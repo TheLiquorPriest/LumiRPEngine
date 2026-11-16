@@ -32,6 +32,14 @@ export const QUEST_OPS = {
   bind: "quest.bind",
   /** What undoes one: `{ quest, fields }` puts the fields back as they were, or, with `fields` null, takes the quest away. */
   restore: "quest.restore",
+  /** A stage called met, failed or open again, with its reason: `{ quest, stage, state, why? }`. On any quest, the world's own among them. */
+  call: "quest.call",
+  /** A quest closed with its outcome and reason, or opened again with `outcome` null: `{ quest, outcome, why? }`. */
+  close: "quest.close",
+  /** What the player is shown of a quest: `{ quest, shown }`, `shown` all, none, the stages named, or null to leave it to the quest's own visibility. */
+  show: "quest.show",
+  /** What undoes a call, a close or a show: `{ quest, part, stage?, was }` puts back what that part held. */
+  unmark: "quest.unmark",
 } as const;
 
 export const QUEST_KINDS: readonly TrackKind[] = ["quest", "secret", "puzzle", "agenda"];
@@ -74,14 +82,55 @@ export interface QuestDoc {
   rows: QuestRowDoc[];
 }
 
+/** A call on a stage: met, failed, or open again; its reason in words; the turn that made it, its number on the path, and who. */
+export interface QuestCallDoc {
+  state: "met" | "failed" | "open";
+  why: string | null;
+  turn: string;
+  n: number;
+  by: string | null;
+}
+
+/** A quest closed: how it went, why, and when. */
+export interface QuestClosedDoc {
+  outcome: string;
+  why: string | null;
+  turn: string;
+  n: number;
+  by: string | null;
+}
+
+/** What the player is shown of a quest: all of it, none of it, or the stages named. */
+export type QuestShown = "all" | "none" | string[];
+
+/** What the story called on a quest, whether the world defined it or the story opened it: its stages' calls, how it closed, what the player is shown. */
+export interface QuestMarkDoc {
+  calls: Record<string, QuestCallDoc>;
+  closed: QuestClosedDoc | null;
+  /** Null: as the world's visibility, or the quest's own, says. */
+  shown: QuestShown | null;
+  touched: string;
+}
+
 /** The area's slice of the state. */
 export interface QuestSlice {
   /** The quests opened in play, in the order they were opened. */
   quests: Record<string, QuestDoc>;
+  /** What was called on a quest (opened in play or the world's, by its id), where anything was. */
+  marks: Record<string, QuestMarkDoc>;
 }
 
 export function emptyQuests(): QuestSlice {
-  return { quests: {} };
+  return { quests: {}, marks: {} };
+}
+
+function noMark(): QuestMarkDoc {
+  return { calls: {}, closed: null, shown: null, touched: "" };
+}
+
+/** What was called on a quest; nothing, where nothing was. */
+export function marksOf(slice: Readonly<QuestSlice>, quest: string): QuestMarkDoc {
+  return hasOwn(slice.marks, quest) ? (slice.marks[quest] as QuestMarkDoc) : noMark();
 }
 
 /** The quests' slice of a folded state; the starting one where the state holds none. */
@@ -331,6 +380,106 @@ const RESTORE: AreaOp = {
   },
 };
 
+/** The slice after `mark` was put as the quest's marks. */
+function marked(s: QuestSlice, quest: string, mark: QuestMarkDoc): AreaOutcome {
+  return { slice: json({ ...s, marks: { ...s.marks, [quest]: mark } }) };
+}
+
+const CALLS = ["met", "failed", "open"] as const;
+
+const CALL: AreaOp = {
+  check(value) {
+    const bad = named(value, "a call on a stage");
+    if (bad !== null) return bad;
+    const v = value as JsonObject;
+    if (!text(v.stage)) return "a call names its stage";
+    if (!(CALLS as readonly unknown[]).includes(v.state)) return "a stage is called met, failed or open";
+    if (v.why !== undefined && typeof v.why !== "string") return "the reason for a call is words";
+    return null;
+  },
+  apply(slice, change): AreaOutcome {
+    const s = asSlice(slice);
+    const v = change.value as { quest: string; stage: string; state: QuestCallDoc["state"]; why?: string };
+    const mark = marksOf(s, v.quest);
+    const call: QuestCallDoc = { state: v.state, why: v.why !== undefined && v.why.trim() !== "" ? v.why.trim() : null, turn: change.turn, n: change.n, by: change.by };
+    return marked(s, v.quest, { ...mark, calls: { ...mark.calls, [v.stage]: call }, touched: change.turn });
+  },
+  touches: (value) => [{ ref: `quest:${(value as { quest: string }).quest}`, part: `stage:${(value as { stage: string }).stage}:call` }],
+  undo(value, before) {
+    const v = value as { quest: string; stage: string };
+    return [{ op: "unmark", value: { quest: v.quest, part: "call", stage: v.stage, was: (marksOf(asSlice(before), v.quest).calls[v.stage] ?? null) as unknown as JsonValue } }];
+  },
+};
+
+const CLOSE: AreaOp = {
+  check(value) {
+    const bad = named(value, "a close of a quest");
+    if (bad !== null) return bad;
+    const v = value as JsonObject;
+    if (v.outcome !== null && !text(v.outcome)) return "a quest is closed with its outcome, or opened again with null";
+    if (v.why !== undefined && typeof v.why !== "string") return "the reason is words";
+    return null;
+  },
+  apply(slice, change): AreaOutcome {
+    const s = asSlice(slice);
+    const v = change.value as { quest: string; outcome: string | null; why?: string };
+    const mark = marksOf(s, v.quest);
+    const closed: QuestClosedDoc | null = v.outcome === null ? null : { outcome: v.outcome.trim(), why: v.why !== undefined && v.why.trim() !== "" ? v.why.trim() : null, turn: change.turn, n: change.n, by: change.by };
+    return marked(s, v.quest, { ...mark, closed, touched: change.turn });
+  },
+  touches: (value) => [{ ref: `quest:${(value as { quest: string }).quest}`, part: "closed" }],
+  undo(value, before) {
+    const v = value as { quest: string };
+    return [{ op: "unmark", value: { quest: v.quest, part: "close", was: marksOf(asSlice(before), v.quest).closed as unknown as JsonValue } }];
+  },
+};
+
+const SHOW: AreaOp = {
+  check(value) {
+    const bad = named(value, "a showing of a quest");
+    if (bad !== null) return bad;
+    const shown = (value as JsonObject).shown;
+    if (shown === null || shown === "all" || shown === "none" || nameList(shown)) return null;
+    return "what the player is shown is all, none, the stages named, or null to leave it to the quest's own visibility";
+  },
+  apply(slice, change): AreaOutcome {
+    const s = asSlice(slice);
+    const v = change.value as { quest: string; shown: QuestShown | null };
+    return marked(s, v.quest, { ...marksOf(s, v.quest), shown: v.shown, touched: change.turn });
+  },
+  touches: (value) => [{ ref: `quest:${(value as { quest: string }).quest}`, part: "shown" }],
+  undo(value, before) {
+    const v = value as { quest: string };
+    return [{ op: "unmark", value: { quest: v.quest, part: "show", was: marksOf(asSlice(before), v.quest).shown as unknown as JsonValue } }];
+  },
+};
+
+const UNMARK: AreaOp = {
+  check(value) {
+    const bad = named(value, "an unmark");
+    if (bad !== null) return bad;
+    const v = value as JsonObject;
+    if (v.part !== "call" && v.part !== "close" && v.part !== "show") return "an unmark names its part: call, close or show";
+    if (v.part === "call" && !text(v.stage)) return "an unmark of a call names the stage";
+    return hasOwn(v, "was") ? null : "an unmark holds what the part held";
+  },
+  apply(slice, change): AreaOutcome {
+    const s = asSlice(slice);
+    const v = change.value as { quest: string; part: "call" | "close" | "show"; stage?: string; was: JsonValue };
+    const mark = marksOf(s, v.quest);
+    if (v.part === "close") return marked(s, v.quest, { ...mark, closed: v.was as unknown as QuestClosedDoc | null, touched: change.turn });
+    if (v.part === "show") return marked(s, v.quest, { ...mark, shown: v.was as unknown as QuestShown | null, touched: change.turn });
+    const calls = { ...mark.calls };
+    if (v.was === null) delete calls[v.stage as string];
+    else calls[v.stage as string] = v.was as unknown as QuestCallDoc;
+    return marked(s, v.quest, { ...mark, calls, touched: change.turn });
+  },
+  touches(value) {
+    const v = value as { quest: string; part: "call" | "close" | "show"; stage?: string };
+    return [{ ref: `quest:${v.quest}`, part: v.part === "call" ? `stage:${v.stage}:call` : v.part === "close" ? "closed" : "shown" }];
+  },
+};
+
 /** A quest, by its id or its name (spaces and case ignored); undefined where none has it. */
 export function findQuest(slice: Readonly<QuestSlice>, words: string): QuestDoc | undefined {
   const asked = words.trim();
@@ -350,9 +499,16 @@ const READS: NonNullable<StoreArea["reads"]> = {
 export const QUEST_STORE_AREA: StoreArea = {
   id: QUEST_AREA_ID,
   initial: () => json(emptyQuests()),
-  ops: { open: OPEN, what: WHAT, stakes: STAKES, thread: THREAD, stage: STAGE, bind: BIND, restore: RESTORE },
+  ops: { open: OPEN, what: WHAT, stakes: STAKES, thread: THREAD, stage: STAGE, bind: BIND, restore: RESTORE, call: CALL, close: CLOSE, show: SHOW, unmark: UNMARK },
   reads: READS,
 };
+
+/** A stage as it is read: the quest's own or the world's, with what was called on it. */
+export interface QuestStageView extends QuestStageDoc {
+  world: boolean;
+  /** What the story called on it; null where nothing was. */
+  call: QuestCallDoc | null;
+}
 
 /** A quest as it is read, whether the world defined it or the story opened it. */
 export interface QuestView {
@@ -367,10 +523,14 @@ export interface QuestView {
   stakes: string | null;
   rewards: string | null;
   thread: string | null;
-  stages: (QuestStageDoc & { world: boolean })[];
+  stages: QuestStageView[];
   who: string[];
   where: string[];
   things: string[];
+  /** How the story closed it; null while it is open (the world's end stages aside: `openQuests`). */
+  closed: QuestClosedDoc | null;
+  /** What the story set the player to be shown; null where it left that to the quest's own visibility. */
+  shown: QuestShown | null;
 }
 
 /**
@@ -378,7 +538,7 @@ export interface QuestView {
  * (none for the GM's own), and each stage with the world's label and, as its condition, the objectives' labels, else the
  * conditions to the next stages, as the world wrote them.
  */
-export function trackAsQuest(def: TrackDef): QuestView {
+export function trackAsQuest(def: TrackDef, mark: QuestMarkDoc = noMark()): QuestView {
   const owner = trackOwner(def);
   return {
     id: def.id,
@@ -391,18 +551,53 @@ export function trackAsQuest(def: TrackDef): QuestView {
     stakes: null,
     rewards: null,
     thread: null,
-    stages: Object.entries(def.stages).map(([id, s]) => ({ id, label: s.label, condition: (s.objectives !== undefined && s.objectives.length > 0 ? s.objectives.map(objectiveLabel) : s.next.map((n) => n.when)).join("; "), world: true })),
+    stages: Object.entries(def.stages).map(([id, s]) => ({
+      id,
+      label: s.label,
+      condition: (s.objectives !== undefined && s.objectives.length > 0 ? s.objectives.map(objectiveLabel) : s.next.map((n) => n.when)).join("; "),
+      world: true,
+      call: mark.calls[id] ?? null,
+    })),
     who: owner === undefined ? [] : [owner],
     where: [],
     things: [],
+    closed: mark.closed,
+    shown: mark.shown,
   };
 }
 
-function viewOf(doc: QuestDoc): QuestView {
-  return { ...doc, world: false, stages: doc.stages.map((s) => ({ ...s, world: false })) };
+function viewOf(doc: QuestDoc, mark: QuestMarkDoc): QuestView {
+  return { ...doc, world: false, stages: doc.stages.map((s) => ({ ...s, world: false, call: mark.calls[s.id] ?? null })), closed: mark.closed, shown: mark.shown };
 }
 
-/** Every quest of the chat: the world's tracks as it defines them, then those opened in play in the order opened. */
+/** Every quest of the chat: the world's tracks as it defines them, then those opened in play in the order opened, each with what the story called on it. */
 export function questViews(tracks: Readonly<Record<string, TrackDef>>, slice: Readonly<QuestSlice>): QuestView[] {
-  return [...Object.values(tracks).map(trackAsQuest), ...Object.values(slice.quests).map(viewOf)];
+  return [...Object.values(tracks).map((t) => trackAsQuest(t, marksOf(slice, t.id))), ...Object.values(slice.quests).map((q) => viewOf(q, marksOf(slice, q.id)))];
+}
+
+/**
+ * The quests not closed: those the story did not close, and for a quest the world defines, those whose track does not stand on one of
+ * the world's end stages (`standing`: each track's stage now). A quest the world defines that no standing is given for is taken as open.
+ */
+export function openQuests(tracks: Readonly<Record<string, TrackDef>>, slice: Readonly<QuestSlice>, standing: Readonly<Record<string, string>> = {}): QuestView[] {
+  return questViews(tracks, slice).filter((q) => {
+    if (q.closed !== null) return false;
+    const def = q.world && hasOwn(tracks, q.id) ? tracks[q.id] : undefined;
+    const at = def === undefined || !hasOwn(standing, q.id) ? undefined : def.stages[standing[q.id] as string];
+    return at === undefined || at.next.length > 0;
+  });
+}
+
+/**
+ * What the player is shown of a quest: the whole of it, or the stages named. The story's own setting stands first (all, none, the
+ * stages named); where it set none, the quest's visibility does: public is the whole quest, secret nothing, known to some the whole
+ * quest while the player's character knows it (`knows`, by the world's own rule).
+ */
+export function seenOf(view: QuestView, knows: boolean): { whole: boolean; stages: readonly string[] } {
+  const shown = view.shown;
+  if (shown === "all") return { whole: true, stages: [] };
+  if (shown === "none") return { whole: false, stages: [] };
+  if (shown !== null) return { whole: false, stages: shown };
+  const own = view.visibility ?? "public";
+  return { whole: own === "public" || (own === "known_by" && knows), stages: [] };
 }
