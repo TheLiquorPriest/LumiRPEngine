@@ -105,4 +105,12 @@ describe("the Turn page's sections", () => {
     const named: TurnReply = { ...turn, kind: "continue", message: "msg-9", runs: [{ ...run, kind: "continue", target: "msg-7" }] };
     expect(view(named)).toContain("Its tag named message msg-7, and the end named message msg-9");
   });
+
+  test("a turn marked interrupted by a restart says so with what it had staged, and one with no marks shows none", () => {
+    const turn = turnAt();
+    expect(view(turn)).not.toContain("Marks on this turn");
+    const marked: TurnReply = { ...turn, marks: [{ kind: "interrupted", message: null, at: T0 }, { kind: "edited-message", message: "msg-4", at: T0 }] };
+    expect(view(marked)).toContain("RPE restarted while a run of this turn went on; what it had staged was dropped.");
+    expect(view(marked)).toContain("A message this turn stands on was edited after it was played (message msg-4).");
+  });
 });

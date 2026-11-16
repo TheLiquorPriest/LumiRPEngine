@@ -11,6 +11,7 @@ import { section as givenSection } from "./given";
 import { section as intentSection } from "./intent";
 import { section as lanesSection } from "./lanes";
 import { section as lanesSummarySection } from "./lanes-summary";
+import { section as marksSection } from "./marks";
 import { section as openSection } from "./open";
 import { section as recordSection } from "./record";
 import { section as replySection } from "./reply";
@@ -22,4 +23,4 @@ import { section as traceSection } from "./trace";
 import { section as unsettledSection } from "./unsettled";
 import { section as wholeSection } from "./whole";
 
-export const TURN_SECTIONS: readonly TurnSection[] = [agentTokensSection, askedSection, continuedSection, foundSection, frontSection, givenSection, intentSection, lanesSection, lanesSummarySection, openSection, recordSection, replySection, runsSection, timingsSection, tokensSection, toldSection, traceSection, unsettledSection, wholeSection].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+export const TURN_SECTIONS: readonly TurnSection[] = [agentTokensSection, askedSection, continuedSection, foundSection, frontSection, givenSection, intentSection, lanesSection, lanesSummarySection, marksSection, openSection, recordSection, replySection, runsSection, timingsSection, tokensSection, toldSection, traceSection, unsettledSection, wholeSection].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
