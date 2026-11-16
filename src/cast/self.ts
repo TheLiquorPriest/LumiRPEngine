@@ -6,8 +6,9 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
-import { type CastCall, type CastReading, readingOr } from "./kit";
-import { type CastWriter, type Character, findCharacter } from "./record";
+import { textOf } from "../iface/texts";
+import { type CastCall, type CastReading, nearIds, readingOr } from "./kit";
+import { type CastWriter, type Character, findCharacter, MIND_KINDS } from "./record";
 import { isUnread, type ItemRead, type Kind, readArg, type Unread } from "./update";
 
 /** What one call of a character's own tool works with: the reading, the character, story time, and the writer of its rows. */
@@ -70,6 +71,13 @@ export function strangers(self: Self, part: OwnPart | readonly OwnPart[], ids: u
   });
 }
 
+/** The ids of the character's own items of `part` (or of either of several), dropped ones too, nearest first to what was said: what an answer about an id that is none of theirs offers. A carried file is no entry of the mind. */
+export function nearOwn(self: Self, part: OwnPart | readonly OwnPart[] | "mind", said: string): string {
+  const parts: readonly string[] = typeof part === "string" ? [part] : part;
+  const ids = [...self.reading.record.items.values()].filter((i) => i.character === self.character.id && parts.includes(i.part) && (i.part !== "mind" || (MIND_KINDS as readonly unknown[]).includes(i.fields.kind))).map((i) => i.id);
+  return textOf(nearIds(said, ids));
+}
+
 /**
  * The ids of `part` an item's `field` names that are the character's: those that are not are left
  * out, each said; none left of a list it needs, they make the item unreadable.
@@ -78,7 +86,7 @@ export function ownIds(self: Self, it: ItemRead, part: OwnPart | readonly OwnPar
   const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
   const unknown = strangers(self, part, list);
   const kept = list.filter((id) => !unknown.includes(id));
-  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part: typeof part === "string" ? part : part.join(" or "), id: JSON.stringify(id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
+  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part: typeof part === "string" ? part : part.join(" or "), id: JSON.stringify(id), near: nearOwn(self, part, id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
   (need && kept.length === 0 ? it.fatal : it.unread).push(...said);
   return kept;
 }

@@ -19,7 +19,7 @@ import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, da
 import { dimmedOf, memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, writeCast } from "./record";
 import { CHARACTER_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
-import { listOf, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
+import { listOf, nearOwn, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
 import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
 /** A memory as the character's own answers show it: in full, or as its gist alone, marked faint, once it has faded. */
@@ -170,7 +170,7 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     readSource(call, it, given);
     const { id, taken, ...fields } = value;
     if (id !== undefined && strangers(self, "memory", [id]).length > 0) {
-      it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
+      it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id), near: nearOwn(self, "memory", String(id)) } });
       continue;
     }
     // A memory is of the moment it comes from: the earliest of the perceptions it names; the moment it is written where it names none.

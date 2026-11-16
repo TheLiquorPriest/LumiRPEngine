@@ -23,7 +23,8 @@ export type Named = { ref: string } | { near: string[] };
 
 /**
  * What the call's words name, by the engine's one reading of names at the call's own point of the story: a person, thing, place or any
- * other point of the tree, by id, ref, name or the words of one name; else a place named in play. Where the call reads no world, nothing is named.
+ * other point of the tree, by id, ref, name or the words of one name; else a place named in play; else a quest (the world's or one opened in
+ * play) or one of its stages. Where the call reads no world, nothing is named.
  */
 export function namesIn(call: CastCall): (said: string) => Named {
   let reading: Reading | null | undefined;
@@ -41,6 +42,17 @@ export function namesIn(call: CastCall): (said: string) => Named {
     const places = findPlaces(reading.ctx, text.replace(/^place:/, ""), stands === null ? {} : { near: stands });
     const [place] = places;
     if (found.several.length === 0 && place !== undefined && (places.length === 1 || place.matched !== "head")) return { ref: `place:${place.id}` };
+    // A quest, the world's own or one opened in play, by its id, name or ref; or one of its stages, as `quest:<id>/<stage>` or the quest's words, a slash and the stage's id or label.
+    const quest = reading.find(text, "quest");
+    if (isFound(quest)) return { ref: quest.ref };
+    const slash = text.indexOf("/");
+    if (slash > 0) {
+      const owner = reading.find(text.slice(0, slash), "quest");
+      if (isFound(owner)) {
+        const stage = reading.stage(owner, text.slice(slash + 1));
+        return "ref" in stage ? { ref: stage.ref } : { near: stage.stages.map((s) => s.name) };
+      }
+    }
     const several = found.several.map((s) => s.name);
     return { near: several.length > 0 ? several : found.near.map((n) => n.name) };
   };

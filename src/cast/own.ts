@@ -20,8 +20,8 @@ import { type CastRow, type CastWrite, type CastWriter, MIND_KINDS, RELATIONSHIP
 import { PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
 import { towardOf } from "./refs";
 import { worldAt } from "./secrets";
-import { listOf, notAnItem, ownIds, readFields, selfOr, unchecked } from "./self";
-import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
+import { listOf, nearOwn, notAnItem, ownIds, readFields, selfOr, unchecked } from "./self";
+import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, outsideDimensions, type Reads, refused } from "./update";
 
 /** What one entry of the mind reads, each as its kind. */
 const ENTRY: Readonly<Record<string, Kind>> = { id: "name", kind: MIND_KINDS, text: "text", about: "texts", from: "texts", drop: "flag", why: "text" };
@@ -75,7 +75,7 @@ async function mindSet(args: JsonObject, call: CastCall): Promise<Reply> {
     // An entry to change is one of the character's own on this path, of a kind the mind holds; a file carried from the earlier build is none of them.
     const item = id === undefined ? undefined : self.reading.record.items.get(id as string);
     if (id !== undefined && (item === undefined || item.part !== "mind" || item.character !== self.character.id || !(MIND_KINDS as readonly unknown[]).includes(item.fields.kind))) {
-      it.fatal.push({ line: "unknown_id", fields: { n, op: "mind", who: self.character.name, part: "mind", id: JSON.stringify(id) } });
+      it.fatal.push({ line: "unknown_id", fields: { n, op: "mind", who: self.character.name, part: "mind", id: JSON.stringify(id), near: nearOwn(self, "mind", String(id)) } });
       continue;
     }
     if (fields.from !== undefined) {
@@ -128,6 +128,7 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
     items.push(it);
     const value: JsonObject = {};
     readFields(call, it, given, RELATIONSHIP, value);
+    outsideDimensions(it, given);
     readSource(call, it, given);
     if (typeof value.with !== "string") {
       needed(it, ["with"]);

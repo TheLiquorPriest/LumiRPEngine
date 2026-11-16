@@ -5,13 +5,13 @@
 // made with the engine's own answer builder, so both lanes answer in one shape.
 
 import type { Database } from "bun:sqlite";
-import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { JsonObject } from "rp-harness/contract";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { writtenTime } from "../engine/time";
-import { described, faultAnswer, type LastUseKeeper, lastUse, Reply, type Writes } from "../iface/kit";
+import { type AreaCall, type AreaSpec, type AreaWords, type LastUseKeeper, Reply, type Writes } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
-import { type Fields, type GuidanceFiles, Lines, textOf, toolText } from "../iface/texts";
+import { type Fields, type GuidanceFiles, Lines, textOf } from "../iface/texts";
 import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type StoreState, type TreeView } from "../store";
 import { pairMarks, questsOfThread, threadTouched } from "../quests/thread";
 import { storyAt } from "./path";
@@ -68,31 +68,13 @@ export interface StoryDeps {
 }
 
 /** One call of a story tool. */
-export interface StoryCall {
-  scope: Scope;
-  agent: AgentRef;
-  callId: string;
-  signal: AbortSignal;
-  tool: string;
+export interface StoryCall extends AreaCall {
   deps: StoryDeps;
   settings: StorySettings;
-  /** The answers' lines in force, for the words one line puts inside another (`wants_`). */
-  lines: Lines;
-  reply(): Reply;
 }
 
 /** A story tool as code holds it: everything but its words. */
-export interface StoryToolSpec {
-  name: string;
-  family: string;
-  tier: ToolTier;
-  lane?: string;
-  properties: Record<string, JsonObject>;
-  required: readonly string[];
-  /** A worked call, for the tests. */
-  example: JsonObject;
-  run(args: JsonObject, call: StoryCall): Promise<Reply>;
-}
+export type StoryToolSpec = AreaSpec<StoryCall>;
 
 /** The answers' lines in force for the chat; none when the part is switched off, so every answer is given with no words. */
 export async function storyLines(files: GuidanceFiles): Promise<Lines> {
@@ -100,39 +82,20 @@ export async function storyLines(files: GuidanceFiles): Promise<Lines> {
   return text === undefined ? Lines.none() : Lines.parse(text, `.prompts/${STORY_ANSWERS}.md`);
 }
 
-/** A story tool as RPH holds it, or null when its file is not in force for the chat. */
-export async function storyHostTool(spec: StoryToolSpec, lines: Lines, deps: StoryDeps): Promise<HostTool | null> {
-  const file = await deps.files.read("tools", spec.name);
-  if (file === undefined) return null;
-  const text = toolText(file, `.tools/${spec.name}.md`);
+/** What the one builder of host tools is given for the story's: its answers' part and lines, its call, and the throws it answers as the facts they are. */
+export function storyWords(deps: StoryDeps, lines: Lines): AreaWords<StoryCall> {
   const settings: StorySettings = { ...STORY_DEFAULTS, ...(deps.settings ?? {}) };
   return {
-    name: spec.name,
-    family: spec.family,
-    tier: spec.tier,
-    ...(spec.lane !== undefined ? { lane: spec.lane } : {}),
-    description: text.description,
-    parameters: described(spec.properties, spec.required, text),
-    async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
-      const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      // A job of no chat has no chat's story to work on: said in the answers' words, nothing read or written.
-      const { scope } = ctx;
-      if (scope.chat === undefined) return new Reply(lines).line("no_chat_run", { tool: spec.name }).fail().result();
-      // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
-      const use = lastUse(lines, deps.lastUse, scope, STORY_ANSWERS);
-      const said = use.lines;
-      const call: StoryCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: said, reply: () => new Reply(said) };
-      try {
-        return (await spec.run(given, call)).result();
-      } catch (error) {
-        if (ctx.signal.aborted) throw error;
-        // A turn joined to another, met unresolved: told as the fact, nothing read or written. Input the store cannot read: told in the story's words.
-        if (error instanceof JoinedTurnError) return call.reply().line("turn_joined", { turn: error.turn, joined: error.joined }).fail().result();
-        if (error instanceof StoreInputError) return call.reply().line("store_unread", { why: error.message }).line("nothing_recorded", {}).fail().result();
-        return faultAnswer(said, spec.name, error, deps.store.env.failed, ctx.scope.turn ?? "");
-      } finally {
-        await use.keep();
-      }
+    part: STORY_ANSWERS,
+    lines,
+    ...(deps.lastUse !== undefined ? { lastUse: deps.lastUse } : {}),
+    failed: (fault) => deps.store.env.failed?.(fault),
+    call: (base) => ({ ...base, deps, settings }),
+    // A turn joined to another, met unresolved: told as the fact, nothing read or written. Input the store cannot read: told in the story's words.
+    told: (error, call) => {
+      if (error instanceof JoinedTurnError) return call.reply().line("turn_joined", { turn: error.turn, joined: error.joined }).fail();
+      if (error instanceof StoreInputError) return call.reply().line("store_unread", { why: error.message }).line("nothing_recorded", {}).fail();
+      return undefined;
     },
   };
 }

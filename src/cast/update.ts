@@ -28,7 +28,8 @@ import type { Lane } from "../store";
 import { IFACE_DEFAULTS } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
 import { type Provenance, provenanceData } from "../iface/source";
-import { baseView, type CastCall, type CastReading, type CastToolSpec, growthOver, itemView, readingOr, sourceView, whoView } from "./kit";
+import { type Beat, beatsAt, resolveBeats } from "./beats";
+import { baseView, type CastCall, type CastReading, type CastToolSpec, growthOver, itemView, nearIds, readingOr, sourceView, whoView } from "./kit";
 import { LORE_STAMP, PROVENANCE_READS, readSource, shownReads, sourceLines, stampOn } from "./source";
 import {
   addCharacter,
@@ -38,6 +39,7 @@ import {
   bindingsOf,
   bindSource,
   CASTINGS,
+  charactersOf,
   castingInForce,
   castingItemId,
   awayItemId,
@@ -235,7 +237,13 @@ export function readArg(lines: Lines, n: number, op: string, field: string, kind
     fields: { n, op, field, value: JSON.stringify(said), choices: textOf(choices), ...(wants !== undefined ? { wants: lines.line(`wants_${wants}`) ?? "" } : {}) },
   });
   const number = typeof said === "number" ? said : typeof said === "string" && said.trim() !== "" && Number.isFinite(Number(said)) ? Number(said) : null;
-  if (Array.isArray(kind)) return typeof said === "string" && kind.includes(said.trim()) ? said.trim() : unreadable(kind);
+  if (Array.isArray(kind)) {
+    if (typeof said === "string" && kind.includes(said.trim())) return said.trim();
+    // A word outside a fixed list is answered with the list, nearest first, and with where whatever was meant by it is recorded (D-169).
+    const records = typeof said === "string" ? RECORDED_IN[`${op}.${field}`] : undefined;
+    if (typeof said !== "string" || records === undefined) return unreadable(kind);
+    return { line: "outside_list", fields: { n, op, field, value: JSON.stringify(said), choices: textOf(nearestOf(said, kind, IFACE_DEFAULTS)), records } };
+  }
   if (kind === "dimension") {
     // A dimension past its scale is applied as it was sent, and said to be past it; only what is no number at all is left out.
     if (number === null) return { line: "out_of_range", fields: { n, op, field, value: JSON.stringify(said), min: -scale, max: scale } };
@@ -269,6 +277,41 @@ export function readArg(lines: Lines, n: number, op: string, field: string, kind
   }
 }
 
+/**
+ * Where whatever a writer meant by a word outside a fixed list is recorded, by the item and its field: the words of the same write
+ * (a casting's `line`, a mind entry's `text`, a perception's `content`) or the knowledge a statement of it is (`how`).
+ */
+const RECORDED_IN: Readonly<Record<string, string>> = {
+  "cast.as": "line",
+  "mind.kind": "text",
+  "perception.reach": "content",
+  "perception.learned": "reliability",
+  "perception.belief": "reliability",
+  "knowledge.learned": "how",
+  "knowledge.belief": "how",
+};
+
+/**
+ * A number sent under a name that is none of a relationship's dimensions is a dimension outside the list: answered with the list
+ * and with where what was meant is written (the relationship's own `text`), kept apart from what the item does not read.
+ */
+export function outsideDimensions(it: ItemRead, given: JsonObject): void {
+  for (const key of [...it.ignored]) {
+    const said = given[key];
+    const number = typeof said === "number" ? said : typeof said === "string" && said.trim() !== "" && Number.isFinite(Number(said)) ? Number(said) : null;
+    if (number === null) continue;
+    it.unread.push({ line: "outside_list", fields: { n: it.n, op: it.op ?? "relationship", field: "dimension", value: JSON.stringify(key), choices: textOf(nearestOf(key, RELATIONSHIP_DIMENSIONS, IFACE_DEFAULTS)), records: "text" }, kept: true });
+    it.ignored = it.ignored.filter((k) => k !== key);
+  }
+}
+
+/** The ids of the sources of one kind bound to any character of the chat: where a source Lumiverse does not hold is looked for among the near ones. */
+function boundAnywhere(call: CastCall, cast: CastReading, kind: SourceKind): string[] {
+  const { db } = call.deps.store;
+  const user = call.scope.user;
+  return [...new Set(charactersOf(db, user, cast.chats).flatMap((c) => bindingsOf(db, user, c.id).filter((b) => b.kind === kind).map((b) => b.ref)))];
+}
+
 /** What a kind of operation reads besides `op`, what every one of it needs, and what a new item of it needs. */
 function readsOf(op: string): Reads {
   const name = op as Op;
@@ -297,6 +340,8 @@ interface Reading {
   ctx: () => ReadContext | null;
   /** What a word names in the world (the engine's one reading of names), at the call's own point. */
   names: (said: string) => Named;
+  /** The story's beats at the call's own point, read once; null where the store holds no story record to check a link against. */
+  beats: () => Beat[] | null;
 }
 
 /** The bindings of a character as the call has them so far, read live on first use. */
@@ -373,12 +418,17 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       const bound = await boundOf(r, character.id);
       const key = sourceKey(kind, ref);
       if (value.drop === true) {
-        if (!bound.has(key)) return unreadable({ line: "not_bound", fields: { n, op, who: character.name, kind, id: ref } });
+        // A binding that is not there is already so: said, and nothing is written.
+        if (!bound.has(key)) {
+          out.unread.push({ line: "already_so", fields: { n, op, who: character.name, kind, id: ref }, kept: true });
+          planned.value = {};
+          return out;
+        }
         bound.delete(key);
         planned.source = { kind, ref, now: null };
       } else {
         const now = await r.read(kind, ref);
-        if (now === null) return unreadable({ line: "no_source", fields: { n, op, kind, id: ref } });
+        if (now === null) return unreadable({ line: "no_source", fields: { n, op, kind, id: ref, near: textOf(nearIds(ref, boundAnywhere(r.call, r.cast, kind))) } });
         bound.set(key, { kind, ref, now });
         planned.source = { kind, ref, now };
       }
@@ -393,6 +443,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       return out;
     }
     case "relationship": {
+      outsideDimensions(out, given);
       if (typeof value.with !== "string") return needed(out, ["with"]);
       if (Object.keys(value).length === 1) return unreadable({ line: "needs_one", fields: { n, op, fields: ["text", ...RELATIONSHIP_DIMENSIONS, "drop"] } });
       // Toward a person by reference: a rename follows, and the id or a nickname joins the same relationship.
@@ -454,8 +505,21 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       let item: CastItem | null = null;
       if (id !== undefined) {
         const found = r.cast.record.items.get(id as string);
-        if (found === undefined || found.part !== name || found.character !== character.id) return unreadable({ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id) } });
+        if (found === undefined || found.part !== name || found.character !== character.id) {
+          const near = nearIds(String(id), r.cast.record.of(character.id, name, true).map((i) => i.id));
+          return unreadable({ line: "unknown_id", fields: { n, op, who: character.name, part: name, id: JSON.stringify(id), near: textOf(near) } });
+        }
         item = found;
+      }
+      // A history entry is linked to beats that exist in the story record: each id is checked and resolved, one that is none is said with the nearest beats and not kept as a link.
+      if (name === "history" && Array.isArray(planned.value.beats)) {
+        const beats = r.beats();
+        if (beats !== null) {
+          const { linked, unknown } = resolveBeats(beats, planned.value.beats as string[]);
+          for (const said of unknown) out.unread.push({ line: "unknown_beat", fields: { n, op, field: "beats", id: said, near: textOf(nearIds(said, beats.map((b) => b.id))) }, kept: true });
+          if (linked.length > 0) planned.value.beats = linked;
+          else delete planned.value.beats;
+        }
       }
       // Knowledge of a secret the lore marks: they hold it from now on, as a perception that names it makes them hold it. One
       // that cannot be held is left out, and said; so is one sent with a strike, which holds nothing.
@@ -547,8 +611,9 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
   const fresh = new Map<string, string>();
   const at = call.scope.turn;
   const world = new SecretWorld(() => worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat), (book, entry) => (call.deps.books === undefined ? Promise.resolve(null) : call.deps.books(scope, book, entry)), secretResolver(call.deps.secretFact, scope.user));
-  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)), names: namesIn(call) };
   let ctxOf: ReadContext | null | undefined;
+  let beatsOf: Beat[] | null | undefined;
+  const reading: Reading = { call, cast, fresh, bound: new Map(), read, world, ctx: () => (ctxOf ??= worldAt(store, scope.user, at ?? null, call.agent.job ?? null, scope.chat)), names: namesIn(call), beats: () => (beatsOf === undefined ? (beatsOf = beatsAt(store, scope.user, cast.record.at, call.agent.job ?? null)) : beatsOf) };
   const ops: OpRead[] = [];
   for (const [i, raw] of list.entries()) ops.push(await readOp(reading, i + 1, raw));
   if (ops.some((o) => o.fatal.length > 0)) return refused(reply, ops, readsOf);

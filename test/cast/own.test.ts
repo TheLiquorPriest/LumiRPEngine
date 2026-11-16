@@ -79,7 +79,7 @@ describe("mind_set", () => {
     expect(r.error).toBe(true);
     expect(wordsFromFiles(r)).toBe(true);
     expect(texts(r)).toEqual([
-      'Operation 1 (mind): kind cannot be read, you sent "dread". It is one of: attention, feeling, belief, want, plan, hiding.',
+      'Operation 1 (mind): kind "dread" is not one of what a kind can hold: plan, want, belief, feeling, hiding, attention. Whatever you meant by it, write it in text, which keeps your words as given.',
       "mind reads id, kind, text, about, from, drop, why, and a new one needs kind, text.",
       `Operation 2 (mind): Bram has no mind "${hersId}" on this path.`,
       "mind reads id, kind, text, about, from, drop, why, and a new one needs kind, text.",

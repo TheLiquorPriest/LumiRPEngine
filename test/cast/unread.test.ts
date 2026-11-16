@@ -82,7 +82,7 @@ describe("the cast's tools, never refused for what they do not read", () => {
     expect(reflected.error).toBeUndefined();
     expect(wordsFromFiles(reflected)).toBe(true);
     // The memory it named that is Bram's is kept; the one that is not is left out and said.
-    expect(reflected.reports).toEqual(['Operation 1 (reflect): Bram has no memory "mem-404" on this path.']);
+    expect(reflected.reports).toEqual(['Operation 1 (reflect): Bram has no memory "mem-404" on this path. The nearest Bram has: mem-2.']);
     expect(((dataOf(reflected).realization as JsonObject).memories as string[]).length).toBe(1);
   });
 });

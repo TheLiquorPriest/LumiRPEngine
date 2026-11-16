@@ -4,15 +4,15 @@
 // every sentence of an answer from `.prompts/cast-answers.md`). An answer is data from the record
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
-import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { JsonObject } from "rp-harness/contract";
 import type { ConfigRead } from "../app/config-read";
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
-import { described, IFACE_DEFAULTS, type LastUseKeeper, lastUse, Reply, type Writes } from "../iface/kit";
+import { type AreaCall, type AreaSpec, type AreaWords, IFACE_DEFAULTS, type LastUseKeeper, type Reply, type Writes } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
-import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
-import { clockRecorded, type Store, type UserStore } from "../store";
+import { type GuidanceFiles, Lines } from "../iface/texts";
+import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type UserStore } from "../store";
 import { castAt } from "./path";
 import { IMPORTED_KIND, importedText } from "./imported";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
@@ -131,31 +131,13 @@ export interface CastDeps {
 }
 
 /** One call of a cast tool. */
-export interface CastCall {
-  scope: Scope;
-  agent: AgentRef;
-  callId: string;
-  signal: AbortSignal;
-  tool: string;
+export interface CastCall extends AreaCall {
   deps: CastDeps;
   settings: CastSettings;
-  /** The answers' lines in force, for the words one line puts inside another (`wants_`). */
-  lines: Lines;
-  reply(): Reply;
 }
 
 /** A cast tool as code holds it: everything but its words. */
-export interface CastToolSpec {
-  name: string;
-  family: string;
-  tier: ToolTier;
-  lane?: string;
-  properties: Record<string, JsonObject>;
-  required: readonly string[];
-  /** A worked call, for the tests. */
-  example: JsonObject;
-  run(args: JsonObject, call: CastCall): Promise<Reply>;
-}
+export type CastToolSpec = AreaSpec<CastCall>;
 
 /** The answers' lines in force for the chat; none when the part is switched off, so every answer is given with no words. */
 export async function castLines(files: GuidanceFiles): Promise<Lines> {
@@ -163,32 +145,20 @@ export async function castLines(files: GuidanceFiles): Promise<Lines> {
   return text === undefined ? Lines.none() : Lines.parse(text, `.prompts/${CAST_ANSWERS}.md`);
 }
 
-/** A cast tool as RPH holds it, or null when its file is not in force for the chat. */
-export async function castHostTool(spec: CastToolSpec, lines: Lines, deps: CastDeps): Promise<HostTool | null> {
-  const file = await deps.files.read("tools", spec.name);
-  if (file === undefined) return null;
-  const text = toolText(file, `.tools/${spec.name}.md`);
+/** What the one builder of host tools is given for the cast's: its answers' part and lines, its call, and the throws it answers as the facts they are. */
+export function castWords(deps: CastDeps, lines: Lines): AreaWords<CastCall> {
   const settings: CastSettings = { ...CAST_DEFAULTS, ...(deps.settings ?? {}) };
   return {
-    name: spec.name,
-    family: spec.family,
-    tier: spec.tier,
-    ...(spec.lane !== undefined ? { lane: spec.lane } : {}),
-    description: text.description,
-    parameters: described(spec.properties, spec.required, text),
-    async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
-      const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      // A job of no chat has no chat's cast to work on: said in the answers' words, nothing written.
-      const { scope } = ctx;
-      if (scope.chat === undefined) return new Reply(lines).line("no_chat_run", { tool: spec.name }).fail().result();
-      // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
-      const use = lastUse(lines, deps.lastUse, scope, CAST_ANSWERS);
-      const call: CastCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: use.lines, reply: () => new Reply(use.lines) };
-      try {
-        return (await spec.run(given, call)).result();
-      } finally {
-        await use.keep();
-      }
+    part: CAST_ANSWERS,
+    lines,
+    ...(deps.lastUse !== undefined ? { lastUse: deps.lastUse } : {}),
+    failed: (fault) => deps.store.env.failed?.(fault),
+    call: (base) => ({ ...base, deps, settings }),
+    // A turn joined to another, met unresolved: told as the fact, naming both, and nothing is written. Input the store cannot read: told in the cast's words.
+    told: (error, call) => {
+      if (error instanceof JoinedTurnError) return call.reply().line("turn_joined", { turn: error.turn, joined: error.joined }).line("nothing_recorded", {}).fail();
+      if (error instanceof StoreInputError) return call.reply().line("store_unread", { why: error.message }).line("nothing_recorded", {}).fail();
+      return undefined;
     },
   };
 }

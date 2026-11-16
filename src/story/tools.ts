@@ -3,7 +3,8 @@
 // so it holds for a session; each call reads its user, chat and turn from its scope.
 
 import type { HostTool } from "rp-harness/contract";
-import { type StoryDeps, storyHostTool, storyLines, type StoryToolSpec } from "./kit";
+import { areaTools } from "../iface/kit";
+import { type StoryDeps, storyLines, type StoryToolSpec, storyWords } from "./kit";
 import { STORY_QUERY } from "./query";
 import { STORY_RECORD } from "./write";
 
@@ -15,11 +16,5 @@ export const STORY_TOOLS: readonly StoryToolSpec[] = [STORY_QUERY, STORY_RECORD]
  * not in force for the chat (switched off) is not offered.
  */
 export async function storyTools(deps: StoryDeps): Promise<HostTool[]> {
-  const lines = await storyLines(deps.files);
-  const out: HostTool[] = [];
-  for (const spec of STORY_TOOLS) {
-    const tool = await storyHostTool(spec, lines, deps);
-    if (tool !== null) out.push(tool);
-  }
-  return out;
+  return areaTools(STORY_TOOLS, deps.files, storyWords(deps, await storyLines(deps.files)));
 }

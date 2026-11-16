@@ -5,10 +5,14 @@ format: lines
 no_chat: There is no chat {{id}} in the engine's records.
 no_chat_run: {{tool}} works on a chat's cast, and this run belongs to no chat: nothing was done.
 no_turn: There is no turn {{id}} in this chat.
+turn_joined: Turn {{turn}} was joined to turn {{joined}}, the turn the continue extended, so nothing was read or written here. Address turn {{joined}} instead.
+store_unread: The cast could not read that call: {{why}}
+engine_fault: {{tool}} failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.
 no_operations: operations cannot be read: send a list of operations.
 unknown_op: Operation {{n}}: op cannot be read, you sent {{value}}. It is one of: {{choices}}.
 unreadable: {{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}
 unreadable_op: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}.{{#choices}} It is one of: {{choices}}.{{/choices}}{{#wants}} It takes {{wants}}.{{/wants}}
+outside_list: Operation {{n}} ({{op}}): {{field}} {{value}} is not one of what a {{field}} can hold: {{choices}}.{{#records}} Whatever you meant by it, write it in {{records}}, which keeps your words as given.{{/records}}
 wants_name: a name or an id
 wants_texts: a text, or a list of texts
 wants_whole: a whole number from 0
@@ -22,8 +26,9 @@ needs: Operation {{n}} ({{op}}) needs {{fields}}.
 needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 added: {{who}} was not in the cast, so they were added to it, not yet cast.
 one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
-no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
-not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
+no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.{{#near}} The nearest {{kind}} ids bound in this chat: {{near}}.{{/near}}
+already_so: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound, which was already so; nothing changed.
+unknown_beat: Operation {{n}} ({{op}}): the story holds no beat {{id}}, so it is not linked{{#near}}; the nearest beats are {{near}}{{/near}}.
 unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.{{#near}} The nearest {{who}} has: {{near}}.{{/near}}
 no_file: Operation {{n}} ({{op}}): {{who}} has no old mind file {{file}} on this path.{{#files}} Theirs are: {{files}}.{{/files}}
 nothing_recorded: Nothing was written. Send the call again with that put right.

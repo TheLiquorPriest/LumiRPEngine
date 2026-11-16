@@ -6,7 +6,8 @@
 // from the agent that calls it.
 
 import type { HostTool } from "rp-harness/contract";
-import { type CastDeps, castHostTool, castLines, type CastToolSpec } from "./kit";
+import { areaTools } from "../iface/kit";
+import { type CastDeps, castLines, castWords, type CastToolSpec } from "./kit";
 import { DREAM, RECALL, REFLECT, REMEMBER } from "./memories";
 import { MIND_SET, RELATE } from "./own";
 import { PERCEIVE } from "./perceive";
@@ -21,11 +22,5 @@ export const CAST_TOOLS: readonly CastToolSpec[] = [CAST_QUERY, CAST_UPDATE, PER
  * is not in force for the chat (switched off) is not offered.
  */
 export async function castTools(deps: CastDeps): Promise<HostTool[]> {
-  const lines = await castLines(deps.files);
-  const out: HostTool[] = [];
-  for (const spec of CAST_TOOLS) {
-    const tool = await castHostTool(spec, lines, deps);
-    if (tool !== null) out.push(tool);
-  }
-  return out;
+  return areaTools(CAST_TOOLS, deps.files, castWords(deps, await castLines(deps.files)));
 }

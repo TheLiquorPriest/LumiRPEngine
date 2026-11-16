@@ -10,6 +10,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Store } from "../store";
+import { beatsAt } from "./beats";
 import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } from "./kit";
 import { castAt } from "./path";
 import { awayItemId, baseHistory, baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
@@ -223,9 +224,18 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       const relationships = listed(shown);
       if (relationships !== undefined) fields = { ...head, relationships };
     } else if (name === "history") {
-      // The Author's record of their story, oldest first, each with its date in story time where the clock shows one.
-      const history = listed(record.of(character.id, "history").map((h) => ({ ...h.fields, ...datedAt(clock, h.at) })));
-      if (history !== undefined) fields = { ...head, history };
+      // The Author's record of their story, oldest first, each with its date in story time where the clock shows one, and each beat it is linked to with the words for when the story record has for it.
+      const rows = record.of(character.id, "history");
+      const history = listed(rows.map((h) => ({ ...h.fields, ...datedAt(clock, h.at) })));
+      if (history !== undefined) {
+        const beats = new Map((beatsAt(input.store, input.user, record.at, input.job ?? null) ?? []).map((b) => [b.id, b.time]));
+        for (const [i, item] of history.items.entries()) {
+          const ids = rows[i]?.fields.beats;
+          const linked = (Array.isArray(ids) ? ids : []).flatMap((id): JsonObject[] => (typeof id === "string" ? [{ id, ...(typeof beats.get(id) === "string" ? { when: beats.get(id) as string } : {}) }] : []));
+          if (linked.length > 0) item.linked = linked;
+        }
+        fields = { ...head, history };
+      }
     } else if (name === "game-side") {
       const side = gameSide(input.store, input.user, input.chat, input.turn, character);
       // A principal out of view: where it is and what it means to do, as the Author recorded them, shown beside where the state places it.

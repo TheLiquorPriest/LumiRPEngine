@@ -15,6 +15,7 @@ import { CAST_STORE_AREA, castTools, type CastDeps } from "../../src/cast/index"
 import { STORY_STORE_AREA } from "../../src/story";
 import { castAt } from "../../src/cast/path";
 import { attachFile, CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
+import { writeStory } from "../../src/story/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import type { SourceNow, SourceReader } from "../../src/cast/sources";
@@ -72,6 +73,8 @@ export interface Table {
   /** A whole exchange: the player's message, a turn, `writes` recorded on it, its reply tied. */
   play(writes?: readonly CastWrite[]): Promise<TurnRow>;
   write(turn: TurnRow, writes: readonly CastWrite[], by?: string): Promise<CastRow[]>;
+  /** The Author records a beat of the story on a turn, with its words for when: its id. */
+  beat(turn: TurnRow, text: string, time?: string): Promise<string>;
   /** The rows at a turn, or at the chat's head. */
   record(turn?: TurnRow | null): CastRecord;
 }
@@ -156,6 +159,10 @@ export async function openTable(world: WorldDoc | null = inventedWorld()): Promi
         });
         return writeCast(store, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null, at: null, now: 5 }, attached);
       });
+    },
+    async beat(turn, text, time) {
+      const [one] = await writes.run(() => writeStory(store, { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", job: null }, [{ part: "beat", item: null, value: { text, ...(time !== undefined ? { time } : {}) } }]));
+      return one?.item ?? "";
     },
     record(turn = null) {
       return CastRecord.read(store, USER, castAt(s, CHAT, turn?.id ?? null));

@@ -5,7 +5,7 @@
 
 import { expect, test } from "bun:test";
 import type { JsonObject, ToolCtx, ToolResult } from "rp-harness/contract";
-import { faultAnswer, hostTool, type ToolSpec } from "../../src/iface/kit";
+import { faultAnswer, hostTool, IFACE_DEFAULTS, type ToolSpec } from "../../src/iface/kit";
 import { Lines } from "../../src/iface/texts";
 import { CHAT, dataOf, rig, texts, USER } from "./rig";
 
@@ -56,7 +56,8 @@ test("a throw in a tool is answered as a fault, logged, with the error in the de
   const failed: unknown[] = [];
   t.deps.env.failed = (f) => void failed.push(f);
   const spec: ToolSpec = { name: "boom", family: "state", tier: "read", properties: {}, required: [], example: {}, run: async () => Promise.reject(new Error("the handler broke")) };
-  const tool = hostTool(spec, { description: "", arguments: {} }, { lines: Lines.parse(await Bun.file("guidance/.prompts/engine-answers.md").text(), "engine-answers"), tree: undefined as never }, t.deps);
+  const lines = Lines.parse(await Bun.file("guidance/.prompts/engine-answers.md").text(), "engine-answers");
+  const tool = hostTool(spec, { description: "", arguments: {} }, { part: "engine-answers", lines, failed: t.deps.env.failed, call: (base) => ({ ...base, deps: t.deps, settings: IFACE_DEFAULTS, tree: undefined as never }) });
   const r = await tool.run({}, ctxOf(t.turn.id));
   expect(r.error).toBe(true);
   expect(texts(r)[0]).toContain("failed in the engine");

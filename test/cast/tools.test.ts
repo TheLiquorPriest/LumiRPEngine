@@ -77,25 +77,26 @@ function approvals(permission: LanePermission, answer: ApprovalAnswer = { go: tr
   };
 }
 
-/** A new character's record in one call, in the casting skill's order: sources, base, then the casting. */
-const MAKE_BRAM: JsonObject = {
+/** A new character's record in one call, in the casting skill's order: sources, base, then the casting; its history linked to a beat the story holds. */
+const makeBram = (beat = ""): JsonObject => ({
   operations: [
     { op: "bind", who: "Bram", card: "card-bram" },
     { op: "bind", who: "Bram", entry: "e-112", defines: "background" },
     { op: "base", who: "Bram", seed: "An innkeeper who keeps his head down.", soul: "Wants a quiet life; will not lie to a guest.", inner_voice: "Counts things when nervous.", background: "Born in the inn's cellar." },
     { op: "cast", who: "Bram", as: "supporting", line: "The innkeeper of the Gilded Hart.", why: "The letter thread hangs on him." },
     { op: "growth", who: "Bram", text: "No longer trusts a sealed letter.", cause: "The forged seal." },
-    { op: "history", who: "Bram", text: "Handed Wren the sealed letter and would not meet her eye.", beats: ["b-3"] },
+    { op: "history", who: "Bram", text: "Handed Wren the sealed letter and would not meet her eye.", beats: [beat] },
     { op: "relationship", who: "Bram", with: "Wren", text: "She pays on time. I would not cross her.", trust: 40, fear: 10 },
     { op: "knowledge", who: "Bram", text: "The reeve's seal has a chipped corner.", how: "He saw it on the letter." },
   ],
-};
+});
 
 describe("cast_update", () => {
   test("writes many operations in one call, a character it casts known to all of them, and answers what each wrote and how that part now stands", async () => {
     const b = await bench();
     const turn = await b.t.begin();
-    const r = await b.call("cast_update", MAKE_BRAM, turn.id);
+    const beat = await b.t.beat(turn, "The letter changes hands.", "that evening");
+    const r = await b.call("cast_update", makeBram(beat), turn.id);
     expect(r.error).toBeUndefined();
     wordsFromFiles(r);
     const [card, entry, base, cast, growth, history, rel, know] = ops(r);
@@ -121,7 +122,7 @@ describe("cast_update", () => {
     expect(cast?.now).toEqual({ as: "supporting", line: "The innkeeper of the Gilded Hart." });
     expect(growth?.id).toMatch(/^g-[0-9a-f]+$/);
     expect(growth?.now).toMatchObject({ text: "No longer trusts a sealed letter.", cause: "The forged seal.", since: null, touched: null });
-    expect(history?.now).toMatchObject({ text: "Handed Wren the sealed letter and would not meet her eye.", beats: ["b-3"] });
+    expect(history?.now).toMatchObject({ text: "Handed Wren the sealed letter and would not meet her eye.", beats: [beat] });
     expect(rel?.now).toMatchObject({ with: "Wren", text: "She pays on time. I would not cross her.", trust: 40, fear: 10 });
     expect(know?.now).toMatchObject({ text: "The reeve's seal has a chipped corner.", how: "He saw it on the letter." });
     // Each source was read from Lumiverse once for the whole call.
@@ -137,7 +138,7 @@ describe("cast_update", () => {
     expect(q.mind).toEqual([]);
     expect(q.relationships).toEqual([expect.objectContaining({ with: "Wren", trust: 40 })]);
     expect(q.knowledge).toEqual([expect.objectContaining({ how: "He saw it on the letter." })]);
-    expect(q.history).toEqual([expect.objectContaining({ beats: ["b-3"] })]);
+    expect(q.history).toEqual([expect.objectContaining({ beats: [beat] })]);
   });
 
   test("anything it cannot read refuses the whole call, and nothing is written", async () => {
@@ -163,7 +164,7 @@ describe("cast_update", () => {
     wordsFromFiles(r);
     const said = texts(r).join("\n");
     // A name the cast does not hold is no reason to refuse; the rest is.
-    for (const part of ["Operation 2: op cannot be read", "Lumiverse holds no entry e-404", "trust runs from -100 to 100", "has no growth \"g-999\"", "Operation 7 (cast): as cannot be read", "Nothing was written"]) expect(said).toContain(part);
+    for (const part of ["Operation 2: op cannot be read", "Lumiverse holds no entry e-404", "trust runs from -100 to 100", "has no growth \"g-999\"", "Operation 7 (cast): as \"lead\" is not one of what a as can hold: extra, principal, supporting", "Nothing was written"]) expect(said).toContain(part);
     expect(said).not.toContain("Hale");
     expect(b.t.record(turn).of(charactersOf(b.t.db, USER, [CHAT])[0]?.id ?? "", "knowledge")).toEqual([]);
     expect(charactersOf(b.t.db, USER, [CHAT]).map((c) => c.name)).toEqual(["Bram"]);
@@ -215,7 +216,7 @@ describe("cast_update", () => {
       const user = approvals(permission, { go: false, reason: "Not yet." });
       const b = await bench({ ...({ approvals: user.port } as object) });
       const turn = await b.t.begin();
-      const r = await b.call("cast_update", MAKE_BRAM, turn.id);
+      const r = await b.call("cast_update", makeBram(), turn.id);
       wordsFromFiles(r);
       expect(r.error).toBeUndefined();
       expect(user.asked).toEqual([]);
@@ -243,7 +244,7 @@ describe("cast_query", () => {
     const b = await bench({ settings: { queryItems: 2 } });
     const turn = await b.t.begin();
     expect(texts(await b.call("cast_query", {}, turn.id))).toEqual(["No one is cast on this path yet."]);
-    await b.call("cast_update", MAKE_BRAM, turn.id);
+    await b.call("cast_update", makeBram(), turn.id);
     await b.call(
       "cast_update",
       {
@@ -285,5 +286,69 @@ describe("cast_query", () => {
     const unknown = await b.call("cast_query", { who: "Odile" }, turn.id);
     expect(unknown.error).toBe(true);
     expect(texts(unknown)).toEqual(["There is no Odile in the cast; the nearest names are Hale, Bram."]);
+  });
+});
+
+describe("cast_update answers as the engine's tools do", () => {
+  test("a binding that is not there is already so; a source Lumiverse lacks, a history id and a beat that are not there come back with the nearest; a word outside a list comes back with the list and where to write it", async () => {
+    const b = await bench();
+    const turn = await b.t.begin();
+    const beat = await b.t.beat(turn, "The letter changes hands.", "that evening");
+    await b.call("cast_update", makeBram(beat), turn.id);
+
+    const ok = await b.call(
+      "cast_update",
+      {
+        operations: [
+          { op: "bind", who: "Bram", card: "card-wren", drop: true },
+          { op: "history", who: "Bram", text: "Kept the cellar key.", beats: [beat.toUpperCase(), "b-404"] },
+          { op: "relationship", who: "Bram", with: "Wren", text: "Warm.", affection: 70 },
+        ],
+      },
+      turn.id,
+    );
+    expect(ok.error).toBeUndefined();
+    wordsFromFiles(ok);
+    const said = (ok.reports ?? []).join("\n");
+    expect(said).toContain("Bram has no card card-wren bound, which was already so; nothing changed.");
+    expect(said).toContain("the story holds no beat b-404, so it is not linked; the nearest beats are");
+    expect(said).toContain('dimension "affection" is not one of what a dimension can hold:');
+    expect(said).toContain("write it in text");
+    const history = ops(ok)[1]?.now as JsonObject;
+    expect(history.beats).toEqual([beat]);
+
+    const refused = await b.call("cast_update", { operations: [{ op: "bind", who: "Bram", entry: "e-11" }, { op: "history", who: "Bram", id: "h-9", text: "x" }, { op: "cast", who: "Bram", as: "lead" }] }, turn.id);
+    expect(refused.error).toBe(true);
+    wordsFromFiles(refused);
+    const why = texts(refused).join("\n");
+    expect(why).toContain("Lumiverse holds no entry e-11. The nearest entry ids bound in this chat: e-112.");
+    expect(why).toContain("The nearest Bram has: h-");
+    expect(why).toContain("as \"lead\" is not one of what a as can hold: extra, principal, supporting. Whatever you meant by it, write it in line");
+
+    const glimpsed = await b.call("perceive", { perceptions: [{ who: "Bram", reach: "glimpsed" }] }, turn.id);
+    expect(glimpsed.error).toBe(true);
+    expect(texts(glimpsed).join("\n")).toContain('reach "glimpsed" is not one of what a reach can hold: none, part, told, whole. Whatever you meant by it, write it in content');
+  });
+
+  test("a throw in a cast tool is answered as a fault, logged and kept in the call's details, never left bare", async () => {
+    const b = await bench({ sources: () => Promise.reject(new Error("the shelf broke")) });
+    const failed: unknown[] = [];
+    b.t.store.env.failed = (f) => void failed.push(f);
+    const turn = await b.t.begin();
+    const r = await b.call("cast_update", { operations: [{ op: "bind", who: "Bram", card: "card-bram" }] }, turn.id);
+    expect(r.error).toBe(true);
+    wordsFromFiles(r);
+    expect(texts(r)).toEqual(["cast_update failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded."]);
+    expect(((r.details as JsonObject).fault as JsonObject).error).toBe("the shelf broke");
+    expect(failed).toHaveLength(1);
+  });
+
+  test("knowledge about a quest, or one of its stages by its ref or its label, is kept by the ref", async () => {
+    const b = await bench();
+    const turn = await b.t.begin();
+    const r = await b.call("cast_update", { operations: [{ op: "knowledge", who: "Bram", text: "He knows who carries it.", about: ["The sealed letter", "errand/Delivered", "quest:errand/asked", "errand/lost"] }] }, turn.id);
+    expect(r.error).toBeUndefined();
+    expect((ops(r)[0]?.now as JsonObject).about_refs).toEqual(["quest:errand", "quest:errand/done", "quest:errand/asked"]);
+    expect((r.reports ?? []).join("\n")).toContain("errand/lost names nothing in the world; the nearest are Asked, Delivered");
   });
 });

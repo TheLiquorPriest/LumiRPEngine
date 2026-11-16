@@ -3,13 +3,15 @@
 // turn, so it holds for a session; each call reads its chat and turn from its scope.
 
 import type { HostTool } from "rp-harness/contract";
+import { JoinedTurnError } from "../store/types";
 import { readPart } from "../store/words";
 import { WORLD_APPLY } from "./apply";
 import { ROLL, WORLD_QUERY, WORLD_SEARCH } from "./fixed";
-import { ANSWERS_PART, type EngineDeps, hostTool, type ToolSpec, type Words } from "./kit";
+import { ANSWERS_PART, type AreaWords, areaTools, type Call, type EngineDeps, IFACE_DEFAULTS, type IfaceSettings, type ToolSpec, type Words } from "./kit";
 import { MAP_TOOLS } from "./maptools";
+import { saysUnreadable, ScopeError } from "./reading";
 import { SEARCHABLE_TOOLS } from "./searchable";
-import { Lines, toolText } from "./texts";
+import { Lines } from "./texts";
 
 export { ANSWERS_PART };
 
@@ -43,10 +45,19 @@ export async function answerWords(deps: Pick<EngineDeps, "files">): Promise<Word
  */
 export async function engineTools(deps: EngineDeps): Promise<HostTool[]> {
   const words = await answerWords(deps);
-  const out: HostTool[] = [];
-  for (const spec of ENGINE_TOOLS) {
-    const text = await deps.files.read("tools", spec.name);
-    if (text !== undefined) out.push(hostTool(spec, toolText(text, `.tools/${spec.name}.md`), words, deps));
-  }
-  return out;
+  const settings: IfaceSettings = { ...IFACE_DEFAULTS, ...(deps.settings ?? {}) };
+  const area: AreaWords<Call> = {
+    part: ANSWERS_PART,
+    lines: words.lines,
+    ...(deps.lastUse !== undefined ? { lastUse: deps.lastUse } : {}),
+    failed: (fault) => deps.env.failed?.(fault),
+    call: (base) => ({ ...base, deps, settings, tree: words.tree }),
+    // A scope found unreadable while the call ran (a turn joined to another in between) is told as the fact.
+    told: (error, call) => {
+      if (error instanceof ScopeError) return saysUnreadable(call.reply(), error.why);
+      if (error instanceof JoinedTurnError) return saysUnreadable(call.reply(), { missing: "joined", id: error.turn, into: error.joined });
+      return undefined;
+    },
+  };
+  return areaTools(ENGINE_TOOLS, deps.files, area);
 }

@@ -23,8 +23,9 @@ function input(b: Bench, present: string[] = [], turn: string | null = null): Om
 }
 
 /** Bram and Wren cast as principals, Odile as supporting, Hale (whom the world does not hold) as an extra, in one played turn, with what the Author recorded of their story. */
-async function cast(b: Bench): Promise<void> {
+async function cast(b: Bench): Promise<string> {
   const turn = await b.t.begin();
+  const beat = await b.t.beat(turn, "The inn changes hands.", "years ago");
   const r = await b.call(
     "cast_update",
     {
@@ -33,7 +34,7 @@ async function cast(b: Bench): Promise<void> {
         { op: "cast", who: "Wren", as: "principal" },
         { op: "cast", who: "Odile", as: "supporting" },
         { op: "cast", who: "Hale", as: "extra", line: "A watchman." },
-        { op: "history", who: "Bram", text: "Took the inn over from his mother.", beats: ["b-3"] },
+        { op: "history", who: "Bram", text: "Took the inn over from his mother.", beats: [beat] },
         { op: "history", who: "Odile", text: "Came down from the hills with nothing." },
       ],
     },
@@ -41,6 +42,7 @@ async function cast(b: Bench): Promise<void> {
   );
   expect(r.error).toBeUndefined();
   await b.t.tie(turn);
+  return beat;
 }
 
 describe("a character's game side", () => {
@@ -96,13 +98,13 @@ describe("a character's game side", () => {
 describe("the Author's views of those on stage", () => {
   test("each view the guidance names, of everyone on stage or of those cast so, one character after another in the stage's order; someone off stage is not given", async () => {
     const b = await openBench();
-    await cast(b);
+    const beat = await cast(b);
     const turn = await b.t.begin();
     const odile = charactersOf(b.t.db, USER, [CHAT]).find((c) => c.name === "Odile")?.id ?? "";
     await b.t.write(turn, [{ character: odile, part: "mind", item: `imported:${odile}:core.md`, value: { kind: "imported", file: "core.md", text: "Odile. Keeps the cellar key.", entity: "odile", filed: false } }], "migration");
     await b.t.tie(turn);
 
-    const BRAM = "### Bram's history in the story\n- Took the inn over from his mother. (Sat 1 Mar 2031, 8:00 AM) (beats b-3)";
+    const BRAM = `### Bram's history in the story\n- Took the inn over from his mother. (Sat 1 Mar 2031, 8:00 AM) (beat ${beat}, years ago)`;
     const ODILE = "### Odile's history in the story\n- Came down from the hills with nothing. (Sat 1 Mar 2031, 8:00 AM)";
     expect(await castPresentViews(["history:principal", "imported:supporting", "history", "lore:map", "history:hero"], input(b, ["Odile", "Bram", "Wren", "Tam"]))).toEqual([
       { name: "history:principal", text: BRAM },

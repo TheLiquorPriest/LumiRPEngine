@@ -15,11 +15,9 @@ import type { GridMoves, MapView } from "./map/ports";
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
-import { JoinedTurnError } from "../store/types";
 import type { Part } from "../store/words";
-import { saysUnreadable, ScopeError } from "./reading";
 import type { WorldService } from "../worlds/service";
-import type { Fields, GuidanceFiles, Lines, ToolText } from "./texts";
+import { type Fields, type GuidanceFiles, type Lines, type ToolText, toolText } from "./texts";
 
 /** Every fixed value of the engine's tools, each a setting with this default. */
 export const IFACE_DEFAULTS = Object.freeze({
@@ -323,20 +321,25 @@ export class Reply {
 
 // ---------------------------------------------------------------- tool specs
 
-/** One call of a tool: who calls, where, and what the call has to hand. */
-export interface Call {
+/** What one call of any area's tool has: where it is made, who makes it, and the words of the answers in force. An area's own call adds what its tools need (its deps, its settings). */
+export interface AreaCall {
   scope: Scope;
   agent: AgentRef;
   callId: string;
   signal: AbortSignal;
   /** The tool's own name, as the approvals and the details name it. */
   tool: string;
+  /** The answers' lines in force, as this call says them. */
+  lines: Lines;
+  reply(): Reply;
+}
+
+/** One call of an engine tool: who calls, where, and what the call has to hand. */
+export interface Call extends AreaCall {
   deps: EngineDeps;
   settings: IfaceSettings;
-  lines: Lines;
   /** The words of the world's tree (the world state's part), for an answer that shows part of the tree. */
   tree: Part;
-  reply(): Reply;
 }
 
 /** The words every answer is given in, read once for the list of tools: the answers' lines and the tree's part. */
@@ -345,19 +348,24 @@ export interface Words {
   tree: Part;
 }
 
-/** A tool as code holds it: everything but its words. */
-export interface ToolSpec {
+/** A tool of any area as code holds it: everything but its words. */
+export interface AreaSpec<C extends AreaCall> {
   name: string;
   family: string;
   tier: ToolTier;
   /** For a tool all of whose writes go to one lane. `world_apply` names none: each operation says its own. */
-  lane?: Lane;
+  lane?: string;
   /** Its arguments' schemas, with no description: each argument's text is in the tool's file. */
   properties: Record<string, JsonObject>;
   required: readonly string[];
   /** A worked call, for the operation reference and the tests. */
   example: JsonObject;
-  run(args: JsonObject, call: Call): Promise<Reply>;
+  run(args: JsonObject, call: C): Promise<Reply>;
+}
+
+/** An engine tool as code holds it. */
+export interface ToolSpec extends AreaSpec<Call> {
+  lane?: Lane;
 }
 
 /**
@@ -427,11 +435,28 @@ export function lastUse(lines: Lines, keeper: LastUseKeeper | undefined, scope: 
 }
 
 /**
- * A tool as RPH holds it: its spec with its file's words, run with the call's context. A throw in its code is a fault, answered as
- * one (`faultAnswer`); a scope found unreadable while it ran (a turn joined to another in between) is told as the fact.
+ * What an area gives the one builder of host tools (the engine, the story, the cast: any area's): the prompt part its answers' lines
+ * are read from and those lines, what keeps their last use, the store's sink for faults, how its own call is made from the base
+ * every call has, and which throws it tells as the fact they are.
  */
-export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: EngineDeps): HostTool {
-  const settings: IfaceSettings = { ...IFACE_DEFAULTS, ...(deps.settings ?? {}) };
+export interface AreaWords<C extends AreaCall> {
+  /** The prompt part the lines are read from, as the Prompts preview names it. */
+  part: string;
+  lines: Lines;
+  lastUse?: LastUseKeeper;
+  /** Where a fault in the area's own code is told (the store's `failed`), for the log and the live view. */
+  failed?: FoldEnv["failed"];
+  /** The call the tool's code is given: the base, with what the area's tools take besides (its deps, its settings). */
+  call(base: AreaCall): C;
+  /** A throw the area answers as the fact it is (a scope found unreadable, a turn joined to another), said in its lines; none for any other, which is a fault. */
+  told?(error: unknown, call: C): Reply | undefined;
+}
+
+/**
+ * A tool of any area as RPH holds it: its spec with its file's words, run with the call's context. A throw in its code is a fault,
+ * answered as one (`faultAnswer`) unless the area tells it as a fact.
+ */
+export function hostTool<C extends AreaCall>(spec: AreaSpec<C>, text: ToolText, area: AreaWords<C>): HostTool {
   return {
     name: spec.name,
     family: spec.family,
@@ -441,25 +466,35 @@ export function hostTool(spec: ToolSpec, text: ToolText, words: Words, deps: Eng
     parameters: described(spec.properties, spec.required, text),
     async run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult> {
       const given = typeof args === "object" && args !== null && !Array.isArray(args) ? args : {};
-      // A job of no chat has no chat's world to work on: said in the answers' words, nothing read or written.
+      // A job of no chat has no chat's records to work on: said in the answers' words, nothing read or written.
       const { scope } = ctx;
-      if (scope.chat === undefined) return new Reply(words.lines).line("no_chat_run", { tool: spec.name }).fail().result();
+      if (scope.chat === undefined) return new Reply(area.lines).line("no_chat_run", { tool: spec.name }).fail().result();
       // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
-      const use = lastUse(words.lines, deps.lastUse, scope, ANSWERS_PART);
+      const use = lastUse(area.lines, area.lastUse, scope, area.part);
       const lines = use.lines;
-      const call: Call = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, tree: words.tree, reply: () => new Reply(lines) };
+      const call = area.call({ scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, lines, reply: () => new Reply(lines) });
       try {
         return (await spec.run(given, call)).result();
       } catch (error) {
         if (ctx.signal.aborted) throw error;
-        if (error instanceof ScopeError) return saysUnreadable(new Reply(lines), error.why).result();
-        if (error instanceof JoinedTurnError) return saysUnreadable(new Reply(lines), { missing: "joined", id: error.turn, into: error.joined }).result();
-        return faultAnswer(lines, spec.name, error, deps.env.failed, ctx.scope.turn ?? "");
+        const told = area.told?.(error, call);
+        if (told !== undefined) return told.result();
+        return faultAnswer(lines, spec.name, error, area.failed, ctx.scope.turn ?? "");
       } finally {
         await use.keep();
       }
     },
   };
+}
+
+/** An area's tools for a chat, as RPH holds them: each with its description and arguments' texts from its file in `.tools/`; one whose file is not in force for the chat (switched off) is not offered. */
+export async function areaTools<C extends AreaCall>(specs: readonly AreaSpec<C>[], files: GuidanceFiles, area: AreaWords<C>): Promise<HostTool[]> {
+  const out: HostTool[] = [];
+  for (const spec of specs) {
+    const file = await files.read("tools", spec.name);
+    if (file !== undefined) out.push(hostTool(spec, toolText(file, `.tools/${spec.name}.md`), area));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- schema pieces
