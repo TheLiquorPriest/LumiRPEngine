@@ -3,7 +3,7 @@ description: The layout of the world state the Author is given at the start of e
 lines:
   level_world: '{{#name}}{{name}} {{/name}}[{{id}}] (world){{#reflection}} — {{parts}}{{/reflection}}{{^reflection}} — nothing is recorded in it yet{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
   level_place: '{{name}} [{{id}}] (place){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
-  level_entity: '{{name}} [{{id}}] ({{what}}{{#worn}}, worn{{/worn}}{{#equipped}}, equipped{{/equipped}}{{#gone}}, gone{{/gone}}){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
+  level_entity: '{{name}} [{{id}}] ({{what}}{{#worn}}, worn{{/worn}}{{#equipped}}, equipped{{/equipped}}{{#on}}, on it{{/on}}{{#gone}}, gone{{/gone}}){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
   level_groups: 'Groups [{{id}}] (groups){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
   level_elsewhere: 'Elsewhere [{{id}}] (not in any place){{#reflection}} — {{parts}}{{/reflection}}{{#opens}} [opened by world_query at {{ref}}]{{/opens}}'
   reflection_people: '{{n}} {{#one}}person{{/one}}{{^one}}people{{/one}}{{#notable}} ({{names}}){{/notable}}'
