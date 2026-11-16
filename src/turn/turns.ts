@@ -36,6 +36,7 @@ import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, type SecretSettingsFor } from "../lore";
+import { placeLinesAt } from "../places";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
 import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathEntry, type PathReport, type Report, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
@@ -1461,7 +1462,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // Counted at the model layer's ratio, as every budget of the turn is: never a figure of the world state's own. A grid's drawn layer
         // the session was given already is left out; what this block printed is kept for the session's next turn.
         const drawnGiven = await this.#drawnGiven(scope, settings.lead, maps);
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
+        const u = this.#d.store.user(scope.user);
+        // A place shown in full carries its base's lines (`src/places`): its features, access and what the story changed of it.
+        const placeLines = placeLinesAt(u, this.#d.store.env, scope.chat, scope.turn, settings.places, settings.map);
+        const state = worldState(u, { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, placeLines, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
         this.#drawnAfter.set(`${scope.user}\n${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {

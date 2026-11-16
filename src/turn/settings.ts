@@ -44,6 +44,7 @@ import { IFACE_DEFAULTS, IFACE_SETTING_DEFS, type IfaceSettings } from "../iface
 import { MAP_DEFAULTS, MAP_SETTINGS, type MapConfig, mapConfigRead } from "../iface/map";
 import { WORLD_STATE_DEFAULTS, WORLD_STATE_SETTING_DEFS, type WorldStateSettings } from "../store";
 import { TAP_DEFAULTS, TAP_SETTINGS, type TapSettings, tapSettingsRead } from "../play/settings";
+import { PLACES_DEFAULTS, PLACES_SETTING_DEFS, type PlacesSettings } from "../places";
 import { STORY_DEFAULTS, STORY_SETTING_DEFS, STORY_SO_FAR_SETTING_DEFS, type StorySettings } from "../story";
 import { STORY_SO_FAR_DEFAULTS, type StorySoFarSettings } from "../story/sofar";
 import { WINDOW_DEFAULTS, type WindowSettings } from "../story/window";
@@ -89,6 +90,8 @@ export interface TurnSettings {
   cast: CastSettings;
   /** The story's tools, for the chat. */
   story: StorySettings;
+  /** What a place's answers and lines show, for the chat (`places.*`, registered by the story's area). */
+  places: PlacesSettings;
   /** The story so far in the briefing. */
   storySoFar: StorySoFarSettings;
   /** The world state in the briefing. */
@@ -151,6 +154,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   // Appendix D.1, as each area keeps its own.
   cast: CAST_DEFAULTS,
   story: STORY_DEFAULTS,
+  places: PLACES_DEFAULTS,
   storySoFar: STORY_SO_FAR_DEFAULTS,
   worldState: WORLD_STATE_DEFAULTS,
   engine: IFACE_DEFAULTS,
@@ -444,6 +448,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     },
     cast: read.numbers(CAST_SETTING_DEFS),
     story: read.numbers(STORY_SETTING_DEFS),
+    places: read.numbers(PLACES_SETTING_DEFS),
     storySoFar: read.numbers(STORY_SO_FAR_SETTING_DEFS),
     worldState: read.numbers(WORLD_STATE_SETTING_DEFS),
     engine: read.numbers(IFACE_SETTING_DEFS),
