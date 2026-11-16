@@ -11,6 +11,7 @@ import type { Clock, CreateHarnessOptions } from "rp-harness";
 import { loadGuidance } from "../app/guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
+import { mapRoutes } from "../iface/map/routes";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
 import { MEANING_TABLE } from "../search/meaning";
@@ -188,6 +189,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       at.routes.add("jobs", jobRoutes({ turns, shared: () => globalConfig(at.paths.files, at.log) }));
       at.routes.add("sessions", sessionRoutes({ turns, writes: at.writes, files: at.paths.files, log: at.log }));
       at.routes.add("web", webRoutes(at.secrets));
+      at.routes.add("maps", mapRoutes({ store: turns.store, writes: at.writes, live: at.live, config: async (chat) => (await chatSettings(chat)).map }));
       await lane.preload();
     },
     stopping: () => turns?.harness.close(),
