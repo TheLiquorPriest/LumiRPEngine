@@ -8,6 +8,7 @@
 // or its closing turn's reply, and never past the start of the next one.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
+import { emptyQuests, type QuestSlice, questSliceOf } from "../quests/record";
 import type { ChangeInput, Source, Store } from "../store";
 import { applyStory, type HorizonEntry, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
 import type { StoryAt } from "./path";
@@ -34,12 +35,16 @@ export class StoryRecord {
   readonly items = new Map<string, StoryItem>();
   /** The Author's horizon as the record holds it: the entries in the order he left them. */
   readonly horizon: readonly HorizonEntry[];
+  /** The quests of the same point of the path: a thread shows each quest that names it. */
+  readonly quests: QuestSlice;
 
   constructor(
     readonly at: StoryAt,
     slice?: { items: Readonly<Record<string, StoryItem>>; horizon?: readonly HorizonEntry[] },
+    quests: QuestSlice = emptyQuests(),
   ) {
     this.horizon = slice?.horizon ?? [];
+    this.quests = quests;
     if (slice !== undefined) for (const [id, item] of Object.entries(slice.items)) this.items.set(id, item);
   }
 
@@ -52,16 +57,17 @@ export class StoryRecord {
   static read(store: Store, user: string, at: StoryAt, job: string | null = null): StoryRecord {
     const u = store.user(user);
     if (at.turn === null) {
-      const head = storySliceOf(u.headState(at.chat).state);
-      if (job === null) return new StoryRecord(at, head);
+      const state = u.headState(at.chat).state;
+      const head = storySliceOf(state);
+      if (job === null) return new StoryRecord(at, head, questSliceOf(state));
       // His own job's writes are changes of no turn, placed when it ends: until then only the job reads them, on top of the head.
       const own = store.db
         .query<{ op: string; value: string; by: string | null }, [string, string, string]>("SELECT op, value, by FROM change WHERE user = ? AND chat = ? AND job = ? AND applied = 1 AND op LIKE 'story.%' ORDER BY ord")
         .all(user, at.chat, job);
-      return new StoryRecord(at, applyStory(head, own.map((c) => ({ op: c.op, value: JSON.parse(c.value) as JsonValue, turn: "", n: at.turns.length + 1, by: c.by }))));
+      return new StoryRecord(at, applyStory(head, own.map((c) => ({ op: c.op, value: JSON.parse(c.value) as JsonValue, turn: "", n: at.turns.length + 1, by: c.by }))), questSliceOf(state));
     }
     const folded = job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
-    return new StoryRecord(at, storySliceOf(folded.state));
+    return new StoryRecord(at, storySliceOf(folded.state), questSliceOf(folded.state));
   }
 
   /**

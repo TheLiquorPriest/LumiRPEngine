@@ -7,9 +7,11 @@ import { route, RouteError, shape } from "../app";
 import type { GuidanceFiles } from "../iface/texts";
 import type { TrackDef } from "../shared/world";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
+import { storySliceOf } from "../story/fold";
 import { STORY_DEFAULTS, storyLines, type StorySettings } from "../story/kit";
 import { journalOf, recordOf } from "./journal";
 import { findQuest, openQuests, type QuestView, questSliceOf, questViews } from "./record";
+import { threadClosedAt } from "./thread";
 import { type JournalAnswer, journalReply, type QuestAnswer, type QuestsPage, questReply, questsReply } from "./shapes";
 
 export const JOURNAL_PATH = "/api/v1/chats/:chat/journal";
@@ -108,10 +110,16 @@ export function questRoutes(deps: QuestRoutesDeps) {
       reply: questReply,
       handle: async ({ user, params }): Promise<QuestAnswer> => {
         const at = await standingAt(deps, user, params.chat, null);
-        const slice = questSliceOf(deps.store.user(user).headState(params.chat).state);
+        const state = deps.store.user(user).headState(params.chat).state;
+        const slice = questSliceOf(state);
         const found = at.views.find((q) => q.id === params.quest) ?? at.views.find((q) => q.id === findQuest(slice, params.quest)?.id) ?? at.views.find((q) => q.name.toLowerCase() === params.quest.toLowerCase());
         if (found === undefined) return refuse(deps, user, params.chat, 404, "no_quest", { id: params.quest });
-        const history = (slice.quests[found.id]?.rows ?? []).map((r) => ({ turn: r.turn === "" ? null : r.turn, by: r.by, op: r.op, value: r.value }));
+        const doc = slice.quests[found.id];
+        const rows = (doc?.rows ?? []).map((r) => ({ n: r.n, turn: r.turn === "" ? null : r.turn, by: r.by, op: r.op, value: r.value }));
+        // The turn its thread closed is in its history (R-169), where the thread is closed on this path.
+        const thread = doc?.thread == null ? undefined : storySliceOf(state).items[doc.thread];
+        const closed = thread === undefined ? null : threadClosedAt(thread);
+        const history = [...rows, ...(thread === undefined || closed === null ? [] : [{ n: closed.n, turn: closed.turn, by: null, op: "thread_closed", value: { thread: thread.id } }])].sort((a, b) => a.n - b.n).map(({ n: _n, ...r }) => r);
         return { quest: recordOf(found, at.standing, at.open.has(found.id)), history };
       },
     }),

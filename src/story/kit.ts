@@ -12,6 +12,7 @@ import { writtenTime } from "../engine/time";
 import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type TreeView } from "../store";
+import { pairMarks, questsOfThread, threadTouched } from "../quests/thread";
 import { storyAt } from "./path";
 import { nameKey, type Span, type StoryItem, StoryRecord } from "./record";
 
@@ -199,7 +200,16 @@ export function itemView(record: StoryRecord, item: StoryItem, clock: StoryClock
   }
   if (item.closedBy !== null) out.closed = true;
   if (item.dropped) out.dropped = true;
-  out.touched = record.at.replyOf(item.touched);
+  if (item.part === "thread") {
+    // The quests that name a thread, each with its state; a mark where the thread and a quest are not both open or both closed.
+    const quests = questsOfThread(record.quests, item.id);
+    if (quests.length > 0) {
+      out.quests = quests.map((q) => ({ id: q.quest, name: q.name, closed: q.closed }));
+      const marked = pairMarks([item], record.quests);
+      if (marked.length > 0) out.marked = marked.map((m) => ({ quest: m.quest, closed: m.closed }));
+    }
+  }
+  out.touched = record.at.replyOf(item.part === "thread" ? threadTouched(item, record.quests).turn : item.touched);
   if (history) out.history = item.rows.map((r) => ({ touched: record.at.replyOf(r.turn), by: r.by, wrote: valueView(record, r.value, clock) }));
   return out;
 }
