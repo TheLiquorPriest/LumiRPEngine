@@ -6,16 +6,20 @@
 // never an open session's files, and a backup goes only when he names it.
 
 import { createHash } from "node:crypto";
+import type { Database } from "bun:sqlite";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { RouteError } from "../app";
 import { listBackups } from "../app/backups-route";
 import type { TreeChats, TreeWrites } from "./chats";
 import { CHATS_FOLDER, SESSIONS_FOLDER } from "./layout";
+import { TreeNotes } from "./notes";
 import { below, folderNames, measure, type Planned, planTurnPrune, retentionOf, takePlanned } from "./retention";
+import { versionsKeptOf } from "./settings";
+import type { TreeSuggestions } from "./suggestions";
 import type { ChatLocation } from "./view";
 
-export type PruneWhat = "turns" | "sessions" | "chat" | "backup";
+export type PruneWhat = "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions";
 
 export interface PruneDeps {
   /** The tree's folder. */
@@ -29,6 +33,9 @@ export interface PruneDeps {
   turning(user: string, chat: string): boolean;
   /** The ids of the chat's sessions that are open now: their files are never pruned. */
   openSessions(user: string, chat: string): Promise<string[]>;
+  /** RPE's database, read at any time. */
+  db: Database;
+  suggestions: TreeSuggestions;
 }
 
 /** What a page asks to prune: the chat for all but a backup, and the backup's name. */
@@ -40,7 +47,7 @@ export interface PruneAsk {
 
 /** What a prune would take, or took. */
 export interface PruneItem {
-  kind: "turn-folder" | "session" | "chat" | "backup";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "backup";
   /** Below the tree's folder, or for a backup its file's name. */
   path: string;
   files: number;
@@ -90,6 +97,15 @@ export async function planPrune(deps: PruneDeps, user: string, ask: PruneAsk): P
         const taken = await measure(join(sessions, id));
         planned.push({ kind: "session", path: below(deps.files, join(sessions, id)), files: taken.files, bytes: taken.bytes, disks: [join(sessions, id)] });
       }
+    } else if (ask.what === "suggestions") {
+      const { decidedKept } = await deps.chats.suggestionLimits(user, chat);
+      const past = deps.suggestions.decidedPast(user, chat, decidedKept);
+      if (past.count > 0) planned.push({ kind: "suggestions", path: `suggestions of ${chat}`, files: past.count, bytes: past.bytes, disks: [], run: async () => void (await deps.suggestions.pruneDecided(user, chat, decidedKept)) });
+    } else if (ask.what === "versions") {
+      const kept = await versionsKeptOf(loc);
+      const notes = new TreeNotes({ files: deps.files, db: deps.db, writes: deps.writes, chats: deps.chats });
+      const past = kept === null ? { ids: [], bytes: 0 } : notes.foldable(user, chat, kept);
+      if (kept !== null && past.ids.length > 0) planned.push({ kind: "note-versions", path: `note versions of ${chat}`, files: past.ids.length, bytes: past.bytes, disks: [], run: async () => void (await notes.fold(user, chat, kept)) });
     } else {
       if (deps.chats.placed(user).find((c) => c.chat === chat)?.deleted == null) throw new RouteError(409, `Lumiverse has not deleted chat ${chat}: only a deleted chat's files are pruned whole.`);
       const taken = await measure(disk);

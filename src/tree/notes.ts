@@ -20,6 +20,7 @@ import { oneFileAtATime, readText, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { sha256, walk } from "./files";
 import { NOTES_FOLDER } from "./layout";
+import { versionsKeptOf } from "./settings";
 import { type ChatLocation, locate } from "./view";
 
 export interface NotesDeps {
@@ -108,6 +109,9 @@ export class TreeNotes {
       (db) => db.run("INSERT INTO tree_notes (user, chat, turn) VALUES (?, ?, ?) ON CONFLICT (user, chat) DO UPDATE SET turn = excluded.turn", [user, chat, at.turns.at(-1) ?? null]),
       "keeping the turn a chat's notes stand at",
     );
+    // Versions of turns further back than the setting says, on every path that reaches them, are folded into the notes as they stand.
+    const kept = await versionsKeptOf(loc);
+    if (kept !== null) await this.fold(user, chat, kept);
     return moved;
   }
 
@@ -123,6 +127,60 @@ export class TreeNotes {
     const rows = this.#d.db.query<WriteRow, [string, string]>(`SELECT ${COLUMNS}, 1 AS stands FROM tree_applied a JOIN note_version w ON w.id = a.write_id WHERE a.user = ? AND a.chat = ?`).all(user, chat);
     await this.#move(user, chat, loc, rows, (w) => w.dropped === 0, moved);
     return moved;
+  }
+
+  /**
+   * What letting go of the versions of notes written in turns further back than `kept` would take, for the chat: those of a turn that
+   * far back on every path that reaches it (the newest end of a path is a node no other node follows), whatever the path, which is
+   * the store's `path_node`. Each is folded into the notes as they stand: the notes are not changed, the version goes, and a swipe or a
+   * branch that reaches back that far leaves the notes as they stand.
+   */
+  foldable(user: string, chat: string, kept: number): { ids: number[]; bytes: number } {
+    const stored = (name: string): boolean => this.#d.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)?.n === 1;
+    if (!stored("path_node") || !stored("turn")) return { ids: [], bytes: 0 };
+    const nodes = this.#d.db
+      .query<{ key: string; prev: string | null; turn: string; depth: number }, [string, string]>("SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ? AND t.chat = ?")
+      .all(user, chat);
+    const children = new Map<string, string[]>();
+    for (const n of nodes) if (n.prev !== null) children.set(n.prev, [...(children.get(n.prev) ?? []), n.key]);
+    // How far each node is from the newest end of the nearest path below it: the deepest first, so its followers are known.
+    const back = new Map<string, number>();
+    for (const n of [...nodes].sort((a, b) => b.depth - a.depth)) {
+      const after = children.get(n.key) ?? [];
+      back.set(n.key, after.length === 0 ? 0 : 1 + Math.min(...after.map((k) => back.get(k) ?? 0)));
+    }
+    const near = new Set<string>();
+    const far = new Set<string>();
+    for (const n of nodes) ((back.get(n.key) ?? 0) > kept ? far : near).add(n.turn);
+    const turns = [...far].filter((t) => !near.has(t));
+    if (turns.length === 0) return { ids: [], bytes: 0 };
+    const rows = this.#d.db
+      .query<{ id: number; bytes: number }, [string, string, string]>("SELECT id, COALESCE(length(before), 0) + COALESCE(length(text), 0) AS bytes FROM note_version WHERE user = ? AND chat = ? AND turn IN (SELECT value FROM json_each(?))")
+      .all(user, chat, JSON.stringify(turns));
+    return { ids: rows.map((r) => r.id), bytes: rows.reduce((sum, r) => sum + r.bytes, 0) };
+  }
+
+  /** Lets go of the versions `foldable` names, and of which of them stood in the notes folder: how many went. */
+  async fold(user: string, chat: string, kept: number): Promise<number> {
+    const { ids } = this.foldable(user, chat, kept);
+    if (ids.length === 0) return 0;
+    await this.#d.writes.run((db) => {
+      db.run("DELETE FROM tree_applied WHERE user = ?1 AND chat = ?2 AND write_id IN (SELECT value FROM json_each(?3))", [user, chat, JSON.stringify(ids)]);
+      db.run("DELETE FROM note_version WHERE user = ?1 AND chat = ?2 AND id IN (SELECT value FROM json_each(?3))", [user, chat, JSON.stringify(ids)]);
+    }, "folding old note versions into the notes");
+    return ids.length;
+  }
+
+  /**
+   * Records a note's text as the version a turn the migration carried wrote (the old engine its writer): what the file held before, and
+   * what it left. It stands in the chat's notes folder exactly when `stands` (that turn stands on the chat's path), so that showing an
+   * earlier carried reply again puts its notes back as for RPE's own.
+   */
+  async recordVersion(user: string, chat: string, turn: string, path: string, before: string | null, after: string | null, by: { id: string; definition: string }, at: number, stands: boolean): Promise<void> {
+    await this.#d.writes.run((db) => {
+      const row = db.run("INSERT INTO note_version (user, chat, turn, agent, path, before, after, text, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [user, chat, turn, JSON.stringify(by), path, before, hashOf(after), after, at]);
+      if (stands) db.run("INSERT INTO tree_applied (user, chat, write_id) VALUES (?, ?, ?)", [user, chat, Number(row.lastInsertRowid)]);
+    }, "recording a carried note's version");
   }
 
   /** What a write found and what it left. */

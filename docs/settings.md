@@ -111,7 +111,11 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `store.snapshotEvery` | `25` | RPE-global.yml | from RPE's next start | Appendix D.1: Snapshot | Snapshot: Turns between snapshots of a chat's world, from which its state is rebuilt. |
-| `store.foldsKept` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World states held in memory: Worked-out world states held in memory, the least recently used going first. |
+| `store.chatsHeld` | none (every chat) | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Chats held in memory: Chats whose world states are held in memory, the chat read least recently let go first and worked out again from its snapshot when next read. |
+| `store.statesPerChat` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World states held for each chat: Worked-out world states held for each chat (its newest reply, a running turn, a swipe's point), the least recently read going first. |
+| `store.snapshotsHeld` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Snapshots waiting to be stored: Snapshots a reading found worth keeping, held in memory until the next write stores them. |
+| `store.branchHops` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Branches followed back: How many branches back a chat's messages are followed to the turns they share; past it, the comparison and the log say where it stopped. |
+| `store.placeDepth` | `64` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Places a place inherits from: How many places up the tree a place takes values from; past it, the tree says the chain stops there. |
 | `store.notable` | `3` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Names of note in a reflection: Names of note each reflection of the world lists. |
 | `store.worldsKept` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World revisions held in memory: Revisions of world documents held in memory once read, the least recently used going first. |
 
@@ -128,6 +132,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `engine.dueItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Things falling due listed: The most things falling due in a span an answer lists, soonest first; how many more fall in it is said. |
 | `engine.creditScoreAssumed` | `700` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Score assumed for someone with none: The credit score the finance tables are read at for someone with no score recorded. |
 | `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
+| `engine.placeCap` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Places a chat makes before each further one is reported: The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same. |
 
 ## `space`
 
@@ -157,7 +162,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.index.batch` | `20` | RPE-global.yml or a chat's RPE.yml | at its next use | Appendix D.1: Lore indexing, entries per call | Lore indexing, entries per call: Entries handed to one call of a lore indexing run. |
 | `lore.index.bound` | `12` | RPE-global.yml or a chat's RPE.yml | at its next use | Appendix D.1: Lore map, bound entries not in the prompt | Lore map, bound entries: Entries bound to the horizon and not in the prompt that the lore map lists. |
 | `lore.index.batchChars` | `48000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore indexing, characters per call: The most characters of entry text handed to one call of a lore indexing run, so long entries never overrun a small model's window; one entry is handed at least, however long. |
-| `lore.index.page` | `50` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
+| `lore.index.page` | `50` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
 | `lore.index.entry` | none (no index entry of his own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Your own lore index entry: A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse. |
 
 ## `migration`
@@ -182,6 +187,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `files.listPage` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Entries a Files page lists: Files and folders the Files page lists in one page of a folder, or of a search, when it asks for no number. |
 | `files.listMost` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most entries a Files page lists: The most files and folders one page of the Files page's listing gives, whatever number it asks for. |
 | `files.readLines` | `500` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lines of a file read at once: Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole. |
+| `notes.versionsKept` | none (all of them) | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns back note versions are kept: How many turns back the versions of notes an agent wrote are kept. Past it, the versions of a turn that far back on every path that reaches it are folded into the notes as they stand and let go, after each turn and when the Storage page prunes them; a swipe or a branch reaching further back leaves the notes as they stand. Empty keeps every version. |
 
 ## `suggestions`
 
@@ -358,12 +364,12 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `map.laidFeet` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Width of a square laid in play: How wide, in feet, a square is on a grid laid in play that names no size. |
-| `map.roundSeconds` | `6` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Seconds in a round: How long a round is on a grid whose square a round's move crosses; a fight counts time in them. |
+| `map.laidFeet` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Width of a square laid in play: How wide, in feet, a square is on a grid laid in play that names no size. |
+| `map.roundSeconds` | `6` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Seconds in a round: How long a round is on a grid whose square a round's move crosses; a fight counts time in them. |
 | `map.roundFeet` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Feet moved in a round: How far someone moves in a round, where nothing says how fast they are. |
-| `map.printColumns` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Map printed, columns: The most columns of a map the world state prints; a wider map is printed around the horizon. |
-| `map.printRows` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Map printed, rows: The most rows of a map the world state prints; a taller map is printed around the horizon. |
-| `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
+| `map.printColumns` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | Map printed, columns: The most columns of a map the world state prints; a wider map is printed around the horizon. |
+| `map.printRows` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | Map printed, rows: The most rows of a map the world state prints; a taller map is printed around the horizon. |
+| `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
 | `map.distances` | `feet` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Distances told in: feet or metres. A world's ruleset that says otherwise wins. |
 | `map.picture` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | World state prints the map's picture: The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load. |
 

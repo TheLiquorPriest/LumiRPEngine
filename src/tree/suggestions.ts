@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentRef, Scope, Suggestion } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import type { TreeWrites } from "./chats";
+import { TREE_DEFAULTS } from "./settings";
 
 export type SuggestionState = "open" | "accepted" | "dismissed";
 export const SUGGESTION_STATES: readonly SuggestionState[] = ["open", "accepted", "dismissed"];
@@ -35,7 +36,18 @@ export interface SuggestionsDeps {
   db: Database;
   writes: TreeWrites;
   now(): number;
+  /** The chat's limits (`suggestions.openMost`, `suggestions.decidedKept`), as its levels' config files set them; the defaults where absent. */
+  limits?(user: string, chat: string): Promise<{ openMost: number; decidedKept: number }>;
 }
+
+/** What filing a suggestion came to: kept, with its id; or not kept, because the chat's open suggestions are at their limit. */
+export type SuggestionFiled = { kept: true; id: number } | { kept: false; openMost: number };
+
+/** The decided suggestions of a chat past the `kept` newest, by the decision's time: their count and bytes, and their removal. */
+const DECIDED_PAST = {
+  count: "SELECT count(*) AS n, sum(length(text) + length(reason)) AS bytes FROM suggestion WHERE user = ?1 AND chat = ?2 AND state <> 'open' AND id NOT IN (SELECT id FROM suggestion WHERE user = ?1 AND chat = ?2 AND state <> 'open' ORDER BY decided DESC, id DESC LIMIT ?3)",
+  delete: "DELETE FROM suggestion WHERE user = ?1 AND chat = ?2 AND state <> 'open' AND id NOT IN (SELECT id FROM suggestion WHERE user = ?1 AND chat = ?2 AND state <> 'open' ORDER BY decided DESC, id DESC LIMIT ?3)",
+} as const;
 
 interface SuggestionRow {
   id: number;
@@ -63,17 +75,24 @@ export class TreeSuggestions {
     this.#d = deps;
   }
 
-  /** Keeps a suggestion an agent filed; null for one of lore, which is not the tree's. */
-  async file(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<number | null> {
+  async #limits(user: string, chat: string): Promise<{ openMost: number; decidedKept: number }> {
+    return (await this.#d.limits?.(user, chat)) ?? { openMost: TREE_DEFAULTS.suggestionsOpenMost, decidedKept: TREE_DEFAULTS.suggestionsDecidedKept };
+  }
+
+  /**
+   * Keeps a suggestion an agent filed, unless the chat's open ones are at their limit (`suggestions.openMost`), in which case it is not
+   * kept and the limit is said, whatever the suggestion says; null for one of lore, which is not the tree's.
+   */
+  async file(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<SuggestionFiled | null> {
     if (!("file" in suggestion.target)) return null;
     const path = suggestion.target.file;
-    return await this.#d.writes.run(
-      (db) =>
-        Number(
-          db.run("INSERT INTO suggestion (user, chat, turn, agent, path, text, reason, at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')", [scope.user, scope.chat, scope.turn ?? null, JSON.stringify(agent), path, suggestion.text, suggestion.reason, this.#d.now()]).lastInsertRowid,
-        ),
-      "keeping an agent's suggestion",
-    );
+    const { openMost } = await this.#limits(scope.user, scope.chat);
+    return await this.#d.writes.run((db): SuggestionFiled => {
+      const open = db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM suggestion WHERE user = ? AND chat = ? AND state = 'open'").get(scope.user, scope.chat)?.n ?? 0;
+      if (open >= openMost) return { kept: false, openMost };
+      const id = Number(db.run("INSERT INTO suggestion (user, chat, turn, agent, path, text, reason, at, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')", [scope.user, scope.chat, scope.turn ?? null, JSON.stringify(agent), path, suggestion.text, suggestion.reason, this.#d.now()]).lastInsertRowid);
+      return { kept: true, id };
+    }, "keeping an agent's suggestion");
   }
 
   /** A chat's suggestions (every chat's when none is named), newest first; only those in `state` when it is given. */
@@ -89,9 +108,26 @@ export class TreeSuggestions {
     return row === null ? null : suggestionOf(row);
   }
 
-  /** Decides an open suggestion; false when it is not open (decided already, or none). */
+  /** Decides an open suggestion; false when it is not open (decided already, or none). The chat's decided suggestions are then kept to its setting, the oldest going. */
   async decide(user: string, id: number, state: Exclude<SuggestionState, "open">): Promise<boolean> {
-    return await this.#d.writes.run((db) => db.run("UPDATE suggestion SET state = ?, decided = ? WHERE user = ? AND id = ? AND state = 'open'", [state, this.#d.now(), user, id]).changes === 1, "deciding a suggestion");
+    const chat = this.one(user, id)?.chat;
+    const kept = chat === undefined ? null : (await this.#limits(user, chat)).decidedKept;
+    return await this.#d.writes.run((db) => {
+      const decided = db.run("UPDATE suggestion SET state = ?, decided = ? WHERE user = ? AND id = ? AND state = 'open'", [state, this.#d.now(), user, id]).changes === 1;
+      if (decided && chat !== undefined && kept !== null) db.run(DECIDED_PAST.delete, [user, chat, kept]);
+      return decided;
+    }, "deciding a suggestion");
+  }
+
+  /** The decided suggestions of a chat past the `kept` newest, and the bytes they hold: what pruning them takes. */
+  decidedPast(user: string, chat: string, kept: number): { count: number; bytes: number } {
+    const row = this.#d.db.query<{ n: number; bytes: number | null }, [string, string, number]>(DECIDED_PAST.count).get(user, chat, kept);
+    return { count: row?.n ?? 0, bytes: row?.bytes ?? 0 };
+  }
+
+  /** Lets go of a chat's decided suggestions past the `kept` newest; open ones never. How many went. */
+  async pruneDecided(user: string, chat: string, kept: number): Promise<number> {
+    return await this.#d.writes.run((db) => db.run(DECIDED_PAST.delete, [user, chat, kept]).changes, "pruning decided suggestions");
   }
 
   /** Opens a suggestion again: its acceptance could not be written. */

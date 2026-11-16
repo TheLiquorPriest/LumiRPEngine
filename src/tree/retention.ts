@@ -33,14 +33,16 @@ export interface Pruned {
 
 /** What a prune would take of one place: its path below the tree's folder, the files and bytes of what goes, and the paths on disk that go. */
 export interface Planned {
-  /** What goes: a turn folder's snapshots, a session, a chat's folder. */
-  kind: "turn-folder" | "session" | "chat";
-  /** The place it goes from, below the tree's folder, "/" between names. */
+  /** What goes: a turn folder's snapshots, a session, a chat's folder, a chat's decided suggestions or old note versions. */
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions";
+  /** The place it goes from, below the tree's folder, "/" between names; for what is kept in the database, what it is of. */
   path: string;
   files: number;
   bytes: number;
   /** The paths on disk removed, whole. */
   disks: string[];
+  /** What takes it where it is not on disk. */
+  run?: () => Promise<void>;
 }
 
 /** The chat's retention settings, as its levels' config files set them over the default. */
@@ -119,6 +121,7 @@ export async function takePlanned(planned: readonly Planned[]): Promise<Pruned> 
   const pruned: Pruned = { folders: 0, files: 0, bytes: 0 };
   for (const p of planned) {
     for (const disk of p.disks) await rm(disk, { recursive: true, force: true });
+    await p.run?.();
     pruned.folders++;
     pruned.files += p.files;
     pruned.bytes += p.bytes;

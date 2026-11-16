@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
 import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, id8, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, type StorageArea } from "./layout";
+import { treeSettingsOf } from "./settings";
 
 /** How RPE's database takes a write: the application's write queue. */
 export interface TreeWrites {
@@ -249,6 +250,13 @@ export class TreeChats {
   folders(user: string, chat: string): ChatFolders | null {
     const row = this.db.query<{ character: string; folder: string }, [string, string]>("SELECT character, folder FROM tree_chat WHERE user = ? AND chat = ?").get(user, chat);
     return row === null ? null : { character: row.character, chat: row.folder };
+  }
+
+  /** The chat's levels' limits on its suggestions (`suggestions.openMost`, `suggestions.decidedKept`), as its config files set them; the defaults for a chat not placed. */
+  async suggestionLimits(user: string, chat: string): Promise<{ openMost: number; decidedKept: number }> {
+    const at = this.folders(user, chat);
+    const s = await treeSettingsOf({ files: this.files, character: at?.character ?? null, chat: at?.chat ?? null });
+    return { openMost: s.suggestionsOpenMost, decidedKept: s.suggestionsDecidedKept };
   }
 
   /** When RPE's record of each of the chat's turns says it began, by the id's first letters a turn folder's name holds (`id8`); none where the store keeps no turns here. */

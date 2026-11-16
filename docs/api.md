@@ -420,6 +420,19 @@ Strikes an item of the story record, or takes its strike back, as the player's o
 
 ## Lore
 
+### `GET /api/v1/chats/:chat/lore/books`
+
+Every book of the user's by its id and name, for the Settings page's choice of the books the lore reads (`lore.books`): whether the chat has it attached, whether a character brought it, and when Lumiverse made it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`LoreBooks`](#lorebooks) |
+
 ### `GET /api/v1/chats/:chat/lore/index`
 
 The lore index of a chat, a page at a time in the order of the lore map's catalog: each entry of its books and its world with its id, keys, size, how it activates and revision, and the lines the index holds of it (the user's own, else the latest run's, an earlier revision's marked stale) with whether they are current.
@@ -2759,6 +2772,17 @@ How Lumiverse activated an entry: always on, by one of its keys, by meaning, or 
 export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
 ```
 
+### `LoreBooks`
+
+The user's books as his choice of the books the lore reads lists them.
+
+```ts
+export interface LoreBooks {
+  /** Every book of his, the engine's own left out. */
+  books: ({ id: string; name: string; attached: boolean; character: boolean; added: number | null })[];
+}
+```
+
 ### `LoreIndexJob`
 
 The indexing job the owner started.
@@ -3190,11 +3214,11 @@ export interface PrunedShown {
 
 ### `PruneItem`
 
-One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, or a backup; its path below the tree's folder (a backup's, its name), and the files and bytes that go.
+One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, a chat's decided suggestions or old note versions, or a backup; its path below the tree's folder (a backup's, its name), and the files (or rows) and bytes that go.
 
 ```ts
 export interface PruneItem {
-  kind: "turn-folder" | "session" | "chat" | "backup";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "backup";
   path: string;
   files: number;
   bytes: number;
@@ -3720,11 +3744,11 @@ export interface StorageKindsReply {
 
 ### `StoragePruneAsk`
 
-What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.
+What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, the decided suggestions past what it keeps, the note versions past how far back they are kept, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.
 
 ```ts
 export interface StoragePruneAsk {
-  what: "turns" | "sessions" | "chat" | "backup";
+  what: "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions";
   chat?: string | null;
   name?: string | null;
   plan?: string;

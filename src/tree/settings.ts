@@ -141,8 +141,21 @@ export const FILE_SETTINGS = [
   },
 ] as const satisfies readonly Setting[];
 
+/** How many turns back the versions of notes are kept (plan §3.2 P10: a swipe, delete or branch rewinds notes wherever it reaches); none keeps all. */
+export const NOTE_VERSIONS = {
+  key: "notes.versionsKept",
+  default: null,
+  takes: { type: "whole", least: 1 },
+  orNone: true,
+  none: "all of them",
+  perConnection: false,
+  name: "Turns back note versions are kept",
+  about: "How many turns back the versions of notes an agent wrote are kept. Past it, the versions of a turn that far back on every path that reaches it are folded into the notes as they stand and let go, after each turn and when the Storage page prunes them; a swipe or a branch reaching further back leaves the notes as they stand. Empty keeps every version.",
+  effect: "use",
+} as const satisfies Setting;
+
 /** Every setting the tree declares, as a config file writes it. */
-export const TREE_SETTINGS: readonly Setting[] = [...Object.values(TREE_SETTING_DEFS), ...FILE_SETTINGS];
+export const TREE_SETTINGS: readonly Setting[] = [...Object.values(TREE_SETTING_DEFS), ...FILE_SETTINGS, NOTE_VERSIONS];
 
 /** Where the config files of a chat's levels are on disk, farthest first; a level the chat has no folder for yet is left out. */
 export function levelFiles(loc: ChatLocation): LevelFile[] {
@@ -174,6 +187,11 @@ export async function levelTexts(loc: ChatLocation): Promise<LevelText[]> {
 /** The tree's limits for a chat, as its levels' config files set them over the defaults; `log` hears of what is passed over. */
 export async function treeSettingsOf(loc: ChatLocation, log: Log | null = null): Promise<TreeSettings> {
   return readConfig(await levelTexts(loc), log, TREE_SETTINGS).numbers(TREE_SETTING_DEFS);
+}
+
+/** The chat's setting of how many turns back note versions are kept; null for all of them. */
+export async function versionsKeptOf(loc: ChatLocation, log: Log | null = null): Promise<number | null> {
+  return readConfig(await levelTexts(loc), log, TREE_SETTINGS).value(NOTE_VERSIONS) as number | null;
 }
 
 /** What the reader the composition hands every area reads by. */

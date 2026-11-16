@@ -858,6 +858,12 @@ export interface LocatedSlices {
 /** How Lumiverse activated an entry: always on, by one of its keys, by meaning, or still in force from an earlier turn. */
 export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
 
+/** The user's books as his choice of the books the lore reads lists them. */
+export interface LoreBooks {
+  /** Every book of his, the engine's own left out. */
+  books: ({ id: string; name: string; attached: boolean; character: boolean; added: number | null })[];
+}
+
 /** The indexing job the owner started. */
 export interface LoreIndexJob {
   /** Its id in the jobs. */
@@ -1152,9 +1158,9 @@ export interface PrunedShown {
   bytes: number;
 }
 
-/** One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, or a backup; its path below the tree's folder (a backup's, its name), and the files and bytes that go. */
+/** One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, a chat's decided suggestions or old note versions, or a backup; its path below the tree's folder (a backup's, its name), and the files (or rows) and bytes that go. */
 export interface PruneItem {
-  kind: "turn-folder" | "session" | "chat" | "backup";
+  kind: "turn-folder" | "session" | "chat" | "suggestions" | "note-versions" | "backup";
   path: string;
   files: number;
   bytes: number;
@@ -1497,9 +1503,9 @@ export interface StorageKindsReply {
   lastPrune: number | null;
 }
 
-/** What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that. */
+/** What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, the decided suggestions past what it keeps, the note versions past how far back they are kept, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that. */
 export interface StoragePruneAsk {
-  what: "turns" | "sessions" | "chat" | "backup";
+  what: "turns" | "sessions" | "chat" | "backup" | "suggestions" | "versions";
   chat?: string | null;
   name?: string | null;
   plan?: string;
@@ -2193,6 +2199,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: JobsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every book of the user's by its id and name, for the Settings page's choice of the books the lore reads (`lore.books`): whether the chat has it attached, whether a character brought it, and when Lumiverse made it. */
+  "GET /api/v1/chats/:chat/lore/books": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: LoreBooks;
     paged: false;
     long: false;
     joined: false;

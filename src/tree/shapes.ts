@@ -255,14 +255,14 @@ export const storageKindsReply = shape.named(
 
 const pruneItem = shape.named(
   "PruneItem",
-  "One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, or a backup; its path below the tree's folder (a backup's, its name), and the files and bytes that go.",
-  shape.object({ kind: shape.oneOf("turn-folder", "session", "chat", "backup"), path: T, files: N, bytes: N }),
+  "One place a prune takes from: a turn folder's snapshots, a closed session, a deleted chat's folder, a chat's decided suggestions or old note versions, or a backup; its path below the tree's folder (a backup's, its name), and the files (or rows) and bytes that go.",
+  shape.object({ kind: shape.oneOf("turn-folder", "session", "chat", "suggestions", "note-versions", "backup"), path: T, files: N, bytes: N }),
 );
 type PruneItemMirrored = Holds<Exactly<Infer<typeof pruneItem>, PruneItem>>;
 export const storagePruneBody = shape.named(
   "StoragePruneAsk",
-  "What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.",
-  shape.object({ what: shape.oneOf("turns", "sessions", "chat", "backup"), chat: opt(nullable(T)), name: opt(nullable(T)), plan: opt(T) }),
+  "What to prune: a chat's old turn folders, its closed sessions' files, a deleted chat's other files, the decided suggestions past what it keeps, the note versions past how far back they are kept, or the backup or copy of the database named. Without `plan` it only says what would go; with the `plan` that answer gave, it takes exactly that.",
+  shape.object({ what: shape.oneOf("turns", "sessions", "chat", "backup", "suggestions", "versions"), chat: opt(nullable(T)), name: opt(nullable(T)), plan: opt(T) }),
 );
 export const storagePruneReply = shape.named(
   "StoragePruneReply",

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { YAML } from "bun";
 import { loadGuidance } from "rp-harness";
 import type { App, RunningServer } from "../../src/app";
-import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
+import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type SuggestionFiled, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "../app/helpers";
 
@@ -230,9 +230,13 @@ describe("the Files page's routes", () => {
   test("a suggestion writes nothing until it is accepted, then writes the file as the user, edited or as proposed; a dismissed one writes nothing", async () => {
     const scope = { user: OWNER, chat: CHAT, session: "s-1", turn: "t-1" };
     const author = { id: "lead-1", definition: "author" };
-    const world = await suggestions.file(scope, author, { target: { file: "WORLD.md" }, text: "# World\nA drowned bell under a grey sea.\n", reason: "The card and the lore say so." });
-    const gm = await suggestions.file(scope, author, { target: { file: "@shipped/.agents/gm.md" }, text: "---\nname: gm\ndescription: Rules the scene.\n---\nKeep every roll in the open.\n", reason: "The player asked to see rolls." });
-    const tone = await suggestions.file(scope, author, { target: { file: "WRITING.md" }, text: "Short sentences.\n", reason: "The replies run long." });
+    const kept = async (filed: Promise<SuggestionFiled | null>): Promise<number | null> => {
+      const f = await filed;
+      return f !== null && f.kept ? f.id : null;
+    };
+    const world = await kept(suggestions.file(scope, author, { target: { file: "WORLD.md" }, text: "# World\nA drowned bell under a grey sea.\n", reason: "The card and the lore say so." }));
+    const gm = await kept(suggestions.file(scope, author, { target: { file: "@shipped/.agents/gm.md" }, text: "---\nname: gm\ndescription: Rules the scene.\n---\nKeep every roll in the open.\n", reason: "The player asked to see rolls." }));
+    const tone = await kept(suggestions.file(scope, author, { target: { file: "WRITING.md" }, text: "Short sentences.\n", reason: "The replies run long." }));
     expect(await suggestions.file(scope, author, { target: { lore: "entry-9" }, text: "x", reason: "y" })).toBeNull();
     if (world === null || gm === null || tone === null) throw new Error("a suggestion of a file was not kept");
 
