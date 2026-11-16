@@ -15,7 +15,7 @@ import { chatDraftOf, DRAFT_EVENT, draftEvent, type DraftEdit } from "../../engi
 import { DOOR_EVENT, SHAPE_EVENT, SQUARES_EVENT } from "../../packs/space/core/grid-play";
 import { POS_EVENT } from "../../packs/space/core/positions";
 import type { ChangeInput } from "../../store/types";
-import { cellOf, type DoorState, type Drawn, type Moving, type Piece, type Square } from "./grid";
+import { cellOf, type DoorState, type Drawn, type Moving, type Piece, type Square } from "../../packs/space/core/grid-model";
 
 /** The change that writes `edit` into the chat's draft of its world: `world` the revision it plays, `state` the chat's state now. */
 export function draftChange(world: WorldDoc, state: Readonly<WorldState>, edit: DraftEdit): ChangeInput {

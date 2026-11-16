@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { initialState } from "../../../src/engine/world-state";
-import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, NOTHING_MOVES, place, putOn, setDoor, squareAt, standsAt, type Drawn } from "../../../src/iface/map/grid";
+import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, NOTHING_MOVES, place, putOn, setDoor, squareAt, standsAt, type Drawn } from "../../../src/packs/space/core/grid-model";
 import { CELLAR, INN, registry, TOWN, worldWith } from "./fixtures";
 
 function inn(): Drawn {

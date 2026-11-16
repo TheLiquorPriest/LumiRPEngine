@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { initialState } from "../../../src/engine/world-state";
-import { NOTHING_MOVES, place, scaleOf } from "../../../src/iface/map/grid";
+import { moveTime, NOTHING_MOVES, place, roundsTime, scaleOf } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { move } from "../../../src/iface/map/path";
+import { move } from "../../../src/packs/space/core/grid-path";
 import { positionChanges } from "../../../src/iface/map/record";
-import { clockChange, moveTime, roundsTime } from "../../../src/iface/map/time";
+import { clockChange } from "../../../src/iface/map/time";
 import type { ChangeInput } from "../../../src/store/types";
 import { testStore } from "../../store/fixtures";
 import { drawn, INN, registry, TOWN, worldWith } from "./fixtures";

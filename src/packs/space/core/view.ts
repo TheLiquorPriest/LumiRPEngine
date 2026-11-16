@@ -11,7 +11,7 @@
 
 import type { JsonObject } from "../../../shared/json";
 import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
-import { addCells, areaOf, cellIndex, gridOf, hasCell, sightCells, standingGrid } from "../../../shared/grid";
+import { addCells, areaOf, cellIndex, gridOf, hasCell, standingGrid } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
 import type { GridDef, MapDisplay, WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
@@ -21,7 +21,7 @@ import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
-import { hiddenCells } from "./positions";
+import { hiddenCells, sightFor } from "./positions";
 import { closedRoutes, goMinutes, routeAt } from "./travel";
 import type { TravelPart } from "../../../shared/travel";
 
@@ -131,7 +131,7 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   const pov = stand && typeof fields?.x === "number" && typeof fields.y === "number" && cellIndex(stand.grid, { x: fields.x, y: fields.y }) !== null ? { x: fields.x, y: fields.y } : undefined;
   const ids = [...children.values()].flat().filter(filter.drawn).sort(byShownId(filter));
   // What the POV sees from where it stands now, while the grid system tracks sight (DESIGN §7).
-  const sight = settings.grid.movement && stand && pov ? new Set(sightCells(stand.grid, pov, settings.grid.sightRadius)) : new Set<number>();
+  const sight = settings.grid.movement && stand && pov ? new Set(sightFor(ctx, stand.scope, pov, settings.grid.sightRadius)) : new Set<number>();
   const trail = (id: PlaceId): MapScopeView["trail"] => [
     ...(roots.length > 0 ? [{ id: null, name: WORLD_SCOPE_NAME }] : []),
     ...placePath(world, id)

@@ -12,7 +12,7 @@ import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
 import { cellKey, editedMap, SQUARES_EVENT, squareEditsOf } from "../../packs/space/core/grid-play";
 import type { Report } from "../../store/types";
-import { cellOf, indexOf, squareKey, type Drawn, type Square } from "./grid";
+import { cellOf, indexOf, squareKey, type Drawn, type Square } from "../../packs/space/core/grid-model";
 import type { Laid } from "./lay";
 import { squaresEvent } from "./record";
 

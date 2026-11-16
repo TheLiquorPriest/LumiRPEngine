@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { blockersOf, indexOf, NOTHING_MOVES, place, setDoor, standsAt, type Drawn, type Moving, type Square } from "../../../src/iface/map/grid";
+import { blockersOf, indexOf, NOTHING_MOVES, place, setDoor, standsAt, type Drawn, type Moving, type Square } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { move, walk, type Walk } from "../../../src/iface/map/path";
+import { move, walk, type Walk } from "../../../src/packs/space/core/grid-path";
 import type { MapDoc } from "../../../src/shared/world";
 import { CELLAR, drawn, HALL, OPEN, PILLAR, SEALED } from "./fixtures";
 

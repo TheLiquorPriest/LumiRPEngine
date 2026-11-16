@@ -1,7 +1,7 @@
-// Grids (DESIGN §3 Locations, §7, §12): cells, A* with a hard expansion cap, walking minutes, the
-// cells someone sees from where they stand, and where someone stands on a grid at a place. Pure
-// over grids and the world's places, so the engine, the space pack, the map compiler and Play's map
-// all read one geometry.
+// Grids (DESIGN §3 Locations, §7, §12): cells, the cost of entering one, walking minutes, the cheapest
+// cost to every cell (travel between a map's places), and where someone stands on a grid at a place.
+// Pure over grids and the world's places. Ways, measuring and sight on a grid are the space pack's one
+// geometry (`packs/space/core/grid-model.ts`, `grid-path.ts`, `grid-measure.ts`), not read here.
 
 import type { PlaceId } from "./ids";
 import { hasOwn } from "./json";
@@ -12,22 +12,14 @@ export interface Cell {
   y: number;
 }
 
-/** What paths and sight read of a grid. */
+/** What the cheapest costs read of a grid. */
 export type GridShape = Pick<GridDef, "width" | "height" | "terrain" | "blocked">;
 
 /** Cost to enter a cell by its terrain code; blocked cells are impassable. */
 export const GRID_TERRAIN_COST: Readonly<Record<string, number>> = Object.freeze({ "": 1, ".": 1, floor: 1, road: 1, grass: 1.2, sand: 1.8, mud: 2, water: 4, rough: 1.6, "~": 4, "^": 3 });
 
-/** Expanded-node cap for one A* search: a search past it returns null. */
-export const ASTAR_CAP = 20_000;
-
 /** The grid system's sight radius, in cells, is a whole number up to this. */
 export const SIGHT_MAX = 32;
-
-export interface GridPath {
-  cells: Cell[];
-  cost: number;
-}
 
 /** The cost of entering a cell: its terrain's, at least 1. */
 export function cellCost(grid: Pick<GridDef, "terrain">, index: number): number {
@@ -44,50 +36,6 @@ export function cellAt(grid: Pick<GridDef, "width">, index: number): Cell {
   return { x: index % grid.width, y: Math.floor(index / grid.width) };
 }
 
-/**
- * A* on a grid, 4-connected, Manhattan heuristic (admissible: every step costs ≥ 1). Returns the
- * cheapest path including both ends, or null when blocked, off-grid or past `cap` expansions.
- */
-export function findPath(grid: GridShape, from: Cell, to: Cell, cap = ASTAR_CAP): GridPath | null {
-  const blocked = new Set(grid.blocked);
-  const start = cellIndex(grid, from);
-  const goal = cellIndex(grid, to);
-  if (start === null || goal === null || blocked.has(start) || blocked.has(goal)) return null;
-  const h = (i: number): number => Math.abs((i % grid.width) - to.x) + Math.abs(Math.floor(i / grid.width) - to.y);
-  const g = new Map<number, number>([[start, 0]]);
-  const came = new Map<number, number>();
-  const open = new Map<number, number>([[start, h(start)]]);
-  let expanded = 0;
-  while (open.size > 0) {
-    let cur = -1;
-    let best = Infinity;
-    for (const [i, f] of open) if (f < best || (f === best && i < cur)) {
-      best = f;
-      cur = i;
-    }
-    if (cur === goal) {
-      const cells: Cell[] = [];
-      for (let i: number | undefined = cur; i !== undefined; i = came.get(i)) cells.unshift(cellAt(grid, i));
-      return { cells, cost: g.get(cur) ?? 0 };
-    }
-    open.delete(cur);
-    if (++expanded > cap) return null;
-    const cx = cur % grid.width;
-    const cy = Math.floor(cur / grid.width);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-      const ni = cellIndex(grid, { x: cx + dx, y: cy + dy });
-      if (ni === null || blocked.has(ni)) continue;
-      const ng = (g.get(cur) ?? 0) + cellCost(grid, ni);
-      if (ng < (g.get(ni) ?? Infinity)) {
-        g.set(ni, ng);
-        came.set(ni, cur);
-        open.set(ni, ng + h(ni));
-      }
-    }
-  }
-  return null;
-}
-
 /** How wide a cell is, in metres, where a map gives none: a block of a town. The one home of this default; the grid and the walking minutes read it here. */
 export const DEFAULT_CELL_METRES = 80;
 
@@ -97,11 +45,6 @@ export const WALK_METRES_PER_MINUTE = 80;
 /** Walking minutes for a path's cost: the cost × the cell size, at the walking speed (a cell is `DEFAULT_CELL_METRES` where its map gives none). */
 export function costMinutes(grid: Pick<GridDef, "cellMeters">, cost: number): number {
   return Math.round(((grid.cellMeters ?? DEFAULT_CELL_METRES) * cost) / WALK_METRES_PER_MINUTE);
-}
-
-/** Walking minutes along a grid path, at least one for any step. */
-export function gridMinutes(grid: Pick<GridDef, "cellMeters">, path: GridPath): number {
-  return Math.max(path.cells.length > 1 ? 1 : 0, costMinutes(grid, path.cost));
 }
 
 /**
@@ -162,55 +105,6 @@ export function gridCosts(grid: GridShape, from: number, enters: (from: number, 
     }
   }
   return cost;
-}
-
-/**
- * Whether nothing blocks the straight line between two cells: every cell Bresenham's line crosses
- * between them is open. The two ends don't count, so a wall is itself seen and hides what's past it.
- */
-export function lineOfSight(grid: Pick<GridDef, "width" | "height">, blocked: ReadonlySet<number>, from: Cell, to: Cell): boolean {
-  const dx = Math.abs(to.x - from.x);
-  const dy = -Math.abs(to.y - from.y);
-  const sx = from.x < to.x ? 1 : -1;
-  const sy = from.y < to.y ? 1 : -1;
-  let err = dx + dy;
-  let x = from.x;
-  let y = from.y;
-  for (let guard = 0; guard <= grid.width + grid.height; guard++) {
-    if (x === to.x && y === to.y) return true;
-    if ((x !== from.x || y !== from.y) && blocked.has(y * grid.width + x)) return false;
-    const e2 = 2 * err;
-    if (e2 >= dy) {
-      err += dy;
-      x += sx;
-    }
-    if (e2 <= dx) {
-      err += dx;
-      y += sy;
-    }
-  }
-  return false;
-}
-
-/**
- * The cells seen from a cell (the grid system, DESIGN §7): within `radius` cells (a round disc),
- * each with an unbroken line of sight, so walls block the view and doorways let it through. In
- * index order.
- */
-export function sightCells(grid: GridShape, from: Cell, radius: number): number[] {
-  if (cellIndex(grid, from) === null) return [];
-  const r = Math.min(SIGHT_MAX, Math.max(0, Math.floor(radius)));
-  const blocked = new Set(grid.blocked);
-  const out: number[] = [];
-  for (let y = Math.max(0, from.y - r); y <= Math.min(grid.height - 1, from.y + r); y++) {
-    for (let x = Math.max(0, from.x - r); x <= Math.min(grid.width - 1, from.x + r); x++) {
-      const dx = x - from.x;
-      const dy = y - from.y;
-      // r² + r rounds the disc's edge (no lone cells sticking out of it at the axes).
-      if (dx * dx + dy * dy <= r * r + r && lineOfSight(grid, blocked, from, { x, y })) out.push(y * grid.width + x);
-    }
-  }
-  return out;
 }
 
 /**

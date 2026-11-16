@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/iface/map/grid";
+import { NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { between, burst, cone, distance, line, sees, within } from "../../../src/iface/map/measure";
+import { between, burst, cone, distance, line, sees, within } from "../../../src/packs/space/core/grid-measure";
 import { CELLAR, drawn, HALL, INN, OPEN, PILLAR, SEALED } from "./fixtures";
 
 /** Where to stand: a square, or a square with a footprint and what it blocks. */

@@ -6,59 +6,23 @@
 // POV's sight (`space.seen`) and zone triggers read whole moves, never half of one.
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import { isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { arrivalCell, areaPlaceAt, cellIndex, entranceCell, findPath, gridOf, standingGrid, type Cell, type GridShape } from "../../../shared/grid";
+import { arrivalCell, areaPlaceAt, cellIndex, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
-import type { GridDef, GridTrigger, WorldDoc } from "../../../shared/world";
+import type { GridTrigger } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone, placeOfEntity } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
-import type { WorldState } from "../../../engine/state";
 import { canSeePlace, knownBySelector } from "../../../engine/visibility";
+import { between, sees, sightFrom } from "./grid-measure";
+import { groundAt, HOLD_DEPTH, spotData, spotOf, squareOf, standsAt, type GridSpot, type Ground, type GroundSource } from "./grid-model";
+import { walk, type Walk } from "./grid-path";
 import { placePath } from "./map-scope";
 
 /** The event every position change makes while the grid system is on. */
 export const POS_EVENT = "space.pos";
-
-/** A cell on the grid of a place (`scope`, the place whose grid it is). */
-export interface GridSpot {
-  scope: PlaceId;
-  x: number;
-  y: number;
-}
-
-/** How deep a chain of holders is followed to find where something carried stands. */
-const HOLD_DEPTH = 32;
-
-/** A `space.pos` spot as written, or null (off any grid, or not a spot). */
-export function spotData(v: unknown): GridSpot | null {
-  return isRecord(v) && typeof v.scope === "string" && Number.isInteger(v.x) && Number.isInteger(v.y) ? { scope: v.scope, x: Number(v.x), y: Number(v.y) } : null;
-}
-
-/**
- * Where an entity stands on a grid: its own cell on the grid its place stands on; for something
- * carried, its outermost holder's. Null off any grid, or with no cell on it.
- */
-export function spotOf(world: WorldDoc, state: Readonly<WorldState>, entity: EntityId): GridSpot | null {
-  let id = entity;
-  for (let depth = 0; depth < HOLD_DEPTH; depth++) {
-    const e = own(state.entities, id);
-    if (!e) return null;
-    const place = e.fields.place;
-    if (typeof place === "string" && place !== "") {
-      const stand = standingGrid(world, place);
-      const { x, y } = e.fields;
-      return stand && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null ? { scope: stand.scope, x, y } : null;
-    }
-    const holder = e.relations.find((r) => r.type === "in")?.to;
-    if (holder === undefined) return null;
-    id = holder;
-  }
-  return null;
-}
 
 function posEvent(entity: EntityId, at: GridSpot | null, from: GridSpot | null): LedgerEvent {
   const data: JsonObject = { entity, at: at ? { ...at } : null, from: from ? { ...from } : null };
@@ -75,7 +39,7 @@ function setCell(entity: EntityId, fields: JsonObject, cell: Cell): LedgerEvent[
  * after such a place, unless the POV is inside it. The map draws them as nothing, and the POV never
  * steps onto them or walks through them, so a secret room is neither shown nor found on foot.
  */
-export function hiddenCells(ctx: ReadContext, grid: Pick<GridDef, "zones">): Set<number> {
+export function hiddenCells(ctx: ReadContext, grid: { readonly zones: Readonly<Record<string, readonly number[]>> }): Set<number> {
   const { world, state } = ctx;
   const inside = new Set(placePath(world, placeOfEntity(state, world.pov)));
   const out = new Set<number>();
@@ -86,9 +50,26 @@ export function hiddenCells(ctx: ReadContext, grid: Pick<GridDef, "zones">): Set
   return out;
 }
 
-/** A grid as the POV walks it: the cells of places it can't see are walls (`hiddenCells`). */
-export function povGround(ctx: ReadContext, grid: GridDef, hidden: ReadonlySet<number> = hiddenCells(ctx, grid)): GridShape {
-  return hidden.size > 0 ? { ...grid, blocked: [...grid.blocked, ...hidden] } : grid;
+/**
+ * The way `entity` walks across `ground`, the grid it stands on as play stands, from its cell to
+ * `to`: the pack's one geometry (eight directions, no corner cut, doors and footprints as they
+ * are, the chat's square changes laid over). The POV never walks through a place it can't see.
+ * Null when nothing joins the two.
+ */
+export function walkOn(ctx: ReadContext, ground: Ground, entity: EntityId, from: Cell, to: Cell): Walk | null {
+  const hidden = entity === ctx.world.pov ? hiddenCells(ctx, ground.drawn) : undefined;
+  return walk(ground.drawn, ground.moving, squareOf(from), squareOf(to), entity, undefined, hidden);
+}
+
+/**
+ * The squares of the grid of `scope` seen from a cell within a radius, as play stands (the
+ * `space.sight` service): the pack's one sight, which the panel's fog and the POV's seen squares
+ * (`engine/seen.ts`) read. Doors not open and footprints that block the view shut it; the POV, who
+ * looks, never does. By index.
+ */
+export function sightFor(source: GroundSource, scope: PlaceId, from: Cell, radius: number): number[] {
+  const ground = groundAt(source, scope);
+  return ground ? sightFrom(ground.drawn, ground.moving, squareOf(from), radius, [source.world.pov]) : [];
 }
 
 /**
@@ -129,7 +110,8 @@ export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): Ledger
   if (!mapSettingsOf(ctx.world).grid.movement) return setCell(entity, e.fields, to);
   const from = spotOf(ctx.world, ctx.state, entity);
   if (!from || from.scope !== stand.scope) return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't standing on this map` };
-  if (!findPath(povGround(ctx, stand.grid, hidden), from, to)) return { code: "no_way", reason: "There's no way there from here." };
+  const ground = groundAt(ctx, here);
+  if (!ground || !walkOn(ctx, ground, entity, from, to)) return { code: "no_way", reason: "There's no way there from here." };
   const room = areaPlaceAt(ctx.world, stand.scope, stand.grid, index) ?? stand.scope;
   if (room === here) return [posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from)];
   const out: LedgerEvent[] = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink" as const, rel: "in", from: entity, to: r.to }));
@@ -158,7 +140,8 @@ export function layEvents(ctx: ReadContext, thing: EntityId, place: PlaceId | nu
 /**
  * Whether `a` can reach `b` (the `reach` formula, DESIGN §11): `b` is `a`, or something `a`
  * carries; or it is where `a` is. While the grid system has both on one grid, that means on `a`'s
- * cell or one of the eight around it; otherwise at the same place.
+ * square or next to it, by the pack's one geometry: not across the pinched corner of a wall or a
+ * shut door; otherwise at the same place.
  */
 export function reach(ctx: ReadContext, a: EntityId, b: EntityId): boolean {
   const { world, state } = ctx;
@@ -173,7 +156,15 @@ export function reach(ctx: ReadContext, a: EntityId, b: EntityId): boolean {
   if (here === null) return false;
   const sa = mapSettingsOf(world).grid.movement ? spotOf(world, state, a) : null;
   const sb = sa ? spotOf(world, state, b) : null;
-  if (sa && sb && sa.scope === sb.scope) return Math.max(Math.abs(sa.x - sb.x), Math.abs(sa.y - sb.y)) <= 1;
+  if (sa && sb && sa.scope === sb.scope) {
+    const ground = groundAt(ctx, here);
+    if (!ground) return false;
+    // Each one by its footprint where it stands on the grid; one carried by someone, by that one's square.
+    const spot = (id: EntityId, s: GridSpot): EntityId | readonly [number, number] => (standsAt(ground.moving, id) !== null ? id : squareOf(s));
+    const [pa, pb] = [spot(a, sa), spot(b, sb)];
+    const apart = between(ground.drawn, ground.moving, pa, pb);
+    return apart !== null && apart <= 1 && sees(ground.drawn, ground.moving, pa, pb) === true;
+  }
   return placeOfEntity(state, b) === here;
 }
 

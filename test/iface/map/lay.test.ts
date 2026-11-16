@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../../src/engine/places-in-play";
 import { initialState } from "../../../src/engine/world-state";
-import { drawnOf, movingOf, squareAt, standsAt, type Drawn } from "../../../src/iface/map/grid";
+import { drawnOf, movingOf, squareAt, standsAt, type Drawn } from "../../../src/packs/space/core/grid-model";
 import { layForPlace, layOverSquare, plainRows } from "../../../src/iface/map/lay";
-import { between } from "../../../src/iface/map/measure";
+import { between } from "../../../src/packs/space/core/grid-measure";
 import { positionChange } from "../../../src/iface/map/record";
 import type { WorldDoc } from "../../../src/shared/world";
 import type { ChangeInput, ChangeRow } from "../../../src/store/types";

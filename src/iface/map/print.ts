@@ -9,7 +9,7 @@ import type { EntityId, PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import type { MapCellDef } from "../../shared/world";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
-import { doorState, footprint, squareAt, standsAt, type DoorState, type Drawn, type Moving, type Piece, type Scale, type Square } from "./grid";
+import { doorState, footprint, squareAt, standsAt, type DoorState, type Drawn, type Moving, type Piece, type Scale, type Square } from "../../packs/space/core/grid-model";
 
 /** One symbol of the picture: what the map's legend says it is, and the squares shown that carry it. */
 export interface LegendEntry {

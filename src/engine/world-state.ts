@@ -13,7 +13,8 @@ import { own } from "./pack-kit";
 import { completeRelations, type RelationTypes } from "./relations";
 import { placeOfEntity } from "./scope";
 import { seedLife } from "./life";
-import { seedObservations } from "./seen";
+import type { ReadContext } from "./registry";
+import { seedObservations, sightOf } from "./seen";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
 
@@ -42,7 +43,7 @@ function domainLevels(levels: Partial<Record<DomainId, unknown>>): Record<Domain
   return out;
 }
 
-export function initialState(world: WorldDoc, revision: RevisionId, types: RelationTypes): WorldState {
+export function initialState(world: WorldDoc, revision: RevisionId, types: RelationTypes & { context?(world: WorldDoc, state: Readonly<WorldState>): ReadContext }): WorldState {
   const entities: Record<string, EntityState> = {};
   for (const [id, e] of Object.entries(world.entities)) {
     entities[id] = {
@@ -103,7 +104,8 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
     materialized: {},
     packs: {},
   };
-  seedObservations(world, state);
+  // What the POV sees from its first cell is the space pack's sight, which a registry's read context gives (`space.sight`); none where `types` is no registry.
+  seedObservations(world, state, types.context ? sightOf(types.context(world, state)) : () => []);
   seedLife(world, state);
   return state;
 }

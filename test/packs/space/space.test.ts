@@ -9,7 +9,6 @@ import { runTimelapse } from "../../../src/engine/time";
 import { ALL_NOTE } from "../../../src/engine/simulate";
 import { modernUsWorld } from "../riverton";
 import { findRoute, routeAt } from "../../../src/packs/space/core/travel";
-import { findPath } from "../../../src/shared/grid";
 import { buildMapView } from "../../../src/packs/space/core/view";
 import { startState } from "../support";
 
@@ -107,29 +106,5 @@ describe("space: routes", () => {
     expect(view.scopes.some((s) => s.places.some((p) => p.id === "maya_flat"))).toBe(false); // known_by, not known yet
     expect(view.travel.some((t) => t.action === "go" && t.to === "cafe")).toBe(true);
     expect(view.travel.some((t) => t.action === "drive" && t.to === "lake" && t.params.vehicle === "truck")).toBe(true);
-  });
-});
-
-describe("space: A* on grids", () => {
-  const grid: GridDef = {
-    id: "g",
-    width: 5,
-    height: 4,
-    terrain: ["", "", "", "", "", "", "mud", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    blocked: [2, 7, 12],
-    zones: {},
-  };
-
-  test("finds the cheapest path around blocked cells and costly terrain", () => {
-    const p = findPath(grid, { x: 0, y: 0 }, { x: 4, y: 0 });
-    expect(p?.cells[0]).toEqual({ x: 0, y: 0 });
-    expect(p?.cells.at(-1)).toEqual({ x: 4, y: 0 });
-    expect(p?.cells.some((c) => c.y * 5 + c.x === 2 || c.y * 5 + c.x === 7 || c.y * 5 + c.x === 12)).toBe(false);
-    expect(p?.cost).toBe(10); // down to row 3, across, back up
-  });
-
-  test("blocked targets and the expansion cap return null", () => {
-    expect(findPath(grid, { x: 0, y: 0 }, { x: 2, y: 0 })).toBeNull();
-    expect(findPath(grid, { x: 0, y: 0 }, { x: 4, y: 0 }, 3)).toBeNull();
   });
 });

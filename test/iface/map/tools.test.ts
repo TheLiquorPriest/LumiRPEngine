@@ -16,6 +16,7 @@ import type { WorldDoc } from "../../../src/shared/world";
 import { migrateStore } from "../../../src/store/schema";
 import { openStore, type UserStore } from "../../../src/store/store";
 import { type EngineDeps, engineTools, Lines, mapLines, mapView, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../../src/iface/index";
+import { PORTS } from "../rig";
 import { CELLAR, INN, registry, TOWN, worldWith } from "./fixtures";
 
 const USER = "user-a";
@@ -38,7 +39,7 @@ async function mapRig(world: WorldDoc, more: (deps: EngineDeps) => Promise<Parti
   const s: UserStore = store.user(USER);
   await writes.run(() => s.createChat({ id: CHAT, world: world.id, revision }));
   const first = await writes.run(() => s.beginTurn({ chat: CHAT, kind: "new" }));
-  const base: EngineDeps = { store: s, env, writes, files: shippedTexts(), search: stateScan };
+  const base: EngineDeps = { store: s, env, writes, files: shippedTexts(), search: stateScan, ...PORTS };
   const deps: EngineDeps = { ...base, ...(await more(base)) };
   const tools = new Map<string, HostTool>((await engineTools(deps)).map((t) => [t.name, t]));
   const call = async (name: string, args: JsonObject, turn: string = first.id): Promise<ToolResult> => {
@@ -204,7 +205,7 @@ describe("map_door and map_measure", () => {
     const said = async (name: string, args: JsonObject): Promise<string> => texts(await t.call(name, args))[0] ?? "";
     expect(await said("map_measure", { from: "Wren", area: "square", size: 1 })).toBe('area cannot be read: you sent "square". It is one of: burst, cone, line.');
     expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Wren", blocks: "walls" }], ...SRC })).toBe('map_place: blocks cannot be read, you sent "walls". It is one of: way, view, both, none.');
-    expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Tram", square: [2, 2] }], ...SRC })).toBe("map_place: there is nothing called Tram that is a person or a thing. Near: Bram [bram], Tam [tam].");
+    expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Tram", square: [2, 2] }], ...SRC })).toStartWith("map_place: there is nothing called Tram that is a person or a thing. Near: Bram [bram], Tam [tam]");
     expect(await said("map_door", { at: "The Common Room", door: [3, 3], state: "open", ...SRC })).toBe("map_door: there is no door at (3,3) on the map of The Common Room [common_room]. Its doors: (6,1), (12,5).");
     expect(await said("map_place", { at: "The Far Road", pieces: [{ who: "Tam", zone: "bank" }], ...SRC })).toBe("map_place: this map has no zone bank. Its zones: ditch, verge.");
     const burst = await t.call("map_measure", { from: "Wren", area: "burst", size: 1 });

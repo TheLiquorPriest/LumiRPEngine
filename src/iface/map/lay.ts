@@ -15,10 +15,10 @@ import { readMap } from "../../shared/maps";
 import type { MapCellDef, MapDoc, WorldDoc } from "../../shared/world";
 import { playedWorld } from "../../engine/places-in-play";
 import type { WorldState } from "../../engine/state";
-import { spotOf } from "../../packs/space/core/positions";
+import { spotOf } from "../../packs/space/core/grid-model";
 import type { ChangeInput, Report } from "../../store/types";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
-import { cellOf, indexOf, laidMetres, scaleOf, squareOf, type Square, type TimeStep } from "./grid";
+import { cellOf, indexOf, laidMetres, scaleOf, squareOf, type Square, type TimeStep } from "../../packs/space/core/grid-model";
 import { draftChange, positionChange } from "./record";
 
 /** A grid to lay. */

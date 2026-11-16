@@ -12,9 +12,9 @@ import { playedWorld } from "../../engine/places-in-play";
 import type { GridMoves } from "../kit";
 import { Lines } from "../texts";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
-import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "./grid";
-import { between } from "./measure";
-import { move } from "./path";
+import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "../../packs/space/core/grid-model";
+import { move } from "../../packs/space/core/grid-path";
+import { between } from "../../packs/space/core/grid-measure";
 import { positionEvent } from "./record";
 import { farText, reportFields, type Say, spotText, timeText, whoIs } from "./words";
 

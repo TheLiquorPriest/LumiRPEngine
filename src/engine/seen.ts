@@ -8,7 +8,7 @@
 // met. A coarsened record (a Timelapse, a catch-up) moves everyone once, to where they end up, so it
 // carries what that would get wrong as one `engine.observed` event at its end (`lostObservations`).
 
-import { addCells, cellIndex, hasCell, sightCells, standingGrid } from "../shared/grid";
+import { addCells, cellIndex, hasCell, standingGrid, type Cell } from "../shared/grid";
 import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
@@ -19,7 +19,7 @@ import type { EventTypeDef, ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { kindIs, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
-import { own, sliceRecord } from "./pack-kit";
+import { optionalService, own, sliceRecord } from "./pack-kit";
 
 /** The slice lives in the space pack's state, beside its routes: the map reads it too. */
 const PACK = "space";
@@ -84,7 +84,7 @@ function writable(state: WorldState, key: Part): JsonObject {
  * stands, walls blocking the view, and they stay seen. Nothing while the grid system is off, or
  * while the POV stands on no cell of a grid.
  */
-export function observeCells(state: WorldState, world: WorldDoc): void {
+export function observeCells(state: WorldState, world: WorldDoc, sight: SightOf): void {
   const settings = mapSettingsOf(world);
   const pov = own(state.entities, world.pov);
   if (!settings.grid.movement || !pov) return;
@@ -93,12 +93,21 @@ export function observeCells(state: WorldState, world: WorldDoc): void {
   const y = pov.fields.y;
   if (!stand || typeof x !== "number" || typeof y !== "number" || cellIndex(stand.grid, { x, y }) === null) return;
   const before = cellsSeen(state, stand.scope, stand.grid.width);
-  const sight = sightCells(stand.grid, { x, y }, settings.grid.sightRadius);
-  if (before !== null && sight.every((cell) => hasCell(before, cell))) return;
-  writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", sight) };
+  const seen = sight(stand.scope, { x, y }, settings.grid.sightRadius);
+  if (before !== null && seen.every((cell) => hasCell(before, cell))) return;
+  writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", seen) };
 }
 
 /** A visit at `at` to a place and every place around it. */
+/** The squares of the grid of a place seen from a cell within a radius, by index: the space pack's sight, as play stands. */
+export type SightOf = (scope: PlaceId, from: Cell, radius: number) => number[];
+
+/** The sight a read context gives (the space pack's `space.sight` service); none where the pack is not loaded. */
+export function sightOf(ctx: ReadContext): SightOf {
+  const sight = optionalService(ctx, "space.sight");
+  return sight === null ? () => [] : (scope, from, radius) => sight(ctx, scope, from, radius);
+}
+
 function visit(state: WorldState, world: WorldDoc, place: PlaceId, at: number): void {
   const places = writable(state, "places");
   let cur: PlaceId | undefined = place;
@@ -157,10 +166,10 @@ export function observing(def: EventTypeDef, sees: SeesEntity): EventTypeDef {
 }
 
 /** A chat's first observation: the place the POV starts in and the places around it, and with the grid system on, what it sees from its first cell. */
-export function seedObservations(world: WorldDoc, state: WorldState): void {
+export function seedObservations(world: WorldDoc, state: WorldState, sight: SightOf): void {
   const here = placeOfEntity(state, world.pov);
   if (here !== null) visit(state, world, here, state.clock);
-  observeCells(state, world);
+  observeCells(state, world, sight);
 }
 
 /** The state without the POV's observations: what the world itself is, for comparing two folds of it. */

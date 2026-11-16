@@ -17,12 +17,12 @@
 import { FILING_STATUSES } from "../../../shared/finance";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
-import { cellIndex, findPath, gridMinutes, gridOf, SIGHT_MAX, standingGrid, type GridPath } from "../../../shared/grid";
+import { cellIndex, costMinutes, gridOf, SIGHT_MAX, standingGrid, type Cell } from "../../../shared/grid";
 import { mapLint, mapSettingsOf, TRAVEL_MODES } from "../../../shared/maps";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { LintIssue } from "../../../shared/protocol";
-import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
+import type { GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import { placeOp, type PlaceOpOutcome } from "../../../engine/places-in-play";
 import type { PlaceOp } from "../../../shared/things";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
@@ -39,7 +39,9 @@ import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, optionalService, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { entersFrom, entryClosed, entryFor, entryRefusal, withoutLeave } from "../../../engine/entry";
-import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
+import { arrivalEvents, entered, layEvents, POS_EVENT, reach, sightFor, stepEvents, walkOn } from "./positions";
+import { groundAt, spotData, spotOf, type GroundSource } from "./grid-model";
+import type { Walk } from "./grid-path";
 import { closedRoutes, goMinutes, nominalRoute, routeAt, vehicleTrips } from "./travel";
 import type { TravelPlan, VehicleTrip, VehicleTripAsk } from "../../../shared/travel";
 import { buildMapView } from "./view";
@@ -71,6 +73,8 @@ declare module "../../../engine/registry" {
      * `orgs.trespass`; none without it.
      */
     "space.trespass": (ctx: ReadContext, who: EntityId, place: PlaceId) => LedgerEvent[];
+    /** The squares of the grid of `scope` seen from a cell within a radius, as play stands (the grid system's sight, DESIGN §7): doors not open and footprints that block the view count, whoever looks never does. */
+    "space.sight": (ctx: GroundSource, scope: PlaceId, from: Cell, radius: number) => number[];
   }
   interface QueryMap {
     /** The fastest route for a mode at the current Space level (terrain and weather from level 4). */
@@ -90,13 +94,13 @@ export function reachable(ctx: ReadContext, from: PlaceId, to: PlaceId): boolean
   return TRAVEL_MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
 
-/** A walk on the grid the POV stands on at `place`, from its cell to (x, y), never through a place it can't see; null when it has no cell there or nothing joins the two. */
-function gridWalk(ctx: ReadContext, place: PlaceId, x: number, y: number): { grid: GridDef; path: GridPath } | null {
-  const stand = standingGrid(ctx.world, place);
+/** A walk on the grid the POV stands on at `place`, from its cell to (x, y), never through a place it can't see, as play stands; null when it has no cell there or nothing joins the two. */
+function gridWalk(ctx: ReadContext, place: PlaceId, x: number, y: number): { way: Walk; metres: number } | null {
+  const ground = groundAt(ctx, place);
   const fields = own(ctx.state.entities, ctx.world.pov)?.fields;
-  if (!stand || typeof fields?.x !== "number" || typeof fields.y !== "number") return null;
-  const path = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
-  return path ? { grid: stand.grid, path } : null;
+  if (!ground || typeof fields?.x !== "number" || typeof fields.y !== "number") return null;
+  const way = walkOn(ctx, ground, ctx.world.pov, { x: fields.x, y: fields.y }, { x, y });
+  return way ? { way, metres: ground.drawn.scale.metres } : null;
 }
 
 /** The map settings as the engine reads them (DESIGN §12), and the grid system's rule triggers (§10). */
@@ -248,6 +252,7 @@ export const spacePack: PackDef = {
     r.service("space.travel", travel);
     r.service("space.arrival", arrivalEvents);
     r.service("space.lay", layEvents);
+    r.service("space.sight", sightFor);
     r.query("space.route", routeAt);
     r.query("space.vehicle_trips", vehicleTrips);
     r.query("space.reachable", reachable);
@@ -276,7 +281,7 @@ export const spacePack: PackDef = {
           delete thing.fields.x;
           delete thing.fields.y;
         }
-        if (entity === ctx.world.pov) observeCells(state, ctx.world);
+        if (entity === ctx.world.pov) observeCells(state, ctx.world, (scope, from, radius) => sightFor({ registry: ctx.registry, world: ctx.world, state }, scope, from, radius));
       },
       // A cell set in play is play's: an Upgrade keeps it over the revision's (the touched record).
       touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
@@ -335,8 +340,9 @@ export const spacePack: PackDef = {
     r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
     // Walking on the grid the POV stands on at `place`: its own, or the one it is drawn on.
     r.formula("grid_minutes", (ctx, place, x, y) => {
-      const path = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
-      return path ? gridMinutes(path.grid, path.path) : 0;
+      const walked = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
+      // Walking minutes by the way's cost and the square's width, at least one for any step.
+      return walked ? Math.max(walked.way.squares.length > 1 ? 1 : 0, costMinutes({ cellMeters: walked.metres }, walked.way.cost)) : 0;
     });
     r.formula("grid_reachable", (ctx, place, x, y) => gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
     // Things in cells (DESIGN §11): `reach(self, item)` holds on or next to the item's cell while the

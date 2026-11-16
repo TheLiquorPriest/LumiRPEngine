@@ -44,7 +44,7 @@ import type { ReadContext } from "./registry";
 import { completeRelations, counterpartOf, type RelationTypes } from "./relations";
 import { GONE_FIELD, placeOfEntity } from "./scope";
 import type { EntityState, WorldState } from "./state";
-import { observeCells } from "./seen";
+import { observeCells, sightOf } from "./seen";
 import { forget, touchedAnyRelation, touchedAspect, touchedField, touchedRelation } from "./touched";
 import { visibilityOf } from "./visibility";
 import { carryDraft, chatDraftOf, NO_DRAFT } from "./world-draft";
@@ -509,7 +509,7 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
     const onCell = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
     const entry = onCell || here === null ? null : arrivalCell(after, here);
     if (entry) Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
-    observeCells(state, after);
+    observeCells(state, after, sightOf(env.types.context(after, state)));
   }
   return notes;
 }

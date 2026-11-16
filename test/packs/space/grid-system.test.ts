@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../../src/shared/hash";
-import { cellIndex, findPath, gridMinutes, hasCell, standingGrid } from "../../../src/shared/grid";
+import { cellIndex, costMinutes, hasCell, standingGrid } from "../../../src/shared/grid";
+import { groundAt } from "../../../src/packs/space/core/grid-model";
+import { walk } from "../../../src/packs/space/core/grid-path";
+import { sightFor } from "../../../src/packs/space/core/positions";
 import { mapLint } from "../../../src/shared/maps";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { RuleDef, WorldDoc } from "../../../src/shared/world";
@@ -108,11 +111,21 @@ describe("the grid system", () => {
     const kitchen = world.places.kitchen?.cell;
     if (!at || !kitchen) throw new Error("no grid");
     expect(act("step", { x: 6, y: 1 }).ok).toBe(false);
-    const path = findPath(at.grid, { x: 3, y: 2 }, kitchen);
-    if (!path) throw new Error("no path");
+    const ground = groundAt({ registry: reg, world, state: w.state }, "taproom");
+    const way = ground && walk(ground.drawn, ground.moving, [4, 3], [kitchen.x + 1, kitchen.y + 1], "you");
+    if (!ground || !way) throw new Error("no path");
     const r = act("step", { x: kitchen.x, y: kitchen.y });
-    expect([r.ok, r.duration]).toEqual([true, gridMinutes(at.grid, path)]);
+    expect([r.ok, r.duration]).toEqual([true, Math.max(1, costMinutes({ cellMeters: ground.drawn.scale.metres }, way.cost))]);
     expect(w.state.entities.you?.fields.place).toBe("kitchen");
+  });
+
+  test("a door locked in play shuts the way and the view through it, as a step and the panel's sight read it", () => {
+    const { w, act } = play(inn());
+    const sees = (x: number) => sightFor({ registry: reg, world: w.world, state: w.state }, "inn", { x: 5, y: 2 }, 3).includes(2 * 12 + x);
+    expect(sees(7)).toBe(true);
+    expect(w.apply({ type: "space.door", data: { scope: "inn", x: 6, y: 2, state: "locked" } })).toBeNull();
+    expect(sees(7)).toBe(false);
+    expect(act("step", { x: 7, y: 2 }).ok).toBe(false);
   });
 
   test("routes come from the doors between rooms, only with movement on; a room without a door is linted", () => {

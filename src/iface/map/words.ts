@@ -16,10 +16,9 @@ import type { WorldState } from "../../engine/state";
 import type { MapView } from "../kit";
 import { Lines, type GuidanceFiles } from "../texts";
 import { MAP_DEFAULTS, type MapConfig, type Unit } from "../../shared/map-config";
-import { drawnOf, movingOf, standsAt, type Drawn, type Moving, type Square } from "./grid";
-import { between } from "./measure";
+import { drawnOf, movingOf, standsAt, type Drawn, type Moving, type Square, type Took } from "../../packs/space/core/grid-model";
+import { between } from "../../packs/space/core/grid-measure";
 import { printMap, type LegendEntry, type Printed } from "./print";
-import type { Took } from "./time";
 
 /** The prompt part every word of a map, and every sentence of the map tools' answers, comes from. */
 export const MAP_ANSWERS = "map-answers";

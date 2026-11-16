@@ -5,12 +5,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { playedWorld } from "../../../src/engine/places-in-play";
-import { drawnOf, footprint, movingOf, blockersOf, indexOf, type Drawn, type Moving } from "../../../src/iface/map/grid";
+import { drawnOf, footprint, movingOf, blockersOf, indexOf, moveTime, type Drawn, type Moving } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { sees } from "../../../src/iface/map/measure";
-import { walk } from "../../../src/iface/map/path";
+import { sees } from "../../../src/packs/space/core/grid-measure";
+import { walk } from "../../../src/packs/space/core/grid-path";
 import { doorEvent, positionEvent, shapeEvent, squaresEvent } from "../../../src/iface/map/record";
-import { moveTime } from "../../../src/iface/map/time";
 import type { JsonObject } from "../../../src/shared/json";
 import { readMap } from "../../../src/shared/maps";
 import type { MapDoc, WorldDoc } from "../../../src/shared/world";

@@ -2,7 +2,7 @@
 // plan §8.2 prints it, two cellar rooms with a door between them, and the town drawn a block to a
 // square. Every name here is made up.
 
-import { drawnOf, type Drawn } from "../../../src/iface/map/grid";
+import { drawnOf, type Drawn } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS, type MapConfig } from "../../../src/shared/map-config";
 import { compileMaps } from "../../../src/shared/maps";
 import type { MapDoc, WorldDoc } from "../../../src/shared/world";
