@@ -28,6 +28,7 @@ import { createStore, type Readable, type Store } from "../store";
 import { openChatState } from "./chat-state";
 import { type CallFile, type OldRoad, keptTransport } from "./client";
 import type { KeptHost } from "./host";
+import { keptMapHand } from "./maps";
 import type { ChatState } from "./play/source";
 
 /** What the toasts read of the page's settings, at each toast: how many show at once and for how long (`pages.toastsShown`, `pages.errorToastMs`, `pages.toastMs`). */
@@ -145,6 +146,9 @@ function playOverlays(ui: Store<UiState>, say: (text: string) => void): Overlays
   };
 }
 
+/** The live channel of what concerns the user and no one chat (`LIVE_USER` of RPE's app, which the page may not import). */
+const USER_CHANNEL = "~user";
+
 export function keptApp(deps: KeptDeps): Kept {
   const { timers } = deps;
   const clock = { set: (run: () => void, ms: number) => timers.setTimeout(run, ms), clear: (handle: unknown) => timers.clearTimeout(handle) };
@@ -259,10 +263,23 @@ export function keptApp(deps: KeptDeps): Kept {
     agents: createStore<AgentsView | null>(null),
     toast,
     request,
+    maps: keptMapHand(deps.client, () => state.read()),
     ...(deps.open === undefined ? {} : { open: deps.open }),
   };
   // A push that the draft moved past the one Build holds has it read again (DESIGN §23).
-  if (deps.mode === "build") stops.push(trackDraft(app, clock));
+  if (deps.mode === "build") {
+    stops.push(trackDraft(app, clock));
+    // What concerns the user and no one chat (a world's draft moved) is told on the user's own channel, which Build hears whether or not a chat is open.
+    stops.push(
+      deps.client.follow(USER_CHANNEL, {
+        events: (events) => {
+          for (const event of events) transport.live(event);
+        },
+        reset: () => undefined,
+        refused: () => undefined,
+      }),
+    );
+  }
   return {
     app,
     said,

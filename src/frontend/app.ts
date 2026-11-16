@@ -6,6 +6,7 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
 import type { AgentsView } from "../shared/agents";
+import type { MapGridReply, MapWrote } from "../shared/api";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { JsonObject } from "../shared/json";
@@ -318,6 +319,35 @@ export interface Overlays {
   closeWorld(): void;
 }
 
+/** One stroke of squares on a grid: the symbol laid on single squares, a rectangle's corners or a line's ends (columns and rows counted from 1). */
+export interface MapStroke {
+  symbol: string;
+  squares?: number[][];
+  rect?: number[][];
+  line?: number[][];
+}
+
+/** A grid laid for a place that has none: its size in squares, how wide a square is in feet, and a name. */
+export interface MapLaying {
+  width: number;
+  height: number;
+  feet: number;
+  title?: string;
+}
+
+/**
+ * The owner's hand on a chat's map (plan §8.2; PlanChatUI-4): the grid of a place in full, someone dragged to a square, squares
+ * changed, a grid laid, and the Undo of each. Each is his own change on the chat's line, told to the Author. Squares are counted
+ * from 1 here, as RPE counts them. A refusal is thrown with RPE's words.
+ */
+export interface MapHand {
+  grid(chat: ChatId, place: string): Promise<MapGridReply>;
+  move(chat: ChatId, place: string, who: string, square: readonly [number, number]): Promise<MapWrote>;
+  paint(chat: ChatId, place: string, strokes: readonly MapStroke[]): Promise<MapWrote>;
+  lay(chat: ChatId, place: string, laying: MapLaying): Promise<MapWrote>;
+  undo(chat: ChatId, edit: string): Promise<void>;
+}
+
 export interface App {
   client: ProtocolClient;
   send: Send;
@@ -335,6 +365,8 @@ export interface App {
   request<K extends keyof ResultBodies>(body: Extract<RequestBody, { type: K }>): Promise<ResultBodies[K] | null>;
   /** Shows one of RPE's own pages (the Live page, a turn's page) where the shell shows its pages; absent where the App has no shell to ask. */
   open?(route: { page: string; chat?: string | null; at?: readonly string[] }): void;
+  /** The owner's hand on a chat's map, where the App is taken to RPE's typed routes; absent where it is not, and the map panel then shows no tools. */
+  maps?: MapHand;
 }
 
 export const AppContext = createContext<App | null>(null);

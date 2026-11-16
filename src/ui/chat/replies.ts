@@ -3,35 +3,14 @@
 // Only the rows mounted are asked for: each mounted row wants its message, the wants of one moment are
 // asked in one read, what was read is kept while the chat stays open, and a row asked again after RPE
 // says the chat changed (a swipe flipped, a turn ended). The route is the turn area's
-// (`GET /api/v1/chats/:chat/replies`); until the generated client has it, it is asked as it is written there.
+// (`GET /api/v1/chats/:chat/replies`).
 
+import type { LaneShown, ReplyLine } from "../../shared/api";
 import { createStore, type Readable } from "../store";
 import { errorWords } from "../words";
 import type { FrameEnv } from "./surface";
 
-/** What a lane of a turn did: how many changes, and the lines a person reads. */
-export interface LaneShown {
-  lane: "story" | "engine";
-  count: number;
-  lines: string[];
-}
-
-/** The line under one reply, for the swipe shown. */
-export interface ReplyLine {
-  message: string;
-  /** False: the reply was made without RPE, and no turn is tied to it. */
-  played: boolean;
-  /** For a migrated reply, the old engine that played it. */
-  engine: string | null;
-  turn: string | null;
-  /** A continue's held turn is shown under the turn it joined. */
-  joined: { turn: string; joined: string } | null;
-  /** The world's date and time at the turn's end, and where the player's character was. */
-  time: string | null;
-  place: string | null;
-  lanes: LaneShown[];
-  marks: { kind: string }[];
-}
+export type { LaneShown, ReplyLine };
 
 export interface RepliesState {
   /** What was read, by message. */
@@ -45,8 +24,6 @@ export interface Replies extends Readable<RepliesState> {
   stop(): void;
 }
 
-type Ask = (key: string, params: Record<string, string>, options: { query: { ids: string } }) => Promise<{ replies: ReplyLine[] }>;
-
 const made = new WeakMap<FrameEnv, { chat: string; replies: Replies }>();
 
 export function repliesOf(env: FrameEnv): Replies | null {
@@ -59,7 +36,7 @@ export function repliesOf(env: FrameEnv): Replies | null {
   if (held !== undefined && held.chat === chat) return held.replies;
   held?.replies.stop();
   const state = createStore<RepliesState>({ lines: new Map(), failed: null });
-  const ask = env.client.call as unknown as Ask;
+  const ask = env.client.call;
   const wanted = new Set<string>();
   const shown = new Set<string>();
   let alive = true;

@@ -13,8 +13,8 @@ import type { ReadContext } from "../engine/registry";
 import type { JsonValue } from "../shared/json";
 import type { Store } from "../store";
 
-/** The context the things are read in for a chat at its head: its played world and its state. */
-function contextOf(store: Store, user: string, chat: string): ReadContext {
+/** The context a chat is read in at its head: its played world and its state (the things, and the walk the map panel's dock shows). */
+export function chatContext(store: Store, user: string, chat: string): ReadContext {
   const s = store.user(user);
   const row = s.chat(chat);
   if (row === null || row.world === null) throw new RouteError(404, `Chat ${chat} plays no world of yours.`);
@@ -27,7 +27,7 @@ function contextOf(store: Store, user: string, chat: string): ReadContext {
 const answer = shape.json();
 
 export function thingsRoutes(store: Store) {
-  const read = <T>(user: string, chat: string, run: (ctx: ReadContext) => T): JsonValue => readPass(() => run(contextOf(store, user, chat))) as unknown as JsonValue;
+  const read = <T>(user: string, chat: string, run: (ctx: ReadContext) => T): JsonValue => readPass(() => run(chatContext(store, user, chat))) as unknown as JsonValue;
   return [
     route({
       method: "GET",

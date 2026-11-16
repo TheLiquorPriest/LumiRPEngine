@@ -69,8 +69,8 @@ async function twoWorlds(rpe: RouteClient): Promise<Map<string, { worldId: strin
 
 function webApp(rpe: RouteClient, timers: HandTimers): UiApp {
   const route = createStore<Route>({ page: "build" });
-  // The page calls only `call` of the client, the road to RPE's Build route.
-  const client = rpe.client as RpeClient;
+  // The page asks `call` of the client, the road to RPE's Build route, and follows the user's own channel, which says nothing here.
+  const client = { ...rpe.client, follow: () => () => undefined } as unknown as RpeClient;
   return { shell: "web", client, gate: createGate(), route, timers, keptHost: () => webHost({ revokeMs: () => 1000 }), go: (next) => route.set(next) };
 }
 
