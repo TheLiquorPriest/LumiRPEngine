@@ -13,7 +13,7 @@ arguments:
   operations.in: "store: what it goes into (a bag, drawer, vehicle, room). spawn: the place or holder it is made in."
   operations.with: "move: others who go along."
   operations.how: "give: handed, lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is."
-  operations.until: "give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (dawn, 22:00), or words (two days)."
+  operations.until: "give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (22:00, noon), or words (two days)."
   operations.off: "wear: true to take it off."
   operations.slot: "wear: ready, or a slot such as holster, sheath or back."
   operations.away: "store: true to put it back where it is kept."

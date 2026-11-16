@@ -15,13 +15,13 @@ A fight is the part of the story where position, order and numbers decide things
 
 ## A round
 
-A round on a room grid is a few seconds. The grid keeps that time; do not pass minutes on top of it.
+A round on a room grid is a few seconds. The grid keeps that time, and `fight_round` moves the clock by the rounds it records; do not pass minutes on top of it.
 
 1. **The player's character first, from the player's message.** If the message covers several rounds, take it one round at a time and stop where what happens would change what they would do next. The Author decides whether to stop there.
 2. **Each principal chooses for themselves.** Their own agent is given the fight as that character perceives it and answers with what they do. Do not choose for them.
 3. **You choose for everyone else,** by who they are and what they want. A guard fights like a guard. Something cornered fights like something cornered. Most people do not fight to the death.
 4. **Resolve in the ruleset's order.** Measure reach, range and line of sight with `map_measure`. Roll what the ruleset calls for, once each.
-5. **Record what changed:** harm and conditions (`set`), who moved (`move`), what was dropped, drawn or broken (`place`, `wear`, the item tools).
+5. **Record what changed:** the round with `fight_round`, each fighter's act as it came out and the roll that decided it; harm and conditions (`set`), who moved (`move`), what was dropped, drawn or broken (`place`, `wear`, the item tools).
 6. **Say what the round did** in a few lines for the Author: who acted, what landed, who is down, where everyone now stands.
 
 ## Ending it

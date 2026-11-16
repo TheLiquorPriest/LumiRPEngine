@@ -8,7 +8,7 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 ## Letting time pass
 
-`world_apply` with a `pass_time` operation: how long, or until when.
+`world_apply` with a `pass_time` operation: how long, or until when. A time is read as it is written: a date and time, a clock time (22:00, noon), a part of the day the world's calendar names, or a counted span (two hours). Words that count nothing (a while) and a part of the day the calendar does not name are refused with what a time takes.
 
 - Pass the time the story took. A conversation is minutes. A meal is an hour. A night's sleep is a night. If the prose does not say, choose plainly and say what you chose.
 - Pass it once per turn, for the whole of what the turn covers. Do not pass it again when a sub-agent has already done so: look at the clock first.
@@ -31,7 +31,7 @@ When the story jumps days or weeks:
 1. Ask ahead first: what will come due in the span? (`world_query` with the span.)
 2. Split the span where something due would change what comes after it: a deadline, an arrival, a season turning. Pass the time one stretch at a time.
 3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them.
-4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance.
+4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance. `time_totals` (found with `tool_search`) gives a person's totals for a span, from the engine run on a copy of the world, and records nothing.
 
 ## Setting the clock
 

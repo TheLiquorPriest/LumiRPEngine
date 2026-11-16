@@ -17,5 +17,5 @@ Mind files from the earlier build, on each character's record word for word, not
 From the earlier build's story record: {{story.beats}} beat(s) and {{story.struck}} strike(s) on the timeline, {{story.futures}} draft(s) as proposed futures, {{story.castings}} casting(s) in the cast.
 {{/story}}
 {{#notes}}
-The Author's notes from the earlier build are in `{{notes.folder}}`, as they stood at its last turn; each earlier version is in `{{notes.versions}}`, by the turn that wrote it{{#notes.learned}}; what it had learned is in `{{notes.learned.folder}}`{{/notes.learned}}.
+The Author's notes from the earlier build are in `{{notes.folder}}`, as the reply now shown left them; each earlier version is in the notes' own history, on the turn that wrote it, so showing an earlier reply puts its notes back{{#notes.learned}}; what it had learned is in `{{notes.learned.folder}}`{{/notes.learned}}.
 {{/notes}}

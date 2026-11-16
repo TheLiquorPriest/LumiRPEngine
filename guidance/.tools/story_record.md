@@ -27,7 +27,7 @@ arguments:
   operations.stands: "arc: where it stands now."
   operations.next: "arc: where it may go. record: what you mean to do next."
   operations.tier: "future: how it is played when it comes: 1 the characters live it, 2 you play every part, 3 you and the GM decide it and brief the characters, 4 you just write it."
-  operations.due: "future: when it falls due, in story time: a date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn)."
+  operations.due: "future: when it falls due, in story time: a date and time (YYYY-MM-DD HH:MM), a clock time or a part of the world's day by its name, as the next time the clock shows it (22:00, noon), or a span from now (two days)."
   operations.standing: "future: how sure it is: established, proposed or assumed."
   operations.tone: "premise: its tone."
   operations.rules: "premise: its rules."

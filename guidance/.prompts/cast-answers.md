@@ -25,7 +25,7 @@ added: {{who}} was not in the cast, so they were added to it, not yet cast.
 one_source: Operation {{n}} ({{op}}) binds one source: one of {{choices}}.
 no_source: Operation {{n}} ({{op}}): Lumiverse holds no {{kind}} {{id}}.
 not_bound: Operation {{n}} ({{op}}): {{who}} has no {{kind}} {{id}} bound.
-unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.
+unknown_id: Operation {{n}} ({{op}}): {{who}} has no {{part}} {{id}} on this path.{{#near}} The nearest {{who}} has: {{near}}.{{/near}}
 no_file: Operation {{n}} ({{op}}): {{who}} has no old mind file {{file}} on this path.{{#files}} Theirs are: {{files}}.{{/files}}
 nothing_recorded: Nothing was written. Send the call again with that put right.
 pinned: Operation {{n}} (cast): the player pinned {{who}} as {{as}}, and that stands. Your casting is kept for when the pin is taken away.

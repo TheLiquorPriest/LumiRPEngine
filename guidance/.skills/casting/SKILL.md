@@ -22,6 +22,7 @@ A character's record is what every agent will know them by. Make it from what th
 - **Principal:** someone the story follows. They get their own agent and their own memories. Each member of a group chat is a principal. So is anyone the player keeps coming back to.
 - **Supporting:** someone who matters to a scene or a thread, and whose inner life the story does not need yet. What they perceive is kept in full, so nothing is lost if they grow.
 - **Extra:** a name and a line. A barkeep, a guard at a gate. Nothing is kept for them.
+- **The player's character:** the persona alone, with no agent and no memories, unless the briefing says it has a mind of its own. Then cast it as a principal: it gets its own agent and its own memories.
 
 Cast by the part they play in the story, not by how much the lore says about them. When unsure, cast low: recasting upward loses nothing.
 

@@ -7,6 +7,8 @@ arguments:
   description: "What it looks like, in a line."
   size: "pocket, hand, armful, heavy, furniture or builtin."
   specs: "A vehicle's specs, the whole list, each a label and a value; an empty list clears them."
+  specs.label: "The spec's name: top speed, seats, range."
+  specs.value: "Its value, in words: 120 mph, 4."
   source: "Where it comes from: from is prose, lore, author, gm, character, player, default or invented; lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent."
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."

@@ -31,6 +31,9 @@ on_stage_views:
 {{#cast.growth.proposed}}
 - {{cast.growth.proposed}} character(s) have growth a reflection proposed that you have not accepted.
 {{/cast.growth.proposed}}
+{{#cast.playerMind}}
+- The player's character has a mind of its own: the setting cast.playerMind is on.
+{{/cast.playerMind}}
 {{#history.unsummarized}}
 - {{history.unsummarized}} message(s), {{history.unsummarized.range.from}} to {{history.unsummarized.range.to}}, are out of the prompt with beats recorded and lie in no scene with a summary.
 {{/history.unsummarized}}
