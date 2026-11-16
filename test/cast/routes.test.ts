@@ -416,3 +416,44 @@ describe("striking from the page", () => {
     ]);
   });
 });
+
+describe("the perception record and the player's own perception", () => {
+  test("lists who on stage has a perception of a turn and who has none, says how the stage was read; a perception he writes closes the gap as his own change, and `knows: []` strikes what it gave", async () => {
+    const t = await openTable();
+    const first = await t.begin();
+    const { wren, bram } = await t.writes.run((db) => ({ wren: addCharacter(db, USER, CHAT, "Wren", 1).id, bram: addCharacter(db, USER, CHAT, "Bram", 1).id }));
+    await t.write(first, [
+      { character: wren, part: "casting", item: `casting:${wren}`, value: { as: "principal" } },
+      { character: bram, part: "casting", item: `casting:${bram}`, value: { as: "supporting" } },
+      { character: wren, part: "perception", item: null, value: { of: first.id, reach: "whole", content: "She sees the seal." } },
+    ]);
+    await t.tie(first);
+    const page = pageOn(t, async (_scope, turns) => new Map(turns.map((turn) => [turn, { who: ["Wren", "Bram", "Tam"], how: "owner" as const }])));
+    const before = await page.record({ turn: first.id });
+    expect(before.turns).toHaveLength(1);
+    expect(before.turns[0]).toMatchObject({ turn: first.id, message: 1, read: "owner" });
+    expect(before.turns[0]?.people.map((p) => [p.name, p.casting, p.perceptions.length])).toEqual([
+      ["Wren", "principal", 1],
+      ["Bram", "supporting", 0],
+      ["Tam", null, 0],
+    ]);
+
+    // His own change: of no turn, so the turn is not written under and a run in progress is no matter.
+    const changes = t.s.changes(first.id).length;
+    const written = await page.perceive("Bram", { turn: first.id, reach: "part", content: "The seal glints behind the bar.", knows: ["The seal is chipped."] });
+    expect(written.id).not.toBeNull();
+    expect(written.knowledge).toHaveLength(1);
+    expect(written.entry?.writes[0]).toMatchObject({ turn: null, by: "player" });
+    expect(written.entry?.of).toEqual({ turn: first.id, message: 1 });
+    expect(t.s.changes(first.id)).toHaveLength(changes);
+    expect((await page.record({ turn: first.id })).turns[0]?.people.map((p) => p.perceptions.length)).toEqual([1, 1, 0]);
+
+    // He corrects it: he now knows nothing from it, so what it gave is struck.
+    const corrected = await page.perceive("Bram", { id: written.id ?? "", knows: [] });
+    expect(corrected.struck).toEqual(written.knowledge);
+    expect((await page.one("Bram")).knowledge.map((k) => k.struck)).toEqual([true]);
+
+    // An id that is none of his is answered with the nearest ids he has.
+    await expect(page.perceive("Bram", { id: "p-nowhere", content: "x" })).rejects.toMatchObject({ status: 422 });
+  });
+});
