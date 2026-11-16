@@ -13,6 +13,8 @@ import { scrollParent } from "../frontend/scroll";
 import { createStore, type Readable, useSelect } from "./store";
 import { AppContext, type Route, type UiApp, useApp } from "./app";
 import { createClient, extensionConnector } from "./client";
+import { chatFrame, type SurfaceList } from "./chat";
+import { CHAT_SURFACES_CSS } from "./chat/styles";
 import { Frame, PagesBar, routeFor } from "./frame";
 import { createGate } from "./gate";
 import { type LumiverseContext, lumiverseHost } from "../frontend/host";
@@ -36,10 +38,11 @@ export interface ShellMount {
   road: RelayChannel;
 }
 
-/** What `mount` hands back: how to take the pages away, and how to show a page (the drawer tab itself is opened by whoever calls). */
+/** What `mount` hands back: how to take the pages away, how to show a page (the drawer tab itself is opened by whoever calls), and the surfaces RPE draws in Lumiverse's chat, which the loader registers. */
 export interface Mounted {
   unmount(): void;
   open(route: Route): void;
+  surfaces: SurfaceList;
 }
 
 /** The page shown last, kept while the page lives: the drawer's memory of where it was, for a tab switch that mounts the shell again. */
@@ -125,8 +128,13 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
     </UiSettingsContext.Provider>,
     root,
   );
+  // The chat's own surfaces, drawn in Lumiverse's chat (the web shell has no chat to adorn and makes none).
+  const frame = chatFrame({ client, chat: active, open: app.go, settings, timers: deps.timers });
+  const removeChatStyle = ctx.dom.addStyle(CHAT_SURFACES_CSS);
   return {
     unmount() {
+      frame.stop();
+      removeChatStyle();
       render(null, root);
       for (const off of offs) off();
       stopSettings();
@@ -134,5 +142,6 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
       removeStyle();
     },
     open: app.go,
+    surfaces: frame.surfaces,
   };
 }
