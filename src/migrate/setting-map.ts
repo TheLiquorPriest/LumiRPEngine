@@ -139,6 +139,7 @@ const ENGINE: Readonly<Record<string, Fate>> = {
   minds: { none: "RPE has no setting of that meaning besides those named of it; each chat's own choices are carried with the chat" },
   loreIndex: { none: "RPE has no setting of that meaning besides the entry that heads the index" },
   prompts: { none: "his edited texts are attached under imported/, switched off" },
+  tidy: { to: "things.tidyRunMost" },
 };
 
 /** What becomes of a key of the engine's `settings.json`. */

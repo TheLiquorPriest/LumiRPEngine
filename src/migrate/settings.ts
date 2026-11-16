@@ -15,6 +15,7 @@
 
 import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
+import { tidySettingsOf } from "../shared/settings";
 import { isRecord, type JsonValue } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
@@ -136,6 +137,11 @@ export async function carrySettings(today: Today, items: readonly Item[], global
   if (isRecord(engine)) {
     for (const [key, value] of Object.entries(engine)) {
       if (key === "v") continue;
+      // His tidy-up's most findings a run puts, as today's reader takes it, into the setting of the same meaning.
+      if (key === "tidy") {
+        puts.push({ from: ["settings.json: tidy.findings"], to: "things.tidyRunMost", value: tidySettingsOf(value).findings });
+        continue;
+      }
       // A group some of whose leaves have a setting of the same meaning: those leaves are settled one by one, and the group's own fate names the rest.
       const inside = engineLeaves(key);
       if (inside.length === 0) {
