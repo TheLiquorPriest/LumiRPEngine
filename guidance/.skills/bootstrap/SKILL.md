@@ -10,7 +10,7 @@ How you go about it is yours to judge. The chat can be played while you work, an
 
 ## What you have to work with
 
-- **The lore index.** If it is not built, start that job first. It is cheap, and everything else leans on it.
+- **The lore index,** which the `indexer` builds. It is cheap, and everything else leans on it.
 - **The chat,** by range with `chat_read` and by search with `chat_search`. Hand long ranges to the historian with `delegate`: one range and one purpose each, several at once.
 - **Summaries and memories that already exist.** Search the archive with `archive_search` before you read raw messages. Where the player kept a book of summaries, start there, and check a summary against the messages only where the next turns will lean on it.
 - **For a chat carried over from the earlier build:** the state, the cast and the beats it left, its notebook, and each character's old mind files. Trust the carried state. Your work there is filing, below.
@@ -24,7 +24,7 @@ How you go about it is yours to judge. The chat can be played while you work, an
 
 Stop when all six hold. They are in the order to do them. Whether each holds is yours to judge, from the records and against the words here. Say which hold when you report.
 
-1. The lore index exists.
+1. The lore index exists: the `indexer` has written a line for every attached entry.
 2. Every message the history window leaves out is covered by the story record, and every covered stretch has its summary. Do the stretch nearest the window first.
 3. The cast is listed, each with its casting. The skill `casting` says how.
 4. The story model has a premise, a skeleton of the timeline, the open threads, an arc for each principal, and a first read of the player.

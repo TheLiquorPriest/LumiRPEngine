@@ -9,6 +9,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { basename } from "node:path";
 import type { Guidance } from "rp-harness";
 import { changed, openSet, type OpenSet, shippedTexts, split } from "./set";
+import { DREAM, REFLECT, RECALL, REMEMBER } from "../../src/cast/memories";
+import { MIND_SET, RELATE } from "../../src/cast/own";
+import { LORE_INDEX_WRITE } from "../../src/lore/tools";
 import { HOME_FILES, REMINDERS } from "./homes";
 
 /** Appendix E, file by file, as the shipped level holds them (E.1 to E.6). */
@@ -255,7 +258,7 @@ describe("each check fails on a scratch copy of the set that breaks it", () => {
 
   test("a definition with no effort, and a definition with a tool that does not read the rules", async () => {
     const author = SHIPPED.get(".agents/author.md") ?? "";
-    expect(await one(changed(SHIPPED, { ".agents/author.md": author.replace("effort: high\n", "") }), "effort")).toEqual(["effort: .agents/author.md names no effort"]);
+    expect(await one(changed(SHIPPED, { ".agents/author.md": author.replace("effort: off\n", "") }), "effort")).toEqual(["effort: .agents/author.md names no effort"]);
     const indexer = SHIPPED.get(".agents/indexer.md") ?? "";
     expect(await one(changed(SHIPPED, { ".agents/indexer.md": indexer.replace("reads: [ALL-AGENTS, rules]", "reads: []") }), "reads")).toEqual([
       "reads: .agents/indexer.md holds a tool and does not read ALL-AGENTS",
@@ -277,6 +280,24 @@ describe("each check fails on a scratch copy of the set that breaks it", () => {
   });
 });
 
-test("the shipped definitions are the nine of E.2 and E.4, and RPH's own lead", () => {
-  expect([...SHIPPED.keys()].filter((path) => path.startsWith(".agents/")).map((path) => basename(path, ".md")).sort()).toEqual([...AGENTS, "lead"].sort());
+test("the shipped definitions are the nine of E.2 and E.4, and no other: RPH ships none", () => {
+  expect([...SHIPPED.keys()].filter((path) => path.startsWith(".agents/")).map((path) => basename(path, ".md")).sort()).toEqual([...AGENTS].sort());
+});
+
+test("the Author's fixed tools, as RPH's loader reads them, are §6.8's thirty, name for name", async () => {
+  const fixed = [
+    "prompt", "chat_read", "chat_search", "lore_read", "lore_search", "archive_search", "web_search", "gap_check", "delegate", "agent_message",
+    "write_reply", "reply_release", "file_read", "file_find", "file_write", "skill_load", "job_start", "suggest", "todo", "tool_search", "tool_use",
+    "world_query", "world_search", "world_apply", "roll", "story_query", "story_record", "cast_query", "cast_update", "perceive",
+  ];
+  expect(fixed).toHaveLength(30);
+  expect([...((await guidance.definition("author"))?.tools ?? [])].sort()).toEqual([...fixed].sort());
+});
+
+test("the Author's search finds no character's own tool, nor the mapper's or the indexer's writer", async () => {
+  const author = await guidance.definition("author");
+  const kept = [RECALL, REMEMBER, REFLECT, DREAM, MIND_SET, RELATE, LORE_INDEX_WRITE].map((tool) => ({ name: tool.name, family: tool.family }));
+  // The mapper's writer is RPH's, of its family `prompt`.
+  kept.push({ name: "prompt_map_write", family: "prompt" });
+  for (const tool of kept) expect({ tool: tool.name, held: author?.tools.includes(tool.name), kept: author?.outOfReach.includes(tool.family) }).toEqual({ tool: tool.name, held: false, kept: true });
 });

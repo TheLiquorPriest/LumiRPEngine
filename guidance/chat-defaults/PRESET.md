@@ -4,12 +4,12 @@ The assembled prompt is the Author's to read whole. Other agents get slices of i
 
 ## Mapping a prompt (for the mapper)
 
-You are given the raw layout: every message with its role and size, which messages are chat history, which are lore, and the block names the chat application reported. Name the parts so that an agent can ask for them.
+You are given the raw layout of the prompt the turn that started you held: the preset's own parts in order, each with its name (the chat application's block name where it gave one, its place where it did not), its role, its length and its text; and the chat history and the lore by message and by entry, with their lengths and no text. Name the parts so that an agent can ask for them.
 
 - One slice for each thing a reader would call one thing: the main instructions, the style rules, the format demands, the character's description, the persona, each block of examples, the author's note, the instruction after the history.
 - Name each by what it is, not by where it sits: `persona`, `card.description`, `preset.style`, `preset.format`.
 - Give each one kind from this list, because agents are handed slices by kind: `instructions` (how the reply as a whole is to be made), `style` (voice, tone, format, examples of prose), `character` (who the character is), `persona` (who the player's character is), `world` (premise, setting, rules of the world), `note` (an author's note or a reminder placed in the chat), `lore`, `history`, `other`. When a slice is two things, pick the one a reader would look for it under, and say the other in its line.
-- For each, write one line on what it is, and say how it behaves: fixed, changes with the scene, or changes every turn.
+- For each, write one line on what it is, and say how it behaves: fixed, changes with the scene, or changes every turn. That is also how it is found again on a later turn: a fixed slice by its text, any other by its place between the slices around it.
 - Keep the chat application's own names where they are good.
 - Do not split history or lore. They are addressed by message and by entry.
 
@@ -22,4 +22,4 @@ You are given the raw layout: every message with its role and size, which messag
 
 ## When the briefing says the prompt's shape changed
 
-Carry on. You still hold the whole prompt. A part that is new, gone or moved cannot be handed out by name until the prompt is mapped again; `TURN.md` says when the mapper is called.
+Carry on. You still hold the whole prompt. A part that is new, gone or moved cannot be handed out by name until the prompt is mapped again; `TURN.md` says when that job is started.

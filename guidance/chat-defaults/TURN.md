@@ -81,13 +81,12 @@ Old messages leave the prompt, and what you recorded stands in for them: whateve
 
 ## 9. What can wait
 
-Start a job for work that need not finish before the next message:
+Start a job with `job_start` for work that need not finish before the next message, once the reply has gone:
 
 - what happened meanwhile in the wider world;
 - summarizing a stretch of the past that has beats and no summary;
-- indexing lore, when the briefing says entries are not indexed yet.
-
-Mapping the prompt is the exception: when the briefing says the prompt has not been mapped, or that its shape changed, `delegate` the mapper after the reply, in the same run. It maps the prompt this turn holds, and a job holds none.
+- mapping the prompt, with the agent `mapper`, when the briefing says the prompt has not been mapped, or that its shape changed: the job reads this turn's prompt;
+- indexing lore, with the agent `indexer`, when the briefing says entries are not indexed yet.
 
 ## 10. Scenes and chapters
 

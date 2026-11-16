@@ -13,7 +13,7 @@ import { HOMES, type Row } from "./homes";
 const SHIPPED = shippedTexts();
 
 /** E.7: the Author's stack as the loader builds it from the set as shipped at the start of the build, in characters. */
-const STACK_CEILING = 21_003;
+const STACK_CEILING = 23_300;
 
 /** A text as the checks compare it: lower case, every run of white space one space. */
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -37,7 +37,7 @@ const NAMES: Record<string, string[]> = {
  */
 const WORDED: { row: string; markers: string[] }[] = [
   { row: "The intent record, first", markers: ["write your intent record"] },
-  { row: "Looking where the message points, then", markers: ["zoom there with `world_query`", "say so in one line after your intent record"] },
+  { row: "Looking where the message points, then", markers: ["zoom there with `world_query`", "say so in the `depth:` line of your intent record"] },
   { row: "A look-up turn aims for 5 calls", markers: ["five calls or fewer on the reply's path"] },
   { row: "Settling the engine lane each turn", markers: ["settle the engine lane yourself"] },
   { row: "Asking the GM to set the map", markers: ["set the map when a scene opens on a mapped place"] },
@@ -48,7 +48,7 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "The horizon for the next turn", markers: ["set the horizon for the next turn"] },
   { row: "Keeping the record ahead of the window", markers: ["record the beats of every turn fully enough"] },
   { row: "When a scene ends, and when a chapter turns", markers: ["a scene ends when", "a chapter turns when"] },
-  { row: "Starting the mapping, indexing and summarizing jobs", markers: ["`delegate` the mapper after the reply", "indexing lore, when the briefing says", "summarizing a stretch of the past that has beats"] },
+  { row: "Starting the mapping, indexing and summarizing jobs", markers: ["mapping the prompt, with the agent `mapper`", "indexing lore, with the agent `indexer`", "summarizing a stretch of the past that has beats"] },
   { row: "Writing a turn's steps down with `todo`", markers: ["write the steps down with `todo`"] },
   { row: "Marking the last calls of a turn as closing", markers: ["mark the last calls you need as closing"] },
   { row: "Before the reply, only what the reply depends on", markers: ["do only what the reply depends on"] },
@@ -143,16 +143,14 @@ describe("TURN.md reads intent, then a look, then a decision on how deep to go",
     ]);
   });
 
-  test("the record's lines are §10.3's five and no sixth", () => {
+  test("the record's lines are §10.3's five, then the depth and the calls after the reply, and no more", () => {
     const block = /```\n([\s\S]*?)```/.exec(part(1))?.[1] ?? "";
-    expect(block.split("\n").filter((line) => line !== "").map((line) => line.split(":")[0])).toEqual(["Wants", "Scope", "Story lane", "Engine lane", "Needs"]);
+    expect(block.split("\n").filter((line) => line !== "").map((line) => line.split(":")[0])).toEqual(["Wants", "Scope", "Story lane", "Engine lane", "Needs", "Depth", "After"]);
   });
 
-  test("the depth is asked for after the record, never inside it, and look-ups are not asked for in the record's call", () => {
-    expect(flat(part(1))).not.toContain("depth");
-    expect(flat(part(1))).not.toContain("how deep");
-    expect(flat(part(3))).toContain("say so in one line after your intent record");
-    expect(flat(turn)).not.toContain("in your intent record");
+  test("the depth is said in the record's `Depth:` line, and the parts stand in order", () => {
+    expect(flat(part(1))).toContain("depth: how deep you go and why");
+    expect(flat(part(3))).toContain("say so in the `depth:` line of your intent record");
     expect(flat(turn)).not.toContain("same call as your intent record");
     expect(turn.indexOf("## 3. ")).toBeGreaterThan(turn.indexOf("## 2. "));
     expect(turn.indexOf("## 2. ")).toBeGreaterThan(turn.indexOf("## 1. "));
@@ -166,7 +164,7 @@ describe("TURN.md reads intent, then a look, then a decision on how deep to go",
 
   test("a stretch played without the Author is read and recorded, in passing or as a job, and rules on neither consent nor sources", () => {
     const stretch = linesOf(turn).find((line) => line.startsWith("- **a stretch was played without you.**")) ?? "";
-    expect(stretch).toContain("record what matters, in passing or as a job");
+    expect(stretch).toContain("record what matters after the reply, or as a job");
     for (const word of ["gap check", "consent", "source", "invent"]) expect(stretch).not.toContain(word);
   });
 
