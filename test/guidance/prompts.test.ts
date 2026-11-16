@@ -226,6 +226,14 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const compacting = part.render({ compacting: true, continuing: true, summary: "Earlier, Wren arrived.", turns }).text;
     expect(compacting).toContain("# Earlier turns of this scene, to be summarized");
     expect(compacting).toContain("The Author called `world_query` with {}.");
+    const work: JsonValue = [{ items: [{ said: "I looked at the quay.", heard: "The player waved." }, { call: { tool: "world_query", args: "{}", result: "Nothing." } }] }];
+    const inRun = part.render({ run: true, compacting: true, summary: "Earlier, it looked.", turns: work }).text;
+    expect(inRun).toContain("# This agent's earlier work in this run, to be summarized");
+    expect(inRun).toContain("The agent wrote:\n\nI looked at the quay.");
+    expect(inRun).toContain("The agent was told:\n\nThe player waved.");
+    expect(inRun).toContain("The agent called `world_query` with {}.");
+    expect(inRun).not.toContain("## Turn");
+    expect(part.render({ run: true, summary: "Earlier, it looked.", turns: work }).text).toContain("# Your earlier work in this run, in short\n\nEarlier, it looked.");
     expect(written(part)).not.toMatch(ASKS);
   });
 
