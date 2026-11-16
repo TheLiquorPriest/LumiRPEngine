@@ -5,6 +5,7 @@ export { FactsRegistry, type FactSource, turnFacts } from "./facts";
 export { kvStore, type Writes } from "./kv";
 export { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
 export { type Received, type TurnPrompts, turnPrompts } from "./prompt";
+export { type CarriedJob, carryJob } from "./jobs";
 export { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf, textOf } from "./request";
 export { type CarriedRequest, carryRequest, dropLeftoverRequests } from "./requests";
 export { turnRoutes, type TurnRoutesDeps, WORLD_VIEW } from "./routes";
