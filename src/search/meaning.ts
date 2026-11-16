@@ -90,6 +90,19 @@ export class MeaningIndex {
     }
   }
 
+  /** What a chat's vectors hold, every place's, as `dropChat` would drop them: how many rows, and the bytes of their vectors. */
+  async held(user: string, chat: string): Promise<{ rows: number; bytes: number }> {
+    let rows = 0;
+    let bytes = 0;
+    for (const place of MEANING_PLACES) {
+      for (const row of await this.#d.index.rows(MEANING_TABLE, user, scopeOf(place, chat))) {
+        rows++;
+        if (row.values.vector instanceof Uint8Array) bytes += row.values.vector.byteLength;
+      }
+    }
+    return { rows, bytes };
+  }
+
   /** The place's rows brought up to date with its docs by the model that made the query's vector: the changed and new embedded, the gone dropped. */
   async #update(user: string, scope: string, docs: readonly MeaningDoc[], made: { connection: string; model: string }): Promise<TableRow[]> {
     const kept = new Map<string, TableRow>((await this.#d.index.rows(MEANING_TABLE, user, scope)).map((r) => [r.id, r]));
