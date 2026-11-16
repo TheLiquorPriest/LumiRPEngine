@@ -19,7 +19,7 @@ const nodeIs = (does: "moved" | "kept" | "dropped" | "never"): Fate => ({ names:
 
 const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
   // A chat's path and head hold the turns its comparison or a tie placed there: never a held open turn.
-  chat: { user: "none", id: "none", world: "none", revision: "none", source_chat: "none", source_message: "none", head: nodeIs("never"), path: turnIs("never"), created: "none", deleted: "none", heard: "none", heard_count: "none" },
+  chat: { user: "none", id: "none", world: "none", revision: "none", source_chat: "none", source_message: "none", head: nodeIs("never"), path: turnIs("never"), created: "none", deleted: "none", heard: "none", heard_count: "none", compared: "none" },
   message_link: { user: "none", chat: "none", message: "none", source_chat: "none", source_message: "none" },
   session: { user: "none", id: "none", chat: "none", scene: "none", opened_by: turnIs("moved"), closed_by: turnIs("moved") },
   // The held turn's row stays as the record of a joined turn; no turn stands after it, and it joins none of its own.
@@ -47,7 +47,7 @@ const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
     joined: turnIs("never"),
   },
   path_node: { user: "none", key: nodeIs("kept"), prev: nodeIs("never"), turn: turnIs("kept"), depth: "none" },
-  change: { id: "none", user: "none", turn: turnIs("moved"), ord: "none", lane: "none", op: "none", value: "none", by: "none", standing: "none", precision: "none", source: "none", cite: "none", job: "none", applied: "none", reports: "none", created: "none", handle: "none" },
+  change: { id: "none", user: "none", turn: turnIs("moved"), chat: "none", ord: "none", lane: "none", op: "none", value: "none", by: "none", standing: "none", precision: "none", source: "none", cite: "none", job: "none", applied: "none", reports: "none", created: "none", handle: "none" },
   snapshot: { user: "none", node: nodeIs("dropped"), kind: "none", fingerprint: "none", upto: "none", state: "none", created: "none" },
   // A snapshot's parts go with the last snapshot that names them; none names a turn.
   snapshot_part: { user: "none", hash: "none", body: "none", refs: "none" },

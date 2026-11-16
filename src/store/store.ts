@@ -21,7 +21,7 @@ import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { applyChecked, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type StoredChange } from "./fold";
+import { applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
 import { draft } from "./working";
 import { Areas, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
@@ -57,7 +57,9 @@ import {
   type TurnRow,
   type TurnStart,
   type TurnStatus,
+  type WriteTarget,
 } from "./types";
+import type { LedgerEvent } from "../shared/ledger";
 
 /** Defaults for the store's settings. */
 export const STORE_DEFAULTS = Object.freeze({
@@ -180,6 +182,7 @@ interface TurnDb {
 interface ChangeDb {
   id: number;
   turn: string;
+  chat: string | null;
   ord: number;
   lane: string;
   op: string;
@@ -209,6 +212,8 @@ interface ChatDb {
   /** How many marks and edits of the chat's messages RPE has heard, ever: what each entry of `heard` is numbered by. */
   heard_count: number;
   created: number;
+  /** When the chat was first compared (`sync`); null before. */
+  compared: number | null;
   deleted: number | null;
 }
 
@@ -264,6 +269,7 @@ function changeOf(r: ChangeDb): ChangeRow {
   return {
     id: r.id,
     turn: r.turn,
+    chat: r.chat,
     ord: r.ord,
     lane: r.lane as Lane,
     op: r.op,
@@ -771,9 +777,33 @@ export class UserStore {
   branchChat(input: { id: string; from: string; map: Readonly<Record<string, string>>; at?: string | null }): ChatRow {
     const source = this.chatOrThrow(input.from);
     if (this.chat(input.id)) throw new StoreInputError(`chat ${input.id} exists`);
-    const at = input.at ?? pathOf(source.path).findLast((e) => Object.hasOwn(input.map, e.message))?.message ?? null;
+    const was = pathOf(source.path);
+    const at = input.at ?? was.findLast((e) => Object.hasOwn(input.map, e.message))?.message ?? null;
+    // Its line from the moment it is made: the source's path up to the branch point, each message the branch's copy with its hidden
+    // mark, and its head the node there; what was heard of the copied messages since the source's last comparison goes across too.
+    const upto = at === null ? -1 : was.findIndex((e) => e.message === at);
+    const path = was.slice(0, upto + 1).flatMap((e) => (Object.hasOwn(input.map, e.message) ? [{ ...e, message: input.map[e.message] as string }] : []));
+    const head = path.findLast((e) => e.node !== null)?.node ?? null;
+    const heardThere = JSON.parse(source.heard) as Heard;
+    const heard: Heard = {};
+    for (const [old, now] of Object.entries(input.map)) {
+      const h = heardThere[old];
+      if (h !== undefined) heard[now] = h;
+    }
     this.write(false, () => {
-      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, created) VALUES (?, ?, ?, ?, ?, ?, ?)", [this.id, input.id, source.world, source.revision, input.from, at, this.store.now()]);
+      this.db.run("INSERT INTO chat (user, id, world, revision, source_chat, source_message, head, path, heard, heard_count, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        this.id,
+        input.id,
+        source.world,
+        source.revision,
+        input.from,
+        at,
+        head,
+        JSON.stringify(path),
+        JSON.stringify(heard),
+        source.heard_count,
+        this.store.now(),
+      ]);
       const link = this.db.query("INSERT OR REPLACE INTO message_link (user, chat, message, source_chat, source_message) VALUES (?, ?, ?, ?, ?)");
       for (const [old, now] of Object.entries(input.map)) link.run(this.id, input.id, now, input.from, old);
     });
@@ -825,22 +855,23 @@ export class UserStore {
        DELETE FROM snapshot WHERE user = ?1 AND node IN (SELECT key FROM down)`,
       [this.id, id],
     );
-    this.db.run(`DELETE FROM change WHERE user = ?1 AND turn IN (${turns})`, [this.id, id]);
+    this.db.run(`DELETE FROM change WHERE user = ?1 AND (turn IN (${turns}) OR chat = ?2)`, [this.id, id]);
     this.db.run(`DELETE FROM path_node WHERE user = ?1 AND turn IN (${turns})`, [this.id, id]);
     for (const table of ["turn", "session", "message_link"]) this.db.run(`DELETE FROM ${table} WHERE user = ? AND chat = ?`, [this.id, id]);
     this.db.run("DELETE FROM chat WHERE user = ? AND id = ?", [this.id, id]);
   }
 
   /**
-   * Whether a chat has been played on RPE: it holds a turn RPE began itself, or a change RPE recorded
-   * on one of its turns (an import gives every change it writes the source `import`).
+   * Whether a chat has been played on RPE: it holds a turn RPE began itself, a change RPE recorded on one of its turns (an import gives
+   * every change it writes the source `import`), or a change of his own.
    */
   isPlayed(chat: string): boolean {
     this.chatOrThrow(chat);
     const r = this.db
       .query<{ played: number }, [string, string]>(
         `SELECT EXISTS(SELECT 1 FROM turn WHERE user = ?1 AND chat = ?2 AND imported = 0)
-             OR EXISTS(SELECT 1 FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND t.chat = ?2 AND (c.source IS NULL OR c.source <> 'import')) AS played`,
+             OR EXISTS(SELECT 1 FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND t.chat = ?2 AND (c.source IS NULL OR c.source <> 'import'))
+             OR EXISTS(SELECT 1 FROM change WHERE user = ?1 AND chat = ?2) AS played`,
       )
       .get(this.id, chat);
     return r?.played === 1;
@@ -1103,9 +1134,11 @@ export class UserStore {
    * shows that text at that turn (the comparison records the edit, or finds it recorded), and both
    * where the path no longer shows the message. `heardUpTo` is the chat's heard count (`heardCount`)
    * read before the path shown was read: what was heard after it, which that path could not show, is
-   * kept whole. Absent, the path was read now, after everything heard.
+   * kept whole. Absent, the path was read now, after everything heard. `swipesOf` gives a message's swipes, each with its saved-text
+   * hash and date, asked only for a reply whose date ties a turn's while its text differs: when that turn's saved text is still among
+   * them, the reply is another swipe, not an edit (§6.3 l.617). Messages inserted before a played turn are reported with it.
    */
-  sync(chat: string, shown: readonly ShownMessage[], heardUpTo?: number): PathReport {
+  sync(chat: string, shown: readonly ShownMessage[], heardUpTo?: number, swipesOf?: (message: string) => readonly { hash: string; date?: number | null }[] | null): PathReport {
     const row = this.chatOrThrow(chat);
     const before = pathOf(row.path);
     const was = new Map(before.map((e) => [e.message, e]));
@@ -1132,7 +1165,8 @@ export class UserStore {
       }
       let turn: string | null = was.get(m.id)?.turn ?? null;
       if (again.has(m.id)) {
-        const match = matchTurn(tied.get(m.id) ?? [], m, turn);
+        // A reply whose date ties a turn's with other text is an edit only when that turn's saved text is no longer among its swipes.
+        const match = matchTurn(tied.get(m.id) ?? [], m, turn, swipesOf === undefined ? undefined : () => swipesOf(m.id));
         turn = match.turn?.id ?? null;
         if (match.turn && match.edited && match.turn.edited !== m.hash) {
           edited.push({ turn: match.turn.id, message: m.id, saved: match.turn.hash ?? "", now: m.hash });
@@ -1175,17 +1209,34 @@ export class UserStore {
     for (const e of fresh) e.own = e.turn !== null && ownNodes.get(e.turn) === e.node;
     const head = showing.at(-1)?.node ?? null;
     const found = comparePaths(before, after);
-    const branched = row.source_chat !== null && before.length === 0 && after.length > 0 ? { from: row.source_chat, at: row.source_message } : null;
+    const branched = row.source_chat !== null && row.compared === null && after.length > 0 ? { from: row.source_chat, at: row.source_message } : null;
+    // Messages new to the path standing before a turn it had: inserted before a played turn, each with the first such turn after it.
+    const inserted: NonNullable<PathReport["inserted"]> = [];
+    const hadTurn = new Set(oldTurns.map((e) => e.turn));
+    let next: string | null = null;
+    for (let i = after.length - 1; i >= 0; i--) {
+      const e = after[i] as PathEntry;
+      if (!was.has(e.message)) {
+        if (next !== null) inserted.unshift({ message: e.message, before: next });
+      } else if (e.turn !== null && hadTurn.has(e.turn)) next = e.turn;
+    }
     // What no longer applies is folded inside the write, so the snapshots that fold finds are stored with it.
     const notApplied = this.write(false, () => {
       const flag = this.db.query("UPDATE turn SET edited = ? WHERE user = ? AND id = ?");
       for (const [turn, hash] of flags) flag.run(hash, this.id, turn);
       const put = this.db.query("INSERT OR IGNORE INTO path_node (user, key, prev, turn, depth) VALUES (?, ?, ?, ?, ?)");
       for (const [key, p, turn, d] of nodes) put.run(this.id, key, p, turn, d);
-      this.db.run("UPDATE chat SET path = ?, head = ?, heard = ? WHERE user = ? AND id = ?", [JSON.stringify(after), head, JSON.stringify(this.untaken(row, shown, after, heardUpTo ?? row.heard_count)), this.id, chat]);
+      this.db.run("UPDATE chat SET path = ?, head = ?, heard = ?, compared = COALESCE(compared, ?) WHERE user = ? AND id = ?", [
+        JSON.stringify(after),
+        head,
+        JSON.stringify(this.untaken(row, shown, after, heardUpTo ?? row.heard_count)),
+        after.length > 0 ? this.store.now() : null,
+        this.id,
+        chat,
+      ]);
       return found.rebased ? this.headState(chat).notApplied : [];
     });
-    return { ...found, edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}) };
+    return { ...found, edited, branched, notApplied, ...(branchStopped.length > 0 ? { branchStopped } : {}), ...(inserted.length > 0 ? { inserted } : {}) };
   }
 
   /** What was heard of a chat (`row`) that a comparison of `shown` (taken as `after`), read once `upto` was heard, does not take. */
@@ -1353,6 +1404,77 @@ export class UserStore {
     return { changes: rows, state };
   }
 
+  /**
+   * Where a write goes (R-73): a turn's call to its turn; an agent's job to its starting turn, with the job; his own edit, what is done
+   * on his word outside a turn, or a job he started, to his own changes, kept with the chat. No call is refused for belonging to no turn.
+   */
+  writeTarget(at: { chat: string; turn?: string | null; job?: string | null }): WriteTarget {
+    const job = at.job ?? undefined;
+    if (at.turn !== undefined && at.turn !== null && at.turn !== "") return job === undefined ? { kind: "turn", turn: at.turn } : { kind: "turn", turn: at.turn, job };
+    return job === undefined ? { kind: "owner", chat: at.chat } : { kind: "owner", chat: at.chat, job };
+  }
+
+  /** Records changes where `target` says (`writeTarget`): on a turn as `addChanges` records them, or as his own (`addOwnerChanges`). */
+  record(target: WriteTarget, inputs: readonly ChangeInput[]): { changes: ChangeRow[]; state: StoreState } {
+    if (target.kind === "turn") return this.addChanges(target.turn, target.job === undefined ? inputs : inputs.map((c) => ({ ...c, job: target.job })));
+    return this.addOwnerChanges(target.chat, inputs, target.job ?? null);
+  }
+
+  /**
+   * His own changes (plan §6.3 l.632, §10.10, R-22, R-29): of no turn, kept with the chat and the moment they are made, applied at once
+   * and never refused for what they say. Each takes effect just before the first turn of the chat's own path to begin after it, so the
+   * chat's head shows it now and no turn begun already has its state changed; in a branch that has played no turn of its own, it is the
+   * branch's. A job of his (`job`) records into them too: its own reads see its writes, nobody else's do until it ends (`endJob`), and
+   * then they take effect as his edits do, from that moment. Each change is checked on the head (a job's, on the job's own state) as
+   * a turn's is; the state returned is that one.
+   */
+  addOwnerChanges(chat: string, inputs: readonly ChangeInput[], job: string | null = null): { changes: ChangeRow[]; state: StoreState } {
+    const row = this.chatOrThrow(chat);
+    inputs.forEach((c, i) => checkChange(c, i, this.store.env.areas));
+    if (job !== null && this.db.query<{ job: string }, [string, string]>("SELECT job FROM job_end WHERE user = ? AND job = ?").get(this.id, job) !== null) {
+      throw new StoreInputError(`job ${job} has ended: it records nothing more`);
+    }
+    const base = this.headState(chat);
+    const n = row.head === null ? 1 : (this.db.query<{ depth: number }, [string, string]>("SELECT depth FROM path_node WHERE user = ? AND key = ?").get(this.id, row.head)?.depth ?? -1) + 2;
+    const env = this.store.envOf(this.id);
+    const state = draft(base.state);
+    if (job !== null) {
+      const mine = this.db.query<ChangeDb, [string, string, string]>("SELECT * FROM change WHERE user = ? AND chat = ? AND job = ? AND applied = 1 ORDER BY ord").all(this.id, chat, job).map(changeOf);
+      applyChecked(env, state, mine.map((c): Item => ({ op: c.op, value: c.value, turn: "", n, by: c.by, cite: c.cite, change: c.id, precision: c.precision, standing: c.standing, source: c.source })), new Set());
+    }
+    const items: Item[] = inputs.map((c) => ({ op: c.op, value: structuredClone(c.value), turn: "", n, by: c.by ?? null, cite: c.cite ?? null, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+    const outcomes = applyChecked(env, state, items, new Set());
+    const now = this.store.now();
+    const ids = this.write([chat], () => {
+      let ord = (this.db.query<{ ord: number | null }, [string, string]>("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
+      const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      return inputs.map((c, i) => {
+        const o = outcomes[i] ?? { applied: false, reports: [] };
+        const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
+        return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
+      });
+    });
+    const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
+    return { changes: rows, state };
+  }
+
+  /**
+   * Lets go of a chat's stored snapshots, on every path through its turns and after them: each is made again by the fold when next
+   * due, and no answer changes. States held in memory stay as they are.
+   */
+  dropSnapshots(chat: string): number {
+    this.chatOrThrow(chat);
+    return this.write(false, () =>
+      this.db.run(
+        `WITH RECURSIVE down(key) AS (
+           SELECT key FROM path_node WHERE user = ?1 AND turn IN (SELECT id FROM turn WHERE user = ?1 AND chat = ?2)
+           UNION SELECT n.key FROM path_node n JOIN down d ON n.user = ?1 AND n.prev = d.key)
+         DELETE FROM snapshot WHERE user = ?1 AND kind = 'cache' AND node IN (SELECT key FROM down)`,
+        [this.id, chat],
+      ).changes,
+    );
+  }
+
   /** Takes back an open turn's staged changes, all or one run's (`handle`: the lead dropping a sub-agent's writes). How many went. */
   dropStaged(turnId: string, handle?: string): number {
     const turn = this.turnToWrite(turnId);
@@ -1497,7 +1619,13 @@ export class UserStore {
   startOf(turnId: string): Folded {
     const t = this.turnToWrite(turnId);
     const prev = this.db.query<{ prev: string | null }, [string, string]>("SELECT prev FROM path_node WHERE user = ? AND key = ?").get(this.id, t.node)?.prev ?? null;
-    return prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
+    const before = prev === null ? this.initial(this.chatOrThrow(t.chat).revision) : this.foldNode(prev).folded;
+    // What was placed just before it (jobs' changes, his own) is where it started.
+    const { jobs, owner } = this.placedBefore(t);
+    if (jobs.length === 0 && owner.length === 0) return before;
+    const state = draft(before.state);
+    const done = foldSteps(this.store.envOf(this.id), { state, upto: 0 }, [{ node: t.node, turn: t.id, n: t.depth + 1, own: true, changes: [], jobs, owner }]);
+    return { ...before, state, notApplied: [...before.notApplied, ...done.notApplied] };
   }
 
   /**
@@ -1550,15 +1678,133 @@ export class UserStore {
     const at = last === undefined ? null : { message: last.message, turn: last.turn };
     // Every node stored: the state there, as any stored node's. Else the chain from the start, needed only when nothing is held for it.
     const endTurn = fresh.nodes.at(-1)?.[2] ?? "";
-    const folded = end === null ? this.initial(row?.revision ?? null) : fresh.nodes.length === 0 ? this.foldNode(end).folded : this.foldPath(end, endTurn, () => chainOf(held, null, 0, this.goesOn(chat, held, 0)).nodes);
+    const folded = end === null ? this.withOwner(chat, null, row?.revision ?? null, true) : fresh.nodes.length === 0 ? this.withOwner(chat, end, row?.revision ?? null, true) : this.foldPath(end, endTurn, () => chainOf(held, null, 0, this.goesOn(chat, held, 0)).nodes);
     return { ...folded, messages, at, known: row !== null };
   }
 
-  /** State at the end of the chat's path: rebased turns' changes applied again where they now stand. */
+  /**
+   * State at the end of the chat's path: rebased turns' changes applied again where they now stand, and his own changes no turn of
+   * the path began after, at once (plan §6.3 l.632, R-22).
+   */
   headState(chat: string): Folded {
     const row = this.chatOrThrow(chat);
-    if (row.head === null) return this.initial(row.revision);
-    return this.foldNode(row.head).folded;
+    return this.withOwner(chat, row.head === null ? null : row.head, row.revision);
+  }
+
+  /**
+   * The state at `node` (null: the chat's start) with his own changes of `chat` that stand after it on the chat's path, and, when
+   * `jobs`, the ended jobs' changes no turn there began after (what the next turn will start with, plan §10.9). Held for the chat.
+   */
+  private withOwner(chat: string, node: string | null, revision: string | null, jobs = false): Folded {
+    const base = node === null ? this.initial(revision) : this.foldNode(node).folded;
+    // A chat none of whose line holds a change of his, and with no job ended since its node's turn began, is its node's state.
+    const owner = this.ownerIn(chat);
+    const due = jobs && node !== null && this.jobEndedSince(node);
+    if (!owner && !due) return base;
+    const mark = this.store.markOf(this.id, chat);
+    const key = `${this.cacheKey(node ?? "~")}\u0000@${chat}${jobs ? "+jobs" : ""}`;
+    const hit = this.store.cached(key, mark);
+    if (hit) return hit.folded;
+    const path = node === null ? [] : this.chainRows(node);
+    const after = owner ? this.placeOwner(path, false, chat).after : [];
+    const pending = due ? this.jobsPending(path) : [];
+    if (after.length === 0 && pending.length === 0) {
+      this.store.keep(key, base, 0, this.id, chat, mark);
+      return base;
+    }
+    const state = draft(base.state);
+    const n = (path.at(-1)?.depth ?? -1) + 2;
+    const notApplied = [...base.notApplied];
+    if (pending.length > 0) {
+      const env = this.store.envOf(this.id);
+      foldSteps(env, { state, upto: 0 }, [{ node: node ?? "", turn: "", n, own: true, changes: [], jobs: pending }], (_s, _st, _u, missed) => notApplied.push(...missed));
+    }
+    notApplied.push(...applyOwner(this.store.envOf(this.id), state, after, n));
+    const folded: Folded = { ...base, state, notApplied };
+    this.store.keep(key, folded, 0, this.id, chat, mark);
+    return folded;
+  }
+
+  /** Whether a job has ended since the turn of `node` began: none has, and no job's change is pending after it (`jobsPending`). */
+  private jobEndedSince(node: string): boolean {
+    return (
+      this.db
+        .query<{ any: number }, [string, string]>(
+          "SELECT EXISTS(SELECT 1 FROM job_end e WHERE e.user = ?1 AND e.ended >= (SELECT t.created FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key = ?2)) AS any",
+        )
+        .get(this.id, node)?.any === 1
+    );
+  }
+
+  /** Whether the chat, or a chat it was branched from, holds a change of his own. */
+  private ownerIn(chat: string): boolean {
+    return (
+      this.db
+        .query<{ any: number }, [string, string]>(
+          `WITH RECURSIVE up(chat) AS (SELECT ?2 UNION SELECT c.source_chat FROM chat c JOIN up ON c.user = ?1 AND c.id = up.chat WHERE c.source_chat IS NOT NULL)
+           SELECT EXISTS(SELECT 1 FROM change WHERE user = ?1 AND chat IN (SELECT chat FROM up)) AS any`,
+        )
+        .get(this.id, chat)?.any === 1
+    );
+  }
+
+  /** A stored path's nodes, oldest first, from its start to `node`: each with its turn, the turn's chat, and when it began. */
+  private chainRows(node: string): { key: string; turn: string; depth: number; chat: string; created: number }[] {
+    return this.db
+      .query<{ key: string; turn: string; depth: number; chat: string; created: number }, [string, string]>(
+        `WITH RECURSIVE up(key, prev, turn, depth) AS (
+           SELECT key, prev, turn, depth FROM path_node WHERE user = ?1 AND key = ?2
+           UNION ALL SELECT n.key, n.prev, n.turn, n.depth FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev)
+         SELECT up.key, up.turn, up.depth, t.chat, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
+      )
+      .all(this.id, node);
+  }
+
+  /** His own changes of these chats that have taken effect (a job of his, once it ended), each with the moment it did, in that order. */
+  private ownerOf(chats: readonly string[]): OwnerChange[] {
+    return this.db
+      .query<{ id: number; chat: string; op: string; lane: string; value: string; by: string | null; cite: string | null; precision: string | null; standing: string | null; source: string | null; at: number }, [string, string]>(
+        `SELECT c.id, c.chat, c.op, c.lane, c.value, c.by, c.cite, c.precision, c.standing, c.source, COALESCE(e.ended, c.created) AS at
+         FROM change c LEFT JOIN job_end e ON e.user = c.user AND e.job = c.job
+         WHERE c.user = ?1 AND c.chat IN (SELECT value FROM json_each(?2)) AND c.applied = 1 AND (c.job IS NULL OR e.ended IS NOT NULL)
+         ORDER BY at, c.id`,
+      )
+      .all(this.id, JSON.stringify(chats))
+      .map((c) => ({ id: c.id, chat: c.chat, at: c.at, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, cite: c.cite === null ? null : (JSON.parse(c.cite) as JsonValue), applied: true, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null }));
+  }
+
+  /**
+   * Where his own changes stand along a run of a path (plan §6.3 l.632): each just before the first turn of the run, of its chat or of
+   * a branch of it made after it, that began after it took effect; else after the run's end, for `reader`, the chat whose head that
+   * is, when it is that chat's or one of its sources' made before the reader was. With `skipFirst`, the run's first node is where a
+   * fold starts: what stands before it is in its state already.
+   */
+  private placeOwner(run: readonly { key: string; chat: string; created: number }[], skipFirst: boolean, reader: string | null): { before: Map<string, OwnerChange[]>; after: OwnerChange[] } {
+    const before = new Map<string, OwnerChange[]>();
+    const after: OwnerChange[] = [];
+    const chats = new Set(run.map((s) => s.chat));
+    if (reader !== null) chats.add(reader);
+    // Each chat with when it was made and the chats it was branched from.
+    const line = new Map<string, { created: number; sources: Set<string> }>();
+    for (const chat of chats) {
+      const sources = new Set<string>();
+      const made = this.chatDb(chat)?.created ?? 0;
+      for (let up = this.chatDb(chat)?.source_chat ?? null; up !== null && !sources.has(up); up = this.chatDb(up)?.source_chat ?? null) sources.add(up);
+      line.set(chat, { created: made, sources });
+    }
+    const all = new Set([...chats, ...[...line.values()].flatMap((l) => [...l.sources])]);
+    const fits = (c: OwnerChange, chat: string): boolean => c.chat === chat || ((line.get(chat)?.sources.has(c.chat) ?? false) && c.at <= (line.get(chat)?.created ?? 0));
+    for (const c of this.ownerOf([...all])) {
+      const i = run.findIndex((s) => s.created > c.at && fits(c, s.chat));
+      if (i < 0) {
+        if (reader !== null && fits(c, reader)) after.push(c);
+        continue;
+      }
+      if (skipFirst && i === 0) continue;
+      const key = run[i]?.key ?? "";
+      before.set(key, [...(before.get(key) ?? []), c]);
+    }
+    return { before, after };
   }
 
   /**
@@ -1621,14 +1867,14 @@ export class UserStore {
     if (hit) return { folded: hit.folded, upto: hit.upto };
     // The path back to the nearest stored snapshot this code may use, or to the start, each node with its turn's chat and that chat's mark.
     const chain = this.db
-      .query<{ key: string; prev: string | null; turn: string; depth: number; snap: number; chat: string; mark: string | null }, [string, string, string]>(
+      .query<{ key: string; prev: string | null; turn: string; depth: number; snap: number; chat: string; created: number; mark: string | null }, [string, string, string]>(
         `WITH RECURSIVE up(key, prev, turn, depth, snap) AS (
            SELECT n.key, n.prev, n.turn, n.depth, EXISTS(SELECT 1 FROM snapshot s WHERE s.user = n.user AND s.node = n.key AND (s.kind = 'base' OR s.fingerprint = ?2))
            FROM path_node n WHERE n.user = ?1 AND n.key = ?3
            UNION ALL
            SELECT n.key, n.prev, n.turn, n.depth, EXISTS(SELECT 1 FROM snapshot s WHERE s.user = n.user AND s.node = n.key AND (s.kind = 'base' OR s.fingerprint = ?2))
            FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev WHERE up.snap = 0)
-         SELECT up.key, up.prev, up.turn, up.depth, up.snap, t.chat, m.mark FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn
+         SELECT up.key, up.prev, up.turn, up.depth, up.snap, t.chat, t.created, m.mark FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn
          LEFT JOIN fold_mark m ON m.user = ?1 AND m.chat = t.chat ORDER BY up.depth`,
       )
       .all(this.id, this.store.fingerprint, node);
@@ -1676,7 +1922,9 @@ export class UserStore {
     const byTurn = this.changesOf(ids);
     const stepOf = (c: { key: string; turn: string; depth: number }, changes: StoredChange[]): FoldStep => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes });
     const placed = this.jobsPlaced(node);
-    const steps = rest.map((c): FoldStep => ({ ...stepOf(c, byTurn.get(c.turn) ?? []), jobs: placed.get(c.key) ?? [] }));
+    // His own changes, placed along the steps folded here; those placed at or before the start are in it already.
+    const owner = this.ownerIn(own.chat) ? this.placeOwner(from >= 0 ? chain.slice(from) : rest, from >= 0, null).before : new Map<string, OwnerChange[]>();
+    const steps = rest.map((c): FoldStep => ({ ...stepOf(c, byTurn.get(c.turn) ?? []), jobs: placed.get(c.key) ?? [], owner: owner.get(c.key) ?? [] }));
     // Changes the snapshot's own turn took after it was stored (a correction after a starting state was set) go on top of it.
     const late = (byTurn.get(first.turn) ?? []).filter((c) => c.id > (stored ?? Number.POSITIVE_INFINITY));
     if (late.length > 0) steps.unshift(stepOf(first, late));
@@ -1735,8 +1983,10 @@ export class UserStore {
     const base = deepest >= 0 ? this.foldNode(nodes[deepest]?.[0] ?? "") : { folded: this.chatStartOf(nodes[0]?.[2] ?? ""), upto: 0 };
     const rest = nodes.slice(deepest + 1);
     const byTurn = this.changesOf(rest.map(([, , turn]) => turn));
-    const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 })));
-    const steps = rest.map(([key, , turn, depth]): FoldStep => ({ node: key, turn, n: depth + 1, own: turns.get(turn)?.node === key, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [] }));
+    const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 }))).placed;
+    const run = nodes.map(([key, , turn]) => ({ key, chat: turns.get(turn)?.chat ?? chat, created: turns.get(turn)?.created ?? 0 }));
+    const owner = this.ownerIn(chat) ? this.placeOwner(deepest >= 0 ? run.slice(deepest) : run, deepest >= 0, null).before : new Map<string, OwnerChange[]>();
+    const steps = rest.map(([key, , turn, depth]): FoldStep => ({ node: key, turn, n: depth + 1, own: turns.get(turn)?.node === key, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [], owner: owner.get(key) ?? [] }));
     const every = this.store.snapshotEvery;
     const snaps: [string, number, SnapshotRows, string, string][] = [];
     const result = foldSteps(this.store.envOf(this.id), { state: draft(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {
@@ -1783,16 +2033,18 @@ export class UserStore {
          SELECT up.key, up.turn, up.depth, t.created FROM up JOIN turn t ON t.user = ?1 AND t.id = up.turn ORDER BY up.depth`,
       )
       .all(this.id, node);
-    return this.jobsAlong(path);
+    return this.jobsAlong(path).placed;
   }
 
   /**
    * Jobs' changes along a path (its nodes oldest first, each with its turn and when that turn began), by the node of the turn each
    * takes effect just before (plan §10.9): the first turn after the one that started the job to have begun after the job ended. A job
-   * that has not ended, or that no turn on the path began after, has not taken effect.
+   * that has not ended has not taken effect; one that ended after every later turn on the path began is pending: it takes effect
+   * before the next turn to begin.
    */
-  private jobsAlong(path: readonly { key: string; turn: string; depth: number; created: number }[]): Map<string, JobChange[]> {
-    const out = new Map<string, JobChange[]>();
+  private jobsAlong(path: readonly { key: string; turn: string; depth: number; created: number }[]): { placed: Map<string, JobChange[]>; pending: JobChange[] } {
+    const placed = new Map<string, JobChange[]>();
+    const pending: JobChange[] = [];
     const jobs = this.db
       .query<{ id: number; turn: string; op: string; lane: string; value: string; by: string | null; cite: string | null; applied: number; precision: string | null; standing: string | null; source: string | null; ended: number }, [string, string]>(
         `SELECT c.id, c.turn, c.op, c.lane, c.value, c.by, c.cite, c.applied, c.precision, c.standing, c.source, e.ended FROM change c JOIN job_end e ON e.user = c.user AND e.job = c.job
@@ -1803,21 +2055,31 @@ export class UserStore {
     for (const c of jobs) {
       const i = index.get(c.turn);
       const started = i === undefined ? undefined : path[i];
-      const before = i === undefined ? undefined : path.slice(i + 1).find((p) => p.created > c.ended);
-      if (!started || !before) continue;
+      if (!started || i === undefined) continue;
+      const before = path.slice(i + 1).find((p) => p.created > c.ended);
       const change: JobChange = { id: c.id, turn: c.turn, from: started.depth + 1, op: c.op, lane: c.lane as Lane, value: JSON.parse(c.value) as JsonValue, by: c.by, cite: c.cite === null ? null : (JSON.parse(c.cite) as JsonValue), applied: c.applied === 1, precision: c.precision as Precision | null, standing: c.standing as Standing | null, source: c.source as Source | null };
-      out.set(before.key, [...(out.get(before.key) ?? []), change]);
+      if (before) placed.set(before.key, [...(placed.get(before.key) ?? []), change]);
+      else pending.push(change);
     }
-    return out;
+    return { placed, pending };
+  }
+
+  /** Ended jobs' changes along a stored path that no turn on it began after: what the next turn to begin starts with. */
+  private jobsPending(path: readonly { key: string; turn: string; depth: number; created: number }[]): JobChange[] {
+    return path.length === 0 ? [] : this.jobsAlong(path).pending;
   }
 
   /**
-   * Notes that a job has ended (plan §10.9): its changes, recorded with the turn that started it, take
-   * effect just before the first turn that begins from now on, so no turn begun already has its state
-   * changed. A job ends once; one that has ended records nothing more.
+   * Notes that a job has ended (plan §10.9): its changes, recorded with the turn that started it (or with his own, for a job of his),
+   * take effect just before the first turn that begins from now on, so no turn begun already has its state changed; his own job's are
+   * at the chat's head at once. A job ends once; one that has ended records nothing more.
    */
   endJob(job: string): void {
-    this.write(false, () => this.db.run("INSERT OR IGNORE INTO job_end (user, job, ended) VALUES (?, ?, ?)", [this.id, job, this.store.now()]));
+    const chats = this.db
+      .query<{ chat: string }, [string, string]>("SELECT DISTINCT COALESCE(c.chat, t.chat) AS chat FROM change c LEFT JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND c.job = ?2")
+      .all(this.id, job)
+      .flatMap((r) => (r.chat === null ? [] : [r.chat]));
+    this.write(chats, () => this.db.run("INSERT OR IGNORE INTO job_end (user, job, ended) VALUES (?, ?, ?)", [this.id, job, this.store.now()]));
   }
 
   /**
@@ -1826,12 +2088,44 @@ export class UserStore {
    * joined turn is refused, as every reading of one is, naming the turn it joined.
    */
   jobsBefore(turnId: string): { change: ChangeRow; applied: boolean; reports: Report[] }[] {
+    return this.changesBefore(turnId).filter((c) => c.change.chat === null);
+  }
+
+  /** What stands just before a turn on the path it was made on: jobs' changes placed there, and his own (plan §10.9, §6.3 l.632). */
+  private placedBefore(t: TurnRow): { jobs: JobChange[]; owner: OwnerChange[] } {
+    const jobs = this.jobsPlaced(t.node).get(t.node) ?? [];
+    if (!this.ownerIn(t.chat)) return { jobs, owner: [] };
+    const rows = this.db
+      .query<{ key: string; chat: string; created: number; depth: number }, [string, string]>(
+        "SELECT n.key, t.chat, t.created, n.depth FROM path_node n JOIN turn t ON t.user = n.user AND t.id = n.turn WHERE n.user = ?1 AND n.key IN (?2, (SELECT prev FROM path_node WHERE user = ?1 AND key = ?2)) ORDER BY n.depth",
+      )
+      .all(this.id, t.node);
+    const owner = this.placeOwner(rows, rows.length > 1, null).before.get(t.node) ?? [];
+    return { jobs, owner };
+  }
+
+  /**
+   * Every change placed before a turn (plan §10.9): a job's, and his own, each with who made it (on its row), its lane and value, the
+   * things it is about (tree refs and an area's parts, by what it touches), whether it took effect there, and its reports (a later value
+   * standing names the later turn). A joined turn is refused, as every reading of one is.
+   */
+  changesBefore(turnId: string): { change: ChangeRow; about: string[]; applied: boolean; reports: Report[] }[] {
     const t = this.turnToWrite(turnId);
-    const placed = this.jobsPlaced(t.node).get(t.node) ?? [];
+    const { jobs, owner } = this.placedBefore(t);
+    const placed = [...jobs, ...owner];
     if (placed.length === 0) return [];
     const missed = new Map(this.stateAt(t.id).notApplied.map((n) => [n.change, n.reports]));
-    const rows = new Map(placed.map((c) => [c.id, this.changeOrThrow(c.id)]));
-    return placed.map((c) => ({ change: rows.get(c.id) as ChangeRow, applied: !missed.has(c.id), reports: missed.get(c.id) ?? [] }));
+    const env = this.store.env;
+    const aboutOf = (c: ChangeRow): string[] => {
+      const area = env.areas?.of(c.op);
+      if (area) return [...new Set((area.def.touches?.(c.value) ?? []).map((p) => p.ref))];
+      const ev = isRecord(c.value) && c.value.type === c.op ? (c.value as unknown as LedgerEvent) : null;
+      return ev ? [...new Set((env.registry.get(ev.type)?.touches?.(ev) ?? []).map((x) => `entity:${x.entity}`))] : [];
+    };
+    return placed.map((c) => {
+      const change = this.changeOrThrow(c.id);
+      return { change, about: aboutOf(change), applied: !missed.has(c.id), reports: missed.get(c.id) ?? [] };
+    });
   }
 
   // ------------------------------------------------------------ sessions
@@ -1933,39 +2227,72 @@ export class UserStore {
   }
 
   /**
-   * What undoing a change would record and leave, read against the chat's newest reply, with the turn
-   * of that reply, where the undo goes; none for a change no longer on the chat's path.
+   * What undoing a change would record and leave, read against the chat's head, with the chat whose own changes the undo goes to;
+   * none for a change no longer on its chat's path. `turn` is the change's turn, null for one of his own; `own` the changes of the
+   * same turn, or his own of the same chat, among which its unit (the changes sharing its group) is.
    */
-  private undoPlan(c: ChangeRow, turn: TurnRow, own: readonly ChangeRow[]): { plan: UndoPlan; on: string | null } {
-    const chat = this.chatOrThrow(turn.chat);
-    const onPath = pathOf(chat.path).some((e) => e.turn === turn.id);
-    const head = chat.head === null ? null : (this.db.query<{ turn: string }, [string, string]>("SELECT turn FROM path_node WHERE user = ? AND key = ?").get(this.id, chat.head)?.turn ?? null);
-    if (!onPath || head === null) return { plan: { inputs: [], left: [{ code: "not_on_path", values: { change: c.id, op: c.op } }] }, on: null };
-    // The change with the rest of its unit: the changes of its turn that share its group.
+  private undoPlan(c: ChangeRow, turn: TurnRow | null, own: readonly ChangeRow[]): { plan: UndoPlan; chat: string | null } {
+    const offPath = { plan: { inputs: [], left: [{ code: "not_on_path", values: { change: c.id, op: c.op } }] }, chat: null };
+    // The change with the rest of its unit: the changes of its turn, or his own, that share its group.
     const group = isRecord(c.value) && typeof c.value.group === "string" ? c.value.group : null;
     const unit = group === null ? [c] : own.filter((x) => isRecord(x.value) && x.value.group === group);
-    const first = unit[0]?.ord ?? c.ord;
+    const first = unit[0] ?? c;
+    if (turn === null) {
+      const chat = c.chat ?? "";
+      const before = this.ownerBefore(chat, first.id);
+      return before === null ? offPath : { plan: reversal(unit, before, this.headState(chat).state, this.store.env), chat };
+    }
+    const chat = this.chatOrThrow(turn.chat);
+    if (!pathOf(chat.path).some((e) => e.turn === turn.id)) return offPath;
     // The state just before the unit: the turn's start, and what the turn recorded before it.
     const before = draft(this.startOf(turn.id).state);
-    const earlier = own.filter((x) => x.applied && x.job === null && x.ord < first);
+    const earlier = own.filter((x) => x.applied && x.job === null && x.ord < first.ord);
     applyUnchecked(this.store.envOf(this.id), before, earlier.map((x): Item => ({ op: x.op, value: x.value, turn: turn.id, n: turn.depth + 1, by: x.by, cite: x.cite, change: x.id, precision: x.precision, standing: x.standing, source: x.source })));
-    return { plan: reversal(unit, before, this.headState(chat.id).state, this.store.env), on: head };
+    return { plan: reversal(unit, before, this.headState(chat.id).state, this.store.env), chat: chat.id };
+  }
+
+  /** The state just before his own change `first` where it stands on its chat's path (before a turn, or after the path's end); null: on none. */
+  private ownerBefore(chat: string, first: number): StoreState | null {
+    const row = this.chatOrThrow(chat);
+    const run = row.head === null ? [] : this.chainRows(row.head);
+    const { before, after } = this.placeOwner(run, false, chat);
+    const env = this.store.envOf(this.id);
+    for (const [i, s] of run.entries()) {
+      const list = before.get(s.key) ?? [];
+      const k = list.findIndex((x) => x.id === first);
+      if (k < 0) continue;
+      const prev = run[i - 1];
+      const state = draft((prev === undefined ? this.initial(row.revision) : this.foldNode(prev.key).folded).state);
+      foldSteps(env, { state, upto: 0 }, [{ node: s.key, turn: s.turn, n: s.depth + 1, own: true, changes: [], jobs: this.jobsPlaced(s.key).get(s.key) ?? [], owner: list.slice(0, k) }]);
+      return state;
+    }
+    const k = after.findIndex((x) => x.id === first);
+    if (k < 0) return null;
+    const state = draft((row.head === null ? this.initial(row.revision) : this.foldNode(row.head).folded).state);
+    applyOwner(env, state, after.slice(0, k), (run.at(-1)?.depth ?? -1) + 2);
+    return state;
   }
 
   /**
-   * Undoes one change (plan §6.8): records the changes that reverse it after the chat's newest reply,
-   * with source `player`, each citing the change it undoes. Nothing recorded is taken away. What would
-   * be left is listed; when a later change has written the same part since, nothing is recorded. A
-   * change still staged in an open turn is taken back with `dropStaged` instead.
+   * Undoes changes (plan §6.8), each in the order given: records the changes that reverse it as his own (`addOwnerChanges`), at the
+   * chat's head at once and before the next turn, with source `player`, each citing the change it undoes. Nothing recorded is taken
+   * away. What would be left is listed; when a later change has written the same part since, nothing is recorded for it. A change
+   * still staged in an open turn is taken back with `dropStaged` instead.
    */
-  undo(changeId: number, by: string | null = "player"): { changes: ChangeRow[]; left: Report[] } {
-    const c = this.changeOrThrow(changeId);
-    const turn = this.turnOrThrow(c.turn);
-    if (turn.status === "open") throw new StoreInputError(`change ${changeId} is staged in an open turn: dropStaged takes it back`);
-    const { plan, on } = this.undoPlan(c, turn, this.changes(turn.id));
-    if (on === null || plan.inputs.length === 0) return { changes: [], left: plan.left };
-    const inputs = plan.inputs.map((i): ChangeInput => ({ ...i, by, source: "player", cite: { undoes: changeId } }));
-    return { changes: this.addChanges(on, inputs).changes, left: plan.left };
+  undo(changeIds: number | readonly number[], by: string | null = "player"): { changes: ChangeRow[]; left: Report[] } {
+    const changes: ChangeRow[] = [];
+    const left: Report[] = [];
+    for (const id of typeof changeIds === "number" ? [changeIds] : changeIds) {
+      const c = this.changeOrThrow(id);
+      const turn = c.chat === null ? this.turnOrThrow(c.turn) : null;
+      if (turn?.status === "open") throw new StoreInputError(`change ${id} is staged in an open turn: dropStaged takes it back`);
+      const own = turn === null ? this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ? AND chat = ? ORDER BY ord").all(this.id, c.chat ?? "").map(changeOf) : this.changes(turn.id);
+      const { plan, chat } = this.undoPlan(c, turn, own);
+      left.push(...plan.left);
+      if (chat === null || plan.inputs.length === 0) continue;
+      changes.push(...this.addOwnerChanges(chat, plan.inputs.map((i): ChangeInput => ({ ...i, by, source: "player", cite: { undoes: id } }))).changes);
+    }
+    return { changes, left };
   }
 
   /**
@@ -1977,7 +2304,7 @@ export class UserStore {
     const turn = this.turnToWrite(turnId);
     const own = this.changes(turn.id);
     const undone = new Map<number, number[]>();
-    for (const r of this.db.query<{ id: number; undoes: number }, [string, string]>("SELECT c.id, json_extract(c.cite, '$.undoes') AS undoes FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ? AND t.chat = ? AND json_extract(c.cite, '$.undoes') IS NOT NULL ORDER BY c.id").all(this.id, turn.chat)) {
+    for (const r of this.db.query<{ id: number; undoes: number }, [string, string]>("SELECT c.id, json_extract(c.cite, '$.undoes') AS undoes FROM change c LEFT JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND COALESCE(c.chat, t.chat) = ?2 AND json_extract(c.cite, '$.undoes') IS NOT NULL ORDER BY c.id").all(this.id, turn.chat)) {
       undone.set(r.undoes, [...(undone.get(r.undoes) ?? []), r.id]);
     }
     return LANES.map((lane) => ({

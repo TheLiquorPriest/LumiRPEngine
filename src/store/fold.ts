@@ -78,6 +78,12 @@ export interface JobChange extends StoredChange {
   from: number;
 }
 
+/** His own change (plan §6.3 l.632): of no turn, kept with its chat and the moment it took effect (a job of his: when the job ended). */
+export interface OwnerChange extends StoredChange {
+  chat: string;
+  at: number;
+}
+
 /** One turn of a path to fold. */
 export interface FoldStep {
   node: string;
@@ -89,6 +95,22 @@ export interface FoldStep {
   changes: readonly StoredChange[];
   /** Jobs' changes that take effect just before this turn: the first on the path to begin after their job ended. */
   jobs?: readonly JobChange[];
+  /** His own changes that take effect just before this turn, after the jobs': the first on his chat's path to begin after each. */
+  owner?: readonly OwnerChange[];
+}
+
+/**
+ * Applies his own changes where they take effect (before the turn numbered `n`, or after a path's end), each checked as any change
+ * placed anew is; what did not apply, listed. They belong to no turn: their marks name none.
+ */
+export function applyOwner(env: FoldEnv, state: StoreState, owner: readonly OwnerChange[], n: number): NotApplied[] {
+  const items = owner.map((c): Item => ({ op: c.op, value: c.value, turn: "", n, by: c.by, cite: c.cite ?? null, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+  const out: NotApplied[] = [];
+  applyChecked(env, state, items, new Set()).forEach((o, k) => {
+    const c = owner[k];
+    if (!o.applied && c) out.push({ change: c.id, turn: "", op: c.op, lane: c.lane, reports: o.reports });
+  });
+  return out;
 }
 
 /** What applying one change came to. */
@@ -558,6 +580,11 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
         if (!o.applied && c) notApplied.push({ change: c.id, turn: c.turn, op: c.op, lane: c.lane, reports: o.reports });
       });
       for (const c of jobs) if (c.id > upto) upto = c.id;
+    }
+    const owner = step.owner ?? [];
+    if (owner.length > 0) {
+      notApplied.push(...applyOwner(env, state, owner, step.n));
+      for (const c of owner) if (c.id > upto) upto = c.id;
     }
     const first = step.changes[0]?.id ?? Number.POSITIVE_INFINITY;
     // Recorded on this very path, after everything before it: it folds as it was recorded.

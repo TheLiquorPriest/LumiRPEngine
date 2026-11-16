@@ -413,11 +413,17 @@ describe("the question's call", () => {
     play(s, "source", "m3", "A long rest.", 3, engine(tick(120)));
     s.sync("source", shown(["u1", "in"], ["m1", "Into the inn.", 1], ["u2", "down"], ["m2", "Down the stairs.", 2], ["u3", "rest"], ["m3", "A long rest.", 3]));
     // Lumiverse forks the chat at the second reply. `CHAT_FORKED` says the source, the branch and the old-to-new map, nothing more,
-    // and the turn lane tells the store so when it hears it; nothing has compared the branch yet.
+    // and the turn lane tells the store so when it hears it; nothing has compared the branch yet, and its line is there already.
     s.branchChat({ id: "branch", from: "source", map: { u1: "b-u1", m1: "b-m1", u2: "b-u2", m2: "b-m2" } });
     // The fork is at the last message of the source's path that the map names.
     expect(s.chat("branch")).toMatchObject({ sourceChat: "source", sourceMessage: "m2" });
-    expect(s.path("branch")).toEqual([]);
+    expect(s.path("branch").map((e) => [e.message, e.turn])).toEqual([
+      ["b-u1", null],
+      ["b-m1", s.path("source")[1]?.turn],
+      ["b-u2", null],
+      ["b-m2", shared.id],
+    ]);
+    expect(s.headState("branch").node).toBe(shared.node);
     const lines = seen(["b-u1", "in"], ["b-m1", "Into the inn.", 0], ["b-u2", "down"], ["b-m2", "Down the stairs.", 0], ["b-u3", "look around"]);
     const answer = s.turnStart("branch", lines, { follows: "b-u3" });
     expect([answer.known, answer.at]).toEqual([true, { message: "b-m2", turn: shared.id }]);

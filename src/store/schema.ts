@@ -219,6 +219,19 @@ ALTER TABLE change ADD COLUMN handle TEXT;
 UPDATE change SET handle = by;
 `,
   },
+  {
+    version: 9,
+    // His own changes (plan §6.3 l.632, §10.9, R-22, R-27): a change of no turn, kept with its chat (`chat`, its `turn` empty) and the
+    // moment it was made (`created`; a job of his: when it ended). A change of a turn names no chat. A chat's first comparison
+    // (`compared`, when it was; null before it): a branch has its path from the moment it is made, so its first comparison is told
+    // by this, not by an empty path; a chat compared already counts from when it was made.
+    sql: `
+ALTER TABLE change ADD COLUMN chat TEXT;
+CREATE INDEX change_owner ON change (user, chat) WHERE chat IS NOT NULL;
+ALTER TABLE chat ADD COLUMN compared INTEGER;
+UPDATE chat SET compared = created WHERE path <> '[]';
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

@@ -26,7 +26,7 @@ function journal(s: UserStore, account: string): { memo: JsonValue; cents: JsonV
 }
 
 describe("undo of one change", () => {
-  test("undoing a payment restores both balances, shows as a change of its own after the newest reply, and the card says so", () => {
+  test("undoing a payment restores both balances, shows as a change of his own after the newest reply, and the card says so", () => {
     const { s } = chat();
     const t1 = play(s, "c", "m1", "Wren pays for two nights.", 1, engine(pay("acct_wren", 250, "Two nights")));
     const t2 = play(s, "c", "m2", "She settles in.", 2, engine(tick(30)));
@@ -38,7 +38,9 @@ describe("undo of one change", () => {
 
     const done = s.undo(paid.id);
     expect(done.left).toEqual([]);
-    expect(done.changes.map((c) => [c.turn, c.op, c.lane, c.source, c.by, c.cite, c.applied])).toEqual([[t2.id, "post", "engine", "player", "player", { undoes: paid.id }, true]]);
+    expect(done.changes.map((c) => [c.turn, c.chat, c.op, c.lane, c.source, c.by, c.cite, c.applied])).toEqual([["", "c", "post", "engine", "player", "player", { undoes: paid.id }, true]]);
+    // It is his own: the next turn starts with it, and the turn it was undone after keeps its state.
+    expect(s.stateAt(t2.id).state.world.accounts.acct_wren).toBe((start.acct_wren ?? 0) - 250);
     const head = s.headState("c").state.world.accounts;
     expect([head.acct_wren ?? 0, head[market] ?? 0]).toEqual([start.acct_wren ?? 0, start[market] ?? 0]);
     // Nothing recorded was taken away: the payment is still its turn's change.

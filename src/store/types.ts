@@ -76,10 +76,15 @@ export interface ChangeInput {
   job?: string | null;
 }
 
-/** One stored change. `applied` says whether it applied when it was recorded, on its own path; `reports` say why not, or what did not add up. */
+/**
+ * One stored change. `applied` says whether it applied when it was recorded, on its own path; `reports` say why not, or what did not
+ * add up. His own change (plan §6.3 l.632) belongs to no turn: its `turn` is empty and `chat` names its chat.
+ */
 export interface ChangeRow {
   id: number;
   turn: string;
+  /** The chat of his own change; null for a turn's. */
+  chat: string | null;
   ord: number;
   lane: Lane;
   op: string;
@@ -211,7 +216,15 @@ export interface PathReport {
    * followed; the turns beyond are not found. Absent when none stopped.
    */
   branchStopped?: { chat: string; message: string; hops: number }[];
+  /** Messages now standing before a played turn that were not on the path before, each with the first turn after it. Absent: none. */
+  inserted?: { message: string; before: string }[];
 }
+
+/**
+ * Where a write goes (plan §10.9, R-73): to a turn (a turn's own call; an agent's job, to the turn that started it, with the job), or to
+ * his own changes, kept with the chat (his edit, what is done on his word outside a turn, a job he started, with the job).
+ */
+export type WriteTarget = { kind: "turn"; turn: string; job?: string } | { kind: "owner"; chat: string; job?: string };
 
 /** An agent's own line on a level of the tree. */
 export interface NoteLine {

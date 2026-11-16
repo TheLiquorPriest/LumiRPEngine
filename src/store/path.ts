@@ -28,9 +28,11 @@ export interface Match {
  * which was edited since it was saved; else `last`, the turn the path showed there last time, when
  * its date matches (swipes can share a date: Lumiverse's own migration gave every swipe of an older
  * message the message's date), edited too; else none (a reply no turn is tied to). Swipe positions
- * are never read: deleting a swipe shifts the later ones and changes nothing here.
+ * are never read: deleting a swipe shifts the later ones and changes nothing here. With `swipes`
+ * (the message's swipes, looked up only when a date ties), a turn whose saved text is still among
+ * them was not edited: the reply is another swipe made in the same second, and no turn's.
  */
-export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessage, "hash" | "date">, last: string | null = null): Match {
+export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessage, "hash" | "date">, last: string | null = null, swipes?: () => readonly { hash: string }[] | null): Match {
   const date = shown.date ?? null;
   const tied = candidates.filter((t) => t.status === "done" || t.status === "cut");
   const both = tied.find((t) => date !== null && t.date === date && t.hash === shown.hash);
@@ -38,10 +40,11 @@ export function matchTurn(candidates: readonly TurnRow[], shown: Pick<ShownMessa
   const byHash = tied.filter((t) => t.hash === shown.hash).sort((a, b) => b.created - a.created)[0];
   if (byHash) return { turn: byHash, edited: false };
   const byDate = date === null ? [] : tied.filter((t) => t.date === date);
-  if (byDate.length === 1 && byDate[0]) return { turn: byDate[0], edited: true };
-  const shownLast = last === null ? undefined : tied.find((t) => t.id === last && t.date === date);
-  if (shownLast) return { turn: shownLast, edited: true };
-  return { turn: null, edited: false };
+  const onlyDate = byDate.length === 1 ? byDate[0] : undefined;
+  const edited = onlyDate ?? (last === null ? undefined : tied.find((t) => t.id === last && t.date === date));
+  if (!edited) return { turn: null, edited: false };
+  const kept = edited.hash !== null && (swipes?.() ?? []).some((s) => s.hash === edited.hash);
+  return kept ? { turn: null, edited: false } : { turn: edited, edited: true };
 }
 
 /** Where a turn's swipe stands among a message's swipes now, looked up when needed: by date and hash, else by hash; null when none is it. */
