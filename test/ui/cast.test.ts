@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { CastStrikeReply } from "../../src/shared/api";
+import type { CastStrikeReply, CharacterReply, EntryRow, PerceptionRecordReply } from "../../src/shared/api";
 import { PAGES } from "../../src/ui/page-list";
 import { type CastShown, CastView, NO_CAST, readCast } from "../../src/ui/pages/cast";
 import { hashOf, routeOfHash } from "../../src/ui/web";
@@ -23,9 +23,13 @@ function view(shown: Partial<CastShown>, gateOpen = false) {
       gateOpen,
       onOpenGate: () => pressed.push("open gate"),
       onCloseGate: () => pressed.push("close gate"),
-      onOpen: (id) => pressed.push(["open", id]),
+      onOpen: (id, at) => pressed.push(at === undefined ? ["open", id] : ["open", id, at]),
       onClose: () => pressed.push("close"),
       onStrike: (ask) => pressed.push(ask),
+      onEdit: (edit) => pressed.push(edit),
+      onMore: (list, skip) => pressed.push(["more", list, skip]),
+      onNewest: () => pressed.push("newest"),
+      onDraft: (name, value) => pressed.push(["draft", name, value]),
     }),
   );
   return { tree, text: textOf(tree), pressed };
@@ -33,6 +37,28 @@ function view(shown: Partial<CastShown>, gateOpen = false) {
 
 const section = (tree: unknown, id: string): string => textOf(elements(tree).find((e) => e.props["data-section"] === id)?.props.children);
 const entry = (tree: unknown, id: string) => elements(tree).find((e) => e.props["data-entry"] === id);
+
+/** An entry of a record, to stand for what an away principal holds. */
+const WHEREABOUTS: EntryRow = { ...(ODILE_RECORD.knowledge.items[0] as EntryRow), id: "away:odile", part: "away", fields: { whereabouts: "At the toll house.", intention: "Wait for the reeve to leave." } };
+
+/** Odile's record with what the base, the sources, the Author's castings, an away principal, the game side and a long list add. */
+const RICH: CharacterReply = {
+  ...ODILE_RECORD,
+  now: { parts: ODILE_RECORD.now.parts, growth: [{ id: "g-1", text: "Distrusts the reeve.", cause: "The toll.", date: "5 Thawmonth" }] },
+  sources: [
+    { kind: "card", ref: "card-odile", defines: "her looks", created: 1, title: "Odile Holt", state: "changed" },
+    { kind: "entry", ref: "e-9", defines: null, created: 2, title: null, state: "gone" },
+  ],
+  castings: [{ turn: "turn-2", message: 3, imported: false, by: "player", wrote: { as: "principal", pinned: true, line: "Runs the ferry.", why: "She was asked to." } }],
+  away: WHEREABOUTS,
+  game: { ref: "entity:odile", where: { ".": ["The Ferry", "Thornbury"] }, holds: { items: [{ name: "a ferry pole" }] }, values: { items: [{ key: "coin", value: "12" }] } },
+  memories: {
+    items: ODILE_RECORD.memories.items.map((m) => (m.id === "mem-1" ? { ...m, fields: { ...m.fields, gist: "The rope." } } : m)),
+    total: 60,
+    before: 40,
+    after: 0,
+  },
+};
 
 describe("the Cast page", () => {
   test("lists every character with its casting, where its record came from and what it holds, struck counted apart", () => {
@@ -76,7 +102,8 @@ describe("the Cast page", () => {
     expect(textOf(entry(tree, "file-1")?.props.children)).toContain("filed");
     expect(section(tree, "perceptions")).toContain("Of turn turn-6, message 10");
     expect(section(tree, "castings")).toContain("turn turn-2, message 3 · by migration · carried by the migration");
-    expect(section(tree, "sources")).toContain("her looks and her trade");
+    expect(section(tree, "sources")).toContain("Odile Holt");
+    expect(elements(tree).some((e) => e.type === "input" && e.props.value === "her looks and her trade")).toBe(true);
   });
 
   test("Strike sends the entry and which; what the cast did comes back in its own terms, and a refusal in RPE's words", () => {
@@ -142,21 +169,23 @@ describe("the Cast page", () => {
 
     reader.strike({ id: "perc-1", struck: true });
     expect(shown.at(-1)?.striking).toBe("perc-1");
-    expect(asked[2]).toMatchObject({ key: "POST /api/v1/chats/:chat/cast/:character/strike", params: { chat: CHAT, character: ODILE.id }, body: { id: "perc-1", struck: true } });
+    // The character's open also asked who was on stage in the latest turns, for a perception to be written.
+    expect(asked[2]).toMatchObject({ key: "GET /api/v1/chats/:chat/perceptions", query: { count: 12 } });
+    expect(asked[3]).toMatchObject({ key: "POST /api/v1/chats/:chat/cast/:character/strike", params: { chat: CHAT, character: ODILE.id }, body: { id: "perc-1", struck: true } });
     const answer: CastStrikeReply = { changed: true, entry: { ...(ODILE_RECORD.perceptions.items[0] as CastStrikeReply["entry"]), struck: true }, alsoStruck: ["know-1"], letGo: [], alsoStood: [], heldAgain: [], notes: [] };
-    asked[2]?.answer(answer);
+    asked[3]?.answer(answer);
     await settle();
     expect(shown.at(-1)).toMatchObject({ striking: null, struck: { ask: { id: "perc-1", struck: true }, answer } });
-    expect(asked.slice(3).map((a) => a.key)).toEqual(["GET /api/v1/chats/:chat/cast", "GET /api/v1/chats/:chat/cast/:character"]);
+    expect(asked.slice(4).map((a) => a.key)).toEqual(["GET /api/v1/chats/:chat/cast", "GET /api/v1/chats/:chat/cast/:character"]);
 
     reader.strike({ id: "mind-1", struck: true });
-    asked[5]?.fail(new Error("A turn of this chat is running; strike it once it ends."));
+    asked[6]?.fail(new Error("A turn of this chat is running; strike it once it ends."));
     await settle();
     expect(shown.at(-1)).toMatchObject({ striking: null, strikeProblem: "A turn of this chat is running; strike it once it ends." });
 
     const count = shown.length;
     reader.stop();
-    asked[3]?.answer(CAST);
+    asked[4]?.answer(CAST);
     await settle();
     expect(shown.length).toBe(count);
   });

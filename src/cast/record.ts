@@ -18,6 +18,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
+import type { Stamp } from "../iface/source";
 import type { ChangeInput, Source, Store, UserStore } from "../store";
 import { CAST_WRITE, type CastSlice, fieldsOf, type RowPart, ROW_PARTS, type RowState, sliceOf, type WriteValue } from "./fold";
 import type { CastAt } from "./path";
@@ -456,6 +457,8 @@ export interface CastWrite {
   value: JsonObject;
   /** The story time the write is of, where it is none of the writer's moment: a memory is of the moment it comes from. */
   at?: number | null;
+  /** What the write says of where it came from (its source, precision, standing and citation), over the writer's own: a stamp that gives `source: null` leaves it unsourced. */
+  stamp?: Stamp;
 }
 
 /** Who writes, on which turn, at what story time, and when. */
@@ -493,7 +496,7 @@ export function writeCast(store: Store, writer: CastWriter, writes: readonly Cas
   const inputs = made.map((w): ChangeInput => {
     const value: WriteValue = { character: w.character, part: w.part, item: w.item, value: w.value, at: w.at === undefined ? writer.at : w.at, agent: writer.agent, when: writer.now };
     const source = writer.source ?? (writer.by === "player" ? "player" : undefined);
-    return { lane: "story", op: CAST_WRITE, value: value as unknown as JsonObject, by: writer.by, handle: writer.agent, job: writer.job, ...(source !== undefined ? { source } : {}) };
+    return { lane: "story", op: CAST_WRITE, value: value as unknown as JsonObject, by: writer.by, handle: writer.agent, job: writer.job, ...(source !== undefined ? { source } : {}), ...(w.stamp ?? {}) };
   });
   const u = store.user(writer.user);
   u.record(u.writeTarget({ chat: writer.chat ?? "", turn: writer.turn, job: writer.job }), inputs);
