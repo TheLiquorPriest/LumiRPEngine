@@ -35,6 +35,8 @@ Whether a stage's condition is met is a judgment, and it is yours or the Author'
 
 A stage can be moved back when the story undoes what met it. Say why.
 
+When a `quest` operation moves a stage the world built, its answer carries `authored`: what the world built for the stage reached (`reached`: its effects, rewards, gate, truth, cue, hints and the stages it goes on to) and for the one left (`left`: its rewards and effects). It is data and nothing in it is applied: what the story hands over, you land as ordinary operations (see the rewards below). `world_query` at the quest gives the same for every stage.
+
 ## What the player sees
 
 The journal the player reads is drawn from these records.
