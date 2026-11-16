@@ -607,11 +607,12 @@ Writes the engine lane. Takes no provenance.
 
 | Argument | Shape | Needed | What it is |
 |---|---|---|---|
-| `who` | text | yes | Whose roll it is. |
-| `for` | text | yes | What the roll decides, kept with it. |
+| `who` | text |  | Whose roll it is. |
+| `for` | text |  | What the roll decides, kept with it. |
 | `dice` | text |  | Dice to roll, such as 1d20+3, 2d6 or 4d6kh3. |
 | `check` | text |  | One of the world's checks, rolled with who's sheet. |
 | `against` | whole number |  | A difficulty the total must reach. |
+| `sum` | text |  | A sum to work out, with + - * / and brackets, such as 12.50 * 3 * 1.08. With dice or check it is kept with the roll; alone it is only answered. |
 
 Worked example:
 
