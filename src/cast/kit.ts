@@ -9,13 +9,14 @@ import type { ConfigRead } from "../app/config-read";
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
-import { described, IFACE_DEFAULTS, Reply, type Writes } from "../iface/kit";
+import { described, IFACE_DEFAULTS, type LastUseKeeper, lastUse, Reply, type Writes } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import { clockRecorded, type Store, type UserStore } from "../store";
 import { castAt } from "./path";
 import { IMPORTED_KIND, importedText } from "./imported";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
+import type { MemorySearch } from "./search";
 import type { BookReader, SecretFactOf } from "./secrets";
 import type { SourceReader, SourceState } from "./sources";
 
@@ -119,6 +120,10 @@ export interface CastDeps {
   books?: BookReader;
   /** Turns the id the lore shows a secret by (`e-112#2`, `w-31`) into the fact it is; without it only today's own forms of a fact id are read. */
   secretFact?: SecretFactOf;
+  /** Finds a character's memories by the words of a cue through the index file; without it, recall reads every memory. */
+  search?: MemorySearch;
+  /** What keeps the values each line of the answers part was last said with in a chat, for the Prompts preview; none: nothing is kept. */
+  lastUse?: LastUseKeeper;
   /** Settings over `CAST_DEFAULTS`. */
   settings?: Partial<CastSettings>;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */
@@ -176,8 +181,14 @@ export async function castHostTool(spec: CastToolSpec, lines: Lines, deps: CastD
       // A job of no chat has no chat's cast to work on: said in the answers' words, nothing written.
       const { scope } = ctx;
       if (scope.chat === undefined) return new Reply(lines).line("no_chat_run", { tool: spec.name }).fail().result();
-      const call: CastCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
-      return (await spec.run(given, call)).result();
+      // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
+      const use = lastUse(lines, deps.lastUse, scope, CAST_ANSWERS);
+      const call: CastCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: use.lines, reply: () => new Reply(use.lines) };
+      try {
+        return (await spec.run(given, call)).result();
+      } finally {
+        await use.keep();
+      }
     },
   };
 }

@@ -27,7 +27,7 @@ import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
 import { type App, LIVE_JOBS } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
-import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, playerMindOf, type SourceReader } from "../cast";
+import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, MemorySearch, playerMindOf, type SourceReader } from "../cast";
 import { castAt } from "../cast/path";
 import { charactersOf } from "../cast/record";
 import { holdersOf } from "../quests/holders";
@@ -312,6 +312,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // A world search's index of tokens in the index file (`store/search.ts`), following each chat's head as the store's writes change it.
   const stateIndex = new StateIndex({ store, index: app.index, log: (message) => app.log.warn(message), ...global.numbers(STATE_SEARCH_SETTING_DEFS) });
   store.onWrite((user, chats) => stateIndex.notify(user, chats));
+  // A character's memories found by the words of a cue through the same index file (`cast/search.ts`), fed as they are searched.
+  const memorySearch = new MemorySearch(app.index);
   // The lore's settings for a chat, read once for the lore, its index and the secrecy a turn starts with.
   const config = async (at: LoreScope) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS);
   const loreSettings = loreSettingsFor(config);
@@ -443,7 +445,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
       engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, places: settings.places, quests: settings.quests, placeSources, questHolders, ...(options.carried !== undefined ? { carried: options.carried } : {}), ...(options.worlds !== undefined ? { worlds: options.worlds } : {}), ...asked }),
-      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), now: () => clock.now(), settings: settings.cast }),
+      castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), secretFact: (user, shown) => secretFacts.secretFactOf(user, shown), search: memorySearch, now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
     ]);

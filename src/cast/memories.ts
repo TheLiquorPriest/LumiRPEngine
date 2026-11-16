@@ -102,8 +102,10 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
   if (self === null) return reply;
   leftOut(reply, it, RECALL_READS.reads);
   const from = typeof value.skip === "number" ? value.skip : 0;
+  // The index file narrows which memories are read to those that hold a word of the cue; the one rule of matching settles which touch it.
+  const found = call.deps.search === undefined ? null : await call.deps.search.candidates(call.scope.user, self.reading.record, self.character.id, [cue]);
   const touched = memoriesNow(self.reading.record, self.character.id, self.now, call.settings)
-    .filter((m) => touches(m.item, [cue]))
+    .filter((m) => (found === null || found.has(m.item.id)) && touches(m.item, [cue]))
     .sort(strongestFirst);
   const back = touched.slice(from, from + call.settings.recallItems);
   if (back.length === 0) return reply.line("no_memories", { cue });

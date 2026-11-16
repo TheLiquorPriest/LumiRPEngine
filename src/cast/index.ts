@@ -14,6 +14,7 @@ export { QUERY_PARTS } from "./query";
 export { REACHES } from "./perceive";
 export { CAST_FACT_DEFS, castFacts, type CastFacts, type OnStage, UNPERCEIVED_GROUPS } from "./facts";
 export { CAST_VIEWS, castPresentViews, castViews, type CastPresentView, type CastView, type CastViewInput, type CastViewName } from "./views";
+export { MemorySearch } from "./search";
 export { type SourceNow, type SourceReader } from "./sources";
 export { type BookReader, personNamed, worldAt } from "./secrets";
 export { filesAttachedOn } from "./imported";

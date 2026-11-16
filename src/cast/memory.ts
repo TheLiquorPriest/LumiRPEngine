@@ -96,21 +96,27 @@ export function memoriesNow(record: CastRecord, character: string, now: number |
 }
 
 /** Text as matching reads it: case and everything but letters and digits set aside, padded so that a phrase matches whole words only. */
-function words(text: string): string {
+export function words(text: string): string {
   return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
 }
 
 const texts = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/** What a memory's matching reads of it, each a text: the people and things it is tagged with, and all it says (its words, its gist, its tone, then those tags). */
+export function sayingsOf(item: CastItem): { tags: string[]; said: string[] } {
+  const tags = [...texts(item.fields.who), ...texts(item.fields.about)];
+  return { tags, said: [...texts(item.fields.text), ...texts(item.fields.gist), ...texts(item.fields.tone), ...tags] };
+}
 
 /**
  * Whether a memory touches any of `cues` (people, places, things, topics, feelings, in words): a cue
  * it is tagged with (who or what it is about), a cue that holds a tag as whole words, or a cue its own words hold, word for word.
  */
 export function touches(item: CastItem, cues: readonly string[]): boolean {
-  const tags = [...texts(item.fields.who), ...texts(item.fields.about)];
+  const { tags, said: sayings } = sayingsOf(item);
   const keys = new Set(tags.map(nameKey));
   const tagged = tags.map(words).filter((t) => t.trim() !== "");
-  const said = words([...texts(item.fields.text), ...texts(item.fields.gist), ...texts(item.fields.tone), ...tags].join(" "));
+  const said = words(sayings.join(" "));
   return cues.some((cue) => {
     const phrase = words(cue);
     // The cue is a tag, or holds one as whole words ("Wren Hale" touches a memory about "Wren"), or the memory's words hold the cue.

@@ -19,6 +19,7 @@ import { worldAt } from "./secrets";
 import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import { memoriesNow, type MemoryNow, strongestFirst, type Tier, touches, untakenPerceptions } from "./memory";
 import { perceptionView } from "./perceive";
+import type { MemorySearch } from "./search";
 import { type SourceReader, sourcesNow } from "./sources";
 
 /** What a view's layout is asked: to lay its fields out as text. The guidance's template part is one. */
@@ -56,6 +57,8 @@ export interface CastViewInput {
   cues?: readonly string[];
   /** Reads a bound source live in Lumiverse, for the sources shown with the base. */
   sources: SourceReader;
+  /** Finds the memories a cue touches through the index file, for `what-comes-to-mind`; without it, every memory is read. */
+  search?: MemorySearch;
   /** The prompt parts in force that lay the views out, by view. A view whose part is not given (switched off) is given no text. */
   layouts: Partial<Record<CastViewName, Layout>>;
   /** Settings over `CAST_DEFAULTS`: memory's, and what comes to mind's budget. */
@@ -102,9 +105,10 @@ function listed(items: JsonObject[]): Listed | undefined {
  * and words; the order is the tiers' and strength's arithmetic. The text grows with each memory, so the
  * most that fit is found by halving.
  */
-function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, tokens: (text: string) => number, layout: Layout): string {
+function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], found: ReadonlySet<string> | null, s: CastSettings, tokens: (text: string) => number, layout: Layout): string {
   const memories = memoriesNow(record, character.id, clock?.now ?? null, s);
-  const touching = (tier: Tier): MemoryNow[] => memories.filter((m) => m.tier === tier && touches(m.item, cues));
+  // What the index found narrows what is read; the one rule of matching still settles which of those touch the cues.
+  const touching = (tier: Tier): MemoryNow[] => memories.filter((m) => m.tier === tier && (found === null || found.has(m.item.id)) && touches(m.item, cues));
   const top = memories.filter((m) => m.tier === "top");
   const order = [...top, ...touching("short").reverse(), ...touching("long").sort(strongestFirst)];
   if (order.length === 0) return "";
@@ -191,7 +195,9 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     } else if (name === "what-comes-to-mind") {
       const layout = input.layouts[name];
       const people = input.present.filter((p) => nameKey(p) !== nameKey(character.name));
-      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, input.tokens, layout) });
+      const cued = [...people, ...(input.cues ?? [])];
+      const found = layout === undefined || input.search === undefined ? null : await input.search.candidates(input.user, record, character.id, cued);
+      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, cued, found, settings, input.tokens, layout) });
       continue;
     } else if (name === "unprocessed-perceptions") {
       // In full, oldest first, each with its date in story time where the clock shows one.
