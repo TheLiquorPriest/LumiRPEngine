@@ -3,7 +3,7 @@
 // what a turn was told and keeps. A panel's tap is held by the panel's own route. An ask longer than
 // `requests.textMost` is not kept, and each refusal is said in the words of `.prompts/request-answers.md`.
 
-import { loadGuidance } from "./guidance";
+import { loadGuidance } from "../app/guidance";
 import { route, RouteError } from "../app";
 import { JoinedTurnError } from "../store";
 import type { Turns } from "./lane";

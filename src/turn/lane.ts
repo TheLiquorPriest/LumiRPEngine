@@ -19,7 +19,7 @@
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
-import { type LinesPart, loadGuidance } from "./guidance";
+import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";

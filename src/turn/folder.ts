@@ -15,7 +15,7 @@
 // and kinds, which the door gives. So is `briefing.md`, what the lead was told at its run's start as it
 // was sent, which a kept request points into.
 
-import type { Fields, Guidance, LinesPart, TemplatePart } from "./guidance";
+import type { Fields, Guidance, LinesPart, TemplatePart } from "../app/guidance";
 import type { JsonValue, LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
 import type { TaggedTurn } from "../adapter/lumiverse/provider";
 import type { CastView } from "../cast";

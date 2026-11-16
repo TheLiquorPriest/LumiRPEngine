@@ -2,7 +2,7 @@
 // map read them (`GuidanceFiles` in `src/iface`), for the tools the harness is handed and for the
 // world state's map in the briefing; what of a part could not be read is logged as it is read.
 
-import { loadGuidance } from "./guidance";
+import { loadGuidance } from "../app/guidance";
 import type { FilesPort, Log, Scope } from "rp-harness/contract";
 import { type GuidanceFiles, Lines, toolText } from "../iface";
 import { splitFile } from "../iface/texts";

@@ -11,14 +11,15 @@
 // in full, which is the world state's horizon, with each place's map when `map` is named too
 // (`world:scene(full)`, `world:scene(full, map)`); what is due (`world:due`), the world state's due
 // section, within the share of its budget the briefing gives it; the world's ruleset (`ruleset`), as
-// `world_query` gives it; the turn's reply as saved (`turn:reply(saved)`), laid out by its own part; the
-// next batch of the chat's lore no run has indexed (`index:batch`), worded by the lore's lines in force;
-// the lore index's bindings as the character the agent plays may know them (`index:known-to-self`); then
-// any view the host adds (`views`); then the cast's views of the character the agent plays
-// (`cast:self(…)`), with who the open scene has on stage and its place as what is present. A view with
-// nothing in it is given all the same, in its own file's words for that: the layout's `none` part, the
-// world state's `horizon_none` and `due_none` lines, the lore's `known_none` and `batch_none`. Only a
-// name none of these spaces gives is left out, and RPH says it could not be found.
+// `world_query` gives it; the turn's reply as saved (`turn:reply(saved)`) and the turn's result (`turn:result`: the beats it opened in
+// order and its staged changes in both lanes, plan §10.4 step 5), each laid out by its own part; the next batch of the chat's lore no run
+// has indexed (`index:batch`), worded by the lore's lines in force; the lore index's bindings as the character the agent plays may know
+// them (`index:known-to-self`); then any view the host adds (`views`); then the cast's views of a character (`cast:<name>(…)`, §10.5),
+// or of the one the agent plays (`cast:self(…)`), with who the open scene has on stage and its place as what is present. A view with
+// nothing in it is given all the same, in its own file's words for that: the layout's `none` part (each cast view's for an agent that
+// plays nobody and is given `cast:self(…)`), the world state's `horizon_none` and `due_none` lines, the lore's `known_none` and
+// `batch_none`. Only a name none of these spaces gives is left out, and RPH says it could not be found. The Agents page reads what each
+// name resolves to through the same resolver (`givenViews`).
 //
 // A job's every change of state is kept (`jobs.ts`); its end is recorded in the store in the same write,
 // so what it recorded takes effect before the next turn to begin, and the sessions of the turn that
@@ -27,13 +28,15 @@
 // holds it.
 
 import type { Database } from "bun:sqlite";
-import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "./guidance";
+import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type SourceReader } from "../cast";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
-import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
+import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
 import { storyBrief } from "../story";
+import { storyAt } from "../story/path";
+import { StoryRecord } from "../story/record";
 import type { TreeNotes, TreeSuggestions } from "../tree";
 import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
@@ -71,7 +74,7 @@ export interface EventsDeps {
 }
 
 /** The turn's own views an agent can be given by name (plan §5.4, §10.4, Appendix C), but the scene's. */
-const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)", mapDrawn: DRAWN_MAP } as const;
+const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)", result: "turn:result", mapDrawn: DRAWN_MAP } as const;
 
 /** The field a view's layout shows its part for nothing by: set only when an agent is given that view by name with nothing in it. */
 const NONE = "none";
@@ -190,11 +193,32 @@ async function turnView(r: Reading, ref: string): Promise<string | null | undefi
       const reply = savedReply(r.deps, r.scope.user, turn);
       return reply === null ? nothing(layout) : layout.render({ reply }).text.trim();
     }
+    case VIEWS.result:
+      return await turnResult(r);
     case VIEWS.mapDrawn:
       return await drawnMap(r.deps, r.scope);
   }
   const scene = sceneOf(ref);
   return scene === null ? undefined : sectionOf(await r.world(scene.maps), "horizon");
+}
+
+/**
+ * The turn's result (plan §10.4 step 5): the beats it opened in the story record, in order, and its staged changes in both lanes, each
+ * lane's in the order recorded, a change that was not applied marked so; laid out by the part `turn-result`, with nothing yet, its part
+ * for nothing. Null for an agent of no turn, or where the part is off.
+ */
+async function turnResult(r: Reading): Promise<string | null> {
+  const { turn, user, chat } = r.scope;
+  const layout = turn === undefined ? undefined : await r.guidance().part(PARTS.turnResult);
+  if (turn === undefined || layout?.format !== "template") return null;
+  const { store } = r.deps;
+  const record = StoryRecord.read(store, user, storyAt(store.user(user), chat, turn));
+  const beats = record.of("beat").flatMap((beat) => (beat.opened === turn && typeof beat.fields.text === "string" ? [{ text: beat.fields.text }] : []));
+  const changes = store.user(user).changes(turn);
+  const lane = (of: Lane) => changes.filter((c) => c.lane === of).map((c) => ({ op: c.op, value: JSON.stringify(c.value), ...(c.applied ? {} : { refused: true }) }));
+  const [engine, story] = [lane("engine"), lane("story")];
+  if (beats.length === 0 && engine.length === 0 && story.length === 0) return nothing(layout);
+  return layout.render({ beats, engine, story }).text.trim();
 }
 
 /**
@@ -207,24 +231,35 @@ async function knownView(deps: EventsDeps, scope: Scope, agent: AgentRef, guidan
   return (await loreLines(guidance))?.line("known_none") ?? "";
 }
 
-/** `cast:self(base, mind, …)`: views of the character the agent plays, by name. */
-const CAST_SELF = /^cast:self\((.*)\)$/;
+/** `cast:<name>(base, mind, …)`: views of a character by its name; `cast:self(…)`: of the character the agent plays. */
+const CAST_NAMED = /^cast:([^()]+)\((.*)\)$/;
+/** The name `cast:` takes for the character the agent plays. */
+const SELF = "self";
 
 /**
- * The cast's views that `ref` names of the character `agent` plays, each laid out by its part in force for the chat, one after
- * another; with nothing in any of them (the cast holds no record of the character yet), each one's part for nothing. Null when the
- * ref is not the cast's, the agent plays nobody, or no part lays out a view it names. A name among them that is not the cast's is
- * left out.
+ * The cast's views that `ref` names of a character (by its name, or `self` for the one `agent` plays), each laid out by its part in
+ * force for the chat, one after another; with nothing in any of them (the cast holds no record of the character yet), each one's part
+ * for nothing, as for an agent of nobody given `cast:self(…)`. Null when the ref is not the cast's, or no part lays out a view it names.
+ * A name among them that is not the cast's is left out.
  */
-async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: string, moment: AttachMoment): Promise<string | null> {
-  const inner = CAST_SELF.exec(ref)?.[1];
-  const { plays } = agent;
-  if (inner === undefined || plays === undefined) return null;
-  const names = inner
+async function castNamed(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: string, moment: AttachMoment): Promise<string | null> {
+  const said = CAST_NAMED.exec(ref);
+  const named = said?.[1]?.trim();
+  if (said?.[2] === undefined || named === undefined || named === "") return null;
+  const character = named === SELF ? agent.plays : named;
+  const names = said[2]
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name !== "");
   const [layouts, settings] = await Promise.all([castLayouts(loadGuidance(deps.files, scope), names), turnSettings(deps.files, scope, deps.log)]);
+  const none = (fields: Fields): string | null => {
+    const words = names.flatMap((name) => {
+      const layout = layouts[name as keyof typeof layouts];
+      return layout === undefined ? [] : [nothing(layout, fields)];
+    });
+    return words.length === 0 ? null : words.filter((w) => w !== "").join("\n\n");
+  };
+  if (character === undefined) return none({});
   const turn = scope.turn ?? null;
   const stage = stageAt(deps.store, scope.user, scope.chat, turn);
   const views = await castViews(names, {
@@ -233,7 +268,7 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     chat: scope.chat,
     turn,
     job: agent.job ?? null,
-    character: plays,
+    character,
     present: stage?.who ?? [],
     // What comes to mind is cued by who and what is really there (R-144): the stage's place and things, and what the moment the lead handed the agent names.
     cues: [...new Set([...(stage === null ? [] : stageCues(stage)), ...namedIn(deps.store, scope.user, scope.chat, turn, [moment.task, moment.message ?? ""])])],
@@ -246,12 +281,39 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     .map((view) => view.text)
     .filter((text) => text.trim() !== "")
     .join("\n\n");
-  if (text !== "") return text;
-  const none = views.flatMap((view) => {
-    const layout = layouts[view.name];
-    return layout === undefined ? [] : [nothing(layout, { name: plays })];
-  });
-  return none.length === 0 ? null : none.filter((said) => said !== "").join("\n\n");
+  return text !== "" ? text : none({ name: character });
+}
+
+/**
+ * What RPE gives by each name an agent is given, at the scope, from its own spaces in the order the header says: the text, or null for a
+ * name none of them gives. A name whose view cannot be read is logged and given null.
+ */
+export async function givenViews(deps: EventsDeps, scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment): Promise<{ ref: string; text: string | null }[]> {
+  let guidance: Guidance | undefined;
+  const inForce = (): Guidance => (guidance ??= loadGuidance(deps.files, scope));
+  const compiled = new Map<boolean, Promise<Compiled | null>>();
+  const reading: Reading = {
+    deps,
+    scope,
+    guidance: inForce,
+    world: (maps) => {
+      const world = compiled.get(maps) ?? compiledWorld(deps, scope, inForce(), maps);
+      compiled.set(maps, world);
+      return world;
+    },
+    maps: refs.some((ref) => sceneOf(ref)?.maps === true),
+  };
+  const out: { ref: string; text: string | null }[] = [];
+  for (const ref of refs) {
+    try {
+      const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
+      out.push({ ref, text: mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castNamed(deps, scope, agent, ref, moment))) });
+    } catch (error) {
+      deps.log.warn("What an agent was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
+      out.push({ ref, text: null });
+    }
+  }
+  return out;
 }
 
 /** One thing told, kept with its turn. */
@@ -327,35 +389,10 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       await tell(at, "attachments", { agent, refs, moment });
       // RPE's views are a chat's: a job of no chat is given none of them, and RPH says each could not be found.
       if (at.chat === undefined) return [];
-      const scope: Scope = at;
       // A view RPE gives is given even with nothing in it, in its file's words for that. Every name none of RPE's spaces gives is left
       // out, and RPH says so. What cannot be read leaves out its name alone.
-      let guidance: Guidance | undefined;
-      const inForce = (): Guidance => (guidance ??= loadGuidance(deps.files, scope));
-      const compiled = new Map<boolean, Promise<Compiled | null>>();
-      const reading: Reading = {
-        deps,
-        scope,
-        guidance: inForce,
-        world: (maps) => {
-          const world = compiled.get(maps) ?? compiledWorld(deps, scope, inForce(), maps);
-          compiled.set(maps, world);
-          return world;
-        },
-        maps: refs.some(({ ref, own }) => !own && sceneOf(ref)?.maps === true),
-      };
-      const blocks: ContextBlock[] = [];
-      for (const { ref, own } of refs) {
-        if (own) continue;
-        try {
-          const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
-          const text = mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castSelf(deps, scope, agent, ref, moment)));
-          if (text !== null) blocks.push({ name: ref, text });
-        } catch (error) {
-          deps.log.warn("What an agent was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
-        }
-      }
-      return blocks;
+      const given = await givenViews(deps, at, agent, refs.flatMap(({ ref, own }) => (own ? [] : [ref])), moment);
+      return given.flatMap(({ ref, text }) => (text === null ? [] : [{ name: ref, text }]));
     },
     consent: (scope, grant) => keep(scope, "consent", grant.by, grant.topic, grant),
     gapCheck: (scope, check) => keep(scope, "gap-check", check.by, check.topic, check),

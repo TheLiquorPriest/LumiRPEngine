@@ -8,7 +8,7 @@
 // through the app's hook (`App.hooks.views`), not from one area's alone.
 
 import type { Clock, CreateHarnessOptions } from "rp-harness";
-import { loadGuidance } from "./guidance";
+import { loadGuidance } from "../app/guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";

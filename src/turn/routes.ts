@@ -28,6 +28,7 @@ import type { RunRecord } from "./runs";
 import { turnSettings } from "./settings";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
+import { stateRoutes } from "./state-routes";
 import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
@@ -537,5 +538,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     }),
     ...requestRoutes(turns),
     ...promptRoutes(turns),
+    ...stateRoutes(turns),
   ] as const;
 }

@@ -20,7 +20,7 @@
 // no state. If the event was missed, the next intake ties it the same way.
 
 import type { Database } from "bun:sqlite";
-import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "./guidance";
+import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
@@ -74,6 +74,8 @@ export const PARTS = {
   turnErrors: "turn-errors",
   /** The turn's reply as saved, as an agent is given it by name (`turn:reply(saved)`). */
   turnReply: "turn-reply",
+  /** The turn's result, the beats it opened and its staged changes in both lanes, as an agent is given it by name (`turn:result`). */
+  turnResult: "turn-result",
 } as const;
 
 /** The names the briefing's template places the host's blocks by. */

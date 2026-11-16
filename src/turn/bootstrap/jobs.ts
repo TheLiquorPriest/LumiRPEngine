@@ -12,7 +12,7 @@
 // Which of a chat's jobs are its bootstrap jobs, with what each was given, is kept in RPH's store beside
 // RPH's own record of its jobs.
 
-import { loadGuidance } from "../guidance";
+import { loadGuidance } from "../../app/guidance";
 import type { AgentRef, JobRefusal, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { Turns } from "../lane";
