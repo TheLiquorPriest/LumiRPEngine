@@ -24,6 +24,7 @@
 //                                by message numbers in one line
 //     deletedWords: 24           words of each such reply it quotes
 //     notAppliedBudget: 1500     tokens it spends listing what no longer applies after a flip; past it, a count
+//     jobBudget: 1500            tokens it spends listing, thing by thing, what each finished job changed; past it, a count
 //   reply:
 //     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
 //   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
@@ -80,6 +81,8 @@ export interface TurnSettings {
   deletedWords: number;
   /** Tokens the briefing spends listing what no longer applies after a flip. */
   notAppliedBudget: number;
+  /** Tokens the briefing spends listing what each finished job changed, change by change. */
+  jobBudget: number;
   /** The history window (`src/story/window`). */
   window: WindowSettings;
   /** The cast's tools and views, for the chat. */
@@ -137,6 +140,8 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   deletedBudget: 1000,
   deletedWords: 24,
   notAppliedBudget: 1500,
+  // PlanTurnKinds-5: what each finished job changed, listed while it fits; the rest counted, and all of it on the Jobs page.
+  jobBudget: 1500,
   // Appendix D.1, as the window's own module keeps them.
   window: WINDOW_DEFAULTS,
   // Appendix D.1, as each area keeps its own.
@@ -250,6 +255,15 @@ const DEFS = {
     perConnection: false,
     name: "What a flip stopped, in the briefing",
     about: "The tokens the briefing spends listing, change by change, what no longer applies after an earlier reply was flipped to another swipe; past them the rest are counted, and the world state lists them.",
+    effect: "turn",
+  },
+  jobBudget: {
+    key: "since.jobBudget",
+    default: TURN_DEFAULTS.jobBudget,
+    takes: { type: "whole", least: 0 },
+    perConnection: false,
+    name: "What a finished job changed, in the briefing",
+    about: "The tokens the briefing spends on each finished job's changes, thing by thing, with why one did not take effect; past them the rest are counted, and the Jobs page lists them all.",
     effect: "turn",
   },
   window: {
@@ -389,6 +403,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     deletedBudget: read.value(DEFS.deletedBudget) as number,
     deletedWords: read.value(DEFS.deletedWords) as number,
     notAppliedBudget: read.value(DEFS.notAppliedBudget) as number,
+    jobBudget: read.value(DEFS.jobBudget) as number,
     window: {
       size: read.value(DEFS.window) as number | null,
       step: read.value(DEFS.step) as number | null,

@@ -5,7 +5,7 @@
 // generated types.
 
 import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices, PromptMapEdit, ShownSlice } from "rp-harness/contract";
-import { agentRef, type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
+import { agentRef, type Exactly, type Holds, type Infer, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { RequestRecord } from "./requests";
 import type { NotGiven, RunKind, RunState, StoppedBy } from "./runs";
@@ -377,11 +377,6 @@ export const requestReply = shape.named(
 );
 
 export const settleReply = shape.named("SettleReply", "The newest turn, and the Settle now run begun on it.", shape.object({ turn: shape.turnId(), run: T }));
-
-// ---------------------------------------------------------------- jobs
-
-export const jobsReply = shape.named("JobsReply", "The user's jobs (of every chat, or of one) as RPH last kept each, the newest started first.", shape.object({ jobs: shape.list(jobView) }));
-export const jobCancelReply = shape.named("JobCancelReply", "The job as it stands after the cancel; one that had already ended comes back as it ended.", shape.object({ job: jobView }));
 
 // ---------------------------------------------------------------- the world (the store's tree, plan §6.4, §6.6)
 

@@ -37,7 +37,7 @@ import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, type SecretSettingsFor } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
-import { clockRecorded, type DueSource, type MapText, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
+import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathEntry, type PathReport, type Report, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
@@ -339,6 +339,8 @@ interface Found {
   /** The turns a delete took, quoted while they fit (`since.deletedBudget`, `since.deletedWords`), and what a flip stopped, listed while it fits (`since.notAppliedBudget`). */
   deleted: { budget: number; words: number };
   notAppliedBudget: number;
+  /** What each finished job changed, listed while it fits (`since.jobBudget`); the rest counted. */
+  jobBudget: number;
   /** A text's tokens as the model layer counts them (`tokenCount`). */
   tokens: (text: string) => number;
   /** The chat's out-of-play settings, by which an edit of his he made no choice on is told or not. */
@@ -645,7 +647,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
+        const found = { steps, notices: lines(notices), guidance, last, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
@@ -1031,7 +1033,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
-        const found = { steps, notices: lines(notices), guidance, last, again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
+        const found = { steps, notices: lines(notices), guidance, last, again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, jobBudget: settings.jobBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(scope, settings.lead);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
@@ -1668,7 +1670,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (tied.status === "cut" && last.kind !== "settle") add("cut-short", notices?.line("cut_short", { message: tied.message }), { turn: last.turn });
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
-    if (!again) for (const job of this.#jobsEnded(user, turn)) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
+    if (!again) for (const job of this.#jobsEnded(user, turn, { keys, place, tokens: found.tokens, budget: found.jobBudget })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
     // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed and what it changed; a swipe of
     // the turn told them is told them again, a continue is not.
     if (!again) {
@@ -1702,29 +1704,54 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * The jobs whose end a turn is told (plan §10.9, §13.5): each job of the chat whose end the store recorded after the turn before it
    * on its own line began, and before it began itself, so that it is the first turn to begin after the job ended, where what the job
    * recorded takes effect; one a turn started, only on a line that holds that turn. Each with the notice of how it ended and that
-   * notice's data: the job, the definition it ran as, its brief, its report, and of what it recorded the operations that took effect
-   * here and those that did not.
+   * notice's data: the job, the definition it ran as, its brief, its report, and what it recorded, change by change: what the change
+   * is about, its operation and value, and for one that did not take effect why, each report code in the notices part's words (its
+   * `keys`), with the later turn whose value stands (by its message's number) where one does. Each job's changes are listed while
+   * they fit `since.jobBudget`; the rest are counted, and the Jobs page lists them all.
    */
-  #jobsEnded(user: string, turn: TurnRow): { turn: string | null; line: string; fields: JsonObject }[] {
+  #jobsEnded(
+    user: string,
+    turn: TurnRow,
+    told: { keys: Record<string, unknown>; place: ReadonlyMap<string, number>; tokens: (text: string) => number; budget: number },
+  ): { turn: string | null; line: string; fields: JsonObject }[] {
     const store = this.#d.store.user(user);
     const parent = turn.parent === null ? null : store.turn(turn.parent);
     const ended = jobsEndedBetween(this.#d.store.db, user, turn.chat, parent?.created ?? Number.MIN_SAFE_INTEGER, turn.created);
     if (ended.length === 0) return [];
-    const did = new Map<string, { applied: string[]; notApplied: string[] }>();
-    for (const placed of store.jobsBefore(turn.id)) {
-      const { job, op } = placed.change;
-      if (job === null) continue;
-      const ops = did.get(job) ?? { applied: [], notApplied: [] };
-      (placed.applied ? ops.applied : ops.notApplied).push(op);
-      did.set(job, ops);
+    const placed = new Map<string, { change: ChangeRow; about: string[]; applied: boolean; reports: Report[] }[]>();
+    for (const c of store.changesBefore(turn.id)) {
+      if (c.change.job === null) continue;
+      const of = placed.get(c.change.job);
+      if (of === undefined) placed.set(c.change.job, [c]);
+      else of.push(c);
     }
     return ended.flatMap(({ view }) => {
       const started = view.scope.turn ?? null;
       const line = JOB_ENDS[view.state];
       if (line === undefined || (started !== null && !madeAfter(store, turn, started))) return [];
-      const ops = did.get(view.id);
-      // A list put in whole, shown once by a block on it (the templates' own value under ".").
-      const fields = { job: view.id, agent: view.agent, brief: view.brief, ...(view.report !== undefined ? { report: view.report } : {}), applied: { ".": ops?.applied ?? [] }, not_applied: { ".": ops?.notApplied ?? [] } };
+      const applied: JsonObject[] = [];
+      const notApplied: JsonObject[] = [];
+      let spent = 0;
+      let more = 0;
+      for (const c of placed.get(view.id) ?? []) {
+        const entry: JsonObject = { op: c.change.op, about: c.about.join(", "), value: JSON.stringify(c.change.value) };
+        if (!c.applied) {
+          entry.why = [...new Set(c.reports.map((r) => r.code))].map((code) => (typeof told.keys[code] === "string" ? told.keys[code] : code)).join("; ");
+          const later = c.reports.find((r) => r.code === "later_value")?.values?.turn;
+          if (typeof later === "string") {
+            const message = store.turn(later)?.message ?? null;
+            entry.later = message === null ? later : (told.place.get(message) ?? message);
+          }
+        }
+        const cost = told.tokens(Object.values(entry).join(" "));
+        if (spent + cost > told.budget) {
+          more++;
+          continue;
+        }
+        spent += cost;
+        (c.applied ? applied : notApplied).push(entry);
+      }
+      const fields = { job: view.id, agent: view.agent, brief: view.brief, ...(view.report !== undefined ? { report: view.report } : {}), applied, not_applied: notApplied, ...(more > 0 ? { more } : {}) };
       return [{ turn: started, line, fields }];
     });
   }

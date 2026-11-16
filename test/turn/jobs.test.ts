@@ -81,7 +81,7 @@ test("the turn a job's changes take effect at is told the job finished, with its
   await play(b, null);
   await play(b, "I count my coins.");
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  const told = `A job finished: ${JOB} (steward). Its brief: Tally the bar's stock. Its report: The stock is short by a cask. Of what it recorded, these took effect now: set.`;
+  const told = `A job finished: ${JOB} (steward). Its brief: Tally the bar's stock. Its report: The stock is short by a cask. Took effect now: set`;
   expect(sent[0]).not.toContain(told);
   expect(sent[1]).toContain(told);
   expect(sent[2]).toContain(told);

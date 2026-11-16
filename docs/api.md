@@ -1313,31 +1313,71 @@ Starts a chat's bootstrap job (taking on a story with a past), with the player's
 | Body | [`BootstrapStartAsk`](#bootstrapstartask) |
 | Reply | [`JobView`](#jobview) |
 
-### `GET /api/v1/chats/:chat/jobs`
+### `POST /api/v1/chats/:chat/jobs`
 
-The user's jobs of one chat, as RPH last kept each, the newest started first.
+He starts a job of the chat, as his own and tied to no turn, with any agent definition, its brief, what it is given and limits of its own.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | takes no body |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
-| Body | none |
-| Reply | [`JobsReply`](#jobsreply) |
+| Body | [`JobStartAsk`](#jobstartask) |
+| Reply | [`JobReply`](#jobreply) |
 
 ### `GET /api/v1/jobs`
 
-The user's jobs, of every chat, as RPH last kept each, the newest started first.
+His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
+| Query | `chat` (may be left out): `string`, Only the jobs of this chat<br>`state` (may be left out): `"queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted"`, Only the jobs in this state<br>`limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: JobView[]; next: string | null }`, a page at a time |
+
+### `POST /api/v1/jobs`
+
+He starts a job of no chat, as his own and tied to no turn, with any agent definition, its brief, what it is given and limits of its own.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`JobStartAsk`](#jobstartask) |
+| Reply | [`JobReply`](#jobreply) |
+
+### `GET /api/v1/jobs/:job`
+
+One job: its record, its run's trace, what its run spent by agent, and how full each of its agents' windows is while it runs.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
 | Query | none |
 | Body | none |
-| Reply | [`JobsReply`](#jobsreply) |
+| Reply | [`JobShownReply`](#jobshownreply) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `POST /api/v1/jobs/:job/answer`
+
+Answers a job that asks whether to go on: it goes on in its own session, to the point it asks at next (none: it asks no more), or ends with what it has.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `job` |
+| Query | none |
+| Body | `{ go: "on"; askAt?: number } | { go: "end" }` |
+| Reply | [`JobReply`](#jobreply) |
 
 ### `POST /api/v1/jobs/:job/cancel`
 
@@ -1350,7 +1390,85 @@ Cancels a job; one that has ended already is given as it ended.
 | Params | `job` |
 | Query | none |
 | Body | none |
-| Reply | [`JobCancelReply`](#jobcancelreply) |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/continue`
+
+Carries on a job that stopped at one of its own limits, from its own session where it stood, with more of each limit named.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `job` |
+| Query | none |
+| Body | `{ limits?: JobLimitsAsk }` |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/hold`
+
+Holds a job that waits for a place: it keeps its place and does not start until let go.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/pause`
+
+Pauses a running job: every agent of its run waits at its next call until he lets it go.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/release`
+
+Lets go a job he held while it waited, or one he paused while it ran.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/restart`
+
+Starts again a job that was interrupted by a restart, failed or was cancelled: a new job of his with the same agent, brief, attachments and limits, tied to no turn.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
+
+### `POST /api/v1/jobs/:job/resume`
+
+Resumes an interrupted job from the last call its own session holds, with what it had done and spent.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobReply`](#jobreply) |
 
 ### `GET /api/v1/jobs/:job/told`
 
@@ -1364,6 +1482,45 @@ What a job he started (which belongs to no turn) was told as it went: its gap ch
 | Query | none |
 | Body | none |
 | Reply | [`JobToldReply`](#jobtoldreply) |
+
+### `POST /api/v1/jobs/:job/word`
+
+Says a word to a running job's lead, which hears it at its next call as his.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `job` |
+| Query | none |
+| Body | `{ text: string }` |
+| Reply | [`JobReply`](#jobreply) |
+
+### `GET /api/v1/jobs/switches`
+
+His switches over all his jobs, and the limits in force for jobs (for the chat's levels, or the shared ones) with the use each is held against over the last 24 hours.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `chat` (may be left out): `string`, The chat whose levels the limits are read for; the shared levels when left out |
+| Body | none |
+| Reply | [`JobSwitchesReply`](#jobswitchesreply) |
+
+### `POST /api/v1/jobs/switches`
+
+Switches all his jobs off or on, holds them or lets them go, and answers the switches with the limits in force.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ off?: boolean; held?: boolean }` |
+| Reply | [`JobSwitchesReply`](#jobswitchesreply) |
 
 ## Agents
 
@@ -3417,16 +3574,6 @@ export interface InstallFact {
 }
 ```
 
-### `JobCancelReply`
-
-The job as it stands after the cancel; one that had already ended comes back as it ended.
-
-```ts
-export interface JobCancelReply {
-  job: JobView;
-}
-```
-
 ### `JobLimits`
 
 Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on.
@@ -3442,6 +3589,33 @@ export interface JobLimits {
 }
 ```
 
+### `JobLimitsAsk`
+
+Limits a start or a carry-on gives one job, each a whole number above 0: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which it is held and he is asked whether to go on.
+
+```ts
+export interface JobLimitsAsk {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokens?: number;
+  time?: number;
+  askAt?: number;
+}
+```
+
+### `JobLimitShown`
+
+A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against over the last 24 hours, or now for the jobs at once; null where it counts no day's use.
+
+```ts
+export interface JobLimitShown {
+  key: string;
+  value: JsonValue;
+  used: number | null;
+}
+```
+
 ### `JobRefusal`
 
 Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs.
@@ -3450,13 +3624,41 @@ Why a job was not started or a control did not apply: jobs switched off; the day
 export type JobRefusal = { refused: "off" } | { refused: "day-count"; max: number; value: number; connection?: string } | { refused: "day-tokens"; max: number; value: number } | { refused: "limit"; limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "askAt"; value: number } | { refused: "agent"; agent: string } | { refused: "no-job"; id: string } | { refused: "state"; id: string; state: JobState; applies: JobState[] } | { refused: "not-at-limit"; id: string } | { refused: "hook"; hook: string; reason: string } | { refused: "connection"; connection: string } | { refused: "part"; part: "tag-check" | "reply-contract" };
 ```
 
-### `JobsReply`
+### `JobReply`
 
-The user's jobs (of every chat, or of one) as RPH last kept each, the newest started first.
+A job as it stands after the call.
 
 ```ts
-export interface JobsReply {
-  jobs: JobView[];
+export interface JobReply {
+  job: JobView;
+}
+```
+
+### `JobShownReply`
+
+One job: its record, its run's trace as the live view shows a turn's, what its run spent by agent (null before it spent anything or after the record was let go), and how full each of its agents' windows is while it runs.
+
+```ts
+export interface JobShownReply {
+  job: JobView;
+  trace: TraceRecord[];
+  usage: RunUsage | null;
+  windows: { agent: AgentRef; gauge: WindowGauge }[];
+}
+```
+
+### `JobStartAsk`
+
+A job he starts: the agent definition it runs as, what it is to do, what it is given by name, and limits of its own.
+
+```ts
+export interface JobStartAsk {
+  definition: string;
+  brief: string;
+  /** What it is given by name, as an agent's attachments are named. */
+  given?: string[];
+  /** Limits of its own: each holds in place of the setting's for this job. */
+  limits?: JobLimitsAsk;
 }
 ```
 
@@ -3466,6 +3668,18 @@ Where a job stands.
 
 ```ts
 export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+```
+
+### `JobSwitchesReply`
+
+His two switches over all his jobs (switched off: none starts; held: those running wait at their next call and none starts), and the limits in force for jobs with the day's use.
+
+```ts
+export interface JobSwitchesReply {
+  off: boolean;
+  held: boolean;
+  limits: JobLimitShown[];
+}
 ```
 
 ### `JobToldReply`
@@ -5005,6 +5219,18 @@ export interface RunShown {
   trace: TraceRecord[];
   /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
   requests: { agent: string; definition: string; call: number; file: string }[];
+}
+```
+
+### `RunUsage`
+
+What a run spent, in all and by agent.
+
+```ts
+export interface RunUsage {
+  run: string;
+  total: Usage;
+  agents: { agent: AgentRef; usage: Usage }[];
 }
 ```
 
@@ -6648,6 +6874,18 @@ The web search provider he set, as the Connections page shows it: its address (n
 export interface WebProviderShown {
   address: string | null;
   key: boolean;
+}
+```
+
+### `WindowGauge`
+
+How full an agent's context is: the tokens it holds, its model's window, and the room kept for its answer.
+
+```ts
+export interface WindowGauge {
+  used: number;
+  window: number;
+  reserve: number;
 }
 ```
 

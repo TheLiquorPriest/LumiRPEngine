@@ -7,16 +7,15 @@
 // with its own trace and the request files the harness kept for it, its timings with intake's steps and
 // the waits apart, where each slice of its prompt was, what he asked for, the Author's record, the tools
 // it found, its changes by lane, each agent's open todo items, what it was told (gap checks, consents,
-// rules fired, attachments, drops) and, for a carried turn, the old engine's record; what a job he
-// started was told; the Stop of a turn going on now; Settle now, a run on the chat's newest
+// rules fired, attachments, drops) and, for a carried turn, the old engine's record; the Stop of a turn
+// going on now; Settle now, a run on the chat's newest
 // turn that writes nothing into the chat; the files of a turn's folder, listed and read, none outside it;
-// the world's tree for a chat, at its head or at a turn, from the store's own view; what he asks for
-// beside his words (`request-routes.ts`); and the jobs (plan §13.5), of the user or of one chat, each
-// as RPH last kept it (how it stands, what started it, what it spent), and the cancel of one. Every
+// the world's tree for a chat, at its head or at a turn, from the store's own view; and what he asks for
+// beside his words (`request-routes.ts`). The jobs are `job-routes.ts`'s. Every
 // route is a page's: it answers only for the user this RPE belongs to. A route that is handed a turn's
 // id answers a turn joined to another (a continue's held turn) as a fact: the turn it joined (`joined`).
 
-import type { AgentRef, JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
+import type { AgentRef, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
 import { isRecord, type JsonValue } from "../shared/json";
 import { type ChangeRow, JoinedTurnError, type NodeView, type ValuesShown } from "../store";
@@ -32,7 +31,7 @@ import { rulesRoutes } from "./rules-routes";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
 import { stateRoutes } from "./state-routes";
-import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
+import { type ChangeView, chatsReply, fileReply, folderReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
 
 /** What the world's tree shows when the page names nothing: the world, one level in, each level with its own values. */
@@ -157,11 +156,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     const held = row !== null && row.chat === chat && row.joined !== null ? turns.runs.byHeld(user, turn) : null;
     return held !== null ? runFolder(held) : folderOf(turnOf(user, chat, turn));
   };
-
-  /** The user's jobs as RPH last kept each, of one chat or of every chat, the newest started first. */
-  const jobsOf = async (user: string, chat?: string): Promise<{ jobs: JobView[] }> => ({
-    jobs: (await turns.harness.jobs.list({ user, ...(chat !== undefined ? { chat } : {}) })).jobs,
-  });
 
   /**
    * The lore of a turn's prompt as its intake kept it in the turn's folder (`turn.json`): the ids of the entries Lumiverse activated
@@ -491,52 +485,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         };
         walk(ref, 0);
         return { at: ref, nodes };
-      },
-    }),
-    route({
-      method: "GET",
-      path: "/api/v1/jobs",
-      access: "page",
-      group: "jobs",
-      does: "The user's jobs, of every chat, as RPH last kept each, the newest started first.",
-      reply: jobsReply,
-      handle: ({ user }) => jobsOf(user),
-    }),
-    route({
-      method: "GET",
-      path: "/api/v1/chats/:chat/jobs",
-      access: "page",
-      group: "jobs",
-      does: "The user's jobs of one chat, as RPH last kept each, the newest started first.",
-      reply: jobsReply,
-      handle: ({ user, params }) => jobsOf(user, params.chat),
-    }),
-    route({
-      method: "POST",
-      path: "/api/v1/jobs/:job/cancel",
-      access: "page",
-      group: "jobs",
-      does: "Cancels a job; one that has ended already is given as it ended.",
-      reply: jobCancelReply,
-      // A job that has ended already is given as it ended: nothing of it is cancelled. Another user's job is no job of his.
-      handle: async ({ user, params }) => {
-        const jobs = turns.harness.jobs;
-        const job = await jobs.get(user, params.job);
-        if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
-        return { job: (await jobs.cancel(user, job.id)) ?? job };
-      },
-    }),
-    route({
-      method: "GET",
-      path: "/api/v1/jobs/:job/told",
-      access: "page",
-      group: "jobs",
-      does: "What a job he started (which belongs to no turn) was told as it went: its gap checks, consents and rules fired.",
-      reply: jobToldReply,
-      handle: async ({ user, params }) => {
-        const job = await turns.harness.jobs.get(user, params.job);
-        if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
-        return { job: job.id, told: toldTo(user, { job: job.id }) };
       },
     }),
     ...requestRoutes(turns),

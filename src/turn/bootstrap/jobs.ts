@@ -15,6 +15,7 @@
 import { loadGuidance } from "../../app/guidance";
 import type { AgentRef, JobRefusal, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
+import { refusalWords } from "../job-routes";
 import type { Turns } from "../lane";
 import { turnSettings } from "../settings";
 import { NO_SESSION, turnErrorWords } from "../turns";
@@ -85,31 +86,6 @@ function keptOf(value: JsonValue | undefined): KeptJob[] {
 
 function refused(status: number, why: string): BootstrapStart {
   return { refused: { status, why } };
-}
-
-/** Why RPH started no job, or why a control of one did nothing, in RPE's words for the page: RPH gives the fact and its numbers. */
-export function refusalWords(refusal: JobRefusal): string {
-  switch (refusal.refused) {
-    case "off":
-      return "jobs are switched off on the Jobs page.";
-    case "day-count":
-      return `${refusal.value} jobs${refusal.connection !== undefined ? ` on connection ${refusal.connection}` : ""} were started in the last 24 hours, and the setting allows ${refusal.max}.`;
-    case "day-tokens":
-      return `jobs spent ${refusal.value} tokens in the last 24 hours, and the setting allows ${refusal.max}.`;
-    case "limit":
-      return `the job's ${refusal.limit} limit is ${refusal.value}, and a limit is a whole number above 0.`;
-    case "agent":
-      return `there is no agent definition ${refusal.agent} in force, or no model for it to run on.`;
-    case "no-job":
-      return `there is no job ${refusal.id}.`;
-    case "state":
-      return `job ${refusal.id} is ${refusal.state}; that is done only to a job that is ${refusal.applies.join(" or ")}.`;
-    case "not-at-limit":
-      return `job ${refusal.id} did not stop at one of its limits, so more of one would not let it go on.`;
-    // The hook's reason is said in its own words.
-    case "hook":
-      return `his hook ${refusal.hook} kept it from starting: ${refusal.reason}`;
-  }
 }
 
 export class BootstrapJobs {

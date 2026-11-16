@@ -816,11 +816,6 @@ export interface InstallFact {
   from: "config.json" | "environment" | "install";
 }
 
-/** The job as it stands after the cancel; one that had already ended comes back as it ended. */
-export interface JobCancelReply {
-  job: JobView;
-}
-
 /** Limits of one job's own run, each holding only where it is tighter than the setting's: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which the job is held and the owner asked whether to go on. */
 export interface JobLimits {
   calls?: number;
@@ -831,16 +826,58 @@ export interface JobLimits {
   askAt?: number;
 }
 
+/** Limits a start or a carry-on gives one job, each a whole number above 0: model calls, tokens sent, tokens written, tokens together as the day's job tokens are counted, seconds, and the tokens at which it is held and he is asked whether to go on. */
+export interface JobLimitsAsk {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokens?: number;
+  time?: number;
+  askAt?: number;
+}
+
+/** A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against over the last 24 hours, or now for the jobs at once; null where it counts no day's use. */
+export interface JobLimitShown {
+  key: string;
+  value: JsonValue;
+  used: number | null;
+}
+
 /** Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs. */
 export type JobRefusal = { refused: "off" } | { refused: "day-count"; max: number; value: number; connection?: string } | { refused: "day-tokens"; max: number; value: number } | { refused: "limit"; limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "askAt"; value: number } | { refused: "agent"; agent: string } | { refused: "no-job"; id: string } | { refused: "state"; id: string; state: JobState; applies: JobState[] } | { refused: "not-at-limit"; id: string } | { refused: "hook"; hook: string; reason: string } | { refused: "connection"; connection: string } | { refused: "part"; part: "tag-check" | "reply-contract" };
 
-/** The user's jobs (of every chat, or of one) as RPH last kept each, the newest started first. */
-export interface JobsReply {
-  jobs: JobView[];
+/** A job as it stands after the call. */
+export interface JobReply {
+  job: JobView;
+}
+
+/** One job: its record, its run's trace as the live view shows a turn's, what its run spent by agent (null before it spent anything or after the record was let go), and how full each of its agents' windows is while it runs. */
+export interface JobShownReply {
+  job: JobView;
+  trace: TraceRecord[];
+  usage: RunUsage | null;
+  windows: { agent: AgentRef; gauge: WindowGauge }[];
+}
+
+/** A job he starts: the agent definition it runs as, what it is to do, what it is given by name, and limits of its own. */
+export interface JobStartAsk {
+  definition: string;
+  brief: string;
+  /** What it is given by name, as an agent's attachments are named. */
+  given?: string[];
+  /** Limits of its own: each holds in place of the setting's for this job. */
+  limits?: JobLimitsAsk;
 }
 
 /** Where a job stands. */
 export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+
+/** His two switches over all his jobs (switched off: none starts; held: those running wait at their next call and none starts), and the limits in force for jobs with the day's use. */
+export interface JobSwitchesReply {
+  off: boolean;
+  held: boolean;
+  limits: JobLimitShown[];
+}
 
 /** What a job he started was told as it went. */
 export interface JobToldReply {
@@ -1880,6 +1917,13 @@ export interface RunShown {
   trace: TraceRecord[];
   /** The files of the turn's folder that hold its model calls' requests as sent, where the harness kept them: by agent and call, each named by its path below the folder. */
   requests: { agent: string; definition: string; call: number; file: string }[];
+}
+
+/** What a run spent, in all and by agent. */
+export interface RunUsage {
+  run: string;
+  total: Usage;
+  agents: { agent: AgentRef; usage: Usage }[];
 }
 
 /** Sampling by its usual names, as a preset sets it; each one absent is the connection's own. */
@@ -2965,6 +3009,13 @@ export interface WebProviderShown {
   key: boolean;
 }
 
+/** How full an agent's context is: the tokens it holds, its model's window, and the room kept for its answer. */
+export interface WindowGauge {
+  used: number;
+  window: number;
+  reserve: number;
+}
+
 /** The level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */
 export interface WorldReply {
   at: string;
@@ -3153,12 +3204,12 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The user's jobs of one chat, as RPH last kept each, the newest started first. */
-  "GET /api/v1/chats/:chat/jobs": {
+  /** He starts a job of the chat, as his own and tied to no turn, with any agent definition, its brief, what it is given and limits of its own. */
+  "POST /api/v1/chats/:chat/jobs": {
     params: { chat: string };
     query: Record<string, never>;
-    body: undefined;
-    reply: JobsReply;
+    body: JobStartAsk;
+    reply: JobReply;
     paged: false;
     long: false;
     joined: false;
@@ -4043,12 +4094,42 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The user's jobs, of every chat, as RPH last kept each, the newest started first. */
+  /** His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did. */
   "GET /api/v1/jobs": {
     params: Record<string, never>;
+    query: { chat?: string; state?: "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted"; limit?: number; cursor?: string };
+    body: undefined;
+    reply: { items: JobView[]; next: string | null };
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** He starts a job of no chat, as his own and tied to no turn, with any agent definition, its brief, what it is given and limits of its own. */
+  "POST /api/v1/jobs": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: JobStartAsk;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One job: its record, its run's trace, what its run spent by agent, and how full each of its agents' windows is while it runs. */
+  "GET /api/v1/jobs/:job": {
+    params: { job: string };
     query: Record<string, never>;
     body: undefined;
-    reply: JobsReply;
+    reply: JobShownReply;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** Answers a job that asks whether to go on: it goes on in its own session, to the point it asks at next (none: it asks no more), or ends with what it has. */
+  "POST /api/v1/jobs/:job/answer": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: { go: "on"; askAt?: number } | { go: "end" };
+    reply: JobReply;
     paged: false;
     long: false;
     joined: false;
@@ -4058,7 +4139,67 @@ export interface ApiRoutes {
     params: { job: string };
     query: Record<string, never>;
     body: undefined;
-    reply: JobCancelReply;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Carries on a job that stopped at one of its own limits, from its own session where it stood, with more of each limit named. */
+  "POST /api/v1/jobs/:job/continue": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: { limits?: JobLimitsAsk };
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Holds a job that waits for a place: it keeps its place and does not start until let go. */
+  "POST /api/v1/jobs/:job/hold": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Pauses a running job: every agent of its run waits at its next call until he lets it go. */
+  "POST /api/v1/jobs/:job/pause": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Lets go a job he held while it waited, or one he paused while it ran. */
+  "POST /api/v1/jobs/:job/release": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Starts again a job that was interrupted by a restart, failed or was cancelled: a new job of his with the same agent, brief, attachments and limits, tied to no turn. */
+  "POST /api/v1/jobs/:job/restart": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Resumes an interrupted job from the last call its own session holds, with what it had done and spent. */
+  "POST /api/v1/jobs/:job/resume": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JobReply;
     paged: false;
     long: false;
     joined: false;
@@ -4069,6 +4210,36 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: JobToldReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Says a word to a running job's lead, which hears it at its next call as his. */
+  "POST /api/v1/jobs/:job/word": {
+    params: { job: string };
+    query: Record<string, never>;
+    body: { text: string };
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** His switches over all his jobs, and the limits in force for jobs (for the chat's levels, or the shared ones) with the use each is held against over the last 24 hours. */
+  "GET /api/v1/jobs/switches": {
+    params: Record<string, never>;
+    query: { chat?: string };
+    body: undefined;
+    reply: JobSwitchesReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Switches all his jobs off or on, holds them or lets them go, and answers the switches with the limits in force. */
+  "POST /api/v1/jobs/switches": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { off?: boolean; held?: boolean };
+    reply: JobSwitchesReply;
     paged: false;
     long: false;
     joined: false;
