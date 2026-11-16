@@ -4,9 +4,10 @@
 // files, written through the tree as RPH's own writer; an agent's write to them is refused, since only
 // the turn's working folders are an agent's (`TURN_WRITABLE`). Each file that holds words is laid out by
 // its prompt part under `.prompts/`, so its layout and words are the user's; `world-state.md` is the
-// briefing's world state as its own part laid it out, and `turn.json`, the turn's record, holds data only,
-// merged into (`mergeTurnRecord`) since its run's end and its message's tie complete it too. A file whose
-// part is switched off, or that lays out nothing, is not written.
+// briefing's world state as its own part laid it out, `cast/<name>/` holds every view the cast lays out
+// of each character on stage, one file a view by its `cast-*` part, and `turn.json`, the turn's record,
+// holds data only, merged into (`mergeTurnRecord`) since its run's end and its message's tie complete it
+// too. A file whose part is switched off, or that lays out nothing, is not written.
 //
 // The views of the prompt itself (the whole prompt, the history it holds, the preset's guidance, the
 // persona, the character) are the harness's prompt map's, their one writer: it writes them in this
@@ -17,6 +18,7 @@
 import type { Fields, Guidance, LinesPart, TemplatePart } from "rp-harness";
 import type { JsonValue, LiveApi, PromptMessage, Scope, TurnRequest } from "rp-harness/contract";
 import type { TaggedTurn } from "../adapter/lumiverse/provider";
+import type { CastView } from "../cast";
 import type { ActivatedRead } from "../lore/indexing";
 import { mergeTurnRecord, TURN_RECORD, type TreeFiles } from "../tree";
 
@@ -26,6 +28,7 @@ export const TURN_FILES = {
   worldState: "world-state.md",
   turn: TURN_RECORD,
   attempts: "previous-attempts/",
+  cast: "cast/",
 } as const;
 
 /** The prompt parts the files are laid out by. */
@@ -36,6 +39,18 @@ export interface Attempt {
   turn: string;
   reply: string | null;
   intent: string | null;
+}
+
+/** A character on stage at the turn, by the name the scene gives, and the cast's views of them that hold anything, each laid out by its part. */
+export interface CastFolder {
+  name: string;
+  views: readonly CastView[];
+}
+
+/** A character's folder name in `cast/`: the name with what a path cannot hold made a dash; null for a name that leaves nothing. */
+function castFolderName(name: string): string | null {
+  const safe = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/^\.+/, "").trim();
+  return safe === "" ? null : safe;
 }
 
 export interface FolderDeps {
@@ -56,13 +71,15 @@ export interface FolderAsk {
   request: TurnRequest;
   /** The ids of the entries the lore map named in the Author's briefing, as the map writes them. */
   loreMap: readonly string[];
-  /** The entries that activated for the prompt, as the lore map read them at intake: the lore file is laid out from them, reading nothing again. */
+  /** The entries that activated for the prompt, in the tag's order with the lore map's ids and how each activated, each with its text as the prompt carried it (none where it was not found there): the lore file is laid out from them, reading nothing again. */
   lore: readonly ActivatedRead[];
   attempts: readonly Attempt[];
+  /** The cast's views of those on stage, read at the turn's start (none where no scene is open); awaited when the folder is written. */
+  cast: Promise<readonly CastFolder[]>;
   received: number;
 }
 
-/** The lore map as the briefing holds it, then each entry that activated for the prompt, in full as intake read it (`FolderAsk.lore`). */
+/** The lore map as the briefing holds it, then each entry that activated for the prompt, its text as the prompt carried it (`FolderAsk.lore`). */
 function loreFields(ask: FolderAsk, loreMap: string | undefined): Fields {
   const entries = ask.lore.map((e) => ({ id: e.id, title: e.title, ...(e.source !== "" ? { source: e.source } : {}), ...(e.how !== undefined ? { how: e.how } : {}), ...(e.text !== undefined ? { text: e.text } : {}) }));
   return { ...(loreMap !== undefined ? { lore_map: loreMap } : {}), entries };
@@ -115,15 +132,26 @@ export async function writeTurnFolder(d: FolderDeps, ask: FolderAsk): Promise<st
     return result.path;
   };
   const loreMap = ask.request.briefing.find((b) => b.name === "lore-map")?.text;
+  const failed = new Set<string>();
+  let cast: readonly CastFolder[] = [];
+  try {
+    cast = await ask.cast;
+  } catch (error) {
+    failed.add(`The cast's views of those on stage could not be read for the turn's folder: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const settled = await Promise.allSettled([
     write(TURN_FILES.lore, lorePart?.render(loreFields(ask, loreMap)).text),
     write(TURN_FILES.worldState, ask.request.briefing.find((b) => b.name === "world-state")?.text),
     ...ask.attempts.map((a, i) =>
       write(`${TURN_FILES.attempts}attempt-${i + 1}.md`, attemptPart?.render({ n: i + 1, turn: a.turn, ...(a.intent !== null ? { intent: a.intent } : {}), ...(a.reply !== null ? { reply: a.reply } : {}) }).text),
     ),
+    ...cast.flatMap((c) => {
+      const named = castFolderName(c.name);
+      return named === null ? [] : c.views.map((v) => write(`${TURN_FILES.cast}${named}/${v.name.replace(/:/g, "-")}.md`, v.text));
+    }),
   ]);
   const written = settled.flatMap((s) => (s.status === "fulfilled" && s.value !== null ? [s.value] : []));
-  const failed = new Set(settled.flatMap((s) => (s.status === "rejected" ? [s.reason instanceof Error ? s.reason.message : String(s.reason)] : [])));
+  for (const s of settled) if (s.status === "rejected") failed.add(s.reason instanceof Error ? s.reason.message : String(s.reason));
   try {
     await mergeTurnRecord(d.files, ask.scope, { fields: turnData(ask, written) });
   } catch (error) {

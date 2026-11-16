@@ -42,6 +42,13 @@ export interface TurnPrompts extends PromptPort {
   keptFrom(user: string, turn: string): string | null;
   /** Where the slices of the chat's prompts were found, by turn, as RPH saved it; null for a turn that has none kept. */
   located(user: string, turn: string): LocatedSlices | null;
+  /** What a turn's request carried as kept: its raw layout and the receipt's cut (`Cut`, as JSON); null for a turn whose prompt is not kept. */
+  carried(user: string, turn: string): { layout: RawLayout; cut: unknown } | null;
+  /**
+   * The chat's turns whose prompt slices are kept, newest first: `limit` of them, after the place `after` (`<received>~<turn>`) when
+   * named; each with when its request came, where its slices were and the receipt's cut.
+   */
+  locatedPage(user: string, chat: string, limit: number, after?: string): { turn: string; received: number; located: LocatedSlices; cut: unknown }[];
   /**
    * Lets go of the prompts the chat's turns carried, and where their slices were, but for the newest `keep` of them and those of turns
    * going on (`going`); inside a queued write.
@@ -138,6 +145,24 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
     located(user, turn) {
       const row = db.query<{ located: string }, [string, string]>("SELECT located FROM prompt_located WHERE user = ? AND turn = ?").get(user, turn);
       return row === null ? null : (JSON.parse(row.located) as LocatedSlices);
+    },
+
+    carried(user, turn) {
+      const row = db.query<{ layout: string; cut: string }, [string, string]>("SELECT layout, cut FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
+      return row === null ? null : { layout: JSON.parse(row.layout) as RawLayout, cut: JSON.parse(row.cut) as unknown };
+    },
+
+    locatedPage(user, chat, limit, after) {
+      const at = after?.indexOf("~") ?? -1;
+      const from = after === undefined || at < 0 ? null : { received: Number(after.slice(0, at)), turn: after.slice(at + 1) };
+      const base = "SELECT p.turn, p.received, p.cut, l.located FROM turn_prompt p JOIN prompt_located l ON l.user = p.user AND l.turn = p.turn WHERE p.user = ? AND p.chat = ?";
+      const rows =
+        from === null
+          ? db.query<{ turn: string; received: number; cut: string; located: string }, [string, string, number]>(`${base} ORDER BY p.received DESC, p.turn DESC LIMIT ?`).all(user, chat, limit)
+          : db
+              .query<{ turn: string; received: number; cut: string; located: string }, [string, string, number, number, string, number]>(`${base} AND (p.received < ? OR (p.received = ? AND p.turn < ?)) ORDER BY p.received DESC, p.turn DESC LIMIT ?`)
+              .all(user, chat, from.received, from.received, from.turn, limit);
+      return rows.map((r) => ({ turn: r.turn, received: r.received, located: JSON.parse(r.located) as LocatedSlices, cut: JSON.parse(r.cut) as unknown }));
     },
 
     prune(into, user, chat, keep, going) {

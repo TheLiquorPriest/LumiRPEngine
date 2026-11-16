@@ -26,6 +26,7 @@ import type { Turns } from "./lane";
 import { turnRecordFields } from "./record";
 import type { RunRecord } from "./runs";
 import { turnSettings } from "./settings";
+import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
 import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
 import { NO_SESSION } from "./turns";
@@ -208,6 +209,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     );
   };
 
+  /** A turn as the list gives it: its latest run's kind and status, and the times of its reply (its latest run that wrote into the chat; a Settle now run's own times are among its runs). */
   const summary = (user: string, chat: string, r: RunRecord) => {
     const store = turns.store.user(user);
     const row = store.turn(r.turn);
@@ -219,7 +221,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       message: row?.message ?? null,
       status: r.status,
       marks: turns.marks.ofTurn(user, r.turn),
-      timings: momentsOf(r),
+      timings: momentsOf(turns.runs.reply(user, r.turn) ?? r),
       usage: spent(turns.runs.ofTurn(user, r.turn)),
     };
   };
@@ -267,11 +269,13 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     const records = (await Promise.all([...folders].map((each) => turns.trace.records({ user, chat: r.chat, session: r.session, turn: each })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
     const runs = byRun(records);
     const within = readFrom(r.turn, runs, run, from);
+    // What went to the chat is the reply's: a Settle now run writes nothing there.
+    const said = turns.runs.reply(user, r.turn) ?? r;
     return {
       ...summary(user, chat, r),
       chat: r.chat,
       intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
-      reply: { text: r.reply, progress: [...r.progress] },
+      reply: { text: said.reply, progress: [...said.progress] },
       error: r.error,
       trace: records.filter(within),
       lore: await keptLore(r),
@@ -532,5 +536,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       },
     }),
     ...requestRoutes(turns),
+    ...promptRoutes(turns),
   ] as const;
 }

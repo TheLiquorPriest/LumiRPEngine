@@ -4,7 +4,7 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
-import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices } from "rp-harness/contract";
+import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices, PromptMapEdit, ShownSlice } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { RequestRecord } from "./requests";
@@ -175,18 +175,86 @@ export const requestHeldReply = shape.named("RequestHeldReply", "The request hel
 export const requestWithdrawnReply = shape.named("RequestWithdrawnReply", "The request was withdrawn.", shape.object({ withdrawn: shape.literal(true) }));
 
 const sliceAt = shape.object({ message: field(N, "The prompt's message, by place from 0."), start: N, end: N });
+const sliceKind = shape.named("SliceKind", "A slice's kind, from the prompt map's fixed list.", shape.oneOf("instructions", "style", "character", "persona", "world", "note", "lore", "history", "other"));
+const promptFront = field(shape.object({ length: N, brokenBy: opt(T) }), "The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held.");
 const locatedSlices = shape.named(
   "LocatedSlices",
   "Where RPH found each slice of the preset's map in a turn's prompt: each slice's marker, kind, places and length; the text that belongs to no slice; the notices of what changed since the turn before; and how much of the prompt's front stayed the same.",
   shape.object({
     preset: nullable(presetRef),
-    slices: shape.list(shape.object({ marker: T, kind: shape.oneOf("instructions", "style", "character", "persona", "world", "note", "lore", "history", "other"), at: shape.list(sliceAt), length: N, hash: T })),
+    slices: shape.list(shape.object({ marker: T, kind: sliceKind, at: shape.list(sliceAt), length: N, hash: T })),
     unclaimed: shape.list(sliceAt),
     notices: shape.list(promptNotice),
-    front: field(shape.object({ length: N, brokenBy: opt(T) }), "The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held."),
+    front: promptFront,
   }),
 );
 type LocatedMirrored = Holds<Mutually<Infer<typeof locatedSlices>, LocatedSlices>>;
+
+// ---------------------------------------------------------------- the Prompt page
+
+const shownSlice = shape.named(
+  "PromptSliceShown",
+  "A slice of the preset's map as found in a turn's prompt: its marker, kind, line and behaviour as the map has them, whether he edited it, its text and places there, how it was found, and what the chat application's breakdown said of it.",
+  shape.object({
+    marker: T,
+    kind: sliceKind,
+    line: opt(T, "One line on what it is; absent where the map has none (a slice of the raw layout)."),
+    behaviour: opt(shape.oneOf("fixed", "scene", "turn"), "How its text goes from turn to turn; absent as for `line`."),
+    edited: opt(shape.literal(true), "He changed it on the Prompt page; a new mapping keeps it."),
+    text: T,
+    length: N,
+    at: shape.list(sliceAt),
+    found: opt(shape.oneOf("signature", "block", "place"), "How it was found: by a signature of its text, by the chat application's block name, or by its place among its neighbours."),
+    breakdown: opt(shape.oneOf("confirmed", "corrected"), "What the chat application's own breakdown said there: it agreed with the map's finder, or the finder was corrected to it."),
+    hint: opt(T, "The breakdown's block the slice was found by."),
+  }),
+);
+type ShownSliceMirrored = Holds<Mutually<Infer<typeof shownSlice>, ShownSlice>>;
+
+const promptClipped = shape.named(
+  "PromptClipped",
+  "Lumiverse's own clipping inside RPE's window: how many of the window's messages the prompt does not hold, and why (its memory's summary stands for them, its message limit, or the preset's context size; null where it could not be told).",
+  shape.object({ count: N, by: nullable(shape.oneOf("memory", "message-limit", "context-size")) }),
+);
+
+export const promptShownReply = shape.named(
+  "PromptShown",
+  "The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, and the old engines' blocks the preset still holds.",
+  shape.object({
+    turn: shape.turnId(),
+    preset: nullable(presetRef),
+    mapped: field(shape.yesNo(), "The slices are the learned map's; false: the raw layout's, named by the chat application's blocks and by place."),
+    complete: field(shape.yesNo(), "The prompt's text could be told apart; false: slices cannot be found in some of it."),
+    slices: shape.list(shownSlice),
+    unclaimed: shape.list(shape.object({ message: N, start: N, end: N, text: T })),
+    notices: shape.list(promptNotice),
+    front: promptFront,
+    clipped: field(nullable(promptClipped), "Null where the window's messages are all in the prompt."),
+    old: field(
+      shape.list(shape.object({ kind: shape.oneOf("block", "outlet"), name: T, in: T })),
+      "The old engines' blocks the preset still holds: a block named `RPEngine · <step>` (its step), or an `{{outlet::lre_…}}` reference left in a block's text (the outlet), each with the block it stands in.",
+    ),
+  }),
+);
+
+export const promptTurnShown = shape.named(
+  "PromptTurnShown",
+  "One turn's notices and front, as the Prompt page lists them turn by turn: its number on the chat's path (null where it is not on it now), when its request came, and Lumiverse's clipping.",
+  shape.object({ turn: shape.turnId(), n: nullable(N), at: N, notices: shape.list(promptNotice), front: promptFront, clipped: nullable(promptClipped) }),
+);
+
+export const promptEditAsk = shape.named(
+  "PromptEditAsk",
+  "One of his edits to the prompt map: rename a marker, merge slices under one, split one where given words begin, correct a line, change a kind.",
+  shape.union(
+    shape.object({ edit: shape.literal("rename"), marker: T, to: T }),
+    shape.object({ edit: shape.literal("merge"), markers: shape.list(T), as: T }),
+    shape.object({ edit: shape.literal("split"), marker: T, at: T, second: T }),
+    shape.object({ edit: shape.literal("line"), marker: T, line: T }),
+    shape.object({ edit: shape.literal("kind"), marker: T, to: sliceKind }),
+  ),
+);
+type PromptEditMirrored = Holds<Mutually<Infer<typeof promptEditAsk>, PromptMapEdit>>;
 
 const reportShown = shape.object({ code: T, values: opt(shape.record(shape.json())) });
 const changeShown = shape.named(

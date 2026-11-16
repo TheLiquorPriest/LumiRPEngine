@@ -405,6 +405,11 @@ export class Runs {
     return row === null ? null : recordOf(user, row);
   }
 
+  /** A turn's reply as it stands: its latest run that wrote into the chat, never a Settle now run, which writes nothing there; null where none did. */
+  reply(user: string, turn: string): RunRecord | null {
+    return this.ofTurn(user, turn).findLast((r) => r.kind !== "settle") ?? null;
+  }
+
   /** Every run of a turn, oldest first: its first, then each continue's; the one going on now as it stands. */
   ofTurn(user: string, turn: string): RunRecord[] {
     const live = this.running(user, turn);

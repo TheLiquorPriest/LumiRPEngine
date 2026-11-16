@@ -30,7 +30,7 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
-import { CAST_VIEWS, castMark, castPresentViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
+import { CAST_VIEWS, castMark, castPresentViews, castViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type SecretSettingsFor } from "../lore";
@@ -41,7 +41,7 @@ import { joinStory, type SceneSession, sceneSession, storyBrief, storyCoverage, 
 import { storyAt } from "../story/path";
 import { storySoFar } from "../story/sofar";
 import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
-import { type Attempt, type FolderAsk, writeAlongside } from "./folder";
+import { type Attempt, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import type { Writes } from "./kv";
 import type { TurnPrompts } from "./prompt";
@@ -667,7 +667,16 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           }, "keeping what a turn was told and its story time");
           if (asking.length > 0) this.#d.requests.changed(user, chat);
         }
-        ask = { scope, guidance, tagged, messages, request, loreMap, lore: activated, attempts: replaced === null ? [] : this.#attempts(user, chat, replaced), received };
+        // The cast's views for the folder are read now, at the turn's start, beside the Author's first call; the folder awaits them.
+        const cast = this.#castFolder(scope, guidance, settings);
+        cast.catch(() => undefined);
+        // Each activated entry's text in the lore file is the text the prompt carried, as the door found it there (`TagLore.text`), never
+        // the entry read again: the lore map lists the tag's entries first, in its order. One the check took out, or not found, has none.
+        const lore = activated.map(({ text: _read, ...entry }, i) => {
+          const sent = tagged.lore[i]?.text;
+          return sent === undefined ? entry : { ...entry, text: sent };
+        });
+        ask = { scope, guidance, tagged, messages, request, loreMap, lore, attempts: replaced === null ? [] : this.#attempts(user, chat, replaced), cast, received };
         lap("kept");
       } catch (error) {
         // The run never began: it ends here, failed, so the turn after it does not wait for it. The throw tells Lumiverse.
@@ -1250,7 +1259,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       .user(user)
       .swipes(chat, message)
       .map((t) => {
-        const run = this.#d.runs.record(user, t.id);
+        const run = this.#d.runs.reply(user, t.id);
         return { turn: t.id, intent: t.intent, reply: run === null ? null : (run.saved ?? run.base + run.reply) };
       });
   }
@@ -1355,6 +1364,25 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
+   * The cast's views of each character on stage at the turn, for its folder's `cast/<name>/` (plan §5.3): every view the cast lays out,
+   * each by its part in force, of every character the open scene names that the cast holds, in the scene's order; only the views that
+   * hold anything. None where the story record holds no scene open at the turn. Growth is read apart, since the base lays it over itself.
+   */
+  async #castFolder(scope: Scope & { turn: string }, guidance: Guidance, settings: TurnSettings): Promise<CastFolder[]> {
+    const stage = stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
+    if (stage === null || stage.who.length === 0) return [];
+    const all = Object.keys(CAST_VIEWS) as CastViewName[];
+    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: turnTokens, settings: settings.cast, ...(stage.place !== null ? { cues: [stage.place] } : {}) };
+    const out: CastFolder[] = [];
+    for (const name of new Set(stage.who)) {
+      const [rest, growth] = await Promise.all([castViews(all.filter((v) => v !== "growth"), { ...input, character: name }), castViews(["growth"], { ...input, character: name })]);
+      const views = [...rest, ...growth].filter((v) => v.text.trim() !== "");
+      if (views.length > 0) out.push({ name, views });
+    }
+    return out;
+  }
+
+  /**
    * The lead's model's limits, as the model layer gives them for the turn's user's connection its definition names (`default`, or none,
    * is his default connection): its window, and whether it takes pictures. Null where the model layer cannot tell them; the log says so.
    */
@@ -1435,8 +1463,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const more: number[] = [];
       let spent = 0;
       for (const g of [...gone.values()].flatMap((g) => (g === null ? [] : [g])).sort((a, b) => (b.n ?? -1) - (a.n ?? -1))) {
-        const run = this.#d.runs.ofTurn(user, g.turn).findLast((r) => r.kind !== "settle");
-        const words = run === undefined ? "" : firstWords(run.saved ?? run.base + run.reply, deleted.words);
+        const run = this.#d.runs.reply(user, g.turn);
+        const words = run === null ? "" : firstWords(run.saved ?? run.base + run.reply, deleted.words);
         const cost = turnTokens(`${g.n ?? g.message} ${words}`);
         if (spent + cost <= deleted.budget) {
           spent += cost;
@@ -1496,7 +1524,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // the chat's bound (`since.editedBudget`); the rest, which a carried chat can hold by the hundred, in one line by their messages'
     // numbers, which tells them as surely.
     const editLines = edited.map((e) => {
-      const run = hidden.has(e.message) ? null : (this.#d.runs.ofTurn(user, e.turn).findLast((r) => r.kind !== "settle") ?? null);
+      const run = hidden.has(e.message) ? null : this.#d.runs.reply(user, e.turn);
       return { edit: e, line: notices?.line("edited", { message: e.message, ...(run !== null ? { old: run.saved ?? run.base + run.reply } : {}), ...textNow(e.message) }) };
     });
     const inFull = new Set<(typeof editLines)[number]>();
