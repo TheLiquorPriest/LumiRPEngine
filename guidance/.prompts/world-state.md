@@ -31,6 +31,7 @@ lines:
   unsettled_report: '{{op}}, turn {{turn}}{{^applied}}, not applied{{/applied}}: {{codes}}'
   left_out: '… and {{n}} more, left out to keep the world state within its budget (world_query opens any level)'
   left_out_uncounted: '… and more, not counted, left out to keep the world state within its budget (world_query opens any level)'
+  walk_stopped: 'The engine stopped following {{from}} at {{at}}: {{setting}} lets it go {{limit}} steps, so what lies past it is not counted.'
 keys:
   time_zone: time zone
 ---
