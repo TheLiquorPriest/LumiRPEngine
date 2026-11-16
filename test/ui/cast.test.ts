@@ -201,6 +201,104 @@ describe("the Cast page", () => {
     expect(shown.at(-1)).toMatchObject({ open: "char-tobin", character: null });
   });
 
+  test("the base shows the growth laid over it, each source its title and how it stands against the base, an away principal where it is and what it means to do, its game side, its castings in words, its memories by tier and its mind by kind", () => {
+    const { tree, text } = view({ list: CAST, open: ODILE.id, character: RICH }, true);
+    expect(section(tree, "base")).toContain("Growth laid over it");
+    expect(section(tree, "base")).toContain("Distrusts the reeve.");
+    expect(section(tree, "base")).toContain("because The toll.");
+    const sources = elements(tree).filter((e) => typeof e.props["data-source"] === "string");
+    expect(sources.map((s) => [s.props["data-source"], s.props["data-state"]])).toEqual([
+      ["card:card-odile", "changed"],
+      ["entry:e-9", "gone"],
+    ]);
+    expect(section(tree, "sources")).toContain("changed since the base was drawn");
+    expect(section(tree, "sources")).toContain("gone from Lumiverse");
+    expect(section(tree, "away")).toContain("At the toll house.");
+    expect(section(tree, "away")).toContain("Wait for the reeve to leave.");
+    expect(section(tree, "game")).toContain("The Ferry › Thornbury");
+    expect(section(tree, "game")).toContain("a ferry pole");
+    expect(section(tree, "who")).toContain("principal, pinned by you, “Runs the ferry.”, because She was asked to.");
+    expect(elements(tree).some((e) => e.props["data-tier"] === "top")).toBe(true);
+    expect(elements(tree).some((e) => e.props["data-kind"] === "want")).toBe(true);
+    // A faint memory is shown as its gist.
+    expect(text).toContain("The rope.");
+  });
+
+  test("a list the record holds more of is read further back a page at a time", () => {
+    const { tree, pressed } = view({ list: CAST, open: ODILE.id, character: RICH, skips: { memories: 20 } }, true);
+    expect(section(tree, "memories")).toContain("40 entries of the 60 the record holds are not shown here.");
+    press(tree, "Earlier ones");
+    press(tree, "Later ones");
+    expect(pressed).toEqual([
+      ["more", "memories", 40],
+      ["more", "memories", 0],
+    ]);
+  });
+
+  test("setting a casting, redrawing the base, binding a source, naming the person and writing a perception each send their edit with what is typed", () => {
+    const stage: PerceptionRecordReply = { chat: CHAT, turns: [{ turn: "turn-9", message: 12, read: "scene", people: [{ name: "Odile Holt", character: ODILE.id, casting: "principal", perceptions: [] }] }] };
+    const drafts = { "casting.as": "extra", "casting.pin": true, "base.part": "soul", "base.text.soul": "Wants the crossing quiet.", "source.kind": "entry", "source.ref": "e-1", "source.defines": "her voice", person: "Tam", "perception.turn-9": "She saw him pay in copper." };
+    const { tree, pressed } = view({ list: CAST, open: ODILE.id, character: RICH, stage, drafts }, true);
+    for (const words of ["Set casting", "Save as the next version", "Bind it", "Say who", "Write it"]) press(tree, words);
+    expect(pressed).toEqual([
+      { what: "casting", body: { as: "extra", pin: true, line: "Runs the ferry, owes nobody." } },
+      { what: "base", body: { soul: "Wants the crossing quiet." } },
+      { what: "sources", body: { kind: "entry", ref: "e-1", defines: "her voice" } },
+      { what: "person", body: { person: "Tam" } },
+      { what: "perception", body: { turn: "turn-9", content: "She saw him pay in copper." } },
+    ]);
+    // The turn it has no perception of is listed, and the character can be seen as it stood then.
+    expect(section(tree, "perceptions")).toContain("Message 12");
+    press(tree, "See it as it stood then");
+    expect(pressed.at(-1)).toEqual(["open", ODILE.id, "turn-9"]);
+  });
+
+  test("a turn joined to another is shown at the turn it joined, and said so, with the way back to the newest", () => {
+    const { tree, text, pressed } = view({ list: CAST, open: ODILE.id, character: RICH, at: "turn-9", joined: { turn: "turn-8", joined: "turn-9" } }, true);
+    expect(text).toContain("Turn turn-8 was joined to turn turn-9, so the record is shown at turn turn-9.");
+    press(tree, "Back to the newest");
+    expect(pressed).toEqual(["newest"]);
+  });
+
+  test("an edit posts to its route and reads the record again, and what comes of it is said; a turn asked for that was joined is read as the turn it joined; a list read further back stays there", async () => {
+    const { client, asked } = askingClient();
+    const shown: CastShown[] = [];
+    const reader = readCast(client, CHAT, (s) => shown.push(s));
+    asked[0]?.answer(CAST);
+    await settle();
+    reader.open(ODILE.id, "turn-8");
+    expect(asked[1]).toMatchObject({ key: "GET /api/v1/chats/:chat/cast/:character", query: { turn: "turn-8" } });
+    asked[1]?.answer({ joined: { turn: "turn-8", joined: "turn-9" } });
+    await settle();
+    expect(shown.at(-1)).toMatchObject({ at: "turn-9", joined: { turn: "turn-8", joined: "turn-9" } });
+    expect(asked[3]).toMatchObject({ key: "GET /api/v1/chats/:chat/cast/:character", query: { turn: "turn-9" } });
+    asked[3]?.answer(RICH);
+    await settle();
+    expect(shown.at(-1)?.character).toEqual(RICH);
+
+    reader.more("memories", 20);
+    expect(asked[4]).toMatchObject({ key: "GET /api/v1/chats/:chat/cast/:character", query: { turn: "turn-9", part: "memories", skip: 20 } });
+    asked[4]?.answer({ ...RICH, memories: { ...RICH.memories, before: 20, after: 20 } });
+    await settle();
+    expect(shown.at(-1)?.character?.memories).toMatchObject({ before: 20, after: 20 });
+
+    reader.draft("person", "Tam");
+    expect(shown.at(-1)?.drafts).toEqual({ person: "Tam" });
+    reader.edit({ what: "person", body: { person: "Tam" } });
+    expect(shown.at(-1)?.editing).toBe("person");
+    expect(asked[5]).toMatchObject({ key: "POST /api/v1/chats/:chat/cast/:character/person", params: { chat: CHAT, character: ODILE.id }, body: { person: "Tam" } });
+    asked[5]?.answer({ changed: true, character: ODILE, notes: [] });
+    await settle();
+    expect(shown.at(-1)).toMatchObject({ editing: null, edited: { edit: "person", changed: true, notes: [] }, drafts: {} });
+    // The cast, the character (still at turn-9 and still read further back) and who was on stage, read again.
+    expect(asked.slice(6).map((a) => a.key)).toEqual(["GET /api/v1/chats/:chat/cast", "GET /api/v1/chats/:chat/cast/:character", "GET /api/v1/chats/:chat/perceptions"]);
+
+    reader.edit({ what: "casting", body: { as: "extra", pin: false } });
+    asked[9]?.fail(new Error("Odile has no casting to pin."));
+    await settle();
+    expect(shown.at(-1)).toMatchObject({ editing: null, editProblem: "Odile has no casting to pin." });
+  });
+
   test("Cast is a chat's page in both shells, behind More on a narrow bar, with its own address", () => {
     const cast = PAGES.find((n) => n.id === "cast");
     expect(cast).toMatchObject({ shells: ["web", "drawer"], needsChat: true, often: false });
