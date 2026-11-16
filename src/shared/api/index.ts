@@ -530,8 +530,8 @@ export interface EntryRow {
   fields: { [key: string]: JsonValue };
   /** Story time of its first write, as the engine shows a time; null where the chat keeps none. */
   date: string | null;
-  /** Its first write: the turn. */
-  turn: TurnId;
+  /** Its first write: the turn; null where the player wrote it, his own change of no turn, placed after the newest reply. */
+  turn: TurnId | null;
   /** That turn's reply on the path. */
   message: number | null;
   /** Whether a migration's import wrote that turn. */
@@ -545,7 +545,8 @@ export interface EntryRow {
 
 /** One write of an entry, as the record keeps it: its turn, that turn's reply on the path (null: on none), whether a migration wrote that turn, who wrote it, and what it said. */
 export interface EntryWriteRow {
-  turn: TurnId;
+  /** The turn that wrote it; null for the player's own change, of no turn, placed after the newest reply. */
+  turn: TurnId | null;
   /** The number of that turn's reply on the chat's path, from 0; null while the turn is on no path (open, or left behind). */
   message: number | null;
   /** That turn was written by a migration's import, not played on RPE. */
@@ -695,6 +696,8 @@ export interface HorizonEntryRow {
   at: string;
   ref: string | null;
   name: string | null;
+  /** How deep the world state shows it: a whole number of levels, or `full`. */
+  depth: number | "full";
 }
 
 /** One of the install's facts, which the command line sets and no page writes: its key in config.json, what it is, its value, and where it was given (config.json, the environment, or where the install put the data folder). */
@@ -1132,8 +1135,8 @@ export interface MemoryRow {
   fields: { [key: string]: JsonValue };
   /** Story time of its first write, as the engine shows a time; null where the chat keeps none. */
   date: string | null;
-  /** Its first write: the turn. */
-  turn: TurnId;
+  /** Its first write: the turn; null where the player wrote it, his own change of no turn, placed after the newest reply. */
+  turn: TurnId | null;
   /** That turn's reply on the path. */
   message: number | null;
   /** Whether a migration's import wrote that turn. */
@@ -1218,8 +1221,8 @@ export interface MindFileRow {
   fields: { [key: string]: JsonValue };
   /** Story time of its first write, as the engine shows a time; null where the chat keeps none. */
   date: string | null;
-  /** Its first write: the turn. */
-  turn: TurnId;
+  /** Its first write: the turn; null where the player wrote it, his own change of no turn, placed after the newest reply. */
+  turn: TurnId | null;
   /** That turn's reply on the path. */
   message: number | null;
   /** Whether a migration's import wrote that turn. */
@@ -1323,8 +1326,8 @@ export interface PerceptionRow {
   fields: { [key: string]: JsonValue };
   /** Story time of its first write, as the engine shows a time; null where the chat keeps none. */
   date: string | null;
-  /** Its first write: the turn. */
-  turn: TurnId;
+  /** Its first write: the turn; null where the player wrote it, his own change of no turn, placed after the newest reply. */
+  turn: TurnId | null;
   /** That turn's reply on the path. */
   message: number | null;
   /** Whether a migration's import wrote that turn. */
