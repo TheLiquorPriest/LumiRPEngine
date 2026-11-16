@@ -40,6 +40,10 @@ export type ChatChange =
   | { kind: "message-swiped"; chat: string; message: string; swipe: number; shown: ShownSwipe; updated?: true }
   /** `chat` was made from `from`, each message of `from` up to the fork given a new id: old id to new. */
   | { kind: "chat-forked"; from: string; chat: string; ids: Record<string, string> }
+  /** A message was put before one already in the chat (`MESSAGE_SENT` with `inserted`), or the reconcile found one on the path that RPE did not know, before one it did: its hidden mark and the swipe it shows. */
+  | { kind: "message-inserted"; chat: string; message: string; hidden: boolean; shown: ShownSwipe }
+  /** Lumiverse deleted the chat (`CHAT_DELETED`), or the reconcile found it gone. */
+  | { kind: "chat-deleted"; chat: string }
   /**
    * Lumiverse's own list of the lore that activated for the chat's running generation (`WORLD_INFO_ACTIVATED` `{chatId, entries,
    * stats}`, sent after the interceptors and before the provider is called, and only when something activated,
@@ -101,6 +105,17 @@ export function changeOf(event: string, payload: unknown): ChatChange | null {
       for (const [old, made] of Object.entries(payload.messageIdMap)) if (typeof made === "string") ids[old] = made;
       return { kind: "chat-forked", from, chat, ids };
     }
+    case "MESSAGE_SENT": {
+      // A message at the end is the chat's newest, no change; one `inserted` before another stands before a message that may be played (`services/chats.service.ts:2675`).
+      const chat = str(payload.chatId) ?? str(message?.chat_id);
+      if (payload.inserted !== true || chat === null || message === null || str(message.id) === null) return null;
+      const m = messageFrom(message);
+      return { kind: "message-inserted", chat, message: m.id, hidden: m.hidden, shown: m.shown };
+    }
+    case "CHAT_DELETED": {
+      const chat = str(payload.id);
+      return chat === null ? null : { kind: "chat-deleted", chat };
+    }
     case "WORLD_INFO_ACTIVATED": {
       const chat = str(payload.chatId);
       if (chat === null) return null;
@@ -138,8 +153,9 @@ export function followChanges(socket: LumiverseSocket, sink: ChatChanges): () =>
 /** A message as RPE last saw it, enough to tell what has changed since. */
 export interface KnownMessage {
   id: string;
-  swipe: number;
-  swipes: number;
+  /** The swipe it showed and how many it had; absent where the caller does not hold them (the store's path entry has none: a changed hash then reads as an edit). */
+  swipe?: number;
+  swipes?: number;
   /** The hash of its showing swipe's saved text, as RPE's store and the importer give it (`LvMessage.shown`). */
   hash: string;
   hidden: boolean;
@@ -152,6 +168,7 @@ export function knownOf(m: LvStep): KnownMessage {
 /** What the turn lane knew of a chat: the messages its turns are tied to, and the generations it played whose end it has not heard. */
 export interface KnownChat {
   chat: string;
+  /** The messages the path held when it was last compared, in its order. */
   messages: readonly KnownMessage[];
   /** `message`: the message the generation was to save to (the tag's target); null where Lumiverse named none. */
   awaiting: readonly { generation: string; message: string | null }[];
@@ -161,19 +178,28 @@ export interface KnownChat {
  * The changes to a chat since what the turn lane knew, found in Lumiverse's rows, as the events would
  * have told them. Called at a turn's start: Lumiverse runs one generation per chat and stops the one
  * before when a new one starts (`services/generate.service.ts:1601-1651`), so every generation awaited
- * has ended, and saved to its target where that message is there.
+ * has ended, and saved to its target where that message is there. The path's own rows are read, with no text: a chat Lumiverse
+ * no longer has is `chat-deleted`; a known message gone, swiped, edited or hidden is told as its event tells it; and a message
+ * on the path that RPE did not know and that stands before one it did is `message-inserted` (one after the last it knew is the
+ * chat's newest, no change).
  */
 export async function reconcile(reads: LumiverseReads, known: KnownChat): Promise<ChatChange[]> {
-  const ids = [...new Set([...known.messages.map((m) => m.id), ...known.awaiting.flatMap((a) => (a.message === null ? [] : [a.message]))])];
-  const now = new Map((await reads.messagesById(known.chat, ids)).map((m) => [m.id, m]));
+  const path = await reads.path(known.chat);
+  if (path === null) return [{ kind: "chat-deleted", chat: known.chat }];
+  const now = new Map(path.map((s) => [s.id, s]));
   const changes: ChatChange[] = [];
   for (const a of known.awaiting) changes.push({ kind: "generation-ended", chat: known.chat, generation: a.generation, message: a.message !== null && now.has(a.message) ? a.message : null });
   for (const k of known.messages) {
     const m = now.get(k.id);
     if (m === undefined) changes.push({ kind: "message-deleted", chat: known.chat, message: k.id });
-    else if (m.swipe !== k.swipe || m.swipes !== k.swipes) changes.push({ kind: "message-swiped", chat: known.chat, message: k.id, swipe: m.swipe, shown: m.shown });
+    else if ((k.swipe !== undefined && m.swipe !== k.swipe) || (k.swipes !== undefined && m.swipes !== k.swipes)) changes.push({ kind: "message-swiped", chat: known.chat, message: k.id, swipe: m.swipe, shown: m.shown });
     else if (m.hidden !== k.hidden || m.shown.hash !== k.hash) changes.push({ kind: "message-edited", chat: known.chat, message: k.id, hidden: m.hidden, shown: m.shown });
   }
+  const knownIds = new Set(known.messages.map((k) => k.id));
+  // What a generation awaited was to save is the generation's, not an insertion.
+  const awaited = new Set(known.awaiting.flatMap((a) => (a.message === null ? [] : [a.message])));
+  const last = path.findLastIndex((s) => knownIds.has(s.id));
+  for (const s of path.slice(0, Math.max(0, last))) if (!knownIds.has(s.id) && !awaited.has(s.id)) changes.push({ kind: "message-inserted", chat: known.chat, message: s.id, hidden: s.hidden, shown: s.shown });
   return changes;
 }
 

@@ -460,9 +460,12 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       // What is heard reaches the turn lane in its order, a lore change once its entries are told: while one is being told, what is heard after it waits behind it.
       let behind: Promise<void> | null = null;
       const { feed } = parts;
-      const deliver = (change: ChatChange): void => {
-        // A chat the search holds is brought up to date in the background when Lumiverse says one of its messages changed.
-        if (change.kind === "message-edited" || change.kind === "message-deleted" || change.kind === "message-swiped" || change.kind === "generation-ended") feed.changed(change.chat);
+      const deliver = (heardChange: ChatChange): void => {
+        // A stopped generation's end names the message its partial text was saved to: the one the tag named.
+        const change = heard.named(heardChange);
+        // A chat the search holds is brought up to date in the background when Lumiverse says one of its messages changed; a chat gone is let go of.
+        if (change.kind === "message-edited" || change.kind === "message-deleted" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "generation-ended") feed.changed(change.chat);
+        if (change.kind === "chat-deleted") feed.dropChat(change.chat).catch((error: unknown) => log(`RPE could not let go of the search entries of chat ${change.chat}: ${error instanceof Error ? error.message : String(error)}`));
         const told = heard.heard(change);
         if (told === null && behind === null) {
           lanes.changes.changed(change);
@@ -478,7 +481,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       };
       // Before anything else hears it: what an event says changed is let go of the reads, so nothing that acts on the event reads it stale.
       const { reads } = parts;
-      const offReads = parts.events.onEvent((event, payload) => reads.heard(event, payload));
+      const offReads = parts.events.onEvent((event, payload) => {
+        reads.heard(event, payload);
+        // A message Lumiverse added to the chat is searched for from now on.
+        if (event === "MESSAGE_SENT" && isRecord(payload) && typeof payload.chatId === "string") feed.changed(payload.chatId);
+      });
       offChanges = followChanges(parts.events, {
         changed: deliver,
         reopened: () => lanes.changes.reopened(),

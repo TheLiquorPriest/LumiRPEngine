@@ -161,7 +161,7 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       cut: received.cut,
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
-      lore: await deps.heard.tagged(received.tag.chat, received.tag.generation),
+      lore: await deps.heard.tagged(received.tag.chat, received.tag.generation, received.tag.target.message),
       parameters: parameters as JsonObject,
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };

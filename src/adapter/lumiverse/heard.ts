@@ -37,6 +37,8 @@ export interface HeardDeps {
 export class HeardGenerations {
   readonly #byChat = new Map<string, Running>();
 
+  readonly #targets = new Map<string, { generation: string; message: string }>();
+
   constructor(private readonly deps: HeardDeps) {}
 
   /** A change the event socket heard. For lore Lumiverse activated, the entries told, once they are; null for any other change. */
@@ -59,12 +61,29 @@ export class HeardGenerations {
     return null;
   }
 
-  /** The tagged request of the chat's generation came: the lore Lumiverse activated for it, told, as heard so far (none heard: none activated). */
-  async tagged(chat: string, generation: string): Promise<TagLore[]> {
+  /**
+   * The tagged request of the chat's generation came: the lore Lumiverse activated for it, told, as heard so far (none heard: none activated); and the message
+   * the tag names as the one the reply is written to, kept while the generation runs (`named`).
+   */
+  async tagged(chat: string, generation: string, target: string | null = null): Promise<TagLore[]> {
+    if (target !== null) this.#targets.set(chat, { generation, message: target });
     const running = this.#byChat.get(chat);
     if (running === undefined || running.generation !== generation) return [];
     running.tagged = true;
     return running.lore === null ? [] : running.lore;
+  }
+
+  /**
+   * A generation's end as the turn lane is to be told it: Lumiverse's stop names no message (`GENERATION_STOPPED` carries the generation and the
+   * partial text, `generate.service.ts:3013-3021`, `:4520-4536`), and the partial text was saved to the message the tag named, which the change then names.
+   * Call it before `heard`, which forgets the generation at its end.
+   */
+  named(change: ChatChange): ChatChange {
+    if (change.kind !== "generation-ended") return change;
+    const kept = this.#targets.get(change.chat);
+    if (kept?.generation !== change.generation) return change;
+    this.#targets.delete(change.chat);
+    return change.stopped === true && change.message === null ? { ...change, message: kept.message } : change;
   }
 
   /** Whether a generation heard to start on RPE's connection, or asked about, awaits its tagged request now; each counts this untagged request. */

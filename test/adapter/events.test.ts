@@ -6,7 +6,8 @@
 // the same change. Every chat and line is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { followChanges, forkOf, knownOf, reconcile, type ChatChange, type KnownChat } from "../../src/adapter/lumiverse/events";
+import { changeOf, followChanges, forkOf, knownOf, reconcile, type ChatChange, type KnownChat } from "../../src/adapter/lumiverse/events";
+import { HeardGenerations } from "../../src/adapter/lumiverse/heard";
 import { messageFrom } from "../../src/adapter/lumiverse/rows";
 import { createDbReader, type DbReader } from "../../src/adapter/lumiverse/db";
 import { LumiverseSession } from "../../src/adapter/lumiverse/session";
@@ -126,7 +127,7 @@ async function bed() {
 
   /** What the turn lane knows of the chat when its turn starts: every message, and the generation it played whose end it has not heard. */
   const known = async (): Promise<KnownChat> => ({ chat: CHAT, messages: ((await reads.path(CHAT)) ?? []).map(knownOf), awaiting: [{ generation: "gen-7", message: "m5" }] });
-  return { clock, server, socket, reads, lumiverse, heard, known, message, reopened: () => reopened };
+  return { clock, db, server, socket, reads, lumiverse, heard, known, message, reopened: () => reopened };
 }
 
 /** Every change of one turn's span, as the events tell it: each message's hidden mark and showing swipe as `messageFrom` reads the row now. */
@@ -238,5 +239,53 @@ describe("Lumiverse's changes to a chat", () => {
     const found = await reconcile(b.reads, before);
     expect(found).toHaveLength(all(b).length);
     expect(found).toEqual(expect.arrayContaining(all(b)));
+  });
+});
+
+describe("what only the events of the end and of the chat's own rows tell", () => {
+  /** `addMessage` with a place (`chats.service.ts:2650-2675`): the rows from the place on move up one, the new one takes it, and `MESSAGE_SENT` carries `inserted`. */
+  function insertBefore(b: Awaited<ReturnType<typeof bed>>, id: string, place: number, send: boolean): void {
+    db(b).run("UPDATE messages SET index_in_chat = index_in_chat + 1 WHERE chat_id = ? AND index_in_chat >= ?", CHAT, place);
+    db(b).run("INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, swipes, swipe_dates, revision) VALUES (?, ?, ?, 1, 'Tamsin', 'A line put in between.', ?, ?, 1)", id, CHAT, place, json(["A line put in between."]), json([1_767_700_000]));
+    if (send) b.server.emit("MESSAGE_SENT", { chatId: CHAT, message: b.message(id), inserted: true }, USER);
+  }
+  const db = (b: Awaited<ReturnType<typeof bed>>): StandInDb => b.db;
+
+  test("a message inserted before a played turn is reported by the event and, with the event missed, by the reconcile; one added at the end is no change", async () => {
+    const b = await bed();
+    const before = await b.known();
+    insertBefore(b, "m-in", 2, true);
+    await b.clock.advance(0);
+    expect(b.heard).toEqual([{ kind: "message-inserted", chat: CHAT, message: "m-in", hidden: false, shown: messageFrom(b.message("m-in")).shown }]);
+    const found = await reconcile(b.reads, { ...before, awaiting: [] });
+    expect(found).toEqual([{ kind: "message-inserted", chat: CHAT, message: "m-in", hidden: false, shown: messageFrom(b.message("m-in")).shown }]);
+    // A new message at the end of the path is the chat's newest, not an insertion.
+    db(b).run("INSERT INTO messages (id, chat_id, index_in_chat, is_user, name, content, swipes, swipe_dates, revision) VALUES ('m-end', ?, 20, 1, 'Tamsin', 'Newest.', ?, ?, 1)", CHAT, json(["Newest."]), json([1]));
+    expect((await reconcile(b.reads, { ...before, awaiting: [] })).map((c) => c.kind)).toEqual(["message-inserted"]);
+  });
+
+  test("a deleted chat is reported by the event and, with the event missed, by the reconcile", async () => {
+    const b = await bed();
+    const before = await b.known();
+    b.server.emit("CHAT_DELETED", { id: CHAT }, USER);
+    await b.clock.advance(0);
+    expect(b.heard).toEqual([{ kind: "chat-deleted", chat: CHAT }]);
+    db(b).run("DELETE FROM messages WHERE chat_id = ?", CHAT);
+    db(b).run("DELETE FROM chats WHERE id = ?", CHAT);
+    expect(await reconcile(b.reads, before)).toEqual([{ kind: "chat-deleted", chat: CHAT }]);
+  });
+
+  test("every way a generation ends reaches the lane as what it is, and a stopped reply's change names the message the tag said it was written to", () => {
+    const ended = (event: string, payload: Record<string, unknown>) => changeOf(event, { generationId: "g1", chatId: CHAT, ...payload });
+    expect(ended("GENERATION_ENDED", { messageId: "m5" })).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: "m5" });
+    // An impersonation draft saves no message; a provider error may have saved part of one or none; a failure in assembly saves none.
+    expect(ended("GENERATION_ENDED", { impersonateDraft: true })).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: null });
+    expect(ended("GENERATION_ENDED", { messageId: "m5", error: "the provider said no" })).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: "m5", error: "the provider said no" });
+    expect(ended("GENERATION_ENDED", { error: "assembly failed" })).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: null, error: "assembly failed" });
+    const stopped = ended("GENERATION_STOPPED", { content: "partial" });
+    expect(stopped).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: null, stopped: true });
+    const heard = new HeardGenerations({ rpeModel: () => false, asked: () => false, untaggedEnd: () => undefined, tell: async (_chat, lore) => [...lore] });
+    void heard.tagged(CHAT, "g1", "m5");
+    expect(heard.named(stopped!)).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: "m5", stopped: true });
   });
 });
