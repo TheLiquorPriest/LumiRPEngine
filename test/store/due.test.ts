@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonValue } from "../../src/shared/json";
+import { NEED_IDS } from "../../src/shared/needs";
 import type { CalendarDef, HolidayDef, ScheduleDef, WorldDoc } from "../../src/shared/world";
 import { chatSchedulesIn, scheduleInstants } from "../../src/engine/schedules";
 import { timeDue } from "../../src/store/due";
@@ -66,10 +67,11 @@ const SCHEDULES: ScheduleDef[] = [
   own("fortnight", { every: "week", from: "2031-03-03", until: "2031-03-20" }, ["08:00", "08:30", "w-all"]),
 ];
 
-/** A world with `schedules` and its calendar's holidays. */
+/** A world with `schedules` and its calendar's holidays, and no needs on (the list here is the schedules' alone). */
 function worldOf(schedules: readonly ScheduleDef[], calendar: Partial<CalendarDef> = {}): WorldDoc {
   const world = inventedWorld();
   world.calendar = { ...world.calendar, holidays: HOLIDAYS, ...calendar };
+  world.needs = Object.fromEntries(NEED_IDS.map((need) => [need, { on: false }]));
   world.schedules = Object.fromEntries(schedules.map((s) => [s.id, s]));
   return world;
 }

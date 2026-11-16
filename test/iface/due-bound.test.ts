@@ -90,8 +90,8 @@ describe("what falls due, listed up to a setting", () => {
     const grew = process.memoryUsage().heapUsed - heap;
     expect(r.error).toBeUndefined();
     expect(((dataOf(r).operations as JsonObject[])[0] as JsonObject).due).toHaveLength(IFACE_DEFAULTS.dueItems);
-    // Twenty routines of two slots and the weather's four, each starting once a day.
-    expect(texts(r)).toContain(lines.line("due_more", { n: 1, op: "pass_time", listed: IFACE_DEFAULTS.dueItems, more: days * 44 - IFACE_DEFAULTS.dueItems }) ?? "");
+    // Twenty routines of two slots and the weather's four, each starting once a day, and the point-of-view character's four needs, each crossing its line once.
+    expect(texts(r)).toContain(lines.line("due_more", { n: 1, op: "pass_time", listed: IFACE_DEFAULTS.dueItems, more: days * 44 + 4 - IFACE_DEFAULTS.dueItems }) ?? "");
     expect(took).toBeLessThan(1000);
     expect(grew).toBeLessThan(64 * 1024 * 1024);
   });

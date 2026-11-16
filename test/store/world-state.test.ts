@@ -252,9 +252,10 @@ describe("what falls due in the world state", () => {
     const due = timeDue(store);
     const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, charsPerToken: 4 });
     const fell = due.due(s.stateAt(next.id).state, { from: since, to: now }, null, Number.POSITIVE_INFINITY).items;
-    expect(fell.length).toBe(8);
+    // Eight slots start in the two days; the point-of-view character's hunger, fatigue and social needs also cross their lines in them.
+    expect(fell.length).toBe(8 + 3);
     const calendar = calendarOf(world);
-    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), d.what]));
+    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), typeof d.what === "string" ? d.what : JSON.stringify(d.what)]));
     const lines = block.text.split("\n");
     const heading = lines.indexOf("### Fell due as the clock moved last turn");
     expect(heading).toBeGreaterThanOrEqual(0);

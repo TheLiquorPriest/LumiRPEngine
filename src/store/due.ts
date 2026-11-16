@@ -1,18 +1,104 @@
 // What time brings due (plan §6.4; §6.1: code lists what is due when time passes, and never decides
-// what the passing of time did). For a span and a part of the tree: each slot that starts in the span
-// on a schedule today's engine keeps (a routine or a shift, which puts someone somewhere or at
-// something; the world's own processes, such as weather, prices or bills, which concern everyone),
-// with who it concerns and where. A list only: nothing in it is applied, and a slot whose value is
-// left to chance is listed by its schedule, its chance never drawn. The list stops at the bound the
-// caller gives, soonest first, and the rest is counted, not made: a span of years costs what its first
-// page does.
+// what the passing of time did). For a span and a part of the tree, every kind there is: each slot that
+// starts in the span on a schedule today's engine keeps (a routine or a shift, which puts someone
+// somewhere or at something; the world's own processes, such as weather, prices or bills, which concern
+// everyone), each future the Author scheduled whose due falls in it (an arrival among them: today's
+// engine records no journey under way, so one is a future that names it), each need that crosses the
+// line it alerts at, each effect that ends (a loan, a grant, a permission), and each regard a world's
+// half-life halves; every one with who it concerns and where. A list only: nothing in it is applied,
+// and a slot whose value is left to chance is listed by its schedule, its chance never drawn. The
+// list stops at the bound the caller gives, soonest first, and the rest is counted, not made: a span
+// of years costs what its first page does.
 
 import type { JsonValue } from "../shared/json";
 import type { ScheduleDef } from "../shared/world";
-import { own } from "../engine/pack-kit";
+import { isRecord } from "../shared/json";
+import { NEED_IDS, needsSettingsOf } from "../shared/needs";
+import { optionalQuery, own } from "../engine/pack-kit";
+import type { ReadContext } from "../engine/registry";
 import { chatSchedulesIn, scheduleOwners, slotStarts } from "../engine/schedules";
+import { needValue } from "../packs/castlife/core";
+import type { TreeView } from "./view";
 import type { Store } from "./store";
+import type { StoreState } from "./types";
 import type { DueEntry, DueSource } from "./world-state";
+
+/** What a future of the story's record gives the list: the story area's read of the open futures that have a due time. */
+interface FutureDue {
+  id: string;
+  due: number;
+  who: string[];
+  place: string | null;
+  text: string;
+}
+
+/** The open futures with a due time, as the story's area reads them (the store names the area and imports nothing of it); none where the store opened without it. */
+function futuresOf(store: Store, state: StoreState): FutureDue[] {
+  const area = store.env.areas?.get("story");
+  const read = area?.reads && Object.hasOwn(area.reads, "futures") ? area.reads.futures : undefined;
+  const list = read?.(state.areas?.story ?? area?.initial?.() ?? {}, {});
+  return (Array.isArray(list) ? list : []).flatMap((f) => (isRecord(f) && typeof f.id === "string" && typeof f.due === "number" ? [{ id: f.id, due: f.due, who: Array.isArray(f.who) ? f.who.filter((w): w is string => typeof w === "string") : [], place: typeof f.place === "string" ? f.place : null, text: typeof f.text === "string" ? f.text : "" }] : []));
+}
+
+/** The minute a need first reaches `line` in (from, to], by today's arithmetic, or null when it does not cross there. */
+function crossing(ctx: ReadContext, who: string, need: string, line: number, from: number, to: number): number | null {
+  if (needValue(ctx, who, need, from) >= line || needValue(ctx, who, need, to) < line) return null;
+  let lo = from;
+  let hi = to;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (needValue(ctx, who, need, mid) >= line) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** Everything but the schedules' slots that falls due in `(from, to]` and concerns the part asked about: futures, needs, endings, fading. */
+function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeView, inside: (ref: string) => boolean, root: string | null, from: number, to: number): DueEntry[] {
+  const world = ctx.world;
+  const here = (...refs: (string | null)[]): boolean => root === null || refs.some((r) => r !== null && inside(r));
+  /** The tree ref words name: an id, or a name of someone or a place. */
+  const refOf = (words: string): string | null => {
+    const said = words.trim().toLowerCase();
+    const id = view.resolve(words.trim());
+    if (id !== null) return id;
+    const person = Object.entries(state.world.entities).find(([, e]) => e.name.trim().toLowerCase() === said);
+    if (person) return `entity:${person[0]}`;
+    const place = Object.entries(world.places).find(([, p]) => p.name.trim().toLowerCase() === said);
+    return place ? `place:${place[0]}` : null;
+  };
+  const out: DueEntry[] = [];
+  for (const f of futuresOf(store, state)) {
+    if (!(f.due > from && f.due <= to)) continue;
+    const refs = f.who.map(refOf);
+    const where = f.place === null ? null : refOf(f.place);
+    if (!here(where, ...refs)) continue;
+    const who = refs.flatMap((r) => (r !== null && r.startsWith("entity:") ? [r.slice("entity:".length)] : []));
+    out.push({ at: f.due, kind: "future", ...(where !== null ? { where } : {}), ...(who.length > 0 ? { who } : {}), what: f.text });
+  }
+  const settings = needsSettingsOf(world);
+  for (const [id, e] of Object.entries(state.world.entities)) {
+    const ref = `entity:${id}`;
+    // An effect recorded with an end (a loan, a grant, a permission), ending in the span.
+    for (const r of e.relations) {
+      if (typeof r.until === "number" && r.until > from && r.until <= to && here(ref, `entity:${r.to}`)) out.push({ at: r.until, kind: "ending", who: [id], what: { relation: r.type, to: r.to } });
+    }
+    // A need that rises with time, crossing the line it alerts at: the POV's, and anyone whose need was recorded.
+    if ((id === world.pov || isRecord(e.fields.needs)) && here(ref)) {
+      for (const need of NEED_IDS) {
+        const tuned = settings[need];
+        if (!tuned.on) continue;
+        const at = crossing(ctx, id, need, tuned.alert, from, to);
+        if (at !== null) out.push({ at, kind: "need", who: [id], what: { need, line: tuned.alert } });
+      }
+    }
+  }
+  // Regard a world's half-life halves, where it sets one: listed with the pair; nothing is applied.
+  for (const f of optionalQuery(ctx, "relationships.fading")?.(ctx, { from, to }) ?? []) {
+    if (here(`entity:${f.from}`, `entity:${f.to}`)) out.push({ at: f.at, kind: "fading", who: [f.from, f.to], what: { axis: f.axis, value: f.value, halved: f.halved } });
+  }
+  return out;
+}
 
 /** What time brings due over the store's states: what the world state and the engine's tools take as `due`. */
 export function timeDue(store: Store): DueSource {
@@ -53,7 +139,11 @@ export function timeDue(store: Store): DueSource {
         const entry = entryOf(i.schedule, i.slot);
         if (entry !== null) items.push({ at: i.at, ...entry });
       }
-      return { items, more };
+      // The rest of what falls due, each kind kept to the part asked about, merged in time order with the slots.
+      items.push(...otherDue(store, ctx, state, view, inside, root, span.from, span.to));
+      items.sort((a, b) => a.at - b.at);
+      const listed = items.slice(0, Math.max(0, most));
+      return { items: listed, more: more === null ? null : more + (items.length - listed.length) };
     },
   };
 }

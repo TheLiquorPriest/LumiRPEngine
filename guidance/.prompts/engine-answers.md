@@ -133,6 +133,7 @@ no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.
 check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
+totals_cut_short: The run ended at {{reached}}, short of {{until}}: the engine's own cap on a run of this size stopped it there. The totals are for the span up to {{reached}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.
 store_unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
 store_bad_marker: {{#n}}Operation {{n}} ({{op}}): {{/n}}this is not a marker the engine can read, so it did not apply.
