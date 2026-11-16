@@ -8,7 +8,7 @@
 // the Author settles an edit then, and nothing is written to the chat.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SettleReply, TurnLoreRow, TurnReply, TurnRow } from "../../../shared/api";
+import type { SettleReply, StageTurn, TurnLoreRow, TurnReply, TurnRow } from "../../../shared/api";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf, type RpeClient, RpeError } from "../../client";
@@ -335,6 +335,8 @@ export interface TurnViewProps {
   lead?: RequestShown | null;
   /** The lore Lumiverse activated for the turn's prompt, entry by entry; null until read. */
   loreRows?: readonly TurnLoreRow[] | null;
+  /** Who was on stage for the turn and who has a perception of it; null until read. */
+  stage?: StageTurn | null;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
@@ -349,7 +351,7 @@ export function TurnView(props: TurnViewProps) {
   const kind = turn.runs.at(-1)?.kind ?? turn.kind;
   const status = statusWords(kind, turn.status);
   const failure = turn.error === null || (kind === "settle" && turn.status === "no-reply") ? null : replyErrorWords(turn.error, turn.status);
-  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
+  const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, stage: props.stage, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
@@ -459,6 +461,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
     [chat, turn, leadHeld, leadFile, gateOpen],
   );
   const loreRead = useRead(gateOpen ? async () => replyOf(await app.client.call("GET /api/v1/chats/:chat/turns/:turn/lore", { chat, turn })).entries : null, [chat, turn, gateOpen, reads]);
+  const stageRead = useRead(async () => replyOf(await app.client.call("GET /api/v1/chats/:chat/perceptions", { chat }, { query: { turn, count: 1 } })).turns.at(-1) ?? null, [chat, turn, reads]);
   const runs = runsOf(watched.model, turn);
   const latest = watched.detail === null ? runs.at(-1) : latestOf(watched.detail, runs);
   const detail = watched.detail === null ? null : liveTurn(watched.detail, latest);
@@ -489,6 +492,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
       notices={notices}
       lead={lead.value}
       loreRows={loreRead.value}
+      stage={stageRead.value}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}

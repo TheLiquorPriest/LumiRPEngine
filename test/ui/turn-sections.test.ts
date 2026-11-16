@@ -114,3 +114,15 @@ describe("the Turn page's sections", () => {
     expect(view(marked)).toContain("A message this turn stands on was edited after it was played (message msg-4).");
   });
 });
+
+describe("who perceived the turn", () => {
+  test("a person on stage with no perception shows under none, and how the stage was read is said", () => {
+    const stage = { turn: "t1", message: 3, read: "owner" as const, people: [{ name: "Ash", character: "c1", casting: "principal" as const, perceptions: ["p-1"] }, { name: "Wren", character: "c2", casting: "supporting" as const, perceptions: [] }] };
+    const text = view(turnAt(), { stage });
+    expect(text).toContain("Who perceived the turn");
+    expect(text).toContain("No scene was recorded, so the stage was read from where your character stands.");
+    expect(text).toContain("Wren");
+    expect(text).toContain("1 person on stage with no perception of this turn: Wren.");
+    expect(view(turnAt())).not.toContain("Who perceived the turn");
+  });
+});
