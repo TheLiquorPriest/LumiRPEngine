@@ -5,7 +5,7 @@
 // quest's paths) is applied and reported.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { safeKey } from "../shared/json";
+import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { formatMoney } from "../shared/world";
 import { fieldBounds, type LevelOffer, levelsFollowXp, applyEffects } from "../engine/effects";
@@ -25,6 +25,7 @@ import { asUnit, cashAccount, isParty, type PayMethod, payeeSide, posting, waysO
 import { axesOf } from "../packs/relationships/core/index";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
+import { HORIZON } from "../store/view";
 import type { FactStore } from "./kit";
 import { find, findOptional, isUnread, itemOptions, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
 import type { Provenance } from "./source";
@@ -515,27 +516,28 @@ const horizon: OpDef = {
   needs: ["list"],
   takes: ["list"],
   provenance: false,
-  example: { op: "horizon", list: ["common_room", "market_square", "odile"] },
+  example: { op: "horizon", list: ["common_room", { at: "market_square", depth: 1 }, "odile"] },
   run(o) {
     const given = o.args.list;
     if (!Array.isArray(given)) return notAs(o, "list", given ?? null, "list");
-    const refs: string[] = [];
-    const words: string[] = [];
-    for (const said of given) {
+    const entries: { at: string; depth: number | "full" }[] = [];
+    for (const item of given) {
+      // An entry is a name or words, or { at, depth }: how deep the world state shows it (a whole number from 0, or "full"; none given is "full").
+      const said = isRecord(item) ? item.at : item;
+      const depth = isRecord(item) && typeof item.depth === "number" && Number.isInteger(item.depth) && item.depth >= 0 ? item.depth : "full";
       const r = find(o, "list", "point", false, said);
       // Words that name no place, person or thing are kept as they were given: a note of what the Author expects to matter.
       // An entry written as a reference (`place:…`, `entity:…`) is a name, not words: one that names nothing is not there, with its near names.
       if (isUnread(r) && r.line === "unknown" && typeof said === "string" && !REF.test(said.trim())) {
-        refs.push(said.trim());
-        words.push(said.trim());
+        entries.push({ at: said.trim(), depth });
+        o.reply.line("horizon_words", { n: o.n, op: o.op, words: said.trim(), near: r.fields.near });
         continue;
       }
       if (isUnread(r)) return r;
-      refs.push(r.ref);
+      entries.push({ at: r.ref, depth });
     }
-    if (words.length > 0) o.reply.line("horizon_words", { n: o.n, op: o.op, words: textOf(words) });
-    o.draft.recordStoreOp(o.n, o.op, "story", o.prov, { op: STORE_OPS.horizon, value: { list: refs } });
-    o.draft.storeState.horizon = refs;
+    o.draft.recordStoreOp(o.n, o.op, "story", o.prov, { op: HORIZON.op, value: { list: entries } });
+    o.draft.storeState.horizon = entries.map((e) => e.at);
     return undefined;
   },
 };

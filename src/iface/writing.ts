@@ -20,7 +20,8 @@ import type { EntityState, WorldState } from "../engine/state";
 import { Working } from "../engine/working";
 import { clockRecorded } from "../store/blank";
 import { type ChangeInput, type ChangeRow, JoinedTurnError, type Lane, StoreInputError, type StoreState } from "../store/types";
-import type { TreeView } from "../store/view";
+import type { FoldEnv } from "../store/fold";
+import { horizonOf, type TreeView } from "../store/view";
 import type { Call, KeptReport, Reply } from "./kit";
 import { fromNow } from "./ops-time";
 import { Reading, type Unreadable } from "./reading";
@@ -87,12 +88,12 @@ export class Draft {
     readonly call: Call,
   ) {
     this.w = new Working(base.registry, base.doc, base.state.world);
-    this.storeState = { horizon: [...base.state.horizon] };
+    this.storeState = { horizon: horizonOf(call.deps.env, base.state).map((h) => h.at) };
   }
 
   /** A reading over the draft as it stands: names made by an earlier operation are found by a later one. */
   reading(): Reading {
-    return this.base.over({ ...this.base.state, world: this.w.state, horizon: this.storeState.horizon }, this.w.ctx);
+    return this.base.over({ ...this.base.state, world: this.w.state }, this.w.ctx);
   }
 
   /** An error of the engine's own, met as a handler ran: logged by the store's sink, and kept so the call is answered as a fault. */
@@ -361,7 +362,7 @@ function diffEntry(at: string, name: string, was: Record<string, JsonValue>, now
  * world as the chat plays it; the clock (on one nobody has set, each time as how long it is from now,
  * in the answers' `lines`); quests' stages; the horizon.
  */
-export function changedBetween(before: StoreState, after: StoreState, doc: WorldDoc, events: readonly JsonValue[], lines: Lines): JsonObject[] {
+export function changedBetween(before: StoreState, after: StoreState, doc: WorldDoc, events: readonly JsonValue[], lines: Lines, env: Pick<FoldEnv, "areas">): JsonObject[] {
   const out: JsonObject[] = [];
   const ids = new Set<string>();
   for (const ev of events) {
@@ -393,7 +394,9 @@ export function changedBetween(before: StoreState, after: StoreState, doc: World
     const label = (stage: string | undefined): JsonValue => (stage === undefined ? null : (own(def?.stages ?? {}, stage)?.label ?? stage));
     out.push({ at: `track:${track}`, name: def?.label ?? track, was: { stage: label(was) }, now: { stage: label(t.stage) } });
   }
-  if (JSON.stringify(before.horizon) !== JSON.stringify(after.horizon)) out.push({ at: "horizon", was: { list: before.horizon }, now: { list: after.horizon } });
+  const was = horizonOf(env, before);
+  const now = horizonOf(env, after);
+  if (JSON.stringify(was) !== JSON.stringify(now)) out.push({ at: "horizon", was: { list: was.map((h) => h.at) }, now: { list: now.map((h) => h.at) } });
   return out;
 }
 
@@ -416,7 +419,7 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
     if (!(error instanceof JoinedTurnError)) throw error;
     reply.line("turn_joined", { id: error.turn, into: error.joined });
   }
-  const changed = changedBetween(draft.base.state, done.state, draft.base.doc, draft.inputs.map((i) => i.value), draft.base.lines);
+  const changed = changedBetween(draft.base.state, done.state, draft.base.doc, draft.inputs.map((i) => i.value), draft.base.lines, draft.call.deps.env);
   const operations: JsonObject[] = [...(extra.operations ?? [])];
   for (const rec of draft.recorded) {
     const rows = rec.inputs.map((i) => done.rows[i]).filter((r): r is ChangeRow => r !== undefined);

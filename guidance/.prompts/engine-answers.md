@@ -41,7 +41,7 @@ want_bestiary: a row of the world's bestiary
 want_type: a type of the catalogs
 want_check: a check of the world's
 want_schedule: a schedule of the world's
-wants_time: a date and time, YYYY-MM-DD HH:MM; a time of day, such as midnight, dawn or 22:00, as the next time the clock shows it; or words for a span, such as two hours
+wants_time: a date and time, YYYY-MM-DD HH:MM; a clock time, such as 22:00, 10pm, noon or midnight, or a part of this world's day by its id or label, as the next time the clock shows it, or tomorrow's after tomorrow; or a count and a unit for a span, such as two hours or an hour and twenty minutes
 wants_minutes: a number of minutes
 wants_dice: dice such as 1d20+3 or 2d6
 wants_square: [column, row], two whole numbers counted from 1 at the top left, as the map prints them
@@ -90,7 +90,7 @@ off_the_scale: Operation {{n}} ({{op}}): {{who}}'s {{axis}} toward {{toward}} is
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 made_nowhere: Operation {{n}} ({{op}}): {{what}} was made at no place, since nothing recorded says where{{#said}}; {{said}} is kept as where it was said to be{{/said}}.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
-horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
+horizon_words: Operation {{n}} ({{op}}): {{words}} names no place, person or thing, so it is kept on the horizon as words.{{#near}} Near it: {{near}}.{{/near}}
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).{{#class}} It is a {{class}}{{#score}} and their score is {{score}}{{/score}}.{{/class}}{{#reason}} The rules' reason: {{reason}}.{{/reason}}
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.
 not_wearable: Operation {{n}} ({{op}}): {{what}} has no place to be worn ({{code}}), so {{who}} carries it.
@@ -121,6 +121,7 @@ off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, whic
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.
 time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
+clock_paused: Operation {{n}} ({{op}}): the clock was paused for this scene, and it was moved as given; the pause still holds.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
