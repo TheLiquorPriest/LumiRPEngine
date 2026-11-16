@@ -8,7 +8,8 @@ import type { GuidanceFiles } from "../iface/texts";
 import type { TrackDef } from "../shared/world";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { storySliceOf } from "../story/fold";
-import { STORY_DEFAULTS, storyLines, type StorySettings } from "../story/kit";
+import { storyLines, type StorySettings } from "../story/kit";
+import { QUESTS_DEFAULTS, type QuestsSettings } from "./settings";
 import { journalOf, recordOf } from "./journal";
 import { findQuest, openQuests, type QuestView, questSliceOf, questViews } from "./record";
 import { threadClosedAt } from "./thread";
@@ -22,8 +23,10 @@ export interface QuestRoutesDeps {
   store: Store;
   /** The guidance files in force for the chat: the page's words are lines of `.prompts/story-answers.md`. */
   files(user: string, chat: string): GuidanceFiles;
-  /** The story's settings for the chat, over `STORY_DEFAULTS`: `queryItems` bounds a page of quests. */
+  /** The story's settings for the chat, over `STORY_DEFAULTS`. */
   settings(user: string, chat: string): Promise<Partial<StorySettings>>;
+  /** The quests' settings for the chat, over `QUESTS_DEFAULTS`: `page` bounds a page of the records. Left out, the defaults. */
+  quests?(user: string, chat: string): Promise<Partial<QuestsSettings>>;
   /**
    * Whether the player's character knows a quest the world made known to some, by the world's own rule. Left out, none is known:
    * such a quest shows the player nothing until the Author shows it.
@@ -62,9 +65,9 @@ async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, tur
 }
 
 export function questRoutes(deps: QuestRoutesDeps) {
-  /** A page of quests holds the story's own bound of items (`story.queryItems`) unless the caller asks for fewer; at most ten times that. */
+  /** A page of quests holds the quests' own bound (`quests.page`) unless the caller asks for fewer; at most ten times that. */
   const sizes = async ({ params, user }: { params: Readonly<Record<string, string>>; user: string | null }): Promise<{ default: number; most: number }> => {
-    const size = { ...STORY_DEFAULTS, ...(user === null ? {} : await deps.settings(user, params.chat ?? "")) }.queryItems;
+    const size = { ...QUESTS_DEFAULTS, ...(user === null || deps.quests === undefined ? {} : await deps.quests(user, params.chat ?? "")) }.page;
     return { default: size, most: size * 10 };
   };
   return [
