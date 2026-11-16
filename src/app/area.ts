@@ -12,6 +12,7 @@ import { serviceRoutes, type TurnsTimed } from "./service-routes";
 import { signinDeps, signinRoutes } from "./signin-routes";
 import { type SettingsDeps, settingsRoutes } from "./settings-routes";
 import { switchesRoutes } from "./switches-routes";
+import type { SwitchesListing } from "./switches-listing";
 import { UPDATE_SETTINGS } from "./update";
 
 /** What the app area takes from the composition. */
@@ -24,6 +25,8 @@ export interface AppTakes {
   accounts?: LumiverseAccounts;
   /** The latest turns' moments of a chat, or of all chats, for the Runtime page's timings. */
   turns?: TurnsTimed;
+  /** What the files name that runs a command or calls out, listed as waiting when RPE starts and after a file that can name one is written. */
+  listing?: Pick<SwitchesListing, "start">;
 }
 
 export function appArea(takes?: AppTakes): Area {
@@ -42,6 +45,8 @@ export function appArea(takes?: AppTakes): Area {
           },
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.
           mounted: (at: App) => at.routes.add("settings", settingsRoutes({ settings: at.settings, facts: () => installFacts(at.config, at.paths), ...takes.settings(at) })),
+          // The server listens: what the user's files already name that runs a command or calls out is listed as waiting.
+          started: () => takes.listing?.start(),
         }),
   };
 }

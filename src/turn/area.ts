@@ -19,6 +19,7 @@ import { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions 
 import { promptOf } from "./request";
 import { REQUESTS_KIND } from "./requests";
 import { turnRoutes } from "./routes";
+import { sessionRoutes } from "./session-routes";
 import { passConnection, TURN_SETTINGS, turnSettings } from "./settings";
 import { namedStretches } from "./stage";
 import { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
@@ -165,6 +166,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       // A restart onto a new app file waits for the turns and the jobs that run, and for a request whose turn is still being taken in.
       at.builds.counts(async () => runs.chatsGoing().length + lane.intakesGoing() + (await harness.jobs.list({ user: owner(), states: ["running", "queued"] })).jobs.length);
       at.routes.add("turn", turnRoutes({ turns, chatName: async (chat) => (await takes.lumiverse()?.reads.chat(chat))?.name ?? null }));
+      at.routes.add("sessions", sessionRoutes({ turns, writes: at.writes }));
       await lane.preload();
     },
     stopping: () => turns?.harness.close(),

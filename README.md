@@ -41,7 +41,7 @@ In these steps, `rpe` stands for `bun <the folder of this repository>/dist/rpe.j
 
 ## The pages
 
-RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own web app. The pages of one chat: **Live** (what the agents are doing now), **Turns** (each turn and what its agents did; **Settle now**), **World** (the world's state at any turn), **Cast** (each character's whole record), **Story** (the story record, and bootstrap: setting RPE's agents to go over a chat's past) and **Play** (the previous build's play panels and HUD, running against RPE). The pages for everything: **Build** (the previous build's world builder, running against RPE), **Files**, **Connections**, **Settings**, **Storage** and **Migration**. The web app also has **Chats**. What each does, and what Play and Build cannot do yet, is in [Install and run](docs/install.md#the-pages).
+RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own web app. The pages of one chat: **Live** (what the agents are doing now), **Turns** (each turn and what its agents did; **Settle now**), **World** (the world's state at any turn), **Cast** (each character's whole record), **Story** (the story record, and bootstrap: setting RPE's agents to go over a chat's past), **Lore** (his books and the world's lore as RPE understands them), **Prompt** (how the chat's preset is cut into named parts) and **Play** (the previous build's play panels and HUD, running against RPE). The pages for everything: **Build** (the previous build's world builder, running against RPE), **Files**, **Connections**, **Settings**, **Runtime**, **Storage** and **Migration**. The web app also has **Chats**. What each does, and what Play and Build cannot do yet, is in [Install and run](docs/install.md#the-pages).
 
 ## Already using the previous build?
 
@@ -53,19 +53,18 @@ Do not install over it. Read [Moving from the previous build](docs/migration.md)
 - **On the Play page:** a tap that goes with your next message or plays at once as your message; the journal and the chips; the map full screen, the actions sheet (Act, Actions, Timelapse) and the World sheet; the things browser; walking on the map; a chat's own choices (knowledge tracking, what the narrator knows).
 - **On the Build page:** its background jobs, lore and secrecy tools.
 - **The `lumirpengine` command line and MCP server for outside harnesses do not work after the switch.** They still talk to the previous build's extension, which the new one replaces.
-- The Places, Quests, Rules, Lore, Prompt, Agents, Sessions and Runtime pages, and a Jobs page of its own: a chat's jobs are listed on its Turns page and all of yours on Chats, each with Cancel while it is queued or running.
+- The Places, Quests, Rules, Agents and Sessions pages, and a Jobs page of its own: a chat's jobs are listed on its Turns page and all of yours on Chats, each with Cancel while it is queued or running.
 - On the pages there are: Live's pause and "say something to the Author"; the Turn page's lanes, perceptions, gap checks, consents, unsourced items, open items, and a migrated turn's old record; editing the world, and a value's history; the Story page's beats beside the prose, its uncovered stretches and its story so far; the Cast page's game side, lore bindings and setting a casting.
 - Anything RPE adds to the chat itself in Lumiverse.
 - Talk.
 - Writing to your Lumiverse lore books.
-
-The previous build stays on its own branch of this repository for anyone who needs these.
 
 ## Where to go next
 
 - [Install and run](docs/install.md): the service, the extension, RPE's connection in Lumiverse, the pages, the web app and its key, updating, and every `rpe` command.
 - [Moving from the previous build](docs/migration.md): the rehearsal, the real run, the switch, the report, and going back.
 - [How behaviour lives in files](docs/behaviour.md): the files the agents read, and how to change what they do.
+- [Worlds in RPE](docs/world.md): what a world is, Build, attaching one to a chat, the packs, formulas and recipes.
 - [Settings](docs/settings.md): every setting, its default and what it does.
 - [Security](docs/security.md): keys, tokens, and what RPE never does by itself.
 - [Troubleshooting](docs/troubleshooting.md): what a failed reply's reason means, and what to do.

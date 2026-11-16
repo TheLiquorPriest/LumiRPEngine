@@ -40,7 +40,6 @@ import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
 import { globalConfig } from "../turn/settings";
 import { bootstrapArea } from "../turn/bootstrap/area";
-import { sessionRoutes } from "../turn/session-routes";
 import { guidanceTexts } from "../turn/texts";
 import { switchesListing } from "./switches-listing";
 import { appArea } from "./area";
@@ -172,6 +171,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       opened: (at) => {
         opened = at;
       },
+      // What the files name that runs a command or calls out is listed as waiting when RPE starts.
+      listing,
       settings: (at) => {
         const owner = at.config.lumiverse.user ?? "";
         // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
@@ -245,14 +246,6 @@ export function compose(options: ComposeOptions = {}): Composition {
         return { dueItems: s.engine.dueItems, editOps: s.engine.editOps, taps: s.taps };
       },
     })),
-    { name: "switches", started: () => listing.start() },
-    // The Sessions page's routes, over the turn lane's harness and store once the turn area is mounted.
-    {
-      name: "sessions",
-      mounted: (at) => {
-        at.routes.add("sessions", sessionRoutes({ turns: made(), writes: at.writes }));
-      },
-    },
     door.area,
   ];
 
