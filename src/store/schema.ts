@@ -250,6 +250,14 @@ ALTER TABLE change ADD COLUMN placed TEXT;
 ALTER TABLE change ADD COLUMN moment INTEGER;
 `,
   },
+  {
+    version: 12,
+    // The Author's horizon is the story's record, beside the scene (B-5): the store's own horizon operation goes, and each change that
+    // recorded one becomes the story area's, whose list takes the same entries (each in full).
+    sql: `
+UPDATE change SET op = 'story.horizon', lane = 'story' WHERE op = 'store.horizon';
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */
