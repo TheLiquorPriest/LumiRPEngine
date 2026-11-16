@@ -46,7 +46,7 @@ A proposal may also be for an entry of the world's own lore. It is drafted the s
 
 ## Offering it
 
-Offer it with `suggest`, as a lore change: `lore` with the entry's id, or `new_lore` true for a new entry; the draft as `text`; and the `reason`, which holds the book it is for and the messages that support it. Then go on with the turn. Do not wait for an answer and do not ask about it in the reply. The player finds it with the other suggestions and answers when they like.
+Offer it with `suggest`, as a lore change. A new entry is `new_lore` true with its `book`, its `title`, its `keys` (a list) and the draft as `text`. An edit is `lore`, the entry's id, with `was`, the passage as it stands, and `text`, the passage as you would have it. Either way the `reason` holds the messages that support it. The player is shown the suggestion whole. Then go on with the turn. Do not wait for an answer and do not ask about it in the reply. The player finds it with the other suggestions and answers when they like.
 
 - **Approved:** RPE writes it and keeps the entry as it was, so the write can be undone.
 - **Edited:** what the player wrote is what is kept. Use their wording from then on.
