@@ -119,6 +119,7 @@ system_keeps: Operation {{n}} ({{op}}): {{system}} keeps {{key}} itself, as {{ke
 fact_lane_default: Operation {{n}} ({{op}}): no lane was named, so this fact is recorded in the {{lane}} lane.
 off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}).
 not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, so nothing was added to it and it stays as it was; the change is recorded as given.
+capped: Operation {{n}} ({{op}}): {{field}} of {{entity}} was {{was}} and is held to {{now}}, the cap given; the change is recorded as given.
 advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).
 on_map: Operation {{n}} ({{op}}): {{said}}
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
@@ -126,7 +127,7 @@ time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{t
 time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 clock_paused: Operation {{n}} ({{op}}): the clock was paused for this scene, and it was moved as given; the pause still holds.
-before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, so the clock went back no further.
+before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, and the clock was set back to a time before it.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
 no_map: {{at}} has no map to show.

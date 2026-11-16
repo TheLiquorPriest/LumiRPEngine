@@ -166,7 +166,7 @@ describe("the new fold", () => {
     const t = s.beginTurn({ chat: "c", kind: "normal" });
     const { changes, state } = s.addChanges(t.id, engine({ type: "fragile.break", data: {} }, tick(3)));
     expect(changes.map((c) => [c.applied, c.reports])).toEqual([
-      [false, [{ code: "failed" }]],
+      [false, [{ code: "failed", values: { fault: true } }]],
       [true, []],
     ]);
     expect(failures.map((f) => [f.op, f.error instanceof Error ? f.error.message : String(f.error)])).toEqual([["fragile.break", "the reducer broke"]]);

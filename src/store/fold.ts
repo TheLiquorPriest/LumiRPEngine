@@ -17,7 +17,7 @@ import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { RevisionId } from "../shared/ids";
 import type { WorldDoc } from "../shared/world";
-import { apartHost, applyEvent, applyMarker, tiesOf, validateEvent, validMarkerBody } from "../engine/events";
+import { adviseEvent, apartHost, applyEvent, applyMarker, tiesOf, validateEvent, validMarkerBody } from "../engine/events";
 import type { ReadContext, Touch } from "../engine/registry";
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
@@ -151,10 +151,25 @@ export function eventOf(op: string, value: JsonValue): LedgerEvent | null {
   return value as unknown as LedgerEvent;
 }
 
-/** A handler, or a pack's code the fold calls, that threw: the error goes to whoever keeps the log; the report says only that it failed. */
+/** A handler, or a pack's code the fold calls, that threw: the error goes to whoever keeps the log; the report says it was a fault, never that a rule refused. */
 function failed(env: FoldEnv, op: string, error: unknown, item: Pick<Item, "turn" | "change">): Report {
   env.failed?.({ op, error, turn: item.turn, change: item.change ?? null });
-  return { code: "failed" };
+  return { code: "failed", values: { fault: true } };
+}
+
+/**
+ * Every code a validator can refuse an event with, ruled (plan §6.7: the world's rules advise, and code leaves no change unapplied for
+ * one). A structural code is one where what the change names is not there or it cannot be read, so there is nothing to apply it to: the
+ * change is recorded unapplied, with the code as its report. Any other is a rule of the world, however it is worded (the funds guard's
+ * declined and not_open, a stage that moved, a detail already materialized, an entity that already exists): the change is applied and the
+ * code kept as its report.
+ */
+const STRUCTURAL_PREFIXES: readonly string[] = ["bad_", "missing_", "unknown_"];
+const STRUCTURAL_CODES: Readonly<Record<string, true>> = { not_found: true, tied: true, failed: true, no_world: true, no_handler: true, not_materialized: true, unbalanced: true };
+
+/** How the fold rules a code a validator refuses an event with. */
+export function ruling(code: string): "structural" | "content" {
+  return Object.hasOwn(STRUCTURAL_CODES, code) || STRUCTURAL_PREFIXES.some((p) => code.startsWith(p)) ? "structural" : "content";
 }
 
 /**
@@ -303,33 +318,45 @@ function applyEv(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item): 
   return { touches, clockMoved: state.world.clock !== clock };
 }
 
-/** Applies one event with today's reducer, without checking it, and keeps its marks; a handler that throws is reported. */
-function applyOne(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item): Outcome {
+/** Applies one event with today's reducer, without checking it, and keeps its marks; a handler that throws is reported. `advice` is kept as the applied change's reports. */
+function applyOne(env: FoldEnv, state: StoreState, ev: LedgerEvent, item: Item, advice: readonly Report[]): Outcome {
   const a = applyEv(env, state, ev, item);
   if ("report" in a) return { applied: false, reports: [a.report] };
   markTouched(state, a.touches, item, a.clockMoved);
-  return { applied: true, reports: [] };
+  return { applied: true, reports: [...advice] };
 }
 
-/** Whether an event may apply to this state, by today's validator (its type's own check and every pack's guard). */
-function checkOne(env: FoldEnv, world: WorldState, ev: LedgerEvent, item: Item): Report | null {
+/** What today's validators and advisers say of an event on a state: the structural code it is refused with, or the advice it applies with. */
+interface Verdict {
+  refused: Report | null;
+  advice: Report[];
+}
+
+/**
+ * Whether an event may apply to this state, by today's validator (its type's own check and every pack's guard). A code of a rule of
+ * the world is advice (`ruling`): the event applies, and the code is kept as its report, with what the event's own adviser says of it.
+ */
+function checkOne(env: FoldEnv, world: WorldState, ev: LedgerEvent, item: Item): Verdict {
   try {
     const ctx = contextOf(env, world);
-    if (!ctx) return noWorld(world.revision);
+    if (!ctx) return { refused: noWorld(world.revision), advice: [] };
     const r = validateEvent(env.registry, ev, ctx);
-    return r ? { code: r.code } : null;
+    if (r) return ruling(r.code) === "structural" ? { refused: { code: r.code }, advice: [] } : { refused: null, advice: [{ code: r.code }] };
+    const a = adviseEvent(env.registry, ev, ctx);
+    return { refused: null, advice: a === null ? [] : [a.values === undefined ? { code: a.code } : { code: a.code, values: a.values }] };
   } catch (e) {
-    return failed(env, ev.type, e, item);
+    return { refused: failed(env, ev.type, e, item), advice: [] };
   }
 }
 
-/** Whether a unit applies whole, tried on a copy of the world as today's fold tries one: the first reason it does not, or null. */
-function trialOnCopy(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent[], items: readonly Item[]): Report | null {
+/** Whether a unit applies whole, tried on a copy of the world as today's fold tries one: the first reason it does not, or null; each event's advice is added to `advice`. */
+function trialOnCopy(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent[], items: readonly Item[], advice: Report[][]): Report | null {
   const scratch = structuredClone(state.world);
   for (const [k, ev] of unit.entries()) {
     const item = items[k] as Item;
-    const found = checkOne(env, scratch, ev, item);
-    if (found) return found;
+    const verdict = checkOne(env, scratch, ev, item);
+    if (verdict.refused) return verdict.refused;
+    advice.push(verdict.advice);
     try {
       const ctx = contextOf(env, scratch);
       if (!ctx) return noWorld(scratch.revision);
@@ -349,29 +376,32 @@ function trialOnCopy(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent
  */
 function landUnit(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent[], items: readonly Item[], out: Outcome[], at: number): Report | null {
   if (!knownWrites(unit)) {
-    const found = trialOnCopy(env, state, unit, items);
+    const advice: Report[][] = [];
+    const found = trialOnCopy(env, state, unit, items, advice);
     if (found) return found;
     unit.forEach((ev, k) => {
-      out[at + k] = applyOne(env, state, ev, items[k] as Item);
+      out[at + k] = applyOne(env, state, ev, items[k] as Item, advice[k] ?? []);
     });
     return null;
   }
   const applied: Extract<Applied, { touches: readonly Touch[] }>[] = [];
+  const advised: Report[][] = [];
   const found = tryUnit(state.world, (): Report | null => {
     for (const [k, ev] of unit.entries()) {
       const item = items[k] as Item;
-      const report = checkOne(env, state.world, ev, item);
-      if (report) return report;
+      const verdict = checkOne(env, state.world, ev, item);
+      if (verdict.refused) return verdict.refused;
       const a = applyEv(env, state, ev, item);
       if ("report" in a) return a.report;
       applied.push(a);
+      advised.push(verdict.advice);
     }
     return null;
   });
   if (found) return found;
   applied.forEach((a, k) => {
     markTouched(state, a.touches, items[k] as Item, a.clockMoved);
-    out[at + k] = { applied: true, reports: [] };
+    out[at + k] = { applied: true, reports: advised[k] ?? [] };
   });
   return null;
 }
@@ -477,7 +507,7 @@ function applyOther(env: FoldEnv, state: StoreState, item: Item): Outcome {
 export function applyUnchecked(env: FoldEnv, state: StoreState, items: readonly Item[]): Outcome[] {
   return items.map((item) => {
     const ev = eventIn(env, item);
-    return ev ? applyOne(env, state, ev, item) : applyOther(env, state, item);
+    return ev ? applyOne(env, state, ev, item, []) : applyOther(env, state, item);
   });
 }
 
@@ -534,9 +564,9 @@ function runEvents(env: FoldEnv, state: StoreState, items: readonly Item[], from
     if (tiesOf(unit).some((t) => fell.has(t))) drop(k, end, { code: "tied" });
     else if (unit.length === 1) {
       const item = items[from + k] as Item;
-      const found = checkOne(env, state.world, unit[0] as LedgerEvent, item);
-      if (found) drop(k, end, found);
-      else out[from + k] = applyOne(env, state, unit[0] as LedgerEvent, item);
+      const verdict = checkOne(env, state.world, unit[0] as LedgerEvent, item);
+      if (verdict.refused) drop(k, end, verdict.refused);
+      else out[from + k] = applyOne(env, state, unit[0] as LedgerEvent, item, verdict.advice);
     } else {
       const found = unitAt(k, end);
       if (found) drop(k, end, found);

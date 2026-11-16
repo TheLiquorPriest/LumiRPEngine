@@ -92,36 +92,36 @@ export function listDue(o: Pick<OpContext, "reading" | "reply" | "call">, listin
 }
 
 /**
- * The clock set to `to`: forward by a `clock` event, back by today's own set-back (`engine.rewind`).
- * Never before the story starts, the one point today's engine holds the clock to: a set-back that
- * asks for earlier goes to the start, and the answer says so. A clock set back is reported. Where an
- * argument of the operation names `to` as a date and time and the clock reaches it, the move sets the
- * clock as well (`settingClock`).
+ * The clock set to `to`: forward by a `clock` event, back by today's own set-back (`engine.rewind`). A set-back before the story starts
+ * is made as asked, and the answer says it is before the start. A clock set back is reported. Where an argument of the operation names
+ * `to` as a date and time, the move sets the clock as well (`settingClock`), the moment the clock already shows included.
  */
 export function setClock(o: OpContext, to: number): Unread | undefined {
   const w = o.draft.w;
   const now = w.state.clock;
   // A clock he paused for the scene is moved as given, and the move is said; the pause stays as he set it.
   if (to !== now && clockPaused(w.ctx.world, w.state)) o.reply.report("clock_paused", { n: o.n, op: o.op });
+  const sets = namesDate(o, to);
+  const done = (events: LedgerEvent[]): Unread | undefined => {
+    const bad = o.draft.applyAll(events);
+    return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  };
   if (to === now) {
+    // Stating the moment the clock already shows sets it; nothing is moved.
+    if (sets) return done([settingClock({ type: "clock", minutes: 0, cause: "advance" })]);
     o.reply.line("already_so", { n: o.n, op: o.op, what: clockText(o, now) });
     return undefined;
   }
-  const sets = namesDate(o, to);
   if (to > now) {
     const move: LedgerEvent = { type: "clock", minutes: clockOfSeconds(clockSeconds(to) - clockSeconds(now)), cause: "advance" };
-    const bad = o.draft.applyAll([sets ? settingClock(move) : move]);
-    return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+    return done([sets ? settingClock(move) : move]);
   }
   const world = w.ctx.world;
   const start = minutesBetween(world.calendar.epoch, world.start.at);
-  const back = Math.max(to, start);
-  o.reply.report("time_back", { n: o.n, op: o.op, from: clockText(o, now), to: clockText(o, back) });
-  if (back !== to) o.reply.report("before_start", { n: o.n, op: o.op, start: clockText(o, start) });
-  if (back === now) return undefined;
-  const rewind: LedgerEvent = { type: ENGINE_EVENTS.rewind, data: { minutes: clockOfSeconds(clockSeconds(now) - clockSeconds(back)) } };
-  const bad = o.draft.applyAll([sets && back === to ? settingClock(rewind) : rewind]);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  o.reply.report("time_back", { n: o.n, op: o.op, from: clockText(o, now), to: clockText(o, to) });
+  if (to < start) o.reply.report("before_start", { n: o.n, op: o.op, start: clockText(o, start) });
+  const rewind: LedgerEvent = { type: ENGINE_EVENTS.rewind, data: { minutes: clockOfSeconds(clockSeconds(now) - clockSeconds(to)) } };
+  return done([sets ? settingClock(rewind) : rewind]);
 }
 
 const passTime: OpDef = {

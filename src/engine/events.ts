@@ -79,6 +79,11 @@ const setDef: EventTypeDef<SetEvent> = {
     if (e.atMost && typeof current === "number" && typeof e.value === "number" && current <= e.value) return;
     entity.fields[e.field] = e.value;
   },
+  // A number a cap lowers is told: what it was and what it is held to (a number already under the cap is left as it is, and nothing is said).
+  advise: (e, ctx) => {
+    const current = e.atMost && hasEntity(ctx.state, e.entity) && safeKey(e.field) ? ctx.state.entities[e.entity]?.fields[e.field] : undefined;
+    return typeof current === "number" && typeof e.value === "number" && current > e.value ? { code: "capped", values: { entity: e.entity, field: e.field, was: current, now: e.value } } : null;
+  },
   touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`,
 };
