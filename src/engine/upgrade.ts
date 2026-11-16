@@ -256,9 +256,9 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
     }
     // Its place and cell are one part: a move in play keeps all of it, and taking any of it takes the
     // revision's place and cell together, so a cell never lands in another place than its own. Play
-    // putting it into something or taking it out (`in`) moved it too.
+    // putting it into something, on something or taking it out (`in`, `on`) moved it too.
     if (PLACEMENT_FIELDS.some((f) => !same(own(earlier, f), own(later, f)))) {
-      const touched = whole || PLACEMENT_FIELDS.some((f) => touchedField(state, id, f)) || touchedAnyRelation(state, id, "in");
+      const touched = whole || PLACEMENT_FIELDS.some((f) => touchedField(state, id, f)) || touchedAnyRelation(state, id, "in") || touchedAnyRelation(state, id, "on");
       for (const f of PLACEMENT_FIELDS) if (!same(own(now.fields, f), own(later, f))) fields[f] = { now: own(now.fields, f), next: own(later, f), touched };
     }
     const olds = byKey(was ? (own(oldRel, id) ?? []) : now.relations);

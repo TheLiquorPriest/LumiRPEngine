@@ -61,6 +61,13 @@ export interface Got {
 /** Where a thing is: lying at a place, or in a holder (a person, a container, a vehicle). */
 export type Spot = { place: PlaceId } | { in: EntityId };
 
+/** A thing's or a person's support: what it is on (the lantern on the table, someone on the cart). It shares the support's square and goes where it goes, with no room, size or capacity rule: a support only supports, as a holder holds. A move may be to one. */
+export type Support = { on: EntityId };
+
+export function isSupport(v: unknown): v is Support {
+  return isRecord(v) && Object.keys(v).length === 1 && typeof v.on === "string" && v.on !== "";
+}
+
 /** Where a thing rests when nobody is using it (`home`): a spot, or on its owner. */
 export type Rest = Spot | "owner";
 
@@ -192,7 +199,7 @@ export type PlaceKind = (typeof PLACE_KINDS)[number];
  */
 export type ItemOp =
   | { do: "make"; name: string; type?: string; class?: string; details?: VehicleDetails; size?: Size; holds?: Size; category?: string; description?: string; at?: Spot; owner?: EntityId; home?: Rest; qty?: number; aliases?: string[]; hidden?: boolean; why: string }
-  | { do: "move"; item: EntityId; to: Spot; why: string }
+  | { do: "move"; item: EntityId; to: Spot | Support; why: string }
   | { do: "hand"; item: EntityId; to: EntityId; basis: HandoverBasis; until?: number; why: string }
   | { do: "own"; item: EntityId; owner: EntityId | null; why: string }
   | { do: "grant" | "revoke"; item: EntityId; who: EntityId; basis?: GrantBasis; until?: number; by?: EntityId }
@@ -311,7 +318,7 @@ export function parseItemOp(o: unknown): ItemOp | null {
       };
     }
     case "move":
-      return id(o.item) && isSpot(o.to) && text(o.why) ? { do: "move", item: o.item, to: o.to, why: o.why } : null;
+      return id(o.item) && (isSpot(o.to) || isSupport(o.to)) && text(o.why) ? { do: "move", item: o.item, to: o.to, why: o.why } : null;
     case "hand":
       if (!id(o.item) || !id(o.to) || !(HANDOVER_BASES as readonly unknown[]).includes(o.basis) || !text(o.why) || !optional(o.until, finite)) return null;
       return { do: "hand", item: o.item, to: o.to, basis: o.basis as HandoverBasis, why: o.why, ...(finite(o.until) ? { until: o.until } : {}) };

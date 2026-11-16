@@ -26,6 +26,8 @@ export interface Listed {
   at: Square | null;
   size?: Square;
   on?: EntityId;
+  /** That `on` is what it lies in (a holder's contents), not what it lies on. */
+  within?: true;
   blocks?: Piece["blocks"];
   /** Whether it stands in the part shown. */
   shown: boolean;
@@ -114,7 +116,7 @@ export function printMap(drawn: Drawn, moving: Moving, opts: { centre?: Square; 
     .map((id) => {
       const p = moving.pieces[id];
       const at = standsAt(moving, id);
-      return { id, at, ...(p?.size ? { size: p.size } : {}), ...(p?.on !== undefined ? { on: p.on } : {}), ...(p?.blocks ? { blocks: p.blocks } : {}), shown: at !== null && at[0] >= c0 && at[0] <= c1 && at[1] >= r0 && at[1] <= r1 };
+      return { id, at, ...(p?.size ? { size: p.size } : {}), ...(p?.on !== undefined ? { on: p.on } : {}), ...(p?.within ? { within: true as const } : {}), ...(p?.blocks ? { blocks: p.blocks } : {}), shown: at !== null && at[0] >= c0 && at[0] <= c1 && at[1] >= r0 && at[1] <= r1 };
     });
   const doors = [...drawn.doors].sort((a, b) => a - b).map((i) => ({ at: squareAt(drawn, i), state: doorState(drawn, moving, i) ?? "open" }));
   return {

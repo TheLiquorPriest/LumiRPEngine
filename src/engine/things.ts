@@ -122,13 +122,30 @@ export function spotOf(state: ThingContext["state"], id: EntityId): Spot | null 
   if (!e) return null;
   if (typeof e.fields.place === "string" && e.fields.place !== "") return { place: e.fields.place };
   const holder = holderOf(state, id);
-  return holder ? { in: holder } : null;
+  if (holder) return { in: holder };
+  // What lies on something lies where that is.
+  const support = supportOf(state, id);
+  const place = support ? placeOfEntity(state, support) : null;
+  return place ? { place } : null;
+}
+
+/** What a thing or a person is on (`on`: the lantern on the table, someone on the cart), or null. It is never a holder: it holds nothing and takes no rule of one. */
+export function supportOf(state: ThingContext["state"], id: EntityId): EntityId | null {
+  return own(state.entities, id)?.relations.find((r) => r.type === "on")?.to ?? null;
 }
 
 /** The holders a thing is in, nearest first (never itself, never twice). */
 export function holdersOf(state: ThingContext["state"], id: EntityId): EntityId[] {
   const out: EntityId[] = [];
   for (let cur = holderOf(state, id); cur && !out.includes(cur) && cur !== id && out.length < CHAIN_DEPTH; cur = holderOf(state, cur)) out.push(cur);
+  return out;
+}
+
+/** Everything a thing rests in or on, nearest first (never itself, never twice): so nothing is put in or on what rests on it. */
+export function carriersOf(state: ThingContext["state"], id: EntityId): EntityId[] {
+  const out: EntityId[] = [];
+  const up = (x: EntityId): EntityId | null => holderOf(state, x) ?? supportOf(state, x);
+  for (let cur = up(id); cur && !out.includes(cur) && cur !== id && out.length < CHAIN_DEPTH; cur = up(cur)) out.push(cur);
   return out;
 }
 

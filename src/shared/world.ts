@@ -184,7 +184,7 @@ export function playedKinds(packKinds: Readonly<Record<string, KindDef>> | undef
 export type Cardinality = "one_one" | "one_many" | "many_one" | "many_many";
 
 /** Built-in relation types (DESIGN §3 feature mapping). */
-export const BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"] as const;
+export const BUILTIN_RELATIONS = ["in", "on", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"] as const;
 
 /**
  * A relation type. A link written through the `link` effect must run between the allowed kinds and

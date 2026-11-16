@@ -225,6 +225,8 @@ export interface Piece {
   at?: Square;
   /** What it lies on or in; it stands where that stands. */
   on?: EntityId;
+  /** That it lies in what `on` names (a holder's contents), not on it (a support's); absent for what is on it. */
+  within?: true;
   /** Its footprint, [columns, rows]; one square when absent. */
   size?: Square;
   /** Whether its footprint blocks the way and the view; neither when absent. */
@@ -408,16 +410,18 @@ export function movingOf(registry: Registry, world: WorldDoc, state: Readonly<Wo
       else unplaced.push(id);
     }
   }
-  // A thing in a thing in a thing: each pass lays on the grid what lies in something laid on it, until none is left.
+  // A thing in a thing in a thing, or on one: each pass lays on the grid what lies in or on something laid on it, until none is left.
   for (let laid = true; laid; ) {
     laid = false;
     for (const id of ids) {
       const e = state.entities[id];
       if (!e || isGone(state, id) || hasOwn(pieces, id) || (typeof e.fields.place === "string" && e.fields.place !== "")) continue;
-      const holder = e.relations.find((r) => r.type === "in")?.to;
+      const rel = e.relations.find((r) => r.type === "in" || r.type === "on");
+      const holder = rel?.to;
       const held = holder !== undefined ? state.entities[holder] : undefined;
-      if (holder === undefined || !held || !hasOwn(pieces, holder) || kindIs(registry, world, held.kind, "person")) continue;
-      pieces[id] = { on: holder, ...shaped(state, id) };
+      // What someone carries is theirs, not the floor's; something on a person or a thing, or in a thing, stands where that does.
+      if (rel === undefined || holder === undefined || !held || !hasOwn(pieces, holder) || (rel.type === "in" && kindIs(registry, world, held.kind, "person"))) continue;
+      pieces[id] = { on: holder, ...(rel.type === "in" ? { within: true as const } : {}), ...shaped(state, id) };
       laid = true;
     }
   }
@@ -454,7 +458,7 @@ export function spotData(v: unknown): GridSpot | null {
 
 /**
  * Where an entity stands on a grid: its own cell on the grid its place stands on; for something
- * carried, its outermost holder's. Null off any grid, or with no cell on it.
+ * carried or lying on something, its outermost holder's or support's. Null off any grid, or with no cell on it.
  */
 export function spotOf(world: WorldDoc, state: Readonly<WorldState>, entity: EntityId): GridSpot | null {
   let id = entity;
@@ -467,7 +471,7 @@ export function spotOf(world: WorldDoc, state: Readonly<WorldState>, entity: Ent
       const { x, y } = e.fields;
       return stand && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null ? { scope: stand.scope, x, y } : null;
     }
-    const holder = e.relations.find((r) => r.type === "in")?.to;
+    const holder = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
     if (holder === undefined) return null;
     id = holder;
   }

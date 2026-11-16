@@ -82,7 +82,7 @@ export function worldWith(...maps: MapDoc[]): WorldDoc {
   const thing = (id: string, kind: string, name: string, relations: WorldDoc["entities"][string]["relations"] = []): WorldDoc["entities"][string] => ({ id, kind, name, tier: "background", fields: {}, relations });
   w.entities.long_table = thing("long_table", "item", "Long table");
   w.entities.chest = thing("chest", "container", "Iron-bound chest");
-  w.entities.lantern = thing("lantern", "item", "Lantern", [{ type: "in", to: "long_table" }]);
+  w.entities.lantern = thing("lantern", "item", "Lantern", [{ type: "on", to: "long_table" }]);
   w.maps = Object.fromEntries(maps.map((m) => [m.id, m]));
   return compileMaps(w);
 }

@@ -40,7 +40,7 @@ import { doorEvent, positionEvent, shapeEvent } from "./map/record";
 import { distanceData, farText, layersAt, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
 import { NO_LAYOUT } from "./map/layout";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
-import { putThing } from "./ops-things";
+import { putOnSupport, putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
 import { textOf } from "./texts";
 
@@ -390,8 +390,8 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
   const say = (): Say => ({ lines: o.call.lines, world: isUnread(layers) ? o.reading.world : layers.world, state: w.state });
   const entry: JsonObject = { who: whoIs(say(), id) };
   if (p.on) {
-    if (!isThing(w.ctx, id)) return { line: "not_a_thing", fields: { n: o.n, op: o.op, what: whoIs(say(), id) } };
-    const failed = putThing(o, id, { in: p.on.id }, why);
+    // On something (a table, a cart): a thing or someone shares its square and goes where it goes, with no holder's rules.
+    const failed = isThing(w.ctx, id) ? putThing(o, id, { on: p.on.id }, why) : putOnSupport(o, id, p.on.id);
     if (failed) return failed;
     const fields = own(w.state.entities, id)?.fields;
     if (typeof fields?.x === "number" || typeof fields?.y === "number") {

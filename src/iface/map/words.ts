@@ -229,7 +229,9 @@ export function mapWords(wording: MapWording, layers: Layers, state: Readonly<Wo
       noSquare.push(p.id);
       continue;
     }
-    const fields = { id: p.id, name: nameIn(world, state, p.id), column: p.at[0], row: p.at[1], shown: p.shown };
+    // What it lies on or in, as recorded: `on` for a support's, `inside` for a holder's.
+    const rests = p.on === undefined ? {} : p.within ? { inside: nameIn(world, state, p.on), insideId: p.on } : { on: nameIn(world, state, p.on), onId: p.on };
+    const fields = { id: p.id, name: nameIn(world, state, p.id), column: p.at[0], row: p.at[1], shown: p.shown, ...rests };
     const recorded = recordedOf(layers, state, opts.facts ?? {}, layout.facts, p.id);
     const said =
       p.id === pov
@@ -239,7 +241,6 @@ export function mapWords(wording: MapWording, layers: Layers, state: Readonly<Wo
             const size = p.size && (p.size[0] > 1 || p.size[1] > 1) ? { columns: p.size[0], rows: p.size[1] } : null;
             return sayAs("map_piece", {
               ...fields,
-              ...(p.on !== undefined ? { on: nameIn(world, state, p.on), onId: p.on } : {}),
               ...(size ? { size } : {}),
               blocksWay: p.blocks?.way === true,
               blocksView: p.blocks?.view === true,

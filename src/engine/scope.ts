@@ -273,7 +273,7 @@ function num(v: Value | undefined): number {
   return 0;
 }
 
-/** The place an entity is at: its `place` field, else the place of what holds it (`in`), as many holders up as `engine.holderDepth` says. */
+/** The place an entity is at: its `place` field, else the place of what holds it (`in`) or what it is on (`on`), as many up as `engine.holderDepth` says. */
 export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }, id: EntityId): string | null {
   let cur: EntityId | undefined = id;
   for (let guard = 0; cur; guard++) {
@@ -285,7 +285,7 @@ export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }
     if (!e) return null;
     const p = e.fields.place;
     if (typeof p === "string" && p !== "") return p;
-    cur = e.relations.find((r) => r.type === "in")?.to;
+    cur = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
   }
   return null;
 }
@@ -304,7 +304,7 @@ export function isGone(state: { entities: Record<EntityId, EntityState> }, id: E
     const e: EntityState | undefined = own(state.entities, cur);
     if (!e) return false;
     if (e.fields[GONE_FIELD] === true) return true;
-    cur = e.relations.find((r) => r.type === "in")?.to;
+    cur = e.relations.find((r) => r.type === "in" || r.type === "on")?.to;
   }
   return false;
 }

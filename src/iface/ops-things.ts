@@ -12,17 +12,17 @@ import { ownersIn } from "../shared/finance";
 import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import { type HandoverBasis, type ItemOp, PLACE_KINDS, type PlaceKind, type Spot } from "../shared/things";
+import { type HandoverBasis, type ItemOp, PLACE_KINDS, type PlaceKind, type Spot, type Support } from "../shared/things";
 import { reachOf } from "../engine/access";
 import { applyEffects } from "../engine/effects";
 import { own } from "../engine/pack-kit";
 import { baseWorld, findPlaces, placeOp } from "../engine/places-in-play";
-import { relocate, relocateInto } from "../engine/relocate";
+import { relocate, relocateInto, relocateOnto } from "../engine/relocate";
 import { createRng } from "../engine/rng";
 import { placeOfEntity } from "../engine/scope";
 import { putAwaySpot } from "../engine/thing-gm";
 import { applyItemOp, type ItemOpApplied, type ItemOpRefusal, locate } from "../engine/thing-ops";
-import { isThing, possessorOf, restOf, spotOf } from "../engine/things";
+import { isThing, possessorOf, restOf, spotOf, supportOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { bestiaryOf, bestiaryRow } from "./bestiary";
 import { find, findOptional, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, type OpDef, textArg, type Unread, unknownFields } from "./ops";
@@ -38,9 +38,9 @@ export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hol
 /** The refusals of today's things model that are about what a change means (its size rules, a part or a built-in, a cycle, an owner), never about whether it can be read: applied all the same, and reported. */
 export const BENT_RULES: Readonly<Record<string, true>> = { part: true, builtin: true, cant_hold: true, too_big: true, too_deep: true, no_room: true, cycle: true, not_owner: true, no_slot: true };
 
-/** Where a spot is, for an answer: a place's or a holder's name with its id. */
-function spotName(o: OpContext, spot: Spot): string {
-  return named(o.reading, "place" in spot ? spot.place : spot.in);
+/** Where a spot is, for an answer: a place's, a holder's or a support's name with its id. */
+function spotName(o: OpContext, spot: Spot | Support): string {
+  return named(o.reading, "place" in spot ? spot.place : "in" in spot ? spot.in : spot.on);
 }
 
 /**
@@ -49,7 +49,7 @@ function spotName(o: OpContext, spot: Spot): string {
  * all the same and the answer reports which rule it bent. A thing already there changes nothing,
  * and the answer says so.
  */
-export function putThing(o: OpContext, thing: EntityId, to: Spot, why: string): Unread | undefined {
+export function putThing(o: OpContext, thing: EntityId, to: Spot | Support, why: string): Unread | undefined {
   const w = o.draft.w;
   const out = applyItemOp(w, { do: "move", item: thing, to, why }, itemOptions(o));
   if (!("code" in out)) {
@@ -71,6 +71,18 @@ export function putThing(o: OpContext, thing: EntityId, to: Spot, why: string): 
 /** Moves a person (or a group, or anything that is not a thing) to a place, out of whatever holds them, through today's one move path. */
 function movePerson(o: OpContext, who: EntityId, to: string, along: boolean): Unread | undefined {
   const events = relocate(o.draft.w.ctx, who, to, along ? { along: true } : {});
+  if ("code" in events) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: events.code } };
+  const bad = o.draft.applyAll(events);
+  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+}
+
+/** Puts someone on a support (seated on a table, riding on a cart) through the engine's support path (`relocateOnto`): they stand where it stands and go where it goes; nothing of a holder's rules applies. */
+export function putOnSupport(o: OpContext, who: EntityId, support: EntityId): Unread | undefined {
+  if (own(o.draft.w.state.entities, who)?.relations.some((r) => r.type === "on" && r.to === support)) {
+    o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, who) });
+    return undefined;
+  }
+  const events = relocateOnto(o.draft.w.ctx, who, support);
   if ("code" in events) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: events.code } };
   const bad = o.draft.applyAll(events);
   return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
@@ -262,18 +274,22 @@ const place: OpDef = {
     const by = whereNamed(o, "by", "person", said);
     if (isUnread(by)) return by;
     // Where it is set down, the most exact first: on a thing, in someone's hands, at a place.
-    const asked: Spot | null = on ? { in: on.id } : by ? { in: by.id } : at ? { place: at.id } : null;
+    const asked: Spot | Support | null = on ? { on: on.id } : by ? { in: by.id } : at ? { place: at.id } : null;
     const what = find(o, "what", "entity");
     if (isUnread(what)) return what;
     const here = placeOfEntity(w.state, what.id);
-    if (!isThing(w.ctx, what.id)) {
+    if (!isThing(w.ctx, what.id) && on) {
+      // Someone on something: where it is, as it goes.
+      const failed = putOnSupport(o, what.id, on.id);
+      if (failed) return failed;
+    } else if (!isThing(w.ctx, what.id)) {
       // Someone set down somewhere: out of what holds them (a vehicle), at the place, as the move path puts them.
       const to = at?.id ?? here;
       if (to === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
       const failed = movePerson(o, what.id, to, false) ?? placeOnMap(o, what.id, to, o.args, soft);
       if (failed) return failed;
     } else {
-      const spot: Spot | null = asked ?? (here !== null ? { place: here } : null);
+      const spot: Spot | Support | null = asked ?? (here !== null ? { place: here } : null);
       if (spot === null) {
         // With no place to put it at, words or a zone for where it is stay as its position until a call gives it a place.
         const unplaced = placeOnMap(o, what.id, null, o.args, soft);
@@ -282,7 +298,7 @@ const place: OpDef = {
       } else {
         // Said to be on or with something that names nothing, and lying where it is set down already: only the words are new.
         const now = spotOf(w.state, what.id);
-        const still = said.length > 0 && now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in);
+        const still = said.length > 0 && ("on" in spot ? supportOf(w.state, what.id) === spot.on : now !== null && ("place" in now ? "place" in spot && now.place === spot.place : "in" in spot && now.in === spot.in));
         const failed = still ? undefined : putThing(o, what.id, spot, textArg(o.args, "why") ?? "");
         if (failed) return failed;
         if ("place" in spot) {

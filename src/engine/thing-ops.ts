@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { Got, GotHow, ItemOp, Rest, SetOp, Size, SizeClass, Spot } from "../shared/things";
+import type { Got, GotHow, ItemOp, Rest, SetOp, Size, SizeClass, Spot, Support } from "../shared/things";
 import { typeFields } from "../shared/items-build";
 import { isSetOp, nameKey, sizeRank, SIZE_LABELS, thingsConfigOf } from "../shared/things";
 import type { EntityDef, FieldDef } from "../shared/world";
@@ -29,7 +29,7 @@ import type { Advice, ReadContext, Rejection } from "./registry";
 import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "./scope";
 import { typeRowOf } from "./thing-index";
 import { findThings, meets } from "./thing-resolve";
-import { contentsOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, slotOf, spotOf, whoseOf } from "./things";
+import { carriersOf, contentsOf, holderOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, slotOf, spotOf, supportOf, whoseOf } from "./things";
 import { isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
 
@@ -84,24 +84,29 @@ function reject(code: string, reason: string): Rejection {
 /** A note for the GM about the op, on the thing it concerns. */
 const note = (text: string, entity: EntityId): LedgerEvent => ({ type: ENGINE_EVENTS.note, data: { text, entity, visibility: "secret" } });
 
-const sameSpot = (a: Spot | null, b: Spot): boolean => a !== null && ("place" in a ? "place" in b && a.place === b.place : "in" in b && a.in === b.in);
+const sameSpot = (a: Spot | Support | null, b: Spot | Support): boolean => a !== null && ("place" in a ? "place" in b && a.place === b.place : "in" in a ? "in" in b && a.in === b.in : "on" in b && a.on === b.on);
 
 /**
  * The one location writer (§3.3): the events that put `thing` at `to` and nowhere else. Out of every
- * holder but the one it goes into, off whoever wears it, `place` set or cleared, and its cell laid
- * or picked up (the space pack's). Nothing when it is there already.
+ * holder but the one it goes into, off what it was on but the support it goes onto, off whoever wears
+ * it, `place` set or cleared, and its cell laid or picked up (the space pack's). Nothing when it is
+ * there already.
  */
-export function locate(ctx: ReadContext, thing: EntityId, to: Spot): LedgerEvent[] {
+export function locate(ctx: ReadContext, thing: EntityId, to: Spot | Support): LedgerEvent[] {
   const e = own(ctx.state.entities, thing);
   if (!e) return [];
   const into = "in" in to ? to.in : null;
+  const onto = "on" in to ? to.on : null;
   const place = "place" in to ? to.place : null;
   const holder = e.relations.find((r) => r.type === "in")?.to ?? null;
+  const support = e.relations.find((r) => r.type === "on")?.to ?? null;
   const at = typeof e.fields.place === "string" && e.fields.place !== "" ? e.fields.place : null;
-  if (into !== null ? holder === into && at === null : at === place && holder === null) return [];
+  const there = into !== null ? holder === into && support === null && at === null : onto !== null ? support === onto && holder === null && at === null : at === place && holder === null && support === null;
+  if (there) return [];
   const out: LedgerEvent[] = [];
   for (const r of e.relations) {
     if (r.type === "in" && r.to !== into) out.push({ type: "unlink", rel: "in", from: thing, to: r.to });
+    if (r.type === "on" && r.to !== onto) out.push({ type: "unlink", rel: "on", from: thing, to: r.to });
     if ((r.type === "worn_by" || r.type === "equipped") && r.to !== into) out.push({ type: "unlink", rel: r.type, from: thing, to: r.to });
   }
   if (place !== null) {
@@ -112,6 +117,7 @@ export function locate(ctx: ReadContext, thing: EntityId, to: Spot): LedgerEvent
   }
   if (at !== null) out.push({ type: "set", entity: thing, field: "place", value: null });
   if (into !== null && holder !== into) out.push({ type: "link", rel: "in", from: thing, to: into });
+  if (onto !== null && support !== onto) out.push({ type: "link", rel: "on", from: thing, to: onto });
   out.push(...(optionalService(ctx, "space.lay")?.(ctx, thing, null, null) ?? []));
   return out;
 }
@@ -151,16 +157,16 @@ function roomProblem(ctx: ReadContext, name: string, holder: EntityId, opts: Ite
  * own paths a holder's room, load and depth count too (`roomProblem`): `adding` is the thing moved,
  * or what a thing being made adds.
  */
-function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts: ItemOpOptions, moving: boolean, adding: EntityId | Adding): { spot: Spot; noted?: string; advice?: Advice[] } | Rejection {
+function landing<S extends Spot | Support>(ctx: ReadContext, name: string, size: SizeClass, to: S, opts: ItemOpOptions, moving: boolean, adding: EntityId | Adding): { spot: S | Spot; noted?: string; advice?: Advice[] } | Rejection {
   const advice: Advice[] = [];
-  const dest = "place" in to ? to.place : to.in;
+  const dest = "place" in to ? to.place : "in" in to ? to.in : to.on;
   /** A rule of what a change means: refused, or with advice asked, applied as asked and advised (no note sentence is written then). */
   const bend = (rule: Rejection): Rejection | null => {
     if (opts.advise !== true) return rule;
     advice.push({ code: "rule_bent", values: { what: name, where: ref(ctx, dest), code: rule.code } });
     return null;
   };
-  const asked = (): { spot: Spot; advice?: Advice[] } => ({ spot: to, ...(advice.length > 0 ? { advice } : {}) });
+  const asked = (): { spot: S | Spot; advice?: Advice[] } => ({ spot: to, ...(advice.length > 0 ? { advice } : {}) });
   if (moving && size === "part") {
     const refused = bend(reject("part", `${name} is built into what holds it`));
     if (refused) return refused;
@@ -168,6 +174,11 @@ function landing(ctx: ReadContext, name: string, size: SizeClass, to: Spot, opts
   if (moving && size === "builtin" && !opts.confirmed) {
     const refused = bend(reject("builtin", `${name} is built in: moving it needs a confirmed change`));
     if (refused) return refused;
+  }
+  if ("on" in to) {
+    // What something is on only supports it: no room, size or capacity rule, and nothing to report.
+    const support = own(ctx.state.entities, to.on);
+    return !support || isGone(ctx.state, to.on) ? reject("missing_entity", `no support ${labelOf(ctx, to.on)}`) : asked();
   }
   if ("place" in to) return own(ctx.world.places, to.place) ? asked() : reject("missing_place", `no place ${labelOf(ctx, to.place)}`);
   const holder = own(ctx.state.entities, to.in);
@@ -247,14 +258,17 @@ function applyAll(w: Working, events: readonly LedgerEvent[]): Rejection | null 
  * is fetched, or found while it was hidden from them, and one they may not use is taken), and the
  * end of the hold whoever had it held for its owner.
  */
-function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, why: string, how: GotHow | null): ItemOpApplied | Rejection {
+function moveThing(w: Working, thing: EntityId, to: Spot | Support, opts: ItemOpOptions, why: string, how: GotHow | null): ItemOpApplied | Rejection {
   const ctx = w.ctx;
   const e = own(ctx.state.entities, thing);
   if (!e) return reject("missing_entity", `no thing ${labelOf(ctx, thing)}`);
   // A thing both lying at a place and in a holder (from before one writer kept them apart) reads at its place, but a move there still takes it out of the holder.
   const twice = typeof e.fields.place === "string" && e.fields.place !== "" && e.relations.some((r) => r.type === "in");
-  if (sameSpot(spotOf(ctx.state, thing), to) && !twice) return reject("no_change", `${e.name} is there already`);
+  const resting = supportOf(ctx.state, thing);
+  const already = "on" in to ? resting === to.on && holderOf(ctx.state, thing) === null : "place" in to ? resting === null && sameSpot(spotOf(ctx.state, thing), to) : sameSpot(spotOf(ctx.state, thing), to);
+  if (already && !twice) return reject("no_change", `${e.name} is there already`);
   if ("in" in to && (to.in === thing || holdersOf(ctx.state, to.in).includes(thing))) return reject("cycle", `${e.name} can't go inside ${labelOf(ctx, to.in)}`);
+  if ("on" in to && (to.on === thing || carriersOf(ctx.state, to.on).includes(thing))) return reject("cycle", `${e.name} can't go on ${labelOf(ctx, to.on)}`);
   const where = landing(ctx, e.name, sizeOf(ctx, thing).size, to, opts, true, thing);
   if ("code" in where) return where;
   const advice: Advice[] = [...(where.advice ?? [])];
@@ -273,7 +287,7 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
     // Taken from the hands of someone who is not where it goes: noticed, never refused.
     if (opts.advise === true && before !== null) {
       const theirs = placeOfEntity(ctx.state, before);
-      const there = "place" in where.spot ? where.spot.place : placeOfEntity(ctx.state, where.spot.in);
+      const there = "place" in where.spot ? where.spot.place : placeOfEntity(ctx.state, "in" in where.spot ? where.spot.in : where.spot.on);
       if (theirs !== null && there !== null && theirs !== there) advice.push({ code: "taken_from", values: { what: ref(ctx, thing), holder: ref(ctx, before), where: ref(ctx, theirs) } });
     }
     // A hold ends with the holding: whoever held it for its owner no longer does.
@@ -288,7 +302,7 @@ function moveThing(w: Working, thing: EntityId, to: Spot, opts: ItemOpOptions, w
   }
   const done = applyAll(w, events);
   if (done) return done;
-  return { ...(sameSpot(where.spot, to) ? {} : { placed: where.spot }), ...(advice.length > 0 ? { advice } : {}), ...(squares.length > 0 ? { filled: squares } : {}) };
+  return { ...(sameSpot(where.spot, to) || "on" in where.spot ? {} : { placed: where.spot }), ...(advice.length > 0 ? { advice } : {}), ...(squares.length > 0 ? { filled: squares } : {}) };
 }
 
 /** Every use grant on a thing, and its overdue flag, ended (it is back with its owner, or has a new one). */

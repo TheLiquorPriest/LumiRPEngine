@@ -244,6 +244,8 @@ export const spacePack: PackDef = {
     r.kind(GROUP);
     r.kind(PARTY);
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
+    // What something is on (the lantern on the table, someone on the cart): it shares that one's place and square and goes where it goes; never a holder's rules (`engine/things`: `supportOf`).
+    r.relation({ id: "on", label: "On", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
     // The player character's party (DESIGN §9.3; ORG-SPEC §3.12): a person who travels with it comes along on every move it makes; a link without a tier is core.
     r.relation({ id: PARTY_RELATION, label: "Travels with", from: "person", to: "person", cardinality: "many_one", symmetric: false, fields: { tier: { type: "enum", label: "Tier", values: [...PARTY_TIERS] }, since: { type: "date", label: "Since" } }, pack: "space" });
     // The party's members: its leader and whoever travels with the leader (ORG-SPEC §3.2).

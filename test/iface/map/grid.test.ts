@@ -109,7 +109,7 @@ describe("the moving layer from the store", () => {
     const d = drawnOf(world, "common_room");
     if (!d) throw new Error("no grid");
     const { moving, unplaced } = movingOf(reg, world, state, d);
-    expect(moving.pieces).toEqual({ chest: { at: [8, 6] }, long_table: { at: [9, 2] }, wren: { at: [6, 5] }, lantern: { on: "long_table" }, box: { on: "long_table" }, amber_ring: { on: "box" } });
+    expect(moving.pieces).toEqual({ chest: { at: [8, 6] }, long_table: { at: [9, 2] }, wren: { at: [6, 5] }, lantern: { on: "long_table" }, box: { on: "long_table", within: true }, amber_ring: { on: "box", within: true } });
     expect(standsAt(moving, "amber_ring")).toEqual([9, 2]);
     expect(unplaced).toEqual(["bram"]);
   });

@@ -17,7 +17,7 @@ import { optionalQuery, optionalService, own } from "./pack-kit";
 import { together } from "./presence";
 import type { Advice, ReadContext, Rejection } from "./registry";
 import { isGone, placeOfEntity } from "./scope";
-import { holdsOf } from "./things";
+import { carriersOf, holdsOf } from "./things";
 
 export interface RelocateOptions {
   /**
@@ -80,7 +80,7 @@ export function relocateInto(ctx: ReadContext, who: EntityId, into: EntityId, op
   if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
   const holder = own(ctx.state.entities, into);
   if (!holder || isGone(ctx.state, into)) return { code: "missing_entity", reason: `no holder ${into}` };
-  const events: LedgerEvent[] = e.relations.filter((r) => r.type === "in" && r.to !== into).map((r): LedgerEvent => ({ type: "unlink", rel: "in", from: who, to: r.to }));
+  const events: LedgerEvent[] = e.relations.filter((r) => (r.type === "in" && r.to !== into) || r.type === "on").map((r): LedgerEvent => ({ type: "unlink", rel: r.type, from: who, to: r.to }));
   if (typeof e.fields.place === "string" && e.fields.place !== "") events.push({ type: "set", entity: who, field: "place", value: null });
   if (!e.relations.some((r) => r.type === "in" && r.to === into)) events.push({ type: "link", rel: "in", from: who, to: into });
   events.push(...(optionalService(ctx, "space.lay")?.(ctx, who, null, null) ?? []));
@@ -89,10 +89,28 @@ export function relocateInto(ctx: ReadContext, who: EntityId, into: EntityId, op
   return { events, advice };
 }
 
+/**
+ * The events that put `who` on `support` (seated on a table, riding on a cart): out of whatever holds them and off whatever
+ * they were on, no place of their own, on it, and off the square they stood on: they stand where it stands and go where it
+ * goes. A support only supports, so no rule of a holder applies and nothing is advised; one that is not there, or that rests
+ * on them, is refused.
+ */
+export function relocateOnto(ctx: ReadContext, who: EntityId, support: EntityId): LedgerEvent[] | Rejection {
+  const e = own(ctx.state.entities, who);
+  if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
+  if (!own(ctx.state.entities, support) || isGone(ctx.state, support)) return { code: "missing_entity", reason: `no support ${support}` };
+  if (support === who || carriersOf(ctx.state, support).includes(who)) return { code: "cycle", reason: `${e.name} can't be on ${support}` };
+  const events: LedgerEvent[] = e.relations.filter((r) => (r.type === "in" || r.type === "on") && !(r.type === "on" && r.to === support)).map((r): LedgerEvent => ({ type: "unlink", rel: r.type, from: who, to: r.to }));
+  if (typeof e.fields.place === "string" && e.fields.place !== "") events.push({ type: "set", entity: who, field: "place", value: null });
+  if (!e.relations.some((r) => r.type === "on" && r.to === support)) events.push({ type: "link", rel: "on", from: who, to: support });
+  events.push(...(optionalService(ctx, "space.lay")?.(ctx, who, null, null) ?? []));
+  return events;
+}
+
 /** The bare move: out of what holds them, the place, and where they stand there. */
 function moveEvents(ctx: ReadContext, who: EntityId, to: PlaceId): LedgerEvent[] {
   const out: LedgerEvent[] = [];
-  for (const r of own(ctx.state.entities, who)?.relations ?? []) if (r.type === "in") out.push({ type: "unlink", rel: "in", from: who, to: r.to });
+  for (const r of own(ctx.state.entities, who)?.relations ?? []) if (r.type === "in" || r.type === "on") out.push({ type: "unlink", rel: r.type, from: who, to: r.to });
   out.push({ type: "set", entity: who, field: "place", value: to });
   // Where the mover stands there is the space pack's: no square, so none of the old place's is read there;
   // on a map drawn, not walked, the POV from Space 3 stands on the cell its place is drawn at.
