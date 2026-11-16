@@ -26,6 +26,7 @@ import { MIGRATE_SETTINGS } from "../../src/migrate/setting-list";
 import { TREE_SETTINGS } from "../../src/tree";
 import { NO_SESSION, TURN_SETTINGS } from "../../src/turn";
 import { BOOTSTRAP_FACTS, BOOTSTRAP_SETTINGS } from "../../src/turn/bootstrap";
+import { JOB_SETTINGS } from "../../src/build/jobs/limits";
 import { CHAT, openTurnBed, USER, type TurnBed } from "../turn/bed";
 import { makeBed, type Bed } from "./helpers";
 
@@ -44,7 +45,7 @@ const OWN: Readonly<Record<string, { file: string; settings: readonly Setting[] 
   bootstrap: { file: "turn/bootstrap/area.ts", settings: BOOTSTRAP_SETTINGS },
   cast: { file: "cast/area.ts", settings: CAST_SETTINGS },
   story: { file: "story/area.ts", settings: STORY_SETTINGS },
-  build: { file: "build/area.ts", settings: [] },
+  build: { file: "build/area.ts", settings: JOB_SETTINGS },
   play: { file: "play/area.ts", settings: [] },
   lumiverse: { file: "adapter/lumiverse/area.ts", settings: LUMIVERSE_SETTINGS },
 };
