@@ -9,7 +9,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { ChangeInput, Source, Store } from "../store";
-import { applyStory, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
+import { applyStory, type HorizonEntry, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
 import type { StoryAt } from "./path";
 
 export { keyedItemId, nameKey, newItemId, STORY_PARTS, type StoryPart } from "./fold";
@@ -32,11 +32,14 @@ export interface Span {
 /** The record as one reading sees it. */
 export class StoryRecord {
   readonly items = new Map<string, StoryItem>();
+  /** The Author's horizon as the record holds it: the entries in the order he left them. */
+  readonly horizon: readonly HorizonEntry[];
 
   constructor(
     readonly at: StoryAt,
-    slice?: { items: Readonly<Record<string, StoryItem>> },
+    slice?: { items: Readonly<Record<string, StoryItem>>; horizon?: readonly HorizonEntry[] },
   ) {
+    this.horizon = slice?.horizon ?? [];
     if (slice !== undefined) for (const [id, item] of Object.entries(slice.items)) this.items.set(id, item);
   }
 

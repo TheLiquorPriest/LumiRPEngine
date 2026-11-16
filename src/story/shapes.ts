@@ -62,7 +62,7 @@ export type StoryList = Infer<typeof itemList>;
 const horizonEntry = shape.named(
   "HorizonEntryRow",
   "An entry of the Author's horizon, as the store keeps it: as the Author wrote it, with the level of the world it names now (none: words that name nothing).",
-  shape.object({ at: T, ref: nullable(T), name: nullable(T) }),
+  shape.object({ at: T, ref: nullable(T), name: nullable(T), depth: field(shape.union(N, shape.literal("full")), "How deep the world state shows it: a whole number of levels, or `full`.") }),
 );
 export type StoryHorizonEntry = Infer<typeof horizonEntry>;
 

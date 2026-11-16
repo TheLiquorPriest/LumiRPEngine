@@ -104,7 +104,7 @@ async function played(settings: Partial<StorySettings> = {}): Promise<Story> {
     { part: "canon", item: null, value: { text: "The seal is the reeve's." } },
     { part: "record", item: `rec:${first.id}`, value: { intent: "An action: Wren takes the letter.", decided: "Bram gives it." } },
   ]);
-  await t.writes.run(() => t.s.addChanges(first.id, [{ lane: "story", op: "store.horizon", value: { list: ["cellar", "the_harbour"] }, by: "author", source: "author" }]));
+  await t.writes.run(() => t.s.addChanges(first.id, [{ lane: "story", op: "story.horizon", value: { list: ["cellar", "the_harbour"] }, by: "author", source: "author" }]));
   await t.tie(first);
 
   const second = await t.begin();
@@ -153,8 +153,8 @@ describe("the story record of a chat", () => {
     expect(got.model.retcon.items).toEqual([expect.objectContaining({ id: ids.retcon, fields: { text: "The rain was mist.", of: "b:x1" } })]);
     expect(got.model.record.items).toEqual([expect.objectContaining({ id: `rec:${first.id}`, turn: first.id, message: 3, fields: { intent: "An action: Wren takes the letter.", decided: "Bram gives it." } })]);
     expect(got.horizon).toEqual([
-      { at: "cellar", ref: "place:cellar", name: "The Cellar" },
-      { at: "the_harbour", ref: null, name: null },
+      { at: "cellar", ref: "place:cellar", name: "The Cellar", depth: "full" },
+      { at: "the_harbour", ref: null, name: null, depth: "full" },
     ]);
     expect(got.futures.items).toEqual([expect.objectContaining({ id: "fu:d1", by: "migration", imported: true, closed: false, struck: false, fields: { text: "The reeve sends for the letter.", tier: 2, who: ["Tam"], state: "open" } })]);
     expect(typeof got.now).toBe("string");
@@ -231,7 +231,7 @@ describe("striking from the page", () => {
 
   test("refuses in the story's words while a turn of the chat runs, for an item the record does not hold, and for what it cannot read; writes nothing", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM story_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
     const before = rows();
     page.running.add(CHAT);
     await expect(page.strike({ id: ids.beat, struck: true })).rejects.toMatchObject({ status: 409, message: words("page_turning") });
@@ -248,7 +248,7 @@ describe("striking from the page", () => {
 
   test("in a branch with no turn of its own, a strike is refused in the story's words and the chat it was branched from keeps its record; once the branch has played a turn, its strike is its own", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM story_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
     const shown = await branchOf(page.t);
     const before = rows();
     await expect(page.strike({ id: ids.beat, struck: true }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
@@ -276,7 +276,7 @@ describe("striking from the page", () => {
 
   test("a turn that begins while a strike waits for its write is not written under: the strike is refused in that write, in the story's words", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM story_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op LIKE 'story.%'").get()?.n ?? 0;
     const before = rows();
     // A continue takes its marks and holds its run in one write, queued before the strike's own.
     const began = page.t.writes.run(() => page.running.add(CHAT));

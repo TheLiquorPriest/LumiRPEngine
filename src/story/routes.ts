@@ -227,7 +227,10 @@ export function storyRoutes(deps: StoryRoutesDeps) {
             timeline: { chapter: list("chapter"), scene: list("scene"), beat: list("beat") },
             current: { chapter: openNow(r.record, "chapter"), scene: openNow(r.record, "scene") },
             model: { premise: premise === undefined ? null : itemShown(r, premise, null), thread: list("thread"), arc: list("arc"), player: list("player"), canon: list("canon"), retcon: list("retcon"), record: list("record") },
-            horizon: view.horizon(),
+            horizon: r.record.horizon.map((h) => {
+              const ref = view.resolve(h.at);
+              return { at: h.at, ref, name: ref === null ? null : view.nameOf(ref), depth: h.depth };
+            }),
             futures: list("future"),
           };
         }),

@@ -212,7 +212,7 @@ describe("the story record", () => {
     expect(await t.writes.run(() => t.s.deleteChat("chat-deleted"))).toEqual({ kept: false });
 
     await elsewhere("chat-imported", true);
-    expect(await t.writes.run(() => t.s.forgetImport("chat-imported"))).toEqual({ removed: ["chat-imported"], played: [] });
+    expect(await t.writes.run(() => t.s.forgetImport("chat-imported"))).toEqual({ removed: ["chat-imported"], played: [], kept: [] });
     expect(all()).toBe(1);
 
     // Deleted while a branch still shares its turns: kept, and so are its story changes, which the branch reads.
