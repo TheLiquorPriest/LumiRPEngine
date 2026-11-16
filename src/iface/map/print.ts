@@ -43,7 +43,9 @@ export interface Printed {
   from: Square;
   to: Square;
   whole: boolean;
-  picture: string;
+  /** The picture as data: the numbers of the columns shown, and each row shown by its number with its squares' symbols, each as wide as its column's number. */
+  columns: number[];
+  rows: { row: number; cells: string[] }[];
   /** In the order each symbol first appears, row by row. */
   legend: LegendEntry[];
   /** Everyone and everything on the grid, by id, shown or not. */
@@ -88,35 +90,23 @@ export function printMap(drawn: Drawn, moving: Moving, opts: { centre?: Square; 
   const c1 = c0 + cols - 1;
   const r1 = r0 + rows - 1;
 
-  // What the map draws of a thing is drawn where the thing stands now: its drawn square shows floor.
-  const symbols = [...drawn.symbols];
-  const marks = new Map<EntityId, string>();
-  const floor = Object.keys(drawn.legend).find((s) => drawn.legend[s] === "floor") ?? ".";
-  for (const [symbol, what] of Object.entries(drawn.legend)) if (typeof what === "object" && "item" in what) marks.set(what.item, symbol);
-  symbols.forEach((s, i) => {
-    const what = hasOwn(drawn.legend, s) ? drawn.legend[s] : undefined;
-    if (typeof what === "object" && "item" in what) symbols[i] = floor;
-  });
-  for (const id of Object.keys(moving.pieces).sort()) {
-    const mark = marks.get(id);
-    if (mark !== undefined && moving.pieces[id]?.at) for (const i of footprint(drawn, moving, id)) symbols[i] = mark;
-  }
-
+  // The picture is the grid as drawn: the squares' own symbols, a thing the map draws at the square it is drawn on. Where a thing stands now is the moving layer's (`pieces`).
+  const symbols = drawn.symbols;
   const columns: number[] = [];
   for (let c = c0; c <= c1; c++) columns.push(c);
-  const lines = [" ".repeat(6) + columns.join(" ")];
+  const picture: { row: number; cells: string[] }[] = [];
   const legend = new Map<string, LegendEntry>();
   for (let r = r0; r <= r1; r++) {
-    const row: string[] = [];
+    const cells: string[] = [];
     for (const c of columns) {
       const s = symbols[(r - 1) * drawn.width + (c - 1)] ?? " ";
       // Each symbol under the first digit of its column's number.
-      row.push(s.padEnd(String(c).length));
+      cells.push(s.padEnd(String(c).length));
       const entry = legend.get(s) ?? { symbol: s, what: (hasOwn(drawn.legend, s) ? drawn.legend[s] : undefined) ?? "floor", where: [] };
       entry.where.push([c, r]);
       legend.set(s, entry);
     }
-    lines.push(`${String(r).padStart(4)}  ${row.join(" ")}`.trimEnd());
+    picture.push({ row: r, cells });
   }
 
   const pieces: Listed[] = Object.keys(moving.pieces)
@@ -137,7 +127,8 @@ export function printMap(drawn: Drawn, moving: Moving, opts: { centre?: Square; 
     from: [c0, r0],
     to: [c1, r1],
     whole: cols === drawn.width && rows === drawn.height,
-    picture: lines.join("\n"),
+    columns,
+    rows: picture,
     legend: [...legend.values()],
     pieces,
     doors,

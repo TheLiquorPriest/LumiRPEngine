@@ -9,7 +9,7 @@ import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { nearestMiddle, standingGrid } from "../../shared/grid";
 import { playedWorld } from "../../engine/places-in-play";
-import type { GridMoves } from "../kit";
+import type { GridMoves } from "./ports";
 import { Lines } from "../texts";
 import { MAP_DEFAULTS, type MapConfig } from "../../shared/map-config";
 import { blockersOf, drawnOf, footprint, indexOf, lift, movingOf, place as putAt, squareAt, squareOf, standsAt, type Drawn, type Moving, type Square } from "../../packs/space/core/grid-model";

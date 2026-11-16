@@ -1,5 +1,5 @@
 ---
-description: The words of the map tools' answers (map_view, map_measure, map_place, map_door, map_lay, map_edit), and of a map wherever one is shown (the world state, world_query, map_view). An answer is data from the store and these lines, filled with that data; a map is its picture (the column and row numbers and the map's own symbols) and the map_ and legend_ lines, shown in that order. One line per name, a name, a colon, then its text; spaces after the first one are kept. Change the words freely. Delete a line, or leave it empty, and that part is given with no words. The lines named want_ (what a name was looked for as) are words put inside the unknown line.
+description: The words of the map tools' answers (map_view, map_measure, map_place, map_door, map_lay, map_edit). An answer is data from the store and these lines, filled with that data; how a map itself is laid out, and every line that prints one, is `map-layout.md`'s. One line per name, a name, a colon, then its text; spaces after the first one are kept. Change the words freely. Delete a line, or leave it empty, and that part is given with no words. The lines named want_ (what a name was looked for as) are words put inside the unknown line.
 format: lines
 ---
 no_chat: There is no chat {{id}} in the engine's records.
@@ -54,24 +54,6 @@ measure_no_way: There is no way from {{from}} to {{to}} as the map stands: walls
 measure_within: Within {{range}} squares ({{far}}) of {{from}}: {{who}}.
 measure_within_none: No one and nothing stands within {{range}} squares ({{far}}) of {{from}}.
 measure_area: The {{area}} from {{from}}{{#toward}} toward {{toward}}{{/toward}}, {{size}} squares ({{far}}), covers {{count}} squares.{{#who}} In it: {{who}}.{{/who}}
-map_title: Map: {{place}}. {{width}} by {{height}} squares of {{size}}{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}. North is up.
-map_part: Shown: columns {{fromColumn}} to {{toColumn}}, rows {{fromRow}} to {{toRow}}. map_view with another centre shows the rest.
-map_legend:    {{#legend}}{{.}}   {{/legend}}
-legend_wall: {{symbol}} wall
-legend_floor:
-legend_door: {{symbol}} door
-legend_nothing:
-legend_terrain: {{symbol}} {{terrain}}{{#seeThrough}} (blocks the way, not the view){{/seeThrough}}
-legend_item: {{symbol}} {{name}}
-legend_place: {{symbol}} {{name}}
-legend_room_door: {{symbol}} door to {{name}}
-legend_zone: {{symbol}} {{zone}}
-map_who: Who and what is where:
-map_you:    you, {{name}} [{{id}}] ({{column}},{{row}})
-map_piece:    {{name}} [{{id}}]{{#on}}, on {{on}}{{/on}} ({{column}},{{row}}){{#size}}, {{columns}} by {{rows}} squares{{/size}}{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}{{#far}}, {{far}} from you{{/far}}{{^shown}}, outside the part shown{{/shown}}
-map_unplaced:    {{name}} [{{id}}], here with no square yet
-map_doors:    {{doors}}
-map_door: door ({{column}},{{row}}) {{state}}
 piece_at: {{what}} stands at {{square}}.
 piece_walked: {{what}} walked from {{from}} to {{to}}: {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.
 way_taken: {{what}}: from {{from}} to {{to}} is {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.

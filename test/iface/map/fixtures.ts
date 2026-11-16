@@ -2,6 +2,11 @@
 // plan §8.2 prints it, two cellar rooms with a door between them, and the town drawn a block to a
 // square. Every name here is made up.
 
+import { join } from "node:path";
+import { SHIPPED_GUIDANCE } from "../../../src/iface/texts";
+import { parseLayout } from "../../../src/iface/map/layout";
+import type { Printed } from "../../../src/iface/map/print";
+import { pictureWords } from "../../../src/iface/map/words";
 import { drawnOf, type Drawn } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS, type MapConfig } from "../../../src/shared/map-config";
 import { compileMaps } from "../../../src/shared/maps";
@@ -9,6 +14,14 @@ import type { MapDoc, WorldDoc } from "../../../src/shared/world";
 import { inventedWorld } from "../../store/fixtures";
 
 export { registry } from "../../store/fixtures";
+
+/** The shipped layout of a map. */
+export const LAYOUT = parseLayout(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "map-layout.md")).text());
+
+/** A printed map's picture as the shipped layout lays it out. */
+export function picture(p: Printed): string {
+  return pictureWords(LAYOUT, p) ?? "";
+}
 
 /** The common room, row by row, as plan §8.2 draws it. */
 export const INN_ROWS = ["#####+######", "#.......TT.#", "#.......TT.#", "#..BBB.....#", "#..........+", "#......c...#", "#HH........#", "############"];

@@ -28,6 +28,8 @@ export interface MapConfig {
   diagonal: Diagonal;
   /** What distances are told in, where the world's ruleset says nothing. */
   distances: Unit;
+  /** The world state prints the map's picture (§22 l.2120's remedy: off, the list carries the load). */
+  picture: boolean;
 }
 
 /** Appendix D.1: squares of 5 ft, rounds of 6 seconds, a map printed whole up to 40 by 30, a diagonal as one square, feet. */
@@ -40,4 +42,5 @@ export const MAP_DEFAULTS: Readonly<MapConfig> = Object.freeze({
   printRows: 30,
   diagonal: "one",
   distances: "feet",
+  picture: true,
 });

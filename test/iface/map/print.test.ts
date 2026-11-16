@@ -4,7 +4,7 @@ import { between, distance, sees } from "../../../src/packs/space/core/grid-meas
 import { walk } from "../../../src/packs/space/core/grid-path";
 import { printMap, type Printed } from "../../../src/iface/map/print";
 import type { MapDoc } from "../../../src/shared/world";
-import { CELLAR, drawn, INN, INN_PICTURE } from "./fixtures";
+import { CELLAR, drawn, INN, INN_PICTURE, picture } from "./fixtures";
 
 /** The common room as plan 8.2 shows it: the long table and the chest where it draws them, you, and a hooded traveller at the table. */
 function commonRoom(): { d: Drawn; moving: Moving } {
@@ -28,7 +28,7 @@ function readSquare(picture: string, s: Square): string {
 
 /** Whether a reader of the printed map would say a square blocks the way: by its symbol's legend entry, the doors' states and what is listed there. */
 function readsBlocked(p: Printed, s: Square): boolean {
-  const what = p.legend.find((e) => e.symbol === readSquare(p.picture, s))?.what;
+  const what = p.legend.find((e) => e.symbol === readSquare(picture(p), s))?.what;
   if (what === "wall") return true;
   if (what === "door") return p.doors.find((x) => x.at[0] === s[0] && x.at[1] === s[1])?.state !== "open";
   if (typeof what === "object" && "terrain" in what) return what.blocked === true;
@@ -40,7 +40,7 @@ describe("the text map", () => {
   test("prints the common room exactly as plan 8.2 does", () => {
     const { d, moving } = commonRoom();
     const p = printMap(d, moving);
-    expect(p.picture).toBe(INN_PICTURE);
+    expect(picture(p)).toBe(INN_PICTURE);
     expect(p.whole).toBe(true);
     expect([p.from, p.to]).toEqual([
       [1, 1],
@@ -90,12 +90,12 @@ describe("the text map", () => {
     ]);
   });
 
-  test("draws a thing the map draws where it stands now", () => {
+  test("the picture is the grid as drawn: a thing the map draws that has moved leaves it as it was, and the list says where it stands", () => {
     const { d, moving } = commonRoom();
     const p = printMap(d, place(d, moving, "chest", [3, 2]).moving);
-    expect(readSquare(p.picture, [3, 2])).toBe("c");
-    expect(readSquare(p.picture, [8, 6])).toBe(".");
-    expect(p.legend.find((e) => e.symbol === "c")?.where).toEqual([[3, 2]]);
+    expect(readSquare(picture(p), [3, 2])).toBe(".");
+    expect(readSquare(picture(p), [8, 6])).toBe("c");
+    expect(p.pieces.find((x) => x.id === "chest")?.at).toEqual([3, 2]);
   });
 });
 
@@ -122,7 +122,7 @@ describe("the printed map and the measuring agree", () => {
     let moving = place(d, NOTHING_MOVES, "wren", [3, 3]).moving;
     moving = place(d, moving, "odile", [7, 3]).moving;
     const shut = setDoor(d, moving, [5, 3], "closed").moving;
-    expect(readSquare(printMap(d, shut).picture, [5, 3])).toBe("+");
+    expect(readSquare(picture(printMap(d, shut)), [5, 3])).toBe("+");
     expect(printMap(d, shut).doors).toEqual([{ at: [5, 3], state: "closed" }]);
     expect([sees(d, shut, "wren", "odile"), walk(d, shut, [3, 3], [7, 3], "wren")]).toEqual([false, null]);
     expect([sees(d, moving, "wren", "odile"), walk(d, moving, [3, 3], [7, 3], "wren")?.distance]).toEqual([true, 4]);
@@ -142,8 +142,8 @@ describe("a map too large to print whole", () => {
       [11, 6],
       [50, 35],
     ]);
-    expect(p.picture.split("\n")).toHaveLength(31);
-    expect(p.picture.split("\n")[0]?.trim().split(/\s+/)[0]).toBe("11");
+    expect(picture(p).split("\n")).toHaveLength(31);
+    expect(picture(p).split("\n")[0]?.trim().split(/\s+/)[0]).toBe("11");
     expect(p.pieces.map((x) => [x.id, x.shown])).toEqual([
       ["tam", false],
       ["wren", true],

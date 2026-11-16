@@ -1,0 +1,43 @@
+// The map's two faces for what calls it (`src/iface/map/`): the squares the everyday operations put
+// someone or something on (`GridMoves`, `world_apply`'s `move` and `place`), and a place's map as the
+// world state and `world_query` print it (`MapView`). The engine's tools are given both by the host
+// (`EngineDeps`, the turn lane); the world state's own declaration of the second is `MapText`.
+
+import type { JsonObject } from "../../shared/json";
+import type { FoldEnv } from "../../store/fold";
+import type { StoreState } from "../../store/types";
+import type { Fields } from "../texts";
+
+/**
+ * Placing on a map's squares: the events that put someone or something at a square, beside someone,
+ * or in a zone; and `said`, the sentences the answer gives of it, worded from the map's part: for one
+ * that stood on the map before, the way it went and the time that took, and what does not add up
+ * where it now stands (a square in a wall, over something that blocks, no way there). It is applied
+ * all the same.
+ */
+export interface GridMoves {
+  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[] } | { problem: string; fields: Fields };
+}
+
+/** The map's two layers: what is drawn (the title, the part shown, the picture, the legend) and what moves (who and what is where, the doors). */
+export type MapLayer = "drawn" | "moving";
+
+/**
+ * A map as printed: the id of the grid it is (a grid shown once however many places on it are shown),
+ * a version of the drawn layer as play stands (it changes when a square is edited, a grid is laid or
+ * the world's revision changes, and not when someone moves or a door opens), and the text of the layer
+ * asked for, or of both when none is.
+ */
+export interface MapPrinted {
+  grid: string;
+  drawn: string;
+  text: string;
+}
+
+/**
+ * A place's map as the world state prints it: null for a place with no map. `around` are the tree
+ * refs of the horizon's entries, which the part printed of a large grid must hold when they fit.
+ */
+export interface MapView {
+  text(input: { state: StoreState; env: FoldEnv; place: string; layer?: MapLayer; around?: readonly string[] }): MapPrinted | null;
+}

@@ -8,7 +8,7 @@ import { walk } from "../../../src/packs/space/core/grid-path";
 import { printMap } from "../../../src/iface/map/print";
 import { isRecord } from "../../../src/shared/json";
 import { testStore } from "../../store/fixtures";
-import { CELLAR, registry, worldWith } from "./fixtures";
+import { CELLAR, picture, registry, worldWith } from "./fixtures";
 
 describe("changing part of a grid", () => {
   test("walls up a door, sets a table in a rectangle and water on a line, kept square by square over the world's own map", () => {
@@ -48,14 +48,14 @@ describe("changing part of a grid", () => {
     expect(JSON.stringify(data)).not.toContain("layout");
     const d = drawnOf(playedWorld(world, state.world), "cellar", MAP_DEFAULTS, state.world);
     if (!d) throw new Error("the cellar lost its grid");
-    expect(printMap(d, NOTHING_MOVES).picture).toBe(["      1 2 3 4 5 6 7 8 9", "   1  # # # # # # # # #", "   2  # ~ . . # t t . #", "   3  # . ~ . # . . . #", "   4  # . . ~ # . . ? #", "   5  # # # # # # # # #"].join("\n"));
+    expect(picture(printMap(d, NOTHING_MOVES))).toBe(["      1 2 3 4 5 6 7 8 9", "   1  # # # # # # # # #", "   2  # ~ . . # t t . #", "   3  # . ~ . # . . . #", "   4  # . . ~ # . . ? #", "   5  # # # # # # # # #"].join("\n"));
     expect([d.doors.size, walk(d, NOTHING_MOVES, [2, 3], [8, 3])]).toEqual([0, null]);
     expect(d.terrain[(3 - 1) * d.width + (3 - 1)]).toBe("water");
     expect(drawnOf(world, "cellar")?.doors.size).toBe(1);
     // The world's own map edited later, elsewhere: its change shows through, and the chat's stays over it.
     const later = worldWith({ ...CELLAR, layout: ["#########", "#...#..c#", "#...+...#", "#...#...#", "#########"], legend: { c: { terrain: "crate", blocked: true } } });
     const both = drawnOf(later, "cellar", MAP_DEFAULTS, state.world);
-    expect(printMap(both ?? d, NOTHING_MOVES).picture.split("\n")[2]).toBe("   2  # ~ . . # t t c #");
+    expect(picture(printMap(both ?? d, NOTHING_MOVES)).split("\n")[2]).toBe("   2  # ~ . . # t t c #");
   });
 
   test("a place with no map of its own has nothing to change", () => {

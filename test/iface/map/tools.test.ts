@@ -15,7 +15,7 @@ import { hashJson } from "../../../src/shared/hash";
 import type { WorldDoc } from "../../../src/shared/world";
 import { migrateStore } from "../../../src/store/schema";
 import { openStore, type UserStore } from "../../../src/store/store";
-import { type EngineDeps, engineTools, Lines, mapLines, mapView, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../../src/iface/index";
+import { type EngineDeps, engineTools, Lines, mapView, mapWording, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../../src/iface/index";
 import { PORTS } from "../rig";
 import { CELLAR, INN, registry, TOWN, worldWith } from "./fixtures";
 
@@ -27,6 +27,10 @@ const SRC = { source: { from: "prose", message: "m-1" } } as const;
 const SENTINEL = "\u0001 no line of any part says this";
 const strict = (text: string): RegExp[] => Lines.parse(text, "answers").patterns().filter((p) => !p.test(SENTINEL));
 const mapPatterns = strict(await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "map-answers.md")).text());
+/** The lines of the map's layout, which print a map wherever one is shown. */
+const layoutFile: unknown = Bun.YAML.parse((await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "map-layout.md")).text()).split("\n---\n")[0]?.replace(/^---\n/, "") ?? "");
+const layoutLines = isRecord(layoutFile) && isRecord(layoutFile.lines) ? Object.entries(layoutFile.lines).flatMap(([name, said]) => (typeof said === "string" ? [`${name}: ${said}`] : [])) : [];
+const layoutPatterns = strict(`---\nformat: lines\n---\n${layoutLines.join("\n")}`);
 
 /** A store over `world` with one chat and a first turn, and the engine's tools, called on a turn (the first unless named). */
 async function mapRig(world: WorldDoc, more: (deps: EngineDeps) => Promise<Partial<EngineDeps>> = async () => ({})) {
@@ -76,7 +80,7 @@ function wordsFromFiles(r: ToolResult, patterns: readonly RegExp[] = mapPatterns
   texts(r).forEach((text, i) => {
     if (kinds[i] === "data") return;
     if (kinds[i] === "tree") {
-      for (const l of text.split("\n")) if (l !== "") expect({ line: l, ok: PICTURE.test(l) || mapPatterns.some((p) => p.test(l)) }).toEqual({ line: l, ok: true });
+      for (const l of text.split("\n")) if (l !== "") expect({ line: l, ok: PICTURE.test(l) || mapPatterns.some((p) => p.test(l)) || layoutPatterns.some((p) => p.test(l)) }).toEqual({ line: l, ok: true });
       return;
     }
     expect({ text, ok: patterns.some((p) => p.test(text)) }).toEqual({ text, ok: true });
@@ -357,21 +361,21 @@ describe("map_lay and map_edit", () => {
 
 describe("the map in world_query", () => {
   test("world_query shows a place's map in the map's own words", async () => {
-    const t = await mapRig(worldWith(CELLAR), async (deps) => ({ map: mapView(await mapLines(deps.files)) }));
+    const t = await mapRig(worldWith(CELLAR), async (deps) => ({ map: mapView(await mapWording(deps.files)) }));
     await t.call("map_place", { at: "The Cellar", pieces: [{ who: "Odile", square: [2, 3] }], ...SRC });
     const r = await t.call("world_query", { at: "The Cellar", map: true });
     const map = texts(r).find((x) => x.startsWith("Map: The Cellar.")) ?? "";
     expect(map).toContain("   2  # . . . # . . . #");
     expect(map).toContain("   Odile [odile] (2,3)");
     expect(map).toContain("   door (5,3) open");
-    for (const l of map.split("\n")) if (l !== "") expect({ line: l, ok: PICTURE.test(l) || mapPatterns.some((p) => p.test(l)) }).toEqual({ line: l, ok: true });
+    for (const l of map.split("\n")) if (l !== "") expect({ line: l, ok: PICTURE.test(l) || mapPatterns.some((p) => p.test(l)) || layoutPatterns.some((p) => p.test(l)) }).toEqual({ line: l, ok: true });
   });
 });
 
 describe("the map's part switched off", () => {
   test("every map tool answers with data and the map's picture, and no word at all", async () => {
     const shipped = shippedTexts();
-    const off = { read: (kind: "tools" | "prompts", name: string) => (kind === "prompts" && name === "map-answers" ? Promise.resolve(undefined) : shipped.read(kind, name)) };
+    const off = { read: (kind: "tools" | "prompts", name: string) => (kind === "prompts" && (name === "map-answers" || name === "map-layout") ? Promise.resolve(undefined) : shipped.read(kind, name)) };
     const t = await mapRig(worldWith(CELLAR), async () => ({ files: off }));
     const answers = [
       await t.call("map_lay", { place: "The Far Road", width: 6, height: 4, ...SRC }),
@@ -389,7 +393,7 @@ describe("the map's part switched off", () => {
       texts(r).forEach((text, i) => {
         if (kinds[i] === "data") return;
         expect(kinds[i]).toBe("tree");
-        for (const l of text.split("\n")) expect({ line: l, ok: PICTURE.test(l) }).toEqual({ line: l, ok: true });
+        expect(text).toBe("");
       });
       expect(r.reports ?? []).toEqual([]);
     }

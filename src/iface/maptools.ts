@@ -37,7 +37,8 @@ import { move, walk } from "../packs/space/core/grid-path";
 import { layForPlace, layOverSquare, plainRows, type Laid, type Laying } from "./map/lay";
 import { beside, inZone } from "./map/moves";
 import { doorEvent, positionEvent, shapeEvent } from "./map/record";
-import { distanceData, farText, layersAt, mapLines, mapWords, reportFields, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
+import { distanceData, farText, layersAt, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whoIs, type Layers } from "./map/words";
+import { NO_LAYOUT } from "./map/layout";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
 import { putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
@@ -58,13 +59,18 @@ type Blocks = (typeof BLOCKS)[number];
 
 // ---------------------------------------------------------------- what every map tool shares
 
-/** A map tool answers in the lines of the map's part, not the engine's. */
+/** What each call's map wording is: the answers' lines are `call.lines`, and the layout lays a map out (`map_view`). */
+const WORDING = new WeakMap<Call, MapWording>();
+
+/** A map tool answers in the lines of the map's part, not the engine's, and prints a map as the layout lays it out. */
 function mapTool(spec: ToolSpec): ToolSpec {
   return {
     ...spec,
     async run(args, call) {
-      const lines = await mapLines(call.deps.files);
-      return spec.run(args, { ...call, lines, reply: () => new Reply(lines) });
+      const wording = await mapWording(call.deps.files);
+      const mapped: Call = { ...call, lines: wording.lines, reply: () => new Reply(wording.lines) };
+      WORDING.set(mapped, wording);
+      return spec.run(args, mapped);
     },
   };
 }
@@ -236,9 +242,10 @@ const view: ReadDef = {
     const say: Say = { lines: call.lines, world: layers.world, state: r.state.world };
     const centre = args.centre === undefined || args.centre === null ? undefined : spotOn(say, layers, "centre", args.centre, (s) => foundIn(r, "centre", s, "entity"));
     if (isUnread(centre)) return centre;
-    const { text, printed } = mapWords(call.lines, layers, r.state.world, { config: configOf(call), ...(centre ? { centre: centre.square } : {}) });
+    const wording = WORDING.get(call) ?? { lines: call.lines, layout: NO_LAYOUT };
+    const { text, grid, drawn, printed } = mapWords(wording, layers, r.state.world, { config: configOf(call), facts: r.state.facts, ...(centre ? { centre: centre.square } : {}) });
     reply.tree(text);
-    reply.data({ map: printed.grid, place: whoIs(say, printed.scope), from: [...printed.from], to: [...printed.to], whole: printed.whole });
+    reply.data({ map: grid, drawn, place: whoIs(say, printed.scope), from: [...printed.from], to: [...printed.to], whole: printed.whole });
     return undefined;
   },
 };

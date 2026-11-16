@@ -9,8 +9,7 @@ import { DIAGONALS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map
 
 export { DIAGONALS, MAP_DEFAULTS, UNITS, type Diagonal, type MapConfig, type Unit } from "../../shared/map-config";
 
-const GROUP = "A grid laid in play";
-const PRINT = "World state: the map";
+// D.1's rows name the width of a square laid in play, how a diagonal counts, a round's seconds and the size printed whole; a round's move, the unit and the picture are beyond D.1.
 
 /** Each setting as a config file writes it, under `map:`. Each is in force from the next turn. */
 export const MAP_SETTING_DEFS = {
@@ -22,7 +21,7 @@ export const MAP_SETTING_DEFS = {
     name: "Width of a square laid in play",
     about: "How wide, in feet, a square is on a grid laid in play that names no size.",
     effect: "turn",
-    row: GROUP,
+    row: "A grid laid in play",
   },
   roundSeconds: {
     key: "map.roundSeconds",
@@ -32,7 +31,7 @@ export const MAP_SETTING_DEFS = {
     name: "Seconds in a round",
     about: "How long a round is on a grid whose square a round's move crosses; a fight counts time in them.",
     effect: "turn",
-    row: GROUP,
+    row: "A grid laid in play",
   },
   roundFeet: {
     key: "map.roundFeet",
@@ -42,7 +41,6 @@ export const MAP_SETTING_DEFS = {
     name: "Feet moved in a round",
     about: "How far someone moves in a round, where nothing says how fast they are.",
     effect: "turn",
-    row: GROUP,
   },
   printColumns: {
     key: "map.printColumns",
@@ -52,7 +50,7 @@ export const MAP_SETTING_DEFS = {
     name: "Map printed, columns",
     about: "The most columns of a map the world state prints; a wider map is printed around the horizon.",
     effect: "turn",
-    row: PRINT,
+    row: "World state: the map",
   },
   printRows: {
     key: "map.printRows",
@@ -62,7 +60,7 @@ export const MAP_SETTING_DEFS = {
     name: "Map printed, rows",
     about: "The most rows of a map the world state prints; a taller map is printed around the horizon.",
     effect: "turn",
-    row: PRINT,
+    row: "World state: the map",
   },
   diagonal: {
     key: "map.diagonal",
@@ -72,7 +70,7 @@ export const MAP_SETTING_DEFS = {
     name: "How a diagonal counts",
     about: "one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins.",
     effect: "turn",
-    row: GROUP,
+    row: "A grid laid in play",
   },
   distances: {
     key: "map.distances",
@@ -82,7 +80,15 @@ export const MAP_SETTING_DEFS = {
     name: "Distances told in",
     about: "feet or metres. A world's ruleset that says otherwise wins.",
     effect: "turn",
-    row: GROUP,
+  },
+  picture: {
+    key: "map.picture",
+    default: MAP_DEFAULTS.picture,
+    takes: { type: "yesNo" },
+    perConnection: false,
+    name: "World state prints the map's picture",
+    about: "The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load.",
+    effect: "turn",
   },
 } as const satisfies Record<keyof MapConfig, Setting>;
 

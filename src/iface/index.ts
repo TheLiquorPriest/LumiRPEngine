@@ -17,9 +17,7 @@ export {
   type EngineDeps,
   type FactStore,
   type FactWrite,
-  type GridMoves,
   type IfaceSettings,
-  type MapView,
   type SearchKind,
   type StateHit,
   type StateSearch,
@@ -28,4 +26,5 @@ export {
 } from "./kit";
 export { MARKS } from "./source";
 export { MAP_TOOLS } from "./maptools";
-export { gridMoves, MAP_ANSWERS, mapLines, mapView } from "./map/index";
+export type { GridMoves, MapLayer, MapPrinted, MapView } from "./map/ports";
+export { gridMoves, MAP_ANSWERS, mapLines, mapView, mapWording, NO_WORDING, type MapWording } from "./map/index";

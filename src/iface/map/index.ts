@@ -9,5 +9,5 @@ export { editMap, type Stroke } from "./edit";
 export { clockChange } from "./time";
 export { doorEvent, draftChange, positionChange, positionChanges, positionEvent, shapeEvent, squaresEvent } from "./record";
 export { beside, gridMoves, inZone } from "./moves";
-export { amountOf, distanceData, farText, layersAt, MAP_ANSWERS, mapLines, mapView, mapWords, type Layers } from "./words";
+export { amountOf, distanceData, farText, layersAt, MAP_ANSWERS, mapLines, mapView, mapWording, mapWords, NO_WORDING, type Layers, type MapWording } from "./words";
 export { DIAGONALS, MAP_DEFAULTS, MAP_SETTING_DEFS, MAP_SETTINGS, mapConfigRead, UNITS, type MapConfig, type Unit } from "./settings";

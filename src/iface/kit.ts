@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonValue, Scope, ToolContent, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
 import type { NumberSettings, Setting } from "../app/setting-list";
 import type { MapConfig } from "../shared/map-config";
+import type { GridMoves, MapView } from "./map/ports";
 import type { UserStore } from "../store/store";
 import type { FoldEnv } from "../store/fold";
 import type { ChangeInput, Lane, StoreState } from "../store/types";
@@ -123,22 +124,6 @@ export interface FactStore {
   change(fact: FactWrite): Pick<ChangeInput, "op" | "value">;
   /** The facts standing on `about` in this state, as data. */
   of(state: StoreState, about: string): JsonValue[];
-}
-
-/**
- * Placing on a map's squares (`src/iface/map/`): the events that put someone or something at a
- * square, beside someone, or in a zone; and `said`, the sentences the answer gives of it, worded
- * from the map's part: for one that stood on the map before, the way it went and the time that
- * took, and what does not add up where it now stands (a square in a wall, over something that
- * blocks, no way there). It is applied all the same.
- */
-export interface GridMoves {
-  place(input: { state: StoreState; env: FoldEnv; who: string; place: string; square?: [number, number]; near?: string; zone?: string }): { events: JsonObject[]; said?: string[] } | { problem: string; fields: Fields };
-}
-
-/** A place's map as the world state prints it (`src/iface/map/`): its text, or null for a place with no map. */
-export interface MapView {
-  text(input: { state: StoreState; env: FoldEnv; place: string }): string | null;
 }
 
 /** What the engine's tools are given by the host (the turn, `src/turn/`). */
