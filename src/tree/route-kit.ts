@@ -3,14 +3,15 @@
 // path of the view, a chat, a level.
 
 import type { Database } from "bun:sqlite";
+import type { Guidance } from "rp-harness";
 import type { LayerLevel, StackPart } from "rp-harness/contract";
 import { RouteError } from "../app";
-import { type TreeFileEntry, treeListing } from "./catalog";
+import { entryAt, listingContext, type TreeFileEntry, treeListing } from "./catalog";
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { defaultStanding } from "./defaults";
 import { OwnFiles } from "./own-files";
 import type { TreeSuggestions } from "./suggestions";
-import type { ChatLocation } from "./view";
+import { type ChatLocation, locate } from "./view";
 
 export interface TreeRoutesDeps {
   /** The tree's folder: the global level. */
@@ -30,6 +31,8 @@ export interface TreeRoutesDeps {
   apply(user: string, chat: string): Promise<{ session: string | null }>;
   /** Places a chat RPE has not played yet, by Lumiverse's own names for it and its character, as its first turn places it; absent where RPE cannot. */
   place?(user: string, chat: string): Promise<ChatFolders>;
+  /** What RPH makes of the files of the chat's view: what it holds out, what it found wrong, whose stacks they join; with no chat, of the shipped and global levels. */
+  guidance(user: string, chat: string | null): Guidance;
 }
 
 /** The levels a file may be written at (plan §5): every level but the shipped one's is the user's. */
@@ -68,5 +71,10 @@ export interface RouteKit {
 export function routeKit(deps: TreeRoutesDeps): RouteKit {
   const own = new OwnFiles({ files: deps.files, chats: deps.chats, writes: deps.writes, now: deps.now, ...(deps.place === undefined ? {} : { place: deps.place }) });
   const listingOf = (user: string, loc: ChatLocation): Promise<TreeFileEntry[]> => treeListing(loc, defaultStanding(deps.db, user));
-  return { deps, own, listingOf, entryOf: async (user, loc, path) => (await listingOf(user, loc)).find((f) => f.path === path) ?? null };
+  const entryOf = async (user: string, loc: ChatLocation, path: string): Promise<TreeFileEntry | null> => {
+    const lookup = await locate(loc, path);
+    if (!lookup.ok || lookup.at.is !== "file" || lookup.at.disk === null) return null;
+    return await entryAt(await listingContext(loc, defaultStanding(deps.db, user)), lookup.at.level, lookup.at.rest, lookup.at.disk);
+  };
+  return { deps, own, listingOf, entryOf };
 }

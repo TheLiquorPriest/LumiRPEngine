@@ -97,7 +97,7 @@ describe("the Files page's routes", () => {
             };
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack, apply, place }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, suggestions, turning: () => turning, stack, apply, place, guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
           },
         },
       ],
@@ -368,6 +368,45 @@ describe("the Files page's routes", () => {
     // Its window setting, written before it is played, is its own RPE.yml.
     await call("PUT", "/api/v1/files/RPE.yml", { level: "chat", chat: ghost, text: "retention:\n  turnFolders: 7\n" });
     expect(await readFile(join(lamp, "RPE.yml"), "utf8")).toContain("turnFolders: 7");
+  });
+
+  test("the listing reads a folder a page at a time and finds files by name and by text across the levels; each rule stands as RPH finds it; a long file is read a range at a time", async () => {
+    type Page = { folder: string; items: { name: string; path: string; folder: boolean; level: string; entry: TreeFileEntry | null }[]; next: string | null; levels: string[]; stopped: string | null };
+    const list = (query: string) => call<Page>("GET", `/api/v1/files-list?chat=${CHAT}${query}`);
+    const top = (await list("")).body;
+    expect(top.items.slice(0, 3).map((i) => i.path)).toEqual(["@character", "@global", "@shipped"]);
+    expect(top.levels).toEqual(["shipped", "global", "character", "chat"]);
+    const first = (await list("&limit=2")).body;
+    const second = (await list(`&limit=2&after=${encodeURIComponent(first.next ?? "")}`)).body;
+    expect([...first.items, ...second.items].map((i) => i.path)).toEqual(top.items.slice(0, 4).map((i) => i.path));
+    expect((await list("&folder=@shipped/.rules")).body.items.map((i) => i.path)).toEqual(["@shipped/.rules/examples", "@shipped/.rules/consent.md"]);
+    expect((await list("&folder=@shipped/.rules/consent.md")).status).toBe(404);
+
+    // A search finds by name and by text, in any level.
+    expect((await list("&search=nudge")).body.items.map((i) => i.path)).toEqual(["@shipped/.rules/examples/nudge.md"]);
+    expect((await list("&search=ask%20first")).body.items.map((i) => i.path)).toEqual(["@shipped/.rules/consent.md"]);
+
+    // A rule whose needs: names what is not in force, and one whose header does not parse, are held out, and RPH's own words are given.
+    await writeFile(join(chatFolder, "rules", "needy.md"), "---\ndescription: Needs a ghost.\nagents: all\nneeds: ghost-file\n---\nBoo.\n");
+    await writeFile(join(chatFolder, "rules", "broken.md"), "---\nagents: [\n---\nx\n");
+    const rules = new Map((await list("&folder=rules")).body.items.map((i) => [i.path, i.entry]));
+    expect(rules.get("rules/needy.md")).toMatchObject({ applies: false, held: "needs" });
+    expect(rules.get("rules/broken.md")).toMatchObject({ applies: false, held: "broken" });
+    expect(rules.get("rules/broken.md")?.problems?.length).toBeGreaterThan(0);
+    expect((await list("&folder=@shipped/.rules")).body.items.find((i) => i.path === "@shipped/.rules/consent.md")?.entry).toMatchObject({ applies: true, held: null, placeable: ["global", "character", "chat"], isConfig: false });
+    await writeFile(join(chatFolder, "PROMPT-MAP.md"), "# The map\n");
+    expect((await list("")).body.items.find((i) => i.path === "PROMPT-MAP.md")?.entry).toMatchObject({ kind: "generated", editable: false, editedOn: "Prompt" });
+
+    // A session file of 20,000 lines is read a range at a time, never sent whole.
+    await mkdir(join(chatFolder, "sessions", "s1"), { recursive: true });
+    await writeFile(join(chatFolder, "sessions", "s1", "big.jsonl"), Array.from({ length: 20_000 }, (_, i) => `{"n":${i + 1}}`).join("\n") + "\n");
+    const part = await call<TreeFileText>("GET", `/api/v1/files/sessions/s1/big.jsonl?chat=${CHAT}&line=100&lines=3`);
+    expect(part.body).toMatchObject({ text: '{"n":100}\n{"n":101}\n{"n":102}\n', lines: 20_000, from: 100, to: 102, more: true, editable: false });
+    const whole = await call<TreeFileText>("GET", `/api/v1/files/sessions/s1/big.jsonl?chat=${CHAT}`);
+    expect(whole.body).toMatchObject({ from: 1, to: 500, lines: 20_000, more: true });
+    expect(whole.body.text.split("\n").length).toBe(501);
+    const bytes = await call<TreeFileText>("GET", `/api/v1/files/sessions/s1/big.jsonl?chat=${CHAT}&offset=0&length=9`);
+    expect(bytes.body).toMatchObject({ text: '{"n":1}\n{', to: 9 });
   });
 
   test("a page reaches nothing outside the tree, writes no shipped or generated file, and without a page's token gets nothing", async () => {

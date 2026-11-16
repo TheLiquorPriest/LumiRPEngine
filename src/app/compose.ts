@@ -15,7 +15,7 @@
 // install's database holds them at this build's version whether or not a migration ever ran there. The
 // turn lane reads no migration: what one carried of a chat is handed to it from here.
 
-import type { Clock, CreateHarnessOptions } from "rp-harness";
+import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness";
 import { doorArea } from "../adapter/lumiverse/area";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
@@ -133,7 +133,7 @@ export function compose(options: ComposeOptions = {}): Composition {
       accounts: door.accounts,
     }),
     storeArea(),
-    loreArea(() => ({ store: made().store, turns: made().prompts.lore })),
+    loreArea(() => ({ store: made().store, turns: made().prompts.lore, indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) } })),
     ifaceArea(),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.
@@ -145,6 +145,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       stack: (user, chat, agent) => made().harness.definitions.stack(scope(user, chat ?? NO_CHAT), agent),
       apply,
       place,
+      // What RPH itself makes of the files of a chat's view, for the Files page.
+      guidance: (user, chat) => loadGuidance(made().files, scope(user, chat ?? NO_CHAT)),
     })),
     turn.area,
     bootstrapArea({

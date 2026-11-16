@@ -13,7 +13,7 @@ import { yamlMapping } from "../app/yaml";
 import { type DefaultStanding, type DefaultUpdate, updatesSince } from "./defaults";
 import { walk } from "./files";
 import { CHARACTER_FOLDERS, FILE_KEYS } from "./layout";
-import { type ChatLocation, kindOf, locate, treeLayers, viewPath } from "./view";
+import { type ChatLocation, kindOf, levelBase, locate, treeLayers, viewPath } from "./view";
 
 /** One file of the tree as the Files page lists it. */
 export interface TreeFileEntry {
@@ -40,6 +40,18 @@ export interface TreeFileEntry {
   defaultChanged: number | null;
   /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. Absent or null otherwise. */
   defaultRemoved?: number | null;
+  /** Whether it is a level's config file (`RPE-global.yml`, a chat's `RPE.yml`): the Settings page edits it too. */
+  isConfig?: boolean;
+  /** The levels where a file of its kind and name has a place that the user may write, so "save as" offers only those. */
+  placeable?: LayerLevel[];
+  /** For a generated file, the page where what it shows is edited, if one is; null otherwise. */
+  editedOn?: string | null;
+  /** Why RPH leaves it out of force, in RPH's own terms, though it is the nearest of its name and not switched off: its `needs:` is not in force, or its header does not parse; null when nothing does. Absent where RPH was not asked. */
+  held?: "needs" | "broken" | null;
+  /** What RPH found wrong with it, in its own words, line by line. Absent where RPH was not asked. */
+  problems?: string[];
+  /** The agents whose stacks it joins (a file `instructions:` names, or one they read), by definition name. Absent where RPH was not asked. */
+  joins?: string[];
 }
 
 /** What the levels' config files say of the names in force (RPH's `off:` and `layered:`, `CONFIG_KEYS`): each name switched off, with the levels whose list names it. */
@@ -175,60 +187,104 @@ export function placeAt(from: LayerLevel, rest: readonly string[], to: LayerLeve
   return rest.length === 1 ? [...rest] : null;
 }
 
+/** The levels a name's files are looked for at, the farthest first: the nearest file of a name is the one taken. */
+const FARTHEST_FIRST: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
+
+/** Where a generated file at the top of a chat's folder is edited, if anywhere: the page that makes it again from what he edits there. */
+const EDITED_ON: Readonly<Record<string, string>> = { "PROMPT-MAP.md": "Prompt" };
+
+/** What the entries of one chat's view are made against: its levels, the config's names in force, and what updates changed of the defaults. */
+export interface ListingContext {
+  loc: ChatLocation;
+  layers: Layer[];
+  names: NamesInForce;
+  standing: DefaultStanding;
+}
+
+export async function listingContext(loc: ChatLocation, standing: DefaultStanding = { updates: new Map(), written: new Map() }): Promise<ListingContext> {
+  const layers = treeLayers();
+  return { loc, layers, names: await namesInForce(loc, layers), standing };
+}
+
+/**
+ * The entry of one file at one level: what it is, whether RPH takes it, the file of its name at each other level (found by where the
+ * name goes there, `placeAt`) and so the one taken in its place, what an update changed of its default or took away since the user
+ * wrote it, and the levels his save-as may name. No other file of the view is read, so a page of a folder costs what it holds.
+ */
+export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: readonly string[], disk: string): Promise<TreeFileEntry> {
+  const layer = ctx.layers.find((l) => l.level === level);
+  if (layer === undefined) throw new Error(`The tree has no ${level} level.`);
+  const kind = kindOf(level, rest);
+  const item = itemOf(layer, rest, kind);
+  const offIn = item === null ? [] : (ctx.names.off.get(item) ?? []);
+  const info = await stat(disk);
+  const place = (to: LayerLevel): string[] | null => (levelBase(ctx.loc, to) === null ? null : placeAt(level, rest, to));
+  const placeable = (["global", "character", "chat"] as const).filter((to) => {
+    const at = place(to);
+    return at !== null && userMayWrite(to, at, kindOf(to, at));
+  });
+  const entry: TreeFileEntry = {
+    path: viewPath(level, rest),
+    level,
+    kind,
+    bytes: info.size,
+    item,
+    applies: true,
+    replacedBy: null,
+    off: offIn.length > 0,
+    offIn,
+    editable: userMayWrite(level, rest, kind),
+    shipped: null,
+    defaultChanged: null,
+    defaultRemoved: null,
+    isConfig: rest.length === 1 && rest[0] === layer.config,
+    placeable,
+    editedOn: kind === "generated" && level === "chat" ? (EDITED_ON[rest.join("/")] ?? null) : null,
+  };
+  if (item === null) return entry;
+  // The file of this name at each level, the farthest first; the nearest is the one taken.
+  const same = new Map<LayerLevel, string>([[level, entry.path]]);
+  for (const other of FARTHEST_FIRST) {
+    const at = other === level ? null : place(other);
+    if (at === null) continue;
+    const lookup = await locate(ctx.loc, viewPath(other, at));
+    const otherLayer = ctx.layers.find((l) => l.level === other);
+    if (lookup.ok && lookup.at.is === "file" && otherLayer !== undefined && itemOf(otherLayer, lookup.at.rest, lookup.at.kind) === item) same.set(other, lookup.at.path);
+  }
+  const layered = !item.includes("/") && ctx.names.layered.has(item);
+  const taken = FARTHEST_FIRST.findLast((l) => same.has(l));
+  const takenPath = taken === undefined ? undefined : same.get(taken);
+  entry.replacedBy = layered || takenPath === undefined || takenPath === entry.path ? null : takenPath;
+  entry.applies = !entry.off && entry.replacedBy === null && !item.startsWith(`rules/${EXAMPLES}/`);
+  if (level === "shipped") return entry;
+  /** The updates since the file was last written that touched the shipped file at `path`. */
+  const since = (path: string): readonly DefaultUpdate[] => {
+    const updates = ctx.standing.updates.get(path);
+    return updates === undefined ? [] : updatesSince(updates, ctx.standing.written.get(writtenKey(ctx.loc.files, disk)), info.mtimeMs);
+  };
+  const theirs = same.get("shipped");
+  if (theirs !== undefined) {
+    entry.shipped = theirs;
+    entry.defaultChanged = since(theirs).findLast((u) => !u.removed)?.at ?? null;
+    return entry;
+  }
+  // A file of his that replaces a default an update has taken away since he wrote it: the default is not there to name, but the place it was is.
+  const was = placeAt(level, rest, "shipped");
+  if (was !== null) entry.defaultRemoved = since(viewPath("shipped", was)).findLast((u) => u.removed)?.at ?? null;
+  return entry;
+}
+
 /**
  * Every file of the chat's view, level by level (shipped, global, character, chat), each in the order of its path. `standing`: what
  * updates changed of the shipped files and when the user wrote their own (`defaultStanding`).
  */
-export async function treeListing(loc: ChatLocation, standing: DefaultStanding = { updates: new Map(), written: new Map() }): Promise<TreeFileEntry[]> {
-  const layers = treeLayers();
-  const names = await namesInForce(loc, layers);
+export async function treeListing(loc: ChatLocation, standing?: DefaultStanding): Promise<TreeFileEntry[]> {
+  const ctx = await listingContext(loc, standing);
   const found: TreeFileEntry[] = [];
-  const origin = new Map<TreeFileEntry, { changed: number; key: string; rest: string[] }>();
-  for (const layer of layers) {
+  for (const layer of ctx.layers) {
     const top = await locate(loc, layer.mount);
     if (!top.ok || top.at.is !== "folder" || top.at.disk === null) continue;
-    for await (const e of walk(loc, layer.level, [], top.at.disk, Number.POSITIVE_INFINITY)) {
-      if (e.folder) continue;
-      const kind = kindOf(layer.level, e.rest);
-      const item = itemOf(layer, e.rest, kind);
-      const offIn = item === null ? [] : (names.off.get(item) ?? []);
-      const info = await stat(e.disk);
-      const entry: TreeFileEntry = { path: viewPath(layer.level, e.rest), level: layer.level, kind, bytes: info.size, item, applies: true, replacedBy: null, off: offIn.length > 0, offIn, editable: userMayWrite(layer.level, e.rest, kind), shipped: null, defaultChanged: null, defaultRemoved: null };
-      found.push(entry);
-      origin.set(entry, { changed: info.mtimeMs, key: writtenKey(loc.files, e.disk), rest: e.rest });
-    }
-  }
-  // The nearest file of a name is the one taken; the levels were walked farthest first, the shipped one first of all.
-  const nearest = new Map<string, TreeFileEntry>();
-  const shipped = new Map<string, TreeFileEntry>();
-  for (const f of found) {
-    if (f.item === null) continue;
-    nearest.set(f.item, f);
-    if (f.level === "shipped") shipped.set(f.item, f);
-  }
-  /** The updates since the file was last written that touched the shipped file at `path`. */
-  const since = (f: TreeFileEntry, path: string): readonly DefaultUpdate[] => {
-    const at = origin.get(f);
-    const updates = standing.updates.get(path);
-    return at === undefined || updates === undefined ? [] : updatesSince(updates, standing.written.get(at.key), at.changed);
-  };
-  for (const f of found) {
-    if (f.item === null) continue;
-    const layered = !f.item.includes("/") && names.layered.has(f.item);
-    const taken = nearest.get(f.item);
-    f.replacedBy = layered || taken === undefined || taken === f ? null : taken.path;
-    f.applies = !f.off && f.replacedBy === null && !f.item.startsWith(`rules/${EXAMPLES}/`);
-    if (f.level === "shipped") continue;
-    const theirs = shipped.get(f.item);
-    if (theirs !== undefined) {
-      f.shipped = theirs.path;
-      f.defaultChanged = since(f, theirs.path).findLast((u) => !u.removed)?.at ?? null;
-      continue;
-    }
-    // A file of his that replaces a default an update has taken away since he wrote it: the default is not there to name, but the place it was is.
-    const rest = origin.get(f)?.rest;
-    const was = rest === undefined ? null : placeAt(f.level, rest, "shipped");
-    if (was !== null) f.defaultRemoved = since(f, viewPath("shipped", was)).findLast((u) => u.removed)?.at ?? null;
+    for await (const e of walk(loc, layer.level, [], top.at.disk, Number.POSITIVE_INFINITY)) if (!e.folder) found.push(await entryAt(ctx, layer.level, e.rest, e.disk));
   }
   return found;
 }

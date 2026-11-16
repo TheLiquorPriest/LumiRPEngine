@@ -6,6 +6,7 @@ import type { FileKind, GuidanceKind, StackPart } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, layerLevel, shape } from "../app";
 import type { TreeFileEntry } from "./catalog";
 import type { DiffLine } from "./defaults";
+import type { Listed, ListedPage } from "./listing";
 import type { Pruned } from "./retention";
 import type { ChatStorage, NoteFile, NoteFiles, TreeStorage } from "./storage";
 import type { SuggestionState, TreeSuggestion } from "./suggestions";
@@ -41,16 +42,52 @@ const treeFileRow = shape.named(
     shipped: field(nullable(T), "The shipped file of the same name, for a file of another level that has one; null otherwise."),
     defaultChanged: field(nullable(N), "For a file of the user's in place of a shipped one: when the latest update that changed that shipped file did so, if it did since this file was last written; null otherwise."),
     defaultRemoved: opt(nullable(N), "For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written."),
+    isConfig: opt(shape.yesNo(), "Whether it is a level's config file, which the Settings page edits too."),
+    placeable: opt(shape.list(layerLevel), "The levels where a file of its kind and name has a place that the user may write: \"save as\" offers only those."),
+    editedOn: opt(nullable(T), "For a generated file, the page where what it shows is edited, if one is; null otherwise."),
+    held: opt(nullable(shape.oneOf("needs", "broken")), "Why RPH leaves it out though it is the nearest of its name and not switched off: what its `needs:` names is not in force, or its header does not parse; null when nothing does."),
+    problems: opt(shape.list(T), "What RPH found wrong with it, in its own words, line by line."),
+    joins: opt(shape.list(T), "The agents whose stacks it joins: a file `instructions:` names or an agent reads."),
   }),
 );
 type EntryMirrored = Holds<Exactly<Infer<typeof treeFileRow>, TreeFileEntry>>;
+
+const listedRow = shape.named(
+  "TreeListed",
+  "One entry of a folder, or of a search: a folder, or a file with its entry.",
+  shape.object({ name: T, path: field(T, "Its path in the chat's view, as the file routes take it."), folder: shape.yesNo(), level: layerLevel, entry: field(nullable(treeFileRow), "The file as the listing shows it; null for a folder.") }),
+);
+type ListedMirrored = Holds<Exactly<Infer<typeof listedRow>, Listed>>;
+export const treeListedReply = shape.named(
+  "TreeListedReply",
+  "A page of a folder of the chat's view, folders first and each by name, or of a search across every level: its entries, where the next page starts, the levels the view has, and whether a search stopped before it had looked everywhere.",
+  shape.object({
+    folder: field(T, "The folder listed, \"\" for the chat's own top (which holds the other levels' folders beside its files); empty for a search."),
+    items: shape.list(listedRow),
+    next: field(nullable(T), "Where the next page starts: send it as `after`; null at the end."),
+    levels: field(shape.list(layerLevel), "The levels the view has now: a chat's and its character's once the chat has its folders."),
+    stopped: field(nullable(shape.oneOf("time")), "A search that ran out of its time with the entries it had found, and did not look everywhere."),
+  }),
+);
+type ListedPageMirrored = Holds<Exactly<Infer<typeof treeListedReply>, ListedPage>>;
 
 export const treeListingReply = shape.named("TreeListingReply", "Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own.", shape.object({ files: shape.list(treeFileRow) }));
 
 export const treeFileReply = shape.named(
   "TreeFileReply",
-  "One file of the tree, as text.",
-  shape.object({ path: T, level: layerLevel, kind: fileKind, bytes: N, editable: shape.yesNo(), text: T }),
+  "One file of the tree, as text: the whole of a short one, and of a long one the lines or bytes asked for (the page's setting `files.readLines` of its lines when none is asked), with its size and its count of lines.",
+  shape.object({
+    path: T,
+    level: layerLevel,
+    kind: fileKind,
+    bytes: field(N, "The file's size in bytes."),
+    editable: shape.yesNo(),
+    text: field(T, "The part read, whole lines or the bytes asked for."),
+    lines: opt(N, "The file's lines in all."),
+    from: opt(N, "The first line the text holds; with `offset`, the first byte."),
+    to: opt(N, "The last line the text holds; with `offset`, the byte after the last."),
+    more: opt(shape.yesNo(), "Whether the file goes on past what was read."),
+  }),
 );
 /** A file the Files page reads. */
 export type TreeFileText = Infer<typeof treeFileReply>;
@@ -206,4 +243,4 @@ export const stackReply = shape.named("StackReply", "The exact stack an agent ge
 type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];
+export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored];

@@ -15,12 +15,15 @@
 import { stat } from "node:fs/promises";
 import { route, RouteError, shape } from "../app";
 import { readText } from "../app/disk";
-import { userMayWrite, writtenKey } from "./catalog";
+import { listingContext, userMayWrite, writtenKey } from "./catalog";
 import { defaultStanding, defaultUpdateTexts, lineDiff, updatesSince } from "./defaults";
-import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
+import { listFolder, searchTree } from "./listing";
 import { OFF_LEVELS } from "./own-files";
+import { readBytes, readLines } from "./ranged";
+import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
 import { treeSettingsOf } from "./settings";
-import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, stackReply, treeDiffReply, treeFileReply, treeListingReply, type TreeFileDiff, type TreeFileText } from "./shapes";
+import { rphStanding, withStanding } from "./standing";
+import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
 
 /** The routes that name a file: its path in the chat's view follows the route's own segments. */
 const FILE_PATH = "/api/v1/files/*";
@@ -53,6 +56,34 @@ export function fileRoutes(kit: RouteKit) {
         // A chat RPE has not played yet is placed as its first turn places it, so its levels have folders; where RPE cannot (Lumiverse is out of reach), its view is the shipped and global levels' alone.
         const loc = await own.locationFor(user, chat).catch(() => own.locationOf(user, chat));
         return { files: await kit.listingOf(user, loc) };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/files-list",
+      access: "page",
+      group: "files",
+      does: "The chat's view of the tree read like a filesystem: one folder's files and folders a page at a time (the chat's own top, with the other levels' folders, when none is named), or a search by name and by text across every level, each file with whether RPH takes it and why not; with no chat, the shipped and global levels.",
+      query: {
+        chat: chatQuery,
+        folder: shape.optional(shape.text(), "The folder to list, by its path in the view; the chat's own top when left out."),
+        search: shape.optional(shape.text(), "Search every level for files whose path or text holds this, instead of listing a folder."),
+        limit: shape.optional(shape.whole({ least: 1 }), "How many entries a page holds; the `files.listPage` setting's when left out, and at most `files.listMost`."),
+        after: shape.optional(shape.text(), "Where the page starts after: the `next` of the page before."),
+      },
+      reply: treeListedReply,
+      handle: async ({ user, query }) => {
+        const chat = chatOf(query.chat);
+        const loc = await own.locationFor(user, chat).catch(() => own.locationOf(user, chat));
+        const settings = await treeSettingsOf(loc);
+        const ask = { limit: Math.min(query.limit ?? settings.listPage, settings.listMost), after: query.after };
+        const ctx = await listingContext(loc, defaultStanding(deps.db, user));
+        const wanted = query.search?.trim() ?? "";
+        const page = wanted === "" ? await listFolder(ctx, query.folder ?? "", ask) : await searchTree(ctx, wanted, ask, { grepBytes: settings.grepBytes, grepMs: settings.grepMs });
+        // RPH's own standing of the guidance files on the page: what it holds out and why, what it found wrong, whose stacks they join.
+        if (!page.items.some((i) => i.entry?.item !== null && i.entry !== null)) return page;
+        const standing = await rphStanding(deps.guidance(user, chat));
+        return { ...page, items: page.items.map((i) => (i.entry === null ? i : { ...i, entry: withStanding(i.entry, standing) })) };
       },
     }),
     route({
@@ -92,16 +123,27 @@ export function fileRoutes(kit: RouteKit) {
       path: FILE_PATH,
       access: "page",
       group: "files",
-      does: "One file of the tree, as text.",
-      query: { chat: chatQuery },
+      does: "One file of the tree, as text: a short file whole, a long one the lines (`line`, `lines`) or the bytes (`offset`, `length`) asked for, `files.readLines` lines when it asks for none; with the file's size and its count of lines, and whether it goes on.",
+      query: {
+        chat: chatQuery,
+        line: shape.optional(shape.whole({ least: 1 }), "The first line to read, from 1."),
+        lines: shape.optional(shape.whole({ least: 0 }), "How many lines to read; the `files.readLines` setting's when left out."),
+        offset: shape.optional(shape.whole({ least: 0 }), "Read bytes instead of lines: the first byte, with `length`."),
+        length: shape.optional(shape.whole({ least: 0 }), "How many bytes to read from `offset`."),
+      },
       reply: treeFileReply,
       handle: async ({ user, params, query }) => {
         const loc = own.locationOf(user, chatOf(query.chat));
         const at = await own.found(loc, viewPathOf(params["*"]));
-        const text = at.is === "file" ? await readText(at.disk) : null;
-        if (text === null) throw new RouteError(404, `The tree has no file ${at.path}.`);
-        const file: TreeFileText = { path: at.path, level: at.level, kind: at.kind, bytes: Buffer.byteLength(text, "utf8"), editable: userMayWrite(at.level, at.rest, at.kind), text };
-        return file;
+        if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
+        const file = { path: at.path, level: at.level, kind: at.kind, editable: userMayWrite(at.level, at.rest, at.kind) };
+        if (query.offset !== undefined) {
+          if (query.length === undefined) throw new RouteError(400, "A read by bytes names `offset` and `length`.");
+          const part = await readBytes(at.disk, query.offset, query.length);
+          return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.offset, to: part.offset + part.length, more: part.offset + part.length < part.bytes };
+        }
+        const part = await readLines(at.disk, query.line ?? 1, query.lines ?? (await treeSettingsOf(loc)).readLines);
+        return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.from, to: part.to, more: part.to < part.lines };
       },
     }),
     route({

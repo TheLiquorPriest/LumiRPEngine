@@ -129,15 +129,21 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.titleWords` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Words that title an entry: Words of its text that title a lore entry with no title of its own. |
 | `lore.index.batch` | `20` | RPE-global.yml | from RPE's next start | Appendix D.1: Lore indexing, entries per call | Lore indexing, entries per call: Entries handed to one call of a lore indexing run. |
 | `lore.index.bound` | `12` | RPE-global.yml | from RPE's next start | Appendix D.1: Lore map, bound entries not in the prompt | Lore map, bound entries: Entries bound to the horizon and not in the prompt that the lore map lists. |
+| `lore.index.batchChars` | `48000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore indexing, characters per call: The most characters of entry text handed to one call of a lore indexing run, so long entries never overrun a small model's window; one entry is handed at least, however long. |
+| `lore.index.page` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
+| `lore.index.entry` | none (no index entry of his own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Your own lore index entry: A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse. |
 
 ## The engine's tools
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `engine.nearMatches` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Near matches listed: How many near matches an answer about a name that is not there lists. |
+| `engine.nearDistance` | `0.25` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Spelling distance of a near match: How far off in spelling a name may be and still be offered as a near match, as a part of the name's length: 0.25 lets a quarter of its letters differ. |
 | `engine.queryDepth` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Depth of a world query: How many levels below its point world_query shows when it names no depth. |
 | `engine.searchHits` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Hits a world search gives: The most things one world_search answers with. |
 | `engine.dueItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Things falling due listed: The most things falling due in a span an answer lists, soonest first; how many more fall in it is said. |
+| `engine.creditScoreAssumed` | `700` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Score assumed for someone with none: The credit score the finance tables are read at for someone with no score recorded. |
+| `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
 
 ## `migration`
 
@@ -158,6 +164,9 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `notes.listed` | `20` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Notes listed: Note files each of the Storage page's lists gives when the page asks for no number. |
 | `notes.most` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most notes listed: The most note files one of the Storage page's lists gives. |
 | `files.idChars` | `128` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest id that names a folder: Characters of a session's or a turn's id, which names its folder; RPE's own ids are 36, and an id is letters, digits, _ and - whatever this says. |
+| `files.listPage` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Entries a Files page lists: Files and folders the Files page lists in one page of a folder, or of a search, when it asks for no number. |
+| `files.listMost` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most entries a Files page lists: The most files and folders one page of the Files page's listing gives, whatever number it asks for. |
+| `files.readLines` | `500` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lines of a file read at once: Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole. |
 
 ## The files in force
 
@@ -294,14 +303,33 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `lead` | `author` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lead agent: The agent definition that leads a turn. |
+| `lead` | none (no lead: no turn is played) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Lead agent: The agent definition that leads a turn; the shipped config names the Author. |
 | `chat.hiddenReadable` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hidden messages readable by agents | Hidden messages readable: Agents may read the messages the player hid from the prompt. |
-| `since.editedBudget` | `4000` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Edited replies in the briefing: Tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named in one line. |
+| `since.editedBudget` | none (every one in full) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Edited replies in the briefing: Off as shipped, every edited reply is told with both its texts whole. Set, the tokens the briefing spends on replies edited after their turns, told in full, the newest first; the rest are named by message in one line, with no text. |
 | `history.window` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: History window | History window: The latest this many of the chat's messages stay in the prompt. |
 | `history.step` | none (off) | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: The window's step | Window step: Lets the window grow by this many messages before it is cut back to its size. |
 | `history.hold.on` | `false` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold uncovered messages: Keeps a message the story record does not cover yet in the prompt. |
 | `history.hold.cap` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: Hold a message in the prompt until the record covers it | Hold's most: The most messages the hold keeps past the window. |
 | `passConnection` | none (the default connection) | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Connection for requests with no tag: The connection a request with no tag is passed on to. |
+
+## `turns`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `turns.page` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns on a page: The turns a chat's list on the Turn page gives when the page names no number. |
+| `turns.pageMost` | `500` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most turns on a page: The most turns one page of a chat's list may ask for. |
+
+## `map`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `map.laidFeet` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Width of a square laid in play: How wide, in feet, a square is on a grid laid in play that names no size. |
+| `map.roundSeconds` | `6` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Seconds in a round: How long a round is on a grid whose square a round's move crosses; a fight counts time in them. |
+| `map.roundFeet` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Feet moved in a round: How far someone moves in a round, where nothing says how fast they are. |
+| `map.printColumns` | `40` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | Map printed, columns: The most columns of a map the world state prints; a wider map is printed around the horizon. |
+| `map.printRows` | `30` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | Map printed, rows: The most rows of a map the world state prints; a taller map is printed around the horizon. |
+| `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
+| `map.distances` | `feet` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Distances told in: feet or metres. A world's ruleset that says otherwise wins. |
 
 ## Bootstrap
 
@@ -348,6 +376,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lumiverse.database.wait` | `0.025` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Database first wait: Seconds before the second try of a locked read, doubled after each try. |
 | `lumiverse.reads.rereads` | `3` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Rereads of a changing chat: Times a chat read over HTTP is read again when it changed while it was read. |
 | `lumiverse.reads.breakdownReplies` | `10` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Replies asked for a breakdown: The newest replies asked when looking for the prompt breakdown Lumiverse stored. |
+| `lumiverse.reads.keep` | `15` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Seconds a read over HTTP is held: Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged. |
+| `lumiverse.reads.kept` | `32` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chats, books and presets held: How many chats, books and presets have what RPE read of them held at once; the one left alone longest goes first. |
 | `lumiverse.dryRun.wait` | `10` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Dry run wait: Seconds a dry run is waited for before the reply goes on without its blocks' names. |
 | `lumiverse.stream.comment` | `5` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Stream comment: Seconds a reply's stream may send nothing before a comment line keeps its connection open. |
 | `lumiverse.relay.flush` | `0.25` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Relay flush: Seconds between the relay's frames to a page; a frame for every event floods Lumiverse's socket. |
