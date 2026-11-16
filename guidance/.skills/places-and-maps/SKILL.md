@@ -18,9 +18,9 @@ The world state prints the scene's map and where everyone and everything stands 
 
 A map the player built may count a whole block or a stretch of road as one square. Nobody can be placed in a room on it. Do not put people a block apart.
 
-1. Lay a room grid for the place with `map_lay`, and link it to its square on the larger map.
+1. Lay a room grid for the place with `map_lay`, over its square on the larger map (`over` and `square`): that square then opens onto the room grid.
 2. Place everyone on the room grid.
-3. Keep the larger map for travel between places.
+3. Keep the larger map for travel between places. A place the story makes that travel needs on it is put on that map with `world_map_place` and joined to its neighbours with `world_map_link`, by how long each way of travelling takes; `places_route` reads the way between two places. Find all three with `tool_search`.
 
 ## When a scene opens on a map and nobody is on it
 
@@ -38,7 +38,7 @@ Do nothing until position starts to matter: a fight, a chase, a search, a questi
 
 1. Draw only what the prose and the lore support: the room's rough shape and size, its doors, the fixtures already mentioned.
 2. Keep it small and plain. Twelve by eight squares is a large room.
-3. Say in your answer that you laid it, so the Author sees it. It belongs to this chat until the player keeps it in the world.
+3. Say in your answer that you laid it, so the Author sees it. It belongs to this chat until the world takes it in: `world_keep` (found with `tool_search`) copies it into the world's draft, which the player commits in Build. A grid laid in error is taken out again with `map_lay`'s `remove`.
 
 If the place is named in the lore and described there, follow the description.
 
@@ -46,7 +46,7 @@ If the place is named in the lore and described there, follow the description.
 
 - A move: `world_apply` with a `move` operation. Give the square, or "next to" someone, or a zone.
 - Something put down, picked up, opened, closed or locked: `world_apply` with `place`, or `map_door`.
-- The place itself changing (a wall broken, a door barred): `map_edit`. A fixture that starts to move (a table overturned) is no longer drawn: make it a thing with a square of its own, so that it is placed, moved and measured like any other thing.
+- The place itself changing (a wall broken, a door barred): `map_edit`. A fixture that starts to move (a table overturned) is no longer drawn: `map_edit`'s `things` makes it a thing with a square of its own in the same call, so that it is placed, moved and measured like any other thing.
 
 ## Measure, do not guess
 

@@ -11,6 +11,9 @@ given:
   - prompt:*
   - session:carry
   - briefing
+# Given once, as the session opens: the map the player's character stands on, as drawn. The world state then prints only what changed on it.
+opening:
+  - map:drawn
 limits: { toolRounds: 24 }
 writer: narrator
 ---
