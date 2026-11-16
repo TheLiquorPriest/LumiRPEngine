@@ -49,7 +49,7 @@ To relive a stretch of the past is to have a principal's own agent take it in as
 
 ## Limits
 
-The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
+The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. If the player says go on, the job has the same limit again from there, unless the player gave another. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
 
 ## What you end with
 

@@ -40,8 +40,9 @@ job_cancelled: A job was cancelled before it finished: {{job}} ({{agent}}). Its 
 job_interrupted: A job was interrupted by a restart before it finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}{{#applied}} Took effect now: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}.{{/applied}}{{#not_applied}} Did not take effect: {{op}}{{#about}} on {{about}}{{/about}}, {{value}}{{#why}}, because {{why}}{{/why}}{{#later}} (the value from message {{later}} stands){{/later}}.{{/not_applied}}{{#more}} {{more}} more of its changes are not listed; the Jobs page lists them all.{{/more}}
 job_off_path: A job was cut off before it finished, when the turn that started it left the chat's path: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}
 panel_request: From a panel{{#from}} ({{from}}){{/from}}: {{what}}{{#on}}, on {{on}}{{/on}}{{#values}}, with {{values}}{{/values}}{{#action}} (action {{action}}){{/action}}
-depth_asked: The player asked for this turn to be played at the depth {{depth}}.
-swipe_asked: The player asked for this attempt to be played in the mode {{mode}}.
+depth_asked: The player asked for this turn to be played at the depth {{depth}}.{{#words}} They typed with it: {{words}}{{/words}}
+swipe_asked: The player asked for this attempt to be played in the mode {{mode}}.{{#words}} They typed with it: {{words}}{{/words}}
+feedback_typed: The player typed this in Lumiverse's regenerate dialog before this attempt: {{text}}{{#position}} Lumiverse put it in a {{position}} message of the prompt.{{/position}}
 change_awaiting: A change is waiting for the player's yes or no: {{what}}
 settle_asked: The player asked, from the Turn page, for this turn to be settled now against the chat as it reads. This run writes no reply, and nothing of it reaches the chat.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}

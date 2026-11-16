@@ -39,8 +39,10 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place" },
   player_edit: { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal: it is older than the turn"] },
   player_inserted: { message: 7, new: "Wren walks in." },
-  depth_asked: { depth: "full" },
-  swipe_asked: { mode: "afresh" },
+  depth_asked: { depth: "full", words: "Keep it short." },
+  swipe_asked: { mode: "afresh", words: "Start from the quay." },
+  feedback_typed: { text: "Less talk, more quay.", position: "user" },
+  approval_waiting: { tool: "world_apply", lane: "engine", turn: "t-4" },
   change_awaiting: { what: "Wren's purse goes to the harbour master" },
   settle_asked: {},
   saved_differs: { message: 4, released: "Wren waved.", saved: "Wren waved twice." },
@@ -411,6 +413,12 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const attempt = await template("turn-attempt");
     expect(attempt.render({ n: 1, turn: "t-2", reply: "Wren waved.", feedback: "Less talk, more quay." }).text).toContain("## What the player said about it\n\nLess talk, more quay.");
     expect(attempt.render({ n: 1, turn: "t-2", reply: "Wren waved." }).text).not.toContain("What the player said");
+    const marked = attempt.render({ n: 1, turn: "t-2", reply: "Wren waved.", mode: "afresh", unseparated: true, position: "system" }).text;
+    expect(marked).toContain("in the mode afresh.");
+    expect(marked).toContain("in a system message");
+    expect(attempt.render({ n: 1, turn: "t-2", reply: "Wren waved." }).text).not.toContain("told apart");
+    const relive = await template("bootstrap-relive");
+    expect(relive.header["relive"]).toEqual(["outline", "key moments", "all"]);
   });
 
   test("judge.md and engine-answers.md stay, the build's own for the owner's approval: the judge's question and the engine's sentences", async () => {
