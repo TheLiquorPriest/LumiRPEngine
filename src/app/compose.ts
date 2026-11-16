@@ -35,6 +35,7 @@ import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefin
 import { oldRecord } from "../migrate/old-records";
 import { migrateArea } from "../migrate/area";
 import { lastReport } from "../migrate/tables";
+import { goingBackArea } from "../migrate/engine-book";
 import { playArea } from "../play/area";
 import { storeArea } from "../store/area";
 import { storyArea } from "../story/area";
@@ -247,6 +248,14 @@ export function compose(options: ComposeOptions = {}): Composition {
       writeAsUser: (user, path, text) => {
         const own = new OwnFiles({ files: app().paths.files, chats: made().chats, writes: app().writes, now: app().now });
         return own.writeAsUser(user, own.locationOf(user, null), `${MOUNTS.global}${path}`, "global", text);
+      },
+    }),
+    goingBackArea({
+      identifier: EXTENSION_IDENTIFIER,
+      // The engine books' press reaches Lumiverse through the door, once RPE is set up for one.
+      door: () => {
+        const parts = door.lumiverse();
+        return parts === null ? null : { books: () => parts.reads.books(), chats: () => parts.reads.chats(), entries: (book) => parts.reads.entries(book), removeBook: (user, book) => parts.writes.removeBook(user, book) };
       },
     }),
     // The tree lays the shipped files before the areas after it read them.

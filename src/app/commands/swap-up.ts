@@ -193,6 +193,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
       todays: taken.length > 0,
       mark: (id, on) => markConnection(call, id, on),
       extension: { build: version, registered: () => registeredBuild(paths, current, io) },
+      earlier,
     },
     swapIo,
   );
