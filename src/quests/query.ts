@@ -3,6 +3,11 @@
 // The tools' own code asks here; nothing is recorded.
 
 import type { JsonObject } from "rp-harness/contract";
+import { readEngineSlice } from "../engine/engine-pack";
+import { evalExpr, scopeEnv, truthy } from "../engine/scope";
+import { currentStage, isTerminal } from "../engine/tracks";
+import { hintsEarned, hintsOpened } from "../engine/visibility";
+import { objectiveLabel, objectiveWhen, type TrackDef, trackOwner } from "../shared/world";
 import type { Call, Reply, StateHit } from "../iface/kit";
 import { isFound, type Reading } from "../iface/reading";
 import { textOf } from "../iface/texts";
@@ -15,6 +20,31 @@ import { QUESTS_DEFAULTS } from "./settings";
 
 /** The point of the tree the quests' level is asked at. */
 export const QUESTS_POINT = "quests";
+
+/**
+ * Where the engine has a quest the world defines: its status (an end stage is done, or failed where a way to fail leads there), when it
+ * came to the stage, what the stage's objectives hold now (as the quest log ticks them), the hints earned and opened, and the truths
+ * revealed. What today's `quests_tracks` and `quests_stage` answered, none left out.
+ */
+function engineOf(reading: Reading, id: string, def: TrackDef): JsonObject {
+  const world = reading.ctx.world;
+  const state = reading.state.world;
+  const at = currentStage(world, state, id) ?? def.start;
+  const stage = Object.hasOwn(def.stages, at) ? def.stages[at] : undefined;
+  const status = isTerminal(def, at) ? (Object.values(def.stages).some((s) => s.fail?.to === at) ? "failed" : "done") : "active";
+  const since = Object.hasOwn(state.tracks, id) ? state.tracks[id]?.since : undefined;
+  const owner = trackOwner(def);
+  const env = scopeEnv({ reg: reading.registry, ctx: reading.ctx, bindings: owner ? { self: owner } : {} });
+  const out: JsonObject = { status, ...(since !== undefined && since !== null ? { since } : {}) };
+  if ((stage?.objectives ?? []).length > 0) out.objectives = (stage?.objectives ?? []).map((o) => ({ label: objectiveLabel(o), done: truthy(evalExpr(objectiveWhen(o), env, false)) }));
+  const earned = hintsEarned(world, state, id);
+  if (earned.length > 0) out.hints = { earned, opened: hintsOpened(world, state, id) };
+  const revealed = readEngineSlice(state).revealed;
+  const shown = (Object.hasOwn(revealed, id) ? revealed[id] : undefined) ?? [];
+  const truths = shown.map((s) => (Object.hasOwn(def.stages, s) ? def.stages[s]?.truth : undefined)).filter((x): x is string => typeof x === "string");
+  if (truths.length > 0) out.truths_revealed = truths;
+  return out;
+}
 
 /** The quests as a reading sees them: the world's tracks and those opened in play, and which are open. */
 function questsOf(reading: Reading) {
@@ -34,7 +64,7 @@ export function queryQuests(call: Call, reading: Reading, reply: Reply, said: un
   if (typeof said !== "string" || said.trim() === "") return null;
   const asked = said.trim();
   const { slice, tracks, standing, views, open } = questsOf(reading);
-  if (asked.toLowerCase() === QUESTS_POINT) return reply.data({ quests: views.map((q) => questLine(q, open.has(q.id), standing)) });
+  if (asked.toLowerCase() === QUESTS_POINT) return reply.data({ quests: views.map((q) => questLine(q, open.has(q.id), standing, Object.hasOwn(tracks, q.id) && q.world ? { status: engineOf(reading, q.id, tracks[q.id] as TrackDef).status } : {})) });
   const prefixed = /^(?:quest|track):/.test(asked);
   // A name that is a place, person or thing is theirs; a quest goes by its own.
   if (!prefixed && isFound(reading.find(asked, "point"))) return null;
@@ -58,6 +88,7 @@ export function queryQuests(call: Call, reading: Reading, reply: Reply, said: un
     items: storySliceOf(reading.state).items,
     settings,
     sources,
+    engine: view.world && Object.hasOwn(tracks, view.id) ? engineOf(reading, view.id, tracks[view.id] as TrackDef) : {},
     holders: call.deps.questHolders?.(call.scope.user, call.scope.chat, turn?.id ?? null, view.id) ?? [],
     messageOf: (item) => record.beatAt(item),
   });

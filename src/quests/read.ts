@@ -77,10 +77,10 @@ export function authoredOf(stage: StageDef): JsonObject {
 }
 
 /** One quest of the quests' level: its id and ref, kind, name, whether it is open, and where it stands. */
-export function questLine(view: QuestView, open: boolean, standing: Readonly<Record<string, string>>): JsonObject {
+export function questLine(view: QuestView, open: boolean, standing: Readonly<Record<string, string>>, extra: JsonObject = {}): JsonObject {
   const at = view.world ? standing[view.id] : undefined;
   const stage = at === undefined ? undefined : view.stages.find((s) => s.id === at);
-  return { quest: view.id, ref: questRef(view.id), name: view.name, kind: view.kind, world: view.world, open, ...(stage !== undefined ? { at: { stage: stage.id, label: stage.label } } : {}), ...(view.closed !== null ? { closed: { outcome: view.closed.outcome, ...(view.closed.why !== null ? { why: view.closed.why } : {}) } } : {}) };
+  return { quest: view.id, ref: questRef(view.id), name: view.name, kind: view.kind, world: view.world, open, ...extra, ...(stage !== undefined ? { at: { stage: stage.id, label: stage.label } } : {}), ...(view.closed !== null ? { closed: { outcome: view.closed.outcome, ...(view.closed.why !== null ? { why: view.closed.why } : {}) } } : {}) };
 }
 
 /** What `world_query` reads at one quest. */
@@ -99,6 +99,8 @@ export interface QuestReadInput {
   settings: Pick<QuestsSettings, "history">;
   /** The entries bound to the quest as the lore keeps them: each with its aspect. */
   sources: readonly { entry: string; aspect: string; title: string | null }[];
+  /** For a quest the world defines, where the engine has it: its status, since when, what its objectives hold, the hints earned and opened and the truths revealed. */
+  engine: JsonObject;
   /** The characters whose knowledge names the quest or one of its stages (the cast's), with what they hold. */
   holders: readonly QuestHolder[];
   /** The message number a turn's reply lies at, for a beat's place in the chat; null when it is not on the path. */
@@ -148,6 +150,7 @@ export function questRead(i: QuestReadInput): JsonObject {
     who: view.who,
     where: view.where,
     things: view.things,
+    ...i.engine,
     visibility: view.visibility,
     shown: view.shown,
     player_sees: seen.whole ? "all" : seen.stages.length > 0 ? [...seen.stages] : "none",

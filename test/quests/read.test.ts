@@ -32,7 +32,8 @@ describe("agents read quests", () => {
     ]);
     // The world's own quest, by name or by its ref: its stages as the world wrote them, and what it authored for them as data.
     const letter = dataOf(await t.call("world_query", { at: "quest:errand" }));
-    expect(letter).toMatchObject({ name: "The sealed letter", world: true });
+    expect(letter).toMatchObject({ name: "The sealed letter", world: true, status: "active" });
+    expect((level.quests as { status?: string }[]).map((q) => q.status)).toEqual(["active", undefined]);
     expect((letter.stages as { stage: string; current: boolean; authored?: { next: { to: string }[] } }[]).map((s) => [s.stage, s.current, s.authored?.next?.[0]?.to])).toEqual([["asked", true, "done"], ["done", false, undefined]]);
     // A place that goes by a name is the place's; a quest not there is answered with the near ones.
     const none = await t.call("world_query", { at: "quest:ferryboat" });
