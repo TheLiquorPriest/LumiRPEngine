@@ -2,13 +2,13 @@
 // are filled by the areas that know the answers. The turn lane fills the tagged reply it plays, the
 // changes it hears, the history window, the stretches a chat names, the messages Lumiverse's memory
 // stands in for, and the model layer's pass; the lore fills the secrecy of its entries. A lane no area
-// fills is what the door answers by itself, below, so the door mounts whatever areas are composed.
+// fills is what the door answers by itself, below, so the door mounts whatever areas are composed; the
+// secrecy of lore alone is not answered by the door, and where no area fills it the question's answer says it is not known.
 //
 // The door's reads of Lumiverse are taken by the areas that need them (the turn lane's), from the
 // handle this returns.
 
 import type { DoorFills } from "../../app/hooks";
-import type { SecrecyRules } from "./answer";
 import { type AdapterDeps, type AdapterLanes, type LumiverseDoor, lumiverseDoor } from "./mount";
 import { LUMIVERSE_SETTINGS } from "./settings";
 
@@ -17,10 +17,8 @@ declare module "../../app/hooks" {
   interface DoorFills extends Partial<AdapterLanes> {}
 }
 
-/** What the door answers for the secrecy of lore while no area fills the lane: it says so, and the extension's own fail-closed verdict keeps every marked secret out. */
-export const UNFILLED_SECRECY: SecrecyRules = async () => {
-  throw new Error("RPE works out no secrecy of its lore, so the extension keeps every marked secret out.");
-};
+/** The lanes the door has an answer for while no area fills them; the secrecy of lore has none, and says so. */
+type UnfilledLanes = Omit<AdapterLanes, "secrecy">;
 
 const none = (lane: string): Error => new Error(`RPE has no area that fills the door's ${lane} lane.`);
 
@@ -29,7 +27,7 @@ const none = (lane: string): Error => new Error(`RPE has no area that fills the 
  * others reads as nothing there (no change heard, no cut, no hidden message read, no stretch named, no message summarised,
  * the default connection).
  */
-const UNFILLED: AdapterLanes = {
+const UNFILLED: UnfilledLanes = {
   turns: {
     play: async () => {
       throw none("turns");
@@ -43,7 +41,6 @@ const UNFILLED: AdapterLanes = {
   },
   // No model known: nothing is trimmed past the window.
   room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
-  secrecy: UNFILLED_SECRECY,
   hiddenReadable: async () => false,
   ranges: async () => ({}),
   summarized: async () => new Set(),
@@ -61,14 +58,19 @@ const UNFILLED: AdapterLanes = {
 export function doorArea(deps: AdapterDeps): LumiverseDoor {
   let filled: Readonly<DoorFills> = {};
   /** The lane as the areas filled it, or the door's own answer. */
-  const lane = <K extends keyof AdapterLanes>(name: K): AdapterLanes[K] => (filled[name] as AdapterLanes[K] | undefined) ?? UNFILLED[name];
+  const lane = <K extends keyof UnfilledLanes>(name: K): UnfilledLanes[K] => (filled[name] as UnfilledLanes[K] | undefined) ?? UNFILLED[name];
   const lanes: AdapterLanes = {
     turns: { play: (turn, out, signal) => lane("turns").play(turn, out, signal) },
     changes: { changed: (change) => lane("changes").changed(change), reopened: () => lane("changes").reopened() },
     window: (ask, signal) => lane("window")(ask, signal),
     start: (ask, signal) => lane("start")(ask, signal),
     room: (chat, reply, signal) => lane("room")(chat, reply, signal),
-    secrecy: (ask, signal) => lane("secrecy")(ask, signal),
+    // No area fills it: the answer is not known, and the extension keeps every marked secret out by its own fail-closed verdict.
+    secrecy: async (ask, signal) => {
+      const secrecy = filled.secrecy;
+      if (secrecy === undefined) throw none("secrecy");
+      return secrecy(ask, signal);
+    },
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
     ranges: (chat) => lane("ranges")(chat),
     summarized: (chat) => lane("summarized")(chat),

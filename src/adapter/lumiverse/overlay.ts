@@ -186,6 +186,8 @@ export interface LaidMessage {
   places: { member: number; start: number; end: number }[];
   /** The thinking Lumiverse sent back with it (an earlier reply's), read apart from its text: no part of what the model is shown as the message. */
   thinking?: string;
+  /** RPE's check of the lore changed this message's text after the tag listed it: its listed messages' hashes no longer stand for their stretches. */
+  changed?: true;
 }
 
 /** Where each chunk of `x` stands in a text made the way `x` is, its chunks having these lengths. */

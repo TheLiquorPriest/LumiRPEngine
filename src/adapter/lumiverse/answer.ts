@@ -35,6 +35,8 @@ export interface SecrecyAsk {
   path: readonly PathStep[];
   /** The path at the question's point as RPE's state reads it; rejects where that point could not be worked out. */
   start: Promise<PathStart>;
+  /** Where the coming turn starts on the path, as the window's start is asked. */
+  point: StartPoint;
   entries: readonly QuestionEntry[];
 }
 
@@ -105,10 +107,10 @@ export interface AnswerDeps {
   log?(message: string): void;
 }
 
-/** The point of the path a question's generation starts at: in place of the reply a swipe or a regenerate replaces, else after the path's newest message. */
-function pointOf(q: Question): StartPoint {
-  const replaced = q.generation?.type === "swipe" || q.generation?.type === "regenerate" ? q.generation.target.message : null;
-  return replaced !== null ? { replaces: replaced } : { follows: q.path.at(-1)?.id ?? null };
+/** The point of the path a generation starts at: in place of the reply a swipe or a regenerate replaces, else after the path's newest message. */
+export function pointOf(generation: GenerationFacts | null, path: readonly PathStep[]): StartPoint {
+  const replaced = generation?.type === "swipe" || generation?.type === "regenerate" ? generation.target.message : null;
+  return replaced !== null ? { replaces: replaced } : { follows: path.at(-1)?.id ?? null };
 }
 
 /** Not worked out within the wait. */
@@ -125,7 +127,8 @@ const LATE = Symbol("late");
  */
 export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal, secretsFailed: (error: unknown) => void): Promise<Answer> {
   const at = { user: q.user, chat: q.chat, generation: q.generation };
-  const start = deps.start({ user: q.user, chat: q.chat, path: q.path, point: pointOf(q) }, signal);
+  const point = pointOf(q.generation, q.path);
+  const start = deps.start({ user: q.user, chat: q.chat, path: q.path, point }, signal);
   // Read by whichever half needs it; a refusal is each half's own failure.
   start.catch(() => undefined);
   const cut = q.purpose === "prompt"
@@ -137,7 +140,7 @@ export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal,
         },
       )
     : Promise.resolve(null);
-  const secrecy = deps.secrecy({ ...at, path: q.path, start, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
+  const secrecy = deps.secrecy({ ...at, path: q.path, start, point, purpose: q.purpose, entries: q.entries }, signal).catch((error: unknown) => {
     secretsFailed(error);
     return null;
   });

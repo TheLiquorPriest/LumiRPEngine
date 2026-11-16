@@ -31,6 +31,7 @@ import { HeardGenerations } from "./heard";
 import { Hints } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { type LumiverseCalls, lumiverseCalls } from "./lumiverse-calls";
+import { createLoreCheck } from "./lore-check";
 import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { type EndpointCall, modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
@@ -331,6 +332,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             passConnection: lanes.passConnection,
             passWords: lanes.passWords,
             holdMs: () => settings().wholeHoldMs,
+            lore: createLoreCheck({ user, reads: p.reads, secrecy: lanes.secrecy, start: lanes.start, answers, macros: p.calls.macros }),
             heard,
             untaggedWhileAwaited: () => settings().untaggedWhileAwaited,
             modelNames: rpeModels,

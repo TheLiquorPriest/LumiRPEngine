@@ -14,6 +14,7 @@ import type { Clock, PassError, PassRequest, PassSink, PromptRole, Usage as Pass
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import type { HeardGenerations } from "./heard";
+import type { LoreCheck } from "./lore-check";
 import { rawLayout } from "./layout";
 import type { HintFor } from "./hint";
 import type { RawLayout } from "rp-harness/contract";
@@ -81,6 +82,8 @@ export interface ProviderDeps {
   passWords(key: string, fields: { detail?: string }): Promise<string>;
   /** For a reply asked for whole: milliseconds after its arrival at which its turn is stopped with what it has, below Lumiverse's ten minutes (the door's settings). */
   holdMs(): number;
+  /** RPE's check of the lore in a prompt, where the extension applied its own verdict (`lore-check.ts`). */
+  lore: LoreCheck;
   /** The generations the event socket heard (`heard.ts`): a tagged request's activated lore, and whether one on RPE's connection awaits its tag. */
   heard: Pick<HeardGenerations, "tagged" | "untagged">;
   /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
@@ -149,6 +152,9 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);
     }
+    // The lore Lumiverse activated for the generation, and RPE's check of it where the extension applied its own verdict (`lore-check.ts`): before any agent is given the prompt.
+    const lore = await deps.heard.tagged(received.tag.chat, received.tag.generation, received.tag.target.message);
+    const checked = await deps.lore(received.tag, received.messages, lore, request.signal);
     // Only a hint for names, and never waited for: without it the layout names parts by their place (`hint.ts`).
     const { hint, revision } = await deps.blocks(read.tag, request.signal).catch((e: unknown): HintFor => {
       deps.log?.(`Lumiverse's breakdown of chat ${read.tag.chat} was not read: ${e instanceof Error ? e.message : String(e)}`);
@@ -157,12 +163,12 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
     const { messages: _messages, model, stream, [TAG_FIELD]: _tag, ...parameters } = body;
     const turn: TaggedTurn = {
       tag: received.tag,
-      prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as PromptRole) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
-      layout: rawLayout(received.tag, received.messages, received.cut.told, hint, revision),
-      cut: received.cut,
+      prompt: checked.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as PromptRole) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
+      layout: rawLayout(received.tag, checked.messages, received.cut.told, hint, revision),
+      cut: { ...received.cut, lore: checked.record },
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),
-      lore: await deps.heard.tagged(received.tag.chat, received.tag.generation, received.tag.target.message),
+      lore,
       parameters: parameters as JsonObject,
     };
     const meta = { id: `rpe-${received.tag.generation}`, model: turn.model ?? "rpe", created: Math.floor(now / 1000) };

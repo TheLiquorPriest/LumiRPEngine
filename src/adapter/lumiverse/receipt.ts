@@ -13,7 +13,8 @@ import type { HistoryWindow, WindowStep } from "./answer";
 import { joiningOf, overlay, partialCut, readBodyMessages, rebuild, type Joining, type LaidMessage, type Overlay } from "./overlay";
 import type { LumiverseReads } from "./reads";
 import type { LvRole } from "./rows";
-import { historyCut, type KeepPoint, type Tag } from "./wire";
+import type { LoreRecord } from "./lore-check";
+import { historyCut, type GenerationFacts, type KeepPoint, type Tag } from "./wire";
 
 /** One of a chat's messages as Lumiverse's rows hold it: its id, the number Lumiverse stored for it (`index_in_chat`), whether the user hid it, and whose it is. */
 export interface ChatRow {
@@ -123,6 +124,12 @@ export interface Cut {
   question: Tag["question"];
   /** What the model's own window left out after the window's cut (§4.2 l.237); null where all fit, or the room could not be told. */
   trimmed: Trimmed | null;
+  /**
+   * What RPE's check of the lore in the prompt found, where the extension applied its own verdict (the tag's `secrecy`: no answer in time, none about
+   * the secrets, or the extension failed): each entry taken out or worded otherwise, and where RPE could not work the secrets out on receipt either, that
+   * and why. Null where RPE's own verdict was applied by the extension, and so nothing was checked.
+   */
+  lore: LoreRecord | null;
 }
 
 /** The request's own room for the reply, as OpenAI's chat format names it; null where it names none. */
@@ -141,6 +148,11 @@ export interface Received {
 
 /** Lumiverse's own name for a reply kind, for the window asked on receipt. */
 const LUMIVERSE_TYPE: Record<Tag["kind"], string> = { new: "normal", swipe: "swipe", regenerate: "regenerate", continue: "continue", impersonate: "impersonate" };
+
+/** The generation a tag is for, as the question names one (Lumiverse's own type name). */
+export function generationOf(tag: Tag): GenerationFacts {
+  return { id: tag.generation, type: LUMIVERSE_TYPE[tag.kind], target: tag.target, speaker: tag.speaker, model: null };
+}
 
 /**
  * The chat's messages the window counts on receipt, oldest first, as Lumiverse's rows have them (§4.2; READINGS R-21, R-103, R-202):
@@ -235,7 +247,7 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   let keep: KeepPoint | null;
   if (tag.cut.answered) keep = tag.cut.keep;
   else {
-    const generation = { id: tag.generation, type: LUMIVERSE_TYPE[tag.kind], target: tag.target, speaker: tag.speaker, model: null };
+    const generation = generationOf(tag);
     const path = async (): Promise<WindowStep[]> => {
       const read = await rows();
       if (read === null) throw new Refused(404, "RPE found no chat of yours in Lumiverse by this reply's chat, so it could not count your history window, and sent nothing.");
@@ -281,6 +293,6 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
   } catch {
     // Only told: a chat whose rows cannot be read now has its clipping not known.
   }
-  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices, secrecy: tag.secrecy, question: tag.question, trimmed };
+  const cut: Cut = { keep, byExtension: tag.cut.answered ? tag.cut.removed : null, byRpe, joining: { ...laid.joining, from: joining === null ? "body" : "settings" }, told: laid.complete, clipped, notices, secrecy: tag.secrecy, question: tag.question, trimmed, lore: null };
   return { tag, overlay: laid, messages: sent, cut };
 }

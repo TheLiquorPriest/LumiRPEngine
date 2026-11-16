@@ -3,7 +3,9 @@
 // question's route and the provider endpoint, given scripted secrecy rules, a scripted history window
 // and a scripted turn. Every name, chat and lore line is invented.
 
-import { questionRoute, type HistoryWindow, type SecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { createLoreCheck } from "../../src/adapter/lumiverse/lore-check";
+import type { LumiverseReads } from "../../src/adapter/lumiverse/reads";
 import { changeOf } from "../../src/adapter/lumiverse/events";
 import { readBlocksHint } from "../../src/adapter/lumiverse/layout";
 import { joiningOf } from "../../src/adapter/lumiverse/overlay";
@@ -178,11 +180,23 @@ export class Rig {
       if (options.secretsFail) throw new Error("RPE does not work out its lore's secrets yet");
       return harborSecrecy(ask);
     };
-    const question = questionRoute({ secrecy, window: atQuestion, start, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
+    // The books and the chat as RPE's reads give them to the check: the stand-in's own.
+    const answers = new KeptAnswers();
+    const loreReads = {
+      chat: async (id: string) => (id === this.chat.id ? { id, user: USER, character: this.chat.character.id, name: "Harbor", metadata: this.chat.metadata ?? {}, updatedAt: 0 } : null),
+      character: async (id: string) => (id === this.chat.character.id ? { id, name: this.chat.character.name, extensions: this.chat.character.extensions ?? {} } : null),
+      persona: async () => null,
+      defaultPersona: async () => null,
+      setting: async () => null,
+      entries: async (book: string) => (this.lv.library.entriesForBooks(USER, [book], new Map()).get(book) ?? []).map((e) => ({ id: e.id, book: e.book, disabled: e.disabled === true, comment: e.comment ?? "", content: e.content, extensions: e.extensions ?? {} })),
+    } as unknown as LumiverseReads;
+    const question = questionRoute({ secrecy, window: atQuestion, start, kept: answers, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
     const provider = providerEndpoint({
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window: onReceipt,
+      // RPE's check of the lore on receipt, over the stand-in's books as Lumiverse reads them, with the rig's own secrecy rules.
+      lore: createLoreCheck({ user: USER, reads: loreReads, secrecy, start, answers, macros: { resolve: async (text) => ({ text, diagnostics: [] }), resolveBatch: async (templates) => ({ ...templates }) } }),
       // No model's window is known to the rig: nothing is trimmed past the window's cut.
       room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
       reads: {

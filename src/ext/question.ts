@@ -16,11 +16,9 @@
 // `world-info-interceptor.ts:384-392`), so it never throws and RPE's wait is held inside that.
 
 import type { WorldInfoCandidate } from "../shared/host";
-import { textOf } from "../secrecy/lore-secrets";
-import { replyKindOf, textHash, type PathStep, type Question, type QuestionEntry } from "../adapter/lumiverse/wire";
+import { questionEntryOf } from "../adapter/lumiverse/candidate";
+import { replyKindOf, textHash, type PathStep, type Question } from "../adapter/lumiverse/wire";
 import { isRecord, type JsonObject } from "../shared/json";
-import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { hasSecretMarks, unreadableMarks } from "../shared/secret-marks";
 import { failClosed } from "./fail-closed";
 import type { Generations, Handoff } from "./generations";
 import { ask, type Road } from "./road";
@@ -65,19 +63,6 @@ function contextOf(raw: unknown): WorldInfoContext | null {
   return { user: raw.userId, chat: raw.chatId, purpose: raw.purpose === "query" ? "query" : "prompt", path, candidates, lastReply: lastReply === null ? null : { id: lastReply.id, text: lastReply.text } };
 }
 
-/** A candidate as RPE is told of it (§9.6): its id and text key always; its text, title and RPE's fields only where it carries marks or RPE's fields. */
-function entryOf(e: WorldInfoCandidate): QuestionEntry {
-  const own = e.extensions[LEDGER_NAMESPACE];
-  const telling = hasSecretMarks(e.content) || unreadableMarks(e.content).length > 0 || isRecord(own);
-  return {
-    id: e.id,
-    book: e.bookId,
-    disabled: e.disabled,
-    key: textOf(e.content),
-    ...(telling ? { content: e.content, comment: e.comment, ...(isRecord(own) ? { extensions: { [LEDGER_NAMESPACE]: own } } : {}) } : {}),
-  };
-}
-
 /** The World Info interceptor's handler. */
 export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Promise<WorldInfoReturn> {
   return async (raw) => {
@@ -102,7 +87,7 @@ export function worldInfoInterceptor(deps: QuestionDeps): (ctx: unknown) => Prom
         handOn({ cut: null, secrecy: { by: "extension", why: "RPE has not registered with the extension for this user" }, question: null });
         return failClosed(ctx.candidates);
       }
-      const question: Question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(entryOf) };
+      const question: Question = { v: 1, user: ctx.user, chat: ctx.chat, purpose: ctx.purpose, generation, path: ctx.path, entries: ctx.candidates.map(questionEntryOf) };
       const reply = await ask(deps.proxy, road, question);
       if ("none" in reply) return fallBack(reply.none, { ms: reply.ms, answered: false });
       const time = { ms: reply.ms, answered: true };

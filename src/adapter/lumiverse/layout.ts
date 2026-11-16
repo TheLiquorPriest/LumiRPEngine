@@ -126,7 +126,7 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
             start: p.start,
             end: p.end,
             role: listed.role,
-            hash: listed.hash,
+            hash: m.changed === true ? textHash(m.text.slice(p.start, p.end)) : listed.hash,
             kind: listed.history ? "history" : listed.lore ? "lore" : "other",
             // Lumiverse's memory put a summary here in place of the messages it sums: marked as a summary (§4.2).
             ...(listed.summary ? { summarized: true as const } : {}),
