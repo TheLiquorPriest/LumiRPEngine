@@ -72,6 +72,7 @@ const OWN_CSS = `
 .rpe-field{display:flex;flex-wrap:wrap;gap:0 var(--lre-s2);min-width:0}
 .rpe-field>dt{flex:none;color:var(--lre-muted);font-weight:600}
 .rpe-field>dd{margin:0;flex:1 1 12em;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.rpe-opened{border-left:3px solid var(--lre-accent);padding-left:var(--lre-s2)}
 .rpe-files-split{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s3);min-width:0}
 .rpe-files-split>*{min-width:0}
 .rpe-files-split[data-open=yes]>.rpe-files-browser{display:none}

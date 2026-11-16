@@ -4,14 +4,18 @@
 // With a chat open its own level is there too. What RPE refuses is shown in its words.
 
 import { useEffect, useState } from "preact/hooks";
-import type { LayerLevel, SettingsReply, SettingView, Takes } from "../../shared/api";
-import { isRecord, type JsonValue } from "../../shared/json";
-import { useApp } from "../app";
-import { Banner, Button, Fold, PageHeader } from "../atoms";
-import type { RpeClient } from "../client";
-import type { PageEntry } from "../page-entry";
-import { useUiSettings } from "../ui-settings";
-import { errorWords, LEVEL_WORDS, num } from "../words";
+import type { LayerLevel, LoreBooks, SettingsReply, SettingView, SwitchEntry, Takes } from "../../../shared/api";
+import { isRecord, type JsonValue } from "../../../shared/json";
+import { useApp } from "../../app";
+import { Badge, Banner, Button, Fold, PageHeader } from "../../atoms";
+import { useRead } from "../../reading";
+import type { RpeClient } from "../../client";
+import type { PageEntry } from "../../page-entry";
+import { useUiSettings } from "../../ui-settings";
+import { errorWords, LEVEL_WORDS, num } from "../../words";
+import { BooksChoice } from "./books";
+import { changedFromDefault, groupTitle, settingMatches } from "./find";
+import { WaitingSection } from "./waiting";
 
 // ---------------------------------------------------------------- the calls
 
@@ -188,13 +192,25 @@ export interface SettingsViewProps {
   onSave(): void;
   onNone(): void;
   onTakeAway(key: string, level: LayerLevel): void;
+  /** What he typed to find a setting; a group that holds a match is open while he searches. */
+  query?: string;
+  onQuery?(query: string): void;
+  /** The setting the address names: its group is open and it is marked. */
+  openKey?: string | null;
+  /** His books, which `lore.books` is chosen among (null with no chat open). */
+  books?: LoreBooks | null;
+  /** What runs a command or calls out, and where each stands. */
+  switches?: readonly SwitchEntry[] | null;
+  switchesProblem?: string | null;
+  onGo?(page: "connections" | "files"): void;
 }
 
 /** The field a setting's value is typed in, by what it takes. */
-function ValueField(props: { setting: SettingView; draft: SettingDraft; onDraft(draft: SettingDraft): void }) {
+function ValueField(props: { setting: SettingView; draft: SettingDraft; books: LoreBooks | null; onDraft(draft: SettingDraft): void }) {
   const { setting, draft } = props;
   const set = (text: string): void => props.onDraft({ ...draft, text });
   const takes = setting.takes;
+  if (setting.key === "lore.books" && props.books !== null) return <BooksChoice books={props.books} text={draft.text} onText={set} />;
   if (takes.type === "oneOf" || takes.type === "yesNo") {
     const values = takes.type === "oneOf" ? takes.values : ["yes", "no"];
     return (
@@ -255,9 +271,12 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
   const decides = s.from !== null && s.levels.includes(s.from) ? s.from : null;
   const from = s.from === null ? "no file sets it" : `set in ${s.file ?? LEVEL_WORDS[s.from]} (${LEVEL_WORDS[s.from]})`;
   return (
-    <li class="lre-stack rpe-setting" data-setting={s.key}>
+    <li class={props.openKey === s.key ? "lre-stack rpe-setting rpe-opened" : "lre-stack rpe-setting"} data-setting={s.key}>
       <div class="lre-row">
-        <span class="k">{s.name}</span>
+        <span class="k">
+          {s.name}
+          {changedFromDefault(s) ? <Badge tone="accent" title="A file sets it to something other than its default">changed</Badge> : null}
+        </span>
         <span class="v">{s.takes.type === "records" ? null : valueWords(s.value, s.none)}</span>
       </div>
       <p class="rpe-line rpe-about">{s.about}</p>
@@ -309,7 +328,7 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
           </label>
           <label class="lre-field">
             <span class="label">Value</span>
-            <ValueField setting={s} draft={editing} onDraft={props.onDraft} />
+            <ValueField setting={s} draft={editing} books={props.books ?? null} onDraft={props.onDraft} />
             {typingHelp(s.takes) === null ? null : <span class="lre-field-help">{typingHelp(s.takes)}</span>}
           </label>
           <div class="lre-inline rpe-wrap">
@@ -340,7 +359,7 @@ function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
 function groupsOf(settings: readonly SettingView[]): { title: string; settings: SettingView[] }[] {
   const groups = new Map<string, SettingView[]>();
   for (const s of settings) {
-    const title = s.connection === undefined ? (s.key.split(".")[0] ?? s.key) : s.connection === null ? "Names no connection there is now" : `Connection: ${s.connection.name}`;
+    const title = groupTitle(s);
     groups.set(title, [...(groups.get(title) ?? []), s]);
   }
   return [...groups].map(([title, inside]) => ({ title, settings: inside }));
@@ -349,9 +368,15 @@ function groupsOf(settings: readonly SettingView[]): { title: string; settings: 
 export function SettingsView(props: SettingsViewProps) {
   const { shown } = props;
   const reply = shown.reply;
+  const searching = (props.query ?? "").trim() !== "";
+  const groups = reply === null ? [] : groupsOf(reply.settings.filter((s) => settingMatches(s, props.query ?? "")));
   return (
     <div class="lre-stack rpe-page" data-page="settings" data-chat={props.chat ?? undefined}>
       <PageHeader title="Settings" sub={props.chat === null ? "The settings RPE's agents run under, at your own level." : "The settings RPE's agents run under in this chat."} />
+      <label class="lre-field">
+        <span class="label">Find a setting</span>
+        <input class="lre-input" type="search" value={props.query ?? ""} placeholder="a key, or what it does" onInput={(event) => props.onQuery?.((event.currentTarget as HTMLInputElement).value)} />
+      </label>
       {shown.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The settings could not be read">
           <span>{shown.problem}</span>
@@ -373,15 +398,31 @@ export function SettingsView(props: SettingsViewProps) {
                   </Banner>,
                 ],
           )}
-          {groupsOf(reply.settings).map((group) => (
-            <Fold key={group.title} open summary={`${group.title} (${group.settings.length})`}>
-              <ul class="lre-stack rpe-plain">
-                {group.settings.map((s) => (
-                  <SettingRow key={s.key} {...props} setting={s} />
-                ))}
-              </ul>
-            </Fold>
-          ))}
+          {groups.map((group) => {
+            const open = searching || group.settings.some((s) => s.key === props.openKey);
+            return (
+              <Fold key={`${group.title}:${open}`} open={open} summary={`${group.title} (${group.settings.length})`}>
+                <ul class="lre-stack rpe-plain">
+                  {group.settings.map((s) => (
+                    <SettingRow key={s.key} {...props} setting={s} />
+                  ))}
+                </ul>
+              </Fold>
+            );
+          })}
+          {searching && groups.length === 0 ? <p class="lre-muted rpe-line">No setting matches that.</p> : null}
+          <Fold summary="Limits">
+            <p class="rpe-line">Every limit RPE and RPH keep is a setting, in the groups above (the ones under <code>limits</code>, <code>turns</code>, <code>pages</code> and the rest, each with the file that decides it). Two are set elsewhere:</p>
+            <div class="lre-inline rpe-wrap">
+              <Button small kind="ghost" onClick={() => props.onGo?.("connections")}>
+                A model's context window and longest reply: Connections
+              </Button>
+              <Button small kind="ghost" onClick={() => props.onGo?.("files")}>
+                A definition's own limits: its file on Files
+              </Button>
+            </div>
+          </Fold>
+          <WaitingSection switches={props.switches ?? null} problem={props.switchesProblem ?? null} />
           {reply.facts.length === 0 ? null : (
             <Fold summary={`The install (${reply.facts.length})`}>
               <p class="rpe-meta">Set by the command line (rpe up, rpe lumiverse), never on this page.</p>
@@ -401,13 +442,17 @@ export function SettingsView(props: SettingsViewProps) {
   );
 }
 
-export function SettingsPage(props: { chat: string | null }) {
+export function SettingsPage(props: { chat: string | null; at?: readonly string[] }) {
   const app = useApp();
   // The page's own settings (pages.*) are read again after each save.
   const ui = useUiSettings();
   const { chat } = props;
   const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
   const [control, setControl] = useState<SettingsControl | null>(null);
+  const [query, setQuery] = useState("");
+  const switches = useRead(() => app.client.call("GET /api/v1/switches", {}).then((got) => got.switches), []);
+  // His books are the choice `lore.books` is made from; with no chat open there are none to choose among.
+  const books = useRead(chat === null ? null : () => app.client.call("GET /api/v1/chats/:chat/lore/books", { chat }), [chat]);
   useEffect(() => {
     setShown(NO_SETTINGS);
     const made = settingsControl(settingsCalls(app.client, chat), setShown, () => ui.reread());
@@ -423,8 +468,15 @@ export function SettingsPage(props: { chat: string | null }) {
       onSave={() => control?.save()}
       onNone={() => control?.none()}
       onTakeAway={(key, level) => control?.takeAway(key, level)}
+      query={query}
+      onQuery={setQuery}
+      openKey={props.at?.[0] ?? null}
+      books={books.value}
+      switches={switches.value}
+      switchesProblem={switches.problem}
+      onGo={(page) => app.go({ page, chat })}
     />
   );
 }
 
-export const entry: PageEntry = { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 110, render: (route) => <SettingsPage chat={route.chat ?? null} /> };
+export const entry: PageEntry = { id: "settings", title: "Settings", icon: "sliders", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 110, render: (route) => <SettingsPage chat={route.chat ?? null} at={route.at} /> };
