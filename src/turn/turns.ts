@@ -55,7 +55,7 @@ import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import { type TurnSettings, turnSettings } from "./settings";
 import { type FoundItem, foundItems, type GoneTurn, type KeptItem, type SinceKept } from "./since";
-import { stageAt } from "./stage";
+import { stageAt, stageCues } from "./stage";
 import { generationStart, seenOf } from "./start";
 import { guidanceTexts } from "./texts";
 
@@ -1383,7 +1383,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (stage !== null && stage.who.length > 0) {
       try {
         const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, named), tokens: tokenCount(settings.charsPerToken), settings: settings.cast };
-        const views = await castPresentViews(named, stage.place === null ? input : { ...input, cues: [stage.place] });
+        const views = await castPresentViews(named, { ...input, cues: stageCues(stage) });
         const text = views.flatMap((view) => (view.text.trim() === "" ? [] : [view.text.trimEnd()])).join("\n\n");
         if (text !== "") blocks.push({ name: BLOCKS.onStage, text });
       } catch (error) {
@@ -1429,7 +1429,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const stage = stageAt(this.#d.store, scope.user, scope.chat, scope.turn);
     if (stage === null || stage.who.length === 0) return [];
     const all = Object.keys(CAST_VIEWS) as CastViewName[];
-    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: tokenCount(settings.charsPerToken), settings: settings.cast, ...(stage.place !== null ? { cues: [stage.place] } : {}) };
+    const input = { store: this.#d.store, user: scope.user, chat: scope.chat, turn: scope.turn, present: stage.who, sources: this.#d.sources, layouts: await castLayouts(guidance, all), tokens: tokenCount(settings.charsPerToken), settings: settings.cast, cues: stageCues(stage) };
     const out: CastFolder[] = [];
     for (const name of new Set(stage.who)) {
       const [rest, growth] = await Promise.all([castViews(all.filter((v) => v !== "growth"), { ...input, character: name }), castViews(["growth"], { ...input, character: name })]);

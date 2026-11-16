@@ -40,7 +40,7 @@ function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
 const MEMORY_FIELDS = ["text", "gist", "weight", "tone", "who", "about"];
 
 const RECALL_READS: Reads = { reads: ["cue", "skip", "top"], needs: ["cue"], newNeeds: [] };
-const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top"], needs: [], newNeeds: ["text", "gist"] };
+const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top", "taken"], needs: [], newNeeds: ["text", "gist"] };
 const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth", "top"], needs: ["from", "text", "gist"], newNeeds: [] };
 const DREAM_READS: Reads = { reads: ["keep", "fade", "connect"], needs: [], newNeeds: [] };
 const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS], needs: ["memories", "text", "gist"], newNeeds: [] };
@@ -161,8 +161,8 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     const it: ItemRead = { n, op: "memory", fatal: [], unread: [], ignored: ignoredOf(given, MEMORY_READS.reads) };
     items.push(it);
     const value: JsonObject = {};
-    readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag" }, value);
-    const { id, ...fields } = value;
+    readFields(call, it, given, { id: "name", ...memoryKinds(call.settings), from: "texts", top: "flag", taken: "texts" }, value);
+    const { id, taken, ...fields } = value;
     if (id !== undefined && strangers(self, "memory", [id]).length > 0) {
       it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
       continue;
@@ -176,9 +176,15 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
         moment = earliestOf(self, from);
       } else delete fields.from;
     }
-    if (id === undefined) needed(it, ["text", "gist"].filter((f) => fields[f] === undefined));
+    const only = taken !== undefined && Object.keys(fields).length === 0;
+    if (only) {
+      // Nothing to remember of them: the perceptions are only marked taken in, and are not given again.
+    } else if (id === undefined) needed(it, ["text", "gist"].filter((f) => fields[f] === undefined));
     else if (Object.keys(fields).length === 0) it.fatal.push({ line: "needs_one", fields: { n, op: "memory", fields: MEMORY_READS.reads.filter((f) => f !== "id") } });
-    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields, ...(id === undefined && moment !== undefined ? { at: moment } : {}) });
+    if (it.fatal.length === 0) {
+      if (!only) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields, ...(id === undefined && moment !== undefined ? { at: moment } : {}) });
+      for (const p of taken === undefined ? [] : ownIds(self, it, "perception", "taken", taken, false)) writes.push({ character: self.character.id, part: "perception", item: p, value: { taken: true } });
+    }
   }
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => MEMORY_READS);
   const putting = writes.filter((w) => w.value.top === true);

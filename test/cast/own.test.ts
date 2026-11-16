@@ -7,7 +7,7 @@ import type { TemplatePart } from "rp-harness";
 import type { AgentRef, JsonObject } from "rp-harness/contract";
 import { charactersOf } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
-import { type Bench, CHAT, dataOf, openBench, shippedLayouts, texts, USER, wordsFromFiles } from "./rig";
+import { type Bench, CHAT, dataOf, openBench, shippedLayouts, texts, tokensOf, USER, wordsFromFiles } from "./rig";
 
 let layouts: Partial<Record<CastViewName, TemplatePart>> = {};
 let dispose = (): void => undefined;
@@ -30,7 +30,7 @@ async function bench(): Promise<Bench> {
 }
 
 async function view(b: Bench, name: CastViewName, present: string[] = []): Promise<string> {
-  const input: CastViewInput = { store: b.t.store, user: USER, chat: CHAT, turn: null, character: "Bram", present, sources: b.t.shelf.reader, layouts };
+  const input: CastViewInput = { store: b.t.store, user: USER, chat: CHAT, turn: null, character: "Bram", present, sources: b.t.shelf.reader, layouts, tokens: tokensOf };
   return (await castViews([name], input))[0]?.text ?? "";
 }
 

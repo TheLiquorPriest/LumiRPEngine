@@ -48,8 +48,6 @@ export const CAST_DEFAULTS = Object.freeze({
   weightMax: 5,
   /** What comes to mind for a scene, in tokens (plan §7.4, Appendix D.1). */
   comesToMindTokens: 2000,
-  /** Characters per token, for a budget counted before a model sees the text, where the host gives no count of the harness's own (`CastViewInput.tokens`): RPH's default estimate. */
-  charsPerToken: 3.2,
   /** The most memories one recall brings back; the answer says how many more touch the cue. */
   recallItems: 10,
 });
@@ -74,7 +72,6 @@ export const CAST_SETTING_DEFS = {
   memoryWeight: { key: "cast.memoryWeight", default: CAST_DEFAULTS.memoryWeight, takes: { type: "whole", least: 1 }, perConnection: false, name: "Weight of a memory given none", about: "The weight a memory has when it is written with none.", effect: "turn" },
   weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false, name: "Highest weight of a memory", about: "The highest weight a memory can have; weights run from 1.", effect: "turn" },
   comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false, name: "What comes to mind", about: "Tokens of a character's memories that come to mind for a scene.", effect: "turn", row: "What comes to mind" },
-  charsPerToken: { key: "cast.charsPerToken", default: CAST_DEFAULTS.charsPerToken, takes: { type: "number", least: 1 }, perConnection: false, name: "Characters per token, for the cast", about: "Characters counted as one token in the cast's budgets, where the model gives no count of its own.", effect: "turn" },
   recallItems: { key: "cast.recallItems", default: CAST_DEFAULTS.recallItems, takes: { type: "whole", least: 1 }, perConnection: false, name: "Memories one recall brings back", about: "The most memories one recall brings back; the answer says how many more touch the cue.", effect: "turn" },
 } as const satisfies NumberSettings<keyof CastSettings>;
 

@@ -8,7 +8,7 @@ import type { TemplatePart } from "rp-harness";
 import type { JsonObject } from "rp-harness/contract";
 import { charactersOf, type CastWrite } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
-import { type Bench, CHAT, dataOf, openBench, shippedLayouts, texts, USER, wordsFromFiles } from "./rig";
+import { type Bench, CHAT, dataOf, openBench, shippedLayouts, texts, tokensOf, USER, wordsFromFiles } from "./rig";
 
 let layouts: Partial<Record<CastViewName, TemplatePart>> = {};
 let dispose = (): void => undefined;
@@ -45,7 +45,7 @@ async function carriedOver(): Promise<{ b: Bench; id: string }> {
 }
 
 function input(b: Bench, turn: string | null = null): CastViewInput {
-  return { store: b.t.store, user: USER, chat: CHAT, turn, character: "Bram", present: [], sources: b.t.shelf.reader, layouts };
+  return { store: b.t.store, user: USER, chat: CHAT, turn, character: "Bram", present: [], sources: b.t.shelf.reader, layouts, tokens: tokensOf };
 }
 
 const BOTH = ["### Bram's old mind files, as they were written", "", "#### core.md", "", CORE, "", "#### now.md", "", NOW_NEW].join("\n");

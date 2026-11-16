@@ -9,7 +9,7 @@ import { castTools } from "../../src/cast/index";
 import { baseHistory, charactersOf } from "../../src/cast/record";
 import { castViews } from "../../src/cast/views";
 import { shippedTexts } from "../../src/iface/texts";
-import { CHAT, openTable, type Table, USER } from "./rig";
+import { CHAT, openTable, type Table, tokensOf, USER } from "./rig";
 
 let dir = "";
 let layout: TemplatePart | undefined;
@@ -55,7 +55,7 @@ async function bench(): Promise<{ t: Table; call(name: string, args: JsonObject,
 }
 
 async function baseText(t: Table): Promise<string> {
-  const views = await castViews(["base"], { store: t.store, user: USER, chat: CHAT, turn: null, character: "Mira", present: [], sources: t.shelf.reader, layouts: layout === undefined ? {} : { base: layout } });
+  const views = await castViews(["base"], { store: t.store, user: USER, chat: CHAT, turn: null, character: "Mira", present: [], sources: t.shelf.reader, layouts: layout === undefined ? {} : { base: layout }, tokens: tokensOf });
   return views[0]?.text ?? "";
 }
 

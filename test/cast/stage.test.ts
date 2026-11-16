@@ -7,7 +7,7 @@ import type { TemplatePart } from "rp-harness";
 import type { JsonValue } from "rp-harness/contract";
 import { charactersOf } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castPresentViews, castViews } from "../../src/cast/views";
-import { type Bench, CHAT, openBench, shippedLayouts, USER } from "./rig";
+import { type Bench, CHAT, openBench, shippedLayouts, tokensOf, USER } from "./rig";
 
 let layouts: Partial<Record<CastViewName, TemplatePart>> = {};
 let dispose = (): void => undefined;
@@ -19,7 +19,7 @@ beforeAll(async () => {
 afterAll(() => dispose());
 
 function input(b: Bench, present: string[] = [], turn: string | null = null): Omit<CastViewInput, "character"> {
-  return { store: b.t.store, user: USER, chat: CHAT, turn, present, sources: b.t.shelf.reader, layouts };
+  return { store: b.t.store, user: USER, chat: CHAT, turn, present, sources: b.t.shelf.reader, layouts, tokens: tokensOf };
 }
 
 /** Bram and Wren cast as principals, Odile as supporting, Hale (whom the world does not hold) as an extra, in one played turn, with what the Author recorded of their story. */

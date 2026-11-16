@@ -13,7 +13,7 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import type { Store } from "../store";
 import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } from "./kit";
 import { castAt } from "./path";
-import { baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
+import { baseHistory, baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
 import { gameSide } from "./game";
 import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import { memoriesNow, type MemoryNow, strongestFirst, type Tier, touches, untakenPerceptions } from "./memory";
@@ -54,14 +54,22 @@ export interface CastViewInput {
   layouts: Partial<Record<CastViewName, Pick<TemplatePart, "render">>>;
   /** Settings over `CAST_DEFAULTS`: memory's, and what comes to mind's budget. */
   settings?: Partial<CastSettings>;
-  /** A text's tokens by the harness's own estimate, for what comes to mind's budget; absent, its length over the setting `charsPerToken`. */
-  tokens?: (text: string) => number;
+  /** A text's tokens, by the harness's own count (the turn's), for what comes to mind's budget. */
+  tokens: (text: string) => number;
 }
 
 export interface CastView {
   name: CastViewName;
   /** The view as laid out; empty when the record holds nothing for it. */
   text: string;
+  /** For the base view: the version of each part it shows and the base's newest, so a view kept from it says which base it was drawn from. */
+  version?: BaseVersions;
+}
+
+/** The versions of a base: each part's, and the newest (how many versions its parts have had written). */
+export interface BaseVersions {
+  parts: Record<string, number>;
+  newest: number;
 }
 
 /** A list the layout shows under one heading: the heading's block is the object, its lines the items. */
@@ -81,17 +89,18 @@ function listed(items: JsonObject[]): Listed | undefined {
 }
 
 /**
- * What comes to a character's mind in a scene (§7.4): what is at the top of their mind, in full; then
- * the short-term memories that touch who and what is present, newest first; then the long-term ones
- * that touch them, strongest first, a faint one by its gist. As many, in that order, as the layout
- * holds within the budget, and how many more touch them. Matching is by tags and words; the order is
- * the tiers' and strength's arithmetic. The text grows with each memory, so the most that fit is
- * found by halving.
+ * What comes to a character's mind in a scene (§7.4): what is at the top of their mind, in full, whatever
+ * the budget; then the short-term memories that touch who and what is present, newest first; then the
+ * long-term ones that touch them, strongest first, a faint one by its gist. After the top, as many, in
+ * that order, as the layout holds within the budget, and how many more touch them. Matching is by tags
+ * and words; the order is the tiers' and strength's arithmetic. The text grows with each memory, so the
+ * most that fit is found by halving.
  */
 function comesToMind(record: CastRecord, character: Character, clock: CastClock | null, head: ViewFields, cues: readonly string[], s: CastSettings, tokens: (text: string) => number, layout: Pick<TemplatePart, "render">): string {
   const memories = memoriesNow(record, character.id, clock?.now ?? null, s);
   const touching = (tier: Tier): MemoryNow[] => memories.filter((m) => m.tier === tier && touches(m.item, cues));
-  const order = [...memories.filter((m) => m.tier === "top"), ...touching("short").reverse(), ...touching("long").sort(strongestFirst)];
+  const top = memories.filter((m) => m.tier === "top");
+  const order = [...top, ...touching("short").reverse(), ...touching("long").sort(strongestFirst)];
   if (order.length === 0) return "";
   const line = (m: MemoryNow): JsonObject => ({
     id: m.item.id,
@@ -105,17 +114,15 @@ function comesToMind(record: CastRecord, character: Character, clock: CastClock 
     const left = order.length - k;
     return layout.render({ ...head, top: of("top"), short: of("short"), long: of("long"), ...(left > 0 ? { left: { count: left } } : {}) }).text.trimEnd();
   };
-  const fits = (text: string): boolean => tokens(text) <= s.comesToMindTokens;
-  let lo = 0;
+  // Top of mind stands whole outside the cut; the rest is cut to what the budget holds after it.
+  let lo = top.length;
   let hi = order.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (fits(render(mid))) lo = mid;
+    if (tokens(render(mid)) <= s.comesToMindTokens) lo = mid;
     else hi = mid - 1;
   }
-  // A budget too small even for the frame and the count of what was left out holds nothing.
-  const text = render(lo);
-  return fits(text) ? text : "";
+  return render(lo);
 }
 
 /**
@@ -146,8 +153,11 @@ export async function castViews(names: readonly string[], input: CastViewInput):
   const out: CastView[] = [];
   for (const name of asked) {
     let fields: ViewFields | null = null;
+    let version: BaseVersions | undefined;
     if (name === "base") {
       const base = baseOf(db, input.user, character.id);
+      // The base's newest version: how many versions of its parts have been written, which any redraw of any part raises.
+      const baseVersion = baseHistory(db, input.user, character.id).length;
       const states = await sourcesNow(input.sources, { user: input.user, chat: input.chat }, bindingsOf(db, input.user, character.id), base.values());
       // Why a source is newer than the base: it is gone, it changed since it was drawn from, or it was bound after.
       const sources = listed(
@@ -159,7 +169,12 @@ export async function castViews(names: readonly string[], input: CastViewInput):
         })),
       );
       const parts = Object.fromEntries([...base].map(([part, v]) => [part, v.text]));
-      if (casting !== null || base.size > 0 || growth !== undefined || sources !== undefined) fields = { ...head, ...parts, growth, sources, ...(states.some((s) => s.newer) ? { older: true } : {}) };
+      if (casting !== null || base.size > 0 || growth !== undefined || sources !== undefined) {
+        // Each part's version, for the cast beside the view: a view kept from it says which base it was drawn from.
+        const partVersions = Object.fromEntries([...base].map(([part, v]) => [part, v.version]));
+        fields = { ...head, ...parts, ...Object.fromEntries(Object.entries(partVersions).map(([part, v]) => [`${part}_version`, v])), version: baseVersion, growth, sources, ...(states.some((s) => s.newer) ? { older: true } : {}) };
+        version = { parts: partVersions, newest: baseVersion };
+      }
     } else if (name === "growth") {
       if (!asked.includes("base") && growth !== undefined) fields = { ...head, growth };
     } else if (name === "mind") {
@@ -170,8 +185,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     } else if (name === "what-comes-to-mind") {
       const layout = input.layouts[name];
       const people = input.present.filter((p) => nameKey(p) !== nameKey(character.name));
-      const tokens = input.tokens ?? ((text: string): number => Math.ceil(text.length / settings.charsPerToken));
-      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, tokens, layout) });
+      out.push({ name, text: layout === undefined ? "" : comesToMind(record, character, clock, head, [...people, ...(input.cues ?? [])], settings, input.tokens, layout) });
       continue;
     } else if (name === "unprocessed-perceptions") {
       // In full, oldest first, each with its date in story time where the clock shows one.
@@ -200,7 +214,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       if (side !== null) fields = { ...head, ...side };
     }
     const layout = input.layouts[name];
-    out.push({ name, text: fields === null || layout === undefined ? "" : layout.render(fields).text.trimEnd() });
+    out.push({ name, text: fields === null || layout === undefined ? "" : layout.render(fields).text.trimEnd(), ...(version !== undefined ? { version } : {}) });
   }
   return out;
 }

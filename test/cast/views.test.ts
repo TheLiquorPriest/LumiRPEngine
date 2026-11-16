@@ -5,9 +5,10 @@ import { join, resolve } from "node:path";
 import { loadGuidance, type TemplatePart } from "rp-harness";
 import type { JsonObject } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
-import { addCharacter, bindSource, castingItemId, charactersOf, type CastWrite, relationshipItemId, sourceKey, writeBase } from "../../src/cast/record";
+import { addCharacter, bindSource, castingItemId, charactersOf, type CastWrite, relationshipItemId, sourceKey, writeBase, writeCast } from "../../src/cast/record";
 import { CAST_VIEWS, type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
-import { type Bench, CHAT, dataOf, openBench, openTable, type Table, USER } from "./rig";
+import { CAST_SETTINGS } from "../../src/cast/kit";
+import { type Bench, CHAT, dataOf, openBench, openTable, type Table, tokensOf, USER } from "./rig";
 import { settingClock } from "../../src/store/blank";
 import { engine, tick } from "../store/fixtures";
 
@@ -62,7 +63,7 @@ async function bram(t: Table, more: (id: string) => CastWrite[] = () => []): Pro
 
 function input(t: Table, present: string[] = [], only?: CastViewName[]): CastViewInput {
   const given = only === undefined ? layouts : Object.fromEntries(only.map((v) => [v, layouts[v]]));
-  return { store: t.store, user: USER, chat: CHAT, turn: null, character: "bram", present, sources: t.shelf.reader, layouts: given };
+  return { store: t.store, user: USER, chat: CHAT, turn: null, character: "bram", present, sources: t.shelf.reader, layouts: given, tokens: tokensOf };
 }
 
 const BASE = [
@@ -90,7 +91,7 @@ describe("the views a definition's given list names", () => {
   test("the base is shown with growth laid over it and the sources it was drawn from; growth beside it adds nothing, and alone shows growth", async () => {
     const t = await openTable();
     await bram(t);
-    expect(await castViews(["base", "growth"], input(t))).toEqual([
+    expect((await castViews(["base", "growth"], input(t))).map(({ name, text }) => ({ name, text }))).toEqual([
       { name: "base", text: BASE },
       { name: "growth", text: "" },
     ]);
@@ -128,7 +129,7 @@ describe("the views a definition's given list names", () => {
   test("a view whose part is switched off gives no text; names that are not the cast's are left to others; someone not in the cast gives empty views", async () => {
     const t = await openTable();
     await bram(t);
-    expect(await castViews(["base", "what-comes-to-mind", "lore:known-to-self"], input(t, [], ["growth"]))).toEqual([
+    expect((await castViews(["base", "what-comes-to-mind", "lore:known-to-self"], input(t, [], ["growth"]))).map(({ name, text }) => ({ name, text }))).toEqual([
       { name: "base", text: "" },
       { name: "what-comes-to-mind", text: "" },
     ]);
@@ -282,33 +283,103 @@ describe("what comes to mind", () => {
     expect(undated((await castViews(["what-comes-to-mind"], { ...input(b.t, []), cues: ["harbour"] }))[0]?.text ?? "")).toContain(`- [${ids["Tar."]}] (faint) Tar.`);
   });
 
-  test("it fits its budget and says how many it left out", async () => {
-    const { b } = await remembered();
-    for (const budget of [40, 50, 60]) {
-      const [view] = await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), cues: ["the cellar"], settings: { comesToMindTokens: budget } });
-      const text = view?.text ?? "";
-      const shown = text.split("\n").filter((l) => l.startsWith("- [")).length;
-      expect(Math.ceil(text.length / 3.2)).toBeLessThanOrEqual(budget);
-      expect(shown).toBeLessThan(4);
-      expect(text).toEndWith(`${4 - shown} more memories touch who and what is here, and were left out for room.`);
-    }
-    // A budget too small even for the heading and that count holds nothing.
-    expect((await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), settings: { comesToMindTokens: 10 } }))[0]?.text).toBe("");
-  });
-
-  test("its budget is counted by the counter the host gives, the harness's own estimate, and by the setting only without one", async () => {
+  test("it fits its budget after the top of mind, which stands whole whatever the budget, and says how many it left out", async () => {
     const { b } = await remembered();
     const shown = (text: string): number => text.split("\n").filter((l) => l.startsWith("- [")).length;
-    const at = async (tokens?: (text: string) => number): Promise<string> =>
-      (await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), cues: ["the cellar"], settings: { comesToMindTokens: 50, charsPerToken: 1000 }, ...(tokens !== undefined ? { tokens } : {}) }))[0]?.text ?? "";
-    // Without a counter, the setting's thousand characters a token holds all four.
-    expect(shown(await at())).toBe(4);
-    // A counter of a token a character holds not even the heading in fifty.
-    expect(await at((text) => text.length)).toBe("");
-    // A counter of a token a word holds some, and says how many it left out.
-    const words = await at((text) => text.split(/\s+/).length);
-    expect(shown(words)).toBeGreaterThan(0);
-    expect(shown(words)).toBeLessThan(4);
-    expect(words).toEndWith(`${4 - shown(words)} more memories touch who and what is here, and were left out for room.`);
+    for (const budget of [52, 56]) {
+      const [view] = await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), cues: ["the cellar"], settings: { comesToMindTokens: budget } });
+      const text = view?.text ?? "";
+      expect(tokensOf(text)).toBeLessThanOrEqual(budget);
+      expect(shown(text)).toBeLessThan(4);
+      expect(text).toEndWith(`${4 - shown(text)} more memories touch who and what is here, and were left out for room.`);
+    }
+    // A budget smaller than the top of mind alone does not cut it.
+    const [tiny] = await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), settings: { comesToMindTokens: 1 } });
+    expect(tiny?.text).toContain("- [");
+    expect(tiny?.text).toContain("The forged seal on the letter.");
+  });
+
+  test("its budget is counted by the count the turn passes: a changed count changes how many fit, and the settings list holds no cast.charsPerToken", async () => {
+    const { b } = await remembered();
+    const shown = (text: string): number => text.split("\n").filter((l) => l.startsWith("- [")).length;
+    const at = async (tokens: (text: string) => number): Promise<string> => (await castViews(["what-comes-to-mind"], { ...input(b.t, ["Wren"]), cues: ["the cellar"], settings: { comesToMindTokens: 60 }, tokens }))[0]?.text ?? "";
+    expect(shown(await at((text) => Math.ceil(text.length / 20)))).toBe(4);
+    expect(shown(await at((text) => Math.ceil(text.length / 2)))).toBeLessThan(4);
+    expect(CAST_SETTINGS.map((s) => s.key)).not.toContain("cast.charsPerToken");
+  });
+
+  test("the tone is printed; a two-word name touches a memory tagged by its first word, a long place a memory about its house", async () => {
+    const b = await openBench();
+    const turn = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, turn.id);
+    await b.call(
+      "remember",
+      {
+        memories: [
+          { text: "Wren paid in old coin.", gist: "Old coin.", who: ["Wren"], tone: "wary" },
+          { text: "The Gilded Hart was loud.", gist: "Loud.", about: ["the Gilded Hart"] },
+          { text: "The harbour smelled of tar.", gist: "Tar." },
+        ],
+      },
+      turn.id,
+      BRAM,
+    );
+    await b.t.tie(turn);
+    const text = (await castViews(["what-comes-to-mind"], { ...input(b.t, []), cues: ["Wren Hale", "the taproom of the Gilded Hart"] }))[0]?.text ?? "";
+    expect(undated(text)).toContain("Wren paid in old coin. (felt wary)");
+    expect(text).toContain("The Gilded Hart was loud.");
+    expect(text).not.toContain("tar.");
+  });
+});
+
+describe("what a character has taken in", () => {
+  const BRAM = { id: "bram-1", definition: "character", plays: "Bram" };
+
+  test("a perception named by a mind entry is no longer given; one taken in with nothing to remember is not given again; a struck memory's perceptions are given again", async () => {
+    const b = await openBench();
+    const turn = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, turn.id);
+    const r = await b.call(
+      "perceive",
+      {
+        perceptions: [
+          { who: "Bram", reach: "whole", content: "Wren breaks the seal." },
+          { who: "Bram", reach: "part", content: "The bell rings.", missed: "Who rang it." },
+          { who: "Bram", reach: "none", content: "Nothing happens at the door." },
+        ],
+      },
+      turn.id,
+    );
+    const [seal, bell, door] = (dataOf(r).perceptions as JsonObject[]).map((p) => String(p.id));
+    await b.t.tie(turn);
+    const given = async (): Promise<string> => (await castViews(["unprocessed-perceptions"], { store: b.t.store, user: USER, chat: CHAT, turn: null, character: "Bram", present: [], sources: b.t.shelf.reader, layouts, tokens: tokensOf }))[0]?.text ?? "";
+    expect(await given()).toContain("Wren breaks the seal.");
+
+    const next = await b.t.begin();
+    await b.call("mind_set", { entries: [{ kind: "belief", text: "The seal was forged.", from: [seal] }] }, next.id, BRAM);
+    await b.call("remember", { memories: [{ taken: [door] }] }, next.id, BRAM);
+    const made = await b.call("remember", { memories: [{ text: "The bell rang.", gist: "The bell.", from: [bell] }] }, next.id, BRAM);
+    await b.t.tie(next);
+    expect(await given()).toBe("");
+
+    // The player strikes the memory as wrong: what it came from is given again.
+    const character = b.t.record().items.values().find((i) => i.part === "casting")?.character ?? "";
+    const memory = String(((dataOf(made).memories as JsonObject[])[0] as JsonObject).id);
+    await b.t.writes.run(() => writeCast(b.t.store, { user: USER, turn: null, chat: CHAT, by: "player", agent: null, job: null, at: null, now: 9 }, [{ character, part: "memory", item: memory, value: { drop: true } }]));
+    const again = await given();
+    expect(again).toContain("The bell rings.");
+    expect(again).not.toContain("Wren breaks the seal.");
+    expect(again).not.toContain("Nothing happens at the door.");
+  });
+});
+
+describe("the base's versions", () => {
+  test("the base view names the version of each part it shows, and a redraw of her soul raises it", async () => {
+    const t = await openTable();
+    const id = await bram(t);
+    const named = async (): Promise<{ parts: Record<string, number>; newest: number } | undefined> => (await castViews(["base"], input(t)))[0]?.version;
+    expect(await named()).toEqual({ parts: { seed: 1, soul: 1, inner_voice: 1, background: 1 }, newest: 4 });
+    await t.writes.run((db) => writeBase(db, { user: USER, turn: null, by: "author", agent: "author-1", now: 5 }, id, { soul: "Wants a quiet life, and a locked cellar." }, {}));
+    expect(await named()).toEqual({ parts: { seed: 1, soul: 2, inner_voice: 1, background: 1 }, newest: 5 });
   });
 });

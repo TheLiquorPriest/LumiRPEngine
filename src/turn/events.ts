@@ -28,7 +28,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
-import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type SourceReader } from "../cast";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
@@ -40,7 +40,7 @@ import { keepJob } from "./jobs";
 import type { Writes } from "./kv";
 import type { Runs } from "./runs";
 import { turnSettings } from "./settings";
-import { stageAt } from "./stage";
+import { namedIn, stageAt, stageCues } from "./stage";
 import { guidanceTexts } from "./texts";
 import { castLayouts, PARTS, tokenCount } from "./turns";
 
@@ -225,7 +225,7 @@ const CAST_SELF = /^cast:self\((.*)\)$/;
  * ref is not the cast's, the agent plays nobody, or no part lays out a view it names. A name among them that is not the cast's is
  * left out.
  */
-async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: string): Promise<string | null> {
+async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: string, moment: AttachMoment): Promise<string | null> {
   const inner = CAST_SELF.exec(ref)?.[1];
   const { plays } = agent;
   if (inner === undefined || plays === undefined) return null;
@@ -244,7 +244,8 @@ async function castSelf(deps: EventsDeps, scope: Scope, agent: AgentRef, ref: st
     job: agent.job ?? null,
     character: plays,
     present: stage?.who ?? [],
-    ...(stage?.place != null ? { cues: [stage.place] } : {}),
+    // What comes to mind is cued by who and what is really there (R-144): the stage's place and things, and what the moment the lead handed the agent names.
+    cues: [...new Set([...(stage === null ? [] : stageCues(stage)), ...namedIn(deps.store, scope.user, scope.chat, turn, [moment.task, moment.message ?? ""])])],
     sources: deps.sources,
     layouts,
     tokens: tokenCount(settings.charsPerToken),
@@ -352,7 +353,7 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
         if (own) continue;
         try {
           const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
-          const text = mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castSelf(deps, scope, agent, ref)));
+          const text = mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castSelf(deps, scope, agent, ref, moment)));
           if (text !== null) blocks.push({ name: ref, text });
         } catch (error) {
           deps.log.warn("What an agent was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });

@@ -15,13 +15,19 @@ import { type CastItem, type CastRecord, nameKey } from "./record";
 /** Story minutes in a day. */
 const DAY = 24 * 60;
 
-/** The perceptions a character has taken in: each one a memory of theirs names as where it came from. */
+/**
+ * The perceptions a character has taken in: each one that any of the character's own writes names as where it came from (`from`: a
+ * memory, a mind entry, a relationship), a struck one not counting, and each the character said was taken in with nothing to remember.
+ */
 export function takenIn(record: CastRecord, character: string): Set<string> {
   const out = new Set<string>();
-  for (const m of record.of(character, "memory", true)) {
-    const from = m.fields.from;
-    if (Array.isArray(from)) for (const id of from) if (typeof id === "string") out.add(id);
+  for (const part of ["memory", "mind", "relationship"] as const) {
+    for (const m of record.of(character, part)) {
+      const from = m.fields.from;
+      if (Array.isArray(from)) for (const id of from) if (typeof id === "string") out.add(id);
+    }
   }
+  for (const p of record.of(character, "perception")) if (p.fields.taken === true) out.add(p.id);
   return out;
 }
 
@@ -98,15 +104,17 @@ const texts = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isA
 
 /**
  * Whether a memory touches any of `cues` (people, places, things, topics, feelings, in words): a cue
- * it is tagged with (who or what it is about), or a cue its own words hold, word for word.
+ * it is tagged with (who or what it is about), a cue that holds a tag as whole words, or a cue its own words hold, word for word.
  */
 export function touches(item: CastItem, cues: readonly string[]): boolean {
   const tags = [...texts(item.fields.who), ...texts(item.fields.about)];
   const keys = new Set(tags.map(nameKey));
+  const tagged = tags.map(words).filter((t) => t.trim() !== "");
   const said = words([...texts(item.fields.text), ...texts(item.fields.gist), ...texts(item.fields.tone), ...tags].join(" "));
   return cues.some((cue) => {
     const phrase = words(cue);
-    return keys.has(nameKey(cue)) || (phrase.trim() !== "" && said.includes(phrase));
+    // The cue is a tag, or holds one as whole words ("Wren Hale" touches a memory about "Wren"), or the memory's words hold the cue.
+    return keys.has(nameKey(cue)) || (phrase.trim() !== "" && (said.includes(phrase) || tagged.some((tag) => phrase.includes(tag))));
   });
 }
 

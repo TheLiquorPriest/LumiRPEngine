@@ -29,6 +29,9 @@ import { hashOf, inventedWorld, registry } from "../store/fixtures";
 export const USER = "user-a";
 export const CHAT = "chat-a";
 
+/** The harness's count of a text's tokens, as the turn passes it: here a token to each four characters. */
+export const tokensOf = (text: string): number => Math.ceil(text.length / 4);
+
 /** Lumiverse's side, invented: each source by kind and id, with its title and revision. */
 export class Shelf {
   readonly held = new Map<string, SourceNow>();

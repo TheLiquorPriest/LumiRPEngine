@@ -10,21 +10,21 @@ Nothing comes to their mind about who and what is here.
 
 At the top of their mind:
 {{#top.items}}
-- [{{id}}] {{text}}{{#date}} ({{date}}){{/date}}
+- [{{id}}] {{text}}{{#tone}} (felt {{tone}}){{/tone}}{{#date}} ({{date}}){{/date}}
 {{/top.items}}
 {{/top}}
 {{#short}}
 
 Lately:
 {{#short.items}}
-- [{{id}}] {{#faint}}(faint) {{gist}}{{/faint}}{{^faint}}{{text}}{{/faint}}{{#date}} ({{date}}){{/date}}
+- [{{id}}] {{#faint}}(faint) {{gist}}{{/faint}}{{^faint}}{{text}}{{/faint}}{{#tone}} (felt {{tone}}){{/tone}}{{#date}} ({{date}}){{/date}}
 {{/short.items}}
 {{/short}}
 {{#long}}
 
 From longer ago:
 {{#long.items}}
-- [{{id}}] {{#faint}}(faint) {{gist}}{{/faint}}{{^faint}}{{text}}{{/faint}}{{#date}} ({{date}}){{/date}}
+- [{{id}}] {{#faint}}(faint) {{gist}}{{/faint}}{{^faint}}{{text}}{{/faint}}{{#tone}} (felt {{tone}}){{/tone}}{{#date}} ({{date}}){{/date}}
 {{/long.items}}
 {{/long}}
 {{#left}}

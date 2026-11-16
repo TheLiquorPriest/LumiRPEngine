@@ -75,7 +75,7 @@ describe("the cast's tools, never refused for what they do not read", () => {
     const remembered = await b.play("remember", { memories: [{ text: "Wren came in soaked and would not say from where.", gist: "Wren's silence about the causeway.", weight: "2", mood: "uneasy" }] }, turn.id, BRAM);
     expect(remembered.error).toBeUndefined();
     expect(wordsFromFiles(remembered)).toBe(true);
-    expect(remembered.reports).toEqual(["Operation 1 (memory) was written without mood. It reads id, text, gist, weight, tone, who, about, from, top."]);
+    expect(remembered.reports).toEqual(["Operation 1 (memory) was written without mood. It reads id, text, gist, weight, tone, who, about, from, top, taken."]);
     const [memory] = dataOf(remembered).memories as JsonObject[];
     expect(memory?.weight).toBe(2);
     const reflected = await b.play("reflect", { from: [String(memory?.id), "mem-404"], text: "She is hiding the crossing from me.", gist: "Wren hides the crossing." }, turn.id, BRAM);

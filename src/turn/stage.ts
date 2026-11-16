@@ -6,10 +6,10 @@
 // play (`findPlaces`). The same scene names the stretch of the chat an agent can ask for as `scene` (`chat:history[scene]`).
 
 import type { HistoryRange } from "rp-harness/contract";
-import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { isGone, kindIs } from "../engine/scope";
 import { findPlaces } from "../engine/places-in-play";
 import { entitiesAt } from "../engine/whereabouts";
-import type { Store, StoreState } from "../store";
+import { openScenePlaceOf, ownerPlaceOf, type Store, type StoreState } from "../store";
 import { namesOf } from "../story/kit";
 import { storyAt } from "../story/path";
 import { storySliceOf } from "../story/fold";
@@ -49,10 +49,12 @@ function stageOf(store: Store, state: StoreState, scene: Scene | null): Stage {
   const doc = store.env.worlds(state.world.revision);
   if (doc === undefined) return asRecorded;
   const reg = store.env.registry;
-  const povPlace = placeOfEntity(state.world, doc.pov);
-  // The scene's place is the one its words name, nearest where the owner's character stands; with no scene, that is where he stands.
-  const found = scene?.place == null ? [] : findPlaces(reg.context(doc, state.world), scene.place, povPlace === null ? {} : { near: povPlace });
-  const at = scene === null ? povPlace : (found[0]?.id ?? null);
+  // The scene's place is the one the store finds for its record (an id the tree holds); the Author's words for a place the tree has no id for are found the way the
+  // space pack finds a place named in play, nearest where the owner's character stands. With no scene, that place is where he stands.
+  const view = store.viewOf(state);
+  const povPlace = ownerPlaceOf(view)?.slice("place:".length) ?? null;
+  const opened = scene === null ? null : openScenePlaceOf(view);
+  const at = scene === null ? povPlace : opened !== null ? opened.slice("place:".length) : scene.place === null ? null : (findPlaces(reg.context(doc, state.world), scene.place, povPlace === null ? {} : { near: povPlace })[0]?.id ?? null);
   if (at === null) return asRecorded;
   const who = [...asRecorded.who];
   const named = new Set(who.map(keyOf));
@@ -112,4 +114,29 @@ export function stagesAt(store: Store, user: string, chat: string, turns: readon
     left.delete(deepest);
   }
   return out;
+}
+
+/** What a stage puts in mind for what comes to a character's mind: its place and the things there, by name. */
+export function stageCues(stage: Stage): string[] {
+  return [...(stage.place === null ? [] : [stage.place]), ...stage.things];
+}
+
+const wordsOf = (text: string): string => ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+
+/**
+ * The people, places and things of the world that `texts` name (R-144), by their ids and by their words as whole words: the moment an
+ * agent was handed, its task and the message that continues it. Code matches names and ids; it never reads what the text means.
+ */
+export function namedIn(store: Store, user: string, chat: string, turn: string | null, texts: readonly string[]): string[] {
+  const u = store.user(user);
+  if (u.chat(chat) === null) return [];
+  const world = (turn === null ? u.headState(chat) : u.stateAt(turn)).state.world;
+  const doc = store.env.worlds(world.revision);
+  const said = wordsOf(texts.join(" "));
+  if (doc === undefined || said.trim() === "") return [];
+  const names = (id: string, name: string): boolean => [name, id].some((w) => wordsOf(w).trim() !== "" && said.includes(wordsOf(w)));
+  const out = new Set<string>();
+  for (const [id, e] of Object.entries(world.entities)) if (!isGone(world, id) && names(id, e.name)) out.add(e.name);
+  for (const [id, p] of Object.entries(doc.places)) if (names(id, p.name)) out.add(p.name);
+  return [...out];
 }
