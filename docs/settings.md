@@ -495,6 +495,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `taps.nameMost` | `80` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest name a refusal quotes: The most characters of a name a tap's refusal quotes back; a longer one reads as naming no one. |
 | `taps.thingsMost` | `64` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Things one fix changes: The most things one ✎ things fix changes; past it the tap is answered in words and changes nothing. |
 | `taps.journalMost` | `100` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns the Journal reads at a time: The most turns, newest first, whose notes the Journal shows; a longer chat reads the rest a page at a time. |
+| `taps.meterTurns` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns the HUD's meter averages over: The chat's last turns whose calls, tokens, time and lore lookups the HUD's meter gives the average and 95th percentile of. |
+| `taps.clocksMost` | `100` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Replies whose world clock the panels carry: The newest replies on the chat's path that show the world's date and time at their turn's end with each read of the panels. |
 | `taps.tell.payments` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Payments to others: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.credit` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Credit: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
 | `taps.tell.property` | `true` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Tell the Author: Property: Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it. |
@@ -513,6 +515,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
+| `things.tidyRunMost` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Findings one Tidy up shows: The most findings one Tidy up run lists, of the things that do not add up in a chat. |
 | `things.tidy` | none (as the world's tidy.auto says) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tidy-up findings in the world state: Whether each turn's world state lists the holds that cannot be (a thing too big to carry on a person, a thing worn but lying elsewhere) with the fix the tidy-up would make; unset, the world's own tidy.auto decides. Nothing is ever fixed by itself. |
 | `things.tidyLeft` | `[]` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Tidy-up findings left as they are: The keys of the tidy-up's findings he told it to leave alone (Leave it): they are not listed again. |
 | `things.tidyLeftMost` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Findings left alone, kept: The most keys the list of findings left alone keeps; past it the oldest go. |
@@ -579,6 +582,18 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `worlds.noteChars` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Characters of a commit note: The longest note a commit keeps in a world's history, cut to it. |
 | `worlds.revisionsHeld` | `8` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | World revisions the editor holds in memory: Revisions of worlds the editor keeps loaded across requests, the least recently used going first; a revision is several MB once read. |
 | `worlds.bodyBytes` | `4194304` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Largest body a worlds route takes: The most bytes a request of Build's worlds routes may carry (a world file imported, a draft written whole); a larger one is refused naming this setting. |
+
+## `build`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `build.jobs.running` | `2` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Jobs running at once: The most jobs one user may have running in Build at once; another is refused until one ends or is cancelled. |
+| `build.jobs.kept` | `8` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Ended jobs kept: How many ended jobs Build keeps per user, the newest, each with its result; running ones are always kept. |
+| `build.jobs.idChars` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest id a job's input names: The longest id (a world, a book, a map, a person) a job's input may name; a longer one is refused. |
+| `build.playtest.turns` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns in a Playtest: The most typed turns one Playtest takes; the rest are cut. |
+| `build.playtest.turnChars` | `2000` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Characters in a Playtest turn: The longest a typed turn of a Playtest may be, in characters; a longer one is cut. |
+| `build.check.days` | `3` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Days a Check world runs: The days Check world simulates when its request names none. |
+| `build.check.daysMost` | `14` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most days a Check world runs: The most days one Check world may simulate; a request for more runs this many. |
 
 ## Lumiverse
 
