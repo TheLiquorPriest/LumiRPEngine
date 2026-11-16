@@ -46,6 +46,10 @@ const bound = <T>(items: T[]): { items: T[]; total: number; before: number; afte
 export const ODILE_RECORD: CharacterReply = {
   chat: CHAT,
   turn: null,
+  listed: 20,
+  now: { parts: [{ part: "seed", version: 2, text: "A ferrywoman who keeps the crossing open, toll or no toll." }], growth: [] },
+  away: null,
+  game: null,
   character: ODILE,
   sources: [{ kind: "card", ref: "card-odile", defines: "her looks and her trade", created: 1_700_000_000_000, title: "Odile Holt", state: "current" }],
   base: [
