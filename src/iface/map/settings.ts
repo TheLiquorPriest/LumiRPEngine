@@ -5,9 +5,9 @@
 
 import type { ConfigRead } from "../../app/config-read";
 import type { Setting } from "../../app/setting-list";
-import { AREA_STARTS, DIAGONALS, LIGHTS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
+import { AREA_STARTS, DIAGONALS, DISPLAYS, LIGHTS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
 
-export { AREA_STARTS, DIAGONALS, LIGHTS, MAP_DEFAULTS, UNITS, type AreaStart, type Diagonal, type Light, type MapConfig, type Unit } from "../../shared/map-config";
+export { AREA_STARTS, DIAGONALS, DISPLAYS, LIGHTS, MAP_DEFAULTS, UNITS, type AreaStart, type Diagonal, type Display, type Light, type MapConfig, type Unit } from "../../shared/map-config";
 
 // D.1's rows name the width of a square laid in play, how a diagonal counts, a round's seconds and the size printed whole; a round's move, the unit and the picture are beyond D.1.
 
@@ -151,6 +151,15 @@ export const MAP_SETTING_DEFS = {
     perConnection: false,
     name: "A place with no light recorded reads",
     about: "lit or dark: how a place reads, on the grid and to sight, when neither it nor any place above it has had its light set (world_apply, set, key light).",
+    effect: "turn",
+  },
+  display: {
+    key: "map.display",
+    default: MAP_DEFAULTS.display,
+    takes: { type: "oneOf", values: DISPLAYS },
+    perConnection: false,
+    name: "How the map panel shows the map",
+    about: "world: as the world says; knowledge: only what the character knows, places heard of drawn dashed; fog: fog over what it has not seen. The panel's Known and Fog switch writes this for the chat.",
     effect: "turn",
   },
 } as const satisfies Record<keyof MapConfig, Setting>;
