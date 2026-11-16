@@ -11,7 +11,7 @@ import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness"
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";
-import type { LoreBooks } from "../lore";
+import type { LoreBooks, LoreProposals } from "../lore";
 import type { Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
@@ -30,6 +30,8 @@ export interface TurnTakes {
   lumiverse: TurnsOptions["lumiverse"];
   /** What a migration carried of a chat, for its first briefing on RPE, over the store the lane made. */
   migrated(app: App, store: Store): MigratedSource;
+  /** The lore's proposals, where an agent's suggestion about lore is kept for his approval. */
+  proposals: () => Pick<LoreProposals, "suggested">;
   clock?: Clock;
   /** Tests only: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
@@ -151,6 +153,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
         migrated: takes.migrated(at, store),
         clock,
         views: at.hooks.views,
+        proposals: takes.proposals,
         ...(takes.harness !== undefined ? { harness: takes.harness } : {}),
       });
       at.routes.add("connections", connectionRoutes(turns.harness.models, owner, at.log));

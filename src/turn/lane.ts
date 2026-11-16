@@ -27,7 +27,7 @@ import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
-import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
+import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { ALL_PACKS } from "../packs/index";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
@@ -159,6 +159,8 @@ export interface TurnsOptions {
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
   migrated: MigratedSource;
+  /** The lore's proposals, where an agent's suggestion about lore is kept for his approval. */
+  proposals: () => Pick<LoreProposals, "suggested">;
   /** A view of the host's that an agent is given by name, beyond the turn's own: its text; null for a name that is none of its own. */
   views?: (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
@@ -318,7 +320,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   };
   const lorePorts = lorePort(lore, loreIndex);
   // A job's end is told through `events.job`, which keeps it; the lane, made below, brings the sessions of its turn up to date.
-  const events = turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log });
+  const events = turnEvents({ db: app.db, writes: app.writes, store, runs, files, sources, loreIndex, notes, suggestions, proposals: options.proposals, due, ...(options.views !== undefined ? { views: options.views } : {}), now: () => clock.now(), jobEnded: (user, chat, turn) => lane.sessionsAfter(user, chat, turn), log: app.log });
   const env: Environment = {
     id: "rpe",
     version: app.version,

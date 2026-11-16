@@ -32,7 +32,7 @@ import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, Ru
 import { castViews, type SourceReader } from "../cast";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
-import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
+import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
 import { storyBrief } from "../story";
 import type { TreeNotes, TreeSuggestions } from "../tree";
@@ -59,6 +59,8 @@ export interface EventsDeps {
   notes: TreeNotes;
   /** The suggestions agents filed of the tree's files, for the Files page. */
   suggestions: TreeSuggestions;
+  /** The lore's proposals, where an agent's suggestion about lore is kept for his approval. */
+  proposals: () => Pick<LoreProposals, "suggested">;
   now(): number;
   /** After a job of a turn ended: the sessions of the turn that started it brought up to date. */
   jobEnded(user: string, chat: string, turn: string): Promise<void>;
@@ -371,12 +373,13 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     },
     ruleFired: (scope, firing) => keep(scope, "rule", firing.agent, firing.rule, firing),
     async suggestion(scope, agent, suggestion) {
-      const told = await tell(scope, "suggestion", { agent, suggestion });
-      // A file's is kept by the tree, under its own id, unless the chat's open ones are at their most. One of lore is kept with the turn
-      // it was made in, which the Turn page shows, under that row's id; one made in no turn has nowhere to be kept.
+      await tell(scope, "suggestion", { agent, suggestion });
+      // A file's is kept by the tree, under its own id, unless the chat's open ones are at their most; one of lore by the lore, as a
+      // proposal for his approval, under its own.
       const filed = await deps.suggestions.file(scope, agent, suggestion);
       if (filed !== null) return filed.kept ? { kept: true, id: String(filed.id) } : filed;
-      return told === null ? { kept: false, openMost: 0 } : { kept: true, id: `told-${told}` };
+      const proposal = await deps.proposals().suggested(scope, agent, suggestion);
+      return proposal === null ? { kept: false, openMost: 0 } : { kept: true, id: `lore-${proposal.id}` };
     },
     // The run was marked released the moment its reply reached RPE's sink, which the harness finishes before it tells this.
     async released(scope, release) {
