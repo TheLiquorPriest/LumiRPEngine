@@ -31,7 +31,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   deleted: { count: 2, turns: [{ message: 4, words: "Wren waved" }], more: "7, 9" },
   swipe_flipped: { message: 8, range: "9-11", stopped: [{ op: "pay", value: "3", message: 9, why: "a later turn had already set that value" }], more: 2 },
   swipe_shown: { message: 8 },
-  job_finished: { job: "j-1", agent: "mapper", brief: "Map the harbour.", report: "Two quays." },
+  job_finished: { job: "j-1", agent: "mapper", brief: "Map the harbour.", report: "Two quays.", applied: [{ op: "place", about: "the harbour", value: "{\"name\":\"Quay\"}" }], not_applied: [{ op: "pay", about: "Wren", value: "3", why: "a later turn had already set that value", later: 9 }], more: 4 },
   job_failed: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_cancelled: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_interrupted: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
