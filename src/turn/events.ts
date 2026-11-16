@@ -27,10 +27,9 @@
 // holds it.
 
 import type { Database } from "bun:sqlite";
-import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
-import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
+import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "./guidance";
+import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type SourceReader } from "../cast";
-import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
@@ -42,7 +41,7 @@ import type { Runs } from "./runs";
 import { turnSettings } from "./settings";
 import { namedIn, stageAt, stageCues } from "./stage";
 import { guidanceTexts } from "./texts";
-import { castLayouts, PARTS, tokenCount } from "./turns";
+import { castLayouts, DRAWN_MAP, drawnLayer, PARTS, tokenCount } from "./turns";
 
 export interface EventsDeps {
   db: Database;
@@ -72,7 +71,7 @@ export interface EventsDeps {
 }
 
 /** The turn's own views an agent can be given by name (plan §5.4, §10.4, Appendix C), but the scene's. */
-const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)", mapDrawn: "map:drawn" } as const;
+const VIEWS = { storyBrief: "story:brief", due: "world:due", ruleset: "ruleset", reply: "turn:reply(saved)", mapDrawn: DRAWN_MAP } as const;
 
 /** The field a view's layout shows its part for nothing by: set only when an agent is given that view by name with nothing in it. */
 const NONE = "none";
@@ -149,16 +148,8 @@ function rulesetView(deps: EventsDeps, scope: Scope): string | null {
  * opening block gives once a session (plan §10.2). Null where the chat has no world, or no map is drawn where he stands.
  */
 async function drawnMap(deps: EventsDeps, scope: Scope): Promise<string | null> {
-  const store = deps.store.user(scope.user);
-  if (store.chat(scope.chat) === null) return null;
-  const turn = scope.turn === undefined ? null : store.turn(scope.turn);
-  const { state } = turn === null || turn.chat !== scope.chat ? store.headState(scope.chat) : store.stateAt(turn.id);
-  const doc = deps.store.env.worlds(state.world.revision);
-  const place = doc === undefined ? null : placeOfEntity(state.world, doc.pov);
-  if (place === null) return null;
   const settings = await turnSettings(deps.files, scope, deps.log);
-  const map = mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map);
-  return map.text({ state, env: deps.store.env, place, layer: "drawn" })?.text ?? null;
+  return drawnLayer(deps.store, scope, mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map))?.text ?? null;
 }
 
 /** A turn's reply as saved, by its latest run that wrote into the chat; null before it has gone out. */
@@ -303,25 +294,27 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     if (scope.turn === undefined) throw new Error("RPH told RPE of a turn's work with no turn named.");
     return scope.turn;
   };
-  /** Keeps what RPH told of a turn, with it; the row's id, or null for a scope of no turn, which has nowhere to keep it. */
-  const tell = async (scope: Scope, kind: string, body: unknown): Promise<number | null> => {
+  /** Keeps what RPH told of a turn, with it; the row's id, or null for a scope of no turn (a job of no chat among them), which has nowhere to keep it. */
+  const tell = async (scope: RunScope, kind: string, body: unknown): Promise<number | null> => {
     if (scope.turn === undefined) return null;
     const { turn } = scope;
     return await deps.writes.run((db) => Number(db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [scope.user, turn, kind, JSON.stringify(body), deps.now()]).lastInsertRowid), "keeping what RPH told of a turn");
   };
   /**
    * A consent, a gap check or a rule fired, a row of its own table (App. B): with its turn, or, told of a call in a job the user started
-   * (no turn, the agent's `job` set), with that job (R-27). One told with neither has nowhere to be kept; its trace holds it.
+   * (no turn, the agent's `job` set), with that job (R-27). One told with neither, or in a job of no chat, has nowhere to be kept; its
+   * trace holds it.
    */
-  const keep = async (scope: Scope, kind: keyof typeof TOLD_TABLES, agent: AgentRef, name: string, body: ConsentGrant | GapCheck | RuleFiring): Promise<void> => {
+  const keep = async (scope: RunScope, kind: keyof typeof TOLD_TABLES, agent: AgentRef, name: string, body: ConsentGrant | GapCheck | RuleFiring): Promise<void> => {
     const turn = scope.turn ?? null;
     const job = agent.job ?? null;
-    if (turn === null && job === null) return;
+    const { chat } = scope;
+    if (chat === undefined || (turn === null && job === null)) return;
     const named = kind === "rule" ? "rule" : "id, topic";
     const values = kind === "rule" ? [name] : [(body as ConsentGrant | GapCheck).id, name];
     await deps.writes.run(
       (db) =>
-        db.run(`INSERT INTO ${TOLD_TABLES[kind]} (user, chat, turn, job, ${named}, body, at) VALUES (?, ?, ?, ?, ${values.map(() => "?").join(", ")}, ?, ?)`, [scope.user, scope.chat, turn, job, ...values, JSON.stringify(body), deps.now()]),
+        db.run(`INSERT INTO ${TOLD_TABLES[kind]} (user, chat, turn, job, ${named}, body, at) VALUES (?, ?, ?, ?, ${values.map(() => "?").join(", ")}, ?, ?)`, [scope.user, chat, turn, job, ...values, JSON.stringify(body), deps.now()]),
       "keeping what RPH told of a turn",
     );
   };
@@ -330,8 +323,11 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       const turn = turnOf(scope);
       await deps.writes.run(() => deps.store.user(scope.user).updateTurn(turn, { intent: text }), "keeping the intent record");
     },
-    async attachments(scope, agent, refs, moment) {
-      await tell(scope, "attachments", { agent, refs, moment });
+    async attachments(at, agent, refs, moment) {
+      await tell(at, "attachments", { agent, refs, moment });
+      // RPE's views are a chat's: a job of no chat is given none of them, and RPH says each could not be found.
+      if (at.chat === undefined) return [];
+      const scope: Scope = at;
       // A view RPE gives is given even with nothing in it, in its file's words for that. Every name none of RPE's spaces gives is left
       // out, and RPH says so. What cannot be read leaves out its name alone.
       let guidance: Guidance | undefined;
@@ -364,6 +360,8 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     consent: (scope, grant) => keep(scope, "consent", grant.by, grant.topic, grant),
     gapCheck: (scope, check) => keep(scope, "gap-check", check.by, check.topic, check),
     async dropStaged(scope, agent) {
+      // A job of no chat stages nothing in the store: there is nothing of it to take back.
+      if (scope.chat === undefined) return;
       const turn = turnOf(scope);
       await deps.writes.run(() => {
         deps.store.user(scope.user).dropStaged(turn, agent.id);

@@ -36,6 +36,8 @@ const sessionFields = {
   from: opt(shape.object({ chat: T, session: T, turn: T })),
   turns: N,
   compactAsked: opt(shape.literal(true)),
+  held: opt(shape.object({ hook: T, reason: T })),
+  hooked: opt(T),
 };
 const sessionBase = shape.object(sessionFields);
 type SessionMirrored = Holds<Exactly<Infer<typeof sessionBase>, SessionView>>;

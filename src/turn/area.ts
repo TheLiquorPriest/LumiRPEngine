@@ -7,7 +7,8 @@
 // migration carried of a chat. The views an agent is given by name come from every area's `fills`,
 // through the app's hook (`App.hooks.views`), not from one area's alone.
 
-import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness";
+import type { Clock, CreateHarnessOptions } from "rp-harness";
+import { loadGuidance } from "./guidance";
 import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";

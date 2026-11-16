@@ -8,7 +8,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadGuidance } from "rp-harness";
+import { loadGuidance } from "../../../src/turn/guidance";
 import type { JobView } from "rp-harness/contract";
 import { gate } from "rp-harness/testing/rig";
 import { RouteTable } from "../../../src/app";

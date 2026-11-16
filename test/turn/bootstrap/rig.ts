@@ -26,6 +26,7 @@ export async function openBootBed(options: TurnBedOptions & { carried?: readonly
   const given = events.attachments.bind(events);
   events.attachments = async (scope, agent, refs, moment) => {
     const blocks = await given(scope, agent, refs, moment);
+    if (scope.chat === undefined) return blocks;
     for (const { ref, own } of refs) {
       if (own) continue;
       const text = await jobs.view(scope, agent, ref);

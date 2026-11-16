@@ -6,7 +6,7 @@
 // chooses no key. A turn the Author wrote no record for gets no file, and neither does a chat whose
 // layout is switched off.
 
-import { loadGuidance } from "rp-harness";
+import { loadGuidance } from "./guidance";
 import type { Scope } from "rp-harness/contract";
 import type { JsonObject } from "../shared/json";
 import type { Store } from "../store";

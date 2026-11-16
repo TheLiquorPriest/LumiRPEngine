@@ -4,7 +4,8 @@
 // late. Each agent's own transcript there, and each request kept beside it, has one writer, RPH: this
 // port writes none of them. Streaming text goes to the live hub only; the call's `call_ended` holds it
 // whole. A piece of streaming text names only its run, by RPH's own id for it: its chat is the one its
-// run's records name, each run's first record coming before any piece of it.
+// run's records name, each run's first record coming before any piece of it. A job of no chat has no
+// chat to tell nor folder to keep its records in: the runs are given them, and nothing more is done.
 
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -59,11 +60,11 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
   };
 
   /** Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. */
-  const follow = (record: TraceRecord, key: string, at: Open): void => {
+  const follow = (record: TraceRecord, chat: string, key: string, at: Open): void => {
     const { event } = record;
     const ended = event.kind === "run_ended" ? record.run : event.kind === "job" && event.job.ended !== undefined ? event.job.id : null;
     if (ended === null) {
-      going.set(record.run, { chat: record.scope.chat, key });
+      going.set(record.run, { chat, key });
       at.runs.add(record.run);
       return;
     }
@@ -97,15 +98,17 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
 
   return {
     event(record) {
-      const key = keyOf(record.scope);
+      deps.runs.record(record);
+      const { scope } = record;
+      if (scope.chat === undefined) return;
+      const key = keyOf(scope);
       let at = open.get(key);
       if (at === undefined) {
-        at = { folder: lookup(record.scope), tail: Promise.resolve(), runs: new Set(), writes: 0 };
+        at = { folder: lookup(scope), tail: Promise.resolve(), runs: new Set(), writes: 0 };
         open.set(key, at);
       }
-      follow(record, key, at);
-      deps.runs.record(record);
-      deps.live.publish(record.scope.chat, { kind: "trace", data: record });
+      follow(record, scope.chat, key, at);
+      deps.live.publish(scope.chat, { kind: "trace", data: record });
       keep(record, key, at);
     },
     delta(delta: TraceDelta) {

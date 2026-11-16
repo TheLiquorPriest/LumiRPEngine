@@ -66,7 +66,8 @@ function jobRecords(db: Database, writes: Writes): JobRecords {
     },
     async set(scope, job) {
       const user = userOf(scope);
-      const row = [user, job.id, job.started, job.scope.chat, job.state, JSON.stringify(job)];
+      // A job of no chat (C-23) is kept under the chat "", which no chat's list names.
+      const row = [user, job.id, job.started, job.scope.chat ?? "", job.state, JSON.stringify(job)];
       await writes.run(
         (into) =>
           into.run(

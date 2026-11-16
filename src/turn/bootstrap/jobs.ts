@@ -12,7 +12,7 @@
 // Which of a chat's jobs are its bootstrap jobs, with what each was given, is kept in RPH's store beside
 // RPH's own record of its jobs.
 
-import { loadGuidance } from "rp-harness";
+import { loadGuidance } from "../guidance";
 import type { AgentRef, JobRefusal, JobState, JobView, JsonValue, Scope } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { Turns } from "../lane";
@@ -104,6 +104,11 @@ export function refusalWords(refusal: JobRefusal): string {
       return `there is no job ${refusal.id}.`;
     case "state":
       return `job ${refusal.id} is ${refusal.state}; that is done only to a job that is ${refusal.applies.join(" or ")}.`;
+    case "not-at-limit":
+      return `job ${refusal.id} did not stop at one of its limits, so more of one would not let it go on.`;
+    // The hook's reason is said in its own words.
+    case "hook":
+      return `his hook ${refusal.hook} kept it from starting: ${refusal.reason}`;
   }
 }
 

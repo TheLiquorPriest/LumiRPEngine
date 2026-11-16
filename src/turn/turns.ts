@@ -20,7 +20,7 @@
 // no state. If the event was missed, the next intake ties it the same way.
 
 import type { Database } from "bun:sqlite";
-import { type Fields, loadGuidance, type Guidance, type LinesPart, type TemplatePart } from "rp-harness";
+import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "./guidance";
 import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
 import { forkOf, reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
@@ -32,11 +32,12 @@ import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
 import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
+import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type LoreProjection, type SecretSettingsFor } from "../lore";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
-import { clockRecorded, type DueSource, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
+import { clockRecorded, type DueSource, type MapText, type PathEntry, type PathReport, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
@@ -87,6 +88,23 @@ export const ON_STAGE_VIEWS = "on_stage_views";
  */
 export function tokenCount(charsPerToken: number): (text: string) => number {
   return (text) => Math.ceil(text.length / charsPerToken);
+}
+
+/** The name an agent is given the drawn layer of the map the player's character stands on by (the Author's opening, plan §10.2). */
+export const DRAWN_MAP = "map:drawn";
+
+/**
+ * The drawn layer of the map the player's character stands on, at the scope's turn's start or the chat's head, with its grid and version;
+ * null where the chat has no world, or no map is drawn where he stands.
+ */
+export function drawnLayer(store: Store, scope: Scope, map: MapText): { grid: string; drawn: string; text: string } | null {
+  const user = store.user(scope.user);
+  if (user.chat(scope.chat) === null) return null;
+  const turn = scope.turn === undefined ? null : user.turn(scope.turn);
+  const { state } = turn === null || turn.chat !== scope.chat ? user.headState(scope.chat) : user.stateAt(turn.id);
+  const doc = store.env.worlds(state.world.revision);
+  const place = doc === undefined ? null : placeOfEntity(state.world, doc.pov);
+  return place === null ? null : map.text({ state, env: store.env, place, layer: "drawn" });
 }
 
 /** The first `count` words of a text, joined by single spaces. */
@@ -368,6 +386,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   readonly #early = new Map<string, Ended>();
   /** How many runs of the turn before each turn stopped at the wait's limit as it began (`previous.run.stopped`), by user and turn. */
   readonly #stoppedAt = new Map<string, number>();
+  /** The drawn layer's versions each turn's world state left given to its session (`drawnGiven` and what it printed), by user and turn; lost on restart, when a layer is printed once more. */
+  readonly #drawnAfter = new Map<string, Record<string, string>>();
   /** The generations whose intake goes on and has no run yet. */
   readonly #taking = new Set<string>();
   /** By chat: the intakes going on, the newest last; each waits for the one before it to hold its run, or to end. */
@@ -1366,8 +1386,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (layout?.status === "read") {
       const maps = mapView(await mapWording(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
       try {
-        // Counted at the model layer's ratio, as every budget of the turn is: never a figure of the world state's own.
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
+        // Counted at the model layer's ratio, as every budget of the turn is: never a figure of the world state's own. A grid's drawn layer
+        // the session was given already is left out; what this block printed is kept for the session's next turn.
+        const drawnGiven = await this.#drawnGiven(scope, settings.lead, maps);
+        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, drawnGiven, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
+        this.#drawnAfter.set(`${scope.user}\n${scope.turn}`, { ...drawnGiven, ...state.drawnShown });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });
@@ -1418,6 +1441,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const cut = cutText(at.cut, notices);
     if (cut !== "") blocks.push({ name: BLOCKS.promptCut, text: cut });
     return { blocks, loreMap: [...new Set([...map.inPrompt, ...map.world, ...(map.bound ?? [])].map((line) => line.id))], activated: map.activated, storyTime: time?.clock ?? null, notGiven };
+  }
+
+  /**
+   * The drawn layer's versions the turn's session has been given (plan §10.2): the turn's own where it was briefed already (a settle), else
+   * what its parent turn left where that turn played in this session (a swipe takes them as the parent left them); else the session is new
+   * and has its opening's, the drawn layer of the grid the player's character stands on where the lead's definition is given `map:drawn`.
+   */
+  async #drawnGiven(scope: Scope & { turn: string }, lead: string | null, map: MapText): Promise<Record<string, string>> {
+    const own = this.#drawnAfter.get(`${scope.user}\n${scope.turn}`);
+    if (own !== undefined) return own;
+    const parent = this.#d.store.user(scope.user).turn(scope.turn)?.parent ?? null;
+    const left = parent === null ? undefined : this.#drawnAfter.get(`${scope.user}\n${parent}`);
+    if (left !== undefined && parent !== null && this.#d.runs.ofTurn(scope.user, parent).some((r) => r.session === scope.session)) return left;
+    const given = (await this.#d.harness().definitions.list(scope)).find((d) => d.name === lead)?.given ?? [];
+    const opening = given.includes(DRAWN_MAP) ? drawnLayer(this.#d.store, scope, map) : null;
+    return opening === null ? {} : { [opening.grid]: opening.drawn };
   }
 
   /**

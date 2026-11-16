@@ -18,8 +18,9 @@
 // anything that runs a command or calls out, and before a provider key goes to a connection whose place changed.
 
 import { join } from "node:path";
-import { createHarness, type CreateHarnessOptions, type LinesPart, loadGuidance } from "rp-harness";
-import type { AgentRef, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, Scope } from "rp-harness/contract";
+import { createHarness, type CreateHarnessOptions } from "rp-harness";
+import { type LinesPart, loadGuidance } from "./guidance";
+import type { AgentRef, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
@@ -365,7 +366,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
    * still running, so writes on the turn it extended. The held turn's own folder, its prompt, its trace, the lore that activated for
    * its prompt and its intent record stay its own: they are its run's.
    */
-  const joined = <S extends Scope>(scope: S): S => {
+  const joined = <S extends RunScope>(scope: S): S => {
     if (scope.turn === undefined) return scope;
     const turns = store.user(scope.user);
     const into = turns.turn(scope.turn) === null ? null : turns.joinedTo(scope.turn);
@@ -386,13 +387,15 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     },
     lore: { ...lorePorts, read: (scope, ids, reader) => lorePorts.read(joined(scope), ids, reader), search: (scope, query, reader) => lorePorts.search(joined(scope), query, reader) },
     prompt: prompts,
-    tools: { all: async (scope) => (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) })) },
+    // RPE's tools are a chat's: a job of no chat is given none of them.
+    tools: { all: async (scope) => (scope.chat === undefined ? [] : (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) }))) },
     // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
     searchers: [stateSearcher, storySearcher].map((make) => {
       const searcher = make({ store, meaning, personPlayed: (at, plays) => lore.personPlayed(at, plays), snippet: async (scope) => (await turnSettings(files, scope, app.log)).gapSnippet });
       return { name: searcher.name, search: (scope: Scope, query: GapQuery) => searcher.search(joined(scope), query) };
     }),
-    facts: { defs: () => facts.defs(), read: (scope, names) => facts.read(joined(scope), names) },
+    // Every fact RPE counts is a chat's: a job of no chat has none of them.
+    facts: { defs: () => facts.defs(), read: async (scope, names) => (scope.chat === undefined ? {} : await facts.read(joined(scope), names)) },
     models: app.models,
     switches: app.switches,
     store: kvStore(app.db, app.writes),

@@ -13,9 +13,9 @@ export interface EndedJob {
   ended: number;
 }
 
-/** Keeps a job's view as RPH tells it, over the one kept before. */
+/** Keeps a job's view as RPH tells it, over the one kept before; a job of no chat under the chat "". */
 export function keepJob(db: Database, view: JobView): void {
-  db.run("INSERT INTO turn_job (user, job, chat, turn, view) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, job) DO UPDATE SET view = excluded.view", [view.scope.user, view.id, view.scope.chat, view.scope.turn ?? null, JSON.stringify(view)]);
+  db.run("INSERT INTO turn_job (user, job, chat, turn, view) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user, job) DO UPDATE SET view = excluded.view", [view.scope.user, view.id, view.scope.chat ?? "", view.scope.turn ?? null, JSON.stringify(view)]);
 }
 
 /** The chat's jobs whose end the store recorded at or after `from` and before `to`, the earliest end first. */
