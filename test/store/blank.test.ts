@@ -68,7 +68,7 @@ describe("a chat with no world", () => {
 
   test("is told no date, time zone or currency nobody set: the clock shows once play sets it to a date and time, not when it only moves it; the rest once a world is attached", () => {
     const { s, first, revision, world } = chat();
-    const horizon: ChangeInput = { lane: "story", op: "store.horizon", value: { list: ["loft"] }, by: "author", source: "author" };
+    const horizon: ChangeInput = { lane: "story", op: "story.horizon", value: { list: ["loft"] }, by: "author", source: "author" };
     play(s, "c", "m1", "Mara climbs into the hayloft.", 1, [...first, horizon]);
     const keys = (ref: string): string[] => s.view("c").values(ref).map((v) => v.key);
     const said = (): string => worldState(s, { chat: "c", turn: s.beginTurn({ chat: "c", kind: "normal" }).id, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).text;

@@ -177,7 +177,6 @@ function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState
     return typeof r === "string" ? leftOf(r, c) : r.map((e) => input(String(e.type), { ...e, group }));
   }
   const v = isRecord(c.value) ? c.value : {};
-  if (c.op === STORE_OPS.horizon) return jsonEqual(now.horizon, v.list) ? [input(c.op, { list: before.horizon })] : leftOf("changed_since", c);
   if (c.op === STORE_OPS.note) {
     const at = typeof v.at === "string" ? v.at : "";
     if ((now.notes[at]?.text ?? "") !== (typeof v.text === "string" ? v.text : "")) return leftOf("changed_since", c);

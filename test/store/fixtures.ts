@@ -16,6 +16,7 @@ import { openStore, type Store, type StoreOptions, type UserStore } from "../../
 import type { ChangeInput, ShownMessage, TurnRow } from "../../src/store/types";
 import type { TreeView } from "../../src/store/view";
 import { readPart, renderView, type Part } from "../../src/store/words";
+import { STORY_STORE_AREA } from "../../src/story";
 
 /** The world state's layout as shipped: the words of every line of the tree. */
 export const SHIPPED_LAYOUT: string = readFileSync(join(import.meta.dir, "..", "..", "guidance", ".prompts", "world-state.md"), "utf8");
@@ -138,13 +139,13 @@ export function moveStoredClock(db: Store["db"], node: string, minutes: number):
   db.run("UPDATE snapshot SET state = ? WHERE node = ?", [JSON.stringify({ ...doc, parts: { ...doc.parts, w: hash } }), node]);
 }
 
-/** A store in memory over the invented world (and any further revisions), with one user. */
+/** A store in memory over the invented world (and any further revisions), with one user, and the story's area (the Author's horizon) unless others are given. */
 export function testStore(options: Partial<Omit<StoreOptions, "db" | "worlds">> & { db?: StoreOptions["db"]; world?: WorldDoc; more?: WorldDoc[] } = {}): TestStore {
   const { world: given, more, db, registry: reg, ...rest } = options;
   const world = given ?? inventedWorld();
   const worlds = new Map<string, WorldDoc>([[hashJson(world), world]]);
   for (const w of more ?? []) worlds.set(hashJson(w), w);
-  const store = openStore({ ...rest, db: db ?? ":memory:", registry: reg ?? registry(), worlds: (r) => worlds.get(r) });
+  const store = openStore({ areas: [STORY_STORE_AREA], ...rest, db: db ?? ":memory:", registry: reg ?? registry(), worlds: (r) => worlds.get(r) });
   return { store, s: store.user(USER), world, revision: hashJson(world), worlds };
 }
 

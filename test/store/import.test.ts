@@ -43,7 +43,7 @@ describe("importing", () => {
     s.sync("b", shown(["b1", "m1", 1], ["b2", "m2", 2]));
     imported(s, "b", "b3", 3, [tick(1)]);
     expect(count(ts, "snapshot")).toBeGreaterThan(0);
-    expect(s.forgetImport("c")).toEqual({ removed: ["c", "b"], played: [] });
+    expect(s.forgetImport("c")).toEqual({ removed: ["c", "b"], played: [], kept: [] });
     for (const table of ["chat", "turn", "change", "snapshot", "path_node", "message_link"]) expect([table, count(ts, table)]).toEqual([table, 0]);
     // The next run imports it again from scratch.
     s.createChat({ id: "c", revision });
@@ -58,7 +58,7 @@ describe("importing", () => {
     s.branchChat({ id: "b", from: "c", map: { m1: "b1" } });
     s.sync("b", shown(["b1", "m1", 1]));
     imported(s, "b", "b2", 2, [goTo(POV, "far_road")]);
-    expect(s.forgetImport("b")).toEqual({ removed: ["b"], played: [] });
+    expect(s.forgetImport("b")).toEqual({ removed: ["b"], played: [], kept: [] });
     expect(s.chat("b")).toBeNull();
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("cellar");
   });
@@ -70,8 +70,8 @@ describe("importing", () => {
     s.branchChat({ id: "b", from: "c", map: { m1: "b1" } });
     s.sync("b", shown(["b1", "m1", 1]));
     play(s, "b", "b2", "Played on RPE in the branch.", 2, engine(goTo(POV, "far_road")));
-    expect(s.forgetImport("c")).toEqual({ removed: [], played: ["b"] });
-    expect(s.forgetImport("b")).toEqual({ removed: [], played: ["b"] });
+    expect(s.forgetImport("c")).toEqual({ removed: [], played: ["b"], kept: [] });
+    expect(s.forgetImport("b")).toEqual({ removed: [], played: ["b"], kept: [] });
     expect(s.headState("b").state.world.entities[POV]?.fields.place).toBe("far_road");
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("cellar");
   });

@@ -33,8 +33,6 @@ export type TurnStatus = (typeof TURN_STATUSES)[number];
  * registry (the core types and every pack's), applied by that type's own handler.
  */
 export const STORE_OPS = {
-  /** The Author's horizon (§6.4): `{ list: string[] }`, the whole list. */
-  horizon: "store.horizon",
   /** An agent's own line on a level of the tree (§6.4): `{ at: string, text: string }`; empty text takes it off. */
   note: "store.note",
   /** One of today's message-level markers (an Upgrade, a level, a time control), applied by today's own marker code. */
@@ -333,8 +331,6 @@ export type Fact = {
 /** The state the store folds: the engine's world state, and what the store keeps beside it. */
 export interface StoreState {
   world: WorldState;
-  /** The Author's horizon, as tree refs; only a recorded change sets it. */
-  horizon: string[];
   /** Agents' own lines, by tree ref. */
   notes: Record<string, NoteLine>;
   /** The last turn that touched each tree ref, for the reflections. */

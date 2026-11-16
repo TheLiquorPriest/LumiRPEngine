@@ -130,25 +130,30 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const placed = new Set(part.body.fields);
   const want = (s: WorldStateSection): boolean => placed.has(s);
 
-  // The horizon as the Author left it, in its order; an entry inside another is shown with it, and one that names nothing in the
-  // world is shown as the Author's own words, once.
+  // The horizon as the Author left it, in his order (plan §6.9): the scene, its first entry that names the world, in full, and every
+  // other entry at the depth he set for it (full when he set none); an entry inside one shown in full is shown with it, and one that
+  // names nothing in the world is shown as his own words, once. It is never cut for length.
   const entries = view.horizon();
-  const listed = [...new Set(entries.flatMap((h) => (h.ref === null ? [] : [h.ref])))];
+  const depthOf = new Map<string, number | "full">();
+  for (const h of entries) if (h.ref !== null && !depthOf.has(h.ref)) depthOf.set(h.ref, depthOf.size === 0 ? "full" : h.depth);
   const ancestors = (ref: string): string[] => {
     const out: string[] = [];
     for (let at = view.parentOf(ref); at !== null; at = view.parentOf(at)) out.push(at);
     return out;
   };
-  const horizon = listed.filter((ref) => !ancestors(ref).some((a) => listed.includes(a)));
+  const horizon = [...depthOf.keys()].filter((ref) => !ancestors(ref).some((a) => depthOf.get(a) === "full"));
+  // What the horizon shows: each entry, and its levels down to its depth.
   const within = new Set<string>();
-  const gather = (ref: string): void => {
+  const gather = (ref: string, depth: number | "full"): void => {
     within.add(ref);
-    for (const c of view.childrenOf(ref)) gather(c);
+    if (depth === "full" || depth > 0) for (const c of view.childrenOf(ref)) gather(c, depth === "full" ? depth : depth - 1);
   };
-  for (const ref of horizon) gather(ref);
+  for (const ref of horizon) gather(ref, depthOf.get(ref) ?? "full");
+  // Every entry brings the chain above it up to the world, nearest first; a parent shared by several, or shown on the horizon, once (R-63).
+  const chain: string[] = [];
+  for (const ref of horizon) for (const a of ancestors(ref)) if (!within.has(a) && !chain.includes(a)) chain.push(a);
   const scene = horizon[0] ?? null;
-  const chain = scene === null ? [] : ancestors(scene);
-  const scenePlace = scene === null ? null : [scene, ...chain].find((r) => r.startsWith("place:")) ?? null;
+  const scenePlace = scene === null ? null : [scene, ...ancestors(scene)].find((r) => r.startsWith("place:")) ?? null;
   const nameOf = (ref: string): string => view.nameOf(ref) ?? ref.replace(/^(place|entity):/, "");
 
   const sections: Partial<Record<WorldStateSection, ViewLine[]>> = {};
@@ -158,7 +163,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     const left = new Set<string>(horizon);
     const said = new Set<string>();
     sections.horizon = entries.flatMap((h): ViewLine[] => {
-      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, input.map, reading) : [];
+      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, depthOf.get(h.ref) ?? "full", input.map, reading) : [];
       if (said.has(h.at)) return [];
       said.add(h.at);
       return [{ kind: "horizon_words", depth: 0, fields: { text: h.at } }];
@@ -380,10 +385,10 @@ function dueShown(part: Part, source: DueSource, state: StoreState, span: { from
   }
 }
 
-/** A horizon entry in full, with a place's map after its own values. */
-function horizonLines(view: TreeView, ref: string, map: MapText | undefined, reading: ViewReading | undefined): ViewLine[] {
-  const lines = view.query(ref, "full", reading)?.lines ?? [];
-  if (!ref.startsWith("place:")) return lines;
+/** A horizon entry at its depth; one shown in full that is a place, with its map after its own values. */
+function horizonLines(view: TreeView, ref: string, depth: number | "full", map: MapText | undefined, reading: ViewReading | undefined): ViewLine[] {
+  const lines = view.query(ref, depth, reading)?.lines ?? [];
+  if (depth !== "full" || !ref.startsWith("place:")) return lines;
   const printed = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
   const text = printed === null ? null : printed.text;
   const mapLine: ViewLine | null = text === null ? null : { kind: "map", depth: 1, fields: { text } };

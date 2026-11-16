@@ -38,9 +38,6 @@ export function checkChange(c: ChangeInput, index: number, areas?: Areas): void 
     return;
   }
   switch (c.op) {
-    case STORE_OPS.horizon:
-      if (!isRecord(v) || !Array.isArray(v.list) || !v.list.every((x) => typeof x === "string")) throw new StoreInputError(`${at}: a horizon is { list: [refs] }`);
-      return;
     case STORE_OPS.note:
       if (!isRecord(v) || typeof v.at !== "string" || v.at === "" || typeof v.text !== "string") throw new StoreInputError(`${at}: a note is { at, text }`);
       return;

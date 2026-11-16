@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { openStore, type Store } from "../../src/store/store";
+import { STORY_STORE_AREA } from "../../src/story";
 import type { SeenMessage, ShownMessage } from "../../src/store/types";
 import { carried, engine, goTo, hand, hashOf, moveStoredClock, play, POV, registry, testStore, tick, USER, type TestStore } from "./fixtures";
 
@@ -21,7 +22,7 @@ function playMany(every: number, n: number) {
 
 /** Another store over the same database: nothing held in memory, as after a restart. */
 function reopened(ts: TestStore, fingerprint?: string): Store {
-  return openStore({ db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r), ...(fingerprint ? { fingerprint } : {}) });
+  return openStore({ db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r), areas: [STORY_STORE_AREA], ...(fingerprint ? { fingerprint } : {}) });
 }
 
 const snapshotDepths = (store: Store): number[] =>
@@ -95,7 +96,7 @@ describe("snapshots", () => {
     ts.s.sync("c", shown(exchanges));
     // Each way runs on a copy of the same database, so the turns, and the keys of their nodes, are the same ones.
     const played = ts.store.db.serialize();
-    const kept = [...shown(exchanges.filter((n) => n !== 10)), { id: "u121", user: true, hash: hashOf("Line 121.") }];
+    const kept = [...shown(exchanges.filter((n) => n !== 10)), { id: "u121", user: true, hash: hashOf("Line 121."), hidden: false }];
     /** The 10th exchange deleted and a line sent; asked about first or not; compared. The snapshots it leaves. */
     const leftAfter = (askFirst: boolean) => {
       let at = 1_000;

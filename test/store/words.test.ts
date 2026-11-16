@@ -79,7 +79,7 @@ function played() {
     { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "wary of strangers" }), by: "gm", precision: "vague", standing: "assumed" },
     { lane: "engine", ...factStore.change({ about: "entity:acct_wren", key: "posted", value: "spent most of it on drink" }), by: "author", source: "prose", precision: "vague" },
     { lane: "story", op: "store.note", value: { at: "cellar", text: "uneasy since the fire" }, by: "author", source: "author" },
-    { lane: "story", op: "store.horizon", value: { list: ["common_room", "tam"] }, by: "author", source: "author" },
+    { lane: "story", op: "story.horizon", value: { list: ["common_room", "tam"] }, by: "author", source: "author" },
     { lane: "engine", ...factStore.change({ about: "place:cellar", key: "door", value: "left unlocked", replaces: "f-000000000000" }), by: "gm", source: "gm" },
   ];
   const t = play(s, "c", "m1", "Wren pays for two nights and keeps her knife to hand.", 1, changes);

@@ -179,6 +179,26 @@ function reflectionPieces(r: Reflection): JsonObject[] {
   return pieces;
 }
 
+/**
+ * Where the Author's horizon is kept (plan §6.4, B-5): the story area's record beside the scene, rewound with the story, set whole by
+ * its `horizon` operation and given by its `horizon` read. The store names the area and imports nothing of it.
+ */
+export const HORIZON = { area: "story", read: "horizon", op: "story.horizon" } as const;
+
+/** An entry of the horizon: a tree ref or the Author's own words, and how deep the world state shows it (`full` when he set none). */
+export interface HorizonEntry {
+  at: string;
+  depth: number | "full";
+}
+
+/** The Author's horizon in `state`, in his order, as the story area's read gives it; none where the store opened without that area. */
+export function horizonOf(env: Pick<FoldEnv, "areas">, state: StoreState): HorizonEntry[] {
+  const area = env.areas?.get(HORIZON.area);
+  const read = area?.reads && Object.hasOwn(area.reads, HORIZON.read) ? area.reads[HORIZON.read] : undefined;
+  const list = read?.(state.areas?.[HORIZON.area] ?? area?.initial?.() ?? {}, {});
+  return (Array.isArray(list) ? list : []).flatMap((e) => (isRecord(e) && typeof e.at === "string" ? [{ at: e.at, depth: typeof e.depth === "number" ? e.depth : "full" }] : []));
+}
+
 /** A mark's fields on a line: the turn's number and, where recorded, how exact, how sure and from where, and an unchecked invention. */
 export function markFields(mark: Mark | undefined): JsonObject {
   if (!mark) return {};
@@ -725,11 +745,11 @@ export class TreeView {
     return { lines };
   }
 
-  /** The horizon as the Author left it, each entry with the level it names now (null: none). */
-  horizon(): { at: string; ref: string | null; name: string | null }[] {
-    return this.state.horizon.map((at) => {
+  /** The horizon as the Author left it (`horizonOf`), each entry with the level it names now (null: none) and the depth it is shown at. */
+  horizon(): { at: string; ref: string | null; name: string | null; depth: number | "full" }[] {
+    return horizonOf(this.env, this.state).map(({ at, depth }) => {
       const ref = this.resolve(at);
-      return { at, ref, name: ref === null ? null : (this.nodes.get(ref)?.name ?? null) };
+      return { at, ref, name: ref === null ? null : (this.nodes.get(ref)?.name ?? null), depth };
     });
   }
 }

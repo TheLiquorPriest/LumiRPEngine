@@ -90,7 +90,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 6;
+const FOLD_VERSION = 7;
 
 export interface StoreOptions {
   /**
@@ -2013,8 +2013,8 @@ export class UserStore {
    * A starting state that stands for the engine's state after a turn on its own path (a migrated
    * chat's, where today's fold and this one differ, plan §15.3 item 7): folds start from it, whatever
    * the turns before it hold, and a change recorded on the turn afterwards (a correction) is folded on
-   * top of it. What the store keeps beside the engine's state (the horizon, agents' lines, what
-   * changed last) is the turn's own as folded.
+   * top of it. What the store keeps beside the engine's state (agents' lines, what changed last, the
+   * areas' slices) is the turn's own as folded.
    */
   setBase(turnId: string, world: WorldState): void {
     const turn = this.turnToWrite(turnId);

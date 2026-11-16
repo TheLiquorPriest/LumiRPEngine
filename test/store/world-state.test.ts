@@ -9,6 +9,7 @@ import { hashJson } from "../../src/shared/hash";
 import { timeDue } from "../../src/store/due";
 import { factStore } from "../../src/store/facts";
 import { openStore } from "../../src/store/store";
+import { STORY_STORE_AREA } from "../../src/story";
 import type { ChangeInput } from "../../src/store/types";
 import { renderView, wordLine, type ViewLine } from "../../src/store/words";
 import { WORLD_STATE_DEFAULTS, worldState, type DueSource, type MapText } from "../../src/store/world-state";
@@ -27,7 +28,7 @@ function played() {
   const { s } = ts;
   s.createChat({ id: "c", revision: ts.revision });
   const first: ChangeInput[] = [
-    { lane: "story", op: "store.horizon", value: { list: ["common_room", "tam"] }, by: "author", source: "author" },
+    { lane: "story", op: "story.horizon", value: { list: ["common_room", "tam"] }, by: "author", source: "author" },
     { lane: "story", op: "store.note", value: { at: "lamp_ladle", text: "busier than usual" }, by: "author", source: "author" },
     { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "on edge" }), by: "gm", source: "prose", precision: "vague" },
     ...engine(pay("acct_wren", 75, "A round for the room")).map((c) => ({ ...c, precision: "approximate" as const })),
@@ -55,13 +56,14 @@ describe("the world state", () => {
     expect(lines.some((l) => l.startsWith("Tam [tam] (Character)"))).toBe(true);
     // The chain above, each by its own values and its reflection; around it, the room beside it.
     const above = block.sections.above?.map((l) => l.fields.ref);
-    expect(above?.filter((r) => typeof r === "string" && !r.startsWith("entity:") && r !== undefined)).toEqual(["place:lamp_ladle", "place:thornbury", "place:vale", "world"]);
+    // Tam, on the horizon too, brings his own chain: only the market is not shared with the scene's.
+    expect(above?.filter((r) => typeof r === "string" && !r.startsWith("entity:") && r !== undefined)).toEqual(["place:lamp_ladle", "place:thornbury", "place:vale", "world", "place:market_square"]);
     expect(lines).toContain("The Lamp and Ladle [lamp_ladle] (place) — 3 people (Bram, Wren, Odile), 5 things, 2 places, 1 record, 1 open, changed turn 1, note: busier than usual");
     expect(block.sections.around?.map((l) => l.fields.ref)).toEqual(["place:cellar"]);
     // Due, open business, what changed by lane, and what is soft.
     expect(lines).toContain("Sat 1 Mar 2031, 9:30 AM: schedule at Market Square, Tam (the market opens)");
     expect(lines).toContain("The sealed letter [errand] (quest): Asked, Wren's");
-    expect(lines).toContain("story: 2 changes (store.horizon, store.note), to The Lamp and Ladle");
+    expect(lines).toContain("story: 2 changes (story.horizon, store.note), to The Lamp and Ladle");
     expect(lines).toContain("engine: 3 changes (store.fact, post, set), to Wren, Wren's coin; 1 did not apply");
     expect(lines.some((l) => /^Wren: mood: "on edge" \(vague, turn 1\) \[f-[0-9a-f]{12}\]$/.test(l))).toBe(true);
     expect(lines.some((l) => /^Wren's coin: posted: -\$0\.75 \(approximate, turn 1\)$/.test(l))).toBe(true);
@@ -76,7 +78,7 @@ describe("the world state", () => {
     const { s } = ts;
     s.createChat({ id: "c", revision: ts.revision });
     const storm = "the storm coming in off the sea";
-    play(s, "c", "m1", "Wren looks to the door.", 1, [{ lane: "story", op: "store.horizon", value: { list: [storm, "common_room", storm] }, by: "author", source: "author" }]);
+    play(s, "c", "m1", "Wren looks to the door.", 1, [{ lane: "story", op: "story.horizon", value: { list: [storm, "common_room", storm] }, by: "author", source: "author" }]);
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });
     const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, charsPerToken: 4 });
     const lines = block.text.split("\n");
@@ -117,12 +119,12 @@ describe("the world state", () => {
   test("on a world of 5,000 things it fits the budget with the horizon whole, in a few milliseconds", () => {
     const world = bigWorld();
     const revision = hashJson(world);
-    const store = openStore({ db: ":memory:", registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
+    const store = openStore({ db: ":memory:", registry: registry(), worlds: (r) => (r === revision ? world : undefined), areas: [STORY_STORE_AREA] });
     const s = store.user(USER);
     s.createChat({ id: "c", revision });
     const room = String(world.entities[POV]?.fields.place);
     const t1 = s.beginTurn({ chat: "c", kind: "normal" });
-    s.addChanges(t1.id, [{ lane: "story", op: "store.horizon", value: { list: [room, "group_3"] }, by: "author", source: "author" }]);
+    s.addChanges(t1.id, [{ lane: "story", op: "story.horizon", value: { list: [room, "group_3"] }, by: "author", source: "author" }]);
     s.tieTurn(t1.id, { message: "m1", hash: hashOf("Wren looks around."), date: 1 });
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });
     const entities = Object.keys(world.entities).length;
@@ -164,7 +166,7 @@ describe("the world state", () => {
     const { s } = ts;
     s.createChat({ id: "c", revision: ts.revision });
     play(s, "c", "m1", "Wren looks down the long landing.", 1, [
-      { lane: "story", op: "store.horizon", value: { list: ["common_room"] }, by: "author", source: "author" },
+      { lane: "story", op: "story.horizon", value: { list: ["common_room"] }, by: "author", source: "author" },
       { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "lost" }), by: "gm", precision: "vague" },
     ]);
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });

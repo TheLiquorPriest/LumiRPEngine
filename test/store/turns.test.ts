@@ -487,11 +487,11 @@ describe("the question's call", () => {
     expect(() => {
       wren.fields.place = "far_road";
     }).toThrow(TypeError);
-    expect(() => answer.state.horizon.push("place:far_road")).toThrow(TypeError);
+    expect(() => Object.assign(answer.state.notes, { "place:far_road": { text: "x", by: null, turn: "" } })).toThrow(TypeError);
     // The turn that follows starts from that very state, as it was folded.
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     expect(s.startOf(next.id).state).toBe(answer.state);
-    expect([s.startOf(next.id).state.world.entities[POV]?.fields.place, s.startOf(next.id).state.horizon]).toEqual(["cellar", []]);
+    expect(s.startOf(next.id).state.world.entities[POV]?.fields.place).toBe("cellar");
     // A change goes through the store, which applies it to a copy of its own: the answer stays as it was.
     s.addChanges(next.id, engine(goTo(POV, "market_square")));
     expect(s.stateAt(next.id).state.world.entities[POV]?.fields.place).toBe("market_square");

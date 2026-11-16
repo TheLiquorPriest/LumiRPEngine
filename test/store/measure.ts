@@ -106,7 +106,7 @@ function foldMeasure(file: string, world: WorldDoc, label: string, places: reado
   // A different first reply is shown: the 1,000 turns after it stand rebased, every change checked.
   const flip = open(1_000_000);
   const other = turn(flip.user(USER), 0, "Another first reply.", null);
-  const shown = [{ id: "m0", user: false, hash: other.hash ?? "", date: other.date }, ...Array.from({ length: 1000 }, (_, k) => ({ id: `m${k + 1}`, user: false, hash: hashOf(`Reply ${k + 1}.`), date: k + 1 }))];
+  const shown = [{ id: "m0", user: false, hash: other.hash ?? "", date: other.date, hidden: false }, ...Array.from({ length: 1000 }, (_, k) => ({ id: `m${k + 1}`, user: false, hash: hashOf(`Reply ${k + 1}.`), date: k + 1, hidden: false }))];
   const report = flip.user(USER).sync("c", shown);
   flip.close();
   const rebased = timeCold("the same 1,000 turns standing rebased (no snapshot on that path: from the start)", () => open(1_000_000), (s) => s.headState("c"), runs.rebased);

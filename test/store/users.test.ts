@@ -99,7 +99,7 @@ function exercise(store: Store, me: UserStore, mine: Played, theirs: Played): vo
   const step = me.beginTurn({ chat: "b", kind: "normal" });
   expect(me.extendPath(mine.t2.node, step.id)).not.toBe(step.node);
   me.dropTurn(step.id);
-  expect(me.forgetImport("imp")).toEqual({ removed: ["imp"], played: [] });
+  expect(me.forgetImport("imp")).toEqual({ removed: ["imp"], played: [], kept: [] });
 }
 
 describe("two users over one database", () => {

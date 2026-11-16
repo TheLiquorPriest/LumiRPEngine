@@ -122,11 +122,11 @@ describe("the tree view", () => {
   test("the horizon is the Author's list: only a recorded change sets it, and it goes with its turn", () => {
     const { s } = chat();
     expect(s.view("c").horizon()).toEqual([]);
-    play(s, "c", "m1", "She means to look in on the cellar.", 1, [{ lane: "story", op: "store.horizon", value: { list: ["cellar", "tam", "the_harbour"] }, by: "author", source: "author" }]);
+    play(s, "c", "m1", "She means to look in on the cellar.", 1, [{ lane: "story", op: "story.horizon", value: { list: ["cellar", "tam", { at: "the_harbour", depth: 1 }] }, by: "author", source: "author" }]);
     expect(s.view("c").horizon()).toEqual([
-      { at: "cellar", ref: "place:cellar", name: "The Cellar" },
-      { at: "tam", ref: "entity:tam", name: "Tam" },
-      { at: "the_harbour", ref: null, name: null },
+      { at: "cellar", ref: "place:cellar", name: "The Cellar", depth: "full" },
+      { at: "tam", ref: "entity:tam", name: "Tam", depth: "full" },
+      { at: "the_harbour", ref: null, name: null, depth: 1 },
     ]);
     // Another swipe of that reply sets none: with it showing, the horizon is as it was before.
     play(s, "c", "m1", "She sits by the fire instead.", 2, [], { target: "m1" });

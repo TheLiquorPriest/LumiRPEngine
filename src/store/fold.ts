@@ -137,7 +137,7 @@ export interface Item extends Provenance {
 export function initialStoreState(env: FoldEnv, revision: RevisionId): StoreState | null {
   const world = env.worlds(revision);
   if (!world) return null;
-  const state: StoreState = { world: initialState(world, revision, env.registry), horizon: [], notes: {}, touched: {}, marks: {}, facts: {} };
+  const state: StoreState = { world: initialState(world, revision, env.registry), notes: {}, touched: {}, marks: {}, facts: {} };
   const areas = env.areas?.initial();
   if (areas && Object.keys(areas).length > 0) state.areas = areas;
   return state;
@@ -368,9 +368,6 @@ function landUnit(env: FoldEnv, state: StoreState, unit: readonly LedgerEvent[],
 function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
   const v = isRecord(item.value) ? item.value : {};
   switch (item.op) {
-    case STORE_OPS.horizon:
-      state.horizon = Array.isArray(v.list) ? v.list.filter((x): x is string => typeof x === "string") : [];
-      return { applied: true, reports: [] };
     case STORE_OPS.note: {
       const at = typeof v.at === "string" ? v.at : "";
       const text = typeof v.text === "string" ? v.text : "";
