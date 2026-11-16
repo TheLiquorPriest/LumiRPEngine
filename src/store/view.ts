@@ -195,6 +195,9 @@ export const HORIZON = { area: "story", read: "horizon", op: "story.horizon" } a
 /** The story area's read of its threads still open (`[{ id, who, place, fields }]`; PlanStory). */
 const THREADS_READ = "threads";
 
+/** The quest area and its read of the quests the story opened in play that are not closed (`[{ id, at }]`, `at` the tree refs each names). */
+const QUESTS_OPEN = { area: "quest", read: "open" } as const;
+
 /** An entry of the horizon: a tree ref or the Author's own words, and how deep the world state shows it (`full` when he set none). */
 export interface HorizonEntry {
   at: string;
@@ -401,6 +404,17 @@ export class TreeView {
     return this.openThreads;
   }
 
+  /** The quests the story opened in play, not closed, each with the tree refs it names (none: the whole world's); the quest area's `open` read. */
+  private questsOpen(): { id: string; at: string[] }[] {
+    const area = this.env.areas?.get(QUESTS_OPEN.area);
+    const read = area?.reads && Object.hasOwn(area.reads, QUESTS_OPEN.read) ? area.reads[QUESTS_OPEN.read] : undefined;
+    const list = read?.(this.state.areas?.[QUESTS_OPEN.area] ?? area?.initial?.() ?? {}, {});
+    return (Array.isArray(list) ? list : []).flatMap((q) => {
+      if (!isRecord(q) || typeof q.id !== "string" || !Array.isArray(q.at)) return [];
+      return [{ id: q.id, at: q.at.filter((r): r is string => typeof r === "string") }];
+    });
+  }
+
   /** Where a thing sits in the tree: in or on what holds it, else at its place, else (a group) in the group it belongs to, else elsewhere. */
   private entityParent(e: EntityState, category: Category): string {
     const entities = this.state.world.entities;
@@ -435,6 +449,7 @@ export class TreeView {
       count(owner !== undefined && this.nodes.has(`entity:${owner}`) ? [`entity:${owner}`] : []);
     }
     for (const t of this.threads()) count(t.refs);
+    for (const q of this.questsOpen()) count(q.at.filter((ref) => this.nodes.has(ref)));
     return opens;
   }
 
