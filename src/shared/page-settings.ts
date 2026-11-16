@@ -34,6 +34,10 @@ export const PAGE_SETTING_DEFS = {
   chatsAtATime: { key: "pages.chatsAtATime", default: 50, least: 1, most: 500, name: "Chats read at a time on Storage", about: "Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take." },
   logLines: { key: "pages.logLines", default: 200, least: 10, most: 2000, name: "Log lines shown per page on Runtime", about: "Lines of RPE's own log the Runtime page reads at a time, the newest first; older lines are read on request (RPE keeps service.logLines of them)." },
   rowsAtOnce: { key: "pages.rowsAtOnce", default: 30, least: 5, most: 500, name: "Rows read at once", about: "Rows the Sessions, Rules and Lore pages' lists read from RPE at a time (sessions and their turns, firings of a rule, proposals and writes to his lore); more are read on request." },
+  toastsShown: { key: "pages.toastsShown", default: 3, least: 1, most: 20, name: "Toasts shown at once", about: "Toasts the kept views (Build, Play, the chat's toolbar) show at once; a new one pushes the oldest out." },
+  errorToastMs: { key: "pages.errorToastMs", default: 6000, least: 500, most: 120_000, name: "An error toast shows for", about: "Milliseconds an error toast shows in the kept views." },
+  toastMs: { key: "pages.toastMs", default: 3500, least: 500, most: 120_000, name: "Any other toast shows for", about: "Milliseconds any other toast shows in the kept views." },
+  downloadRevokeMs: { key: "pages.downloadRevokeMs", default: 1000, least: 100, most: 60_000, name: "A download link is kept for", about: "Milliseconds the kept views keep a download's link before the browser lets it go." },
 } as const satisfies Record<string, PageSettingDef>;
 
 /** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */
