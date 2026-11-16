@@ -3,12 +3,12 @@
 // and read the level's typed systems. The page fills the parts' slots with these (parts.tsx).
 
 import { useState } from "preact/hooks";
-import type { DueShown, FactPrecision, LevelNode, TurnId } from "../../../shared/api";
+import type { DueShown, EditOpAsk, FactPrecision, LevelNode, TapReply, TurnId } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Row } from "../../atoms";
 import { marksWords, PRECISIONS } from "../../marks";
 import { usePaged, useRead } from "../../reading";
-import type { EditOpAsk, EditReply, ValueChangeShown } from "../../wanted";
+import type { ValueChangeShown } from "../../wanted";
 import { errorWords, when } from "../../words";
 import { readHistory, readSystems, sendEdit, sendUndo } from "./read";
 
@@ -71,7 +71,7 @@ export function History(props: { chat: string; at: string; part: string; turn: T
 }
 
 /** What came of an edit: its words, what the world's rules reported of it, and its Undo while it can be taken back. */
-function EditResult(props: { done: EditReply; busy: boolean; onUndo(): void }) {
+function EditResult(props: { done: TapReply; busy: boolean; onUndo(): void }) {
   const { done } = props;
   return (
     <Banner tone={done.applied ? "info" : "warn"} icon={done.applied ? "check" : "alert"} title={done.applied ? "Recorded as your change" : "Nothing was recorded"} actions={done.undo === null ? undefined : <Button busy={props.busy} onClick={props.onUndo}>Undo</Button>}>
@@ -97,7 +97,7 @@ function EditForm(props: { chat: string; level: string; as: "value" | "fact"; pa
   const [tell, setTell] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [done, setDone] = useState<EditReply | null>(null);
+  const [done, setDone] = useState<TapReply | null>(null);
   const removing = props.remove === true;
   const send = (): void => {
     setBusy(true);

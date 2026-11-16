@@ -1,10 +1,10 @@
 // What the World page reads and sends: the tree at a level, a value's history, a level's typed systems,
 // what a turn's time brought due, what no longer applies on another swipe, and the owner's own edit.
 
-import type { ApiRoutes, DueReply, TurnId, WorldReply } from "../../../shared/api";
+import type { ApiRoutes, DueReply, EditOpAsk, TapReply, TurnId, WorldReply } from "../../../shared/api";
 import { replyOf, type RpeClient } from "../../client";
 import type { PageOf } from "../../reading";
-import { callWanted, type EditOpAsk, type EditReply, type NotAppliedReply, type SystemsReply, type ValueChangeShown } from "../../wanted";
+import { callWanted, type NotAppliedReply, type SystemsReply, type ValueChangeShown } from "../../wanted";
 import { errorWords } from "../../words";
 
 /** Which values each level carries: none, its own (with what game systems keep), or all (with what it inherits). */
@@ -63,11 +63,11 @@ export function readNotApplied(client: Pick<RpeClient, "call">, chat: string): P
 }
 
 /** The owner's own edit of a value or a fact: recorded as his change (source `player`), told to the Author at the next turn when `tell`. */
-export function sendEdit(client: Pick<RpeClient, "call">, chat: string, op: EditOpAsk, tell: boolean): Promise<EditReply> {
-  return callWanted(client, "POST /api/v1/chats/:chat/taps", { chat }, { body: { kind: "edit", ops: [op], tell } });
+export function sendEdit(client: Pick<RpeClient, "call">, chat: string, op: EditOpAsk, tell: boolean): Promise<TapReply> {
+  return client.call("POST /api/v1/chats/:chat/taps", { chat }, { body: { kind: "edit", ops: [op], tell } }).then(replyOf);
 }
 
 /** Takes an edit back, by the id its answer gave. */
-export function sendUndo(client: Pick<RpeClient, "call">, chat: string, undo: string): Promise<EditReply> {
-  return callWanted(client, "POST /api/v1/chats/:chat/taps/undo", { chat }, { body: { undo } });
+export function sendUndo(client: Pick<RpeClient, "call">, chat: string, undo: string): Promise<TapReply> {
+  return client.call("POST /api/v1/chats/:chat/taps/undo", { chat }, { body: { undo } }).then(replyOf);
 }

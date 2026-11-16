@@ -58,42 +58,9 @@ export interface NotAppliedReply {
   items: NotAppliedShown[];
 }
 
-/** One field of an owner's edit: set a value or a fact at a level, or remove it. */
-export interface EditOpAsk {
-  op: "set" | "remove";
-  at: string;
-  key: string;
-  as: "value" | "fact";
-  value?: string;
-  precision?: FactPrecision;
-  standing?: FactStanding;
-}
-
-export interface EditAsk {
-  kind: "edit";
-  ops: EditOpAsk[];
-  /** Whether the next briefing tells the Author of it (the "Tell the story" choice). */
-  tell: boolean;
-}
-
-export interface EditReply {
-  applied: boolean;
-  /** What the world's rules reported of it, listed under unsettled. */
-  reports: string[];
-  /** The id its Undo takes; null where nothing was recorded. */
-  undo: string | null;
-  words: string;
-}
-
-export interface UndoAsk {
-  undo: string;
-}
-
 /** The World page's routes. */
 export interface WorldRoutes {
   "GET /api/v1/chats/:chat/state/history": WantedRoute<{ chat: string }, { at: string; part: string; turn?: TurnId; limit?: number; cursor?: string }, undefined, ValueHistoryReply>;
   "GET /api/v1/chats/:chat/state/systems": WantedRoute<{ chat: string }, { at: string; turn?: TurnId }, undefined, SystemsReply>;
   "GET /api/v1/chats/:chat/state/not-applied": WantedRoute<{ chat: string }, Record<string, never>, undefined, NotAppliedReply>;
-  "POST /api/v1/chats/:chat/taps": WantedRoute<{ chat: string }, Record<string, never>, EditAsk, EditReply>;
-  "POST /api/v1/chats/:chat/taps/undo": WantedRoute<{ chat: string }, Record<string, never>, UndoAsk, EditReply>;
 }
