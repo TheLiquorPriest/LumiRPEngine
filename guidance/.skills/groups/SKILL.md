@@ -38,4 +38,4 @@ A group the lore names is taken from the lore. A group the story makes up as it 
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a position that does not exist, a power used by someone who does not hold it, a member counted twice. Read the report, and put it in your answer to the Author.
+A tool applies what you give it and reports what does not add up: a position that does not exist, a power used by someone who does not hold it, a member counted twice. `SIMULATION.md` says what to do with a report.

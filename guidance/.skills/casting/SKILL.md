@@ -4,7 +4,7 @@ description: Make a character's record and decide how large a part they play. Fo
 ---
 # Casting
 
-A character's record is what every agent will know them by. Make it from what the player already wrote. Do not invent a person.
+A character's record is what every agent will know them by. Make it from what the player already wrote; where that is silent, the consent rule says what a person may be given.
 
 ## Making the record
 

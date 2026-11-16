@@ -10,7 +10,7 @@ Everyone's coin is kept as accounts. Every payment has two sides: it leaves one 
 
 `world_apply` with a `pay` operation: who pays, who is paid, how much, and what for.
 
-- If something was bought, name the goods in the same operation. The money and the goods change hands as one change, so a swipe takes both back.
+- If something was bought, name the goods in the same operation: goods nothing recorded goes by are `spawn`ed first, earlier in the same call. The money and the goods change hands as one change, so a swipe takes both back.
 - If it was a gift, a bribe, a fine or a loss, say which. The books keep the reason.
 - A payment between two people who are both in the scene is one operation, not two.
 
@@ -42,4 +42,4 @@ Accounts opened and closed, loans, credit, taxes, a job taken or lost, a busines
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a payment larger than what the payer holds, an account that does not exist, a sum that does not balance. Read the report. `SIMULATION.md` says what to do when the books and the story disagree. Either way the Author must hear of it: put the report in your answer.
+A tool applies what you give it and reports what does not add up: a payment larger than what the payer holds, an account that does not exist, a sum that does not balance. `SIMULATION.md` says what to do with a report.

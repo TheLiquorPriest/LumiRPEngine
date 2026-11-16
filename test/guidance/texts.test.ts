@@ -12,8 +12,8 @@ import { HOMES, type Row } from "./homes";
 
 const SHIPPED = shippedTexts();
 
-/** E.7: the Author's stack as the loader builds it from the set as shipped at the start of the build, in characters. */
-const STACK_CEILING = 23_300;
+/** E.7's figure was 21,003 characters at the start of the build; the Author's stack as the loader builds it stood at 22,927 after G0's fix and at 23,771 after wave 2's texts. This is the size it may not pass. */
+const STACK_CEILING = 23_800;
 
 /** A text as the checks compare it: lower case, every run of white space one space. */
 const flat = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -29,6 +29,9 @@ const NAMES: Record<string, string[]> = {
   "ALL-AGENTS.md": ["all-agents.md", "file for every agent"],
   ".agents/author.md": ["author.md", "author's definition"],
   ".agents/narrator.md": ["narrator.md"],
+  ".agents/gm.md": ["gm.md", "gm's definition"],
+  ".agents/indexer.md": ["indexer.md", "indexer's instructions", "indexer's file"],
+  "PRESET.md": ["preset.md"],
 };
 
 /**
@@ -63,15 +66,18 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "Reading a narrator's draft before release", markers: ["read the draft before you release it"] },
   { row: "The narrator's brief", markers: ["the beats in order, the outcomes, what must and must not be said, the point of view"] },
   { row: "The narrator writing live only", markers: ["only when the brief leaves nothing to add"] },
-  { row: "What leads when story, lore and rules disagree", markers: ["when the story as told and the recorded game state disagree", "apply it anyway and let the report stand"] },
+  { row: "What leads when story, lore and rules disagree", markers: ["when the story as told and the recorded game state disagree", "apply it anyway and let the report stand", "put what a report said in your answer"] },
   { row: "When the GM rolls", markers: ["the gm rolls when an outcome is uncertain"] },
-  { row: "What is tracked closely and what loosely", markers: ["what is tracked closely"] },
+  { row: "What is tracked closely and what loosely", markers: ["what is tracked closely", "a level never decides whether a change is applied"] },
   { row: "Saying where a recorded thing comes from", markers: ["say where it comes from"] },
   { row: "Never deciding for the player's character", markers: ["never decide what the player's character does"] },
   { row: "Notes are notes", markers: ["your notes are notes"] },
   { row: "Keeping working text short", markers: ["keep it short and plain"] },
   { row: "What the narrator may add", markers: ["add texture freely"] },
   { row: "That the Author decides", markers: ["they are not yours to set aside"] },
+  { row: "How the GM rules, stages changes", markers: ["stage those changes with `world_apply`", "with the chat's tidy-up switch on"] },
+  { row: "What an index line holds", markers: ["one of character, place, item, faction, rule, event, concept, style"] },
+  { row: "How a prompt is mapped, with the kinds", markers: ["one slice for each thing a reader would call one thing", "a fixed slice by its text"] },
 ];
 
 /** Rows whose home a later texts package words, with the package that does (their behaviour needs code that comes with it). */
@@ -220,6 +226,10 @@ describe("the Author's own files ask for no step and are true", () => {
   test("WRITING.md gives an example where `long` and `large enough` stand, and SIMULATION.md gives the dice their reason", () => {
     expect(linesOf(SHIPPED.get("WRITING.md") ?? "").find((line) => line.includes("grown large enough"))).toContain("a thousand words");
     expect(linesOf(SHIPPED.get("SIMULATION.md") ?? "").find((line) => line.startsWith("the gm rolls"))).toContain(", so that");
+  });
+
+  test("the GM is called the GM in every shipped file", () => {
+    expect([...SHIPPED].filter(([path, text]) => path.endsWith(".md") && /game master/i.test(text)).map(([path]) => path)).toEqual([]);
   });
 });
 

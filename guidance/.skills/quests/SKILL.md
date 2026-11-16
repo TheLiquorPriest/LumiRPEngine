@@ -49,4 +49,4 @@ When a stage or a quest lands, its rewards are ordinary changes: coin with `pay`
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a stage that does not exist, a quest completed with a stage still open, a reward given by someone who does not hold it. Read the report, and put it in your answer to the Author.
+A tool applies what you give it and reports what does not add up: a stage that does not exist, a quest completed with a stage still open, a reward given by someone who does not hold it. `SIMULATION.md` says what to do with a report.

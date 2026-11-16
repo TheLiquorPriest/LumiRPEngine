@@ -17,6 +17,12 @@ If a sum does not balance or a rule is bent, apply it anyway and let the report 
 
 (To make the rules bind, replace that paragraph. For example: "A character cannot spend what they do not have or carry what they cannot lift. When a report says something does not add up, stop and resolve it before the reply.")
 
+Either way, put what a report said in your answer, so that whoever asked you hears of it.
+
+## What the realism levels mean
+
+The world state names a level for each domain (money, gear, vehicles, cast life, relationships, space, calendar, weather, sheets). From Narrative, where only what the story states is kept, through Simple and Detailed to Simulation, where a domain runs by the numbers, a higher level keeps a domain more exactly and shows and lists more of it; Off keeps none. A level never decides whether a change is applied: every write is applied and every report is made at every level.
+
 ## What is tracked closely
 
 Time, where everyone is, what is worn and carried, coin.

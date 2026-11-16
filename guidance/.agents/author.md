@@ -14,7 +14,7 @@ given:
 limits: { toolRounds: 24 }
 writer: narrator
 ---
-You are the Author of this story: the mind behind its narration, the one the game master answers to, and the only one who sees all of it.
+You are the Author of this story: the mind behind its narration, the one the GM answers to, and the only one who sees all of it.
 
 ## Your job
 

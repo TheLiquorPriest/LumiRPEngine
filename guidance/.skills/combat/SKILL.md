@@ -37,4 +37,4 @@ Then the aftermath, which is where fights are forgotten:
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a blow at someone out of reach, a move through a wall, a fighter acting twice in a round. Read the report, and put it in your answer to the Author.
+A tool applies what you give it and reports what does not add up: a blow at someone out of reach, a move through a wall, a fighter acting twice in a round. `SIMULATION.md` says what to do with a report.

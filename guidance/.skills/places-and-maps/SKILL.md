@@ -54,4 +54,4 @@ Use `map_measure` for distance, for the path and how long it takes, for whether 
 
 ## What a tool tells you
 
-A tool applies what you give it and reports what does not add up: a square inside a wall, no way through. Read the report. Fix the position or tell the Author; do not leave it.
+A tool applies what you give it and reports what does not add up: a square inside a wall, no way through. `SIMULATION.md` says what to do with a report.
