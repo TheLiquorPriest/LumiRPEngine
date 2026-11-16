@@ -11,6 +11,11 @@ export { moveWorldFiles, sha256Of, storedWorlds, readWorldDoc, UserWorlds, WORLD
 export { timeDue } from "./due";
 export {
   worldState,
+  openScenePlaceOf,
+  ownerPlaceOf,
+  scenePlaceOf,
+  timeOf,
+  type TimeAt,
   WORLD_STATE_DEFAULTS,
   WORLD_STATE_SECTIONS,
   type DueEntry,

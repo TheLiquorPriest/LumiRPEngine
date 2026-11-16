@@ -28,10 +28,12 @@ import { optionalQuery, own } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { EntityState } from "../engine/state";
+import { clockPaused } from "../engine/time";
 import { isGone, kindDef, kindIs, WALK_SETTINGS, walkCuts } from "../engine/scope";
 import { isOpened } from "../packs/economy/core/journal";
 import { openerOf } from "../packs/economy/core/model";
 import { cashAccount } from "../packs/economy/core/pay";
+import { regionOf } from "../packs/weather/core/index";
 import { BLANK_REVISION, clockRecorded } from "./blank";
 import { standing } from "./facts";
 import type { FoldEnv } from "./fold";
@@ -106,6 +108,8 @@ export type ValueLine = {
   value: string | null;
   from?: From;
   mark?: Mark;
+  /** A time while the clock is paused for the scene. */
+  paused?: true;
 };
 
 /** What is beneath a level (§6.4), as data. */
@@ -229,6 +233,7 @@ function valueFields(v: ValueLine, facts: number): JsonObject {
   if (v.from?.system !== undefined) out.system = v.from.system;
   if (v.from?.ref !== undefined) out.from = { ref: v.from.ref, name: v.from.name ?? null, ...(v.from.ref === "world" ? { world: true } : {}) };
   if (facts > 0) out.facts = facts;
+  if (v.paused) out.paused = true;
   return out;
 }
 
@@ -507,14 +512,26 @@ export class TreeView {
 
   /**
    * What the game systems keep their own way, for a place: its local time (at the query's own point, where the clock is a recorded
-   * value), weather and entry, and at the query's own point the prices the economy quotes there, each the number its sums use.
+   * value) named by the place whose time zone gives it, and paused for the scene where it is; weather named by the place or region
+   * whose weather it is; entry; and at the query's own point the prices the economy quotes there, each the number its sums use.
    */
   private placeSystems(id: string, root: boolean): ValueLine[] {
     const out: ValueLine[] = [];
     const clock = this.state.world.clock;
-    if (root && clockRecorded(this.state)) out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: { system: "calendar" }, ...this.timeMark() });
+    const chain = this.placeChain(id);
+    if (root && clockRecorded(this.state)) {
+      const zone = placeZone(this.doc, id);
+      const setter = chain.find((x) => own(this.doc.places, x.id)?.timeZone === zone);
+      const level = setter ? { ref: `place:${setter.id}`, name: setter.name } : { ref: "world", name: this.doc.name };
+      out.push({ key: "time", value: formatClock(calendarOf(this.doc), clock, placeOffset(this.doc, clock, id)), from: { system: "calendar", ...level }, ...(clockPaused(this.doc, this.state.world) ? { paused: true as const } : {}), ...this.timeMark() });
+    }
     const sky = optionalQuery(this.ctx, "weather.sky")?.(this.ctx, id) ?? null;
-    if (sky !== null) out.push({ key: "weather", value: sky, from: { system: "weather" } });
+    if (sky !== null) {
+      const placed = chain.find((x) => typeof x.fields.weather === "string" && x.fields.weather !== "");
+      const region = placed === undefined ? regionOf(this.ctx, id) : null;
+      const level = placed !== undefined ? { ref: `place:${placed.id}`, name: placed.name } : region !== null ? { ref: `entity:${region}`, name: own(this.state.world.entities, region)?.name ?? region } : {};
+      out.push({ key: "weather", value: sky, from: { system: "weather", ...level } });
+    }
     const entry = setEntryOf(this.ctx, id);
     if (entry) out.push({ key: "entry", value: entry.entry, from: entry.at === id ? { system: "orgs" } : { system: "orgs", ref: `place:${entry.at}`, name: own(this.doc.places, entry.at)?.name ?? entry.at } });
     const offers = root ? (optionalQuery(this.ctx, "economy.offers_at")?.(this.ctx, id) ?? []) : [];

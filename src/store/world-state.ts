@@ -18,15 +18,70 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { TidyFinding } from "../shared/thing-gm";
 import { trackOwner } from "../shared/world";
-import { calendarOf, formatClock } from "../engine/calendar";
+import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
+import { clockPaused } from "../engine/time";
 import { clockRecorded } from "./blank";
 import { standing } from "./facts";
 import { eventOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
 import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
-import { factFields, markFields, type TreeView, type ViewReading } from "./view";
+import { factFields, HORIZON, markFields, type TreeView, type ViewReading } from "./view";
 import { readPart, wordLine, type Part, type ViewLine } from "./words";
+
+/** The story area's read of the scene the chat is in (`{ scene, place, who }`, null when none is open; PlanStory-5). */
+const SCENE_READ = "scene";
+
+/** The nearest place at or above `ref` in the tree; none where no place holds it. */
+function placeAbove(view: TreeView, ref: string | null): string | null {
+  for (let at = ref; at !== null; at = view.parentOf(at)) if (at.startsWith("place:")) return at;
+  return null;
+}
+
+/** The levels above `ref` in the tree, nearest first, up to the world. */
+function ancestorsOf(view: TreeView, ref: string): string[] {
+  const out: string[] = [];
+  for (let at = view.parentOf(ref); at !== null; at = view.parentOf(at)) out.push(at);
+  return out;
+}
+
+/** The place the open scene's record names (the story's `scene` read), found in the tree, on any state the store gives; none when no scene is open or its place is not found. */
+export function openScenePlaceOf(view: TreeView): string | null {
+  const area = view.env.areas?.get(HORIZON.area);
+  const read = area?.reads && Object.hasOwn(area.reads, SCENE_READ) ? area.reads[SCENE_READ] : undefined;
+  const scene = read?.(view.state.areas?.[HORIZON.area] ?? area?.initial?.() ?? {}, {});
+  return placeAbove(view, isRecord(scene) && typeof scene.place === "string" ? view.resolve(scene.place) : null);
+}
+
+/** The nearest place that holds his character (the world's point of view), on any state the store gives; none when no place does. */
+export function ownerPlaceOf(view: TreeView): string | null {
+  return placeAbove(view, view.resolve(`entity:${view.world.pov}`));
+}
+
+/** The scene's place (plan §6.9): the open scene's, else the place holding the first horizon entry that names the world, else where his character stands. */
+export function scenePlaceOf(view: TreeView): string | null {
+  return openScenePlaceOf(view) ?? placeAbove(view, view.horizon().find((h) => h.ref !== null)?.ref ?? null) ?? ownerPlaceOf(view);
+}
+
+/** The time at a place: its date and time where the clock is a recorded value (null: nobody set it), the level whose time zone gives it, and whether the clock is paused for the scene. */
+export interface TimeAt {
+  clock: number;
+  time: string | null;
+  from: { ref: string; name: string } | null;
+  paused: boolean;
+}
+
+/** The time at `place` (the scene's place when none is given), on any state the store gives (`TimeAt`). */
+export function timeOf(view: TreeView, place: string | null = scenePlaceOf(view)): TimeAt {
+  const doc = view.world;
+  const clock = view.state.world.clock;
+  const id = place !== null && place.startsWith("place:") ? place.slice("place:".length) : null;
+  const time = clockRecorded(view.state) ? formatClock(calendarOf(doc), clock, placeOffset(doc, clock, id)) : null;
+  const zone = placeZone(doc, id);
+  let from: TimeAt["from"] = null;
+  for (let at = place; at !== null && from === null; at = view.parentOf(at)) if (at.startsWith("place:") && own(doc.places, at.slice("place:".length))?.timeZone === zone) from = { ref: at, name: view.nameOf(at) ?? at };
+  return { clock, time, from: from ?? (time === null ? null : { ref: "world", name: doc.name }), paused: clockPaused(doc, view.state.world) };
+}
 
 /** Every fixed value of the world state, each a setting with this default (Appendix D.1). */
 export const WORLD_STATE_DEFAULTS = Object.freeze({
@@ -81,8 +136,10 @@ export interface WorldStateInput {
   turn: string;
   /** The world state's layout as the chat has it: the part's text, or the part as read. */
   layout: string | Part;
-  /** Each place's map as text; absent, no map is shown. */
+  /** Each place's map as text; absent, no map is shown and no line says so. */
   map?: MapText;
+  /** The drawn layer's version of each grid given already this session, by grid: such a grid is printed with its moving layer only. */
+  drawnGiven?: Readonly<Record<string, string>>;
   /** What time brings due; absent, no due section is given. */
   due?: DueSource;
   /**
@@ -102,6 +159,8 @@ export interface WorldStateBlock {
   sections: Partial<Record<WorldStateSection, ViewLine[]>>;
   /** Tokens of everything but the horizon, as the budget counts them. */
   tokens: number;
+  /** The drawn layer's version of each grid this block printed it for, by grid: the session keeps them and gives them back as `drawnGiven`. */
+  drawnShown: Record<string, string>;
 }
 
 const SOFT_PRECISION = new Set<string>(["approximate", "vague", "unknown"]);
@@ -130,18 +189,17 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const placed = new Set(part.body.fields);
   const want = (s: WorldStateSection): boolean => placed.has(s);
 
-  // The horizon as the Author left it, in his order (plan §6.9): the scene, its first entry that names the world, in full, and every
-  // other entry at the depth he set for it (full when he set none); an entry inside one shown in full is shown with it, and one that
-  // names nothing in the world is shown as his own words, once. It is never cut for length.
+  // The horizon (plan §6.9): first the scene's place (`scenePlaceOf`), in full, whatever the horizon names; then the Author's entries in
+  // his order, each at the depth he set for it (full when he set none); then his character, in full, where neither shows him. An entry
+  // inside one shown in full is shown with it, and one that names nothing in the world is shown as his own words, once. It is never cut.
   const entries = view.horizon();
+  const scenePlace = scenePlaceOf(view);
+  const pov = view.resolve(`entity:${view.world.pov}`);
   const depthOf = new Map<string, number | "full">();
-  for (const h of entries) if (h.ref !== null && !depthOf.has(h.ref)) depthOf.set(h.ref, depthOf.size === 0 ? "full" : h.depth);
-  const ancestors = (ref: string): string[] => {
-    const out: string[] = [];
-    for (let at = view.parentOf(ref); at !== null; at = view.parentOf(at)) out.push(at);
-    return out;
-  };
-  const horizon = [...depthOf.keys()].filter((ref) => !ancestors(ref).some((a) => depthOf.get(a) === "full"));
+  if (scenePlace !== null) depthOf.set(scenePlace, "full");
+  for (const h of entries) if (h.ref !== null && !depthOf.has(h.ref)) depthOf.set(h.ref, h.depth);
+  if (pov !== null && !depthOf.has(pov)) depthOf.set(pov, "full");
+  const horizon = [...depthOf.keys()].filter((ref) => !ancestorsOf(view, ref).some((a) => depthOf.get(a) === "full"));
   // What the horizon shows: each entry, and its levels down to its depth.
   const within = new Set<string>();
   const gather = (ref: string, depth: number | "full"): void => {
@@ -151,26 +209,35 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   for (const ref of horizon) gather(ref, depthOf.get(ref) ?? "full");
   // Every entry brings the chain above it up to the world, nearest first; a parent shared by several, or shown on the horizon, once (R-63).
   const chain: string[] = [];
-  for (const ref of horizon) for (const a of ancestors(ref)) if (!within.has(a) && !chain.includes(a)) chain.push(a);
-  const scene = horizon[0] ?? null;
-  const scenePlace = scene === null ? null : [scene, ...ancestors(scene)].find((r) => r.startsWith("place:")) ?? null;
+  for (const ref of horizon) for (const a of ancestorsOf(view, ref)) if (!within.has(a) && !chain.includes(a)) chain.push(a);
   const nameOf = (ref: string): string => view.nameOf(ref) ?? ref.replace(/^(place|entity):/, "");
 
   const sections: Partial<Record<WorldStateSection, ViewLine[]>> = {};
+  const drawnShown: Record<string, string> = {};
   // Each level's reflection says what falls due under it in the same span the due section lists, when the reading has a due source.
   const reading: ViewReading | undefined = input.due === undefined ? undefined : { due: input.due, ahead: settings.dueAhead };
   if (want("horizon")) {
     const left = new Set<string>(horizon);
+    const maps: Maps = { port: input.map, given: input.drawnGiven ?? {}, shown: drawnShown, grids: new Set(), around: horizon };
+    const show = (ref: string): ViewLine[] => (left.delete(ref) ? horizonLines(view, ref, depthOf.get(ref) ?? "full", maps, reading) : []);
     const said = new Set<string>();
-    sections.horizon = entries.flatMap((h): ViewLine[] => {
-      if (h.ref !== null) return left.delete(h.ref) ? horizonLines(view, h.ref, depthOf.get(h.ref) ?? "full", input.map, reading) : [];
-      if (said.has(h.at)) return [];
-      said.add(h.at);
-      return [{ kind: "horizon_words", depth: 0, fields: { text: h.at } }];
-    });
+    sections.horizon = [
+      ...(scenePlace === null ? [] : show(scenePlace)),
+      ...entries.flatMap((h): ViewLine[] => {
+        if (h.ref !== null) return show(h.ref);
+        if (said.has(h.at)) return [];
+        said.add(h.at);
+        return [{ kind: "horizon_words", depth: 0, fields: { text: h.at } }];
+      }),
+      ...(pov === null ? [] : show(pov)),
+    ];
   }
   if (want("above")) sections.above = chain.flatMap((ref) => view.level(ref, 0, "own", reading) ?? []);
-  if (want("around")) sections.around = around(view, scenePlace, new Set([...within, ...chain])).flatMap((ref) => view.level(ref, 0, "none", reading) ?? []);
+  if (want("around")) {
+    const beside = around(view, scenePlace, new Set([...within, ...chain]));
+    const room = settings.budget * input.charsPerToken;
+    sections.around = [...beside.flatMap((ref) => view.level(ref, 0, "none", reading) ?? []), ...onTheWay(view, scenePlace === null ? [] : [scenePlace, ...beside], input.due, settings.dueAhead, room, nameOf)];
+  }
   const before = turn.parent === null ? null : store.turn(turn.parent);
   const lastRows = before === null ? [] : store.changes(before.id);
   // How many more a section's span holds than its lines list (null: more, uncounted); its cut counts them with what it leaves out.
@@ -282,7 +349,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     if (s !== "horizon") used += (texts[s] ?? "").length;
   }
   const text = part.body.render(part.header, texts).trim();
-  return { text, sections, tokens: Math.ceil(used / input.charsPerToken) };
+  return { text, sections, tokens: Math.ceil(used / input.charsPerToken), drawnShown };
 }
 
 /** What a line takes of the budget: its words and the line break after them; nothing for a kind the layout does not word. */
@@ -385,16 +452,70 @@ function dueShown(part: Part, source: DueSource, state: StoreState, span: { from
   }
 }
 
+/** The maps a world state prints through the map port (Maps-4): each grid once, its drawn layer only where the session was not given that version. */
+interface Maps {
+  port: MapText | undefined;
+  given: Readonly<Record<string, string>>;
+  shown: Record<string, string>;
+  /** The grids printed already in this block. */
+  grids: Set<string>;
+  /** The horizon's entries, which the printed part of a big grid must hold. */
+  around: readonly string[];
+}
+
+/** A place's map line: its moving layer, with its drawn layer where the session was not given that version; none for a place with no map, or on a grid printed already. */
+function mapLine(view: TreeView, place: string, maps: Maps): ViewLine | null {
+  if (maps.port === undefined) return null;
+  const input = { state: view.state, env: view.env, place: place.slice("place:".length), around: maps.around };
+  const moving = maps.port.text({ ...input, layer: "moving" });
+  if (moving === null || maps.grids.has(moving.grid)) return null;
+  maps.grids.add(moving.grid);
+  if (maps.given[moving.grid] === moving.drawn) return { kind: "map", depth: 1, fields: { text: moving.text } };
+  const both = maps.port.text(input) ?? moving;
+  maps.shown[both.grid] = both.drawn;
+  return { kind: "map", depth: 1, fields: { text: both.text } };
+}
+
 /** A horizon entry at its depth; one shown in full that is a place, with its map after its own values. */
-function horizonLines(view: TreeView, ref: string, depth: number | "full", map: MapText | undefined, reading: ViewReading | undefined): ViewLine[] {
+function horizonLines(view: TreeView, ref: string, depth: number | "full", maps: Maps, reading: ViewReading | undefined): ViewLine[] {
   const lines = view.query(ref, depth, reading)?.lines ?? [];
   if (depth !== "full" || !ref.startsWith("place:")) return lines;
-  const printed = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
-  const text = printed === null ? null : printed.text;
-  const mapLine: ViewLine | null = text === null ? null : { kind: "map", depth: 1, fields: { text } };
-  if (mapLine === null) return lines;
+  const map = mapLine(view, ref, maps);
+  if (map === null) return lines;
   const at = lines.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
-  return at < 0 ? [...lines, mapLine] : [...lines.slice(0, at), mapLine, ...lines.slice(at)];
+  return at < 0 ? [...lines, map] : [...lines.slice(0, at), map, ...lines.slice(at)];
+}
+
+/**
+ * Who is on the way to the scene's place or a place beside it (plan §6.9): each one an arrival the due list gives there in the time
+ * ahead brings (a schedule's move there among them), and each person whose recorded trip ends there and has not brought them yet; a
+ * line each, by who, where to and how long from now, none for someone there already. The due list is asked for no more than `room`
+ * lines could ever hold.
+ */
+function onTheWay(view: TreeView, places: readonly string[], due: DueSource | undefined, ahead: number, room: number, nameOf: (ref: string) => string): ViewLine[] {
+  const now = view.state.world.clock;
+  const out: ViewLine[] = [];
+  const seen = new Set<string>();
+  const add = (who: string, to: string, at: number | null): void => {
+    const key = `${who}\u0000${to}`;
+    if (seen.has(key) || ancestorsOf(view, `entity:${who}`).includes(to)) return;
+    seen.add(key);
+    out.push({ kind: "on_the_way", depth: 0, fields: { who: nameOf(`entity:${who}`), to: nameOf(to), ...(at !== null && at > now ? { after: at - now } : {}) } });
+  };
+  for (const to of places) {
+    const listed = due?.due(view.state, { from: now, to: now + ahead }, to, Math.max(1, room)).items ?? [];
+    for (const d of listed) if ((d.kind === "arrival" || d.kind === "place") && (d.where === undefined || view.resolve(d.where) === to)) for (const who of d.who ?? []) add(who, to, d.at);
+  }
+  for (const [id, e] of Object.entries(view.state.world.entities)) {
+    const trips = e.fields.trips;
+    if (!Array.isArray(trips)) continue;
+    for (const t of trips) {
+      if (!isRecord(t) || typeof t.place !== "string" || (typeof t.until === "number" && t.until <= now) || (typeof t.from === "number" && t.from > now + ahead)) continue;
+      const to = view.resolve(`place:${t.place}`);
+      if (to !== null && places.includes(to)) add(id, to, typeof t.from === "number" ? t.from : null);
+    }
+  }
+  return out;
 }
 
 /** Places next to the scene's place: those beside it in the same place, and those a route joins it to. */

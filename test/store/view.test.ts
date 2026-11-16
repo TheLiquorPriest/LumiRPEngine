@@ -85,7 +85,7 @@ describe("the tree view", () => {
     expect(cellar).toContain("  · owner: bram (from The Lamp and Ladle)");
     expect(cellar).toContain("  · region: region_vale (from Hollow Vale)");
     expect(cellar).toContain("  · time zone: Europe/London (from Hollow Vale)");
-    expect(cellar).toContain("  · weather: rain (weather)");
+    expect(cellar).toContain("  · weather: rain (weather, from The vale's weather)");
     // What only describes a level stays with it.
     expect(cellar.some((l) => l.includes("A crooked inn"))).toBe(false);
     expect(lines(say(s.view("c"), "far_road", 0))).toContain("  · law: the Vale charter (from Hollow Vale)");

@@ -84,8 +84,9 @@ describe("the world state", () => {
     const lines = block.text.split("\n");
     const words = `${storm} (on the horizon in your own words: nothing in the world is called that)`;
     expect(lines.filter((l) => l === words)).toHaveLength(1);
-    expect(lines.indexOf(words)).toBeLessThan(lines.findIndex((l) => l.startsWith("The Common Room [common_room] (place)")));
-    expect(block.sections.horizon?.[0]).toEqual({ kind: "horizon_words", depth: 0, fields: { text: storm } });
+    // The scene's place opens the horizon; the words keep their place among the Author's entries after it.
+    expect(lines.indexOf(words)).toBeGreaterThan(lines.findIndex((l) => l.startsWith("The Common Room [common_room] (place)")));
+    expect(block.sections.horizon?.find((l) => l.kind === "horizon_words")).toEqual({ kind: "horizon_words", depth: 0, fields: { text: storm } });
   });
 
   test("a section switched off is absent, a moved one moves, and with no map or due list to hand there is nothing of either", () => {
