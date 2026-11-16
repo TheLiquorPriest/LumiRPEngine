@@ -26,12 +26,6 @@ import { matchAt, snippetOf, wordsOf } from "./words";
 /** A chat's setting `story.from` (R-176): whose messages are its story: as Lumiverse has it (its Sovereign Hand), everyone's, or the replies alone. */
 export type StoryFrom = "lumiverse" | "everyone" | "replies";
 
-/**
- * A message or a hit as the chat port gives it, `story: false` where the chat's story choice leaves it out. The member is RPH's own
- * (`ChatMessage.story`, `ChatHit.story`, signed by the lead) from the RPH that brings it; this type goes when RPE's pin holds it.
- */
-type StoryMarked<T> = T & { story?: false };
-
 /** A message as the chat's path lists it, with no text: its place, and Lumiverse's own facts of it. */
 export interface ChatStep {
   id: string;
@@ -120,7 +114,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     return isRecord(hand) && hand.enabled === true;
   }
 
-  const shown = (m: LvMessage, index: number, readable: boolean, summarized: ReadonlySet<string>, outside: boolean): StoryMarked<ChatMessage> => ({
+  const shown = (m: LvMessage, index: number, readable: boolean, summarized: ReadonlySet<string>, outside: boolean): ChatMessage => ({
     id: m.id,
     index,
     role: m.role,
@@ -191,7 +185,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
       const hits = [...word.map((h) => ({ ...h, how: "words" as const })), ...near.map((h) => ({ ...h, how: "meaning" as const }))];
       const [read, outside] = await Promise.all([deps.reads.messagesById(chat, hits.map((h) => h.id)), playerOutside(chat)]);
       const texts = new Map(read.map((m) => [m.id, m] as const));
-      return hits.flatMap(({ id, i, how }): StoryMarked<ChatHit>[] => {
+      return hits.flatMap(({ id, i, how }): ChatHit[] => {
         const m = texts.get(id);
         return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how, ...(outside && m.role === "user" ? { story: false as const } : {}) }];
       });
