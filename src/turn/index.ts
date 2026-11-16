@@ -6,7 +6,7 @@ export { kvStore, type Writes } from "./kv";
 export { buildTurns, MACHINE_CLOCK, openAppStore, type Turns, type TurnsOptions } from "./lane";
 export { type Received, type TurnPrompts, turnPrompts } from "./prompt";
 export { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf, textOf } from "./request";
-export { TURN_LIST, turnRoutes, type TurnRoutesDeps, WORLD_VIEW } from "./routes";
+export { turnRoutes, type TurnRoutesDeps, WORLD_VIEW } from "./routes";
 export { type RunView, type TurnFileEntry } from "./shapes";
 export { type Run, type RunRecord, Runs, type RunState } from "./runs";
 export { passConnection, TURN_DEFAULTS, TURN_SETTINGS, type TurnSettings, turnSettings } from "./settings";

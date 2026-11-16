@@ -50,7 +50,7 @@ export function servedRpe(): ServedRpe {
   const live = new LiveHub({ queueEvents: 64, now: () => 0 });
   const running = new Set<string>();
   const [post] = buildRoutes(new BuildService({ db: bed.db, writes: bed.writes, store: bed.store, log: bed.log, guidance: GUIDANCE }));
-  const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), log: bed.log }));
+  const [stateRoute, actionsRoute, undoRoute] = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), dueItems: async () => 50, log: bed.log }));
 
   const serve = async (key: string, chat: string, body: unknown, query: Record<string, string>): Promise<unknown> => {
     switch (key) {

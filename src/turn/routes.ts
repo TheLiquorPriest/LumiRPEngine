@@ -1,10 +1,14 @@
 // The routes the Turn and World pages read (plan §14), declared in the route form (`src/app/routes.ts`)
 // with the shapes of `./shapes.ts`, so that the pages' types and the API reference are written from them:
 // the chats RPE played, then those its store holds that it has not (a migration's);
-// a chat's turns newest first, each with what its runs spent
-// together; one turn with its intent record, what went to the chat, the lore of its prompt, its trace,
-// and each of its runs (the first, each continue, each Settle now) with its own trace and the request
-// files the harness kept for it; the Stop of a turn going on now; Settle now, a run on the chat's newest
+// a chat's turns newest first, each with what its runs spent together, a page as long as the settings
+// say; one turn, or the newest on the chat's path in one read, with its intent record, what went to the
+// chat, the lore of its prompt, its trace, each of its runs (the first, each continue, each Settle now)
+// with its own trace and the request files the harness kept for it, its timings with intake's steps and
+// the waits apart, where each slice of its prompt was, what he asked for, the Author's record, the tools
+// it found, its changes by lane, each agent's open todo items, what it was told (gap checks, consents,
+// rules fired, attachments, drops) and, for a carried turn, the old engine's record; what a job he
+// started was told; the Stop of a turn going on now; Settle now, a run on the chat's newest
 // turn that writes nothing into the chat; the files of a turn's folder, listed and read, none outside it;
 // the world's tree for a chat, at its head or at a turn, from the store's own view; a panel's request,
 // held as part of the player's next message; and the jobs (plan §13.5), of the user or of one chat, each
@@ -12,17 +16,18 @@
 // route is a page's: it answers only for the user this RPE belongs to. A route that is handed a turn's
 // id answers a turn joined to another (a continue's held turn) as a fact: the turn it joined (`joined`).
 
-import type { JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
+import type { AgentRef, JobView, Scope, TraceRecord, Usage } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
-import { isRecord } from "../shared/json";
-import { JoinedTurnError, type NodeView, type ValuesShown } from "../store";
+import { isRecord, type JsonValue } from "../shared/json";
+import { type ChangeRow, JoinedTurnError, type NodeView, type ValuesShown } from "../store";
+import { toldOf, toldRows } from "./events";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
+import { turnRecordFields } from "./record";
 import type { RunRecord } from "./runs";
-import { chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, panelRequestBody, panelRequestReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
-
-/** Fixed: turns a chat's list gives when the page names no limit, and the most it gives. */
-export const TURN_LIST = { limit: 50, most: 500 } as const;
+import { turnSettings } from "./settings";
+import { type ChangeView, chatsReply, fileReply, folderReply, jobCancelReply, jobsReply, jobToldReply, panelRequestBody, panelRequestReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
+import { NO_SESSION } from "./turns";
 
 /** What the world's tree shows when the page names nothing: the world, one level in, each level with its own values. */
 export const WORLD_VIEW = { at: "world", depth: 1, values: "own" } as const satisfies { at: string; depth: number; values: ValuesShown };
@@ -63,6 +68,28 @@ function byRun(records: readonly TraceRecord[]): Map<string, TraceRecord[]> {
     else of.push(record);
   }
   return runs;
+}
+
+/** A run's moments as the pages read them. */
+function momentsOf(r: RunRecord) {
+  return { received: r.received, started: r.started, firstWord: r.firstWord, released: r.released, ended: r.ended, finished: r.finished, intent: r.intent, thinking: r.thinking, intake: r.intake, wait: r.wait };
+}
+
+/** The tools a turn's agents reached through `tool_use` (a tool `tool_search` found), by name, each once, in the order first reached. */
+function foundTools(records: readonly TraceRecord[]): string[] {
+  return [...new Set(records.flatMap((t) => (t.event.kind === "tool_started" && t.event.via === "tool_use" ? [t.event.tool] : [])))];
+}
+
+/** Each agent's `todo` items still open as its list last stood; an agent with none open is left out. */
+function openTodos(records: readonly TraceRecord[]): { agent: string; open: string[] }[] {
+  const last = new Map<string, string[]>();
+  for (const t of records) if (t.event.kind === "todo") last.set(t.agent.id, t.event.items.flatMap((item) => (item.done ? [] : [item.text])));
+  return [...last].flatMap(([agent, open]) => (open.length === 0 ? [] : [{ agent, open }]));
+}
+
+/** One change of a turn as its route shows it. */
+function changeOf(c: ChangeRow): ChangeView {
+  return { id: c.id, ord: c.ord, op: c.op, value: c.value, by: c.by, applied: c.applied, reports: c.reports, source: c.source, standing: c.standing, precision: c.precision, job: c.job };
 }
 
 /**
@@ -165,7 +192,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
           status: run.status,
           target: run.target,
           held: run.held,
-          timings: { received: run.received, started: run.started, firstWord: run.firstWord, released: run.released, ended: run.ended, intent: run.intent, thinking: run.thinking },
+          timings: momentsOf(run),
           usage: run.usage ?? NO_USAGE,
           reply: { text: run.reply, progress: [...run.progress] },
           error: run.error,
@@ -189,9 +216,77 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       onPath,
       message: row?.message ?? null,
       status: r.status,
-      timings: { received: r.received, started: r.started, firstWord: r.firstWord, released: r.released, ended: r.ended, intent: r.intent, thinking: r.thinking },
+      timings: momentsOf(r),
       usage: spent(turns.runs.ofTurn(user, r.turn)),
     };
+  };
+
+  /**
+   * What a turn, or a job he started (R-27), was told as it went: its gap checks, consents and rules fired from their tables; a
+   * turn's attachments and drops from what else RPH told of it.
+   */
+  const toldTo = (user: string, of: { turn: string } | { job: string }) => {
+    const { db } = turns.store;
+    const other = "turn" in of ? toldOf(db, user, of.turn) : [];
+    return {
+      gapChecks: toldRows(db, user, "gap-check", of).map((r) => ({ check: r.body, at: r.at })),
+      consents: toldRows(db, user, "consent", of).map((r) => ({ grant: r.body, at: r.at })),
+      rules: toldRows(db, user, "rule", of).map((r) => ({ firing: r.body, at: r.at })),
+      attachments: other.flatMap((t) => (t.kind === "attachments" && isRecord(t.body) ? [{ agent: t.body.agent as AgentRef, refs: (t.body.refs ?? []) as JsonValue, at: t.at }] : [])),
+      dropped: other.flatMap((t) => (t.kind === "dropped" && isRecord(t.body) ? [{ agent: t.body.agent as AgentRef, at: t.at }] : [])),
+    };
+  };
+
+  /** A turn's changes by lane, each lane's in the order recorded, the lanes in the order first written to. */
+  const changesByLane = (user: string, turn: string): { lane: string; changes: ChangeView[] }[] => {
+    const lanes = new Map<string, ChangeView[]>();
+    for (const c of turns.store.user(user).changes(turn)) {
+      const of = lanes.get(c.lane);
+      if (of === undefined) lanes.set(c.lane, [changeOf(c)]);
+      else of.push(changeOf(c));
+    }
+    return [...lanes].map(([lane, changes]) => ({ lane, changes }));
+  };
+
+  /** For a turn a migration carried: its message and swipe, and the old engine's record of it as the migration kept it; null for any other. */
+  const carriedOf = (user: string, turn: string): { message: string; swipe: number; record: JsonValue } | null => {
+    const { db } = turns.store;
+    if (db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'imported_record'").get()?.n !== 1) return null;
+    const row = db.query<{ message: string; swipe: number; record: string }, [string, string]>("SELECT message, swipe, record FROM imported_record WHERE user = ? AND turn = ?").get(user, turn);
+    return row === null ? null : { message: row.message, swipe: row.swipe, record: JSON.parse(row.record) as JsonValue };
+  };
+
+  /** One turn of the chat as its route gives it, read on from record `from` of the run `run` names. */
+  const turnRead = async (user: string, chat: string, turn: string, run: string | undefined, from: number) => {
+    const r = turnOf(user, chat, turn);
+    // Its runs' records, each kept in the folder it played in: a continue that joined this turn played in its own held turn's.
+    const folders = new Set([r.turn, ...turns.runs.ofTurn(user, r.turn).flatMap((each) => (each.held !== null && each.held !== r.turn ? [each.held] : []))]);
+    const records = (await Promise.all([...folders].map((each) => turns.trace.records({ user, chat: r.chat, session: r.session, turn: each })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
+    const runs = byRun(records);
+    const within = readFrom(r.turn, runs, run, from);
+    return {
+      ...summary(user, chat, r),
+      chat: r.chat,
+      intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
+      reply: { text: r.reply, progress: [...r.progress] },
+      error: r.error,
+      trace: records.filter(within),
+      lore: await keptLore(r),
+      runs: await runsOf(r, runs, within),
+      prompt: turns.prompts.located(user, r.turn),
+      asked: turns.player.requestsFor(user, r.chat, [r.turn]),
+      record: turnRecordFields(turns.store, { user, chat: r.chat, session: r.session, turn: r.turn }),
+      found: foundTools(records),
+      todos: openTodos(records),
+      changes: changesByLane(user, r.turn),
+      told: toldTo(user, { turn: r.turn }),
+      carried: carriedOf(user, r.turn),
+    };
+  };
+
+  const runQuery = {
+    run: shape.optional(shape.text(), "One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole."),
+    from: shape.optional(shape.whole({ least: 1 }), "The named run's records are given from the one with this number; 1 when left out."),
   };
 
   return [
@@ -226,15 +321,16 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/turns",
       access: "page",
       group: "turns",
-      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it.",
+      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length.",
       query: {
-        limit: shape.optional(shape.whole({ least: 1 }), `How many turns to give: ${TURN_LIST.limit} when left out, and at most ${TURN_LIST.most}.`),
+        limit: shape.optional(shape.whole({ least: 1 }), "How many turns to give: the setting `turns.page` when left out, and at most `turns.pageMost`."),
         before: shape.optional(shape.turnId(), "A turn's id: the turns older than it are given."),
       },
       reply: turnsReply,
       joined: true,
-      handle: ({ user, params, query }) => {
-        const limit = Math.min(query.limit ?? TURN_LIST.limit, TURN_LIST.most);
+      handle: async ({ user, params, query }) => {
+        const { turnsPage } = await turnSettings(turns.files, { user, chat: params.chat, session: NO_SESSION }, turns.env.log);
+        const limit = Math.min(query.limit ?? turnsPage.size, turnsPage.most);
         if (query.before !== undefined) notJoined(user, params.chat, query.before);
         const kept = turns.runs.ofChatKept(user, params.chat, limit + 1, query.before);
         return { turns: kept.slice(0, limit).map((r) => summary(user, params.chat, r)), more: kept.length > limit };
@@ -245,30 +341,27 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/turns/:turn",
       access: "page",
       group: "turns",
-      does: "One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, and each of its runs.",
-      query: {
-        run: shape.optional(shape.text(), "One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole."),
-        from: shape.optional(shape.whole({ least: 1 }), "The named run's records are given from the one with this number; 1 when left out."),
-      },
+      does: "One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, each of its runs, and all it holds besides (its prompt by slice, what he asked for, the Author's record, the tools it found, its changes by lane, open todo items, what it was told, and the old engine's record of a carried turn).",
+      query: runQuery,
       reply: turnReply,
       joined: true,
-      handle: async ({ user, params, query }) => {
-        const r = turnOf(user, params.chat, params.turn);
-        // Its runs' records, each kept in the folder it played in: a continue that joined this turn played in its own held turn's.
-        const folders = new Set([r.turn, ...turns.runs.ofTurn(user, r.turn).flatMap((run) => (run.held !== null && run.held !== r.turn ? [run.held] : []))]);
-        const records = (await Promise.all([...folders].map((turn) => turns.trace.records({ user, chat: r.chat, session: r.session, turn })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
-        const runs = byRun(records);
-        const within = readFrom(r.turn, runs, query.run, query.from ?? 1);
-        return {
-          ...summary(user, params.chat, r),
-          chat: r.chat,
-          intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
-          reply: { text: r.reply, progress: [...r.progress] },
-          error: r.error,
-          trace: records.filter(within),
-          lore: await keptLore(r),
-          runs: await runsOf(r, runs, within),
-        };
+      handle: ({ user, params, query }) => turnRead(user, params.chat, params.turn, query.run, query.from ?? 1),
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/chats/:chat/newest",
+      access: "page",
+      group: "turns",
+      does: "The newest turn on the chat's path in one read, as the turn's own route gives it: a turn going on now, else the newest of the chat's own on its path, however far back it was swiped.",
+      query: runQuery,
+      reply: turnReply,
+      joined: true,
+      handle: ({ user, params, query }) => {
+        const store = turns.store.user(user);
+        const going = turns.runs.ofChat(user, params.chat).sort((a, b) => b.received - a.received)[0];
+        const newest = going?.turn ?? store.line(params.chat).findLast((l) => store.turn(l.turn)?.chat === params.chat)?.turn;
+        if (newest === undefined) throw new RouteError(404, `Chat ${params.chat} has no turn of its own on its path.`);
+        return turnRead(user, params.chat, newest, query.run, query.from ?? 1);
       },
     }),
     route({
@@ -435,6 +528,19 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         const job = await jobs.get(user, params.job);
         if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
         return { job: (await jobs.cancel(user, job.id)) ?? job };
+      },
+    }),
+    route({
+      method: "GET",
+      path: "/api/v1/jobs/:job/told",
+      access: "page",
+      group: "jobs",
+      does: "What a job he started (which belongs to no turn) was told as it went: its gap checks, consents and rules fired.",
+      reply: jobToldReply,
+      handle: async ({ user, params }) => {
+        const job = await turns.harness.jobs.get(user, params.job);
+        if (job === undefined) throw new RouteError(404, `There is no job ${params.job}.`);
+        return { job: job.id, told: toldTo(user, { job: job.id }) };
       },
     }),
   ] as const;

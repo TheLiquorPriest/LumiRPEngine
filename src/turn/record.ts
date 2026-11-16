@@ -6,8 +6,9 @@
 // chooses no key. A turn the Author wrote no record for gets no file, and neither does a chat whose
 // layout is switched off.
 
-import { type Fields, loadGuidance } from "rp-harness";
+import { loadGuidance } from "rp-harness";
 import type { Scope } from "rp-harness/contract";
+import type { JsonObject } from "../shared/json";
 import type { Store } from "../store";
 import { allSpans, itemView, storyClock } from "../story/kit";
 import { storyAt } from "../story/path";
@@ -21,7 +22,7 @@ export const CARRIED_PART = "carried";
 export const RECORD_PART = "turn-record";
 
 /** The Author's record of the scope's turn on its path, every field as `story_query` answers with it; null when the turn wrote none. */
-export function turnRecordFields(store: Store, scope: Scope & { turn: string }): Fields | null {
+export function turnRecordFields(store: Store, scope: Scope & { turn: string }): JsonObject | null {
   const record = StoryRecord.read(store.db, scope.user, storyAt(store.user(scope.user), scope.chat, scope.turn));
   const id = keyedItemId("record", scope.turn);
   const item = record.of("record").find((i) => i.id === id);

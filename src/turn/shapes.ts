@@ -4,8 +4,8 @@
 // says the same. Written once here, read by the routes (`routes.ts`) and by every page through the
 // generated types.
 
-import type { FindStopped, KeptMessage } from "rp-harness/contract";
-import { type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, replyError, shape, traceRecord, usage } from "../app";
+import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices } from "rp-harness/contract";
+import { agentRef, type Exactly, type Holds, type Infer, jobView, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
 import type { PanelRequest } from "./player";
 import type { NotGiven, RunKind, RunState, StoppedBy } from "./runs";
@@ -42,8 +42,14 @@ const moments = shape.named(
     firstWord: field(nullable(N), "The reply's first words went to the chat."),
     released: field(nullable(N), "The reply was released (plan §10.7)."),
     ended: field(nullable(N), "The lead's run ended; it can go on after the release (plan §10.9)."),
+    finished: field(nullable(N), "The reply went out whole; the run after the reply is from here to `ended`."),
     intent: field(nullable(span), "The intent record's own time, its first token to its last; null when none began; to null when it began and did not end."),
     thinking: field(shape.list(span), "Each span of thinking before a model call's first output on the reply's path, in call order; none when no call thought."),
+    intake: field(
+      nullable(shape.list(shape.object({ step: T, from: N, to: N }))),
+      "Intake's own steps in order, from `received` to `started`, none of them holding a wait for the turn before; null for a run with no intake of its own (a Settle now) or one kept before they were.",
+    ),
+    wait: field(nullable(shape.list(shape.object({ from: N, to: N }))), "Each wait for the turn before, on its own, in order; none when nothing was waited for; null as for `intake`."),
   }),
 );
 
@@ -124,6 +130,82 @@ const runShown = shape.named(
 );
 export type RunView = Infer<typeof runShown>;
 
+const precision = shape.named("FactPrecision", "How exact a value or a fact is.", shape.oneOf("exact", "approximate", "vague", "unknown"));
+const standing = shape.named("FactStanding", "How sure a value or a fact is.", shape.oneOf("established", "proposed", "assumed"));
+const source = shape.named("FactSource", "Where a value or a fact came from.", shape.oneOf("prose", "lore", "author", "gm", "character", "player", "import", "default", "invented"));
+
+export const panelRequestHeld = shape.named("PanelRequestHeld", "A request a panel made, held as part of the player's next message: what was pressed, and what it was pressed on.", shape.object({ id: T, what: T, on: nullable(T), at: N }));
+type PanelMirrored = Holds<Exactly<Infer<typeof panelRequestHeld>, PanelRequest>>;
+
+const sliceAt = shape.object({ message: field(N, "The prompt's message, by place from 0."), start: N, end: N });
+const locatedSlices = shape.named(
+  "LocatedSlices",
+  "Where RPH found each slice of the preset's map in a turn's prompt: each slice's marker, kind, places and length; the text that belongs to no slice; the notices of what changed since the turn before; and how much of the prompt's front stayed the same.",
+  shape.object({
+    preset: nullable(presetRef),
+    slices: shape.list(shape.object({ marker: T, kind: shape.oneOf("instructions", "style", "character", "persona", "world", "note", "lore", "history", "other"), at: shape.list(sliceAt), length: N, hash: T })),
+    unclaimed: shape.list(sliceAt),
+    notices: shape.list(promptNotice),
+    front: field(shape.object({ length: N, brokenBy: opt(T) }), "The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held."),
+  }),
+);
+type LocatedMirrored = Holds<Mutually<Infer<typeof locatedSlices>, LocatedSlices>>;
+
+const reportShown = shape.object({ code: T, values: opt(shape.record(shape.json())) });
+const changeShown = shape.named(
+  "TurnChange",
+  "One change a turn recorded, in its order: the operation and its values, who made it, whether it applied, what it reported, and how exact, how sure and from where it is.",
+  shape.object({
+    id: N,
+    ord: N,
+    op: T,
+    value: shape.json(),
+    by: nullable(T),
+    applied: shape.yesNo(),
+    reports: shape.list(reportShown),
+    source: nullable(source),
+    standing: nullable(standing),
+    precision: nullable(precision),
+    job: field(nullable(T), "The job that recorded it, when a job did."),
+  }),
+);
+/** One change of a turn as its route shows it. */
+export type ChangeView = Infer<typeof changeShown>;
+
+const searchHit = shape.object({ ref: T, title: T, snippet: T, how: field(shape.oneOf("words", "meaning"), "How it matched: by the names and words given, or by meaning.") });
+const gapCheck = shape.named(
+  "GapCheck",
+  "A gap check run (plan §10.5): who ran it, on what, by which names and words, each place it searched with what came back there, and where its evidence was saved.",
+  shape.object({ id: T, by: agentRef, topic: T, terms: shape.list(T), searched: shape.list(shape.object({ where: T, hits: shape.list(searchHit) })), saved: opt(T) }),
+);
+type GapMirrored = Holds<Mutually<Infer<typeof gapCheck>, GapCheck>>;
+const consentGrant = shape.named(
+  "ConsentGrant",
+  "Something the lead allowed to be invented (plan §10.5): who allowed it, for whom, how (its own write, or its answer to a sub-agent), what, within what bounds, and the gap check it rests on.",
+  shape.object({
+    id: T,
+    by: agentRef,
+    to: opt(agentRef),
+    via: shape.union(shape.object({ kind: shape.literal("write"), tool: T, callId: T }), shape.object({ kind: shape.literal("answer"), callId: T })),
+    topic: T,
+    bounds: opt(T),
+    gapCheck: opt(T, "The gap check it rests on; absent when none was cited."),
+  }),
+);
+type ConsentMirrored = Holds<Mutually<Infer<typeof consentGrant>, ConsentGrant>>;
+
+export const toldShown = shape.named(
+  "TurnTold",
+  "What a turn, or a job he started, was told as it went: each gap check, each consent, each rule that fired with what the agent did next, the attachments each agent was given by name, and each sub-agent's writes the lead dropped, in the order told.",
+  shape.object({
+    gapChecks: shape.list(shape.object({ check: gapCheck, at: N })),
+    consents: shape.list(shape.object({ grant: consentGrant, at: N })),
+    rules: shape.list(shape.object({ firing: ruleFiring, at: N })),
+    attachments: shape.list(shape.object({ agent: agentRef, refs: shape.json(), at: N })),
+    dropped: shape.list(shape.object({ agent: agentRef, at: N })),
+  }),
+);
+export const jobToldReply = shape.named("JobToldReply", "What a job he started was told as it went.", shape.object({ job: T, told: toldShown }));
 export const turnReply = shape.named(
   "TurnReply",
   "One turn, read on from where a page has read to, and each of its runs.",
@@ -139,6 +221,14 @@ export const turnReply = shape.named(
       "The lore of the turn's prompt, by id, as its intake kept it: the entries Lumiverse activated for it (Lumiverse's ids), and the entries its lore map showed the Author (RPE's ids, as the map writes them).",
     ),
     runs: field(shape.list(runShown), "Each of its runs, the first first."),
+    prompt: field(nullable(locatedSlices), "Where each slice of the preset's map was in this turn's prompt, with its notices; null where RPH kept none, or no longer keeps it (its folder was pruned)."),
+    asked: field(shape.list(panelRequestHeld), "What he asked for beside his words, through a panel, that this turn was told."),
+    record: field(nullable(shape.record(shape.json())), "The Author's record of the turn as `story_query` shows it, every field; null when it wrote none."),
+    found: field(shape.list(T), "The tools its agents reached through `tool_search` and `tool_use`, by name."),
+    todos: field(shape.list(shape.object({ agent: T, open: shape.list(T) })), "Each agent's `todo` items still open as its list last stood."),
+    changes: field(shape.list(shape.object({ lane: T, changes: shape.list(changeShown) })), "Its changes by lane, each lane's in order."),
+    told: toldShown,
+    carried: field(nullable(shape.object({ message: T, swipe: N, record: shape.json() })), "For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other."),
   }),
 );
 
@@ -183,8 +273,6 @@ export const requestReply = shape.named(
 
 export const settleReply = shape.named("SettleReply", "The newest turn, and the Settle now run begun on it.", shape.object({ turn: shape.turnId(), run: T }));
 
-export const panelRequestHeld = shape.named("PanelRequestHeld", "A request a panel made, held as part of the player's next message: what was pressed, and what it was pressed on.", shape.object({ id: T, what: T, on: nullable(T), at: N }));
-type PanelMirrored = Holds<Exactly<Infer<typeof panelRequestHeld>, PanelRequest>>;
 export const panelRequestReply = shape.object({ request: panelRequestHeld });
 export const panelRequestBody = shape.named(
   "PanelRequestAsk",
@@ -198,10 +286,6 @@ export const jobsReply = shape.named("JobsReply", "The user's jobs (of every cha
 export const jobCancelReply = shape.named("JobCancelReply", "The job as it stands after the cancel; one that had already ended comes back as it ended.", shape.object({ job: jobView }));
 
 // ---------------------------------------------------------------- the world (the store's tree, plan §6.4, §6.6)
-
-const precision = shape.named("FactPrecision", "How exact a value or a fact is.", shape.oneOf("exact", "approximate", "vague", "unknown"));
-const standing = shape.named("FactStanding", "How sure a value or a fact is.", shape.oneOf("established", "proposed", "assumed"));
-const source = shape.named("FactSource", "Where a value or a fact came from.", shape.oneOf("prose", "lore", "author", "gm", "character", "player", "import", "default", "invented"));
 
 const levelKind = shape.named("LevelKind", "What a level of the world's tree is: the world, a place, an entity, or one of the two levels the tree adds (the groups, and what is elsewhere).", shape.oneOf("world", "place", "entity", "groups", "elsewhere"));
 const levelMark = shape.named(
@@ -259,4 +343,4 @@ export const valuesShown = shape.oneOf("none", "own", "all");
 type ValuesMirrored = Holds<Exactly<Infer<typeof valuesShown>, ValuesShown>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [RunKindMirrored, RunStateMirrored, PanelMirrored, NodeMirrored, ValuesMirrored];
+export type Mirrors = [RunKindMirrored, RunStateMirrored, PanelMirrored, NodeMirrored, ValuesMirrored, LocatedMirrored, GapMirrored, ConsentMirrored];

@@ -69,6 +69,19 @@ The chats RPE played, the most recently played first, then the chats its store h
 | Body | none |
 | Reply | [`ChatsReply`](#chatsreply) |
 
+### `GET /api/v1/chats/:chat/messages`
+
+A chat's messages as Lumiverse holds them, by a list of ids or by a stretch of its places (`index_in_chat`, a gap where a message was deleted); only the signed-in user's own chats.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `ids` (may be left out): `string`, The messages' ids, separated by commas<br>`from` (may be left out): `number`, The first place (`index_in_chat`) of a stretch<br>`to` (may be left out): `number`, The place a stretch ends before: the messages from `from` up to but not including it |
+| Body | none |
+| Reply | [`ChatMessagesReply`](#chatmessagesreply) |
+
 ### `POST /api/v1/chats/:chat/requests`
 
 Holds a panel's request as part of the player's next message, for the turn that answers it.
@@ -83,6 +96,20 @@ Holds a panel's request as part of the player's next message, for the turn that 
 | Reply | `{ request: PanelRequestHeld }` |
 
 ## Turns
+
+### `GET /api/v1/chats/:chat/newest`
+
+The newest turn on the chat's path in one read, as the turn's own route gives it: a turn going on now, else the newest of the chat's own on its path, however far back it was swiped.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `run` (may be left out): `string`, One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole<br>`from` (may be left out): `number`, The named run's records are given from the one with this number; 1 when left out |
+| Body | none |
+| Reply | [`TurnReply`](#turnreply) |
+| Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/settle`
 
@@ -99,21 +126,21 @@ Settle now: a run on the chat's newest turn that writes nothing into the chat; a
 
 ### `GET /api/v1/chats/:chat/turns`
 
-A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it.
+A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
-| Query | `limit` (may be left out): `number`, How many turns to give: 50 when left out, and at most 500<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
+| Query | `limit` (may be left out): `number`, How many turns to give: the setting `turns.page` when left out, and at most `turns.pageMost`<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
 | Body | none |
 | Reply | [`TurnsReply`](#turnsreply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn`
 
-One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, and each of its runs.
+One turn, read on from where a page has read to: its intent record, what went to the chat, the lore of its prompt, its runs' records from the record numbered `from` of the run named, each of its runs, and all it holds besides (its prompt by slice, what he asked for, the Author's record, the tools it found, its changes by lane, open todo items, what it was told, and the old engine's record of a carried turn).
 
 | | |
 |---|---|
@@ -642,6 +669,19 @@ Cancels a job; one that has ended already is given as it ended.
 | Query | none |
 | Body | none |
 | Reply | [`JobCancelReply`](#jobcancelreply) |
+
+### `GET /api/v1/jobs/:job/told`
+
+What a job he started (which belongs to no turn) was told as it went: its gap checks, consents and rules fired.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `job` |
+| Query | none |
+| Body | none |
+| Reply | [`JobToldReply`](#jobtoldreply) |
 
 ## Connections
 
@@ -1560,6 +1600,47 @@ What came of a chat the last run looked at, in the run's own words.
 export type ChatImportOutcome = "imported" | "replaced" | "played on RPE: left alone" | "a chat made from it was played on RPE: left alone" | "gone from Lumiverse: removed" | "gone from Lumiverse, played on RPE: left alone" | "gone from Lumiverse, a chat made from it was played on RPE: left alone" | "not imported";
 ```
 
+### `ChatMessageShown`
+
+A message of a chat as Lumiverse holds it: its place (`index_in_chat`, with a gap where one was deleted), who said it, the text the prompt is built from, the swipe it shows, whether it is hidden, and Lumiverse's revision of it.
+
+```ts
+export interface ChatMessageShown {
+  /** Lumiverse's id of the message. */
+  id: string;
+  /** Its chat's id. */
+  chat: string;
+  /** Lumiverse's `index_in_chat`: a gap where a message was deleted. */
+  index: number;
+  /** Who said it. */
+  role: "user" | "assistant" | "system";
+  /** The name it was said under. */
+  name: string;
+  /** The text the prompt is built from. */
+  text: string;
+  /** The swipe it shows. */
+  swipe: number;
+  /** How many swipes it has. */
+  swipes: number;
+  /** Hidden from the prompt. */
+  hidden: boolean;
+  /** When it was sent, epoch milliseconds. */
+  sentAt: number;
+  /** Lumiverse's revision of it: an edit raises it. */
+  revision: number;
+}
+```
+
+### `ChatMessagesReply`
+
+The messages of a chat asked for, in the chat's order.
+
+```ts
+export interface ChatMessagesReply {
+  messages: ChatMessageShown[];
+}
+```
+
 ### `ChatRow`
 
 A chat RPE plays, as the web shell lists them.
@@ -1729,6 +1810,23 @@ A connection's test: how long it took, and the model that answered or the provid
 
 ```ts
 export type ConnectionTested = { ok: true; ms: number; model: string; limits: ModelLimits | null; limitsProblem?: string | null } | { ok: false; ms: number; error: string; limits: ModelLimits | null };
+```
+
+### `ConsentGrant`
+
+Something the lead allowed to be invented (plan §10.5): who allowed it, for whom, how (its own write, or its answer to a sub-agent), what, within what bounds, and the gap check it rests on.
+
+```ts
+export interface ConsentGrant {
+  id: string;
+  by: AgentRef;
+  to?: AgentRef;
+  via: { kind: "write"; tool: string; callId: string } | { kind: "answer"; callId: string };
+  topic: string;
+  bounds?: string;
+  /** The gap check it rests on; absent when none was cited. */
+  gapCheck?: string;
+}
 ```
 
 ### `DiffRow`
@@ -2068,6 +2166,21 @@ export interface FolderReply {
 }
 ```
 
+### `GapCheck`
+
+A gap check run (plan §10.5): who ran it, on what, by which names and words, each place it searched with what came back there, and where its evidence was saved.
+
+```ts
+export interface GapCheck {
+  id: string;
+  by: AgentRef;
+  topic: string;
+  terms: string[];
+  searched: ({ where: string; hits: ({ ref: string; title: string; snippet: string; how: "words" | "meaning" })[] })[];
+  saved?: string;
+}
+```
+
 ### `GuidanceKind`
 
 A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.
@@ -2142,6 +2255,17 @@ Where a job stands.
 
 ```ts
 export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+```
+
+### `JobToldReply`
+
+What a job he started was told as it went.
+
+```ts
+export interface JobToldReply {
+  job: string;
+  told: TurnTold;
+}
 ```
 
 ### `JobView`
@@ -2407,6 +2531,21 @@ The first and the last number of the events the hub dropped before a batch, for 
 export interface LiveMissed {
   from: number;
   to: number;
+}
+```
+
+### `LocatedSlices`
+
+Where RPH found each slice of the preset's map in a turn's prompt: each slice's marker, kind, places and length; the text that belongs to no slice; the notices of what changed since the turn before; and how much of the prompt's front stayed the same.
+
+```ts
+export interface LocatedSlices {
+  preset: { id: string; name?: string; revision?: string } | null;
+  slices: ({ marker: string; kind: "instructions" | "style" | "character" | "persona" | "world" | "note" | "lore" | "history" | "other"; at: { message: number; start: number; end: number }[]; length: number; hash: string })[];
+  unclaimed: { message: number; start: number; end: number }[];
+  notices: PromptNotice[];
+  /** The length of the prompt's front that was the same as the turn before, and the marker of the slice that broke it; no marker when the whole prompt held. */
+  front: { length: number; brokenBy?: string };
 }
 ```
 
@@ -3682,6 +3821,27 @@ export interface TreeListingReply {
 }
 ```
 
+### `TurnChange`
+
+One change a turn recorded, in its order: the operation and its values, who made it, whether it applied, what it reported, and how exact, how sure and from where it is.
+
+```ts
+export interface TurnChange {
+  id: number;
+  ord: number;
+  op: string;
+  value: JsonValue;
+  by: string | null;
+  applied: boolean;
+  reports: { code: string; values?: { [key: string]: JsonValue } }[];
+  source: FactSource | null;
+  standing: FactStanding | null;
+  precision: FactPrecision | null;
+  /** The job that recorded it, when a job did. */
+  job: string | null;
+}
+```
+
 ### `TurnId`
 
 A turn's id: the id RPE gives a turn when it begins it.
@@ -3743,10 +3903,16 @@ export interface TurnMoments {
   released: number | null;
   /** The lead's run ended; it can go on after the release (plan §10.9). */
   ended: number | null;
+  /** The reply went out whole; the run after the reply is from here to `ended`. */
+  finished: number | null;
   /** The intent record's own time, its first token to its last; null when none began; to null when it began and did not end. */
   intent: Span | null;
   /** Each span of thinking before a model call's first output on the reply's path, in call order; none when no call thought. */
   thinking: Span[];
+  /** Intake's own steps in order, from `received` to `started`, none of them holding a wait for the turn before; null for a run with no intake of its own (a Settle now) or one kept before they were. */
+  intake: { step: string; from: number; to: number }[] | null;
+  /** Each wait for the turn before, on its own, in order; none when nothing was waited for; null as for `intake`. */
+  wait: { from: number; to: number }[] | null;
 }
 ```
 
@@ -3779,6 +3945,21 @@ export interface TurnReply {
   lore: { activated: string[]; map: string[] };
   /** Each of its runs, the first first. */
   runs: RunShown[];
+  /** Where each slice of the preset's map was in this turn's prompt, with its notices; null where RPH kept none, or no longer keeps it (its folder was pruned). */
+  prompt: LocatedSlices | null;
+  /** What he asked for beside his words, through a panel, that this turn was told. */
+  asked: PanelRequestHeld[];
+  /** The Author's record of the turn as `story_query` shows it, every field; null when it wrote none. */
+  record: { [key: string]: JsonValue } | null;
+  /** The tools its agents reached through `tool_search` and `tool_use`, by name. */
+  found: string[];
+  /** Each agent's `todo` items still open as its list last stood. */
+  todos: { agent: string; open: string[] }[];
+  /** Its changes by lane, each lane's in order. */
+  changes: { lane: string; changes: TurnChange[] }[];
+  told: TurnTold;
+  /** For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other. */
+  carried: { message: string; swipe: number; record: JsonValue } | null;
 }
 ```
 
@@ -3827,6 +4008,20 @@ Where a turn or a run stands: running, or how it ended.
 
 ```ts
 export type TurnState = "running" | "released" | "no-reply" | "stopped" | "limit" | "failed";
+```
+
+### `TurnTold`
+
+What a turn, or a job he started, was told as it went: each gap check, each consent, each rule that fired with what the agent did next, the attachments each agent was given by name, and each sub-agent's writes the lead dropped, in the order told.
+
+```ts
+export interface TurnTold {
+  gapChecks: { check: GapCheck; at: number }[];
+  consents: { grant: ConsentGrant; at: number }[];
+  rules: { firing: RuleFiring; at: number }[];
+  attachments: { agent: AgentRef; refs: JsonValue; at: number }[];
+  dropped: { agent: AgentRef; at: number }[];
+}
 ```
 
 ### `UndoAsk`
