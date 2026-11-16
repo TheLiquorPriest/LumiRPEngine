@@ -238,6 +238,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     // His own index entry heading the index's file (`lore.index.entry`), read for the chat at each write.
     settingsFor: loreSettingsFor(async (at) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS)),
     log: app.log,
+    // A batch handed to a job is held for it while the job may still write it.
+    jobRunning: async (user, job) => {
+      const view = await harness.jobs.get(user, job);
+      return view !== undefined && ["queued", "held", "running", "asking"].includes(view.state);
+    },
   });
   const overlay = overlayWrite(worlds, () => clock.now());
   const facts = new FactsRegistry();

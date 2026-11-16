@@ -328,7 +328,7 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       for (const { ref, own } of refs) {
         if (own) continue;
         try {
-          const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce()) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
+          const mine = ref === LORE_BATCH ? await loreBatchBlock(deps.loreIndex, scope, inForce(), agent) : ref === LORE_KNOWN ? await knownView(deps, scope, agent, inForce()) : await turnView(reading, ref);
           const text = mine !== undefined ? mine : ((await deps.views?.(scope, agent, ref)) ?? (await castSelf(deps, scope, agent, ref)));
           if (text !== null) blocks.push({ name: ref, text });
         } catch (error) {
@@ -381,6 +381,8 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
         else deps.log.error("A job's new state could not be kept.", { job: job.id, state: job.state, error: words });
         return;
       }
+      // What the lore handed the job that it never wrote is given back once it ended.
+      if (ended) deps.loreIndex.release(job.id);
       if (!ended || scope.turn === undefined) return;
       await deps.jobEnded(scope.user, scope.chat, scope.turn).catch((error: unknown) => deps.log.error("The sessions of a job's scene could not be brought up to date.", { turn: scope.turn ?? null, error: error instanceof Error ? error.message : String(error) }));
     },
