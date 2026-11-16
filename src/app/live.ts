@@ -77,8 +77,8 @@ const ruleFiring = shape.named(
     then: opt(ruleThen),
   }),
 );
-const presetRef = shape.object({ id: T, name: opt(T), revision: opt(T) });
-const promptNotice = shape.named(
+export const presetRef = shape.object({ id: T, name: opt(T), revision: opt(T) });
+export const promptNotice = shape.named(
   "PromptNotice",
   "What changed in the prompt's shape since the turn before, or that it is not mapped or could not be told apart.",
   shape.union(
