@@ -197,7 +197,7 @@ export class Rig {
       },
       blocks: async (tag) => {
         const last = [...this.lv.stored.values()].filter((s) => s.chatId === tag.chat).at(-1);
-        return last === undefined ? null : readBlocksHint(last.data, "breakdown");
+        return { hint: last === undefined ? null : readBlocksHint(last.data, "breakdown"), revision: null };
       },
       models: {
         pass: async (request, sink) => {

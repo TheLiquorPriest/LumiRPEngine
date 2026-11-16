@@ -28,7 +28,7 @@ import { Activations } from "./activation";
 import { IndexFeed } from "./index-feed";
 import { followChanges, type ChatChange, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
-import { blocksHint } from "./hint";
+import { Hints } from "./hint";
 import { createHttpReads } from "./http-reads";
 import { type LumiverseCalls, lumiverseCalls } from "./lumiverse-calls";
 import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
@@ -98,6 +98,8 @@ export interface Lumiverse {
   stores: Stores;
   /** What the index file holds of the user's chats' messages and books' entries, and the search over them. */
   feed: IndexFeed;
+  /** The names of the blocks of the chat's prompt Lumiverse's breakdown or a dry run gave, kept for the prompt's mapping job (`latest`). */
+  hints: Hints;
   /** Lets go of what the door holds of one chat for the Storage page's prune: its held reads, and its entries in the search index, fed again at the chat's next search. */
   dropChat(chat: string): Promise<void>;
   /** Macros resolved and tokens counted as Lumiverse does it. */
@@ -274,7 +276,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       reads.dropChat(id);
       await fed.dropChat(id);
     };
-    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, calls: lumiverseCalls(session), stopGeneration };
+    const hints = new Hints({ reads, session, log, dryRunMs: () => settings().dryRunMs });
+    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, hints, calls: lumiverseCalls(session), stopGeneration };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */
@@ -320,7 +323,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             window: lanes.window,
             reads: promptReads(p.reads),
             room: lanes.room,
-            blocks: blocksHint({ reads: p.reads, session: p.session, log, dryRunMs: () => settings().dryRunMs }),
+            blocks: async (tag) => p.hints.forReply(tag),
             models: lanes.models,
             passConnection: lanes.passConnection,
             passWords: lanes.passWords,
@@ -459,12 +462,13 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       key = (await at.auth.makeKey("extension")).key;
       // What is heard reaches the turn lane in its order, a lore change once its entries are told: while one is being told, what is heard after it waits behind it.
       let behind: Promise<void> | null = null;
-      const { feed } = parts;
+      const { feed, hints } = parts;
       const deliver = (heardChange: ChatChange): void => {
         // A stopped generation's end names the message its partial text was saved to: the one the tag named.
         const change = heard.named(heardChange);
         // A chat the search holds is brought up to date in the background when Lumiverse says one of its messages changed; a chat gone is let go of.
         if (change.kind === "message-edited" || change.kind === "message-deleted" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "generation-ended") feed.changed(change.chat);
+        if (change.kind === "message-deleted") hints.deleted(change.chat);
         if (change.kind === "chat-deleted") feed.dropChat(change.chat).catch((error: unknown) => log(`RPE could not let go of the search entries of chat ${change.chat}: ${error instanceof Error ? error.message : String(error)}`));
         const told = heard.heard(change);
         if (told === null && behind === null) {
@@ -483,6 +487,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       const { reads } = parts;
       const offReads = parts.events.onEvent((event, payload) => {
         reads.heard(event, payload);
+        void hints.heard(event, payload).catch((error: unknown) => log(`Lumiverse's breakdown of a prompt could not be taken in: ${error instanceof Error ? error.message : String(error)}`));
         // A message Lumiverse added to the chat is searched for from now on.
         if (event === "MESSAGE_SENT" && isRecord(payload) && typeof payload.chatId === "string") feed.changed(payload.chatId);
       });

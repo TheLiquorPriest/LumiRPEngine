@@ -14,7 +14,8 @@ import type { Clock, PassError, PassRequest, PassSink, PromptRole, Usage as Pass
 import { isRecord, type JsonObject } from "../../shared/json";
 import type { HistoryWindow } from "./answer";
 import type { HeardGenerations } from "./heard";
-import { rawLayout, type BlocksHint } from "./layout";
+import { rawLayout } from "./layout";
+import type { HintFor } from "./hint";
 import type { RawLayout } from "rp-harness/contract";
 import { receive, Refused, type Cut, type ModelRooms, type PromptReads } from "./receipt";
 import { streamedReply, wholeReply, type ReplyStream, type Usage } from "./stream";
@@ -70,8 +71,8 @@ export interface ProviderDeps {
   reads: PromptReads;
   /** The Author's model's room for the chat's prompt (the turn lane, through RPH's model port): what the model's own window lets through (§4.2 l.237). */
   room: ModelRooms;
-  /** Lumiverse's breakdown of the chat's prompt, a hint for names (`hint.ts`); null when it has none. */
-  blocks(tag: Tag, signal: AbortSignal): Promise<BlocksHint | null>;
+  /** The names of the blocks of the chat's prompt as far as they are known now, never waited for, and the preset's revision (`hint.ts`). */
+  blocks(tag: Tag, signal: AbortSignal): Promise<HintFor>;
   /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
   models: OwnerPass;
   /** The connection a request with no tag is passed on to; null for RPH's default. */
@@ -148,16 +149,16 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       // The window is the user's setting: a reply whose window RPE could not work out is not sent with more history than it allows.
       return e instanceof Refused ? error(e.status, e.message) : error(500, `RPE could not prepare this reply: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const hint = await deps.blocks(read.tag, request.signal).catch((e: unknown) => {
-      // Only a hint for names: without it the layout names parts by their place.
+    // Only a hint for names, and never waited for: without it the layout names parts by their place (`hint.ts`).
+    const { hint, revision } = await deps.blocks(read.tag, request.signal).catch((e: unknown): HintFor => {
       deps.log?.(`Lumiverse's breakdown of chat ${read.tag.chat} was not read: ${e instanceof Error ? e.message : String(e)}`);
-      return null;
+      return { hint: null, revision: null };
     });
     const { messages: _messages, model, stream, [TAG_FIELD]: _tag, ...parameters } = body;
     const turn: TaggedTurn = {
       tag: received.tag,
       prompt: received.messages.map((m) => ({ role: ROLES.includes(m.role) ? (m.role as PromptRole) : "user", content: m.content, ...(m.thinking !== undefined ? { thinking: m.thinking } : {}) })),
-      layout: rawLayout(received.tag, received.messages, received.cut.told, hint),
+      layout: rawLayout(received.tag, received.messages, received.cut.told, hint, revision),
       cut: received.cut,
       model: typeof model === "string" ? model : null,
       ...(stream === true ? {} : { whole: true, hold: deps.holdMs() }),

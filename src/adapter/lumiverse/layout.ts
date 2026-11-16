@@ -111,12 +111,12 @@ function placeBlocks(messages: RawMessage[], texts: readonly string[], blocks: r
 }
 
 /**
- * The raw layout of the prompt RPE passes on (`messages`), from the tag that listed it and Lumiverse's breakdown of it. `told`: every
+ * The raw layout of the prompt RPE passes on (`messages`), from the tag that listed it and Lumiverse's breakdown of it, with its preset's `revision` as the adapter reads it (R-18). `told`: every
  * listed message was found in the body (`Cut.told`). Where not, the prompt is unsupported for slicing (§18.1 row 0.4): each message is
  * carried whole as one part no listed message accounts for, so the Author still gets the whole prompt. A message Lumiverse added after
  * its interceptors is such a part in a told prompt too.
  */
-export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: boolean, hint: BlocksHint | null): RawLayout {
+export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: boolean, hint: BlocksHint | null, revision: string | null = null): RawLayout {
   const out: RawMessage[] = messages.map((m) => {
     const parts: RawPart[] = !told || m.places.length === 0
       ? [{ start: 0, end: m.text.length, role: role(m.role) ?? "user", hash: textHash(m.text), kind: "unknown", blocks: [] }]
@@ -128,6 +128,8 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
             role: listed.role,
             hash: listed.hash,
             kind: listed.history ? "history" : listed.lore ? "lore" : "other",
+            // Lumiverse's memory put a summary here in place of the messages it sums: marked as a summary (§4.2).
+            ...(listed.summary ? { summarized: true as const } : {}),
             ...(listed.source ? { source: { ...listed.source } } : {}),
             blocks: [],
           };
@@ -138,6 +140,6 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
   });
   const blocks = hint?.blocks ?? [];
   placeBlocks(out, messages.map((m) => m.text), blocks);
-  const preset = tag.preset === null ? null : { id: tag.preset, ...(hint !== null && hint.presetId === tag.preset && hint.presetName !== null ? { name: hint.presetName } : {}) };
+  const preset = tag.preset === null ? null : { id: tag.preset, ...(hint !== null && hint.presetId === tag.preset && hint.presetName !== null ? { name: hint.presetName } : {}), ...(revision !== null ? { revision } : {}) };
   return { preset, messages: out, complete: told, blocks, blocksFrom: hint?.from ?? null };
 }
