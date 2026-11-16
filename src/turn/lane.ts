@@ -19,7 +19,7 @@
 
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions, type LinesPart, loadGuidance } from "rp-harness";
-import type { AgentRef, Clock, Environment, Harness, HostTool, JsonValue, Scope } from "rp-harness/contract";
+import type { AgentRef, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, Scope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { App } from "../app";
@@ -43,6 +43,7 @@ import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } f
 import { TurnMarks } from "./marks";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
+import { stateSearcher, storySearcher } from "./searchers";
 import { STORE_AREAS } from "./store-areas";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
@@ -366,7 +367,11 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     lore: { ...lorePorts, read: (scope, ids, reader) => lorePorts.read(joined(scope), ids, reader), search: (scope, query, reader) => lorePorts.search(joined(scope), query, reader) },
     prompt: prompts,
     tools: { all: async (scope) => (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) })) },
-    searchers: [],
+    // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
+    searchers: [stateSearcher, storySearcher].map((make) => {
+      const searcher = make({ store, personPlayed: (at, plays) => lore.personPlayed(at, plays), snippet: async (scope) => (await turnSettings(files, scope, app.log)).gapSnippet });
+      return { name: searcher.name, search: (scope: Scope, query: GapQuery) => searcher.search(joined(scope), query) };
+    }),
     facts: { defs: () => facts.defs(), read: (scope, names) => facts.read(joined(scope), names) },
     models: app.models,
     switches: app.switches,

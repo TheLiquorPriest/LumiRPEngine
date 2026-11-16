@@ -107,6 +107,8 @@ export interface TurnSettings {
   /** Whose messages are the chat's story (`story.from`), and, read with `replies`, whether his newest message is the turn's direction (`story.newest`): briefing facts (R-176). */
   storyFrom: StoryFrom;
   storyNewest: StoryNewest;
+  /** The most characters of a gap check's hit in the state or the story record (`gap.snippet`). */
+  gapSnippet: number;
 }
 
 /** Whose messages are the story: as Lumiverse has it, everyone's, or the replies alone (R-176). */
@@ -154,6 +156,7 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   // R-176: today's values, carried.
   storyFrom: "lumiverse",
   storyNewest: "directive",
+  gapSnippet: 240,
 });
 
 const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
@@ -355,6 +358,15 @@ const DEFS = {
     about: "With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
     effect: "turn",
   },
+  gapSnippet: {
+    key: "gap.snippet",
+    default: TURN_DEFAULTS.gapSnippet,
+    takes: { type: "whole", least: 1 },
+    perConnection: false,
+    name: "Gap check hit length",
+    about: "The most characters of a gap check's hit in the world state or the story record that the agent reads and the evidence keeps.",
+    effect: "turn",
+  },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting the turn lane reads, as a config file writes it: its own, the map's and the taps'. */
@@ -392,6 +404,7 @@ export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Pr
     taps: tapSettingsRead(read),
     storyFrom: read.value(DEFS.storyFrom) as StoryFrom,
     storyNewest: read.value(DEFS.storyNewest) as StoryNewest,
+    gapSnippet: read.value(DEFS.gapSnippet) as number,
   };
 }
 
