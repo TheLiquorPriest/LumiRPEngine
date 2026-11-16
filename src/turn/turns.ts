@@ -43,6 +43,8 @@ import { storySoFar } from "../story/sofar";
 import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
 import { type Attempt, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
+import { ownerEditsBefore } from "./owner-changes";
+import type { OffstageSettings } from "../shared/offstage";
 import type { Writes } from "./kv";
 import type { TurnPrompts } from "./prompt";
 import type { TurnMarks } from "./marks";
@@ -316,6 +318,8 @@ interface Found {
   notAppliedBudget: number;
   /** A text's tokens as the model layer counts them (`tokenCount`). */
   tokens: (text: string) => number;
+  /** The chat's out-of-play settings, by which an edit of his he made no choice on is told or not. */
+  tell: OffstageSettings;
 }
 
 /**
@@ -615,7 +619,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // turn-errors line that says so.
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
         // The briefing's blocks, and what has happened since the last turn.
-        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken) };
+        const found = { steps, notices: lines(notices), guidance, last, stopped, again: named !== null, replaced, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const writes = tag.target.message !== null && (tag.kind === "new" || tag.kind === "swipe" || tag.kind === "regenerate");
         const at: BriefingFor = { kind: tag.kind, speaker: tag.speaker.name, message: target, writing: writes ? tag.target.message : null, keep: tagged.cut.keep?.id ?? null, limits, notGiven: left, cut: tagged.cut };
         // A continue whose tag names a turn's message is told what is new since that turn's runs were told, as a continue of it.
@@ -953,7 +957,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let request: TurnRequest;
       try {
         if (settings.lead === null) throw new Error(await turnErrorWords(this.#d.files, { user, chat }, "no_lead"));
-        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken) };
+        const found = { steps, notices: lines(notices), guidance, last, stopped: [], again: true, replaced: null, hiddenReadable: settings.hiddenReadable, editedBudget: settings.editedBudget, deleted: { budget: settings.deletedBudget, words: settings.deletedWords }, notAppliedBudget: settings.notAppliedBudget, tokens: tokenCount(settings.charsPerToken), tell: settings.taps.tell };
         const limits = (): Promise<ModelLimits | null> => this.#leadLimits(scope, settings.lead);
         const at: BriefingFor = { kind: run.kind, speaker: null, message: null, writing: null, keep: this.#d.prompts.keptFrom(user, turn.id), limits, notGiven: [], cut: { notices: [], clipped: null } };
         const [{ blocks: briefing, notGiven }, { items, told }] = await Promise.all([this.#briefing(reads, guidance, scope, at, steps, settings), this.#since(reads, user, turn, found)]);
@@ -1566,6 +1570,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
     if (!again) for (const job of this.#jobsEnded(user, turn)) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
+    // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed and what it changed; a swipe of
+    // the turn told them is told them again, a continue is not.
+    if (!again) {
+      const revision = store.chat(chat)?.revision ?? null;
+      const world = revision === null ? undefined : this.#d.store.env.worlds(revision);
+      for (const e of ownerEditsBefore(store, chat, turn.id, found.tell, world)) add("player-edit", notices?.line("player_edit", e.fields));
+    }
     // The run after a reply is the turn's own work done late (plan §10.9): one stopped at its limit is told as a job is, with what it recorded kept.
     for (const r of stopped) add("job", notices?.line("previous_run_stopped"), { turn: r.turn });
     // What this turn was told that decides what later turns are: a continue's found things, so the turns after the turn it continues
