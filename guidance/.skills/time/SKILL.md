@@ -12,7 +12,7 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 - Pass the time the story took. A conversation is minutes. A meal is an hour. A night's sleep is a night. If the prose does not say, choose plainly and say what you chose.
 - Pass it once per turn, for the whole of what the turn covers. Do not pass it again when a sub-agent has already done so: look at the clock first.
-- In a fight or a chase on a room grid, time moves in the grid's own step, a few seconds a round. Do not add minutes on top.
+- In a fight or a chase on a room grid, time moves in the grid's own step, a few seconds a round. Pass it as `rounds` (the scene's grid says how long each is) or as `seconds`; do not add minutes on top. The round tool already moves the clock by the rounds it plays: do not pass those again.
 
 ## What time brings due
 
