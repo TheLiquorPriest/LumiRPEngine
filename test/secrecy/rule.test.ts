@@ -15,7 +15,7 @@ import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { bookTextHash } from "../../src/shared/lore";
 import { factId, MINDS_EVENTS } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
-import { type NarratorView, NARRATOR_DEFAULTS } from "../../src/shared/settings";
+import { type NarratorView, NARRATOR_DEFAULTS } from "../../src/shared/narrator-view";
 import type { WorldDoc } from "../../src/shared/world";
 import type { WorldState } from "../../src/engine/state";
 import { blind } from "../../src/secrecy/blind";

@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { lintDiff, lintSummary, ranked } from "../../src/cli/report";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 
 const issue = (severity: LintIssue["severity"], code: string, path: string, message = `${code} at ${path}`): LintIssue => ({ severity, path, code, message });
 

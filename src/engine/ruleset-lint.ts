@@ -7,7 +7,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import { DOMAINS } from "../shared/ids";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { CheckDef, EffectSpec, Expr, ProgressionDef, WorldDoc } from "../shared/world";
 import { EFFECT_ONLY_FUNCTIONS, objectiveWhen, requirementExpr } from "../shared/world";
 import { lintAdjudication } from "./adjudication";

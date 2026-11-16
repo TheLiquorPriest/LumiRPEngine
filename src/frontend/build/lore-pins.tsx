@@ -12,7 +12,7 @@
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { lorePinKey, lorePinsJson, lorePinsOf } from "../../shared/lore";
 import { isMindPurpose, type MindPurpose } from "../../shared/minds";
-import type { LoreBookEntryView, LoreBookView, LorePinView } from "../../shared/protocol";
+import type { LoreBookEntryView, LoreBookView, LorePinView } from "../../shared/lore-views";
 import type { LorePin, LorePins, StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
 import { Badge, Button, Section, useBusy } from "../components";

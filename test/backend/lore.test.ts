@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { JobProposal } from "../../src/shared/protocol";
+import type { JobProposal } from "../../src/shared/jobs";
 import type { WorldDoc } from "../../src/shared/world";
 import { IMPORT_MAX_CALLS } from "../../src/backend/proposals";
 import { INDEX_TEXT_CHUNK, textChunks } from "../../src/backend/lore-index";

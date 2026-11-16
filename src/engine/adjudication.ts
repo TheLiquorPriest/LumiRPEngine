@@ -21,7 +21,7 @@ import { ADJUDICATION_PRESET_IDS, ADJUDICATION_PRESET_LABEL, defaultAdjudication
 import { hashJson, hashParts } from "../shared/hash";
 import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { PaletteOption } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, AdjudicationPresetId, CheckAuthority, CheckDef, RetryRule, WorldDoc } from "../shared/world";
 import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, type OutcomeCounts, type ReadyCheck } from "./checks";

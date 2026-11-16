@@ -10,7 +10,7 @@ import { hasOwn } from "../../shared/json";
 import type { JsonObject } from "../../shared/json";
 import type { AuthoredHolding, AuthoredHoldings, FidelityWeights, HoldingBelief, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
 import { DEFAULT_WORLD_MINDS, factId, HOLDING_BELIEFS, MINDS_RANGES, worldMindsOf } from "../../shared/minds";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Button, Disclosure, IconButton, IdText, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";

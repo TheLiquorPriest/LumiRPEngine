@@ -5,7 +5,8 @@
 // Pure.
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import type { JsonPatchOp, LintFix, LintIssue } from "../../../shared/protocol";
+import type { JsonPatchOp } from "../../../shared/json-patch";
+import type { LintFix, LintIssue } from "../../../shared/lint";
 import { pointerOf } from "../../../shared/json-patch";
 import type { Size, SizeClass } from "../../../shared/things";
 import { SIZE_LABELS, sizeRank, thingsConfigOf } from "../../../shared/things";

@@ -21,11 +21,13 @@ import type { ChatRun } from "../shared/ledger";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey, shareAlike } from "../shared/json";
 import { applyPatch, isPrototypeKey, jsonEqual, measure, parsePointer, PatchError, readOp } from "../shared/json-patch";
-import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
+import type { EditorAnswer, EditorRequest, WorldCollection, WorldPart } from "../shared/world";
+import type { JsonPatchOp } from "../shared/json-patch";
+import type { LintIssue } from "../shared/lint";
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_PLACE_CAPS, DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
-import { narratorViewOf } from "../shared/settings";
+import { narratorViewOf } from "../shared/narrator-view";
 import { loreBooksOf, lorePinsOf, loreSourceOf } from "../shared/lore";
 import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, routineShapeProblems } from "../shared/routines";
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
@@ -59,7 +61,7 @@ export interface DraftState {
 export type DraftNotice = (worldId: WorldId, state: DraftState) => void;
 
 /** An editor operation's answer: the draft as it stands after it. */
-export type EditorResult = ResultBodies["lre.editor"];
+export type EditorResult = EditorAnswer;
 
 /** What made a revision the head, as the world's history keeps it. */
 export type HeadSource = RevisionNote["source"];

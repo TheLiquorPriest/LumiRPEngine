@@ -8,7 +8,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { WorldId } from "../../shared/ids";
 import type { EntityUpgradePick } from "../../shared/ledger";
-import type { UpgradeChange, UpgradePreview, WorldChatInfo } from "../../shared/protocol";
+import type { WorldChatInfo } from "../../shared/protocol";
+import type { UpgradeChange, UpgradePreview } from "../../shared/upgrade";
 import { useApp, useView } from "../app";
 import { Badge, Banner, Button, List, ListRow, Section, Seg, useBusy } from "../components";
 import { ActionRow, ActionRows, GmCard } from "../gm/ui";

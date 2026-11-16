@@ -9,7 +9,7 @@ import type { TierId } from "../../shared/ids";
 import { BANDS } from "../../shared/ids";
 import type { JsonValue } from "../../shared/json";
 import { safeKey } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { BAND_LABEL, spawnTierOf, tiersInOrder } from "../../shared/tiers";
 import type { TierDef, WorldDoc } from "../../shared/world";
 import { Button, Disclosure, Field, IconButton, IdText, PageHeader, SaveBar, Seg, useBusy, useShowIds } from "../components";

@@ -8,7 +8,7 @@ import type { EntityId, SlotId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
 import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
-import type { NarratorView } from "../shared/settings";
+import type { NarratorView } from "../shared/narrator-view";
 import { readSectionFeed, SECTION_FEED_KEYS, type FeedScope, type SectionFeed, type SectionTemplate } from "../shared/world";
 import { feedSentence } from "../shared/words";
 import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./registry";

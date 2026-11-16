@@ -13,7 +13,7 @@ import type { EntityUpgradePick, UpgradeAspect } from "../shared/ledger";
 import { UPGRADE_ASPECTS } from "../shared/ledger";
 import { OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, worthShares, type OwnerRole } from "../shared/finance";
 import { isRecord, type JsonObject } from "../shared/json";
-import type { UpgradeChange, UpgradeEntityRow, UpgradePreview, UpgradeTarget } from "../shared/protocol";
+import type { UpgradeChange, UpgradeEntityRow, UpgradePreview, UpgradeTarget } from "../shared/upgrade";
 import { tierLabel } from "../shared/tiers";
 import type { FieldDef, RelationInstance, WorldDoc } from "../shared/world";
 import { formatMoney, lifeStateOf } from "../shared/world";

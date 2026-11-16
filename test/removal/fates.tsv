@@ -843,6 +843,7 @@ src/shared/decide.ts	kept	under		the shapes of a typed decision, moved out of sr
 src/shared/diagnostics.ts	removed	PlanSwap-10	ui	the old engines' per-turn diagnostics records and activity line (DESIGN §6.9; §15.4: their UI)
 src/shared/diagnostics.ts	piece	PlanSwap-15	src/frontend/build/jobs.tsx	phaseTimeText, which Build's jobs page shows (jobs.tsx:14)
 src/shared/diagnostics.ts	piece	PlanSwap-15	src/migrate/today/	what today's ledger and settings store read of it, carried without texts (diagnostics.ts)
+src/shared/edit-ops.ts	kept	under		an edit's operations, moved out of protocol.ts by PlanSwap-13 item 2
 src/shared/final-review.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
 src/shared/final-review.ts	piece	PlanSwap-15	src/shared/ledger.ts	FinalEdit and finalEditsOf, which the kept ledger reads of a record (src/engine/ledger/journal.ts:7, :828; src/engine/thing-tidy.ts:24; src/shared/ledger.ts:11)
 src/shared/finance.ts	kept	under
@@ -868,17 +869,21 @@ src/shared/host.ts	kept	under		the host's shapes, moved whole from src/backend/h
 src/shared/ids.ts	kept	under
 src/shared/inferred.ts	kept	under
 src/shared/items-build.ts	kept	under
+src/shared/jobs.ts	kept	under		Build's jobs as data, moved out of protocol.ts by PlanSwap-13 item 2
 src/shared/json-patch.ts	kept	under
 src/shared/json.ts	kept	under
 src/shared/ledger.ts	kept	under
+src/shared/lint.ts	kept	under		a world's lint and its fix, moved out of protocol.ts by PlanSwap-13 item 2
 src/shared/live.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
 src/shared/lore-routing.ts	removed	PlanSwap-10	agents	the agents engine's lore routing; only the old preview's mock backend reaches it (dev/preview/mock-backend.ts, PlanSwap-7)
+src/shared/lore-views.ts	kept	under		Build's views of his lore books, moved out of protocol.ts and settings.ts by PlanSwap-13 items 1 and 3 (Build's lore service reads them too)
 src/shared/lore.ts	kept	under
 src/shared/lre-map-v1.schema.json	kept	under
 src/shared/macros.ts	kept	under
 src/shared/main-agent-prompts.ts	removed	PlanSwap-10	texts	the old engines' prompt texts
 src/shared/maps.ts	kept	under
 src/shared/minds.ts	kept	under
+src/shared/narrator-view.ts	kept	under		the narrator's view, moved out of settings.ts by PlanSwap-13 item 3
 src/shared/money.ts	kept	under
 src/shared/needs.ts	kept	under
 src/shared/offstage.ts	kept	under
@@ -929,11 +934,13 @@ src/shared/text-diff.ts	kept	under
 src/shared/thing-gm.ts	kept	under
 src/shared/thing-view.ts	kept	under
 src/shared/things.ts	kept	under
+src/shared/time-reach.ts	kept	under		the clock's reach and Speed through, moved out of settings.ts by PlanSwap-13 item 3
 src/shared/tiers.ts	kept	under
 src/shared/timeouts.ts	kept	under
 src/shared/timeouts.ts	cut	PlanSwap-9		the six turn timeouts (engineRunMs, preLookupMs, finalReviewMs, postReplyMs, postLookupMs, skipPlanMs) and guardMs
 src/shared/travel.ts	kept	under
 src/shared/vehicles.ts	kept	under
+src/shared/upgrade.ts	kept	under		what an Upgrade brings into a chat, moved out of protocol.ts by PlanSwap-13 (the world store reads it too)
 src/shared/words.ts	kept	under
 src/shared/world-diff.ts	kept	under
 src/shared/world.ts	kept	under

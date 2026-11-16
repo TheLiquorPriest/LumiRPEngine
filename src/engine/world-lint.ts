@@ -8,8 +8,8 @@
 import { CLAIM_MODE_LABEL, CLAIM_MODES, readClaims } from "../shared/claims";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { LintIssue } from "../shared/protocol";
-import { narratorViewOf } from "../shared/settings";
+import type { LintIssue } from "../shared/lint";
+import { narratorViewOf } from "../shared/narrator-view";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, KindDef, WorldDoc } from "../shared/world";

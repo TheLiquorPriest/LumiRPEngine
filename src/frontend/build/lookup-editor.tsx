@@ -8,7 +8,7 @@ import { useId, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreTerm, termSuggestions, topicIdOf, topicSuggestions } from "../../shared/lore";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { LoreIndex, WorldDoc } from "../../shared/world";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, PageHeader, SaveBar, Seg, useBusy } from "../components";
 import { Icon } from "../../ui/icons";

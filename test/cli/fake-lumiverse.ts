@@ -7,7 +7,8 @@
 import { STARTER_INFO, STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
-import type { LintIssue, MarkerPreview, WorldChatInfo } from "../../src/shared/protocol";
+import type { MarkerPreview, WorldChatInfo } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world";
 import type { Http, HttpRequest, OpenSocket, SocketEvents } from "../../src/cli/connection";

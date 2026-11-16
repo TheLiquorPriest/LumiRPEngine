@@ -6,7 +6,7 @@
 // own Extends cuts the pack's chain.
 
 import { describe, expect, test } from "bun:test";
-import type { JobProposal } from "../../../src/shared/protocol";
+import type { JobProposal } from "../../../src/shared/jobs";
 import { playedKinds, type WorldDoc } from "../../../src/shared/world";
 import { lintWorld, migrateWorld, newBlankWorld } from "../../../src/engine/authoring";
 import { buildCharacter } from "../../../src/engine/character";

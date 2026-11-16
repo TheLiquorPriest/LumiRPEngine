@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { WorldId } from "../../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
-import type { WorldCollection, WorldPart } from "../../shared/protocol";
+import type { WorldCollection, WorldPart } from "../../shared/world";
 import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
 import type { App, BuildRoute } from "../app";
 import { useApp } from "../app";

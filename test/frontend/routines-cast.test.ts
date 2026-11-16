@@ -13,7 +13,7 @@ import { routinePlayerView } from "../../src/packs/castlife/core/view";
 import { usualDay } from "../../src/packs/castlife/ui/person";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { JsonValue } from "../../src/shared/json";
-import type { JobProposal } from "../../src/shared/protocol";
+import type { JobProposal } from "../../src/shared/jobs";
 import { routineShapeProblems, type RoutineDef } from "../../src/shared/routines";
 import type { WorldDoc } from "../../src/shared/world";
 import { modernUsWorld } from "../packs/riverton";

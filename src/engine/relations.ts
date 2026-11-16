@@ -11,7 +11,7 @@
 import type { EntityId, RelationTypeId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { Cardinality, RelationInstance, RelationTypeDef, WorldDoc } from "../shared/world";
 import { own } from "./pack-kit";
 import type { Rejection } from "./registry";

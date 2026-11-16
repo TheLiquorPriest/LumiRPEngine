@@ -19,7 +19,9 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import type { EntityId } from "../../shared/ids";
-import type { EditOp, GmThingsRead, ResultBodies } from "../../shared/protocol";
+import type { ResultBodies } from "../../shared/protocol";
+import type { EditOp } from "../../shared/edit-ops";
+import type { GmThingsRead } from "../../shared/thing-view";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { GmThingExtras, HistorySource, KeepResult, LoanChoice, MadeInPlay, RestView, TidyFinding, TidyFix, TidyKind, TidyRun } from "../../shared/thing-gm";
 import type { HandoverBasis, ItemOp, Rest, SetKind, Size, SizeClass, Spot } from "../../shared/things";

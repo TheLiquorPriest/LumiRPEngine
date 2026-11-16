@@ -12,7 +12,7 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { CommitmentKind, CommitmentStatus, FactId, Fidelity, HoldingBelief, HoldingHow, MindApproach, MindIntent, MindsGmCharacter, MindsGmHolding, MindsGmView, PlanKind, PlanStatus, RefreshReason } from "../../../shared/minds";
 import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, MIND_APPROACHES, PLAN_KINDS, PLAN_PRIORITY, planInForce, witnessRef } from "../../../shared/minds";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Chip } from "../../../frontend/build/form-kit";

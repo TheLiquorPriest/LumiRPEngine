@@ -24,7 +24,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { CLASS_TRAITS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, LEGACY_TYPE_CLASS, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, UNPAID, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
 import { pointerOf } from "../../../shared/json-patch";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { OrgMember } from "../../../shared/org";
 import { formatMoney } from "../../../shared/world";
 import { minorUnitPlural } from "../../../shared/money";

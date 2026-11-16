@@ -13,7 +13,7 @@ import { ADJUDICATION_PRESET_LABEL, presetAdjudication, readAdjudication } from 
 import { INFER_MODE_LABEL, inferredDefaults, readInferred, type InferredChecks, type SheetSkill } from "../../shared/inferred";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { profileOf } from "../../shared/profiles/index";
 import type { SheetSectionView } from "../../shared/state-view";
 import { playedKinds, type FieldDef, type ProgressionDef, type RulesetDef, type SheetLayoutDef, type SheetRowDef, type SheetSectionDef, type WorldDoc } from "../../shared/world";

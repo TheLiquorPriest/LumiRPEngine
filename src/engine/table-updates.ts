@@ -11,7 +11,7 @@
 
 import type { TableId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
-import type { TableNames, TableRowChanges, TableUpdate } from "../shared/protocol";
+import type { TableNames, TableRowChanges, TableUpdate } from "../shared/tables";
 import type { DataTable, ShippedRevision, StarterTable, TableRow } from "../shared/tables";
 import { columnPrints, isDataTable, rowPrints, shippedRowPrints, tableRevision } from "../shared/tables";
 import type { WorldDoc } from "../shared/world";

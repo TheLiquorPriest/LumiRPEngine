@@ -6,7 +6,7 @@ import type { EntityId, WorldId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { SheetSectionView } from "../shared/state-view";
 import type { SheetSkill } from "../shared/inferred";
 import { currentSignals, hasRetiredSignal, knownSignal, PURPOSE_PLACEHOLDERS, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";

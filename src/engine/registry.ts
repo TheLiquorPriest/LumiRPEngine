@@ -15,7 +15,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { DomainId, EntityId, FieldId, KindId, Level, PackId, PanelId, RelationTypeId, SlotId, TableId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { OrgMember, OrgPower } from "../shared/org";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { ColumnDef, DataTable, ShippedRevision } from "../shared/tables";
 import type { ActionDef, EffectSpec, FeedScope, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { MapConfig } from "../shared/map-config";

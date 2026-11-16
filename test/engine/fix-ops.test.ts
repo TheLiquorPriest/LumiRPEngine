@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FixOp, LedgerEvent } from "../../src/shared/ledger";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import { blobHash } from "../../src/shared/stores";
 import { parseEditOps, parseFixOps, resolveEdit, resolveFix } from "../../src/engine/edits";
 import type { WorldState } from "../../src/engine/state";

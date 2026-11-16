@@ -10,7 +10,7 @@ import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { claimFactId, factId, KNOWLEDGE_DEFAULTS, MINDS_EVENTS, MINDS_KEEP, witnessRef, type KnowledgeFact, type LearnEventData, type MindsGmHolding, type MindsGmView } from "../../src/shared/minds";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import { Rig } from "../support/rig";
 
 /** Words no world text has, so a leak into Play shows: the claim of a fact the player character doesn't hold. */

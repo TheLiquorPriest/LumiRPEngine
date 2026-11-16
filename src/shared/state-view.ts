@@ -6,7 +6,6 @@ import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { JsonObject, JsonValue } from "./json";
 import type { MindCallTrace, MindsGmView } from "./minds";
-import type { GenerateAs } from "./protocol";
 import type { GmHeldWrite } from "./gm-parts";
 import type {
   ActionId,
@@ -33,9 +32,19 @@ import type { GmPlaceEntry, OrgGmView } from "./org-view";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { RoutineRole } from "./routines";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, SectionFeed, StepPurpose, WorldCurrency } from "./world";
-import type { LorePolicy, NarratorView } from "./settings";
+import type { NarratorView } from "./narrator-view";
 import type { OffstageSettings } from "./offstage";
 import type { PlaceRef } from "./character";
+
+/**
+ * How the frontend starts a generation the guard stopped, once the engine prepared it (DESIGN §5.1):
+ * `regenerate` and `continue` run Lumiverse's own commands; a new reply after a reply only the
+ * player can start again, with Send.
+ */
+export type GenerateAs = "regenerate" | "continue" | "send";
+
+/** What a step does with the world's lore (DESIGN §5.4): nothing; a prefetch from its own inputs, at no extra call; lookups the model asks for, on the phase's lookup budget; or both. */
+export type LorePolicy = "none" | "prefetch" | "lookup" | "prefetch+lookup";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
 

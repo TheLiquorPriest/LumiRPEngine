@@ -6,7 +6,8 @@
 // again when the chat moves on (`reloadKey`). Names stand in for ids everywhere; the ids show only
 // with Show ids.
 
-import type { EditOp, ResultBodies } from "../../shared/protocol";
+import type { ResultBodies } from "../../shared/protocol";
+import type { EditOp } from "../../shared/edit-ops";
 import type { GmEntity, GmView } from "../../shared/state-view";
 import type { WorldCurrency } from "../../shared/world";
 import type { GmNeed } from "./parts";

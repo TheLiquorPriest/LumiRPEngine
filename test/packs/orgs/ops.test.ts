@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../../src/shared/json";
 import type { OrgOp } from "../../../src/shared/org-ops";
-import type { EditOp } from "../../../src/shared/protocol";
+import type { EditOp } from "../../../src/shared/edit-ops";
 import type { WorldDoc } from "../../../src/shared/world";
 import { resolveEdit } from "../../../src/engine/edits";
 import { orgPower } from "../../../src/engine/org";

@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { lintWorld } from "../../src/engine/authoring";
 import type { TableDef } from "../../src/engine/registry";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import type { DataTable, ShippedRevision } from "../../src/shared/tables";

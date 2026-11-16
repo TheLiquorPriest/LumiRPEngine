@@ -28,7 +28,7 @@ import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json"
 import { parseMoneyInput } from "../../../shared/money";
 import { ORG_BASES, ORG_POWER_FAMILIES, ORG_POWERS, POWER_FAMILY_LABELS, POWER_WORDS, isOrgPower, positionsIn, powersIn, type OrgPower, type OrgPowerFamily, type OrgType, type Position } from "../../../shared/org";
 import type { OrgGmView, OrgMayPowerView, OrgRef, OrgView } from "../../../shared/org-view";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import type { GmEntity, GmView } from "../../../shared/state-view";
 import { delegationDraft, delegationEditOps, delegationProblem, delegationRevokeOps, duesDraft, duesEditOps, duesProblem, GM_PART, orgEditOf, payoutOps, payoutProblem, positionDraft, positionEditOps, positionProblem, positionRemoveOps, staffJobOf } from "./edit";
 import { MemberDetails } from "./member";

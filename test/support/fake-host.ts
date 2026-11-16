@@ -11,7 +11,8 @@
 import type { ListedTool } from "../../src/shared/agents";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { ChatId, MessageId, UserId } from "../../src/shared/ids";
-import type { BackendToFrontend, GenerateAs } from "../../src/shared/protocol";
+import type { BackendToFrontend } from "../../src/shared/protocol";
+import type { GenerateAs } from "../../src/shared/state-view";
 import type { Answers } from "../../src/engine/decide";
 import type {
   ContextHandlerInput,

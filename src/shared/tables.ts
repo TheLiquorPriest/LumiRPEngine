@@ -200,3 +200,39 @@ export function tableRowKey(table: DataTable | undefined, text: string): string 
   const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said || c.label.toLowerCase() === said);
   return hit ? hit.key : null;
 }
+
+/** Some of a table's rows: how many, and the first few by name (a row's `label` or `name`, else its id in words). */
+export interface TableNames {
+  count: number;
+  names: string[];
+}
+
+/** How one version of a table's rows differs from another's: the rows it adds, holds otherwise and drops. */
+export interface TableRowChanges {
+  added: TableNames;
+  changed: TableNames;
+  dropped: TableNames;
+}
+
+/**
+ * A data table this build ships newer than a world's copy (Data updates, DESIGN §9.2).
+ * `update`: the copy is an earlier shipped version the world never changed, so the shipped one
+ * replaces it with nothing lost; `missing`: the world has none, as the table shipped after it was
+ * made; `edited`: the world changed its copy of an earlier shipped version, so nothing replaces it
+ * unasked. `shipped` is what the shipped version changes since the version the copy came from (for
+ * a missing table, every row it brings), with the columns it adds, changes and drops by id;
+ * `yours`, for an edited copy, what the world changed since that version, which taking the shipped
+ * one would lose. `starter` names the starter world whose own version of the table it is (a
+ * template's prices or items: a world made from Fantasy town keeps Brindlemere's); without it, the
+ * packs' own version.
+ */
+export interface TableUpdate {
+  table: TableId;
+  label: string;
+  pack: PackId;
+  status: "update" | "missing" | "edited";
+  /** The starter world whose own version ships newer (its template id and name); absent for the packs' own. */
+  starter?: { id: string; name: string };
+  shipped: TableRowChanges & { columns: { added: string[]; changed: string[]; dropped: string[] } };
+  yours?: TableRowChanges;
+}

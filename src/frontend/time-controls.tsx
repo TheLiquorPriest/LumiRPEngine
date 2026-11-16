@@ -8,7 +8,7 @@ import { hasOwn } from "../shared/json";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimeControl, TimeScope } from "../shared/ledger";
-import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/time-reach";
 import { HostSlider, NumberStepper, Section, Seg } from "./components";
 import { formatMinutes, humanize } from "./format";
 

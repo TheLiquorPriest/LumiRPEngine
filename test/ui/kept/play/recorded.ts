@@ -19,7 +19,7 @@ import type { ChatRun } from "../../../../src/shared/ledger";
 import type { Level } from "../../../../src/shared/ids";
 import { OFFSTAGE_DEFAULTS } from "../../../../src/shared/offstage";
 import type { ErrorMessage, ResultMessage } from "../../../../src/shared/protocol";
-import { NARRATOR_DEFAULTS } from "../../../../src/shared/settings";
+import { NARRATOR_DEFAULTS } from "../../../../src/shared/narrator-view";
 import type { StateView } from "../../../../src/shared/state-view";
 import { testModel } from "../../../support/test-pack";
 

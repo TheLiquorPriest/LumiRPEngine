@@ -25,7 +25,7 @@ import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { COST_WHEN_WORDS, costParts, isProjectStatus, lengthWords, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_EVENTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_NOTE, PROJECT_STATUS_WORDS, PROJECTS_SECTION, PROJECTS_TABLE, stepCost, stepDays, stepOrder, stepsIn, type ProjectDef, type ProjectRun, type ProjectStatus, type ProjectStep, type ProjectTemplateView, type ProjectUnlock, type ProjectView, type ProjectsView, type StepNote, type StepRun, type StepState, type StepView } from "../../../shared/projects";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import type { ActionDef, EntityDef, FieldDef, ParamDef, WorldDoc } from "../../../shared/world";

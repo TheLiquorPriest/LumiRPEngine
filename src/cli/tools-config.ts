@@ -7,7 +7,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { jsonEqual, mergeAdjusted } from "../shared/json-patch";
 import type { ResultBodies } from "../shared/protocol";
-import { TIMELAPSE_REACH_MINUTES } from "../shared/settings";
+import { TIMELAPSE_REACH_MINUTES } from "../shared/time-reach";
 import type { DiagRecord } from "../shared/diagnostics";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, ToolError } from "./args";

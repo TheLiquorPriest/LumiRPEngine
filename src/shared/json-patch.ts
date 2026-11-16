@@ -5,7 +5,15 @@
 
 import { hasOwn, isRecord } from "./json";
 import type { JsonValue } from "./json";
-import type { JsonPatchOp } from "./protocol";
+
+/** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
+export type JsonPatchOp =
+  | { op: "add"; path: string; value: JsonValue }
+  | { op: "remove"; path: string }
+  | { op: "replace"; path: string; value: JsonValue }
+  | { op: "move"; from: string; path: string }
+  | { op: "copy"; from: string; path: string }
+  | { op: "test"; path: string; value: JsonValue };
 
 export class PatchError extends Error {
   constructor(

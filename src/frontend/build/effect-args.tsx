@@ -7,7 +7,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { WorldDoc } from "../../shared/world";
 import { Button, IconButton, Seg } from "../components";
 import { ExprEditor } from "./expr-editor";

@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import type { PaletteView, SheetSectionView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";

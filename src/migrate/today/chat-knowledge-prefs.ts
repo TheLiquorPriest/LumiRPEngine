@@ -5,7 +5,7 @@
 
 import { isRecord, type JsonObject } from "../../shared/json";
 import { LEDGER_NAMESPACE } from "../../shared/ledger";
-import { narratorViewOf, type NarratorView } from "../../shared/settings";
+import { narratorViewOf, type NarratorView } from "../../shared/narrator-view";
 
 /** Which engine plays a chat's turns (GM → This chat): its classic steps, the agent loop, or the harness, where the author and the agents it starts play the turn through tools. */
 export type ChatEngine = "classic" | "agents" | "harness";

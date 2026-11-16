@@ -12,7 +12,7 @@ import { pinOp } from "../../src/packs/minds/ui/ops";
 import { CharacterRows, RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
 import { BINDING_LABEL, bindingOf, blockOffOp, blockOp, changedBy, dropBlockOp, dropScheduleOp, followOp, routineRows, scheduleDraft, scheduleOffOp, scheduleOwnOp, scheduleRows, storyChanges, type RoutineBinding } from "../../src/packs/castlife/ui/routines-ops";
 import { blankBlock } from "../../src/frontend/build/routine-editor";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { RoutineBlock, RoutineChangeSummary, RoutineGmView, RoutineRole } from "../../src/shared/routines";
 import { DEFAULT_ROUTINE_ROLES, isOff, ROUTINE_ROLES, SKIP_LIFE_LABEL, SKIP_LIVES } from "../../src/shared/routines";
 import type { GmView } from "../../src/shared/state-view";

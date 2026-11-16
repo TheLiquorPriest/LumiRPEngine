@@ -5,7 +5,7 @@
 import worldSchemaJson from "../../schemas/lre-world-v1.schema.json";
 import { macrosIn } from "../engine/authoring";
 import { isRecord } from "../shared/json";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { WorldDoc } from "../shared/world";
 import { MAP_SCHEMA } from "../shared/maps";
 import { checkSchema, pathText, type Schema } from "../shared/schema-check";

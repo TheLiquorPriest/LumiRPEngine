@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { JobProposal } from "../../src/shared/protocol";
+import type { JobProposal } from "../../src/shared/jobs";
 import { blankWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";

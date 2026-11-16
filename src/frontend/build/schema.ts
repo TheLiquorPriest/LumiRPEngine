@@ -6,7 +6,7 @@ import { safeKey, type JsonObject, type JsonValue } from "../../shared/json";
 import { loreIsSecret } from "../../shared/lore";
 import { DOMAINS } from "../../shared/ids";
 import { TRAVEL_MODES } from "../../shared/maps";
-import type { WorldCollection, WorldPart } from "../../shared/protocol";
+import type { WorldCollection, WorldPart } from "../../shared/world";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
 import { FEED_SCOPES, SCOPE_LABEL } from "../../shared/world";

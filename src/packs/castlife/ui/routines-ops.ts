@@ -7,7 +7,7 @@
 import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import type { Fidelity } from "../../../shared/minds";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, RoutineRole, SkipLife, SourceView, StoryHoldView } from "../../../shared/routines";
 import { blockShapeProblems, isOff, PLAN_BEND_LABEL, ROUTINE_ROLE_LABEL } from "../../../shared/routines";
 import type { GmEntity } from "../../../shared/state-view";

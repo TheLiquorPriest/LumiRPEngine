@@ -14,11 +14,13 @@ import { attachedText, ENGINE_HELP, EngineBlocked, engineRequest, EngineSwitch, 
 import { SessionPanel, workspaceControls, type WorkspaceBody, type WorkspaceResult } from "../../src/frontend/gm/workspace";
 import { followReview, type ReviewBody, ReviewCard, reviewHandlers, ReviewUnread } from "../../src/frontend/review-card";
 import type { ActivityAgent } from "../../src/shared/diagnostics";
-import type { GenerateAs, ReviewCardView, SessionView } from "../../src/shared/protocol";
+import type { SessionView } from "../../src/shared/protocol";
+import type { GenerateAs } from "../../src/shared/state-view";
+import type { ReviewCardView } from "../../src/ui/kept/protocol";
 import { LimitRow, SettingRow } from "../../src/frontend/settings/kit";
 import type { JsonObject } from "../../src/shared/json";
 import { HARNESS_TIME_PASS_DEF } from "../../src/shared/agent-settings";
-import { TIMELAPSE_REACH_MINUTES } from "../../src/shared/settings";
+import { TIMELAPSE_REACH_MINUTES } from "../../src/shared/time-reach";
 import { labelled, press, propsOf, type Props } from "../support/tree";
 
 const CHAT = "chat-port-alder";

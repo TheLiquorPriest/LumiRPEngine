@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { QuietRequest } from "../../src/shared/host";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/migrate/today/ledger-io";

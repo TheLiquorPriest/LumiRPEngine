@@ -17,13 +17,16 @@ import type { DiagnosticsSettings } from "./diagnostics";
 import type { RetentionSettings } from "./stores";
 import { ITEM_CHANGES } from "./things";
 import type { OffstageSettings } from "./offstage";
+import type { ReasoningChoice, SamplingParams } from "./host";
+import type { BuiltLoreIndex, LoreEntryRef } from "./lore-views";
+import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorKnowledge, type NarratorSecrets, type NarratorView, narratorViewOf } from "./narrator-view";
+import type { LorePolicy } from "./state-view";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "./time-reach";
 
-/**
- * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
- * it to the connection's reasoning binding, else the user's Lumiverse setting; `off` turns reasoning
- * off; the rest ask for that effort, which the host maps to each provider's own field.
- */
-export type ReasoningChoice = "inherit" | "off" | "auto" | "minimal" | "low" | "medium" | "high" | "max" | "xhigh";
+// Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this registry.
+export { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, narratorViewOf, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES };
+export type { BuiltLoreIndex, LoreEntryRef, LorePolicy, NarratorKnowledge, NarratorSecrets, NarratorView, ReasoningChoice, SamplingParams };
+
 export const REASONING_CHOICES: readonly ReasoningChoice[] = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 
 /**
@@ -31,19 +34,6 @@ export const REASONING_CHOICES: readonly ReasoningChoice[] = ["inherit", "off", 
  * (DESIGN §5.3): too little room and the answer comes back empty.
  */
 export const HELPER_MAX_TOKENS = 8192;
-
-/**
- * Sampling parameters a helper call may set, by the names Lumiverse's generation call takes
- * (`GenerationParameters`). One left out is the connection's own (its preset's); the provider
- * decides which it honours.
- */
-export interface SamplingParams {
-  temperature?: number;
-  top_p?: number;
-  top_k?: number;
-  frequency_penalty?: number;
-  presence_penalty?: number;
-}
 
 export const SAMPLING_PARAMS: readonly { key: keyof SamplingParams; label: string; min: number; max: number; step: number; integer: boolean; fallback: number }[] = [
   { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
@@ -117,8 +107,6 @@ export const UNREASONED_STEPS: readonly StepPurpose[] = ["memory", "consolidate"
 /** Those steps' route while unsaved, and in the presets: the helper model, reasoning off. */
 export const UNREASONED_ROUTE: Readonly<StepRoute> = Object.freeze({ provider: "helper", connectionId: null, model: null, effort: "off" });
 
-/** What a step does with the world's lore (DESIGN §5.4): nothing; a prefetch from its own inputs, at no extra call; lookups the model asks for, on the phase's lookup budget; or both. */
-export type LorePolicy = "none" | "prefetch" | "lookup" | "prefetch+lookup";
 export const LORE_POLICIES: readonly LorePolicy[] = ["none", "prefetch", "lookup", "prefetch+lookup"];
 
 /** How a step's lookups reach the model: native tool calls, the two-phase `{"need": [...]}` form, or `auto`: tools until its connection is seen refusing them. */
@@ -199,13 +187,6 @@ export interface LookupLimits {
   calls: number;
 }
 
-/** The activities Speed through always lists (DESIGN §9.2), each offered as a timelapse past 30 minutes unless set otherwise; worlds may add more. */
-export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;
-export const SPEED_DEFAULT: Readonly<{ mode: "offer" | "auto"; thresholdMinutes: number }> = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
-/** A Speed-through threshold's range in whole minutes, 1 minute to 7 days (DESIGN §9.2): what Settings keeps, the controls offer and the engine reads. */
-export const SPEED_THRESHOLD_MINUTES = [1, 7 * 1440] as const;
-/** The farthest a timelapse reaches from now, 366 days in minutes (DESIGN §9.2): the engine's hard maximum, and the most a skip can run without asking. */
-export const TIMELAPSE_REACH_MINUTES = 366 * 1440;
 /** How long a skip runs without asking unless the user sets otherwise (`TimeSettings.askBeyondMinutes`): a day. */
 export const ASK_BEYOND_DEFAULT = 1440;
 
@@ -467,38 +448,9 @@ export interface GateSettings {
   outline: boolean;
 }
 
-/** Whose knowledge the narrator gets (DESIGN §6.11): everyone's in the scene, or the player character's alone. */
-export type NarratorKnowledge = "scene" | "pov";
-export const NARRATOR_KNOWLEDGE: readonly NarratorKnowledge[] = ["scene", "pov"];
-
-/** What the narrator gets of a secret: the secret, marked as one, or none of it. */
-export type NarratorSecrets = "marked" | "omit";
-export const NARRATOR_SECRETS: readonly NarratorSecrets[] = ["marked", "omit"];
-
-/**
- * The narrator's knowledge (DESIGN §6.11). The user's default (Settings → Narrator), a world's
- * default (`WorldDoc.narrator`) and a chat's own choice (`backend/chat-knowledge-prefs.ts`) all
- * take this shape; the chat's wins, then the world's.
- */
-export interface NarratorView {
-  knowledge: NarratorKnowledge;
-  secrets: NarratorSecrets;
-}
-
-/** The ruling's default (OPEN-DECISIONS core 3): what everyone in the scene knows, secrets included and marked. */
-export const NARRATOR_DEFAULTS: Readonly<NarratorView> = Object.freeze({ knowledge: "scene", secrets: "marked" });
-
 /** Each choice in the words Settings, Build and GM mode show. */
 export const NARRATOR_KNOWLEDGE_LABEL: Readonly<Record<NarratorKnowledge, string>> = { scene: "Everyone in the scene", pov: "Your character's only" };
 export const NARRATOR_SECRETS_LABEL: Readonly<Record<NarratorSecrets, string>> = { marked: "Marked", omit: "Left out" };
-
-/** A narrator view read from outside data (a settings file, a world document, a chat's metadata): null unless both parts are ones it takes. */
-export function narratorViewOf(raw: unknown): NarratorView | null {
-  if (!isRecord(raw)) return null;
-  const knowledge = NARRATOR_KNOWLEDGE.find((k) => k === raw.knowledge);
-  const secrets = NARRATOR_SECRETS.find((s) => s === raw.secrets);
-  return knowledge && secrets ? { knowledge, secrets } : null;
-}
 
 /** `UserSettings.narrator` as the engine reads it: each part checked, else `base`'s. */
 export function narratorSettingsOf(raw: unknown, base: Readonly<NarratorView>): NarratorView {
@@ -512,17 +464,6 @@ export type LoreBooks = "auto" | string[];
 /** `UserSettings.loreBooks` as the engine reads it: a list keeps each book id once; anything else reads as every book the chat reads. */
 export function loreBooksSettingOf(raw: unknown): LoreBooks {
   return Array.isArray(raw) ? [...new Set(raw.filter((id): id is string => typeof id === "string" && id !== ""))] : "auto";
-}
-
-/** One World Info entry, by its book and its own id. */
-export interface LoreEntryRef {
-  bookId: string;
-  entryId: string;
-}
-
-/** The lore index entry Build → Lore built (DESIGN §4.2): where it is, and the world whose books it lists, which LRE keeps it in step with. */
-export interface BuiltLoreIndex extends LoreEntryRef {
-  worldId: string;
 }
 
 /**

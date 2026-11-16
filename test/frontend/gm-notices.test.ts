@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { bulkDone } from "../../src/frontend/gm/batch";
 import { editNotice } from "../../src/frontend/gm/editor";
 import { editRequest } from "../../src/frontend/requests";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 

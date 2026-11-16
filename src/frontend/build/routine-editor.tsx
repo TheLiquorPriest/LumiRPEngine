@@ -16,7 +16,7 @@
 import { useId, useMemo, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { NEED_IDS, NEED_WORDS } from "../../shared/needs";
 import { wiFactIdOfLiveLore } from "../../shared/minds";
 import type { RoutineBlock, RoutineBlockKind, RoutineDays, RoutineDef, RoutineEntry, RoutinePlace, RoutineSeason, RoutineSource, WorldRoutineSource } from "../../shared/routines";

@@ -7,7 +7,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { CommitmentKind, CommitmentStatus, FactId, FactTruth, Fidelity, Holding, HoldingBelief, HoldingHow, MindApproach, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
 import { MIND_LENGTH_DEFAULTS, PLAN_PRIORITY } from "../../../shared/minds";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 
 export const FIDELITY_LABEL: Record<Fidelity, string> = { live: "Live", near: "Near", far: "Far", background: "Background" };
 

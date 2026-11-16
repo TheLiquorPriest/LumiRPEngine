@@ -10,7 +10,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { pointerOf } from "../shared/json-patch";
 import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../shared/lore";
-import type { JobKind, JobProposal, JobSummary } from "../shared/protocol";
+import type { JobKind, JobProposal, JobSummary } from "../shared/jobs";
 import type { Args } from "./args";
 import { intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import { editTool } from "./live";

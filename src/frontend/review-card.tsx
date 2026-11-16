@@ -11,7 +11,9 @@
 
 import { hasOwn } from "../shared/json";
 import type { ChatId } from "../shared/ids";
-import type { GenerateAs, ResultBodies, ReviewCardView, ReviewItemView } from "../shared/protocol";
+import type { ResultBodies } from "../shared/protocol";
+import type { GenerateAs } from "../shared/state-view";
+import type { ReviewCardView, ReviewItemView } from "../ui/kept/protocol";
 import { Badge, Button, IdText } from "./components";
 import { humanize } from "./format";
 import { Icon, type IconName } from "../ui/icons";

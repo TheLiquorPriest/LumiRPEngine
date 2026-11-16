@@ -17,7 +17,7 @@ import type { OrgGmTabProps, OrgTabDef, OrgTabProps } from "../../../frontend/re
 import type { JsonObject } from "../../../shared/json";
 import { DECISION_ACTIONS, DECISION_EFFECTS, DECISION_RANGES, DECISIONS_SECTION, DECISIONS_TAB, pctWords, type Answer, type DecisionsView, type MotionView, type RequestView, type StandingVoteKind, type Vote, type VoteBasis, type VoteHow } from "../../../shared/org-motions";
 import type { OrgRef } from "../../../shared/org-view";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { decodeDecisions } from "./decode";
 import { toastQueued } from "../../../frontend/queued";
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { adjustOp, bringOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, partyOf, placesMatching, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest, upgradeRequest, whereFixTarget } from "../../src/frontend/requests";
-import type { UpgradePreview } from "../../src/shared/protocol";
+import type { UpgradePreview } from "../../src/shared/upgrade";
 import type { Chip, GmEntity, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { INTERRUPT_CLASSES } from "../../src/shared/ids";

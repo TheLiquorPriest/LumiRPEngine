@@ -8,7 +8,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { MindsRunView } from "../../../shared/minds";
-import type { LorePinView, LorePinsView } from "../../../shared/protocol";
+import type { LorePinView, LorePinsView } from "../../../shared/lore-views";
 import type { GmView } from "../../../shared/state-view";
 import { useApp, useView } from "../../../frontend/app";
 import { Badge, Banner, Button, List, ListRow, Meter, Section } from "../../../frontend/components";

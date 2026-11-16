@@ -12,7 +12,7 @@ import { useState } from "preact/hooks";
 import type { EntityId } from "../../../shared/ids";
 import { hasOwn, type JsonObject, type JsonValue } from "../../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import {
   CATALOG_MAX,
   REVENUE_TEMPLATE_IDS,

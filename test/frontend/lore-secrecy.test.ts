@@ -8,7 +8,7 @@ import { MoveSteps, MoveView } from "../../src/frontend/build/lore-secrecy";
 import { Button } from "../../src/frontend/components";
 import { ActionRow } from "../../src/frontend/gm/ui";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import type { SecrecyBookPlan } from "../../src/shared/protocol";
+import type { SecrecyBookPlan } from "../../src/shared/lore-views";
 import { Rig } from "../support/rig";
 
 const DEBT = "Marcus owes the bank four thousand dollars on the shop.";

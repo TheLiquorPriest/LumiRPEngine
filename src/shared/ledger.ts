@@ -30,7 +30,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { EntityDef } from "./world";
-import type { EditOp } from "./protocol";
+import type { EditOp } from "./edit-ops";
 import type { ItemFix } from "./things";
 
 export const LEDGER_NAMESPACE = "lumi_rp_engine";

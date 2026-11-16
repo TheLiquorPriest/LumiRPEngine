@@ -6,7 +6,7 @@
 import { hashJson } from "../shared/hash";
 import { isRecord } from "../shared/json";
 import type { JsonValue } from "../shared/json";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import { MAP_SCHEMA } from "../shared/maps";
 import { checkSchema, pathText, type Schema } from "../shared/schema-check";
 import type { GmView } from "../shared/state-view";

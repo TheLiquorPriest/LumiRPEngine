@@ -3,7 +3,7 @@
 // person holds from the start (§24.11), and the world's step templates for the minds purposes.
 
 import { hasOwn, isRecord } from "../../../shared/json";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { FactRef } from "../../../shared/minds";
 import { AUTHORED_FACT_KINDS, HOLDING_BELIEFS, isConfidence, isMindPurpose, MINDS_RANGES, parseFactId, WORLD_MINDS_KEYS, worldMindTemplate } from "../../../shared/minds";
 import type { WorldDoc } from "../../../shared/world";

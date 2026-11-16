@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsSettingsOf, type NeedId, type NeedTuning } from "../../shared/needs";
 import { useApp } from "../app";
 import { Button, NumberStepper, PageHeader, SaveBar, Seg, useBusy } from "../components";

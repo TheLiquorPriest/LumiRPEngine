@@ -14,7 +14,7 @@ import type { RevisionId, UserId, WorldId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityUpgradePick, MarkerBody, UpgradePicks } from "../shared/ledger";
-import type { UpgradeChange, UpgradePreview } from "../shared/protocol";
+import type { UpgradeChange, UpgradePreview } from "../shared/upgrade";
 import type { WorldDoc } from "../shared/world";
 import { BLANK_REVISION, type ChangeInput, type ChangeRow, type Store } from "../store";
 import { STORE_OPS } from "../store/types";

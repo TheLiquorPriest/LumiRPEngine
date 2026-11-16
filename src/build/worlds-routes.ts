@@ -6,7 +6,7 @@
 // it, Build's when a page did. Every route answers only for the user this RPE belongs to.
 
 import { type CallAuth, route, RouteError, shape } from "../app";
-import type { WorldCollection, WorldPart } from "../shared/protocol";
+import type { WorldCollection, WorldPart } from "../shared/world";
 import type { WorldService } from "../worlds/service";
 import { DraftMoved, type EditorResult, WorldError } from "../worlds/worlds";
 

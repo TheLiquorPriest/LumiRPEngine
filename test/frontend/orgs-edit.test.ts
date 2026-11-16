@@ -41,7 +41,7 @@ import type { JsonValue } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
 import { positionsIn } from "../../src/shared/org";
 import type { OrgView } from "../../src/shared/org-view";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY, playedKinds, type WorldDoc } from "../../src/shared/world";
 import { startState } from "../packs/support";

@@ -8,11 +8,30 @@
 
 import type { ListedTool } from "./agents";
 import type { JsonObject, JsonValue } from "./json";
-import type { ReasoningChoice, SamplingParams } from "./settings";
 import type { Limit } from "./minds";
 import type { ChatId, GenerationId, MessageId, UserId } from "./ids";
 import type { BackendToFrontend } from "./protocol";
 import type { Answers, Questions } from "./decide";
+
+/**
+ * How hard a model reasons on a call (Lumiverse's per-request reasoning override): `inherit` leaves
+ * it to the connection's reasoning binding, else the user's Lumiverse setting; `off` turns reasoning
+ * off; the rest ask for that effort, which the host maps to each provider's own field.
+ */
+export type ReasoningChoice = "inherit" | "off" | "auto" | "minimal" | "low" | "medium" | "high" | "max" | "xhigh";
+
+/**
+ * Sampling parameters a helper call may set, by the names Lumiverse's generation call takes
+ * (`GenerationParameters`). One left out is the connection's own (its preset's); the provider
+ * decides which it honours.
+ */
+export interface SamplingParams {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+}
 
 export type HostGenerationType = "normal" | "regenerate" | "swipe" | "continue" | "impersonate";
 

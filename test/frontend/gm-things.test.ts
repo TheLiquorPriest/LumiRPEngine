@@ -26,7 +26,7 @@ import { ActionRow, GmCard } from "../../src/frontend/gm/ui";
 import type { AddDraft } from "../../src/frontend/things/add-thing";
 import { AddThingSheet } from "../../src/frontend/things/add-thing";
 import { typesOfKind } from "../../src/frontend/things/what-it-is";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmEntity, GmView } from "../../src/shared/state-view";
 import type { MadeInPlay, TidyFinding } from "../../src/shared/thing-gm";
 import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";

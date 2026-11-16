@@ -15,7 +15,7 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { AS_THE_WORLD, AUDIENCES, ENTRY_WORDS, isAudience, NO_KEYS, ORG_ENTRY_ACTION, ORGS_ENTRY } from "../../../shared/org";
 import type { GmPlaceEntry, PremisesView, PremiseView } from "../../../shared/org-view";
 import { listWords } from "../../../shared/words";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
 import { calendarOf, formatClock, formatTimeOfDay, weekdayName } from "../../../engine/calendar";
 import { entryClosed, keyHolders, placeKeys, placeOwnersOf } from "../../../engine/entry";

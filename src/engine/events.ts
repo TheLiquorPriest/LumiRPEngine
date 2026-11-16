@@ -11,7 +11,7 @@ import { readInferred } from "../shared/inferred";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
-import { SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { SPEED_THRESHOLD_MINUTES } from "../shared/time-reach";
 import { dropPassMemo } from "./read-pass";
 import type {
   AddEvent,

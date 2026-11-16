@@ -15,7 +15,9 @@ import { GM_IDS_PARTS, GM_KEYED_PARTS, GM_OUTLINE, GM_PARTS, GM_ROSTER, keyedIte
 import type { EventRef, ResolveScope, TimeControl, TimeScope } from "../shared/ledger";
 import type { MindEditOp } from "../shared/minds";
 import type { RoutineEditOp } from "../shared/routines";
-import type { EditOp, GenerateAs, ResultBodies } from "../shared/protocol";
+import type { ResultBodies } from "../shared/protocol";
+import type { EditOp } from "../shared/edit-ops";
+import type { GenerateAs } from "../shared/state-view";
 import type { Chip, GmEntity, GmView } from "../shared/state-view";
 import { chipStarts } from "../shared/state-view";
 import { atOnceByDefault } from "../shared/offstage";

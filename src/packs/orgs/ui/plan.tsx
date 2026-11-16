@@ -20,7 +20,7 @@ import type { OrgGmTabProps, OrgTabDef, OrgTabProps } from "../../../frontend/re
 import type { JsonObject } from "../../../shared/json";
 import { isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_STATUS_WORDS, PLAN_TAB, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoalView, type PlanOrderView, type PlanStatus } from "../../../shared/org-feed";
 import type { OrgRef } from "../../../shared/org-view";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { decodePlan } from "./decode";
 import { andList } from "./words";
 

@@ -17,7 +17,8 @@
 import type { Transport } from "../../frontend/protocol-client";
 import type { RequestBody } from "../../frontend/registry";
 import type { LiveEvent, UndoAsk } from "../../shared/api";
-import { type ErrorCode, type ErrorMessage, type FrontendToBackend, type LintIssue, PROTOCOL_VERSION, type ResultBodies, type ResultMessage } from "../../shared/protocol";
+import { type ErrorCode, type ErrorMessage, type FrontendToBackend, PROTOCOL_VERSION, type ResultBodies, type ResultMessage } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { ConnectFailure, replyOf, RpeError, type RpeClient } from "../client";
 import { errorWords } from "../words";
 import { CALLS } from "./calls";

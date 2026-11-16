@@ -18,7 +18,7 @@ import { isRecord } from "../../shared/json";
 import { pointerOf } from "../../shared/json-patch";
 import { listingIn, ownersIn, OWNER_ROLE_LABELS, ROLE_RIGHTS, worthShares, type Owner, type OwnerRole } from "../../shared/finance";
 import { DIRECTOR, ORG_POWERS, positionIdOf, positionsIn } from "../../shared/org";
-import type { JsonPatchOp } from "../../shared/protocol";
+import type { JsonPatchOp } from "../../shared/json-patch";
 import type { WorldDoc } from "../../shared/world";
 import { entityPatch } from "./character-model";
 import { kindFields } from "./schema-form";

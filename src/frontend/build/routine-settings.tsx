@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { NEED_WORDS } from "../../shared/needs";
 import type { Fidelity } from "../../shared/minds";
 import { FIDELITIES } from "../../shared/minds";

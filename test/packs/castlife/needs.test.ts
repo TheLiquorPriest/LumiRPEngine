@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { JsonValue } from "../../../src/shared/json";
 import { ACTIVITY_PLACE, ACTIVITY_SPAN_OF, ENGINE_FIELDS, type WorldDoc } from "../../../src/shared/world";
-import type { EditOp } from "../../../src/shared/protocol";
+import type { EditOp } from "../../../src/shared/edit-ops";
 import { resolveEdit } from "../../../src/engine/edits";
 import { applyMarker } from "../../../src/engine/events";
 import { palette } from "../../../src/play/state/palette";

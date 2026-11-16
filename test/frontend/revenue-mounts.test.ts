@@ -17,7 +17,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { gmStreamDrafts, revenueEditOps, revenueSpawnOps, streamFromTemplate, type RevenueStreamDraft } from "../../src/packs/economy/ui/revenue";
 import type { JsonValue } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { WorldDoc } from "../../src/shared/world";
 import { startState } from "../packs/support";
 

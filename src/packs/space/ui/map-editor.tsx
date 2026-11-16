@@ -27,7 +27,7 @@ import { Icon } from "../../../ui/icons";
 import { lineAt, parseJsonText } from "../../../frontend/json-text";
 import { hitTest, TAP_SLOP, toScreen, toWorld, type Point, type Transform } from "../../../frontend/map-math";
 import type { EditorProps } from "../../../frontend/registry";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { MapScopeView } from "../core/map-scope";
 import type { CanvasPalette } from "./canvas-theme";
 import { cellAt, cellView, crossCell, EditCanvas, gridLines, gridUnit, strokeCells, Swatch, usePalette, ZOOM_STRIP, type CanvasTool } from "./editors";

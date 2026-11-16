@@ -18,7 +18,7 @@ import { Button, IconButton, ListRow } from "../../src/frontend/components";
 import { cannotHold, searchWhere, whereIndex, whereLabel } from "../../src/frontend/things/where";
 import type { JsonObject } from "../../src/shared/json";
 import { applyPatch } from "../../src/shared/json-patch";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import type { ThingRow } from "../../src/shared/thing-view";
 import { presumedLine, whoseWords } from "../../src/shared/thing-view";
 import type { WorldDoc } from "../../src/shared/world";

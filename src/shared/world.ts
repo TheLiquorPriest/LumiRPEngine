@@ -9,7 +9,9 @@
 // types and changes with them; its test checks it against the starters and the preview world.
 
 import type { JsonObject, JsonValue } from "./json";
-import type { NarratorView } from "./settings";
+import type { JsonPatchOp } from "./json-patch";
+import type { LintIssue } from "./lint";
+import type { NarratorView } from "./narrator-view";
 import type { PartyTier } from "./party";
 import type { OrgPower } from "./org";
 import { hasOwn, isRecord } from "./json";
@@ -52,6 +54,7 @@ import type {
   Visibility,
   PlaceVisibility,
   WorldId,
+  RevisionId,
 } from "./ids";
 import type { ClaimPlace, ClaimsPolicy } from "./claims";
 import type { InferredChecks } from "./inferred";
@@ -1524,4 +1527,80 @@ export interface WorldIndex {
    * the first. The world's history is kept beside the index (`history.json`), not in it.
    */
   draftVersion?: number;
+}
+
+/** World document collections the editors write. */
+export type WorldCollection =
+  | "kinds"
+  | "relations"
+  | "entities"
+  | "places"
+  | "routes"
+  | "grids"
+  | "maps"
+  | "rules"
+  | "actions"
+  | "checks"
+  | "schedules"
+  | "tracks"
+  | "tables"
+  | "sections"
+  | "steps"
+  | "packs"
+  | "lore"
+  | "classifications"
+  | "routines";
+
+/**
+ * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
+ * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
+ * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it; `lorePins` is
+ * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it; `routineSettings` is
+ * `world.routineSettings` (DESIGN §8), whole: the defaults remove it; `needs` is `world.needs`
+ * (DESIGN §8), whole: only what differs from the defaults is stored, and the defaults remove it.
+ */
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins" | "routineSettings" | "needs";
+
+/** The previous extension's request envelope an editor request came in, as it sent it: its protocol's version, the request's type and its id. */
+export interface EditorEnvelope {
+  lre: 1;
+  type: "lre.editor";
+  reqId: string;
+}
+
+/**
+ * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is
+ * none) so a reload or a second device resumes it; its `base` is ignored. `discard` drops the draft.
+ * `profile` applies a ruleset profile to the draft in one write (`shared/profiles`), each
+ * conflicting item kept or taken by its path in `choices` (kept when unnamed). `patch` applies
+ * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
+ * one of the world's revisions, which a commit then makes head again (DESIGN §23). `shipped` puts
+ * the version this build ships of each named data table into the draft, in place of the draft's copy
+ * or beside the rest (Data updates), pinned at its revision as any table write is.
+ *
+ * `version` names a state of the world's working copy, and is never reused within a world: each
+ * write counts one, and so does a discard or commit (which drops the draft). With no draft stored it
+ * is the world's count (`WorldIndex.draftVersion`; 0 for a world never edited), and a new draft starts one above it.
+ * A request that sends `version` is refused with `conflict` when the working copy has moved on
+ * from it; one without it is not checked. Every result carries the current one.
+ */
+export type EditorRequest = EditorEnvelope & { worldId: WorldId; base: RevisionId | null; version?: number } & (
+    | { op: "get" }
+    | { op: "discard" }
+    | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
+    | { op: "remove"; collection: WorldCollection; id: string }
+    | { op: "set"; part: WorldPart; value: JsonValue }
+    | { op: "profile"; profile: string; choices: Record<string, "mine" | "profile"> }
+    | { op: "patch"; ops: JsonPatchOp[] }
+    | { op: "restore"; revision: RevisionId }
+    | { op: "shipped"; tables: TableId[] }
+  );
+
+/** What an editor write answers: the draft as it stands, its lint, the revision it builds on, whether a draft is stored, and the working copy's version. */
+export interface EditorAnswer {
+  draft: WorldDoc;
+  lint: LintIssue[];
+  base: RevisionId | null;
+  stored: boolean;
+  version: number;
 }

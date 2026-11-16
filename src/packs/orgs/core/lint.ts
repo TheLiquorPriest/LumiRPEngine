@@ -15,7 +15,7 @@ import type { JsonValue } from "../../../shared/json";
 import { pointerOf } from "../../../shared/json-patch";
 import { objOf, own } from "../../../engine/pack-kit";
 import { ACTS_FOR, isOrgPower, ORG_POWERS, positionIn, positionsIn, POWER_WORDS, type OrgPower } from "../../../shared/org";
-import type { LintFix, LintIssue } from "../../../shared/protocol";
+import type { LintFix, LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
 import { headOf, HEAD, jobsAt, orgPower, orgTypeOf, placesOf, positionsOf } from "../../../engine/org";
 import { siteOf } from "../../../engine/presence";

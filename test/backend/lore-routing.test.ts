@@ -20,9 +20,9 @@ import type { ToolView } from "../../src/shared/agent-tools";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { builtIndexOf } from "../../src/shared/lore";
 import { holdsOf } from "../../src/shared/lore-routing";
-import type { LoreIndexView } from "../../src/shared/protocol";
+import type { LoreIndexView } from "../../src/shared/lore-views";
 import { secretMarkText } from "../../src/shared/secret-marks";
-import type { BuiltLoreIndex } from "../../src/shared/settings";
+import type { BuiltLoreIndex } from "../../src/shared/lore-views";
 import { outputsOf } from "../../src/engine/outputs";
 import { Rig } from "../support/rig";
 

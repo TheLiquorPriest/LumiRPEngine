@@ -8,7 +8,8 @@
 
 import type { AgentCheckIn, HelloClient } from "../shared/agents";
 import { isRecord } from "../shared/json";
-import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
+import type { ErrorCode, FrontendToBackend, ResultBodies } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import { AGENT_API, ENGINE_EXTENSION, PROTOCOL_VERSION } from "../shared/protocol";
 import { formatMs } from "../shared/timeouts";
 import { inClear } from "./credentials";

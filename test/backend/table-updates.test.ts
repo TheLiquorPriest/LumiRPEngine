@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import type { TableUpdate } from "../../src/shared/protocol";
+import type { TableUpdate } from "../../src/shared/tables";
 import type { DataTable } from "../../src/shared/tables";
 import { tableRevision } from "../../src/shared/tables";
 import type { WorldDoc } from "../../src/shared/world";

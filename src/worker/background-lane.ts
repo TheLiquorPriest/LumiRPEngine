@@ -4,7 +4,7 @@
 // and the job (`build/jobs/lab.ts`) hands each its predecessor's state, so a step is short, progress is told after each and a cancel stops
 // the next one. No model is called; the engine reads no clock of its own, so a Check world day's processes are timed here, by the wall clock.
 
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import { checkWorldDay, lintWorld, playtestTurn, type PlaytestTurn } from "../engine/authoring";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";

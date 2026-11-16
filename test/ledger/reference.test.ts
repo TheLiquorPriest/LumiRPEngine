@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/shared/ledger";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { WorldDoc } from "../../src/shared/world";
 import { resolveEdit, resolveFix } from "../../src/engine/edits";
 import { applyEffects } from "../../src/engine/effects";

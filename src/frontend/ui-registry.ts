@@ -5,7 +5,7 @@
 
 import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
-import type { WorldCollection } from "../shared/protocol";
+import type { WorldCollection } from "../shared/world";
 import type { ChipKind } from "../shared/state-view";
 import type { SheetKind } from "./app";
 import type { ChipProps, EditorDef, FieldEditorDef, GlanceDef, GmSectionDef, OrgTabDef, PackConfigProps, PanelDef, PlaceFieldDef, PlacePartDef, PreviewProps, SheetProps, UiPackDef, UiRegistry } from "./registry";

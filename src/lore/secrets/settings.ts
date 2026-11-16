@@ -11,7 +11,7 @@ import { knowledgeSwitch } from "../../secrecy/knowledge-switch";
 import { PACK, readSlice } from "../../packs/minds/core/state";
 import { isRecord, type JsonObject } from "../../shared/json";
 import { knowledgeThreshold, knowledgeTracked } from "../../shared/minds";
-import { type NarratorView, narratorViewOf } from "../../shared/settings";
+import { type NarratorView, narratorViewOf } from "../../shared/narrator-view";
 import type { WorldDoc } from "../../shared/world";
 import type { ChangeInput, Lane, Store } from "../../store";
 import type { LoreScope } from "../chat-settings";

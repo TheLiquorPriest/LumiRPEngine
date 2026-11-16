@@ -10,25 +10,43 @@ import type { AgentsView, HelloClient, KitReport } from "./agents";
 import type { AcceptanceState } from "./agent-settings";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
-import type { BookFieldsEdit, BookLoreFields, LoreIndexAddition } from "./lore";
-import type { Limit, MindEditOp, MindsRunView } from "./minds";
-import type { RoutineEditOp, RoutineRead, RoutineReadResult } from "./routines";
-import type { ItemFix, ItemOp, PlaceOp } from "./things";
+import type { BookFieldsEdit, BookLoreFields } from "./lore";
+import type { Limit, MindsRunView } from "./minds";
+import type { RoutineRead, RoutineReadResult } from "./routines";
+import type { ItemFix } from "./things";
 import type { VehicleClassChoice } from "./vehicles";
-import type { OrgOp } from "./org-ops";
 import type { CharacterResult } from "./character";
-import type { PersonThings, ThingPage, ThingPicks, ThingsList, ThingType } from "./thing-view";
+import type { GmThingsRead, PersonThings, ThingPage, ThingPicks, ThingsList, ThingsRead, ThingType } from "./thing-view";
+import type { UpgradePreview } from "./upgrade";
 import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } from "./thing-gm";
-import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PackId, PanelId, PlaceId, RelationTypeId, RevisionId, SlotId, StageId, TableId, TierId, TrackId, WorldId } from "./ids";
-import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
-import type { BuiltLoreIndex, ChangeType, NarratorView, UserSettings } from "./settings";
+import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, PlaceId, RevisionId, SlotId, TableId, WorldId } from "./ids";
+import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradePicks } from "./ledger";
+import type { ChangeType, UserSettings } from "./settings";
+import type { BuiltLoreIndex, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LorePinsView, SecrecyBookPlan, SecrecyBookView } from "./lore-views";
 import type { Activity, DiagRecord } from "./diagnostics";
 import type { LiveChange, LiveView } from "./live";
-import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, FeedScope, KindDef, LifeStateId, LorePin, MapDisplay, RelationTypeDef, RevisionNote, SectionFeed, StepPurpose, WorldDoc, WorldIndex } from "./world";
+import type { GenerateAs, GmView, SheetSectionView, StateView } from "./state-view";
+import type { AdjudicationDef, EditorAnswer, EditorRequest, FeedScope, KindDef, LorePin, MapDisplay, RelationTypeDef, RevisionNote, StepPurpose, WorldDoc, WorldIndex } from "./world";
+import type { EditOp } from "./edit-ops";
+import type { JobKind, JobResult, JobStatus, JobSummary } from "./jobs";
+import type { LintIssue } from "./lint";
+import type { NarratorView } from "./narrator-view";
+import type { TableUpdate } from "./tables";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
 import type { PrepareLiveView } from "./prepare-live";
 import type { PrepareAsk, PrepareView, StoryAnswer, StoryAsk } from "./story-pages";
+
+// Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this protocol.
+export type { EditOp } from "./edit-ops";
+export type { JobKind, JobProposal, JobResult, JobSummary } from "./jobs";
+export type { JsonPatchOp } from "./json-patch";
+export type { LintFix, LintIssue } from "./lint";
+export type { GenerateAs } from "./state-view";
+export type { TableNames, TableRowChanges, TableUpdate } from "./tables";
+export type { GmThingsRead, ThingsRead } from "./thing-view";
+export type { UpgradeChange, UpgradeEntityRow, UpgradePreview, UpgradeTarget } from "./upgrade";
+export type { BuiltLoreIndex, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LoreMarkView, LorePinsView, LorePinView, SecrecyBookPlan, SecrecyBookView, SecrecyEntryView, SecrecyState } from "./lore-views";
+export type { EditorRequest, WorldCollection, WorldPart } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -163,66 +181,6 @@ export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: En
 /** The most things one `lre.fix {things}` changes. */
 export const FIX_THINGS_MAX = 64;
 
-/**
- * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a
- * field's type, values and bounds; a relation type's kinds and fields; a tier, a track's stages)
- * and resolved through the core effects, so pack guards apply. A ✎ fix is one `set`; the GM editor
- * sends any of them in order, applied all or none as one `fix` entry.
- *  - `set`, `add`: an entity's field (an owner is `set owner`); `add` stops at the field's bounds.
- *  - `link` adds a relation or replaces its fields; `unlink` removes it.
- *  - `move` puts an entity at a place, out of any container; `put` puts it inside another entity
- *    (`in`), or with `into: null` takes it out to where its container is.
- *  - `adjust` moves money into (positive) or out of an account against `economy.external:correction`.
- *  - `stage` moves a track to a stage: on to one that follows, as its entry plays; back, only the stage.
- *  - `entity` sets an entity's tier, agent flag and per-domain level overrides (null follows the tier).
- *  - `classify` sets an entity's classes (facet → values, the world's facets and values only) and
- *    tags, both whole; the chat holds them from then on over the world's definition.
- *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
- *    and `restore` brings it back.
- *  - `mind_pin`, `mind_refresh`, `mind_memory`, `mind_intent`: a character's mind (DESIGN §24.9): pin
- *    their fidelity, ask for a fresh mind next turn, edit or delete a note, commitment or plan, and
- *    set what they mean to do now and how they go about it; `mind_knowledge`: one holding of a fact
- *    the chat knows (§24.11), anyone's, the player character's too, set whole or taken away (`MindEditOp`).
- *  - `routine_follow`, `routine_block`, `schedule_override`: a character's routine and schedules in
- *    this chat (DESIGN §8): how they follow it, one block of it, one of their schedules (`RoutineEditOp`).
- *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
- *    what no entity field holds, such as an asset's price.
- *  - `feed` sets a section's settings in this chat over the world's (DESIGN §6.11), whole; `to: null`
- *    returns it to the world's.
- *  - `item` is one change to a thing in the things model's vocabulary (`ItemOp`, ITEMS-SPEC §3.5):
- *    made, moved through the one location writer, handed over, owned, lent, kept at, labelled,
- *    merged or removed. `put`, `move`, `link in`, `unlink in` and `set place` on a thing are such a
- *    move too.
- *  - `place` is one change to a place made in play (`PlaceOp`), the space pack's.
- *  - `org` is one change to an organization (`OrgOp`, ORG-SPEC §7.2): founding one, its members,
- *    positions, titles, delegations, staff and pay, shares, entry, dues, the party's tiers, its
- *    structure and name; the orgs pack compiles it to the packs' effects, the GM's (no power asked),
- *    with its History line, in one unit.
- */
-export type EditOp =
-  | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
-  | { op: "add"; entity: EntityId; field: FieldId; delta: number }
-  | { op: "link"; rel: RelationTypeId; from: EntityId; to: EntityId; fields?: JsonObject; until?: number }
-  | { op: "unlink"; rel: RelationTypeId; from: EntityId; to: EntityId }
-  | { op: "move"; entity: EntityId; to: PlaceId }
-  | { op: "put"; entity: EntityId; into: EntityId | null }
-  | { op: "adjust"; account: EntityId; cents: number }
-  | { op: "stage"; track: TrackId; to: StageId }
-  | { op: "entity"; entity: EntityId; tier?: TierId; agent?: boolean; levels?: Partial<Record<DomainId, number | null>> }
-  | { op: "classify"; entity: EntityId; class: Record<FacetId, FacetValueId[]>; tags: string[] }
-  /** A life state (DESIGN §8), and who is told it besides everyone with the entity; at least one of them. */
-  | { op: "life"; entity: EntityId; to?: LifeStateId; tell?: EntityId[] }
-  | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
-  | { op: "despawn"; entity: EntityId }
-  | { op: "restore"; entity: EntityId }
-  | MindEditOp
-  | RoutineEditOp
-  | { op: "effect"; effect: string; args: JsonObject }
-  | { op: "feed"; section: SlotId; to: SectionFeed | null }
-  | { op: "item"; change: ItemOp }
-  | { op: "place"; change: PlaceOp }
-  | { op: "org"; change: OrgOp };
-
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {
   chatId: ChatId;
@@ -346,12 +304,6 @@ export type CharacterRequest = Request<"lre.character"> & { op: "get"; entity: E
  */
 export type ThingsRequest = Request<"lre.things"> & (({ scope: "build"; worldId: WorldId } & ThingsRead) | ({ scope: "gm"; chatId: ChatId } & GmThingsRead) | { scope: "play"; chatId: ChatId; op: "types" });
 
-/** The reads of `lre.things` both scopes answer. */
-export type ThingsRead = { op: "list" } | { op: "thing"; entity: EntityId } | { op: "person"; entity: EntityId } | { op: "find"; words: string } | { op: "types" };
-
-/** What `lre.things` answers in GM scope: the reads, and Tidy up, Leave it, what was made in play and Keep in the world. */
-export type GmThingsRead = ThingsRead | { op: "tidy" } | { op: "leave"; key: string; left: boolean } | { op: "made" } | { op: "keep"; things: EntityId[]; places: PlaceId[] };
-
 /**
  * A chat's state view, as a page's snapshot holds it, answered to an outside client (DESIGN §23),
  * with the chat's activity line. A read only: unlike a hello or a resync it makes the session no
@@ -374,52 +326,6 @@ export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: 
     | { kind: "infer"; to: InferredChecks }
     | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );
-
-/** Where an Upgrade pick is written (DESIGN §4.3 `migrate`): a whole entity, one of its parts, a field, or one relation by type and target. */
-export type UpgradeTarget =
-  | { entity: EntityId; part: "entity" | UpgradeAspect }
-  | { entity: EntityId; part: "field"; field: FieldId }
-  | { entity: EntityId; part: "relation"; rel: RelationTypeId; to: string };
-
-/** One change an Upgrade can bring into the chat, with its default pick and why. */
-export interface UpgradeChange {
-  /** Unique within the preview. */
-  id: string;
-  label: string;
-  /** The chat's value now and the revision's, in words. */
-  from: string;
-  to: string;
-  /** Take or keep; for an entity gone from the revision, keep or remove. */
-  options: EntityUpgradePick[];
-  /** The default: take what play never touched, keep what it did. */
-  pick: EntityUpgradePick;
-  why: "changed in play" | "unchanged" | "new" | "removed";
-  /** Where a pick is written: both sides of a symmetric or inverse pair, which change together. */
-  targets: UpgradeTarget[];
-  /** It names someone or somewhere the POV can't see: shown as "A hidden change" until the owner opens the spoiler gate. */
-  secret?: true;
-}
-
-export interface UpgradeEntityRow {
-  entity: EntityId;
-  name: string;
-  /** The kind's label. */
-  kind: string;
-  status: "new" | "removed" | "changed";
-  changes: UpgradeChange[];
-  /** Someone or something the POV can't see: the whole row waits behind the spoiler gate. */
-  secret?: true;
-}
-
-/** What an Upgrade brings into the chat, entity by entity (DESIGN §4.3 `migrate`). */
-export interface UpgradePreview {
-  /** The revision the chat's definitions come from (its own, unless an earlier Upgrade left them behind) and the one it moves to. */
-  from: RevisionId;
-  to: RevisionId;
-  entities: UpgradeEntityRow[];
-  /** Tracks that go back to their start, in words; a track the POV can't see is `secret`. */
-  tracks: { text: string; secret?: true }[];
-}
 
 /** What a marker would do (DESIGN §9.2: the demotion preview lists predicates whose inputs will freeze; an Upgrade's lists its definition changes). */
 export interface MarkerPreview {
@@ -483,18 +389,6 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
 }
 
 /**
- * Background-lane jobs (DESIGN §13): Import from lore, Build/Refine with AI, Describe a map,
- * Propose routines from lore, Playtest, Check world, and the lore indexing jobs (§4.2). Input:
- * `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}`
- * (the place drawn, the author's description, and the map's id, by default `<scope>_map`; its one
- * proposal is the map); `propose_routines` `RoutineJobInput`; `playtest` `{turns: string[]}`;
- * `check_world` `{days?: number}` (1–14 simulated days, default 3); `index_text` `{text}`.
- * Playtest and Check world results share the `turns`/`lint` shape (Check
- * world: one entry per day, with drops, failures and leaks as notes).
- */
-export type JobKind = "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_text";
-
-/**
  * Propose routines from lore (DESIGN §13): whom it proposes routines and schedules for, and where a
  * second pass starts. People and groups are read in id order; a pass that stops before the last
  * returns the input that continues it (`JobResult.next`).
@@ -513,137 +407,16 @@ export interface RoutineJobInput {
  */
 export type JobRequest = Request<"lre.job"> & ({ op: "start"; kind: JobKind; worldId: WorldId; input: JsonObject } | { op: "cancel"; jobId: string } | { op: "list"; worldId: WorldId } | { op: "dismiss"; jobId: string });
 
-/** A proposed world edit; the UI applies accepted ones as `lre.editor put`, then `lre.world commit`. */
-export interface JobProposal {
-  id: string;
-  collection: WorldCollection;
-  key: string;
-  value: JsonValue;
-  source: string;
-  confidence: number;
-  note?: string;
-  /** The pack the proposal belongs to (an entity's kind's pack; `space` for places and routes), for grouping the review. */
-  pack?: string;
-  /**
-   * Import: the title of each lore entry the value's `sources` cite, by back-link (`bookId/entryId`), for the review; a book index job: the book entry its lore entry comes from;
-   * Propose routines: each source it cites, by key (a lore entry's id, or `<entity>.<field>` for a sheet's field), named as the review shows it.
-   */
-  sourceNames?: Record<string, string>;
-  /** A lore indexing proposal: the terms and topics its entry joins in the lookup table when it is applied. */
-  index?: LoreIndexAddition;
-  /** Propose routines: the person or group it is for, for grouping the review by character and group. */
-  owner?: EntityId;
-  /**
-   * What checking it against the draft found wrong, in the author's words: a place, owner or person
-   * that isn't there, a window that can't be, company with no ground, a clash with what the owner's
-   * schedules or routine already hold. The review starts it unticked.
-   */
-  problems?: string[];
-}
-
-/**
- * A job's result: proposals, with `next`, the input that continues a pass that stopped before the
- * end (Propose routines), or a run's turns and lint. `processMs`: a Check world day's ms per
- * simulated process, wall clock, shown beside the day; absent for Playtest.
- */
-export type JobResult = { proposals: JobProposal[]; next?: JsonObject } | { turns: { user: string; reply: string; notes: string[]; processMs?: Record<string, number> }[]; lint: LintIssue[] };
-
 /** Pushed while a job runs and once when it ends. */
 export interface JobUpdate extends Envelope<"lre.job.update"> {
   jobId: string;
   kind: JobKind;
-  status: "running" | "done" | "failed" | "cancelled";
+  status: JobStatus;
   /** 0..1 */
   progress: number;
   message?: string;
   result?: JobResult;
 }
-
-/**
- * A kept job (`lre.job list`). `interrupted`: it was running when the extension stopped; its result
- * holds the proposals it had made by then, and `input` runs it again as it was started.
- */
-export interface JobSummary {
-  jobId: string;
-  kind: JobKind;
-  worldId: WorldId;
-  status: JobUpdate["status"] | "interrupted";
-  progress: number;
-  message?: string;
-  result?: JobResult;
-  input: JsonObject;
-  /** Epoch ms of the job's last change. */
-  at: number;
-}
-
-/** World document collections the editors write. */
-export type WorldCollection =
-  | "kinds"
-  | "relations"
-  | "entities"
-  | "places"
-  | "routes"
-  | "grids"
-  | "maps"
-  | "rules"
-  | "actions"
-  | "checks"
-  | "schedules"
-  | "tracks"
-  | "tables"
-  | "sections"
-  | "steps"
-  | "packs"
-  | "lore"
-  | "classifications"
-  | "routines";
-
-/**
- * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
- * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
- * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it; `lorePins` is
- * `world.lorePins` (DESIGN §24.5), whole: one that pins nothing removes it; `routineSettings` is
- * `world.routineSettings` (DESIGN §8), whole: the defaults remove it; `needs` is `world.needs`
- * (DESIGN §8), whole: only what differs from the defaults is stored, and the defaults remove it.
- */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds" | "lorePins" | "routineSettings" | "needs";
-
-/** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
-export type JsonPatchOp =
-  | { op: "add"; path: string; value: JsonValue }
-  | { op: "remove"; path: string }
-  | { op: "replace"; path: string; value: JsonValue }
-  | { op: "move"; from: string; path: string }
-  | { op: "copy"; from: string; path: string }
-  | { op: "test"; path: string; value: JsonValue };
-
-/**
- * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is
- * none) so a reload or a second device resumes it; its `base` is ignored. `discard` drops the draft.
- * `profile` applies a ruleset profile to the draft in one write (`shared/profiles`), each
- * conflicting item kept or taken by its path in `choices` (kept when unnamed). `patch` applies
- * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
- * one of the world's revisions, which a commit then makes head again (DESIGN §23). `shipped` puts
- * the version this build ships of each named data table into the draft, in place of the draft's copy
- * or beside the rest (Data updates, `lre.world updates`), pinned at its revision as any table write is.
- *
- * `version` names a state of the world's working copy, and is never reused within a world: each
- * write counts one, and so does a discard or commit (which drops the draft). With no draft stored it
- * is the world's count (`WorldIndex.draftVersion`; 0 for a world never edited), and a new draft starts one above it.
- * A request that sends `version` is refused with `conflict` when the working copy has moved on
- * from it; one without it is not checked. Every result carries the current one.
- */
-export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null; version?: number } & (
-    | { op: "get" }
-    | { op: "discard" }
-    | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
-    | { op: "remove"; collection: WorldCollection; id: string }
-    | { op: "set"; part: WorldPart; value: JsonValue }
-    | { op: "profile"; profile: string; choices: Record<string, "mine" | "profile"> }
-    | { op: "patch"; ops: JsonPatchOp[] }
-    | { op: "restore"; revision: RevisionId }
-    | { op: "shipped"; tables: TableId[] }
-  );
 
 /**
  * World operations. `sheet` previews the Sheet Designer's layout: the draft world with `ruleset` in
@@ -667,47 +440,12 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
     | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
     | { op: "undo_upgrade"; chatId: ChatId; edit: string }
+  | { op: "limits" }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
     | { op: "templates" }
     | { op: "chats"; worldId?: WorldId; chatId?: ChatId }
     | { op: "updates"; worldId: WorldId; revision?: RevisionId }
   );
-
-/** Some of a table's rows: how many, and the first few by name (a row's `label` or `name`, else its id in words). */
-export interface TableNames {
-  count: number;
-  names: string[];
-}
-
-/** How one version of a table's rows differs from another's: the rows it adds, holds otherwise and drops. */
-export interface TableRowChanges {
-  added: TableNames;
-  changed: TableNames;
-  dropped: TableNames;
-}
-
-/**
- * A data table this build ships newer than a world's copy (`lre.world updates`, DESIGN §9.2).
- * `update`: the copy is an earlier shipped version the world never changed, so the shipped one
- * replaces it with nothing lost; `missing`: the world has none, as the table shipped after it was
- * made; `edited`: the world changed its copy of an earlier shipped version, so nothing replaces it
- * unasked. `shipped` is what the shipped version changes since the version the copy came from (for
- * a missing table, every row it brings), with the columns it adds, changes and drops by id;
- * `yours`, for an edited copy, what the world changed since that version, which taking the shipped
- * one would lose. `starter` names the starter world whose own version of the table it is (a
- * template's prices or items: a world made from Fantasy town keeps Brindlemere's); without it, the
- * packs' own version.
- */
-export interface TableUpdate {
-  table: TableId;
-  label: string;
-  pack: PackId;
-  status: "update" | "missing" | "edited";
-  /** The starter world whose own version ships newer (its template id and name); absent for the packs' own. */
-  starter?: { id: string; name: string };
-  shipped: TableRowChanges & { columns: { added: string[]; changed: string[]; dropped: string[] } };
-  yours?: TableRowChanges;
-}
 
 /** A starter world `lre.world create` can start from. */
 export interface TemplateInfo {
@@ -743,7 +481,8 @@ export interface WorldChatInfo {
  * Save of one entry's own LRE fields, its visibility, links and aliases (null takes them off); an
  * earlier build's secrecy fields on it stay as they are, and nothing else of the entry is written.
  * `mark`: Build's Make secret and Make public, written as secret marks into the entry's text
- * (`shared/secret-marks.ts`) and nothing else of it. Both answer the book's entries, as read after.
+ * (`shared/secret-marks.ts`) and nothing else of it. Both answer the book's entries, as read after, and carry the `revision` the page read
+ * the entry at: a write on an entry that has changed since is refused, and the page reads the entry as it now stands.
  * `index`: the lore index of the world's books as Build's index entry would hold it now
  * (`LoreIndexView`), the entry kept brought up to date first. `build`: Build's Build an index entry,
  * on the user's press: that index written as a new entry of `bookId`, which LRE keeps in sync until
@@ -755,98 +494,11 @@ export type LoreRequest = Request<"lre.lore"> &
     | { op: "books"; chatId?: ChatId }
     | { op: "entries"; bookId: string }
     | { op: "pins"; worldId?: WorldId; chatId?: ChatId }
-    | { op: "fields"; bookId: string; entryId: string; fields: BookFieldsEdit | null }
-    | { op: "mark"; bookId: string; entryId: string; change: LoreMarkChange }
+    | { op: "fields"; bookId: string; entryId: string; fields: BookFieldsEdit | null; revision?: number }
+    | { op: "mark"; bookId: string; entryId: string; change: LoreMarkChange; revision?: number }
     | { op: "index"; worldId: WorldId }
     | { op: "build"; worldId: WorldId; bookId: string }
   );
-
-/**
- * The lore index of a world's books as Build shows it (`lre.lore index`): the text Build's index
- * entry holds (the entries anyone may read), each book with how many entries it lists, and the entry
- * LRE keeps in sync, with its book's name, when there is one.
- */
-export interface LoreIndexView {
-  text: string;
-  books: { id: string; name: string; entries: number }[];
-  built: (BuiltLoreIndex & { book: string }) | null;
-}
-
-/**
- * A change to the secret marks in one World Info entry's text (`lre.lore mark`), names as written:
- * `secret` makes its whole text one secret; `add` adds a secret line at its end; `names` changes the
- * names of its mark `mark`, and `public` makes that mark plain text again (marks counted from 0, in
- * the order its text holds them).
- */
-export type LoreMarkChange =
-  | { kind: "secret"; knownTo: string[]; keptFrom: string[] | "everyone" }
-  | { kind: "add"; text: string; knownTo: string[]; keptFrom: string[] | "everyone" }
-  | { kind: "names"; mark: number; knownTo: string[]; keptFrom: string[] | "everyone" }
-  | { kind: "public"; mark: number };
-
-/** A secret mark in an entry's text as Build shows it: its text, and its names as written. */
-export interface LoreMarkView {
-  text: string;
-  knownTo: string[];
-  keptFrom: string[] | "everyone";
-}
-
-/**
- * A World Info book a pin may name an entry of (`lre.lore books`); `attached`: to the chat asked
- * about. `character`: a character brought it (Lumiverse makes a book of its own for each one a card
- * it imports carries, which may share its name with one imported on its own); `added`: when it was
- * made, in Unix seconds, or null. A picker tells books with the same name apart by these.
- */
-export interface LoreBookView {
-  id: string;
-  name: string;
-  attached: boolean;
-  character: boolean;
-  added: number | null;
-}
-
-/**
- * One entry of a World Info book, for a pin picker and the lore editor (`lre.lore entries`);
- * `disabled`: switched off in its book, which a pin still reads; `lore`: its LRE fields, when it has
- * any (an earlier build's secrecy among them, read as it stands). `marks`: the secret marks its text
- * holds, in order; `whole` when its whole text is one, which makes the whole entry secret;
- * `unreadable`: what in its text starts like a mark but can't be read as one, and why. `copyOf`: the
- * entry an earlier build switched this one off as a copy of, as its note names it.
- */
-export interface LoreBookEntryView {
-  id: string;
-  title: string;
-  disabled: boolean;
-  /** Its text's length, in characters. */
-  chars: number;
-  lore?: BookLoreFields;
-  marks?: LoreMarkView[];
-  whole?: true;
-  unreadable?: { raw: string; problem: string }[];
-  copyOf?: { bookId: string; entryId: string };
-}
-
-/**
- * A pin as read now (`lre.lore pins`): its entry's title and where it comes from (the world's lore,
- * or a book by name). `missing`: no such lore entry, or gone from its book; `pending`: an AI-written
- * entry not reviewed yet, which nothing reads; `off`: switched off in its book, which a pin still
- * reads. `secret`: a secret world entry, which reaches only the readers it allows.
- */
-export interface LorePinView {
-  key: string;
-  pin: LorePin;
-  title: string;
-  source: string;
-  status: "ok" | "missing" | "pending" | "off";
-  secret: boolean;
-}
-
-/** Every pin of a world, read now (`lre.lore pins`), by character, by place and by step, in order. */
-export interface LorePinsView {
-  characters: Record<EntityId, LorePinView[]>;
-  places: Record<PlaceId, LorePinView[]>;
-  steps: Partial<Record<StepPurpose, LorePinView[]>>;
-}
 
 /**
  * Moving the user's World Info books from LRE's old secrecy fields to secret marks (DESIGN §4.2),
@@ -864,76 +516,6 @@ export type SecrecyRequest = Request<"lre.secrecy"> &
     | { op: "confirm"; bookId: string; version: string }
     | { op: "restore"; bookId: string; version: string }
   );
-
-/**
- * Where a book stands in its move to secret marks: never moved, or put back (`legacy`); moved and
- * waiting for the user's check (`applied`); moved with its old fields taken off (`confirmed`); or put
- * back only in part, a restore that didn't finish, which Restore finishes (`restoring`).
- */
-export type SecrecyState = "legacy" | "applied" | "confirmed" | "restoring";
-
-/** A book of the user's on Build's secrecy page (`lre.secrecy books`): when its latest move was applied, and when that move was put back, in Unix ms (null for none). */
-export interface SecrecyBookView extends LoreBookView {
-  state: SecrecyState;
-  applied: number | null;
-  restored: number | null;
-}
-
-/**
- * One entry a book's move lists (`lre.secrecy preview`), by what LRE left on it:
- * - `mark`: an LRE secret whose whole text becomes one secret mark, `mark` (the entry's text once
- *   moved), known to `knownTo` (its holders' ids, as LRE stored them);
- * - `marked`: an LRE secret whose text holds secret marks already, which it is read by; its text stays;
- * - `twin`: a copy LRE kept off with the secret `original`, whose text becomes the same mark (`mark`,
- *   known to `knownTo`), then put back as its note says it stood (`was`: switched off or on, and
- *   whether it had LRE fields of its own);
- * - `fields`: LRE fields on an entry that keeps nothing secret, which Confirm takes off (`removes`);
- * - `refused`: an LRE secret, or a twin (`original`), whose text can't be a mark (`reason`), which
- *   keeps its old secrecy.
- * `gate` and `audience`: what no longer applies once a secret is a mark. `switchedOff`: LRE switched
- * it off and nothing says how it stood before, so the move leaves it off and the page lists it for
- * the user to switch on. `off`: stored switched off now. Once moved, `now` says whether it stands as
- * the move left it, was changed since (Restore replaces the change, keeping a copy in the backup), is
- * gone (Restore can't put it back) or stands as before the move already; `marked`, whether its text
- * holds a secret mark now; `error`, the last step whose write to it failed, and why.
- */
-export interface SecrecyEntryView {
-  id: string;
-  title: string;
-  kind: "mark" | "marked" | "twin" | "fields" | "refused";
-  off: boolean;
-  mark?: string;
-  knownTo?: string[];
-  gate?: string;
-  audience?: StepPurpose[];
-  switchedOff?: boolean;
-  original?: { bookId: string; entryId: string };
-  was?: { off: boolean; fields: boolean };
-  removes?: string[];
-  reason?: string;
-  now?: "moved" | "changed" | "gone" | "before";
-  marked?: boolean;
-  error?: { step: "apply" | "confirm" | "restore"; message: string };
-}
-
-/**
- * A book's move to secret marks (`lre.secrecy preview`, and the answer to Apply, Confirm and
- * Restore): when its latest move was applied, confirmed and put back (Unix ms, null for none);
- * `version`, what Apply, Confirm and Restore send back; `entries`, what Apply would do, or what the
- * move did; `damaged`, where a backup file that couldn't be read was kept aside, when one was (the
- * book then reads as never moved).
- */
-export interface SecrecyBookPlan {
-  bookId: string;
-  name: string;
-  state: SecrecyState;
-  applied: number | null;
-  confirmed: number | null;
-  restored: number | null;
-  version: string;
-  entries: SecrecyEntryView[];
-  damaged: string | null;
-}
 
 /**
  * Character minds on demand (DESIGN §24.9), from GM → Minds behind the GM gate. `run` asks the minds
@@ -1291,22 +873,6 @@ export type FrontendToBackend =
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
-export interface LintIssue {
-  severity: "error" | "warning" | "info";
-  /** Document path, e.g. `entities.npc_dev.fields.cash`. */
-  path: string;
-  code: string;
-  message: string;
-  /** A fix Problems offers in one press: what it does, and the draft patch that does it. */
-  fix?: LintFix;
-}
-
-/** One press's fix to the draft (`lre.editor patch`): its label ("Put it at 114 Harbor Street") and its operations. */
-export interface LintFix {
-  label: string;
-  ops: JsonPatchOp[];
-}
-
 /** Each extraction or agent change type's effective mode and where it comes from (DESIGN §11, D4 learning; AGENT-LOOP-PLAN §6). */
 export interface ExtractionModeView {
   mode: BoundMode;
@@ -1357,7 +923,7 @@ export interface ResultBodies {
   "lre.settings.set": SettingsResult;
   "lre.settings.caveats": { caveats: { code: string; message: string }[] };
   /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the working copy's version (see `EditorRequest`). */
-  "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean; version: number };
+  "lre.editor": EditorAnswer;
   /**
    * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and
    * relation type the registered packs define, for Build's kind and relation pickers and typed
@@ -1369,7 +935,7 @@ export interface ResultBodies {
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number } };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */
@@ -1474,13 +1040,6 @@ export interface MindsRunUpdate extends Envelope<"lre.minds.update"> {
   chatId: ChatId;
   run: MindsRunView;
 }
-
-/**
- * How the frontend starts a generation the guard stopped, once the engine prepared it (DESIGN §5.1):
- * `regenerate` and `continue` run Lumiverse's own commands; a new reply after a reply only the
- * player can start again, with Send.
- */
-export type GenerateAs = "regenerate" | "continue" | "send";
 
 /**
  * The engine prepared the chat's next generation: the frontend open on that chat starts it (DESIGN

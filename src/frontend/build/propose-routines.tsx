@@ -11,7 +11,8 @@
 import { useMemo, useState } from "preact/hooks";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonValue } from "../../shared/json";
-import type { JobProposal, RoutineJobInput } from "../../shared/protocol";
+import type { JobProposal } from "../../shared/jobs";
+import type { RoutineJobInput } from "../../ui/kept/protocol";
 import { BLOCK_KIND_LABEL, isOff, routineShapeProblems, type RoutineDef, type RoutineEntry } from "../../shared/routines";
 import { playedKinds, type ScheduleDef, type WorldDoc } from "../../shared/world";
 import type { App } from "../app";

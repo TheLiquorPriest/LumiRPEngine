@@ -11,7 +11,7 @@
 import { hasOwn, isRecord } from "../shared/json";
 import { isLorePin, LORE_AUDIENCE, loreIsSecret, lorePinKey, loreSourceOf, loreTerm, PROSE_STEPS } from "../shared/lore";
 import { STEP_OUTPUTS } from "../shared/steps";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import { markNameIssues, parseSecretMarks } from "../shared/secret-marks";
 import type { WorldDoc } from "../shared/world";
 import { loreHeldBy } from "./lore";

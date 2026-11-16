@@ -6,7 +6,7 @@
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { SEARCH_LIMITS } from "../engine/lore";
 import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
-import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS } from "../shared/settings";
+import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS } from "../shared/narrator-view";
 import { LORE_INDEX_DEFAULTS, type LoreIndexSettings } from "./indexing";
 import { LORE_DEFAULTS, type LoreSettings } from "./lore";
 import { LORE_PROPOSAL_DEFAULTS, type LoreProposalSettings } from "./proposals";

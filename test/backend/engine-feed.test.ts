@@ -10,7 +10,7 @@ import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { markedText } from "../../src/engine/feed";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { SectionTemplate } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 

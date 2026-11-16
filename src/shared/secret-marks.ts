@@ -43,7 +43,7 @@
 
 import type { EntityId } from "./ids";
 import { neutralizeMacros } from "./macros";
-import type { LintIssue } from "./protocol";
+import type { LintIssue } from "./lint";
 
 /**
  * One secret mark in an entry's text: where it stands (from its `{{` to just after its `}}`), as

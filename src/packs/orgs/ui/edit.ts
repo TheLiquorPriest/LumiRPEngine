@@ -13,7 +13,7 @@ import { isRecord } from "../../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
 import { DUES_EVERY, ORG_ACTIONS, ORG_POWERS, positionIdOf, powerCovers, type OrgPower, type Position, type PositionScope } from "../../../shared/org";
 import type { OrgDelegationView, OrgDuesView, OrgPersonView, OrgPositionView, OrgRef, OrgView } from "../../../shared/org-view";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 
 /** The section only GM → Orgs' pages hold: its parts and tabs draw from it, and the editors give the GM every control. */

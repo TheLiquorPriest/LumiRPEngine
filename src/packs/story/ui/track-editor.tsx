@@ -8,7 +8,7 @@ import { useId, useMemo, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { nameOfId } from "../../../shared/maps";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { Objective, StageDef, TrackDef, TrackKind, WorldDoc } from "../../../shared/world";
 import { GM_OWNER, GM_OWNER_NAME } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";

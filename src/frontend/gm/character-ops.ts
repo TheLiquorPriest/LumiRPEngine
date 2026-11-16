@@ -2,7 +2,7 @@
 // page a GM entity opens, and one `lre.edit` op for each control. Pure, so tests read them.
 
 import type { CharacterBed, CharacterRelation, PlaceRef } from "../../shared/character";
-import type { EditOp } from "../../shared/protocol";
+import type { EditOp } from "../../shared/edit-ops";
 import { PARTY_RELATION } from "../../shared/party";
 import type { RoutineRole } from "../../shared/routines";
 import type { GmEntity, GmRelation, GmView } from "../../shared/state-view";

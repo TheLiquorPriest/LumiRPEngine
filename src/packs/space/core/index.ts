@@ -21,7 +21,7 @@ import { cellIndex, costMinutes, gridOf, SIGHT_MAX, standingGrid, type Cell } fr
 import { mapLint, mapSettingsOf, TRAVEL_MODES } from "../../../shared/maps";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import { placeOp, type PlaceOpOutcome } from "../../../engine/places-in-play";
 import type { PlaceOp } from "../../../shared/things";

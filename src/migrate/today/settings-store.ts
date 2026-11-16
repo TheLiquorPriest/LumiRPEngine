@@ -13,9 +13,13 @@ import type { DomainId, InterruptPolicy, Level, ModelUsePresetId, RealismPresetI
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
-import type { ExtractionModeView, SettingsResult } from "../../shared/protocol";
-import type { AgentChangeType, ChangeType, ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, SamplingParams, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../../shared/settings";
-import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, ASK_BEYOND_DEFAULT, CHANGE_TYPES, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, NARRATOR_DEFAULTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, THING_READ_DEFAULTS, thingReadsOf, TIDY_DEFAULTS, tidySettingsOf, TIMELAPSE_REACH_MINUTES, UNREASONED_ROUTE, UNREASONED_STEPS } from "../../shared/settings";
+import type { ExtractionModeView, SettingsResult } from "./wire";
+import type { AgentChangeType, ChangeType, ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GateSettings, HelperDefault, LookupLimits, ModelUseSettings, PhaseBudget, RealismSettings, RecentHistory, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../../shared/settings";
+import type { LorePolicy } from "../../shared/state-view";
+import type { SamplingParams } from "../../shared/host";
+import { AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, ASK_BEYOND_DEFAULT, CHANGE_TYPES, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, narratorSettingsOf, REASONING_CHOICES, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, THING_READ_DEFAULTS, thingReadsOf, TIDY_DEFAULTS, tidySettingsOf, UNREASONED_ROUTE, UNREASONED_STEPS } from "../../shared/settings";
+import { NARRATOR_DEFAULTS } from "../../shared/narrator-view";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../../shared/time-reach";
 import { FACT_CHANGE } from "../../shared/things";
 import type { BoundMode } from "../../shared/ids";
 import type { StepPurpose } from "../../shared/world";

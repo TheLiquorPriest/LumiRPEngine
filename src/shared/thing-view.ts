@@ -6,7 +6,7 @@
 // thing shows, a secret one marked. Also the words the pages share for sizes, where a size comes
 // from and whose a thing is.
 
-import type { EntityId, KindId } from "./ids";
+import type { EntityId, KindId, PlaceId } from "./ids";
 import type { OrgType } from "./org";
 import type { AccessBasis, GrantBasis, Size, SizeClass, SizeFrom, Spot } from "./things";
 import { SIZE_LABELS } from "./things";
@@ -253,3 +253,9 @@ export function presumedLine(whose: WhoseView): string | null {
 
 /** A use grant's basis in words: "holding it for its owner", "borrowing it", "may use it". */
 export const GRANT_WORDS: Readonly<Record<GrantBasis, string>> = { hold: "holding it for its owner", loan: "borrowing it", assign: "may use it" };
+
+/** The reads of the things browser both scopes answer. */
+export type ThingsRead = { op: "list" } | { op: "thing"; entity: EntityId } | { op: "person"; entity: EntityId } | { op: "find"; words: string } | { op: "types" };
+
+/** What the things browser answers in GM scope: the reads, and Tidy up, Leave it, what was made in play and Keep in the world. */
+export type GmThingsRead = ThingsRead | { op: "tidy" } | { op: "leave"; key: string; left: boolean } | { op: "made" } | { op: "keep"; things: EntityId[]; places: PlaceId[] };

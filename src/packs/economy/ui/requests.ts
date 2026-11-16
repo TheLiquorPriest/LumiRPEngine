@@ -6,7 +6,7 @@
 
 import type { ChatId, EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { parseMoneyInput } from "../../../shared/money";
 import type { WorldCurrency } from "../../../shared/world";
 import { FINANCE_ACTIONS, type AutopayMode, type CardState, type Flow, type FlowKind, type FlowShortfall, type PayTier } from "../../../shared/finance";

@@ -10,7 +10,7 @@
 
 import type { ComponentChildren } from "preact";
 import type { FinanceView, UpcomingLine } from "../../../shared/finance";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import type { GmView, PaletteView } from "../../../shared/state-view";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Banner, Button, Empty, List, ListRow, Section, Stat, Tabs, tabPanel } from "../../../frontend/components";

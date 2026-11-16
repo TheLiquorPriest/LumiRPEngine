@@ -12,7 +12,7 @@
 import type { ChatId, UserId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
 import { bookLoreFieldsOf, engineWroteEntry, loreIsSecret, lorePinKey, lorePinsOf, loreSourceOf, secretCopyOf } from "../shared/lore";
-import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from "../shared/protocol";
+import type { LoreBookEntryView, LoreBookView, LorePinView, LorePinsView } from "../shared/lore-views";
 import type { LorePin, WorldDoc } from "../shared/world";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../shared/secret-marks";
 import { worldPinText, type PinRef, type PinnedText } from "../engine/lore-pins";

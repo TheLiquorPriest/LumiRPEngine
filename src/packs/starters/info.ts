@@ -1,8 +1,14 @@
-// What each starter world is, for `lre.world templates` (DESIGN §23) and anyone choosing one
-// without loading it: the names Build's template picker uses, and each template's blurb from
-// data-src/templates. Kept apart from the worlds themselves, so reading it loads none of them.
+// What each starter world is, for anyone choosing one without loading it (DESIGN §23): the names
+// Build's template picker uses, and each template's blurb from data-src/templates. Kept apart from
+// the worlds themselves, so reading it loads none of them.
 
-import type { TemplateInfo } from "../../shared/protocol";
+/** A starter world a new world can start from. */
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  /** One or two sentences on what it holds. */
+  summary: string;
+}
 
 export const STARTER_INFO: readonly TemplateInfo[] = [
   {

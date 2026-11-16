@@ -6,7 +6,8 @@
 import { useMemo, useState } from "preact/hooks";
 import type { WorldId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import type { LintFix, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
+import type { LintFix, LintIssue } from "../../shared/lint";
+import type { WorldCollection, WorldPart } from "../../shared/world";
 import type { WorldDoc } from "../../shared/world";
 import { useApp, type BuildRoute } from "../app";
 import { Badge, Banner, Button, Empty, IdText, PageHeader, Section, Seg, useBusy } from "../components";

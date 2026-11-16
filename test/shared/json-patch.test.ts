@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../src/shared/json";
 import { applyPatch, getAt, isPrototypeKey, jsonEqual, parsePointer, PatchError, pointerOf, readOp } from "../../src/shared/json-patch";
-import type { JsonPatchOp } from "../../src/shared/protocol";
+import type { JsonPatchOp } from "../../src/shared/json-patch";
 
 const patch = (doc: JsonValue, ops: JsonPatchOp[]): JsonValue => applyPatch(doc, ops);
 

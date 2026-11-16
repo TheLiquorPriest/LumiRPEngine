@@ -11,7 +11,7 @@ import schemaJson from "./lre-map-v1.schema.json";
 import { areaOf, cellIndex, costMinutes, gridCosts, nearestMiddle, SIGHT_MAX } from "./grid";
 import type { EntityId, MapId, PlaceId, TravelMode } from "./ids";
 import { hasOwn, isRecord, safeKey } from "./json";
-import type { LintIssue } from "./protocol";
+import type { LintIssue } from "./lint";
 import { checkSchema, pathText, type JsonPath, type Schema } from "./schema-check";
 import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, TravelTuning, WorldDoc } from "./world";
 

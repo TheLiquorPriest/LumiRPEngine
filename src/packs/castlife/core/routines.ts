@@ -8,7 +8,7 @@ import type { EntityId, PlaceId, ScheduleId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { hashParts } from "../../../shared/hash";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { FIDELITIES, wiFactIdOfLiveLore } from "../../../shared/minds";
 import {
   BASIC_BLOCKS,

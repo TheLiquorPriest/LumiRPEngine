@@ -12,7 +12,7 @@ import { useId, useState } from "preact/hooks";
 import { ACCOUNT_CLASSES, CLASS_TRAITS, isAccountClass, LEGACY_TYPE_CLASS, OWNER_ROLES, type AccountClass, type PayTier } from "../../../shared/finance";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { formatMoney, type FieldDef, type WorldDoc } from "../../../shared/world";
 import { Button, IconButton } from "../../../frontend/components";
 import { AddPicker, CheckField, Chip, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "../../../frontend/build/form-kit";

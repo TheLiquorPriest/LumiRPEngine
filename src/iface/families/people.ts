@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { FixOp } from "../../shared/ledger";
-import type { EditOp } from "../../shared/protocol";
+import type { EditOp } from "../../shared/edit-ops";
 import { lifeStatesOf } from "../../shared/world";
 import type { EntityId } from "../../shared/ids";
 import { editFindings } from "../../engine/edits";

@@ -16,7 +16,7 @@ import { isRecord } from "../shared/json";
 import { hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { HolidayDef, Recurrence, ScheduleDef, ScheduleSlot, WeightedValue, WorldDoc } from "../shared/world";
 import type { RoutineDef } from "../shared/routines";
 import { type Calendar, calendarOf, clockAt, dateAt, dayIndexOfText, daysFromCivil, holidayDay, MINUTES_PER_DAY, parseHHMM, recursOn } from "./calendar";

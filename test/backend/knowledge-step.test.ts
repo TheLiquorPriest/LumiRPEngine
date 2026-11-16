@@ -22,7 +22,7 @@ import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json
 import { LEDGER_NAMESPACE, type LedgerEvent } from "../../src/shared/ledger";
 import { claimFactId, claimKey, DEFAULT_MINDS_MEMORY, factId, fillText, KNOWLEDGE_ANSWER_SHAPE, KNOWLEDGE_DEFAULTS, KNOWLEDGE_TEXTS, knowledgeSettingsOf, MEMORY_ANSWER_V2, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MINDS_EVENTS, witnessRef, type Holding, type KnowledgeFact, type KnowledgeSettings, type KnownView, type LearnEventData, type MindsGmView, type MindsSlice } from "../../src/shared/minds";
 import { SECRET_MARK_WORDING, secretMarkText } from "../../src/shared/secret-marks";
-import type { NarratorView } from "../../src/shared/settings";
+import type { NarratorView } from "../../src/shared/narrator-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { markedText } from "../../src/engine/feed";
 import type { WorldState } from "../../src/engine/state";

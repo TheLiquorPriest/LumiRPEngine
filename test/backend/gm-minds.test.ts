@@ -9,7 +9,7 @@ import { toChain } from "../../src/migrate/today/ledger-io";
 import { journalOf } from "../../src/packs/economy/core/journal";
 import type { MindsGmCharacter, MindsGmView } from "../../src/shared/minds";
 import { MIND_LENGTH_DEFAULTS } from "../../src/shared/minds";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import { Rig } from "../support/rig";
 
 const SECRET_NOTE = "Saw the ledger hidden behind the boiler";

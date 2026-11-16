@@ -11,7 +11,7 @@ import { JobRunner } from "../../src/backend/jobs";
 import { ROUTINE_MAX_CALLS, ROUTINE_OWNERS_PER_CALL } from "../../src/backend/routine-proposals";
 import { isRecord } from "../../src/shared/json";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import type { JobProposal } from "../../src/shared/protocol";
+import type { JobProposal } from "../../src/shared/jobs";
 import { routineShapeProblems, type RoutineGmView } from "../../src/shared/routines";
 import { TimeoutFired } from "../../src/shared/timeouts";
 import type { WorldDoc } from "../../src/shared/world";

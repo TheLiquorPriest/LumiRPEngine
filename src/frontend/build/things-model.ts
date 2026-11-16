@@ -9,7 +9,7 @@
 import { pointerOf } from "../../shared/json-patch";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { JsonPatchOp } from "../../shared/protocol";
+import type { JsonPatchOp } from "../../shared/json-patch";
 import type { OwnerGroup, PartyRef, ThingRow, ThingType, WhereStep } from "../../shared/thing-view";
 import type { GrantBasis, Size, Spot, ThingIs } from "../../shared/things";
 import { makeFieldsOf } from "../../shared/things";

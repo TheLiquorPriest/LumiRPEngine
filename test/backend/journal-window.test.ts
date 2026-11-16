@@ -17,7 +17,7 @@ import { createRegistry } from "../../src/engine/registry-impl";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatRun, LedgerEvent, Rec } from "../../src/shared/ledger";
 import { OFFSTAGE_DEFAULTS } from "../../src/shared/offstage";
-import { NARRATOR_DEFAULTS } from "../../src/shared/settings";
+import { NARRATOR_DEFAULTS } from "../../src/shared/narrator-view";
 import { POV, testModel, testPack, testWorld, tieStubPack } from "../support/test-pack";
 
 const reg = createRegistry([enginePack, testPack, tieStubPack]);

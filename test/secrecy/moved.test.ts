@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import type { WorldState } from "../../src/engine/state";
 import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
-import { NARRATOR_DEFAULTS } from "../../src/shared/settings";
+import { NARRATOR_DEFAULTS } from "../../src/shared/narrator-view";
 import { booksAsLore, entriesRead } from "../../src/secrecy/book-lore";
 import { copiedOriginals } from "../../src/secrecy/lore-secrets";
 import { knowledgeSwitch } from "../../src/secrecy/knowledge-switch";

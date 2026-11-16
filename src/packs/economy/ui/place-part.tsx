@@ -12,7 +12,7 @@ import type { ClaimsPolicy } from "../../../shared/claims";
 import type { PropertyView } from "../../../shared/finance";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import { mapPlaceOf, PLACE_MARK_LABEL, type PlaceMark } from "../../../shared/maps";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../../shared/world";
 import { useApp, type SheetRoute } from "../../../frontend/app";
 import { Badge, Button, List, ListRow, Section, useBusy } from "../../../frontend/components";

@@ -15,7 +15,8 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { ownersIn } from "../../src/shared/finance";
 import type { JsonObject } from "../../src/shared/json";
 import type { UpgradePicks } from "../../src/shared/ledger";
-import type { MarkerPreview, UpgradeChange } from "../../src/shared/protocol";
+import type { MarkerPreview } from "../../src/shared/protocol";
+import type { UpgradeChange } from "../../src/shared/upgrade";
 import { playedKinds, type EntityDef, type WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 

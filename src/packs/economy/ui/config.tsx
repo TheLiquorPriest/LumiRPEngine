@@ -17,7 +17,7 @@ import { useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import { ACCOUNT_CLASSES, ASSET_CLASSES, CLASS_TRAITS, DEPRECIATION_LABELS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { formatMoneyInput } from "../../../shared/money";
 import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { Button, IconButton, IdText, Seg, type SegOption } from "../../../frontend/components";

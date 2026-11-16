@@ -8,7 +8,7 @@ import { loreGateReader } from "../../src/engine/visibility";
 import { audienceChoices, bookLabels, gateExamples } from "../../src/frontend/build/book-lore";
 import { exprReads } from "../../src/frontend/build/expr-editor";
 import { LORE_AUDIENCE, PROSE_STEPS } from "../../src/shared/lore";
-import type { LoreBookView } from "../../src/shared/protocol";
+import type { LoreBookView } from "../../src/shared/lore-views";
 import { STARTER_WORLDS } from "../../src/packs/starters/index";
 import { Play, registry } from "../packs/templates/play";
 

@@ -16,7 +16,7 @@ import type { EntityId } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import { ORG_POWERS } from "../../src/shared/org";
 import type { OrgView } from "../../src/shared/org-view";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { StateView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney } from "../../src/shared/world";
 import { Button, ListRow, Row, Section } from "../../src/frontend/components";

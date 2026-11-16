@@ -24,7 +24,7 @@ import { clampBand, DIFFICULTY_BANDS, INFER_DETAILS, INFER_OTHERS, INFER_WHENS, 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { tableChoices } from "../shared/tables";
-import type { LintIssue } from "../shared/protocol";
+import type { LintIssue } from "../shared/lint";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { offersAction, requirementExpr } from "../shared/world";
 import { passOutcomes } from "./adjudication";

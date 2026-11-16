@@ -14,7 +14,6 @@ import { GM_IDS_MAX, GM_PARTS, GM_ROSTER, rosterEntity, type GmPart, type GmPart
 import type { EntityId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
 import { DEFAULT_WORLD_MINDS, knowledgeThreshold, MIND_LENGTH_DEFAULTS } from "../../shared/minds";
-import type { GmDuringTurn } from "../../shared/settings";
 import type { ChatStatus, GmEntity, GmRosterEntry, GmView } from "../../shared/state-view";
 import type { GmSection } from "../app";
 import type { GmSectionDef, RequestBody } from "../registry";
@@ -102,6 +101,12 @@ export function thinEntity(entity: GmEntity): boolean {
 /** A kept read: a part by its name; an entity's full entry by `entities:<id>`, a party's money by `money:<id>` (null: there is none). */
 const ENTITY = "entities:";
 const MONEY = "money:";
+
+/**
+ * What the GM page shows while a turn runs: the chat as it was before the turn, its parts held until
+ * Refresh shows the turn so far (`hold`), or every change as it lands (`live`).
+ */
+export type GmDuringTurn = "hold" | "live";
 
 /**
  * What the page does when the chat's GM key (`StateView.gmKey`) reads `next` and its parts were last

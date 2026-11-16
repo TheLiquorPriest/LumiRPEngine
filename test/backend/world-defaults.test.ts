@@ -7,7 +7,7 @@ import { REALISM_PRESETS } from "../../src/engine/realism";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import type { ControlsView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
-import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../../src/shared/settings";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../../src/shared/time-reach";
 import { newWorld } from "../../src/cli/local-engine";
 import { Rig } from "../support/rig";
 

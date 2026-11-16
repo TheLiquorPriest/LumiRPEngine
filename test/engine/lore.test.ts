@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { blankWorld, lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { addToLoreIndex, loreSourceOf, termSuggestions, topicSuggestions } from "../../src/shared/lore";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import type { LoreEntryDef, WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
 

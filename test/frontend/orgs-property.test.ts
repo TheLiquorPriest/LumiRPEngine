@@ -28,7 +28,7 @@ import orgsUi from "../../src/packs/orgs/ui/index";
 import { orgTabs } from "../../src/packs/orgs/ui/org";
 import { decodePremises, orgEntryParams, Premises, type PremisesProps } from "../../src/packs/orgs/ui/property";
 import type { PremisesView } from "../../src/shared/org-view";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { startState } from "../packs/support";

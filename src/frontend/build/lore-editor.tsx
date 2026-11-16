@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { LORE_AUDIENCE, loreIsSecret, loreSourceOf } from "../../shared/lore";
-import type { LoreBookView, LoreIndexView } from "../../shared/protocol";
+import type { LoreBookView, LoreIndexView } from "../../shared/lore-views";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";

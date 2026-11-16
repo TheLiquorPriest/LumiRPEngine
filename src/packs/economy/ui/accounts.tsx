@@ -15,7 +15,7 @@
 
 import { useState } from "preact/hooks";
 import { ACCOUNT_STATUSES, AUTOPAY_MODES, CARD_STATES, CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, FINANCE_ACTIONS, type AccountClass, type AccountView, type AutopayMode, type CardState, type CardView, type FinanceView, type InterestView, type PartyKind, type PayTier } from "../../../shared/finance";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Badge, Button, Empty, IdText, List, ListRow, Meter, Section } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";

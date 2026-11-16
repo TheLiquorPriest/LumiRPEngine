@@ -16,10 +16,11 @@ import { mindLines } from "../../src/packs/minds/core/section";
 import type { JsonObject } from "../../src/shared/json";
 import { neutralizeMacros } from "../../src/shared/macros";
 import { MARK_TEXT_IDS } from "../../src/shared/prompts";
-import type { EditOp, ResultBodies } from "../../src/shared/protocol";
+import type { ResultBodies } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import { SECRET_MARK_WORDING, secretMarkForms, secretMarkText, type SecretMarkWording } from "../../src/shared/secret-marks";
 import { DEFAULT_SECTIONS } from "../../src/shared/sections";
-import type { NarratorView } from "../../src/shared/settings";
+import type { NarratorView } from "../../src/shared/narrator-view";
 import type { FeedScope, SectionTemplate, WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 

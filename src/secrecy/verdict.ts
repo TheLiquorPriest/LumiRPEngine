@@ -29,7 +29,7 @@ import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
 import { loreGateReader } from "../engine/visibility";
 import { bookLoreId, bookMarkLoreId } from "./book-lore";
-import type { NarratorView } from "../shared/settings";
+import type { NarratorView } from "../shared/narrator-view";
 import { bookSecrecy, secretTexts, switchedOffForSecrecy, textOf, type MarkAt } from "./lore-secrets";
 import type { WorldInfoCandidate, WorldInfoInput, WorldInfoVerdict } from "../shared/host";
 import { blind, usersOwn } from "./blind";

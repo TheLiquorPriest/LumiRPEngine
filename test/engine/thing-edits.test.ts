@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FixOp, LedgerEvent } from "../../src/shared/ledger";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { WorldDoc } from "../../src/shared/world";
 import { parseEditOps, resolveEdit, type EditOptions } from "../../src/engine/edits";
 import { createRegistry } from "../../src/engine/registry-impl";

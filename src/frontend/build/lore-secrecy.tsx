@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { loreBooksOf } from "../../shared/lore";
-import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView } from "../../shared/protocol";
+import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView } from "../../shared/lore-views";
 import { STEP_LABEL } from "../../shared/steps";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, IconButton, PageHeader, Section, useBusy } from "../components";

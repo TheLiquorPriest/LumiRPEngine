@@ -11,7 +11,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { DOMAINS } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { WorldDoc } from "../../shared/world";
 import { EFFECT_ONLY_FUNCTIONS } from "../../shared/world";
 import { useApp } from "../app";

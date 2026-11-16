@@ -22,7 +22,7 @@ import { runDir } from "../../src/shared/ids";
 import { hasOwn } from "../../src/shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, PostEntry, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import { decodeLedger, encodeLedger, toChain } from "../../src/migrate/today/ledger-io";
 import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { startMarkersFrom } from "../../src/migrate/today/start-markers";

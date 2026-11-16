@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../src/shared/json";
 import { applyPatch, measure, PatchError } from "../../src/shared/json-patch";
-import type { JsonPatchOp } from "../../src/shared/protocol";
+import type { JsonPatchOp } from "../../src/shared/json-patch";
 
 function refusal(doc: JsonValue, ops: JsonPatchOp[], budget: { size: number; depth: number }): PatchError {
   try {

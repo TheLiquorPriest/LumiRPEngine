@@ -11,7 +11,7 @@ import type { ComponentChildren } from "preact";
 import { useId, useMemo, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import type { FieldDef, Recurrence, ScheduleDef, ScheduleSlot, WeightedValue, WorldDoc } from "../../shared/world";
 import { Button, Disclosure, Field, IconButton, NumberStepper, Section, Seg } from "../components";
 import { humanize } from "../format";

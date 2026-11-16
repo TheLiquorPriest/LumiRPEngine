@@ -16,7 +16,7 @@ import { referenceFold } from "../../src/engine/ledger/reference";
 import { heldBy } from "../../src/shared/finance";
 import { hashJson } from "../../src/shared/hash";
 import { isRecord, type JsonObject } from "../../src/shared/json";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 

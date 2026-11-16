@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { LintIssue } from "../../src/shared/protocol";
+import type { LintIssue } from "../../src/shared/lint";
 import { lintWorld, newBlankWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";

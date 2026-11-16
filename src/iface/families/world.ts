@@ -9,7 +9,9 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import { getAt, parsePointer } from "../../shared/json-patch";
-import type { JsonPatchOp, LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
+import type { JsonPatchOp } from "../../shared/json-patch";
+import type { LintIssue } from "../../shared/lint";
+import type { WorldCollection, WorldPart } from "../../shared/world";
 import { nameOf } from "../../shared/world-diff";
 import { DraftMoved, WORLD_COLLECTIONS, WorldError } from "../../worlds/worlds";
 import type { EditorResult } from "../../worlds/worlds";

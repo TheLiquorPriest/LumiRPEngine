@@ -6,7 +6,7 @@
 // behind the GM gate as `lre.gm` is. A GM's view: every thing shows, a secret one marked.
 
 import type { EntityId, PlaceId } from "./ids";
-import type { EditOp } from "./protocol";
+import type { EditOp } from "./edit-ops";
 import type { WhereStep } from "./thing-view";
 import type { Spot } from "./things";
 

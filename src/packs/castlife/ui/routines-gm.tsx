@@ -14,7 +14,7 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { EntityId, ScheduleId } from "../../../shared/ids";
 import { nameOfId } from "../../../shared/maps";
 import { wiFactIdOfLiveLore } from "../../../shared/minds";
-import type { EditOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
 import type { EffectiveBlock, EffectiveSchedule, InvitationView, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutineRole, SkipLife, SourceView } from "../../../shared/routines";
 import { AWARENESS_LABEL, BLOCK_KIND_LABEL, isOff, ROUTINE_AWARENESS, ROUTINE_MODE_LABEL, ROUTINE_MODES, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, storySourceLabel } from "../../../shared/routines";
 import type { GmView } from "../../../shared/state-view";

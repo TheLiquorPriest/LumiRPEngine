@@ -3,7 +3,7 @@
 // world document, an imported ledger or an intent can never ask for an unbounded run.
 
 import type { Level } from "../shared/ids";
-import { SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/settings";
+import { SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../shared/time-reach";
 import { MINUTES_PER_DAY } from "./calendar";
 
 export const TIME_LIMITS = Object.freeze({

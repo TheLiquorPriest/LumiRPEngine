@@ -25,7 +25,7 @@ import { hashParts } from "../shared/hash";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent, Rec, FinalEdit } from "../shared/ledger";
-import type { EditOp } from "../shared/protocol";
+import type { EditOp } from "../shared/edit-ops";
 import type { TidyFinding, TidyFix, TidyKind, TidyRun } from "../shared/thing-gm";
 import { TIDY_KINDS } from "../shared/thing-gm";
 import type { Spot } from "../shared/things";

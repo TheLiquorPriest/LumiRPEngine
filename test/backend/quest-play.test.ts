@@ -16,7 +16,8 @@ import { regardAxes } from "../../src/packs/relationships/core/index";
 import { decodeQuestsView, type QuestTrack } from "../../src/packs/story/ui/panel";
 import { hashJson } from "../../src/shared/hash";
 import { isRecord, type JsonObject } from "../../src/shared/json";
-import type { EditOp, ResultBodies } from "../../src/shared/protocol";
+import type { ResultBodies } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 

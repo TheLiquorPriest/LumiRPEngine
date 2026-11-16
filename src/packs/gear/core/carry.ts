@@ -7,7 +7,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import { hasOwn, isRecord } from "../../../shared/json";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { TableRow } from "../../../shared/tables";
 import { thingsConfigOf } from "../../../shared/things";
 import type { WorldDoc } from "../../../shared/world";

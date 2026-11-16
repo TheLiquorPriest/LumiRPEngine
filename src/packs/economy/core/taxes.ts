@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { FILING_STATUSES, FINANCE_ACTIONS, ownersIn, STRUCTURE_WORDS, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
 import type { FieldDef, WorldDoc } from "../../../shared/world";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { Registry } from "../../../engine/registry-impl";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, MINUTES_PER_DAY, monthName } from "../../../engine/calendar";
 import { dissolvedOn, jobsAt, mayAct, orgTypeOf } from "../../../engine/org";

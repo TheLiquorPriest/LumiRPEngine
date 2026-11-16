@@ -22,7 +22,8 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { pointerOf } from "../../../shared/json-patch";
 import { parseMoneyInput } from "../../../shared/money";
 import { COST_WHEN_WORDS, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_STATUS_WORDS, PROJECTS_SECTION, projectsViewIn, stepCost, stepsIn, STEP_STATE_WORDS, type ProjectStatus, type ProjectTemplateView, type ProjectView, type ProjectsView, type StepState, type StepView } from "../../../shared/projects";
-import type { EditOp, JsonPatchOp } from "../../../shared/protocol";
+import type { EditOp } from "../../../shared/edit-ops";
+import type { JsonPatchOp } from "../../../shared/json-patch";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 
 export const PROJECTS_TAB = "economy.projects";

@@ -14,10 +14,14 @@ import { GM_OUTLINE, GM_ROSTER, gmRosterEntry } from "../../src/shared/gm-parts"
 import { applyPatch } from "../../src/shared/json-patch";
 import type { MindsRunView } from "../../src/shared/minds";
 import type { LiveView } from "../../src/shared/live";
-import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, LoreBookEntryView, LorePinView, ReviewCardView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
+import type { AssistantProposal, AssistantProposalOp, AssistantRun, AssistantView, TraceRow, WorkspaceFileView } from "../../src/shared/protocol";
+import type { ReviewCardView } from "../../src/ui/kept/protocol";
+import type { LoreBookEntryView, LorePinView } from "../../src/shared/lore-views";
 import { editedBookFields, OLD_SECRECY_FIELDS, withBookLoreFields, type BookLoreFields } from "../../src/shared/lore";
 import { parseSecretMarks, unreadableMarks, wholeEntrySecret } from "../../src/shared/secret-marks";
-import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, PresetCard, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, FrontendToBackend, JobUpdate, PresetCard, ResultBodies } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
+import type { JobProposal, JobSummary } from "../../src/shared/jobs";
 import { AGENT_API } from "../../src/shared/protocol";
 import { loreBooksSettingOf, loreIndexSettingsOf, narrationSettingsOf, storySettingsOf, type UserSettings } from "../../src/shared/settings";
 import { LORE_INDEX_TEXT } from "../../src/shared/lore-routing";

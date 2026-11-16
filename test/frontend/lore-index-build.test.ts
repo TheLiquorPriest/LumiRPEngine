@@ -10,7 +10,7 @@ import { LoreIndexBody, type LoreIndexProps } from "../../src/frontend/build/lor
 import { Banner, Button, HostSelect, ListRow } from "../../src/frontend/components";
 import type { HostBookEntryInput } from "../../src/shared/host";
 import { isRecord, type JsonObject } from "../../src/shared/json";
-import type { LoreBookView, LoreIndexView } from "../../src/shared/protocol";
+import type { LoreBookView, LoreIndexView } from "../../src/shared/lore-views";
 import { Rig } from "../support/rig";
 import { labelled, press, propsOf, type Props } from "../support/tree";
 

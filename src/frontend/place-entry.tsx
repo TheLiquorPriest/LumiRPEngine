@@ -7,7 +7,7 @@
 
 import type { JsonObject } from "../shared/json";
 import { AS_THE_WORLD, AUDIENCES, ENTRY_WORDS, NO_KEYS, ORGS_ENTRY, type Audience } from "../shared/org";
-import type { EditOp } from "../shared/protocol";
+import type { EditOp } from "../shared/edit-ops";
 import type { PremiseView } from "../shared/org-view";
 import { Button, Field, Row } from "./components";
 

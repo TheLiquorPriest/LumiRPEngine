@@ -29,7 +29,7 @@ import { activityPhrase } from "../../../shared/activity";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
 import { activitySpanEnd, type FacetId, type FacetValueId, type FeedScope, type ScheduleDef, type WorldDoc } from "../../../shared/world";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";

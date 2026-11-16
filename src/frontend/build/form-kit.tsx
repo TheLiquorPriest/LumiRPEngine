@@ -6,7 +6,7 @@
 import type { ComponentChildren } from "preact";
 import { createContext } from "preact";
 import { useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { LintIssue } from "../../shared/protocol";
+import type { LintIssue } from "../../shared/lint";
 import { HostSelect, IdText, PageHeader, useShowIds } from "../components";
 import { Icon } from "../../ui/icons";
 import { revealInScroller } from "../scroll";

@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import type { HostBookEntryInput, QuietRequest } from "../../src/shared/host";
 import type { JsonObject } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView } from "../../src/shared/protocol";
+import type { SecrecyBookPlan, SecrecyBookView, SecrecyEntryView } from "../../src/shared/lore-views";
 import { parseSecretMarks } from "../../src/shared/secret-marks";
 import { Rig } from "../support/rig";
 

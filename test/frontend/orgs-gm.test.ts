@@ -28,7 +28,7 @@ import { decodeOrgList, decodeOrgPage } from "../../src/packs/orgs/ui/decode";
 import { decodeGmOrgs, GmJobs, GmMembers, GmOrgFields, GmOrgHistory, GmOrgsList, GmOwners, gmPage, gmPageDefs, jobAddOps, jobEndOps, jobsOf, memberOps, memberRemoveOps, ownerOps, ownerRemoveOps, ownersOf, WhoMay, type GmOrgSheet, type GmOrgsListProps } from "../../src/packs/orgs/ui/gm";
 import { OrgPage } from "../../src/packs/orgs/ui/org";
 import type { OrgGmView } from "../../src/shared/org-view";
-import type { EditOp } from "../../src/shared/protocol";
+import type { EditOp } from "../../src/shared/edit-ops";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { startState } from "../packs/support";

@@ -8,7 +8,7 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
 import { loreIsSecret, lorePhrases } from "../../../shared/lore";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
 import { trackOwner } from "../../../shared/world";
 import { cuesOf, readCue } from "../../../engine/cues";

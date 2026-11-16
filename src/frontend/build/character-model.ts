@@ -4,7 +4,7 @@
 import { pointerOf } from "../../shared/json-patch";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { JsonPatchOp } from "../../shared/protocol";
+import type { JsonPatchOp } from "../../shared/json-patch";
 import type { WorldDoc } from "../../shared/world";
 import { kindIs } from "./selector-editor";
 import { COLLECTION_SPECS, type FieldSpec } from "./schema";

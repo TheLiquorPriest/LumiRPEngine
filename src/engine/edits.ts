@@ -24,7 +24,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { FixDirective, FixOp, LedgerEvent, PostEntry, WorkspaceOp } from "../shared/ledger";
 import type { Holding, MindLengths } from "../shared/minds";
-import type { EditOp } from "../shared/protocol";
+import type { EditOp } from "../shared/edit-ops";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";
 import type { ChatScheduleChange, RoutineEntry } from "../shared/routines";
 import { ROUTINE_AWARENESS, ROUTINE_MODES, ROUTINE_ROLES, SKIP_LIVES } from "../shared/routines";

@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { TableId } from "../../shared/ids";
-import type { TableRowChanges, TableUpdate } from "../../shared/protocol";
+import type { TableRowChanges, TableUpdate } from "../../shared/tables";
 import { useApp } from "../app";
 import { Badge, Button, List, ListRow, Section, useBusy } from "../components";
 import { humanize } from "../format";

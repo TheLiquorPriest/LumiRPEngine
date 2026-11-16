@@ -11,7 +11,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import { pointerOf } from "../shared/json-patch";
 import type { LedgerEvent } from "../shared/ledger";
-import type { JsonPatchOp } from "../shared/protocol";
+import type { JsonPatchOp } from "../shared/json-patch";
 import type { GmThingExtras, GmThingsList, HistorySource, KeepResult, LoanChoice, MadePlaceView, MadeThingView, RestView, ThingHistoryEntry, TidyFinding } from "../shared/thing-gm";
 import type { Spot } from "../shared/things";
 import { gotOf, grantBasisOf, type GotHow } from "../shared/things";

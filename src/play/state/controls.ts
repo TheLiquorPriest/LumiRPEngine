@@ -12,7 +12,7 @@ import { chatCashRule, toggles } from "../../packs/economy/core/pay";
 import { FEATURE_DEFS } from "../../shared/finance";
 import type { OffstageSettings } from "../../shared/offstage";
 import { builtInSectionsOf } from "../../shared/sections";
-import { type NarratorView, narratorViewOf } from "../../shared/settings";
+import { type NarratorView, narratorViewOf } from "../../shared/narrator-view";
 import type { ControlsView } from "../../shared/state-view";
 import { thingsConfigOf } from "../../shared/things";
 import { bandTiers } from "../../shared/tiers";

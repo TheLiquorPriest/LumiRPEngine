@@ -13,7 +13,7 @@ import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger
 import type { EntityDef, FieldDef, WorldDoc } from "../../../shared/world";
 import { DEFAULT_ACCOUNT_PRODUCT, INVOICE_STATES, ownersIn, type AlertLine, type BusinessView, type Flow, type FlowSchedule, type Invoice, type InvoiceState, type JournalLine, type OwnerLine } from "../../../shared/finance";
 import { pointerOf } from "../../../shared/json-patch";
-import type { LintIssue } from "../../../shared/protocol";
+import type { LintIssue } from "../../../shared/lint";
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOf, formatClock, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
