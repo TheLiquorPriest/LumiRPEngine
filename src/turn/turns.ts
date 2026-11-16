@@ -728,11 +728,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     else if (change.kind === "generation-ended") {
       this.#generatingIn(user, change.chat).delete(change.generation);
       work = this.#ended(user, change);
-    } else if (change.kind === "message-deleted") work = this.#deleted(user, change.chat, change.message);
+    } else if (change.kind === "message-deleted") work = this.#deleted(user, change.chat, change.message).then(() => this.#atRest(user, change.chat));
     else if (change.kind === "message-edited") work = this.#edited(user, change.chat, change.message, change.hidden, change.shown);
     // A swipe flipped, added or deleted changes only which swipe shows, which the question's path carries; his edit of the swipe that
     // shows, through the swipe route and outside a generation, is his edit.
     else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
+    else if (change.kind === "message-swiped") work = this.#atRest(user, change.chat);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
     // A chat deleted in Lumiverse: its folders are kept as a deleted chat's, and its turns stay in the store.
@@ -1898,6 +1899,29 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     await writeTurnRecord(this.#d.files, this.#d.store, { user: run.user, chat: run.chat, session: run.session, turn: run.turn }).catch((error: unknown) =>
       this.#d.log.error("A turn's record could not be written to its folder.", { turn: run.turn, error: words(error) }),
     );
+  }
+
+  /**
+   * A message deleted, or an earlier reply's swipe flipped, heard by its event with no turn of the chat going on: the path compared as
+   * a turn's intake compares it (keeping its report with the chat, so the next turn's start still tells the Author, once), and the
+   * chat's notes put as they stand at its head (plan §5.1, R-130); a note he changed in between stays as he left it. With a turn going
+   * on its own start puts the notes; a missed event is caught up at the next start. `#catchUp` is not called here: it waits for
+   * `settled()`, which waits on this very work.
+   */
+  async #atRest(user: string, chat: string): Promise<void> {
+    const reads = this.#d.reads();
+    const store = this.#d.store.user(user);
+    if (reads === null || store.chat(chat) === null || this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0) return;
+    const intake = this.#queue(user, chat);
+    try {
+      if (intake.waiting) return;
+      const steps = await reads.path(chat);
+      if (steps === null) return;
+      await this.#compare(user, chat, steps, null, null, store.heardCount(chat));
+      await this.#d.notes.follow(user, chat, { turns: store.line(chat).map((l) => l.turn), branchOf: store.chat(chat)?.sourceChat ?? null });
+    } finally {
+      intake.done();
+    }
   }
 
   /**
