@@ -93,6 +93,11 @@ const OWN_CSS = `
 .rpe-timings-head{display:grid;color:var(--lre-muted);font-weight:600}
 .rpe-timings-label{display:none}
 }
+.rpe-gauge{display:flex;height:8px;border-radius:4px;background:var(--lre-well);overflow:hidden;min-width:0}
+.rpe-gauge-held{background:var(--lre-accent)}
+.rpe-gauge-reserve{background:var(--lre-hairline)}
+.rpe-window[data-full=yes] .rpe-gauge-held{background:var(--lre-warn)}
+.rpe-open-session{min-width:0}
 
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}
