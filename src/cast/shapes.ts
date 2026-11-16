@@ -61,6 +61,7 @@ const memberRow = shape.named(
     chat: field(T, "The chat it was first cast in: this chat, or one this chat was branched from."),
     casting: field(nullable(castingRow), "Its casting at the reading; null when it has none there (in the cast, not yet cast)."),
     from: field(shape.object({ carried: shape.yesNo(), played: shape.yesNo() }), "Where its record on the path came from: writes on turns a migration's import wrote (carried), and writes on turns RPE played."),
+    person: field(nullable(T), "The world's person it is, by the entity's id; null where none is known."),
     counts,
   }),
 );
@@ -129,34 +130,103 @@ const baseVersionRow = shape.named(
 );
 export type CastBaseShown = Infer<typeof baseVersionRow>;
 
+const sourceFreshness = shape.named(
+  "SourceFreshness",
+  "A bound source read now in Lumiverse against the base: current; changed since the base was last drawn from it; unseen (bound after, or never drawn from); gone from Lumiverse; or unread (Lumiverse could not be asked).",
+  shape.oneOf("current", "changed", "unseen", "gone", "unread"),
+);
+export type CastSourceFreshness = Infer<typeof sourceFreshness>;
+
 const sourceBindingRow = shape.named(
   "SourceBindingRow",
-  "A source bound to the character, as recorded (the text stays in Lumiverse).",
-  shape.object({ kind: sourceBindingKind, ref: T, defines: field(nullable(T), "Which side of the character it defines, in the binder's words."), created: N }),
+  "A source bound to the character, as recorded (the text stays in Lumiverse), with its title as Lumiverse holds it now and how it stands against the base.",
+  shape.object({ kind: sourceBindingKind, ref: T, defines: field(nullable(T), "Which side of the character it defines, in the binder's words."), created: N, title: field(nullable(T), "Its name or title in Lumiverse now; null when gone or unread."), state: sourceFreshness }),
 );
 export type CastSourceShown = Infer<typeof sourceBindingRow>;
 
+const boundedFields = { total: field(N, "How many the record holds in all."), before: field(N, "How many older ones are left out before what is given."), after: field(N, "How many newer ones are left out after it.") } as const;
+const entryItems = shape.named("EntryItems", "A list of entries, bounded: the newest the setting cast.queryItems allows after passing over `skip`, with what was left out on either side.", shape.object({ items: shape.list(entryRow), ...boundedFields }));
+const memoryItems = shape.named("MemoryItems", "A list of memories, bounded as the entries are.", shape.object({ items: shape.list(memoryRow), ...boundedFields }));
+const perceptionItems = shape.named("PerceptionItems", "A list of perceptions, bounded as the entries are.", shape.object({ items: shape.list(perceptionRow), ...boundedFields }));
+const fileItems = shape.named("MindFileItems", "A list of carried mind files, bounded as the entries are.", shape.object({ items: shape.list(mindFileRow), ...boundedFields }));
+
+const growthOver = shape.named(
+  "GrowthOverBase",
+  "A change a reflection proposed and the Author accepted, laid over the base: its words, what caused it, and its date in story time.",
+  shape.object({ id: T, text: T, cause: nullable(T), date: nullable(T) }),
+);
+
+const baseNow = shape.named(
+  "BaseNow",
+  "The base as it stands, each document in its newest version, with the accepted growth laid over it (growth is layered over the base wherever the base is shown).",
+  shape.object({ parts: shape.list(shape.object({ part: baseDocument, version: N, text: T })), growth: shape.list(growthOver) }),
+);
+
 export const characterReply = shape.named(
   "CharacterReply",
-  "Everything on one character's record, by kind; `turn` null: at the chat's newest.",
+  "Everything on one character's record, by kind; `turn` null: at the chat's newest. Each list is bounded by cast.queryItems and read further back with `part` and `skip`.",
   shape.object({
     chat: T,
     turn: nullable(shape.turnId()),
+    listed: field(N, "The most items of one list this answer gives (the setting cast.queryItems)."),
     character: memberRow,
-    sources: shape.list(sourceBindingRow),
+    sources: field(shape.list(sourceBindingRow), "Each source bound to it, read live: its title now and how it stands against the base."),
     base: field(shape.list(baseVersionRow), "Every version of every part of the base, oldest first."),
+    now: baseNow,
     castings: field(shape.list(writeRow), "The Author's castings of it on the path, oldest first."),
-    growth: shape.list(entryRow),
-    mind: field(shape.list(entryRow), "What is on its mind; the carried mind files are under `files`."),
-    memories: shape.list(memoryRow),
-    relationships: shape.list(entryRow),
-    knowledge: shape.list(entryRow),
-    history: shape.list(entryRow),
-    perceptions: shape.list(perceptionRow),
-    files: shape.list(mindFileRow),
+    away: field(nullable(entryRow), "While a principal is away: its whereabouts and intention as the Author recorded them (the entry's fields); null otherwise."),
+    game: field(nullable(shape.record(shape.json())), "Its game side by reference to the world's person it is: where it is, what it holds, what it owns elsewhere, its values; null where the store holds no such person."),
+    growth: entryItems,
+    mind: field(entryItems, "What is on its mind; the carried mind files are under `files`."),
+    memories: memoryItems,
+    relationships: entryItems,
+    knowledge: entryItems,
+    history: entryItems,
+    perceptions: perceptionItems,
+    files: fileItems,
   }),
 );
 export type CastCharacter = Infer<typeof characterReply>;
+
+/** The lists of a character's record the page reads further back: by the name each has in the answer. */
+export const CHARACTER_LISTS = ["growth", "mind", "memories", "relationships", "knowledge", "history", "perceptions", "files"] as const;
+export type CharacterList = (typeof CHARACTER_LISTS)[number];
+export const characterListName = shape.named("CharacterListName", "The lists of a character's record the answer bounds.", shape.oneOf(...CHARACTER_LISTS));
+
+export const castingBody = shape.named(
+  "CastingAsk",
+  "The owner sets how large a part a character plays. `as` names the casting; `pin` true pins it, so it stands over the Author's (a casting of his own from then on, until he takes the pin away); false sets it as his casting alone, which the Author may change next turn, and takes any pin away. `as` null with `pin` false takes the pin away and leaves the casting as it is. `line` is the line of the character's part, where he gives one.",
+  shape.object({ as: nullable(castRole), pin: shape.yesNo(), line: shape.optional(nullable(T)) }),
+);
+export type CastingAsk = Infer<typeof castingBody>;
+
+export const baseBody = shape.named(
+  "BaseAsk",
+  "The owner redraws documents of a character's base: each document given is written as the next version of its part, outside any turn; the others stand as they are.",
+  shape.object({ seed: shape.optional(T), soul: shape.optional(T), inner_voice: shape.optional(T), background: shape.optional(T) }),
+);
+export type CastBaseAsk = Infer<typeof baseBody>;
+
+export const sourceBody = shape.named(
+  "SourceAsk",
+  "The owner binds a source to a character, says again which side of it a bound source defines (`defines`; null: none), or takes the binding away (`drop`). A card, a persona, a memory entity or a lore entry Lumiverse does not hold is refused.",
+  shape.object({ kind: sourceBindingKind, ref: shape.text({ blank: false }), defines: shape.optional(nullable(T)), drop: shape.optional(shape.yesNo()) }),
+);
+export type CastSourceAsk = Infer<typeof sourceBody>;
+
+export const personBody = shape.named(
+  "PersonAsk",
+  "The owner says which of the world's people a character is, by the person's id or name; null takes the reference away.",
+  shape.object({ person: nullable(shape.text({ blank: false })) }),
+);
+export type CastPersonAsk = Infer<typeof personBody>;
+
+export const castEditedReply = shape.named(
+  "CastEditedReply",
+  "What the owner's edit of a character did: whether anything changed, the character as the cast lists it now, and what it could not do or left as it was, in the cast's words. The edit is his own change, which the Author is told of in the next briefing.",
+  shape.object({ changed: field(shape.yesNo(), "False when the character already stood so."), character: memberRow, notes: shape.list(T) }),
+);
+export type CastEdited = Infer<typeof castEditedReply>;
 
 export const castStrikeBody = shape.named(
   "CastStrikeAsk",

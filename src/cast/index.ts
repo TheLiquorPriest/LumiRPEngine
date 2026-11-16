@@ -17,8 +17,8 @@ export { CAST_VIEWS, castPresentViews, castViews, type CastPresentView, type Cas
 export { type SourceNow, type SourceReader } from "./sources";
 export { type BookReader } from "./secrets";
 export { filesAttachedOn } from "./imported";
-export { CAST_PATH, CHARACTER_PATH, CHARACTER_PERCEPTIONS_PATH, CHARACTER_STRIKE_PATH, castRoutes, PERCEPTIONS_PATH, type CastRoutesDeps } from "./routes";
-export { type CastBaseShown, type CastCharacter, type CastCounts, type CastEntryShown, type CastFileShown, type CastHeld, type CastingShown, type CastKind, type CastList, type CastMemberShown, type CastMemoryShown, type CastPerceptionAsk, type CastPerceptionShown, type CastPerceptionWritten, type CastSourceShown, type CastStrike, type CastStruck, type CastWriteShown, type PerceptionRecord, type StagePersonShown, type StageTurnShown } from "./shapes";
+export { CAST_PATH, CHARACTER_BASE_PATH, CHARACTER_CASTING_PATH, CHARACTER_PATH, CHARACTER_PERCEPTIONS_PATH, CHARACTER_PERSON_PATH, CHARACTER_SOURCES_PATH, CHARACTER_STRIKE_PATH, castRoutes, PERCEPTIONS_PATH, type CastRoutesDeps } from "./routes";
+export { type CastBaseAsk, type CastBaseShown, type CastCharacter, type CastCounts, type CastEdited, type CastEntryShown, type CastFileShown, type CastHeld, type CastingAsk, type CastingShown, type CastKind, type CastList, type CastMemberShown, type CastMemoryShown, type CastPerceptionAsk, type CastPerceptionShown, type CastPerceptionWritten, type CastPersonAsk, type CastSourceAsk, type CastSourceFreshness, type CastSourceShown, type CastStrike, type CastStruck, type CastWriteShown, type PerceptionRecord, type StagePersonShown, type StageTurnShown } from "./shapes";
 export {
   addCharacter,
   attachFile,

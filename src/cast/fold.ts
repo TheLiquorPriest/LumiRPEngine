@@ -24,8 +24,8 @@ export const WRITE_OP = "write";
 /** The change's operation as a change names it. */
 export const CAST_WRITE = `${CAST_AREA}.${WRITE_OP}`;
 
-/** The parts kept as writes tied to turns. */
-export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory", "away"] as const;
+/** The parts kept as writes tied to turns. `edit` is the owner's own edit of what the record keeps outside turns (a base document, a source, which person a character is): a note in the story lane that tells the Author of it. */
+export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory", "away", "edit"] as const;
 export type RowPart = (typeof ROW_PARTS)[number];
 
 /** What a cast change's value holds: one write of one item. */

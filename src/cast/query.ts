@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { oneOf, type Reply, TEXT, WHOLE, YES_NO } from "../iface/kit";
-import { baseView, type CastCall, type CastReading, type CastToolSpec, itemView, readingOr, sourceView, whoView } from "./kit";
+import { baseView, type CastCall, type CastReading, type CastToolSpec, datedAt, itemView, readingOr, sourceView, whoView } from "./kit";
 import { perceptionView } from "./perceive";
 import { baseHistory, baseOf, bindingsOf, type CastItem, castingInForce, castingItemId, castOn, charactersOf, findCharacter, nameKey, type RowPart } from "./record";
 import { sourcesNow } from "./sources";
@@ -72,7 +72,12 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (parts.includes("sources")) data.sources = states.map(sourceView);
     if (parts.includes("base")) {
       const older = states.filter((s) => s.newer);
-      data.base = { ...baseView(base, history ? baseHistory(db, user, character.id, call.scope.chat) : null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
+      // Growth is laid over the base wherever the base is shown: each accepted change with its date in story time (one a reflection proposed counts once the Author accepts it).
+      const growth = reading.record
+        .of(character.id, "growth")
+        .filter((g) => g.fields.proposed !== true)
+        .map((g) => ({ ...g.fields, ...datedAt(reading.clock, g.at) }));
+      data.base = { ...baseView(base, history ? baseHistory(db, user, character.id, call.scope.chat) : null), ...(growth.length > 0 ? { growth } : {}), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
     }
   }
   if (parts.includes("casting") && history) {

@@ -51,7 +51,7 @@ more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{s
 top_left: Top of mind holds {{limit}} at most, so {{count}} left it to make room, the weakest first: {{ids}}. They stay memories; recall brings them back.
 no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
 no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.
-page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.
 page_no_entry: {{who}} has no entry {{id}} on this chat's record.
-page_branch_no_turn: This chat was branched from another and has no turn of its own yet. A strike is kept with this chat's newest turn, and the newest one here is the other chat's, so a strike here would change that chat too: nothing was struck or restored. It can be done once a turn has been played in this chat.
+page_pin_needs_casting: A pin holds a casting: say how large a part {{who}} plays to pin it.
+page_nothing_to_edit: Nothing was sent to change in {{who}}'s record.
 page_still_struck: {{id}}{{#text}} ({{text}}){{/text}} stays struck: it was struck apart from {{from}}, so taking that strike back leaves it as it is.{{#secret}} The secret it gave, {{secret}}, is not held again.{{/secret}}

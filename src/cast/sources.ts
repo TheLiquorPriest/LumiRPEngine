@@ -44,3 +44,10 @@ export async function sourcesNow(read: SourceReader, scope: { user: string; chat
     }),
   );
 }
+
+/** How a bound source stands against the base, for the page: gone from Lumiverse; changed since the base was last drawn from it; unseen (bound after, or never drawn from); else current. */
+export function freshnessOf(s: Pick<SourceState, "title" | "newer" | "drawn">): "current" | "changed" | "unseen" | "gone" {
+  if (s.title === null) return "gone";
+  if (!s.newer) return "current";
+  return s.drawn === null ? "unseen" : "changed";
+}

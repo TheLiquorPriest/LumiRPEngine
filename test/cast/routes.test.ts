@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { JsonObject } from "rp-harness/contract";
-import { type CastCharacter, type CastList, type CastPerceptionWritten, castRoutes, type CastRoutesDeps, type CastStruck, type PerceptionRecord } from "../../src/cast/index";
+import { type CastCharacter, type CastEdited, type CastList, type CastPerceptionWritten, castRoutes, type CastRoutesDeps, type CastStruck, type PerceptionRecord } from "../../src/cast/index";
 import { addCharacter, type CastWrite, pinCasting } from "../../src/cast/record";
 import type { BookReader } from "../../src/cast/secrets";
 import { knowersOf } from "../../src/packs/minds/core/knowledge";
@@ -29,13 +29,24 @@ const words = (line: string, fields: JsonObject = {}): string => LINES.line(line
 const CORE = "# Bram\nKeeps the Lamp and Ladle.\n\nOwes the reeve two seasons of rent.";
 const PLANS = "Sell the cellar wine before the tax.";
 
+/** Each chat the cast told its pages to read again, in order. */
+const told: string[] = [];
+
+/** A character as the page gives it, each bounded list as the entries it holds. */
+type Flat = { [K in keyof CastCharacter]: CastCharacter[K] extends { items: infer I } ? I : CastCharacter[K] };
+function flat(c: CastCharacter): Flat {
+  return Object.fromEntries(Object.entries(c).map(([k, v]) => [k, typeof v === "object" && v !== null && "items" in v ? v.items : v])) as Flat;
+}
+
 interface Page {
   t: Table;
   list(query?: Record<string, string>, user?: string, chat?: string): Promise<CastList>;
-  one(character: string, query?: Record<string, string>, user?: string, chat?: string): Promise<CastCharacter>;
+  one(character: string, query?: Record<string, string>, user?: string, chat?: string): Promise<Flat>;
   strike(character: string, body: unknown, user?: string, chat?: string): Promise<CastStruck>;
   record(query?: Record<string, string>, user?: string, chat?: string): Promise<PerceptionRecord>;
   perceive(character: string, body: unknown, user?: string, chat?: string): Promise<CastPerceptionWritten>;
+  /** The owner's edits of a character, by the route that makes each. */
+  edit(what: "casting" | "base" | "sources" | "person", character: string, body: unknown, user?: string, chat?: string): Promise<CastEdited>;
 }
 
 /** The player's own changes to the engine's state (the holdings a strike lets go or holds again): of no turn, with their source. */
@@ -45,15 +56,19 @@ function ownChanges(t: Table): { op: string; source: string | null }[] {
 
 /** The Cast page over a table: the routes as the application mounts them, called through each route's own reader and handler. */
 function pageOn(t: Table, onStage: CastRoutesDeps["onStage"] = async () => new Map()): Page {
-  const deps: CastRoutesDeps = { store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({}), onStage, now: () => 7 };
-  const [listRoute, oneRoute, strikeRoute, recordRoute, perceiveRoute] = castRoutes(deps);
+  const deps: CastRoutesDeps = { store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({}), onStage, sources: t.shelf.reader, changed: (chat) => told.push(chat), now: () => 7 };
+  const [listRoute, oneRoute, strikeRoute, recordRoute, perceiveRoute, castingRoute, baseRoute, sourcesRoute, personRoute] = castRoutes(deps);
   return {
     t,
     list: async (query = {}, user = USER, chat = CHAT) => await callRoute(listRoute, { params: { chat }, query, user }),
-    one: async (character, query = {}, user = USER, chat = CHAT) => await callRoute(oneRoute, { params: { chat, character }, query, user }),
+    one: async (character, query = {}, user = USER, chat = CHAT) => flat(await callRoute(oneRoute, { params: { chat, character }, query, user })),
     strike: async (character, body, user = USER, chat = CHAT) => await callRoute(strikeRoute, { params: { chat, character }, body, user }),
     record: async (query = {}, user = USER, chat = CHAT) => await callRoute(recordRoute, { params: { chat }, query, user }),
     perceive: async (character, body, user = USER, chat = CHAT) => await callRoute(perceiveRoute, { params: { chat, character }, body, user }),
+    edit: async (what, character, body, user = USER, chat = CHAT) => {
+      const route = { casting: castingRoute, base: baseRoute, sources: sourcesRoute, person: personRoute }[what];
+      return await callRoute(route, { params: { chat, character }, body, user });
+    },
   };
 }
 
@@ -149,6 +164,7 @@ describe("the cast of a chat", () => {
           id: bram,
           name: "Bram",
           chat: CHAT,
+          person: null,
           casting: { as: "supporting", pinned: false, line: null },
           // The migration carried his casting and files; marking a file filed was played on RPE.
           from: { carried: true, played: true },
@@ -158,11 +174,12 @@ describe("the cast of a chat", () => {
           id: wren,
           name: "Wren",
           chat: CHAT,
+          person: null,
           casting: { as: "principal", pinned: false, line: "A courier with a sealed letter." },
           from: { carried: false, played: true },
           counts: { growth: { held: 1, struck: 0 }, mind: { held: 1, struck: 0 }, memories: { held: 1, struck: 0 }, relationships: { held: 1, struck: 0 }, knowledge: { held: 1, struck: 1 }, history: none, perceptions: { held: 1, struck: 0 }, files: { ...none, filed: 0 } },
         },
-        { id: odile, name: "Odile", chat: CHAT, casting: null, from: { carried: false, played: false }, counts: { growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 } } },
+        { id: odile, name: "Odile", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: { growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 } } },
       ],
     });
   });
@@ -455,5 +472,76 @@ describe("the perception record and the player's own perception", () => {
 
     // An id that is none of his is answered with the nearest ids he has.
     await expect(page.perceive("Bram", { id: "p-nowhere", content: "x" })).rejects.toMatchObject({ status: 422 });
+  });
+});
+
+describe("the owner's own edits of a character", () => {
+  test("he pins Wren as principal, redraws her soul, binds an entry as her voice and names Odile the world's Tam: each lands as his own change, the Author is told, the page hears it, and a second page reads it", async () => {
+    const { page, wren, odile } = await played();
+    const { t } = page;
+    t.shelf.put("entry", "e-112", "Wren's way of speaking", "r1");
+    const told0 = told.length;
+    const parts = (): string[] =>
+      t.db
+        .query<{ value: string }, [string]>("SELECT value FROM change WHERE chat = ? AND by = 'player' AND op = 'cast.write' ORDER BY ord")
+        .all(CHAT)
+        .map((c) => String(JSON.parse(c.value).part));
+
+    // Pinned as supporting, then as principal; a pin stands over the Author's casting, and is told in his own change.
+    const pinned = await page.edit("casting", wren, { as: "supporting", pin: true });
+    expect(pinned).toMatchObject({ changed: true, character: { casting: { as: "supporting", pinned: true } } });
+    expect((await page.edit("casting", wren, { as: "supporting", pin: true })).changed).toBe(false);
+    expect((await page.edit("casting", wren, { as: "principal", pin: true, line: "Still the courier." })).character.casting).toEqual({ as: "principal", pinned: true, line: "Still the courier." });
+    expect((await page.edit("casting", wren, { as: null, pin: false })).character.casting).toMatchObject({ pinned: false });
+    await expect(page.edit("casting", wren, { as: null, pin: true })).rejects.toMatchObject({ status: 400 });
+
+    // Her soul is redrawn outside any turn, drawn against the entry as it stands now; saying it again changes nothing.
+    expect((await page.edit("sources", wren, { kind: "entry", ref: "e-112", defines: "voice" })).changed).toBe(true);
+    expect((await page.edit("sources", wren, { kind: "entry", ref: "e-112" })).changed).toBe(false);
+    await expect(page.edit("sources", wren, { kind: "entry", ref: "e-nowhere" })).rejects.toMatchObject({ status: 404 });
+    expect((await page.edit("base", wren, { soul: "Wants to be believed." })).changed).toBe(true);
+    expect((await page.edit("base", wren, { soul: "Wants to be believed." })).changed).toBe(false);
+    const shown = await page.one("Wren");
+    expect(shown.base.map((v) => [v.part, v.version, v.text, v.by])).toEqual([["soul", 1, "Wants to be believed.", "player"]]);
+    expect(shown.now.parts).toEqual([{ part: "soul", version: 1, text: "Wants to be believed." }]);
+    expect(shown.now.growth.map((g) => g.text)).toEqual(["Trusts her own eyes over a seal."]);
+    expect(shown.sources).toEqual([expect.objectContaining({ kind: "entry", ref: "e-112", defines: "voice", title: "Wren's way of speaking", state: "current" })]);
+    // The entry changes in Lumiverse after she was drawn: marked changed; gone: marked gone.
+    t.shelf.put("entry", "e-112", "Wren's way of speaking", "r2");
+    expect((await page.one("Wren")).sources[0]?.state).toBe("changed");
+    t.shelf.remove("entry", "e-112");
+    expect((await page.one("Wren")).sources[0]?.state).toBe("gone");
+    expect((await page.edit("sources", wren, { kind: "entry", ref: "e-112", drop: true })).changed).toBe(true);
+    expect((await page.one("Wren")).sources).toEqual([]);
+
+    // Which person: by name, the nearest named for one the world lacks.
+    expect((await page.edit("person", odile, { person: "Tam" })).character.person).toBe("tam");
+    await expect(page.edit("person", odile, { person: "Tamm Nowhere" })).rejects.toMatchObject({ status: 404 });
+    expect((await page.edit("person", odile, { person: null })).character.person).toBeNull();
+
+    // Each is his own change in the story lane, which the briefing tells the Author of; the pages were told each time.
+    expect(parts()).toEqual(["casting", "casting", "casting", "edit", "edit", "edit", "edit", "edit"]);
+    expect(told.length - told0).toBe(8);
+  });
+
+  test("a character's page bounds each list and reads further back with part and skip: 600 memories", async () => {
+    const page = pageOn(await openTable());
+    const { t } = page;
+    const bram = (await t.writes.run((db) => addCharacter(db, USER, CHAT, "Bram", 1))).id;
+    await t.play([{ character: bram, part: "casting", item: `casting:${bram}`, value: { as: "principal" } }]);
+    const turn = await t.begin();
+    await t.write(
+      turn,
+      Array.from({ length: 600 }, (_, i): CastWrite => ({ character: bram, part: "memory", item: null, value: { text: `Memory number ${i}.`, gist: `m${i}` } })),
+      "bram",
+    );
+    await t.tie(turn);
+    const first = await callRoute(castRoutes({ store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({ queryItems: 50 }), onStage: async () => new Map(), sources: t.shelf.reader, changed: () => {} })[1], { params: { chat: CHAT, character: "Bram" }, query: {}, user: USER });
+    expect(first.listed).toBe(50);
+    expect(first.memories).toMatchObject({ total: 600, before: 550, after: 0 });
+    expect(first.memories.items.map((m) => m.fields.gist).at(-1)).toBe("m599");
+    const back = await callRoute(castRoutes({ store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({ queryItems: 50 }), onStage: async () => new Map(), sources: t.shelf.reader, changed: () => {} })[1], { params: { chat: CHAT, character: "Bram" }, query: { part: "memories", skip: "550" }, user: USER });
+    expect(back.memories).toMatchObject({ total: 600, before: 0, after: 550 });
+    expect(back.memories.items.map((m) => m.fields.gist)[0]).toBe("m0");
   });
 });

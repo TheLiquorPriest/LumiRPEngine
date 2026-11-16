@@ -241,6 +241,8 @@ export interface Turns {
   stateIndex: StateIndex;
   /** What RPE gives by each name an agent is given, at a scope as a run's would be joined (`givenViews`): the resolver the turn uses, for the Agents page. */
   given(scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment): Promise<{ ref: string; text: string | null }[]>;
+  /** A character's sources as Lumiverse holds them now, the cast's reader: what the Cast page marks each bound source by. */
+  sources: SourceReader;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -534,5 +536,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources };
 }

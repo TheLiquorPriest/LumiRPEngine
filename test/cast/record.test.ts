@@ -32,6 +32,7 @@ function everyRowPart(c: string): CastWrite[] {
     { character: c, part: "perception", item: null, value: { reach: "part", moment: "Wren opens the letter", content: "From behind the bar: she goes pale.", missed: "What it says.", knows: ["Wren has a sealed letter."] } },
     { character: c, part: "memory", item: null, value: { text: "She went pale at my letter and I said nothing.", gist: "Said nothing when she went pale.", weight: 3, who: ["Wren"], about: ["the letter"], from: ["p-1"] } },
     { character: c, part: "away", item: awayItemId(c), value: { whereabouts: "At the docks.", intention: "Find passage north.", place_ref: "place:docks", until: "nightfall" } },
+    { character: c, part: "edit", item: null, value: { what: "person", person: "e-9" } },
   ];
 }
 

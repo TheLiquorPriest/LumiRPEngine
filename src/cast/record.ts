@@ -43,7 +43,7 @@ export const MIND_KINDS = ["attention", "feeling", "belief", "want", "plan", "hi
 export const RELATIONSHIP_DIMENSIONS = ["trust", "warmth", "respect", "fear"] as const;
 
 /** What an item's id starts with, for the parts that hold many items per character. */
-const PREFIX: Readonly<Record<"growth" | "mind" | "knowledge" | "history" | "perception" | "memory", string>> = { growth: "g", mind: "m", knowledge: "k", history: "h", perception: "p", memory: "mem" };
+const PREFIX: Readonly<Record<"growth" | "mind" | "knowledge" | "history" | "perception" | "memory" | "edit", string>> = { growth: "g", mind: "m", knowledge: "k", history: "h", perception: "p", memory: "mem", edit: "ed" };
 
 /** A name as the cast compares names: trimmed, spaces folded, case ignored (the story record's rule). */
 export function nameKey(name: string): string {
