@@ -42,6 +42,7 @@ import type { ChatRun, Tombstone } from "../shared/ledger";
 import { type KeptOwn, matchTurn, StoreInputError, type ShownMessage, type Store, type UserStore } from "../store";
 import { CapturingFold, foldToday } from "./capture";
 import { textHash, type SwipeFacts } from "./lumiverse-db";
+import type { KeepCarriedJob } from "./history-things";
 import { chainOf, placements, type Pick, type Placement } from "./own-path";
 import type { ChatImportReport, Difference } from "./report";
 import { forgetChats, keepChat, keepRecord } from "./tables";
@@ -231,10 +232,11 @@ interface Imported {
  */
 export type KeepCarriedRun = (db: Database, run: { user: string; chat: string; turn: string; at: number; released: string; saved: string | null }) => void;
 
-/** The turn lane's writer of carried turns' run records, with the tables it writes (its area's migrations, which the run brings up to date first). */
+/** The turn lane's writers of what a migration carries onto its tables, with the tables they write (its area's migrations, which the run brings up to date first): each carried turn's run record, and his jobs and approvals (`keepJob`). */
 export interface CarriedRuns {
   tables: { area: MigrationArea; migrations: readonly Migration[] };
   keep: KeepCarriedRun;
+  keepJob?: KeepCarriedJob;
 }
 
 /** The lines a swipe's record holds where its reply says something against its turn, joined; null where it holds none. */

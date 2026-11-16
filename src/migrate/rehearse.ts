@@ -44,6 +44,8 @@ export interface RehearseOptions {
   given?: readonly OwnerRow[];
   /** Whether the real run is given the file tree's places, where the user's own files go (`rpe migrate` always gives them). */
   tree?: boolean;
+  /** Whether the real run is given the turn lane's writer of his jobs and approvals, so they land (`rpe migrate` gives it). */
+  jobs?: boolean;
   now?: () => Date;
 }
 
@@ -419,7 +421,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     }
 
     // Where each thing carried or attached goes in this run, decided before anything is written.
-    const placeOf = await placesOf(today, items, options.tree ?? false);
+    const placeOf = await placesOf(today, items, options.tree ?? false, options.jobs ?? false);
     const places = new Map<Item, Place>(items.flatMap((i): [Item, Place][] => (i.fate === "carried" || i.fate === "attached" ? [[i, placeOf(i)]] : [])));
     const rows: RowReport[] = ROWS.map((r) => {
       const own = items.filter((i) => i.row === r.id);
@@ -478,6 +480,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       worldsInStore: null,
       changes: null,
       identifier: sources.identifier,
+      sources: { lumiverse: sources.lumiverse, runtime: sources.runtime, ...(sources.runtimeName !== undefined ? { runtimeName: sources.runtimeName } : {}), ...(sources.runtimeFolders !== undefined ? { runtimeFolders: sources.runtimeFolders } : {}) },
       offRpe,
       refusals: [],
     };

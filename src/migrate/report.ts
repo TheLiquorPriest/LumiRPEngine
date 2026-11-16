@@ -13,6 +13,7 @@ import type { ChatEngine, JournalRead } from "./chats";
 import type { CarriedReport, Place } from "./carry";
 import { goingBack, swapSteps } from "./going-back";
 import type { RuntimeFolders } from "./runtime-folders";
+import type { Sources } from "./today";
 
 export const REPORT_FORMAT = "rpe-migration-report-v1";
 
@@ -232,6 +233,8 @@ export interface MigrationReport {
   changes: Changes | null;
   /** The extension's identifier in Lumiverse, which the swap's steps and going back's name. Absent from a report kept before runs named it. */
   identifier?: string;
+  /** The folders the run read (Lumiverse's data folder, today's runtime's two, and what he said of runtime folders): where a rehearsal started from the Migration page reads again. Absent from a report kept before runs named them. */
+  sources?: Omit<Sources, "identifier" | "userId">;
   /**
    * Each chat that was on today and is on none of RPE's connections once swapped (N-14, R-109): RPE's are every connection in
    * Lumiverse that reaches the runtime the run takes. By id, with the connection it is pinned to in Lumiverse (null: none, so it

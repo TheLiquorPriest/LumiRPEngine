@@ -107,6 +107,24 @@ export class MigrationStopped extends Error {
   }
 }
 
+/**
+ * A rehearsal for RPE's own Migration page (R-180): the read `rpe migrate --rehearse` makes, with the real run's gate, writing
+ * nothing anywhere, RPE's database included, which it reads through the running RPE's own connection (`db`). `owner` is the
+ * Lumiverse user RPE's config names. It gives the chats' names as Lumiverse holds them besides, which the page shows and the
+ * report never holds.
+ */
+export async function rehearsal(sources: Sources, options: { data: string; db: Database; owner: string | null; now?: () => Date }): Promise<{ report: MigrationReport; names: Map<string, string> }> {
+  const paths = dataPaths(options.data);
+  const previous = lastReport(options.db, sources.userId);
+  const today = await openToday(sources);
+  try {
+    const report = await reportOf(today, { mode: "rehearsal", target: options.data, ...(options.now ? { now: options.now } : {}), rpe: { owner: options.owner, earlier: runUsers(options.db) }, tree: true, jobs: true, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
+    return { report, names: new Map(today.chats.map((c) => [c.id, c.name])) };
+  } finally {
+    today.close();
+  }
+}
+
 export async function migrate(sources: Sources, options: MigrateOptions): Promise<MigrateResult> {
   const now = options.now ?? (() => new Date());
   const paths = dataPaths(options.data);
@@ -117,7 +135,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
   let step: string | null = null;
   const today = await openToday(sources);
   try {
-    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
+    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, jobs: options.runs?.keepJob !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
     const owner = config.lumiverse.user;
@@ -180,7 +198,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
             ...(layout.toolNames === undefined ? {} : { toolNames: layout.toolNames.bind(layout, paths.files) }),
           }
         : null;
-      const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree, plays: new Set(worlds.keys()), ...(options.settings ? { settings: options.settings } : {}) });
+      const carried = await carry({ today, report, paths, db, store, s, run, now: now().getTime(), tree, plays: new Set(worlds.keys()), ...(options.settings ? { settings: options.settings } : {}), ...(options.runs?.keepJob ? { keepJob: options.runs.keepJob } : {}) });
       report.landed = carried.landed;
       report.carried = carried.carried;
       // What it carried of each chat it imported, over the chat's whole path, for the chat's first briefing on RPE and the Migration page.
@@ -194,7 +212,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
       // Each row counted again from what the run did (R-320, R-321): what of a chat it did not carry is not carried, and is named; what then does not balance is said, and the swap reads it.
       step = "counting what the run did";
-      const placeOf = await placesOf(today, report.items, layout !== undefined);
+      const placeOf = await placesOf(today, report.items, layout !== undefined, options.runs?.keepJob !== undefined);
       const end = chatEndOf(report, (chat) => s.chat(chat) !== null);
       recountRows(report, (i) => (i.fate === "carried" || i.fate === "attached" ? placeOf(i) : undefined), end);
       insideEnds(report, end, layout !== undefined);
