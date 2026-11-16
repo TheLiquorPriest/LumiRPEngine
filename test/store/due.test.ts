@@ -109,7 +109,7 @@ describe("what time brings due", () => {
   test("the world state's due section lists them, worded by the layout", () => {
     const { s, store } = scheduled();
     const t = s.beginTurn({ chat: "c", kind: "normal" });
-    const lines = worldState(s, { chat: "c", turn: t.id, layout: SHIPPED_LAYOUT, due: timeDue(store) }).text.split("\n");
+    const lines = worldState(s, { chat: "c", turn: t.id, layout: SHIPPED_LAYOUT, due: timeDue(store), charsPerToken: 4 }).text.split("\n");
     expect(lines).toContain("Sat 1 Mar 2031, 9:00 AM: place at Market Square, Tam (tam_day)");
     expect(lines).toContain("Sat 1 Mar 2031, 12:00 PM: weather (vale_weather)");
   });

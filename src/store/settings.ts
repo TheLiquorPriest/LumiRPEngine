@@ -30,7 +30,6 @@ export const STORE_SETTING_DEFS = {
 /** The world state's (`worldState`), worked out for each turn's briefing: read at every level. */
 export const WORLD_STATE_SETTING_DEFS = {
   budget: { key: "worldState.budget", default: WORLD_STATE_DEFAULTS.budget, takes: { type: "whole", least: 0 }, perConnection: false, name: "World state: everything else", about: "Tokens of the briefing's world state that everything but the horizon shares.", effect: "turn", row: "World state: everything else" },
-  charsPerToken: { key: "worldState.charsPerToken", default: WORLD_STATE_DEFAULTS.charsPerToken, takes: { type: "number", least: 1 }, perConnection: false, name: "Characters per token, for the world state", about: "Characters counted as one token when the world state's budget is measured.", effect: "turn" },
   dueAhead: { key: "worldState.dueAhead", default: WORLD_STATE_DEFAULTS.dueAhead, takes: { type: "whole", least: 0 }, perConnection: false, name: "Time ahead listed as due", about: "Minutes of story time ahead that the world state's due section lists.", effect: "turn" },
 } as const satisfies Record<keyof typeof WORLD_STATE_DEFAULTS, object>;
 

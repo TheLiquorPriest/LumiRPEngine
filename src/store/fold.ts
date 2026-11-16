@@ -108,7 +108,7 @@ export function applyOwner(env: FoldEnv, state: StoreState, owner: readonly Owne
   const out: NotApplied[] = [];
   applyChecked(env, state, items, new Set()).forEach((o, k) => {
     const c = owner[k];
-    if (!o.applied && c) out.push({ change: c.id, turn: "", op: c.op, lane: c.lane, reports: o.reports });
+    if (!o.applied && c) out.push(notAppliedOf(env, c, "", o.reports));
   });
   return out;
 }
@@ -202,6 +202,40 @@ function lessExact(a: Precision | null, b: Precision | null): Precision | null {
 }
 
 /**
+ * Whether a change is an invention with no gap check or no consent (plan §10.5): its source `invented`, its cite naming no gap check,
+ * or saying no one consented (`consent_by: none`).
+ */
+export function inventedUnchecked(source: Source | null | undefined, cite: JsonValue | null | undefined): boolean {
+  if (source !== "invented") return false;
+  const c = isRecord(cite) ? cite : {};
+  return typeof c.gap_check !== "string" || c.gap_check === "" || c.consent_by === "none";
+}
+
+/**
+ * The tree refs a change is about: the entities its event touches, an area operation's parts, a fact's or a note's level, the world
+ * for a world value or a marker. None where a pack's code that says so throws (the fold reports that fault where it applies).
+ */
+export function aboutOf(env: Pick<FoldEnv, "registry" | "areas">, op: string, value: JsonValue): string[] {
+  const v = isRecord(value) ? value : {};
+  try {
+    const area = env.areas?.of(op);
+    if (area) return [...new Set((area.def.touches?.(value) ?? []).map((p) => p.ref))];
+    if (op === STORE_OPS.fact) return typeof v.about === "string" ? [v.about] : [];
+    if (op === STORE_OPS.note) return typeof v.at === "string" ? [v.at] : [];
+    if (op === STORE_OPS.value || op === STORE_OPS.marker) return ["world"];
+    const ev = eventOf(op, value);
+    return ev ? [...new Set((env.registry.get(ev.type)?.touches?.(ev) ?? []).map((t) => `entity:${t.entity}`))] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** What did not apply of a stored change, named by its thing and its value. */
+export function notAppliedOf(env: Pick<FoldEnv, "registry" | "areas">, c: Pick<StoredChange, "id" | "op" | "lane" | "value">, turn: string, reports: Report[]): NotApplied {
+  return { change: c.id, turn, op: c.op, lane: c.lane, reports, about: aboutOf(env, c.op, c.value), value: c.value };
+}
+
+/**
  * Keeps which turn last touched what an applied event declares it writes (`touches`), and the world
  * when it moved the clock; and, for each part it writes (a field, a relation type, an aspect, the
  * world's time), the change that wrote it last. A move of the clock that states the date and time it
@@ -211,7 +245,7 @@ function lessExact(a: Precision | null, b: Precision | null): Precision | null {
  */
 function markTouched(state: StoreState, touches: readonly Touch[], item: Item, clockMoved: boolean): void {
   const mark = { turn: item.turn, n: item.n };
-  const provenance = { standing: item.standing ?? null, source: item.source ?? null };
+  const provenance = { standing: item.standing ?? null, source: item.source ?? null, ...(inventedUnchecked(item.source, item.cite) ? { unchecked: true as const } : {}) };
   if (clockMoved) {
     state.touched.world = mark;
     const time = { ...mark, precision: item.precision ?? null, ...provenance };
@@ -383,9 +417,10 @@ function applyStoreOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
 /** Keeps, for each part a change wrote, the turn that wrote it last and how (as `markTouched` keeps an event's). */
 function markParts(state: StoreState, parts: readonly AreaPart[], item: Item): void {
   const mark = { turn: item.turn, n: item.n };
+  const unchecked = inventedUnchecked(item.source, item.cite) ? { unchecked: true as const } : {};
   for (const { ref, part } of parts) {
     state.touched[ref] = mark;
-    state.marks[ref] = { ...state.marks[ref], [part]: { ...mark, precision: item.precision ?? null, standing: item.standing ?? null, source: item.source ?? null } };
+    state.marks[ref] = { ...state.marks[ref], [part]: { ...mark, precision: item.precision ?? null, standing: item.standing ?? null, source: item.source ?? null, ...unchecked } };
   }
 }
 
@@ -586,7 +621,7 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
     if (jobs.length > 0) {
       applyJobs(env, state, jobs).forEach((o, k) => {
         const c = jobs[k];
-        if (!o.applied && c) notApplied.push({ change: c.id, turn: c.turn, op: c.op, lane: c.lane, reports: o.reports });
+        if (!o.applied && c) notApplied.push(notAppliedOf(env, c, c.turn, o.reports));
       });
       for (const c of jobs) if (c.id > upto) upto = c.id;
     }
@@ -603,7 +638,7 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
     const outcomes = clean ? applyUnchecked(env, state, items) : applyChecked(env, state, items, new Set());
     outcomes.forEach((o, k) => {
       const c = live[k];
-      if (!o.applied && c) notApplied.push({ change: c.id, turn: step.turn, op: c.op, lane: c.lane, reports: o.reports });
+      if (!o.applied && c) notApplied.push(notAppliedOf(env, c, step.turn, o.reports));
     });
     for (const c of step.changes) if (c.id > upto) upto = c.id;
     visit?.(step, state, upto, notApplied, rebased);

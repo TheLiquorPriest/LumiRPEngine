@@ -71,7 +71,7 @@ describe("a chat with no world", () => {
     const horizon: ChangeInput = { lane: "story", op: "store.horizon", value: { list: ["loft"] }, by: "author", source: "author" };
     play(s, "c", "m1", "Mara climbs into the hayloft.", 1, [...first, horizon]);
     const keys = (ref: string): string[] => s.view("c").values(ref).map((v) => v.key);
-    const said = (): string => worldState(s, { chat: "c", turn: s.beginTurn({ chat: "c", kind: "normal" }).id, layout: SHIPPED_LAYOUT }).text;
+    const said = (): string => worldState(s, { chat: "c", turn: s.beginTurn({ chat: "c", kind: "normal" }).id, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).text;
     expect(keys("world")).toEqual([]);
     expect(keys("place:loft")).toEqual([]);
     expect(said()).not.toMatch(/· (time|time zone|currency):/);

@@ -22,6 +22,9 @@ export function checkChange(c: ChangeInput, index: number, areas?: Areas): void 
   if (!text(c.by) || !text(c.handle) || !text(c.job)) throw new StoreInputError(`${at}: by, handle and job are text`);
   if (JSON.stringify(c.value) === undefined) throw new StoreInputError(`${at}: value is not JSON`);
   if (c.cite !== undefined && c.cite !== null && JSON.stringify(c.cite) === undefined) throw new StoreInputError(`${at}: cite is not JSON`);
+  if (c.reports !== undefined && (!Array.isArray(c.reports) || !c.reports.every((r) => isRecord(r) && typeof r.code === "string" && r.code !== "" && (r.values === undefined || isRecord(r.values))))) {
+    throw new StoreInputError(`${at}: reports are [{ code, values? }]`);
+  }
   const v = c.value;
   if (areas?.owns(c.op)) {
     const found = areas.of(c.op);

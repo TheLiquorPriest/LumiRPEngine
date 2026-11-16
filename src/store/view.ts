@@ -179,7 +179,7 @@ function reflectionPieces(r: Reflection): JsonObject[] {
   return pieces;
 }
 
-/** A mark's fields on a line: the turn's number and, where recorded, how exact, how sure and from where. */
+/** A mark's fields on a line: the turn's number and, where recorded, how exact, how sure and from where, and an unchecked invention. */
 export function markFields(mark: Mark | undefined): JsonObject {
   if (!mark) return {};
   const out: JsonObject = { turn: mark.n };
@@ -187,6 +187,7 @@ export function markFields(mark: Mark | undefined): JsonObject {
   if (mark.standing !== null) out.standing = mark.standing;
   if (mark.source !== null) out.source = mark.source;
   else out.unsourced = true;
+  if (mark.unchecked === true) out.unchecked = true;
   return out;
 }
 

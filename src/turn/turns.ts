@@ -1313,7 +1313,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const maps = mapView(await mapWording(guidanceTexts(this.#d.files, scope, this.#d.log)), settings.map);
       try {
         // Counted at the model layer's ratio, as every budget of the turn is: never a figure of the world state's own.
-        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: { ...settings.worldState, charsPerToken: settings.charsPerToken } });
+        const state = worldState(this.#d.store.user(scope.user), { chat: scope.chat, turn: scope.turn, layout: layout.text, map: maps, due: this.#d.due, settings: settings.worldState, charsPerToken: settings.charsPerToken });
         if (state.text.trim() !== "") blocks.push({ name: BLOCKS.worldState, text: state.text.trimEnd() });
       } catch (error) {
         this.#d.log.error("The world state could not be compiled for this turn's briefing.", { turn: scope.turn, error: words(error) });

@@ -232,6 +232,14 @@ ALTER TABLE chat ADD COLUMN compared INTEGER;
 UPDATE chat SET compared = created WHERE path <> '[]';
 `,
   },
+  {
+    version: 10,
+    // The reports a change's tool made for it when it was recorded (plan §6.7, AuState-120): codes and values, kept beside the
+    // store's own (`reports`), which a join of a held turn writes again; these it never does.
+    sql: `
+ALTER TABLE change ADD COLUMN told TEXT;
+`,
+  },
 ];
 
 /** The tables the store reads and writes, all made by its migrations. */

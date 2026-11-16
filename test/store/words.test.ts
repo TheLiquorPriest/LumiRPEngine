@@ -136,10 +136,11 @@ describe("no words of the store reach an agent", () => {
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     const labels = Object.values(s.view("c").state.world.entities).map((e) => kindDef(registry(), world, e.kind)?.label ?? e.kind);
     const due = { due: () => ({ items: [{ at: s.view("c").state.world.clock + 30, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the bell rings" }], more: 0 }) };
-    const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, map: { text: () => ({ grid: "g", drawn: "d", text: "#.#" }) } });
+    const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, map: { text: () => ({ grid: "g", drawn: "d", text: "#.#" }) }, charsPerToken: 4 });
     for (const section of ["horizon", "above", "around", "outline", "due", "open", "changed", "unsettled"] as const) expect([section, (block.sections[section]?.length ?? 0) > 0]).toEqual([section, true]);
-    expect(foreign(block.sections, vocabulary(world, changes, labels, t.id, "the bell rings", "#.#"))).toEqual([]);
-    expect(worldState(s, { chat: "c", turn: next.id, layout: "", due }).text).toBe("");
+    // What the store kept of each change (its reports' codes and values) is recorded data too.
+    expect(foreign(block.sections, vocabulary(world, changes, s.changes(t.id), labels, t.id, "the bell rings", "#.#"))).toEqual([]);
+    expect(worldState(s, { chat: "c", turn: next.id, layout: "", due, charsPerToken: 4 }).text).toBe("");
   });
 
   test("what an Upgrade put back reaches a model as a code with values from the world, never in today's own words", () => {

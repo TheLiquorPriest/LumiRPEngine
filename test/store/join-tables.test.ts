@@ -47,7 +47,7 @@ const FATES: Readonly<Record<string, Readonly<Record<string, Fate>>>> = {
     joined: turnIs("never"),
   },
   path_node: { user: "none", key: nodeIs("kept"), prev: nodeIs("never"), turn: turnIs("kept"), depth: "none" },
-  change: { id: "none", user: "none", turn: turnIs("moved"), chat: "none", ord: "none", lane: "none", op: "none", value: "none", by: "none", standing: "none", precision: "none", source: "none", cite: "none", job: "none", applied: "none", reports: "none", created: "none", handle: "none" },
+  change: { id: "none", user: "none", turn: turnIs("moved"), chat: "none", ord: "none", lane: "none", op: "none", value: "none", by: "none", standing: "none", precision: "none", source: "none", cite: "none", job: "none", applied: "none", reports: "none", told: "none", created: "none", handle: "none" },
   snapshot: { user: "none", node: nodeIs("dropped"), kind: "none", fingerprint: "none", upto: "none", state: "none", created: "none" },
   // A snapshot's parts go with the last snapshot that names them; none names a turn.
   snapshot_part: { user: "none", hash: "none", body: "none", refs: "none" },

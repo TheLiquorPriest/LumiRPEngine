@@ -115,7 +115,7 @@ async function compiledWorld(deps: EventsDeps, scope: Scope, guidance: Guidance,
   const part = readPart(layout.text, "world-state");
   const settings = await turnSettings(deps.files, scope, deps.log);
   const map = maps ? mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map) : undefined;
-  return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: { ...settings.worldState, charsPerToken: settings.charsPerToken } }) };
+  return { part, ahead: settings.worldState.dueAhead, state: worldState(store, { chat: scope.chat, turn, layout: part, ...(map !== undefined ? { map } : {}), due: deps.due, settings: settings.worldState, charsPerToken: settings.charsPerToken }) };
 }
 
 /**

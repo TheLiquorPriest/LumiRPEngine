@@ -41,7 +41,7 @@ function played() {
 describe("the world state", () => {
   test("holds all eight sections, laid out by the layout, each line a recorded value", () => {
     const { s, t2 } = played();
-    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, due: DUE });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, due: DUE, charsPerToken: 4 });
     const at = HEADINGS.map((h) => block.text.indexOf(h));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -65,7 +65,7 @@ describe("the world state", () => {
     expect(lines).toContain("engine: 3 changes (store.fact, post, set), to Wren, Wren's coin; 1 did not apply");
     expect(lines.some((l) => /^Wren: mood: "on edge" \(vague, turn 1\) \[f-[0-9a-f]{12}\]$/.test(l))).toBe(true);
     expect(lines.some((l) => /^Wren's coin: posted: -\$0\.75 \(approximate, turn 1\)$/.test(l))).toBe(true);
-    expect(lines).toContain("set, turn 1, not applied: missing_entity");
+    expect(lines.some((l) => /^set, turn 1, .*not applied: missing_entity/.test(l))).toBe(true);
     // The outline: a line for each level in the world, the horizon's place among them.
     expect(lines).toContain("Groups [groups] (groups) — 1 group");
     expect(block.tokens).toBeLessThanOrEqual(WORLD_STATE_DEFAULTS.budget);
@@ -78,7 +78,7 @@ describe("the world state", () => {
     const storm = "the storm coming in off the sea";
     play(s, "c", "m1", "Wren looks to the door.", 1, [{ lane: "story", op: "store.horizon", value: { list: [storm, "common_room", storm] }, by: "author", source: "author" }]);
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });
-    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, charsPerToken: 4 });
     const lines = block.text.split("\n");
     const words = `${storm} (on the horizon in your own words: nothing in the world is called that)`;
     expect(lines.filter((l) => l === words)).toHaveLength(1);
@@ -89,14 +89,14 @@ describe("the world state", () => {
   test("a section switched off is absent, a moved one moves, and with no map or due list to hand there is nothing of either", () => {
     const { s, t2 } = played();
     const off = SHIPPED_LAYOUT.replace(/\{\{#due\}\}[\s\S]*?\{\{\/due\}\}\n/, "");
-    const block = worldState(s, { chat: "c", turn: t2.id, layout: off, map: MAP, due: DUE });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: off, map: MAP, due: DUE, charsPerToken: 4 });
     expect(block.text).not.toContain("### Due");
     expect(block.sections.due).toBeUndefined();
     expect(block.text).not.toContain("the market opens");
     for (const h of HEADINGS.filter((x) => x !== "### Due")) expect(block.text).toContain(h);
     const moved = SHIPPED_LAYOUT.replace(/(\{\{#unsettled\}\}[\s\S]*?\{\{\/unsettled\}\}\n)/, "").replace("{{#horizon}}", "{{#unsettled}}\n### Unsettled\n\n{{unsettled}}\n{{/unsettled}}\n{{#horizon}}");
-    expect(worldState(s, { chat: "c", turn: t2.id, layout: moved }).text.startsWith("### Unsettled")).toBe(true);
-    const bare = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT }).text;
+    expect(worldState(s, { chat: "c", turn: t2.id, layout: moved, charsPerToken: 4 }).text.startsWith("### Unsettled")).toBe(true);
+    const bare = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).text;
     // With no source of what falls due or of maps, there is neither section nor line to say so.
     expect(bare).not.toContain("### Due");
     expect(bare).not.toContain("No map is drawn here");
@@ -106,7 +106,7 @@ describe("the world state", () => {
     const ts = testStore();
     ts.s.createChat({ id: "c" });
     const t = ts.s.beginTurn({ chat: "c", kind: "normal" });
-    const block = worldState(ts.s, { chat: "c", turn: t.id, layout: SHIPPED_LAYOUT });
+    const block = worldState(ts.s, { chat: "c", turn: t.id, layout: SHIPPED_LAYOUT, charsPerToken: 4 });
     expect(block.text).toContain("### The rest of the world, in outline");
     // With no horizon, the outline opens on the world's own line, which says nothing is recorded yet.
     expect(block.sections.outline?.map((l) => l.kind)).toEqual(["level_world"]);
@@ -127,7 +127,7 @@ describe("the world state", () => {
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });
     const entities = Object.keys(world.entities).length;
     expect(entities).toBeGreaterThanOrEqual(5000);
-    const compile = () => worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_PART, map: MAP, due: DUE });
+    const compile = () => worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_PART, map: MAP, due: DUE, charsPerToken: 4 });
     // The first compile at a turn also builds the tree over its state; later ones reuse it.
     const cold = performance.now();
     const block = compile();
@@ -168,7 +168,7 @@ describe("the world state", () => {
       { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "lost" }), by: "gm", precision: "vague" },
     ]);
     const t2 = s.beginTurn({ chat: "c", kind: "normal" });
-    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, due: DUE });
+    const block = worldState(s, { chat: "c", turn: t2.id, layout: SHIPPED_LAYOUT, map: MAP, due: DUE, charsPerToken: 4 });
     expect(block.tokens).toBeLessThanOrEqual(WORLD_STATE_DEFAULTS.budget);
     // The horizon whole, whatever the rest takes.
     const whole = s.viewAt(t2.id).query("common_room", "full")?.lines ?? [];
@@ -197,7 +197,7 @@ describe("the world state", () => {
     const flipped = s.sync("c", shown(["u1", "light"], ["m1", "No lantern tonight.", 11], ["u2", "down"], ["m2", "She sets it on the cask.", 2]));
     expect(flipped.notApplied.map((n) => n.op)).toEqual(["unlink", "link"]);
     const reports = (turn: string): string[] =>
-      (worldState(s, { chat: "c", turn, layout: SHIPPED_LAYOUT }).sections.unsettled ?? []).filter((l) => l.kind === "unsettled_report").map((l) => `${String(l.fields.op)} ${String(l.fields.turn)}`);
+      (worldState(s, { chat: "c", turn, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).sections.unsettled ?? []).filter((l) => l.kind === "unsettled_stopped").map((l) => `${String(l.fields.op)} ${String(l.fields.turn)}`);
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     expect(reports(next.id)).toEqual(["unlink 2", "link 2"]);
     s.addChanges(next.id, engine(tick(5)));
@@ -247,7 +247,7 @@ describe("what falls due in the world state", () => {
     expect(now).toBe(since + 2 * DAY);
 
     const due = timeDue(store);
-    const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due });
+    const block = worldState(s, { chat: "c", turn: next.id, layout: SHIPPED_LAYOUT, due, charsPerToken: 4 });
     const fell = due.due(s.stateAt(next.id).state, { from: since, to: now }, null, Number.POSITIVE_INFINITY).items;
     expect(fell.length).toBe(8);
     const calendar = calendarOf(world);
@@ -262,7 +262,7 @@ describe("what falls due in the world state", () => {
     // A turn whose clock did not move lists nothing as fallen due.
     s.tieTurn(next.id, { message: "m2", hash: hashOf("She waits."), date: 2 });
     const after = s.beginTurn({ chat: "c", kind: "normal" });
-    expect(worldState(s, { chat: "c", turn: after.id, layout: SHIPPED_LAYOUT, due }).sections.passed).toBeUndefined();
+    expect(worldState(s, { chat: "c", turn: after.id, layout: SHIPPED_LAYOUT, due, charsPerToken: 4 }).sections.passed).toBeUndefined();
   });
 
   test("a due span of a century costs no more than a day's: the list stops at what the budget can show, and the rest is counted", () => {
@@ -276,7 +276,7 @@ describe("what falls due in the world state", () => {
     const budget = { budget: 50 };
     const listed = (dueAhead: number) => {
       const due = counted(timeDue(store));
-      const block = worldState(s, { chat: "c", turn: next.id, layout, due: due.source, settings: { ...budget, dueAhead } });
+      const block = worldState(s, { chat: "c", turn: next.id, layout, due: due.source, settings: { ...budget, dueAhead }, charsPerToken: 4 });
       return { made: due.made(), lines: block.sections.due ?? [] };
     };
     const day = listed(DAY);

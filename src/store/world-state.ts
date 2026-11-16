@@ -16,6 +16,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
+import type { TidyFinding } from "../shared/thing-gm";
 import { trackOwner } from "../shared/world";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
@@ -23,7 +24,7 @@ import { clockRecorded } from "./blank";
 import { standing } from "./facts";
 import { eventOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
-import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState } from "./types";
+import { LANES, STORE_OPS, StoreInputError, type ChangeRow, type Mark, type StoreState, type UnsettledChange } from "./types";
 import { factFields, markFields, type TreeView, type ViewReading } from "./view";
 import { readPart, wordLine, type Part, type ViewLine } from "./words";
 
@@ -31,8 +32,6 @@ import { readPart, wordLine, type Part, type ViewLine } from "./words";
 export const WORLD_STATE_DEFAULTS = Object.freeze({
   /** Tokens everything but the horizon shares. */
   budget: 4000,
-  /** Characters counted as one token when the budget is measured. */
-  charsPerToken: 4,
   /** Minutes of story time ahead that the due section lists. */
   dueAhead: 360,
 });
@@ -86,6 +85,13 @@ export interface WorldStateInput {
   map?: MapText;
   /** What time brings due; absent, no due section is given. */
   due?: DueSource;
+  /**
+   * The holds that cannot be (R-173): what the chat's tidy-up finds at the turn's start with `things.tidy` on, less what it was told
+   * to leave. Each is listed under "unsettled" with the fix the tidy would make; the store neither finds nor applies one.
+   */
+  holds?: readonly TidyFinding[];
+  /** Characters counted as one token, the model layer's own ratio (RPH's `tokens.charsPerToken`): the budget is counted at it. */
+  charsPerToken: number;
   settings?: Partial<WorldStateSettings>;
 }
 
@@ -101,7 +107,8 @@ export interface WorldStateBlock {
 const SOFT_PRECISION = new Set<string>(["approximate", "vague", "unknown"]);
 const SOFT_STANDING = new Set<string>(["proposed", "assumed"]);
 
-const isSoft = (m: Pick<Mark, "precision" | "standing" | "source">): boolean => (m.precision !== null && SOFT_PRECISION.has(m.precision)) || (m.standing !== null && SOFT_STANDING.has(m.standing)) || m.source === null;
+const isSoft = (m: Pick<Mark, "precision" | "standing" | "source"> & { unchecked?: true }): boolean =>
+  (m.precision !== null && SOFT_PRECISION.has(m.precision)) || (m.standing !== null && SOFT_STANDING.has(m.standing)) || m.source === null || m.unchecked === true;
 
 /** A recorded value as one line of text. */
 function said(v: JsonValue): string {
@@ -163,7 +170,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const lastRows = before === null ? [] : store.changes(before.id);
   // How many more a section's span holds than its lines list (null: more, uncounted); its cut counts them with what it leaves out.
   const beyond: Partial<Record<WorldStateSection, number | null>> = {};
-  const budget = settings.budget * settings.charsPerToken;
+  const budget = settings.budget * input.charsPerToken;
   const now = state.world.clock;
   // On a clock nobody set (the blank world's, until play sets it) a time is given only as how long from now, or how long ago.
   const dated = clockRecorded(state);
@@ -215,14 +222,27 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
         lines.push({ kind: "unsettled_value", depth: 0, fields: { at: nameOf(ref), key: name, ...(value.value !== null ? { value: value.value } : {}), ...markFields(mark) } });
       }
     }
-    const n = before === null ? 0 : before.depth + 1;
-    for (const r of lastRows) if (!r.applied || r.reports.length > 0) lines.push({ kind: "unsettled_report", depth: 0, fields: { op: r.op, turn: n, applied: r.applied, codes: r.reports.map((x) => x.code) } });
-    // What stopped applying is told once, in the first briefing after: what the turn before started from, its own briefing told.
+    // Every change of the turn before, and every change placed since (a job's, his own), that carries a report, did not apply, names
+    // no source, or is an invention with no gap check or consent: wherever in the world it is.
+    const listed = new Set<number>();
+    for (const u of store.unsettledOf(input.chat, before?.id ?? null, turn.id)) {
+      listed.add(u.change.id);
+      lines.push(unsettledChange(u, before !== null && u.turn === before.id ? before.depth + 1 : null, nameOf, view));
+    }
+    // What stopped applying is told once, in the first briefing after, by its thing and its value: what the turn before started
+    // from, its own briefing told.
     const told = new Set(before === null ? [] : store.startOf(before.id).notApplied.map((x) => x.change));
     for (const x of folded.notApplied) {
-      if (told.has(x.change)) continue;
-      const t = store.turn(x.turn);
-      lines.push({ kind: "unsettled_report", depth: 0, fields: { op: x.op, turn: t === null ? 0 : t.depth + 1, applied: false, codes: x.reports.map((r) => r.code) } });
+      if (told.has(x.change) || listed.has(x.change)) continue;
+      const t = x.turn === "" ? null : store.turn(x.turn);
+      lines.push({ kind: "unsettled_stopped", depth: 0, fields: { op: x.op, ...(t === null ? { between: true } : { turn: t.depth + 1 }), ...aboutField(x.about ?? [], nameOf, view), value: said(x.value ?? null), codes: x.reports.map((r) => r.code) } });
+    }
+    // The holds that cannot be, each once, with the fix the tidy would make as its operations.
+    const holds = new Set<string>();
+    for (const h of input.holds ?? []) {
+      if (holds.has(h.key)) continue;
+      holds.add(h.key);
+      lines.push(holdLine(h, nameOf, view));
     }
     sections.unsettled = lines;
   }
@@ -257,7 +277,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     if (s !== "horizon") used += (texts[s] ?? "").length;
   }
   const text = part.body.render(part.header, texts).trim();
-  return { text, sections, tokens: Math.ceil(used / settings.charsPerToken) };
+  return { text, sections, tokens: Math.ceil(used / input.charsPerToken) };
 }
 
 /** What a line takes of the budget: its words and the line break after them; nothing for a kind the layout does not word. */
@@ -270,7 +290,8 @@ function costOf(part: Part, line: ViewLine): number {
  * As many of a section's lines as fit in `room` characters, in order. When some do not, or its span
  * holds `beyond` more than its lines list, the layout's `left_out` line, counting them all, ends the
  * section at the depth of the first one left out, with room kept for it (`left_out_uncounted` when
- * how many the span holds was not counted); when not even that fits, nothing of the section is shown.
+ * how many the span holds was not counted); when not even that fits, the section is that line alone,
+ * past its share: nothing is dropped for space without a word (B-3).
  */
 function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[], room: number, beyond: number | null): { lines: ViewLine[]; used: number } {
   const costs = lines.map((l) => costOf(part, l));
@@ -278,15 +299,68 @@ function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[],
   let k = 0;
   while (k < lines.length && used + (costs[k] as number) <= room) used += costs[k++] as number;
   if (k === lines.length && beyond === 0) return { lines: [...lines], used };
+  const noteAt = (at: number): ViewLine => {
+    const n = beyond === null ? null : lines.length - at + beyond;
+    const depth = (lines[at] ?? lines[at - 1])?.depth ?? 0;
+    return n === null ? { kind: "left_out_uncounted", depth, fields: { section, [section]: true } } : { kind: "left_out", depth, fields: { n, one: n === 1, section, [section]: true } };
+  };
   for (; k >= 0; k--) {
-    const n = beyond === null ? null : lines.length - k + beyond;
-    const depth = (lines[k] ?? lines[k - 1])?.depth ?? 0;
-    const note: ViewLine = n === null ? { kind: "left_out_uncounted", depth, fields: { section, [section]: true } } : { kind: "left_out", depth, fields: { n, one: n === 1, section, [section]: true } };
-    const total = used + costOf(part, note);
-    if (total <= room) return { lines: [...lines.slice(0, k), note], used: total };
+    const total = used + costOf(part, noteAt(k));
+    if (total <= room) return { lines: [...lines.slice(0, k), noteAt(k)], used: total };
     if (k > 0) used -= costs[k - 1] as number;
   }
-  return { lines: [], used: 0 };
+  const alone = noteAt(0);
+  return { lines: [alone], used: costOf(part, alone) };
+}
+
+/** The things a line is about, by name, as its `about` field; none for a line about nothing in the tree. */
+function aboutField(about: readonly string[], nameOf: (ref: string) => string, view: TreeView): JsonObject {
+  const names = [...new Set(about.flatMap((ref) => (view.resolve(ref) === null ? [] : [nameOf(view.resolve(ref) as string)])))];
+  return names.length > 0 ? { about: { names } } : {};
+}
+
+/**
+ * A change "unsettled" lists, as its line: its operation, its turn's number (`between` when placed between turns), its lane and
+ * who made it, the things it is about and the value it carried, its reports (codes, and each report as a piece with its values),
+ * whether it applied, and the marks that list it (no source; an invention with no gap check or consent).
+ */
+function unsettledChange(u: UnsettledChange, n: number | null, nameOf: (ref: string) => string, view: TreeView): ViewLine {
+  const c = u.change;
+  const fields: JsonObject = { op: c.op, lane: c.lane, ...(n === null ? { between: true } : { turn: n }), ...aboutField(u.about, nameOf, view), value: said(c.value), applied: c.applied && !u.why.includes("not_applied") };
+  if (c.by !== null) fields.by = c.by;
+  if (c.reports.length > 0) {
+    fields.codes = c.reports.map((r) => r.code);
+    fields.reports = { pieces: c.reports.map((r) => ({ kind: "unsettled_code", fields: { code: r.code, ...(r.values !== undefined && Object.keys(r.values).length > 0 ? { values: JSON.stringify(r.values) } : {}) } })) };
+  }
+  if (u.why.includes("unsourced")) fields.unsourced = true;
+  if (u.why.includes("unchecked")) fields.unchecked = true;
+  return { kind: "unsettled_change", depth: 0, fields };
+}
+
+/**
+ * A hold that cannot be, as its line: its kind, the things it names, and the fix the tidy would make as that fix's operations, each
+ * a piece the layout words by its own key (`fix_<what it does>`), its ids given as the names they have; never the finding's own
+ * words (its text, a fix's label, an operation's `why`).
+ */
+function holdLine(h: TidyFinding, nameOf: (ref: string) => string, view: TreeView): ViewLine {
+  const named = (v: JsonValue): JsonValue => {
+    if (typeof v !== "string") return isRecord(v) || Array.isArray(v) ? JSON.stringify(v) : v;
+    const ref = view.resolve(v);
+    return ref === null ? v : nameOf(ref);
+  };
+  const fields: JsonObject = { kind: h.kind, things: { names: h.things.map((id) => named(id)) } };
+  if (h.fix !== null) {
+    fields.fix = {
+      pieces: h.fix.ops.map((op) => {
+        // A thing's operation says what it does (`do`); any other is its own operation.
+        const body = (op.op === "item" ? op.change : op) as unknown as JsonObject;
+        const what = String(op.op === "item" ? op.change.do : op.op);
+        const rest = Object.entries(body).filter(([k]) => k !== "op" && k !== "do" && k !== "why");
+        return { kind: `fix_${what}`, fields: Object.fromEntries(rest.map(([k, v]) => [k, named(v ?? null)])) };
+      }),
+    };
+  }
+  return { kind: "unsettled_hold", depth: 0, fields };
 }
 
 /**

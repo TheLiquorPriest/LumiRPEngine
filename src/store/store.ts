@@ -21,7 +21,7 @@ import type { WorldDoc } from "../shared/world";
 import type { Registry } from "../engine/registry-impl";
 import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
+import { aboutOf, applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, inventedUnchecked, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
 import { draft } from "./working";
 import { Areas, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
@@ -57,9 +57,10 @@ import {
   type TurnRow,
   type TurnStart,
   type TurnStatus,
+  type UnsettledChange,
+  type UnsettledWhy,
   type WriteTarget,
 } from "./types";
-import type { LedgerEvent } from "../shared/ledger";
 
 /** Defaults for the store's settings. */
 export const STORE_DEFAULTS = Object.freeze({
@@ -86,7 +87,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 5;
+const FOLD_VERSION = 6;
 
 export interface StoreOptions {
   /**
@@ -196,6 +197,8 @@ interface ChangeDb {
   job: string | null;
   applied: number;
   reports: string | null;
+  /** The reports its tool made for it, as JSON; null: none. */
+  told: string | null;
   created: number;
 }
 
@@ -265,6 +268,11 @@ function turnOf(r: TurnDb): TurnRow {
   };
 }
 
+/** A change's tool reports as its row keeps them: JSON, or null for none. */
+function toldOf(c: ChangeInput): string | null {
+  return c.reports === undefined || c.reports.length === 0 ? null : JSON.stringify(c.reports.map((r) => (r.values === undefined ? { code: r.code } : { code: r.code, values: r.values })));
+}
+
 function changeOf(r: ChangeDb): ChangeRow {
   return {
     id: r.id,
@@ -282,7 +290,7 @@ function changeOf(r: ChangeDb): ChangeRow {
     cite: r.cite === null ? null : (JSON.parse(r.cite) as JsonValue),
     job: r.job,
     applied: r.applied === 1,
-    reports: r.reports === null ? [] : (JSON.parse(r.reports) as Report[]),
+    reports: [...(r.told === null ? [] : (JSON.parse(r.told) as Report[])), ...(r.reports === null ? [] : (JSON.parse(r.reports) as Report[]))],
     created: r.created,
   };
 }
@@ -1389,11 +1397,11 @@ export class UserStore {
     let ord = (existing.at(-1)?.ord ?? -1) + 1;
     const through = this.throughTurn(turn);
     const ids = this.write(through, () => {
-      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const put = this.db.query("INSERT INTO change (user, turn, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const made = inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
-        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
+        return Number(put.run(this.id, turnId, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, c.job ?? null, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf(c), now).lastInsertRowid);
       });
       this.dropSnapshotsThrough(turnId);
       return made;
@@ -1447,11 +1455,11 @@ export class UserStore {
     const now = this.store.now();
     const ids = this.write([chat], () => {
       let ord = (this.db.query<{ ord: number | null }, [string, string]>("SELECT max(ord) AS ord FROM change WHERE user = ? AND chat = ?").get(this.id, chat)?.ord ?? -1) + 1;
-      const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const put = this.db.query("INSERT INTO change (user, turn, chat, ord, lane, op, value, by, handle, standing, precision, source, cite, job, applied, reports, told, created) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       return inputs.map((c, i) => {
         const o = outcomes[i] ?? { applied: false, reports: [] };
         const cite = c.cite === undefined || c.cite === null ? null : JSON.stringify(c.cite);
-        return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, now).lastInsertRowid);
+        return Number(put.run(this.id, chat, ord++, c.lane, c.op, JSON.stringify(c.value), c.by ?? null, c.handle ?? null, c.standing ?? null, c.precision ?? null, c.source ?? null, cite, job, o.applied ? 1 : 0, o.reports.length > 0 ? JSON.stringify(o.reports) : null, toldOf(c), now).lastInsertRowid);
       });
     });
     const rows = this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2)) ORDER BY ord").all(this.id, JSON.stringify(ids)).map(changeOf);
@@ -2115,17 +2123,62 @@ export class UserStore {
     const placed = [...jobs, ...owner];
     if (placed.length === 0) return [];
     const missed = new Map(this.stateAt(t.id).notApplied.map((n) => [n.change, n.reports]));
-    const env = this.store.env;
-    const aboutOf = (c: ChangeRow): string[] => {
-      const area = env.areas?.of(c.op);
-      if (area) return [...new Set((area.def.touches?.(c.value) ?? []).map((p) => p.ref))];
-      const ev = isRecord(c.value) && c.value.type === c.op ? (c.value as unknown as LedgerEvent) : null;
-      return ev ? [...new Set((env.registry.get(ev.type)?.touches?.(ev) ?? []).map((x) => `entity:${x.entity}`))] : [];
-    };
     return placed.map((c) => {
       const change = this.changeOrThrow(c.id);
-      return { change, about: aboutOf(change), applied: !missed.has(c.id), reports: missed.get(c.id) ?? [] };
+      return { change, about: aboutOf(this.store.env, change.op, change.value), applied: !missed.has(c.id), reports: missed.get(c.id) ?? [] };
     });
+  }
+
+  /**
+   * What "unsettled" lists of a turn and what follows it (plan §6.7, §10.5, AuTurn-K41): every change of the turn (null: none, the
+   * chat's start), and every change placed after it before the next turn (a job's, his own), that carries a report, did not apply,
+   * names no source, or is an invention with no gap check or consent, wherever in the world it is. The next turn is `next` when given,
+   * else the one after it on the chat's path, else the newest begun after it; with none, what stands after it at the chat's head. Each
+   * with its turn (null: placed between turns), the things it is about, and why it is listed. A joined turn is refused, as every
+   * reading of one is.
+   */
+  unsettledOf(chat: string, turnId: string | null, next?: string): UnsettledChange[] {
+    const t = turnId === null ? null : this.turnToWrite(turnId);
+    const row = this.chatOrThrow(chat);
+    let upto = next;
+    if (upto === undefined && t !== null) {
+      const onPath = pathOf(row.path).flatMap((e) => (e.turn === null ? [] : [e.turn]));
+      const at = onPath.indexOf(t.id);
+      upto =
+        (at >= 0 ? onPath[at + 1] : undefined) ??
+        this.db.query<{ id: string }, [string, string, string]>("SELECT id FROM turn WHERE user = ? AND chat = ? AND parent = ? AND status <> 'joined' ORDER BY created DESC LIMIT 1").get(this.id, chat, t.id)?.id;
+    }
+    const placed: { change: ChangeRow; applied: boolean; reports: Report[] }[] = upto !== undefined ? this.changesBefore(upto) : t !== null ? this.trailingAfter(row, t) : [];
+    const env = this.store.env;
+    const out: UnsettledChange[] = [];
+    const consider = (change: ChangeRow, turn: string | null, applied: boolean, reports: readonly Report[]): void => {
+      const why: UnsettledWhy[] = [];
+      if (change.reports.length > 0 || reports.length > 0) why.push("reported");
+      if (!applied) why.push("not_applied");
+      if (change.source === null) why.push("unsourced");
+      if (inventedUnchecked(change.source, change.cite)) why.push("unchecked");
+      if (why.length === 0) return;
+      out.push({ change: reports.length === 0 ? change : { ...change, reports: [...change.reports, ...reports] }, turn, about: aboutOf(env, change.op, change.value), why });
+    };
+    // The turn's own changes; its jobs' are listed where they are placed.
+    if (t !== null) for (const c of this.changes(t.id)) if (c.job === null) consider(c, t.id, c.applied, []);
+    for (const p of placed) consider(p.change, null, p.applied, p.reports);
+    return out;
+  }
+
+  /** His own changes of a chat (`addOwnerChanges`; his jobs' among them), in the order they were made. */
+  ownerChanges(chat: string): ChangeRow[] {
+    return this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ? AND chat = ? ORDER BY ord").all(this.id, chat).map(changeOf);
+  }
+
+  /** What stands after a turn at the chat's head, when the turn is the head's: his own changes since, and ended jobs' changes pending. */
+  private trailingAfter(row: ChatDb, t: TurnRow): { change: ChangeRow; applied: boolean; reports: Report[] }[] {
+    if (row.head === null || row.head !== t.node) return [];
+    const path = this.chainRows(row.head);
+    const ids = [...this.jobsPending(path), ...(this.ownerIn(row.id) ? this.placeOwner(path, false, row.id).after : [])].map((c) => c.id);
+    if (ids.length === 0) return [];
+    const missed = new Map(this.withOwner(row.id, row.head, row.revision, true).notApplied.map((n) => [n.change, n.reports]));
+    return ids.map((id) => ({ change: this.changeOrThrow(id), applied: !missed.has(id), reports: missed.get(id) ?? [] }));
   }
 
   // ------------------------------------------------------------ sessions
@@ -2286,7 +2339,7 @@ export class UserStore {
       const c = this.changeOrThrow(id);
       const turn = c.chat === null ? this.turnOrThrow(c.turn) : null;
       if (turn?.status === "open") throw new StoreInputError(`change ${id} is staged in an open turn: dropStaged takes it back`);
-      const own = turn === null ? this.db.query<ChangeDb, [string, string]>("SELECT * FROM change WHERE user = ? AND chat = ? ORDER BY ord").all(this.id, c.chat ?? "").map(changeOf) : this.changes(turn.id);
+      const own = turn === null ? this.ownerChanges(c.chat ?? "") : this.changes(turn.id);
       const { plan, chat } = this.undoPlan(c, turn, own);
       left.push(...plan.left);
       if (chat === null || plan.inputs.length === 0) continue;

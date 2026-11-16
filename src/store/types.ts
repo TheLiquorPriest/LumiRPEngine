@@ -79,6 +79,8 @@ export interface ChangeInput {
   cite?: JsonValue | null;
   /** The job that made it, when a job did. */
   job?: string | null;
+  /** The reports its tool made for it (code and values, never words), kept beside the store's own. */
+  reports?: Report[];
 }
 
 /**
@@ -102,6 +104,7 @@ export interface ChangeRow {
   cite: JsonValue | null;
   job: string | null;
   applied: boolean;
+  /** The reports its tool made for it when it was recorded, then the store's own (codes and values, never words). */
   reports: Report[];
   created: number;
 }
@@ -189,13 +192,32 @@ export interface PathEntry {
   hidden: boolean;
 }
 
-/** A change that applied when it was recorded and does not apply on the path folded now, with the reports that say why. */
+/**
+ * A change that applied when it was recorded and does not apply on the path folded now, with the reports that say why, the things it
+ * was about (tree refs: what it touches) and the value it carried. The change's own row is never rewritten.
+ */
 export interface NotApplied {
   change: number;
   turn: string;
   op: string;
   lane: Lane;
   reports: Report[];
+  about: string[];
+  value: JsonValue;
+}
+
+/** Why a change is listed under "unsettled" (plan §6.7, §10.5). */
+export type UnsettledWhy = "reported" | "not_applied" | "unsourced" | "unchecked";
+
+/**
+ * A change "unsettled" lists (`unsettledOf`): the change, the turn it is of (null: one of his own, or a job's, placed between turns),
+ * the things it is about, and why it is listed.
+ */
+export interface UnsettledChange {
+  change: ChangeRow;
+  turn: string | null;
+  about: string[];
+  why: UnsettledWhy[];
 }
 
 /** What comparing the chat's path with the turn tree found (§6.3). Ids and hashes only. */
@@ -253,6 +275,8 @@ export type Mark = Touched & {
   precision: Precision | null;
   standing: Standing | null;
   source: Source | null;
+  /** An invention with no gap check or no consent (plan §10.5): its source `invented`, its cite naming neither. Absent: not one. */
+  unchecked?: true;
 };
 
 /** A plain statement about a thing (§6.6), as the fact store keeps it. History is kept: a replaced fact stays, marked. */
