@@ -12,6 +12,7 @@ import type { AgentRef, HostTool, JsonObject, ToolResult } from "rp-harness/cont
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { WriteQueue } from "../../src/app/database";
 import { CAST_STORE_AREA, castTools, type CastDeps } from "../../src/cast/index";
+import { STORY_STORE_AREA } from "../../src/story";
 import { castAt } from "../../src/cast/path";
 import { attachFile, CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
@@ -88,7 +89,7 @@ export async function openTable(world: WorldDoc | null = inventedWorld()): Promi
   // The lore keeps the bindings of lore entries, which the cast binds a character to.
   for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
   let clock = 0;
-  const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock, areas: [CAST_STORE_AREA] });
+  const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock, areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
   await writes.run(() => s.createChat(world === null ? { id: CHAT } : { id: CHAT, world: world.id, revision }));

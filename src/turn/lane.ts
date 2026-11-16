@@ -279,8 +279,6 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const facts = new FactsRegistry();
   facts.add(turnFacts(store, (user, turn) => runs.ofTurn(user, turn)));
   facts.add(loreIndex.facts());
-  // Who was on stage at each turn the cast counts: the open scene there, as the story record holds it; a turn with none, nobody.
-  facts.add(castFacts({ store, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, stage.who])) }));
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
   const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs), log: app.log });
@@ -291,6 +289,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     return parts.chat;
   };
   const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore, files);
+  // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
+  facts.add(castFacts({ store, sources, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])) }));
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
   const due = timeDue(store);
   /**
