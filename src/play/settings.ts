@@ -14,7 +14,7 @@ import { SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_T
 import type { JsonValue } from "../shared/json";
 import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
 import { OFFSTAGE_DEFAULTS, OFFSTAGE_GROUP_LABEL, OFFSTAGE_GROUPS, type OffstageGroup, type OffstageSettings } from "../shared/offstage";
-import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorView } from "../shared/settings";
+import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorView } from "../shared/narrator-view";
 import type { ControlsKnowledge } from "./state/controls";
 
 /**

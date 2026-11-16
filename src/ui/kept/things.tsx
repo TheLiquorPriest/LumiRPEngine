@@ -19,7 +19,7 @@ import { EditNoticeBar } from "../../frontend/gm/ui";
 import { useGmParts } from "../../frontend/gm/use-gm-parts";
 import { gmReloadKey } from "../../frontend/play/gm";
 import { editRequest } from "../../frontend/requests";
-import type { EditOp } from "../../shared/protocol";
+import type { EditOp } from "../../shared/edit-ops";
 import { DEFAULT_CURRENCY } from "../../shared/world";
 import { useApp } from "../app";
 import type { RpeClient } from "../client";
