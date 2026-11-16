@@ -783,8 +783,8 @@ export function TurnPage(props: { chat: string; turn: string }) {
   const notices = useNoticeLines(chat);
   const turnsAtATime = useUiSetting("turnsAtATime");
   // What the watch is held to is read when it is used, so a setting changed meanwhile holds at once.
-  const limits = useRef<WatchLimits>({ renderMs: 0, keepRuns: 0 });
-  limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns") };
+  const limits = useRef<WatchLimits>({ renderMs: 0, keepRuns: 0, keepFailures: 0 });
+  limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns"), keepFailures: useUiSetting("keepFailures") };
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
     return watchTurn(app.client, chat, turn, app.timers, setWatched, () => limits.current);

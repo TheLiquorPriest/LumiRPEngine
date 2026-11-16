@@ -13,7 +13,7 @@ import type { Timers } from "../../src/ui/roads";
 import { CHAT, CONTINUED, CONTINUED_REPLY, continuedTurn, RECORDED, RECORDS, REPLY, RUN, RUN_FIRST, RUN_SECOND, T0, turnAt, turnListAt, turnOf, underRun } from "./recorded";
 
 /** What a watch is held to in these tests: redrawn at most each `renderMs`, the Live page keeping four runs. */
-const held = (renderMs: number) => () => ({ renderMs, keepRuns: 4 });
+const held = (renderMs: number) => () => ({ renderMs, keepRuns: 4, keepFailures: 20 });
 
 /** A clock the test moves by hand. */
 function manualTimers(): Timers & { advance(ms: number): void } {

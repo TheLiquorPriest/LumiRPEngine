@@ -15,7 +15,8 @@ import { replyOf } from "../../client";
 import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../atoms";
 import { type Follow, useFollowNewest } from "../../live-follow";
 import { type RunNode, shownRuns, stopOf } from "../../live-model";
-import { type LetGo, NOTHING_WATCHED, watchChat, type Watched } from "../../live-watch";
+import { type FailureShown, type LetGo, NOTHING_WATCHED, watchChat, type Watched } from "../../live-watch";
+import { FailureLines } from "./failures";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
 import { AgentTree, ReplyBox, RunHead, runTitle, STATUS_WORDS } from "../../trace-view";
 import type { PageEntry } from "../../page-entry";
@@ -35,6 +36,8 @@ export interface LiveViewProps {
   runs: readonly RunNode[];
   /** The runs the page let go, the one let go first first. */
   letGo: readonly LetGo[];
+  /** The handler failures told to this chat that have not been dismissed, oldest first. */
+  failures?: readonly FailureShown[];
   /** How many events the hub dropped for this page because it fell behind; 0 when it did not. */
   behind: number;
   loading: boolean;
@@ -46,6 +49,7 @@ export interface LiveViewProps {
   onStop(run: RunNode): void;
   onOpenGate(): void;
   onCloseGate(): void;
+  onDismiss?(seq: number): void;
   onOpenTurn(turn: string): void;
   /** The notices file's words, for the records of the tree that are notices (a turn held to under ten minutes for want of a keep-alive line). */
   notices?: NoticeLines;
@@ -133,6 +137,7 @@ export function LiveView(props: LiveViewProps) {
           <span>{props.problem}</span>
         </Banner>
       )}
+      <FailureLines failures={props.failures ?? []} onOpenTurn={props.onOpenTurn} onDismiss={(seq) => props.onDismiss?.(seq)} />
       {props.behind === 0 ? null : (
         <Banner
           tone="warn"
@@ -202,15 +207,17 @@ export function LivePage(props: { chat: string }) {
   const { chat } = props;
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [stops, setStops] = useState<readonly StopPress[]>([]);
+  const [dismissed, setDismissed] = useState<ReadonlySet<number>>(new Set());
   const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
   const notices = useNoticeLines(chat);
   // What the watch is held to is read when it is used, so a setting changed meanwhile holds at once.
-  const limits = useRef({ renderMs: 0, keepRuns: 0 });
-  limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns") };
+  const limits = useRef({ renderMs: 0, keepRuns: 0, keepFailures: 0 });
+  limits.current = { renderMs: useUiSetting("redrawMs"), keepRuns: useUiSetting("keepRuns"), keepFailures: useUiSetting("keepFailures") };
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setWatched(NOTHING_WATCHED);
     setStops([]);
+    setDismissed(new Set());
     return watchChat(app.client, chat, app.timers, setWatched, () => limits.current);
   }, [chat]);
   const runs = shownRuns(watched.model);
@@ -237,6 +244,8 @@ export function LivePage(props: { chat: string }) {
       chat={chat}
       runs={runs}
       letGo={watched.letGo}
+      failures={watched.failures.filter((failure) => !dismissed.has(failure.seq))}
+      onDismiss={(seq) => setDismissed((held) => new Set([...held, seq]))}
       behind={watched.behind}
       loading={watched.loading}
       problem={watched.problem}

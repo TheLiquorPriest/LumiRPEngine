@@ -100,6 +100,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.tickMs` | `1000` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Page's running clocks tick: Milliseconds between the redraws of a running timer on a page. |
 | `pages.redrawMs` | `100` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Live and Turn pages redraw at most every: Milliseconds at most between redraws of a watched turn on the Live and Turn pages while it streams; what a read of it gives shows at once. |
 | `pages.keepRuns` | `4` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Runs the Live page keeps: Runs of a chat the Live page holds at once; once more have ended than this, the oldest ended is let go, named with a link to its Turn page. |
+| `pages.keepFailures` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Handler failures the Live page keeps: Handler failures told to a chat that the Live page holds at once; once more have come than this, the oldest is let go. A failure stays on the page until it is dismissed. |
 | `pages.turnsAtATime` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns read at a time: Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500). |
 
 ## The store

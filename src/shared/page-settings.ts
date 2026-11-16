@@ -27,6 +27,7 @@ export const PAGE_SETTING_DEFS = {
   tickMs: { key: "pages.tickMs", default: 1000, least: 100, most: 60_000, name: "Page's running clocks tick", about: "Milliseconds between the redraws of a running timer on a page." },
   redrawMs: { key: "pages.redrawMs", default: 100, least: 10, most: 10_000, name: "Live and Turn pages redraw at most every", about: "Milliseconds at most between redraws of a watched turn on the Live and Turn pages while it streams; what a read of it gives shows at once." },
   keepRuns: { key: "pages.keepRuns", default: 4, least: 1, most: 100, name: "Runs the Live page keeps", about: "Runs of a chat the Live page holds at once; once more have ended than this, the oldest ended is let go, named with a link to its Turn page." },
+  keepFailures: { key: "pages.keepFailures", default: 20, least: 1, most: 500, name: "Handler failures the Live page keeps", about: "Handler failures told to a chat that the Live page holds at once; once more have come than this, the oldest is let go. A failure stays on the page until it is dismissed." },
   turnsAtATime: { key: "pages.turnsAtATime", default: 30, least: 1, most: 500, name: "Turns read at a time", about: "Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500)." },
 } as const satisfies Record<string, PageSettingDef>;
 

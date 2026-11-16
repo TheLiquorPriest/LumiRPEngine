@@ -28,6 +28,16 @@ export interface LetGo {
   readonly endedAt: number | null;
 }
 
+/** A handler's failure told to this chat, as the chat's own live view heard it: the operation, the handler's words, the turn and the change that failed (null where the change had no number). */
+export interface FailureShown {
+  readonly seq: number;
+  readonly at: number;
+  readonly op: string;
+  readonly error: string;
+  readonly turn: string;
+  readonly change: number | null;
+}
+
 export interface Watched {
   model: LiveModel;
   /** The first read has not come back yet. */
@@ -40,14 +50,18 @@ export interface Watched {
   letGo: readonly LetGo[];
   /** How many events the hub dropped for this page because it fell behind, all told; 0 when none. */
   behind: number;
+  /** On the Live page: the handler failures told to the chat, oldest first, as many as `keepFailures` allows; none on the Turn page. */
+  failures: readonly FailureShown[];
 }
 
-export const NOTHING_WATCHED: Watched = { model: EMPTY_LIVE, loading: true, problem: null, detail: null, letGo: [], behind: 0 };
+export const NOTHING_WATCHED: Watched = { model: EMPTY_LIVE, loading: true, problem: null, detail: null, letGo: [], behind: 0, failures: [] };
 
 /** What a watch is held to, read each time it is used so a change of the setting holds at once: the most often it redraws (ms) and the runs the Live page keeps. */
 export interface WatchLimits {
   readonly renderMs: number;
   readonly keepRuns: number;
+  /** The most handler failures the Live page holds; the oldest are let go past it. */
+  readonly keepFailures: number;
 }
 
 /** The model without its oldest ended runs past `keep`, and those it let go. */
@@ -122,6 +136,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
   let detail: TurnReply | null = null;
   let letGo: readonly LetGo[] = [];
   let behind = 0;
+  let failures: readonly FailureShown[] = [];
   let alive = true;
   let timer: unknown = null;
   /** Turns being read now, so one hole is not read twice at once. */
@@ -142,7 +157,7 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
       const gone = kept.dropped.filter((run) => !letGo.some((l) => l.run === run.run));
       if (gone.length > 0) letGo = [...letGo, ...gone.map((run): LetGo => ({ run: run.run, turn: run.turn, started: run.started, status: run.outcome?.status ?? null, endedAt: run.endedAt }))];
     }
-    onChange({ model, loading, problem, detail, letGo, behind });
+    onChange({ model, loading, problem, detail, letGo, behind, failures });
   };
   const soon = (): void => {
     if (timer === null) timer = timers.setTimeout(publish, limits().renderMs);
@@ -227,6 +242,11 @@ function watch(client: RpeClient, chat: string, only: string | null, timers: Tim
     events(events, missed) {
       let begunOrEnded = false;
       for (const event of events) {
+        // A failure told to the chat belongs to the chat's page, whether any run goes on or not.
+        if (event.kind === "handler_failed") {
+          if (only === null) failures = [...failures, { seq: event.seq, at: event.at, ...event.data }].slice(-limits().keepFailures);
+          continue;
+        }
         if (only !== null && !ofOurs(event)) continue;
         model = applyLive(model, event);
         begunOrEnded ||= turning(event);
