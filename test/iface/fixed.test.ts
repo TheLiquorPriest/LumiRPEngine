@@ -208,9 +208,12 @@ describe("world_query, world_search and roll", () => {
     expect(r.error).toBeUndefined();
     const tree = renderView(t.s.view(CHAT).query("place:thornbury", 1, { due: DUE, ahead: 360 }) ?? { lines: [] }, treePart);
     expect(tree).toContain("Thornbury [thornbury] (place)");
-    expect(texts(r)[0]).toBe(tree);
+    // A place opened says what of its record is empty, in lines of its own after its level's line.
+    const said = texts(r)[0] ?? "";
+    expect(said.split("\n").filter((l) => !/^ {2}· (since|feature|access) — /.test(l)).join("\n")).toBe(tree);
+    expect(said).toContain("· since — nothing is recorded");
     expect((dataOf(r).due as JsonObject[])[0]?.where).toBe("place:thornbury");
-    wordsFromFiles(r, [tree]);
+    wordsFromFiles(r, [said]);
     const ruleset = await t.call("world_query", { at: "ruleset" });
     expect(((dataOf(ruleset).ruleset as JsonObject).bestiary as JsonObject[]).map((b) => b.id)).toEqual(["town_guard", "wolf"]);
   });

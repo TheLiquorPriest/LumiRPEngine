@@ -17,6 +17,7 @@ import { renderView } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type SearchKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { baseOf, isPlaceFactPart, PLACE_FACT_PARTS, PLACES_DEFAULTS, placeAtState, placeSliceOf, sourcesNow, sourcesOf, withPlaceLines } from "../places";
+import { queryQuests, searchedQuests } from "../quests/query";
 import { clockText, listDue, timeFrom } from "./ops-time";
 import { missed, missedData, numberArg, unknownFields } from "./ops";
 import { type Found, isFound, nearestOf, Reading, saysUnreadable, type Unreadable } from "./reading";
@@ -65,6 +66,9 @@ export const WORLD_QUERY: ToolSpec = {
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
     if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc) });
+    // (S17Story, quests) The quests' level, or a quest by name, id or ref: its record whole.
+    const quest = queryQuests(call, reading, reply, args.at);
+    if (quest !== null) return quest;
     const at = foundOr(reading, reply, "at", args.at, "point");
     if (at === null) return reply;
     // A depth that reads as none is refused naming the field, never replaced by the setting's.
@@ -128,7 +132,10 @@ export const WORLD_SEARCH: ToolSpec = {
     const asked = args.limit === undefined || args.limit === null ? call.settings.searchHits : numberArg(args, "limit");
     if (asked === undefined || !Number.isInteger(asked) || asked < 1) return reply.line("unreadable", { field: "limit", value: JSON.stringify(args.limit), wants: reading.lines.line("wants_qty") ?? "" }).fail();
     // At most what the setting allows, with how many more were found beyond what is listed.
-    const found = await call.deps.search.search(reading.state, call.deps.env, words, { ...(args.kind !== undefined ? { kind: args.kind as SearchKind } : {}), limit: Number.MAX_SAFE_INTEGER });
+    // (S17Story, quests) A quest is found by the words of its name, objective and stages, beside what the state's search finds; the state's own kinds are asked of it alone.
+    const stateKind = args.kind === undefined || args.kind === "quest" ? undefined : (args.kind as SearchKind);
+    const fromState = args.kind === "quest" ? [] : await call.deps.search.search(reading.state, call.deps.env, words, { ...(stateKind !== undefined ? { kind: stateKind } : {}), limit: Number.MAX_SAFE_INTEGER });
+    const found = [...fromState, ...(args.kind === undefined || args.kind === "quest" ? searchedQuests(reading, words) : [])];
     if (found.length === 0) return reply.line("none_found", { words });
     const shown = Math.min(asked, call.settings.searchHits);
     if (found.length > shown) reply.line("more_found", { words, shown, more: found.length - shown });

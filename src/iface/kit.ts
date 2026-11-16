@@ -4,6 +4,8 @@
 // `.prompts/engine-answers.md`). An answer is data from the store plus lines from that file.
 
 import type { PlacesSettings } from "../places/settings";
+import type { QuestHolder } from "../quests/holders";
+import type { QuestsSettings } from "../quests/settings";
 import type { PlaceSourcesReader } from "../places/sources";
 import type { Database } from "bun:sqlite";
 import type { AgentRef, ApprovalsPort, HostTool, JsonObject, JsonSchema, JsonValue, Scope, ToolContent, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
@@ -16,6 +18,7 @@ import type { ChangeInput, Lane, StoreState } from "../store/types";
 import { JoinedTurnError } from "../store/types";
 import type { Part } from "../store/words";
 import { saysUnreadable, ScopeError } from "./reading";
+import type { WorldService } from "../worlds/service";
 import type { Fields, GuidanceFiles, Lines, ToolText } from "./texts";
 
 /** Every fixed value of the engine's tools, each a setting with this default. */
@@ -38,6 +41,10 @@ export const IFACE_DEFAULTS = Object.freeze({
   placeCap: 64,
   /** The most characters of an old engine's record `turn_carried` gives in one answer; the rest is read on from where the answer stops. */
   carriedChars: 6000,
+  /** The most characters of a world's document one `world_read` answers with, past which it answers an outline to read further into. */
+  worldChars: 6000,
+  /** The most items of a list about a world's document (issues of a lint, revisions of its history) one answer gives. */
+  worldListed: 20,
 });
 
 export type IfaceSettings = { -readonly [K in keyof typeof IFACE_DEFAULTS]: number };
@@ -57,6 +64,8 @@ export const IFACE_SETTING_DEFS = {
   editOps: { key: "engine.editOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
   placeCap: { key: "engine.placeCap", default: IFACE_DEFAULTS.placeCap, takes: { type: "whole", least: 0 }, perConnection: false, name: "Places a chat makes before each further one is reported", about: "The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same.", effect: "turn" },
   carriedChars: { key: "engine.carriedChars", default: IFACE_DEFAULTS.carriedChars, takes: { type: "whole", least: 1 }, perConnection: false, name: "Characters of an old record read at once", about: "The most characters of what an earlier build recorded for a migrated turn that one turn_carried answers with; the rest is read on from where it stops.", effect: "turn" },
+  worldChars: { key: "engine.worldChars", default: IFACE_DEFAULTS.worldChars, takes: { type: "whole", least: 1 }, perConnection: false, name: "Characters of a world's document read at once", about: "The most characters of a world's document one world_read answers with; a longer value is answered as an outline to read further into.", effect: "turn" },
+  worldListed: { key: "engine.worldListed", default: IFACE_DEFAULTS.worldListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items of a list about a world listed", about: "The most items of a list about a world's document, such as the issues of its lint or its revisions, that one answer gives; how many more there are is said.", effect: "turn" },
 } as const satisfies NumberSettings<keyof IfaceSettings>;
 
 /** Every setting the engine's tools read, as a config file writes it. */
@@ -111,7 +120,7 @@ export interface StateSearch {
   search(state: StoreState, env: FoldEnv, words: string, opts: { kind?: SearchKind; limit: number }): StateHit[] | Promise<StateHit[]>;
 }
 
-export const SEARCH_KINDS = ["person", "thing", "place", "group"] as const;
+export const SEARCH_KINDS = ["person", "thing", "place", "group", "quest"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** A statement about a thing, as the `fact` operation gives it to the fact store (plan §6.6). */
@@ -187,10 +196,16 @@ export interface EngineDeps {
   mapSettings?: MapConfig;
   /** The places' settings for the chat (`places:` in its config): how many entries of each part of a place's record a level shows; absent, their defaults. */
   places?: Partial<PlacesSettings>;
+  /** The quests' settings for the chat (`quests:` in its config): how many beats a quest's history gives; absent, their defaults. */
+  quests?: Partial<QuestsSettings>;
+  /** The characters whose knowledge names a quest or one of its stages by ref (the cast's), at a turn of the chat (null: its head); absent: none. */
+  questHolders?(user: string, chat: string, turn: string | null, quest: string): QuestHolder[];
   /** What a place's record reads of the lore: the entries bound to a place and each as Lumiverse holds it now, for the base a call writes and the sources a place shows. Absent: no entry is bound to any place. */
   placeSources?: PlaceSourcesReader;
   /** What an earlier build recorded on a migrated turn, read-only, for `turn_carried`: given by the application, which holds the migration's records. Absent: none is held. */
   carried?: CarriedPort;
+  /** The world service Build's routes call (`src/worlds/service.ts`), for the tools that read and change a world's document. Absent: the user's worlds are not reachable from this run. */
+  worlds?: Pick<WorldService, "list" | "read" | "draft" | "commit" | "lint">;
   /** Milliseconds since 1970, for an approval's question; `Date.now` when absent. */
   now?: () => number;
 }

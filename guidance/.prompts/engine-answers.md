@@ -145,6 +145,16 @@ carried_none: Turn {{turn}} carries no record of an earlier build: nothing was m
 carried_removed: {{part}} of turn {{turn}}'s old record was removed by the earlier build's clean-up before it was carried, so its words are gone.
 carried_unknown: Turn {{turn}}'s old record has no part {{part}}.{{#near}} Near: {{near}}.{{/near}} Its parts: {{parts}}.
 carried_cut: {{part}} goes on past {{to}} of {{of}} characters: send from {{to}} to read on.
+worlds_none: {{tool}} works on his worlds, and none can be reached from this run, so nothing was read or written.
+world_not_named: No world is named, and this chat plays none: name one with world.
+world_not_found: {{why}}
+world_conflict: {{why}} The draft is as it now stands in the answer's data; write again on it.
+world_validation: {{why}} The world's own checks refused it, so the draft stands as it was.
+world_bad_request: {{why}}
+world_bad_pointer: at {{at}} is not a JSON pointer: {{why}}
+world_nothing_at: The document holds nothing at {{at}}.{{#near}} What its parent holds: {{near}}.{{/near}}
+world_outline: The value at {{at}} is {{size}} characters, more than one answer holds, so what it holds is outlined: read further into one member with at.
+wants_patch: a list of operations, each an object with op (add, remove, replace, move, copy or test) and path, as RFC 6902 gives them, the paths JSON pointers into the document
 check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
 totals_cut_short: The run ended at {{reached}}, short of {{until}}: the engine's own cap on a run of this size stopped it there. The totals are for the span up to {{reached}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.

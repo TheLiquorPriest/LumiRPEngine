@@ -7,7 +7,7 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import { formatMoney } from "../shared/world";
+import { formatMoney, type StageDef } from "../shared/world";
 import { fieldBounds, type LevelOffer, levelsFollowXp, applyEffects } from "../engine/effects";
 import { levelProgression, progressOf } from "../engine/ruleset";
 import { valueProblem } from "../engine/edits";
@@ -24,6 +24,7 @@ import { accountsOf, balance, classOf, external, hasLedger, holdersOf, statusOf,
 import { asUnit, cashAccount, isParty, type PayMethod, payeeSide, posting, waysOf, wayFor } from "../packs/economy/core/pay";
 import { LIGHT_FIELD } from "../packs/space/core/light";
 import { axesOf } from "../packs/relationships/core/index";
+import { authoredOf } from "../quests/read";
 import { findQuest, newQuestId, QUEST_KINDS, QUEST_OPS, QUEST_STORE_AREA, type QuestDoc, type QuestOp, type QuestSlice, questSliceOf } from "../quests";
 import { storySliceOf } from "../story";
 import { baseOf, PLACE_OPS, placeSliceOf } from "../places/fold";
@@ -670,6 +671,12 @@ function worldQuest(o: OpContext): Unread | undefined {
   if (stage !== undefined && outcome !== undefined) writeQuest(o, "call", { quest: track.id, stage, state: outcome, ...(why !== undefined ? { why } : {}) });
   if (shown !== undefined) writeQuest(o, "show", { quest: track.id, shown });
   if (closing !== undefined) writeQuest(o, "close", { quest: track.id, outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
+  // (S17Story, quests) What the world authored for the stage reached and the stage left (effects, rewards, a truth, a cue), named so an agent lands them as ordinary operations; none is applied here.
+  if (stage !== undefined && stage !== current) {
+    const reached = authoredOf(def.stages[stage] as StageDef);
+    const left = authoredOf(def.stages[current] as StageDef);
+    if (Object.keys(reached).length > 0 || left.rewards !== undefined || left.effects !== undefined) o.after(() => ({ authored: { reached: { stage, ...reached }, left: { stage: current, ...(left.rewards !== undefined ? { rewards: left.rewards } : {}), ...(left.effects !== undefined ? { effects: left.effects } : {}) } } }));
+  }
   return undefined;
 }
 
