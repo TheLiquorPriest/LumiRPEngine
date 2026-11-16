@@ -9,12 +9,12 @@
 // left how much out, how Lumiverse joined the prompt, how many of the window's messages Lumiverse's own
 // clipping left out, and a notice for each thing in the body that is not as the tag listed it.
 
-import type { HistoryWindow, WindowStep } from "./answer";
+import { pointOf, type HistoryWindow, type TurnStarts, type WindowStep } from "./answer";
 import { joiningOf, overlay, partialCut, readBodyMessages, rebuild, type Joining, type LaidMessage, type Overlay } from "./overlay";
 import type { LumiverseReads } from "./reads";
 import type { LvRole } from "./rows";
 import type { LoreRecord } from "./lore-check";
-import { historyCut, type GenerationFacts, type KeepPoint, type Tag } from "./wire";
+import { historyCut, type GenerationFacts, type KeepPoint, type PathStep, type Tag } from "./wire";
 
 /** One of a chat's messages as Lumiverse's rows hold it: its id, the number Lumiverse stored for it (`index_in_chat`), whether the user hid it, and whose it is. */
 export interface ChatRow {
@@ -154,6 +154,13 @@ export function generationOf(tag: Tag): GenerationFacts {
   return { id: tag.generation, type: LUMIVERSE_TYPE[tag.kind], target: tag.target, speaker: tag.speaker, model: null };
 }
 
+/** The chat's path as the tag lists it: its history messages, each with the hash of its text, as the question's path does. */
+export function pathOf(tag: Tag): PathStep[] {
+  return tag.messages
+    .flatMap((m) => (m.history === true && m.source !== undefined ? [{ id: m.source.id, index: m.source.index, swipe: null, user: m.role === "user", hash: m.hash }] : []))
+    .sort((a, b) => a.index - b.index);
+}
+
 /**
  * The chat's messages the window counts on receipt, oldest first, as Lumiverse's rows have them (§4.2; READINGS R-21, R-103, R-202):
  * each at the number Lumiverse stored for it, gaps after deletes and all, and with whose it is, since two of the player's messages next
@@ -229,7 +236,7 @@ function words(error: unknown): string {
  * goes as it came, and the turn's notices say what stays. A window that is on and a chat whose rows
  * cannot be read are refused rather than sent with more history than the window allows.
  */
-export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; reads: PromptReads; room: ModelRooms }, signal: AbortSignal): Promise<Received> {
+export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; start: TurnStarts; reads: PromptReads; room: ModelRooms }, signal: AbortSignal): Promise<Received> {
   if (tag.user !== own.user) throw new Refused(403, "This reply's chat belongs to another Lumiverse user than the one this RPE plays for.");
   const messages = readBodyMessages(body.messages);
   if (messages === null) throw new Refused(400, "The request's messages are not in the chat format RPE reads.");
@@ -253,7 +260,12 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
       if (read === null) throw new Refused(404, "RPE found no chat of yours in Lumiverse by this reply's chat, so it could not count your history window, and sent nothing.");
       return windowPath(tag, read);
     };
-    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path }, signal);
+    // The turn this reply follows, as RPE's own state reads it from the history the tag lists: where the story's record is read for the window's hold.
+    const follows = async () => {
+      const listed = pathOf(tag);
+      return (await own.start({ user: tag.user, chat: tag.chat, path: listed, point: pointOf(generation, listed) }, signal)).at;
+    };
+    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path, follows }, signal);
   }
   const left = new Set(historyCut(tag.messages.map((m) => ({ history: m.history === true, index: m.source?.index ?? null })), keep));
   /** The body with these listed messages left out: by the tag's list where every listed message was found, else as far as the body says. */

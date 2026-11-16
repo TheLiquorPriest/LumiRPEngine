@@ -64,6 +64,11 @@ export interface WindowAsk {
    * (`receipt.ts`). A path that cannot be read throws, and the window's answer with it.
    */
   path(): Promise<readonly WindowStep[]>;
+  /**
+   * The message and the turn the coming turn follows, as RPE's own state reads them (the store's `TurnStart.at`); null at the world's start. The story's record is read along this
+   * turn's own line, never at the chat's head, so a swipe or a branch is cut by its own story. Rejects where the point could not be worked out. Asked only by a window that needs it.
+   */
+  follows(): Promise<PathStart["at"]>;
 }
 
 /** The first history message to keep (the window, its step and its hold, §4.2); null keeps all. */
@@ -132,7 +137,7 @@ export async function answer(deps: AnswerDeps, q: Question, signal: AbortSignal,
   // Read by whichever half needs it; a refusal is each half's own failure.
   start.catch(() => undefined);
   const cut = q.purpose === "prompt"
-    ? deps.window({ ...at, path: async () => (await start).messages }, signal).then(
+    ? deps.window({ ...at, path: async () => (await start).messages, follows: async () => (await start).at }, signal).then(
         (keep) => ({ keep }),
         (error: unknown) => {
           deps.log?.(`the history window for chat ${q.chat} was not worked out, so RPE cuts it when the request arrives: ${words(error)}`);

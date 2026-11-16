@@ -74,7 +74,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
       return secrecy(ask, signal);
     },
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
-    ranges: (chat) => lane("ranges")(chat),
+    ranges: (chat, turn) => lane("ranges")(chat, turn),
     summarized: (chat) => lane("summarized")(chat),
     models: { pass: (request, sink, signal) => lane("models").pass(request, sink, signal) },
     passConnection: () => lane("passConnection")(),

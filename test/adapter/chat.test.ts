@@ -82,7 +82,7 @@ for (const source of ["database", "http"] as const) {
   const where = source === "database" ? "database file" : "HTTP routes";
 
   describe(`the chat port over Lumiverse's ${where}`, () => {
-    async function port(options: { hiddenReadable?: boolean; summarized?: string[] } = {}): Promise<ChatReads> {
+    async function port(options: { hiddenReadable?: boolean; summarized?: string[]; stretches?: (turn: string | null) => Record<string, { from: number; to: number }> } = {}): Promise<ChatReads> {
       const db = new StandInDb();
       closing.push(() => db.close());
       db.write(chatRows("user-tamsin", "chat-coast", COAST, 1));
@@ -94,12 +94,20 @@ for (const source of ["database", "http"] as const) {
         reads: read.reads,
         user: "user-tamsin",
         hiddenReadable: async () => options.hiddenReadable === true,
-        ranges: async () => ({ scene: { from: 3, to: 5 } }),
+        ranges: async (_chat, turn) => options.stretches?.(turn) ?? { scene: { from: 3, to: 5 } },
         summarized: async () => new Set(options.summarized ?? []),
         feed: bed.feed,
       });
     }
     const scope = { user: "user-tamsin", chat: "chat-coast", session: "s-1" };
+
+    test("history[scene] on a branch names the branch's open scene: the stretches are read along the turn the work belongs to, and at the head where it belongs to none", async () => {
+      const asked: (string | null)[] = [];
+      const chat = await port({ stretches: (turn) => (asked.push(turn), turn === "t-branch" ? { scene: { from: 1, to: 5 } } : { scene: { from: 3, to: 5 } }) });
+      expect((await chat.info({ ...scope, turn: "t-branch" })).ranges).toEqual({ scene: { from: 1, to: 5 } });
+      expect((await chat.info(scope)).ranges).toEqual({ scene: { from: 3, to: 5 } });
+      expect(asked).toEqual(["t-branch", null]);
+    });
 
     test("reads a stretch by place on the path (a deleted message leaves no hole); a hidden message is marked and its text left out", async () => {
       const chat = await port({ summarized: ["c1"] });

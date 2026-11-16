@@ -19,8 +19,8 @@ import { questionEntryOf } from "./candidate";
 import type { MacroCalls } from "./lumiverse-calls";
 import type { LaidMessage } from "./overlay";
 import type { LumiverseReads } from "./reads";
-import { generationOf } from "./receipt";
-import type { PathStep, SecrecyVerdict, Tag, TagLore } from "./wire";
+import { generationOf, pathOf } from "./receipt";
+import type { SecrecyVerdict, Tag, TagLore } from "./wire";
 
 /** An entry the check named: its id, its book and its title in Lumiverse's editor. */
 export interface LoreEntryNote {
@@ -81,13 +81,6 @@ async function candidatesOf(reads: LumiverseReads, tag: Tag): Promise<WorldInfoC
     for (const e of await reads.entries(book)) out.push({ id: e.id, bookId: book, disabled: e.disabled, extensions: e.extensions, comment: e.comment, content: e.content });
   }
   return out;
-}
-
-/** The chat's path as the tag lists it: its history messages, each with the hash of its text, as the question's path does. */
-function pathOf(tag: Tag): PathStep[] {
-  return tag.messages
-    .flatMap((m) => (m.history === true && m.source !== undefined ? [{ id: m.source.id, index: m.source.index, swipe: null, user: m.role === "user", hash: m.hash }] : []))
-    .sort((a, b) => a.index - b.index);
 }
 
 /** One message with `[start, end)` of its text made `insert`; null where the stretch is not inside one text part of it. Its listed messages' stretches move with the text. */

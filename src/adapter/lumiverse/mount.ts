@@ -62,8 +62,8 @@ export interface AdapterLanes {
   secrecy: SecrecyRules;
   /** A chat's setting: agents may read the messages the user hid. */
   hiddenReadable(chat: string): Promise<boolean>;
-  /** The story lane: the stretches a chat names (`scene`, since the scene opened). */
-  ranges(chat: string): Promise<Record<string, HistoryRange>>;
+  /** The story lane: the stretches a chat names (`scene`, since the scene opened), read along the line of the turn the work belongs to; at the chat's head for null. */
+  ranges(chat: string, turn: string | null): Promise<Record<string, HistoryRange>>;
   /** The turn lane: the messages Lumiverse's memory stands in for with a summary in the chat's prompt, from the tag's `summary` marks. */
   summarized(chat: string): Promise<ReadonlySet<string>>;
   /** RPH's model layer, for requests passed through: its pass, given the user this RPE belongs to. */
@@ -331,6 +331,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             user,
             allowed: providerKey,
             window: lanes.window,
+            start: lanes.start,
             reads: promptReads(p.reads),
             room: lanes.room,
             blocks: async (tag) => p.hints.forReply(tag),

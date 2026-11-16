@@ -41,6 +41,7 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     user: "user-a",
     allowed: (r) => r.headers.get("authorization") === "Bearer rpe_key",
     window: async () => null,
+    start: async ({ path }) => ({ messages: path.map((s) => ({ ...s, hidden: false })), at: null, known: true }),
     // Every tag here carries RPE's own verdict, so nothing is checked.
     lore: async (_tag, messages, lore) => ({ messages, record: null, lore }),
     feedback: async () => null,

@@ -7,7 +7,7 @@
 // light extension in it (`test/ext/rig.ts`). Every name is invented.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { WindowAsk } from "../../src/adapter/lumiverse/answer";
+import type { TurnStarts, WindowAsk } from "../../src/adapter/lumiverse/answer";
 import { createDbReader } from "../../src/adapter/lumiverse/db";
 import { createHttpReads } from "../../src/adapter/lumiverse/http-reads";
 import { rawLayout } from "../../src/adapter/lumiverse/layout";
@@ -30,8 +30,10 @@ const reads = (rows: ChatRows, joining: Joining = { post: "none", collapse: fals
 /** No model's window known: nothing is trimmed past the window's cut. */
 const NO_ROOM: ModelRoom = { room: null, count: async () => 0, covered: async () => false };
 
-/** The receipt with no model's room unless a test gives one. */
-const receive = (tag: Tag, body: Record<string, unknown>, own: Omit<Parameters<typeof receiveWith>[2], "room"> & { room?: Parameters<typeof receiveWith>[2]["room"] }, signal: AbortSignal) => receiveWith(tag, body, { room: async () => NO_ROOM, ...own }, signal);
+/** The receipt with no model's room, and no turn lane's state to say what a reply follows, unless a test gives them. */
+const NO_STATE: TurnStarts = async ({ path }) => ({ messages: path.map((s) => ({ ...s, hidden: false })), at: null, known: true });
+type Own = Parameters<typeof receiveWith>[2];
+const receive = (tag: Tag, body: Record<string, unknown>, own: Omit<Own, "room" | "start"> & { room?: Own["room"]; start?: Own["start"] }, signal: AbortSignal) => receiveWith(tag, body, { room: async () => NO_ROOM, start: NO_STATE, ...own }, signal);
 
 /** The window of `size` over the path the window is asked, as RPE's turn lane counts it. */
 const windowOf = (size: number, step: number | null = null) => async (ask: WindowAsk) => historyWindow(await ask.path(), { ...WINDOW_DEFAULTS, size, step }, new Set()).first;
@@ -97,6 +99,23 @@ describe("the window made on receipt", () => {
     // The window off reads no rows for its count, so a chat whose rows cannot be read refuses nothing; Lumiverse's clipping is then not known.
     const off = await receive(tag, out.body!, { user: USER, window: async () => null, reads: reads(async () => null) }, new AbortController().signal);
     expect(off.cut).toMatchObject({ keep: null, byExtension: null, byRpe: 0, clipped: null });
+  });
+
+  test("the window made on receipt is told the turn the reply follows, asked of RPE's own state with the history the tag lists and the point the reply starts at", async () => {
+    const rig = await new Rig({ windowFailsAtQuestion: true }).start();
+    const out = await rig.generate("conn-rpe");
+    const tag = tagOf(out);
+    const asked: { path: string[]; point: unknown }[] = [];
+    const start: TurnStarts = async ({ path, point }) => {
+      asked.push({ path: path.map((s) => s.id), point });
+      return { messages: [], at: { message: "m10", turn: "t-10" }, known: true };
+    };
+    let follows: unknown;
+    await receive(tag, out.body!, { user: USER, window: async (ask) => ((follows = await ask.follows()), null), start, reads: reads(async (chat) => rig.lv.rowsOf(chat)) }, new AbortController().signal);
+    expect(follows).toEqual({ message: "m10", turn: "t-10" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.path.at(-1)).toBe("m10");
+    expect(asked[0]!.point).toEqual({ follows: "m10" });
   });
 
   test("a cut inside a message Lumiverse joined keeps it whole and names its first row (R-202)", async () => {

@@ -58,8 +58,11 @@ export interface ChatDeps {
   user: string;
   /** The chat's setting: agents may read the messages the user hid from the prompt (off unless the user turns it on). */
   hiddenReadable(chat: string): Promise<boolean>;
-  /** The stretches the chat names, by name (the story record's: `scene`, the stretch since the scene opened, §5.4). */
-  ranges(chat: string): Promise<Record<string, HistoryRange>>;
+  /**
+   * The stretches the chat names, by name (the story record's: `scene`, the stretch since the scene opened, §5.4), read along the line of the turn the work belongs to (the scope's turn),
+   * not at the chat's head, so a swipe or a branch is named by its own story; at the head where the work belongs to no turn (null).
+   */
+  ranges(chat: string, turn: string | null): Promise<Record<string, HistoryRange>>;
   /** The messages Lumiverse's memory stands in for with a summary in the chat's prompt (the turn lane's, from the tag's `summary` marks). */
   summarized(chat: string): Promise<ReadonlySet<string>>;
   /** The search's limits, read at each search (the door's settings); `CHAT_SEARCH_DEFAULTS` when not given. */
@@ -96,7 +99,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
   return {
     async info(scope): Promise<ChatInfo> {
       const chat = own(scope);
-      const [path, hiddenReadable, ranges] = await Promise.all([deps.reads.path(chat), deps.hiddenReadable(chat), deps.ranges(chat)]);
+      const [path, hiddenReadable, ranges] = await Promise.all([deps.reads.path(chat), deps.hiddenReadable(chat), deps.ranges(chat, scope.turn ?? null)]);
       if (path === null) throw new NoSuchChat(chat);
       return { length: path.length, hiddenReadable, ranges };
     },

@@ -195,6 +195,7 @@ export class Rig {
       user: USER,
       allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
       window: onReceipt,
+      start,
       // RPE's check of the lore on receipt, over the stand-in's books as Lumiverse reads them, with the rig's own secrecy rules.
       lore: createLoreCheck({ user: USER, reads: loreReads, secrecy, start, answers, macros: { resolve: async (text) => ({ text, diagnostics: [] }), resolveBatch: async (templates) => ({ ...templates }) } }),
       feedback: async () => null,
