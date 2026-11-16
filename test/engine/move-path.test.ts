@@ -93,7 +93,7 @@ describe("every writer of a place moves alike", () => {
     }
     state.entities.maya?.relations.push({ type: "travels_with", to: "you" });
     const w = new Working(reg, world, state);
-    const out = applyEffects(reg, w, [{ type: "vehicles.drive", args: { vehicle: "truck", to: "cafe", driver: "you" } }], { bindings: { self: "you" }, rng: createRng("m") });
+    const out = applyEffects(reg, w, [{ type: "vehicles.drive", args: { vehicle: "truck", to: "cafe", driver: "you", riders: ["maya"] } }], { bindings: { self: "you" }, rng: createRng("m") });
     expect(out.rejected).toEqual([]);
     expect(where(w.state, "maya")).toEqual({ in: [], place: "cafe", cell: null });
     expect(placeOfEntity(w.state, "rosa")).toBe("garage");

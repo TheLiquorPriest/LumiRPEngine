@@ -17,14 +17,13 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, ShippedRevision, TableRow } from "../../../shared/tables";
 import { ownersIn } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
-import { matchVehicleClass, saysNew, shortClassName, specWords, USED_VEHICLE_AGE_YEARS, vehicleDomainOf, vehicleNameFrom, vehiclesConfigOf, vehicleSpecsOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
+import { matchVehicleClass, specWords, vehicleDomainOf, vehiclesConfigOf, vehicleSpecsOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
-import type { Rng } from "../../../engine/rng";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
-import { partyAt, relocate } from "../../../engine/relocate";
+import { relocate } from "../../../engine/relocate";
 import { ownsThrough } from "../../../engine/org";
 import { passMemo } from "../../../engine/read-pass";
 import { calendarOf, dateAt, formatClock } from "../../../engine/calendar";
@@ -70,9 +69,7 @@ export interface TravelOption {
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
-    /** Fuel, odometer or engine hours, and (level 4, with an rng) breakdowns for one trip. */
-    "vehicle.consume": (ctx: ReadContext, vehicle: EntityId, leg: Leg, rng?: Rng) => LedgerEvent[];
-    /** A vehicle of a class made in play (a purchase, a make): its fields from the class and the details, where it stands, whose it is and its home base. */
+    /** A vehicle of a class made in play (a purchase, a make): the class, its name, whose it is, where it stands and what the details give; nothing the call left out is made up. */
     "vehicles.spawn": (ctx: ReadContext, spec: VehicleSpawn) => { entity: EntityId; events: LedgerEvent[] } | Rejection;
   }
   interface QueryMap {
@@ -88,9 +85,9 @@ declare module "../../../engine/registry" {
     "vehicles.values": (ctx: ReadContext) => { vehicle: EntityId; cents: number }[];
     /** The vehicles `who` may drive (the one reader, `vehiclesFor`): owned, a household's or company's, staff's, granted or permitted. */
     "vehicles.for": (ctx: ReadContext, who: EntityId) => EntityId[];
-    /** The class words buy (or `cls`, a class row given) and its price (`economy.buy`'s quote, after the catalog): used unless they say new. Null when they name no class. */
-    "vehicles.priced": (ctx: ReadContext, words: string, place: PlaceId | null, cls?: string) => VehiclePrice | null;
-    /** The class a purchase's main noun phrase names as what it buys (`economy.buy`'s quote, `economy.unpriced`): one whose name ends it, the longest ("flatbed truck", "jet ski", "Cessna 172"). Null when none does ("plane ticket", "car insurance"). */
+    /** The class words buy (or `cls`, a class row given) and its price (`economy.buy`'s quote, after the catalog): used unless `fresh` gives it as new. Null when they name no class by its id, name or alias. */
+    "vehicles.priced": (ctx: ReadContext, words: string, place: PlaceId | null, cls?: string, fresh?: boolean) => VehiclePrice | null;
+    /** The class a purchase's main noun names exactly as what it buys (`economy.buy`'s quote, `economy.unpriced`): one whose id, name or alias it is ("flatbed truck", "jet ski"). Null when it is none ("plane ticket", "car insurance"). */
     "vehicles.named": (ctx: ReadContext, noun: string) => string | null;
   }
 }
@@ -109,6 +106,8 @@ export const VEHICLE: KindDef = {
     plate: { type: "text", label: "Plate" },
     // Named for the vehicle, so Build doesn't read it as one of the world's own classifications.
     class: { type: "text", label: "Vehicle class" },
+    // Who drives it, as the story or a `store` with driving says: no default puts anyone at the wheel.
+    driver: { type: "ref", label: "Driver" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
     fuel_pct: { type: "number", label: "Fuel %", min: 0, max: 100, domain: "vehicles", level: 2, bound: { mode: "auto" } },
     odometer_mi: { type: "number", label: "Odometer (mi)", min: 0, domain: "vehicles", level: 3, locked: true },
@@ -222,9 +221,9 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const parts = classText(v, e.kind);
     if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
     else {
-      if (burnsFuel(ctx, v)) {
+      if (burnsFuel(ctx, v) && typeof e.fields.fuel_pct === "number") {
         const range = rangeLeft(ctx, v);
-        parts.push(`fuel ${Math.round(numOf(e.fields.fuel_pct, 100))}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
+        parts.push(`fuel ${Math.round(e.fields.fuel_pct)}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
       }
       if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
     }
@@ -237,6 +236,8 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit})` : `next service due at ${due} ${unit}`);
     }
     parts.push(...specsText(v, place));
+    const driver = driverOf(ctx, v);
+    if (driver !== null && see(pov, driver)) parts.push(`driven by ${driver === pov ? "you" : ownerName(driver)}`);
     // Who and what is in it only for one at his site: one away from here he can't see into.
     const inside = elsewhere ? [] : contents(v);
     const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? "you" : (own(ctx.state.entities, id)?.name ?? id)));
@@ -354,33 +355,37 @@ function usage(ctx: Pick<ReadContext, "tables" | "state">, vehicle: EntityId): n
   return domainOf(ctx, vehicle) === "road" ? numOf(e?.fields.odometer_mi) : numOf(e?.fields.engine_hours);
 }
 
-const consume = (ctx: ReadContext, vehicle: EntityId, leg: Leg, rng?: Rng): LedgerEvent[] => {
+/**
+ * What the world's tables work a drive out to burn and wear, as changes of what the vehicle has recorded: its fuel left,
+ * and its odometer or engine hours. A value nobody recorded is left alone, and no breakdown is drawn.
+ */
+export function driveSums(ctx: ReadContext, vehicle: EntityId, leg: Leg): LedgerEvent[] {
   const e = own(ctx.state.entities, vehicle);
-  const level = ownerLevel(ctx, vehicle);
-  if (!e || level < 2) return [];
+  if (!e) return [];
   const out: LedgerEvent[] = [];
   const use = fuelUse(ctx, vehicle, leg);
-  const fuel = numOf(e.fields.fuel_pct, 100);
-  const delta = -Math.min(fuel, Math.round(use.pct * 10) / 10);
-  if (delta !== 0) out.push(bump(ctx.state, vehicle, "fuel_pct", delta, fuel));
-  if (level >= 3) {
-    if (domainOf(ctx, vehicle) === "road") {
-      if (use.miles > 0) out.push({ type: "add", entity: vehicle, field: "odometer_mi", delta: Math.round(use.miles * 10) / 10 });
-    } else if (use.hours > 0) out.push({ type: "add", entity: vehicle, field: "engine_hours", delta: Math.round(use.hours * 100) / 100 });
+  const fuel = e.fields.fuel_pct;
+  if (typeof fuel === "number") {
+    const delta = -Math.min(fuel, Math.round(use.pct * 10) / 10);
+    if (delta !== 0) out.push(bump(ctx.state, vehicle, "fuel_pct", delta, fuel));
   }
-  if (level >= 4 && rng) {
-    const interval = serviceInterval(ctx, vehicle);
-    const overdue = interval !== null && usage(ctx, vehicle) - numOf(e.fields.last_service) > interval;
-    const condition = numOf(e.fields.condition, 80);
-    const units = domainOf(ctx, vehicle) === "road" ? use.miles / 10 : use.hours;
-    const p = Math.min(0.5, 0.002 * units * (1 + (100 - condition) / 50) * (overdue ? 2 : 1));
-    if (rng.next() < p) {
-      out.push({ type: "set", entity: vehicle, field: "status", value: "broken" });
-      out.push({ type: ENGINE_EVENTS.signal, data: { class: "incident", text: `${e.name} breaks down.`, entity: vehicle } });
-    }
-  }
+  if (domainOf(ctx, vehicle) === "road") {
+    if (typeof e.fields.odometer_mi === "number" && use.miles > 0) out.push({ type: "add", entity: vehicle, field: "odometer_mi", delta: Math.round(use.miles * 10) / 10 });
+  } else if (typeof e.fields.engine_hours === "number" && use.hours > 0) out.push({ type: "add", entity: vehicle, field: "engine_hours", delta: Math.round(use.hours * 100) / 100 });
   return out;
-};
+}
+
+/** The chance the pack's own arithmetic gives a drive of breaking the vehicle down, for the game master to roll if the story wants it; null without a condition recorded. */
+export function breakdownChance(ctx: ReadContext, vehicle: EntityId, leg: Leg): number | null {
+  const e = own(ctx.state.entities, vehicle);
+  const condition = e?.fields.condition;
+  if (!e || typeof condition !== "number") return null;
+  const use = fuelUse(ctx, vehicle, leg);
+  const interval = serviceInterval(ctx, vehicle);
+  const overdue = interval !== null && usage(ctx, vehicle) - numOf(e.fields.last_service) > interval;
+  const units = domainOf(ctx, vehicle) === "road" ? use.miles / 10 : use.hours;
+  return Math.min(0.5, 0.002 * units * (1 + (100 - condition) / 50) * (overdue ? 2 : 1));
+}
 
 /**
  * Trips for a vehicle from where its driver is to each of `targets` (DESIGN §9.1): the walk to it
@@ -405,7 +410,7 @@ function tripFor(ctx: ReadContext, vehicle: EntityId, from: PlaceId, to: PlaceId
 }
 
 /** The drive of a trip, as fuel and wear read it. */
-function legOf(trip: VehicleTrip): Leg {
+export function legOf(trip: VehicleTrip): Leg {
   return { minutes: trip.drive.minutes, distanceKm: trip.drive.distanceKm, terrain: trip.drive.legs.find((l) => l.terrain)?.terrain ?? null, mode: trip.drive.mode };
 }
 
@@ -414,16 +419,17 @@ function startOf(ctx: ReadContext, vehicle: EntityId, from: unknown): PlaceId | 
   return typeof from === "string" && from !== "" ? from : placeOfEntity(ctx.state, vehicle);
 }
 
+/** Whether the fuel recorded covers a leg; with none recorded, nothing says it lacks any. */
 const fuelOk = (ctx: ReadContext, vehicle: EntityId, leg: Leg): boolean => {
-  if (ownerLevel(ctx, vehicle) < 2) return true;
-  return numOf(own(ctx.state.entities, vehicle)?.fields.fuel_pct, 100) >= fuelUse(ctx, vehicle, leg).pct;
+  const fuel = own(ctx.state.entities, vehicle)?.fields.fuel_pct;
+  return typeof fuel !== "number" || fuel >= fuelUse(ctx, vehicle, leg).pct;
 };
 
-/** Range left in miles (road) or hours (marine, off-road) at the current fuel. */
+/** Range left in miles (road) or hours (marine, off-road) at the current fuel; null when the fuel left is not recorded. */
 export function rangeLeft(ctx: ReadContext, vehicle: EntityId): { value: number; unit: "mi" | "h" } | null {
   const row = classRow(ctx, vehicle);
-  if (!row) return null;
-  const fuel = numOf(own(ctx.state.entities, vehicle)?.fields.fuel_pct, 100);
+  const fuel = own(ctx.state.entities, vehicle)?.fields.fuel_pct;
+  if (!row || typeof fuel !== "number") return null;
   const road = domainOf(ctx, vehicle) === "road";
   const probe = fuelUse(ctx, vehicle, road ? { minutes: 60, distanceKm: 100 / KM_TO_MI, mode: "road" } : { minutes: 60, distanceKm: 0, mode: modesOf(ctx, vehicle)[0] ?? "water" });
   if (probe.pct <= 0) return null;
@@ -440,74 +446,85 @@ function fuelProduct(ctx: Pick<ReadContext, "tables" | "state">, vehicle: Entity
   return { catalog: type === "diesel" ? (marine ? "marine_diesel" : "diesel") : marine ? "marine_gasoline" : "gasoline_regular", perUnit: 0, unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
 }
 
-/** A plate as a state's DMV issues one ("7KDX219"), the same for the same vehicle id. */
-function plateFor(id: string): string {
-  const h = hashParts("plate", id);
-  const letters = [0, 2, 4].map((i) => String.fromCharCode(65 + (parseInt(h.slice(i, i + 2), 16) % 26))).join("");
-  return `${parseInt(h.slice(6, 7), 16) % 9 + 1}${letters}${(parseInt(h.slice(8, 12), 16) % 1000).toString().padStart(3, "0")}`;
+/** Who drives: the call's driver, else the one recorded on the vehicle, else no one; a recorded driver who is gone is not used. */
+export function driverOf(ctx: Pick<ReadContext, "state">, vehicle: EntityId, said?: JsonValue): EntityId | null {
+  const given = strOf(said);
+  if (given !== "") return given;
+  const recorded = own(ctx.state.entities, vehicle)?.fields.driver;
+  return typeof recorded === "string" && own(ctx.state.entities, recorded) !== undefined && !isGone(ctx.state, recorded) ? recorded : null;
+}
+
+/** The trip a drive takes: from where the driver is (they walk to the vehicle when it is parked elsewhere), else from where the vehicle stands; null when the world's routes have none. */
+export function driveTrip(ctx: ReadContext, vehicle: EntityId, driver: EntityId | null, to: PlaceId): VehicleTrip | null {
+  const driverAt = driver !== null ? placeOfEntity(ctx.state, driver) : null;
+  const vehicleAt = placeOfEntity(ctx.state, vehicle);
+  return (driverAt ? tripFor(ctx, vehicle, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, vehicle, vehicleAt, to) : null);
 }
 
 /**
- * A vehicle of a class made in play (DESIGN §9.3; a purchase's or a make's, ITEMS-SPEC §5.3): named
- * by the spec, else its make and model, else the class; its make, model and year from the details,
- * else the class's and (used) four years back; new, no miles and full condition and tank, used the
- * miles or hours four years give and condition 80 with half a tank (what burns nothing has no tank);
- * a road vehicle plated; owned as given; standing where given (or in a holder); home where given,
- * else at its owner's home, else where it stands.
+ * The changes that carry a drive's people to `to` through the one move path: the driver and the riders named, none else.
+ * One riding inside the vehicle goes with it when it is parked at `to`, so is not moved apart; the rest are moved,
+ * a rider as one who comes along.
+ */
+function movePeople(ctx: ReadContext, vehicle: EntityId, to: PlaceId, parked: PlaceId, driver: EntityId | null, riders: unknown): LedgerEvent[] | Rejection {
+  const named = Array.isArray(riders) ? riders.filter((x): x is string => typeof x === "string") : [];
+  const out: LedgerEvent[] = [];
+  const moved = new Set<string>();
+  for (const p of driver !== null ? [driver, ...named] : named) {
+    const pe = own(ctx.state.entities, p);
+    if (!pe || moved.has(p) || (parked === to && pe.relations.some((x) => x.type === "in" && x.to === vehicle))) continue;
+    moved.add(p);
+    // A rider comes along: what they were doing stays behind, as for a Go companion.
+    const events = relocate(ctx, p, to, p === driver ? {} : { along: true });
+    if ("code" in events) return events;
+    out.push(...events);
+  }
+  return out;
+}
+
+/**
+ * A vehicle of a class made in play (DESIGN §9.3; a purchase's or a make's, ITEMS-SPEC §5.3): it records the
+ * class, the name (the spec's, else the class's as the table has it), the owner, where it stands (or the holder
+ * it is in) and what the details and fields the call gives say, and nothing else. Its make and model are its class's
+ * and are read from the class; no year, miles or hours, condition, fuel, plate, status or home is made up.
  */
 function spawnVehicle(ctx: ReadContext, spec: VehicleSpawn): { entity: EntityId; events: LedgerEvent[] } | Rejection {
   const row = rowOf(ctx, "vehicles.classes", spec.class);
   if (!row) {
-    const some = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {}).slice(0, 8);
-    return reject("unknown_class", `no vehicle class ${spec.class}${some.length > 0 ? `; classes include ${some.join(", ")}` : ""}`);
+    const classes = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {});
+    return { code: "unknown_class", reason: `no vehicle class ${spec.class}`, choices: classes, said: spec.class };
   }
   const d = spec.details ?? {};
-  const domain = vehicleDomainOf(row);
-  const used = spec.new !== true;
-  const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
-  const make = typeof d.make === "string" && d.make.trim() !== "" ? d.make.trim() : strOf(row.make);
-  const model = typeof d.model === "string" && d.model.trim() !== "" ? d.model.trim() : strOf(row.model);
-  const name = spec.name?.trim() || (make !== "" && model !== "" ? `${make} ${model}` : shortClassName(strOf(row.name, spec.class)));
+  const name = spec.name?.trim() || strOf(row.name, spec.class);
   const holder = spec.holder && own(ctx.state.entities, spec.holder) ? spec.holder : null;
   const place = holder ? null : (spec.place ?? null);
   // Its id is its salt's, as a made thing's (`madeId`): the same make or purchase checked again after the read's changes and the time they took, or applied from its review card, makes the same vehicle, so the changes that name it still find it.
   let id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "").slice(0, 12)}`;
   for (let n = 2; own(ctx.state.entities, id); n++) id = `vehicle:${hashParts("vehicle", spec.class, name, spec.owner ?? "", spec.salt ?? "", String(n)).slice(0, 12)}`;
-  const ownerHome = spec.owner ? own(ctx.state.entities, spec.owner)?.fields.home : undefined;
-  const home = spec.home ?? (typeof ownerHome === "string" && own(ctx.world.places, ownerHome) ? ownerHome : place);
-  const burns = strOf(row.fuel_type) !== "none";
-  const fields: JsonObject = { class: spec.class, status: "ok" };
+  const fields: JsonObject = { class: spec.class };
   if (spec.owner) fields.owner = spec.owner;
-  if (make !== "") fields.make = make;
-  if (model !== "") fields.model = model;
-  fields.year = typeof d.year === "number" && Number.isFinite(d.year) ? Math.round(d.year) : used ? year - USED_VEHICLE_AGE_YEARS : year;
-  if (typeof d.colour === "string" && d.colour.trim() !== "") fields.colour = d.colour.trim();
-  if (typeof d.plate === "string" && d.plate.trim() !== "") fields.plate = d.plate.trim();
-  else if (domain === "road" && burns) fields.plate = plateFor(id);
-  if (domain === "road") fields.odometer_mi = typeof d.odometer_mi === "number" ? d.odometer_mi : used ? 12000 * USED_VEHICLE_AGE_YEARS : 10;
-  else if (burns) fields.engine_hours = typeof d.engine_hours === "number" ? d.engine_hours : used ? 60 * USED_VEHICLE_AGE_YEARS : 1;
-  fields.condition = typeof d.condition === "number" ? d.condition : used ? 80 : 100;
-  if (burns) fields.fuel_pct = typeof d.fuel_pct === "number" ? d.fuel_pct : used ? 50 : 100;
+  for (const key of ["make", "model", "colour", "plate"] as const) if (typeof d[key] === "string" && d[key].trim() !== "") fields[key] = d[key].trim();
+  for (const key of ["year", "odometer_mi", "engine_hours", "condition", "fuel_pct"] as const) if (typeof d[key] === "number" && Number.isFinite(d[key])) fields[key] = key === "year" ? Math.round(d[key]) : d[key];
   if (typeof d.value === "number" && d.value > 0) fields.value = Math.round(d.value);
   const specs = vehicleSpecsOf(d.specs) ?? [];
   if (specs.length > 0) fields.specs = specs.map((s) => ({ label: s.label, value: s.value }));
-  if (home) fields.home = home;
+  if (spec.home) fields.home = spec.home;
   if (place) fields.place = place;
   Object.assign(fields, spec.fields ?? {});
   return { entity: id, events: [{ type: "spawn", entity: { id, kind: "vehicle", name, tier: "background", fields, relations: holder ? [{ type: "in", to: holder }] : [] } }] };
 }
 
-/** What words buy (DESIGN §9.5): the class they name, used unless they say new, at the class's typical price of that kind. */
-function pricedVehicle(ctx: ReadContext, words: string, given?: string): VehiclePrice | null {
+/** What a class named by its id, its name or an alias (`vehicles.named` reads a noun that way) buys (DESIGN §9.5): used unless the call gives it as new, at the class's typical price of that kind. */
+function pricedVehicle(ctx: ReadContext, words: string, given?: string, fresh?: boolean): VehiclePrice | null {
   const table = ctx.tables.get("vehicles.classes");
   const cls = given !== undefined && own(table?.rows ?? {}, given) ? given : matchVehicleClass(words, table);
   const row = cls ? own(table?.rows ?? {}, cls) : undefined;
   if (!cls || !row) return null;
-  const fresh = saysNew(words);
-  const raw = objOf(fresh ? row.price_new_cents : row.price_used_cents);
+  const isNew = fresh === true;
+  const raw = objOf(isNew ? row.price_new_cents : row.price_used_cents);
   const band = { min: Math.round(numOf(raw.min)), typical: Math.round(numOf(raw.typical)), max: Math.round(numOf(raw.max)) };
   if (!(band.typical > 0)) return null;
-  return { class: cls, name: vehicleNameFrom(words, strOf(row.name, cls)), new: fresh, band, cents: band.typical };
+  return { class: cls, name: strOf(row.name, cls), new: isNew, band, cents: band.typical };
 }
 
 function reject(code: string, reason: string): Rejection {
@@ -528,6 +545,18 @@ function priceOf(ctx: ReadContext, catalog: string, qty: number): number {
   return p ? p.cents : Math.round(numOf(objOf(row?.price_cents).typical) * qty);
 }
 
+/** What the world's tables price filling `pct` points of a vehicle's tank at, in cents: a figure for the game master, who sets the amount. */
+export function fuelCents(ctx: ReadContext, vehicle: EntityId, pct: number): number {
+  const product = fuelProduct(ctx, vehicle);
+  const qty = Math.round((pct / 100) * product.capacity * 100) / 100;
+  return product.catalog !== null ? priceOf(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
+}
+
+/** What the world's tables price a service (or, with `repair`, a repair) at, in cents: a figure for the game master, who sets the amount. */
+export function serviceCents(ctx: ReadContext, repair: boolean): number {
+  return repair ? priceOf(ctx, "tow_hookup", 1) + priceOf(ctx, "diagnostic_fee", 1) + priceOf(ctx, "brake_pads_axle", 1) : priceOf(ctx, "oil_change_synthetic", 1);
+}
+
 export const vehiclesPack: PackDef = {
   id: "vehicles",
   label: "Vehicles",
@@ -537,7 +566,6 @@ export const vehiclesPack: PackDef = {
   register(r) {
     for (const t of TABLES) r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t, shipped: SHIPPED[t.id] ?? [] });
     r.kind(VEHICLE);
-    r.service("vehicle.consume", consume);
     r.query("fuel_ok", fuelOk);
     r.query("vehicles.travel_options", (ctx, from) => {
       const out: TravelOption[] = [];
@@ -595,40 +623,51 @@ export const vehiclesPack: PackDef = {
       resolve(args, ctx) {
         const v = strOf(args.vehicle);
         const to = strOf(args.to);
-        const driver = strOf(args.driver) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken") return reject("broken", `${e.name} has broken down`);
+        // The driver is the call's, else the vehicle's recorded one, else no one.
+        const driver = driverOf(ctx, v, args.driver);
         // The trip starts where the driver is: they walk to the vehicle when it's parked elsewhere.
         // An effect tells what happened, so a driver too far to fetch it (a rule's "the tow truck
         // takes you there") still rides it from where it stands.
-        const driverAt = placeOfEntity(ctx.state, driver);
-        const vehicleAt = placeOfEntity(ctx.state, v);
         // Driving a vehicle to where it already is would only take it away to park and walk back.
-        if (vehicleAt === to) return reject("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
-        const trip = (driverAt ? tripFor(ctx, v, driverAt, to) : null) ?? (vehicleAt && vehicleAt !== driverAt ? tripFor(ctx, v, vehicleAt, to) : null);
+        if (placeOfEntity(ctx.state, v) === to) return reject("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
+        const trip = driveTrip(ctx, v, driver, to);
         if (!trip) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         const leg = legOf(trip);
         if (!fuelOk(ctx, v, leg)) return reject("no_fuel", `${e.name} doesn't have the fuel`);
-        const out: LedgerEvent[] = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: trip.park }];
-        // The driver and anyone riding along (people at the same place named in `riders`, and the
-        // player character's party when it drives) arrive too, through the one move path. Whoever
+        const out: LedgerEvent[] = [...driveSums(ctx, v, leg), { type: "set", entity: v, field: "place", value: trip.park }];
+        if (driver !== null) out.push({ type: "set", entity: v, field: "driver", value: driver });
+        // The driver and the riders the call names arrive too, through the one move path. Whoever
         // rides inside the vehicle goes with it, unless it's left short of the place: then the
-        // driver and the riders get out and walk the rest.
-        const leftShort = trip.park !== to;
-        const named = Array.isArray(args.riders) ? args.riders.filter((x): x is string => typeof x === "string") : [];
-        const riders = driver === ctx.world.pov ? [...named, ...partyAt(ctx, placeOfEntity(ctx.state, driver))] : named;
-        const moved = new Set<string>();
-        for (const p of [driver, ...riders]) {
-          const pe = own(ctx.state.entities, p);
-          if (!pe || moved.has(p) || (!leftShort && pe.relations.some((x) => x.type === "in" && x.to === v))) continue;
-          moved.add(p);
-          // A rider comes along: what they were doing stays behind, as for a Go companion.
-          const events = relocate(ctx, p, to, p === driver ? {} : { along: true });
-          if ("code" in events) return events;
-          out.push(...events);
-        }
-        return out;
+        // driver and the riders get out and walk the rest. No one else rides: a party goes only when named.
+        const moved = movePeople(ctx, v, to, trip.park, driver, args.riders);
+        if ("code" in moved) return moved;
+        return [...out, ...moved];
+      },
+    });
+    // The game master's drive: the vehicle stands where the call says (`park`, else `to`), its driver and the riders named arrive at
+    // `to`, and only what the call gives is burnt or worn. No route, fuel or breakdown is asked.
+    r.effect({
+      type: "vehicles.take",
+      args: ["vehicle", "to", "driver?", "riders?", "park?", "fuel_pct?", "miles?", "hours?"],
+      resolve(args, ctx) {
+        const v = strOf(args.vehicle);
+        const to = strOf(args.to);
+        const e = own(ctx.state.entities, v);
+        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        const park = strOf(args.park) || to;
+        const driver = driverOf(ctx, v, args.driver);
+        const out: LedgerEvent[] = [{ type: "set", entity: v, field: "place", value: park }];
+        if (driver !== null) out.push({ type: "set", entity: v, field: "driver", value: driver });
+        if (typeof args.fuel_pct === "number") out.push({ type: "set", entity: v, field: "fuel_pct", value: args.fuel_pct });
+        // The miles or hours of the drive are added to the odometer or the engine's hours where one is recorded.
+        if (typeof args.miles === "number" && typeof e.fields.odometer_mi === "number") out.push({ type: "add", entity: v, field: "odometer_mi", delta: args.miles });
+        if (typeof args.hours === "number" && typeof e.fields.engine_hours === "number") out.push({ type: "add", entity: v, field: "engine_hours", delta: args.hours });
+        const moved = movePeople(ctx, v, to, park, driver, args.riders);
+        if ("code" in moved) return moved;
+        return [...out, ...moved];
       },
     });
     r.effect({
@@ -666,8 +705,32 @@ export const vehiclesPack: PackDef = {
         if (!Array.isArray(paid)) return paid;
         const out: LedgerEvent[] = [...paid, { type: "set", entity: v, field: "status", value: "ok" }];
         if (ownerLevel(ctx, v) >= 4) out.push({ type: "set", entity: v, field: "last_service", value: usage(ctx, v) });
-        const condition = numOf(e.fields.condition, 80);
-        if (condition < 90) out.push(bump(ctx.state, v, "condition", Math.min(15, 90 - condition), condition));
+        const condition = e.fields.condition;
+        if (typeof condition === "number" && condition < 90) out.push(bump(ctx.state, v, "condition", Math.min(15, 90 - condition), condition));
+        return out;
+      },
+    });
+    // The game master's upkeep: it records what the call gives (the fuel left, the status, the condition, that a service was done, a payment) and nothing else.
+    r.effect({
+      type: "vehicles.upkeep",
+      args: ["vehicle", "fuel_pct?", "status?", "condition?", "serviced?", "payer?", "cents?", "memo?", "category?"],
+      resolve(args, ctx) {
+        const v = strOf(args.vehicle);
+        const e = own(ctx.state.entities, v);
+        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        const out: LedgerEvent[] = [];
+        const payer = strOf(args.payer);
+        const cents = Math.round(numOf(args.cents));
+        if (payer !== "" && cents > 0) {
+          const paid = charge(ctx, payer, cents, strOf(args.memo), strOf(args.category, "vehicle_services"));
+          if (!Array.isArray(paid)) return paid;
+          out.push(...paid);
+        }
+        if (typeof args.fuel_pct === "number") out.push({ type: "set", entity: v, field: "fuel_pct", value: args.fuel_pct });
+        if (typeof args.status === "string" && args.status !== "") out.push({ type: "set", entity: v, field: "status", value: args.status });
+        if (typeof args.condition === "number") out.push({ type: "set", entity: v, field: "condition", value: args.condition });
+        // A service marks the miles or hours it was done at, where they are recorded.
+        if (args.serviced === true && (typeof e.fields.odometer_mi === "number" || typeof e.fields.engine_hours === "number")) out.push({ type: "set", entity: v, field: "last_service", value: usage(ctx, v) });
         return out;
       },
     });
@@ -740,8 +803,8 @@ export const vehiclesPack: PackDef = {
       return out;
     });
     r.query("vehicles.for", (ctx, who) => vehiclesFor(ctx, who).map((u) => u.id));
-    r.query("vehicles.priced", (ctx, words, _place, cls) => pricedVehicle(ctx, words, cls));
-    r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes"), { ending: true }));
+    r.query("vehicles.priced", (ctx, words, _place, cls, fresh) => pricedVehicle(ctx, words, cls, fresh));
+    r.query("vehicles.named", (ctx, noun) => matchVehicleClass(noun, ctx.tables.get("vehicles.classes")));
     r.service("vehicles.spawn", spawnVehicle);
     r.query("vehicles.values", (ctx) => {
       const out: { vehicle: EntityId; cents: number }[] = [];

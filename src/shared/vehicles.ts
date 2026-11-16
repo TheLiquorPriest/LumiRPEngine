@@ -1,6 +1,6 @@
 // Vehicles as the engine, the agents and the UI share them (DESIGN §9.3): the class domains, a class
 // as the vehicle picker lists it, what a made vehicle is made with (`vehicles.spawn`), how words name
-// a class (`matchVehicleClass`, which `vehicles.priced`, `vehicles.named` and the Curator's reads use), and whether a
+// a class (`matchVehicleClass`, which `vehicles.priced`, `vehicles.named` and the Curator's reads use, by the world's own names only), and whether a
 // world flies at all (`worldHasAir`: aircraft travel only over routes the world authors for the air).
 // Pure.
 
@@ -189,56 +189,19 @@ function tokens(text: string): string[] {
     .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
 }
 
-/** Whether `phrase`'s words run, in order and together, inside `words`. */
-function within(words: readonly string[], phrase: readonly string[]): boolean {
-  if (phrase.length === 0 || phrase.length > words.length) return false;
-  for (let i = 0; i + phrase.length <= words.length; i++) if (phrase.every((w, j) => words[i + j] === w)) return true;
-  return false;
-}
-
-/** Whether `phrase`'s words are the last of `words`, or the last before a model number ("Cessna 172"). */
-function ends(words: readonly string[], phrase: readonly string[]): boolean {
-  let bare = words.length;
-  while (bare > 0 && /^\d+$/.test(words[bare - 1] ?? "")) bare--;
-  return phrase.length > 0 && [words.length, bare].some((end) => phrase.length <= end && phrase.every((w, j) => words[end - phrase.length + j] === w));
-}
-
 /**
- * The class words name (`vehicles.priced`, DESIGN §9.5): the row whose id, short name or one of its
- * `aliases` runs inside the words with the most words, a tie to the table's first; null when none.
- * `ending`: only a name that ends the words, or ends them before a model number, as a purchase's
- * main noun names what it buys (`vehicles.named`: "flatbed truck", "jet ski", never "plane ticket").
+ * The class words name exactly (`vehicles.priced`, `vehicles.named`, DESIGN §9.5): the row whose id, name (whole or
+ * without its parenthesis) or one of its `aliases` is the words, case, hyphens, punctuation and a plural's `s` aside, which
+ * is matching the world's own names and reads no meaning; null when none. A phrase that only contains a name
+ * ("a brand-new flatbed truck") names no class.
  */
-export function matchVehicleClass(words: string, table: Pick<DataTable, "rows"> | undefined, opts: { ending?: boolean } = {}): string | null {
-  const said = tokens(words);
-  if (said.length === 0) return null;
-  const fits = opts.ending === true ? ends : within;
-  let best: { id: string; size: number } | null = null;
+export function matchVehicleClass(words: string, table: Pick<DataTable, "rows"> | undefined): string | null {
+  const said = tokens(words).join(" ");
+  if (said === "") return null;
   for (const [id, row] of Object.entries(table?.rows ?? {})) {
     if (!row) continue;
-    const names = [id.replace(/_/g, " "), typeof row.name === "string" ? shortClassName(row.name) : "", ...(Array.isArray(row.aliases) ? row.aliases.filter((a): a is string => typeof a === "string") : [])];
-    for (const name of names) {
-      const phrase = tokens(name);
-      if (fits(said, phrase) && (best === null || phrase.length > best.size)) best = { id, size: phrase.length };
-    }
+    const names = [id.replace(/_/g, " "), typeof row.name === "string" ? row.name : "", typeof row.name === "string" ? shortClassName(row.name) : "", ...(Array.isArray(row.aliases) ? row.aliases.filter((a): a is string => typeof a === "string") : [])];
+    if (names.some((name) => tokens(name).join(" ") === said)) return id;
   }
-  return best?.id ?? null;
-}
-
-/** Whether words say the vehicle is new from a dealer ("a new pickup", "brand-new"), not used. */
-export function saysNew(words: string): boolean {
-  const said = tokens(words);
-  if (said.some((w) => w === "used" || w === "secondhand" || w === "second" || w === "pre" || w === "old")) return false;
-  return said.includes("new");
-}
-
-/** A name a bought vehicle goes by from the words ("a used flatbed truck" → "Flatbed truck"), else the class's short name. */
-export function vehicleNameFrom(words: string, className: string): string {
-  const cut = words
-    .trim()
-    .replace(/^(?:an?|the|my|our|his|her|their|one)\s+/i, "")
-    .replace(/^(?:brand[\s-]new|new|used|second[\s-]hand|pre[\s-]owned|old)\s+/i, "")
-    .trim();
-  const name = cut === "" || /^[a-z0-9_]+$/.test(cut) && cut.includes("_") ? shortClassName(className) : cut;
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return null;
 }

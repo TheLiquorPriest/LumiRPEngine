@@ -46,7 +46,7 @@ describe("vehicles", () => {
     await t.call("world_apply", { operations: [{ op: "set", at: id, key: "status", value: "broken", ...SRC }] });
     const r = await t.call("vehicles_drive", { vehicle: "Old van", to: "far_road", driver: "tam", ...SRC });
     appliedInFull(r, "engine");
-    expect((r.reports ?? []).some((x) => x.includes("say otherwise (broken)"))).toBe(true);
+    expect((r.reports ?? []).some((x) => x.includes("recorded as broken down"))).toBe(true);
     expect(t.s.stateAt(t.turn.id).state.world.entities[id]?.fields.place).toBe("far_road");
   });
 });

@@ -1,39 +1,64 @@
 // Vehicles (the skill `vehicles`): the world's vehicle classes and what they cost, as today's
-// `vehicles_classes` lists them, and a drive to a place, as the vehicles pack drives one (its route,
-// its time on the road, its fuel, the driver and riders arriving with it). A drive today's rules would
-// refuse for what it means (no road there, no fuel, a vehicle broken down) is made all the same: the
-// vehicle, its driver and its riders are at the place, and the answer reports it.
+// `vehicles_classes` lists them, and a drive, which records only what the call gives: the vehicle
+// stands where the call says (`park`, else `to`), its driver (the call's, else the one recorded
+// on the vehicle, else no one) and the riders it names arrive at `to`, and the fuel left, the miles
+// or hours are the call's. Where the world's tables would say otherwise (no route, no fuel, a
+// vehicle broken down, a driver not aboard) it is recorded all the same and the answer reports it;
+// what the tables work the trip out to, and the chance of a breakdown, are given as data.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
-import type { LedgerEvent } from "../../shared/ledger";
 import { VEHICLE_DOMAINS, vehicleDomainOf, worldHasAir } from "../../shared/vehicles";
 import { own, strOf } from "../../engine/pack-kit";
-import { relocate } from "../../engine/relocate";
-import { oneOf, TEXT, TEXTS } from "../kit";
-import { find, isUnread, named, textArg } from "../ops";
-import { effectChange, isAlready, notApplicable, readTool, type WriteDef, writeTool } from "./run";
+import { isGone, kindIs, placeOfEntity } from "../../engine/scope";
+import { breakdownChance, driveSums, driverOf, driveTrip, fuelUse, legOf } from "../../packs/vehicles/core";
+import { oneOf, TEXT, TEXTS, YES_NO } from "../kit";
+import { find, findOptional, isUnread, named, notAs, textArg, type OpContext, type Unread } from "../ops";
+import { nearestOf, type Found } from "../reading";
 import { textOf } from "../texts";
+import { effectChange, notApplicable, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "vehicles";
 
-/** Today's refusals of a drive for what it means: made all the same, and reported. */
-const DRIVEN_ANYWAY: Readonly<Record<string, true>> = { no_route: true, no_fuel: true, broken: true };
+/** The vehicle a call names: the line that says it is not a vehicle, with the vehicles nearest the name, when it is something else or nothing at all. */
+export function vehicleNamed(o: OpContext): Found | Unread {
+  const w = o.draft.w;
+  const found = find(o, "vehicle", "thing");
+  if (isUnread(found) ? found.line !== "unknown" : kindIs(w.ctx.registry, w.world, own(w.state.entities, found.id)?.kind ?? "", "vehicle")) return found;
+  const said = String(o.args.vehicle);
+  const vehicles = Object.keys(w.state.entities)
+    .sort()
+    .filter((id) => kindIs(w.ctx.registry, w.world, own(w.state.entities, id)?.kind ?? "", "vehicle") && !isGone(w.state, id))
+    .map((id) => ({ id, name: strOf(own(w.state.entities, id)?.name, id) }));
+  const near = nearestOf(said, vehicles.map((v) => v.name), o.call.settings)
+    .slice(0, o.call.settings.nearMatches)
+    .flatMap((n) => vehicles.filter((v) => v.name === n));
+  return { line: "not_a_vehicle", fields: { n: o.n, op: o.op, name: said, vehicles: near.length > 0 ? textOf(near.map((v) => `${v.name} [${v.id}]`)) : "none" }, data: { near: near.map((v) => ({ id: v.id, name: v.name })) } };
+}
+
+/** A number a call gives, when it gives one; the line that says it is not one otherwise. */
+function numberArg(o: OpContext, field: string): number | undefined | Unread {
+  const v = o.args[field];
+  if (v === undefined || v === null) return undefined;
+  return typeof v === "number" && Number.isFinite(v) ? v : notAs(o, field, v, "number");
+}
 
 const drive: WriteDef = {
   name: "vehicles_drive",
   family: FAMILY,
   lane: "engine",
-  properties: { vehicle: TEXT, to: TEXT, driver: TEXT, riders: TEXTS },
+  properties: { vehicle: TEXT, to: TEXT, driver: TEXT, riders: TEXTS, park: TEXT, fuel_pct: { type: "number" }, miles: { type: "number" }, hours: { type: "number" }, sums: YES_NO },
   required: ["vehicle", "to"],
-  example: { vehicle: "Old van", to: "The Far Road", driver: "bram", riders: ["odile"], source: { from: "prose", message: "m-0601" } },
+  example: { vehicle: "Old van", to: "The Far Road", driver: "bram", riders: ["odile"], fuel_pct: 60, source: { from: "prose", message: "m-0601" } },
   run(o) {
-    const vehicle = find(o, "vehicle", "thing");
+    const w = o.draft.w;
+    const vehicle = vehicleNamed(o);
     if (isUnread(vehicle)) return vehicle;
     const to = find(o, "to", "place");
     if (isUnread(to)) return to;
-    const w = o.draft.w;
-    let driver = w.world.pov;
+    const park = findOptional(o, "park", "place");
+    if (park !== undefined && isUnread(park)) return park;
+    let driver: string | null = driverOf(w.ctx, vehicle.id);
     if (textArg(o.args, "driver") !== undefined) {
       const found = find(o, "driver", "person");
       if (isUnread(found)) return found;
@@ -45,22 +70,49 @@ const drive: WriteDef = {
       if (isUnread(rider)) return rider;
       riders.push(rider.id);
     }
+    const given: Record<string, number> = {};
+    for (const field of ["fuel_pct", "miles", "hours"]) {
+      const n = numberArg(o, field);
+      if (typeof n === "object") return n;
+      if (n !== undefined) given[field] = n;
+    }
+    // What the world's rules would say of this drive: told, never held back.
+    const e = own(w.state.entities, vehicle.id);
+    const recorded = e?.fields.driver;
+    const trip = driveTrip(w.ctx, vehicle.id, driver, to.id);
+    const leg = trip ? legOf(trip) : null;
+    const use = leg ? fuelUse(w.ctx, vehicle.id, leg) : null;
+    const fuel = e?.fields.fuel_pct;
+    const what = named(o.reading, vehicle.id);
+    if (textArg(o.args, "driver") === undefined && typeof recorded === "string" && driver === null) o.reply.report("driver_gone", { n: o.n, op: o.op, who: recorded, what });
+    if (e?.fields.status === "broken") o.reply.report("broken", { n: o.n, op: o.op, what });
+    if (trip === null) o.reply.report("no_route", { n: o.n, op: o.op, what, where: named(o.reading, to.id) });
+    else if (trip.park !== to.id) o.reply.report("route_short", { n: o.n, op: o.op, what, where: named(o.reading, trip.park), to: named(o.reading, to.id) });
+    if (use !== null && typeof fuel === "number" && fuel < use.pct) o.reply.report("no_fuel", { n: o.n, op: o.op, what });
+    if (driver !== null && !(own(w.state.entities, driver)?.relations.some((r) => r.type === "in" && r.to === vehicle.id) ?? false) && placeOfEntity(w.state, driver) !== placeOfEntity(w.state, vehicle.id)) o.reply.report("driver_not_aboard", { n: o.n, op: o.op, who: named(o.reading, driver), what });
+    if (given.miles !== undefined && typeof e?.fields.odometer_mi !== "number") o.reply.report("not_recorded", { n: o.n, op: o.op, what, field: "odometer_mi" });
+    if (given.hours !== undefined && typeof e?.fields.engine_hours !== "number") o.reply.report("not_recorded", { n: o.n, op: o.op, what, field: "engine_hours" });
+    // The tables' figures for the trip and the breakdown's chance, as data for the game master (who rolls it if the story wants it).
+    const tables: JsonObject = {};
+    if (leg !== null && use !== null) {
+      tables.fuel_pct_used = Math.round(use.pct * 10) / 10;
+      tables.miles = Math.round(use.miles * 10) / 10;
+      tables.hours = Math.round(use.hours * 100) / 100;
+      const chance = breakdownChance(w.ctx, vehicle.id, leg);
+      if (chance !== null) tables.breakdown_chance = Math.round(chance * 1000) / 1000;
+    }
+    o.after((): JsonObject => (Object.keys(tables).length > 0 ? { tables } : {}));
     const from = w.events.length;
-    const refused = effectChange(o, { type: "vehicles.drive", args: { vehicle: vehicle.id, to: to.id, driver, riders } });
-    if (refused !== null) {
-      if (refused.code === "already_there" || isAlready(refused.code)) o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, vehicle.id) });
-      else if (DRIVEN_ANYWAY[refused.code]) {
-        // There all the same: the vehicle parked at the place, its driver and riders arrived by the one move path.
-        const events: LedgerEvent[] = [{ type: "set", entity: vehicle.id, field: "place", value: to.id }];
-        for (const p of [driver, ...riders]) {
-          const moved = relocate(w.ctx, p, to.id, p === driver ? {} : { along: true });
-          if ("code" in moved) return notApplicable(o, moved.code);
-          events.push(...moved);
-        }
-        const bad = o.draft.applyAll(events);
-        if (bad) return notApplicable(o, bad.code);
-        o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, vehicle.id), where: named(o.reading, to.id), code: refused.code });
-      } else return notApplicable(o, refused.code);
+    const args: JsonObject = { vehicle: vehicle.id, to: to.id, riders, ...given };
+    if (driver !== null) args.driver = driver;
+    if (park !== undefined) args.park = park.id;
+    const refused = effectChange(o, { type: "vehicles.take", args });
+    if (refused !== null) return notApplicable(o, refused.code);
+    // With sums, what the tables work out for the trip and the call did not give is recorded, as filled in from the world, in changes of its own.
+    if (o.args.sums === true && leg !== null) {
+      const filled = driveSums(w.ctx, vehicle.id, leg).filter((ev) => !("field" in ev) || (given[ev.field] === undefined && !(ev.field === "odometer_mi" && given.miles !== undefined) && !(ev.field === "engine_hours" && given.hours !== undefined)));
+      const bad = o.draft.fillWith(filled);
+      if (bad) return notApplicable(o, bad.code);
     }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;

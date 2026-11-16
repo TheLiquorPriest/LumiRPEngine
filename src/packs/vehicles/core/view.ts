@@ -20,7 +20,7 @@ import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { loanChoices } from "../../../engine/thing-gm";
 import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME } from "../../../engine/visibility";
 import { useTier, vehiclesFor, type VehicleUse } from "./access";
-import { rangeLeft, serviceInterval } from "./index";
+import { driverOf, rangeLeft, serviceInterval } from "./index";
 
 /** Someone the Garage names: a person to lend to, a household. */
 export interface GarageParty {
@@ -70,6 +70,8 @@ export interface GarageVehicle {
   mine?: boolean;
   /** The POV may lend it out or let someone use it. */
   canLend?: boolean;
+  /** Who drives it, as recorded: none when no one is. */
+  driver?: GarageParty;
   /** Its free specs ("Engine": "5.0L V8"), when it has any. */
   specs?: VehicleSpec[];
 }
@@ -129,7 +131,7 @@ export function buildGarageView(ctx: ReadContext): GarageView {
       id,
       name: e.name,
       kind: strOf(cls?.domain, "road"),
-      status: level <= 1 ? (e.fields.status === "broken" ? "broken" : "runs fine") : strOf(e.fields.status, "ok").replace(/_/g, " "),
+      status: level <= 1 ? (e.fields.status === "broken" ? "broken" : "runs fine") : typeof e.fields.status === "string" ? e.fields.status.replace(/_/g, " ") : "",
       place: place ? (seesPlace(place) ? (own(ctx.world.places, place)?.name ?? place) : HIDDEN_PLACE_NAME) : null,
       ...(place && seesPlace(place) ? { placeId: place } : {}),
       ...(cls ? { classId: strOf(e.fields.class), className: strOf(cls.name, strOf(e.fields.class)) } : {}),
@@ -140,10 +142,13 @@ export function buildGarageView(ctx: ReadContext): GarageView {
       canLend: u.canLend,
     };
     if (level >= 2) {
-      v.fuelPct = Math.round(numOf(e.fields.fuel_pct, 100));
+      // The fuel left is shown when it is recorded; one nobody recorded shows none.
+      if (typeof e.fields.fuel_pct === "number") v.fuelPct = Math.round(e.fields.fuel_pct);
       const range = rangeLeft(ctx, id);
       if (range) v.rangeLabel = `~${Math.round(range.value)} ${range.unit}`;
     }
+    const driver = driverOf(ctx, id);
+    if (driver !== null && seesEntity(driver)) v.driver = { id: driver, name: nameOf(driver) };
     if (level >= 3) {
       if (typeof e.fields.odometer_mi === "number") v.odometerLabel = `${Math.round(e.fields.odometer_mi).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} mi`;
       else if (typeof e.fields.engine_hours === "number") v.odometerLabel = `${Math.round(e.fields.engine_hours)} h`;

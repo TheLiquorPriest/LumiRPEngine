@@ -186,3 +186,18 @@ fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothi
 joined: Operation {{n}} ({{op}}): {{who}} joined the fight {{fight}}, which was under way; no one else was added.
 which_fight: {{#n}}Operation {{n}} ({{op}}): {{/n}}more than one fight is under way ({{fights}}); name the one with fight, by its id.
 unknown_fight: {{#n}}Operation {{n}} ({{op}}): {{/n}}no fight {{fight}} is under way; the fights under way are: {{fights}}.
+no_route: Operation {{n}} ({{op}}): the world's routes give {{what}} no way to {{where}}; the drive was recorded as the call gave it, and no walk was worked out.
+no_fuel: Operation {{n}} ({{op}}): {{what}} has less fuel recorded than the world's tables say the trip uses; the drive was recorded all the same.
+broken: Operation {{n}} ({{op}}): {{what}} is recorded as broken down; the drive was recorded all the same.
+route_short: Operation {{n}} ({{op}}): the world's routes take {{what}} as far as {{where}} and no further toward {{to}}; the drive was recorded as the call gave it, and no walk was worked out.
+driver_not_aboard: Operation {{n}} ({{op}}): {{who}} drives {{what}} but is neither aboard nor at the place it stood; they were moved with it all the same.
+driver_gone: Operation {{n}} ({{op}}): the driver recorded for {{what}} ({{who}}) is out of the world, so no one drives it in this drive.
+not_recorded: Operation {{n}} ({{op}}): {{what}} has no {{field}} recorded, so the amount given was not added.
+not_a_vehicle: Operation {{n}} ({{op}}): {{name}} is not a vehicle. The vehicles nearest that name: {{vehicles}}. To put a thing somewhere, use the move operation.
+wants_number: a number
+unknown_holiday: {{#n}}Operation {{n}} ({{op}}): {{/n}}no holiday {{holiday}} is on this calendar; the holidays are: {{holidays}}.
+wants_date_md: a day of the year as MM-DD, such as 12-25
+wants_date_rule: an object: {"type": "fixed", "month", "day"}, {"type": "nth_weekday", "month", "weekday" (0 is Sunday), "n"}, {"type": "easter", "days" from Easter} or {"type": "relative", "to" (a holiday's id), "days"}
+fuel_memo: Fuel for {{what}}
+service_memo: Service: {{what}}
+repair_memo: Repair: {{what}}

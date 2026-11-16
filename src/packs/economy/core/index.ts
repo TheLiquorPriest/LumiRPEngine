@@ -361,7 +361,7 @@ function quote(ctx: EffectContext, args: JsonObject, payer: EntityId, qty: numbe
   const vehicleFirst = given === VEHICLE_CATEGORY || cls !== "";
   const said = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
   const wordsClass = vehicleFirst || catalogRow !== null ? null : vehicleNamed(ctx, named, given);
-  const vehicle = vehicleFirst || wordsClass !== null ? (optionalQuery(ctx, "vehicles.priced")?.(ctx, [named, strOf(args.name)].filter((w) => w !== "").join(" "), place, cls || (wordsClass ?? undefined)) ?? null) : null;
+  const vehicle = vehicleFirst || wordsClass !== null ? (optionalQuery(ctx, "vehicles.priced")?.(ctx, [named, strOf(args.name)].filter((w) => w !== "").join(" "), place, cls || (wordsClass ?? undefined), args.new === true) ?? null) : null;
   if (vehicle) {
     const unit = said === undefined ? vehicle.cents : args.exact === true ? said : Math.min(vehicle.band.max, Math.max(vehicle.band.min, said));
     const clamped = said !== undefined && unit !== said;
@@ -685,7 +685,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     }
     // A vehicle as `quote` takes one: the category or a class given, else a class the words name as what they buy (`vehicleNamed`).
     const cls = strOf(p.class) || (category === VEHICLE_CATEGORY || rowOf(ctx, "economy.catalog", item) ? "" : (vehicleNamed(ctx, item, category) ?? ""));
-    const vehicle = item !== "" && (category === VEHICLE_CATEGORY || cls !== "") && optionalQuery(ctx, "vehicles.priced")?.(ctx, item, placeOfEntity(ctx.state, payer), cls || undefined) != null;
+    const vehicle = item !== "" && (category === VEHICLE_CATEGORY || cls !== "") && optionalQuery(ctx, "vehicles.priced")?.(ctx, item, placeOfEntity(ctx.state, payer), cls || undefined, p.new === true) != null;
     const priced = set || vehicle || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
     return !priced && own(ctx.state.entities, payer) !== undefined && ctx.levelOf(payer, "money") >= 1;
   });
@@ -942,7 +942,7 @@ function actor(ctx: EffectContext, args: Record<string, JsonValue>, key = "who")
 function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   r.effect({
     type: "economy.buy",
-    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?", "class?", "details?", "finance?", "down?", "term_months?"],
+    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?", "story?", "seller?", "size?", "at?", "by?", "class?", "new?", "details?", "finance?", "down?", "term_months?"],
     resolve(args, ctx) {
       // Bought `as` an organization (ORG-SPEC §3.6), or with an account of one the words name: it
       // pays and owns what was bought, and its buyer (`by`) is where it is bought and takes it.
