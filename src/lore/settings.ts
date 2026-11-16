@@ -5,6 +5,8 @@
 
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { SEARCH_LIMITS } from "../engine/lore";
+import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
+import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS } from "../shared/settings";
 import { LORE_INDEX_DEFAULTS, type LoreIndexSettings } from "./indexing";
 import { LORE_DEFAULTS, type LoreSettings } from "./lore";
 
@@ -67,5 +69,55 @@ export const LORE_INDEX_ENTRY_DEF = {
   effect: "turn",
 } as const satisfies Setting;
 
+/**
+ * What the narrator knows of the chat's secrets (the three choices of today's Settings → Narrator, carried as they are): the chat's own
+ * value, else its world's own `narrator` at the point of the path, else the global one, else the shipped default. Each part is a
+ * setting; a chat that sets one part follows its world's, then the global, for the other.
+ */
+export const SECRETS_NARRATOR_KNOWLEDGE_DEF = {
+  key: "secrets.narrator.knowledge",
+  default: NARRATOR_DEFAULTS.knowledge,
+  takes: { type: "oneOf", values: NARRATOR_KNOWLEDGE },
+  perConnection: false,
+  name: "Narrator's knowledge",
+  about: "What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (the player's character only). The chat's own choice wins over its world's own, which wins over this global one.",
+  effect: "use",
+} as const satisfies Setting;
+
+export const SECRETS_NARRATOR_SECRETS_DEF = {
+  key: "secrets.narrator.secrets",
+  default: NARRATOR_DEFAULTS.secrets,
+  takes: { type: "oneOf", values: NARRATOR_SECRETS },
+  perConnection: false,
+  name: "Narrator's secrets",
+  about: "How a secret kept from the player's character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one.",
+  effect: "use",
+} as const satisfies Setting;
+
+/** Whether a chat tracks who knows what: a holding of a secret counts only while it does. The chat's own, else the global one; each new turn records the value in force. */
+export const SECRETS_TRACKED_DEF = {
+  key: "secrets.tracked",
+  default: KNOWLEDGE_DEFAULTS.enabled,
+  takes: { type: "yesNo" },
+  perConnection: false,
+  name: "Track who knows what",
+  about: "Whether a chat tracks who holds which secret. Off, no holding counts and every secret stays kept; what was recorded stays for when it is switched on again. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there.",
+  effect: "turn",
+} as const satisfies Setting;
+
+/** How sure a holding must be before it counts: the global one, and the chat's where set; each new turn records the value in force. */
+export const SECRETS_THRESHOLD_DEF = {
+  key: "secrets.threshold",
+  default: KNOWLEDGE_DEFAULTS.threshold,
+  takes: { type: "number", least: 0, most: 1 },
+  perConnection: false,
+  name: "How sure a holding must be",
+  about: "How sure a holding of a secret must be, from 0 to 1, before it counts as the holder knowing it. Each new turn records the value in force, so a swipe or a branch judges a secret by what held there.",
+  effect: "turn",
+} as const satisfies Setting;
+
+/** The settings of the secrets: what the narrator knows of them, and when a holding counts. */
+export const SECRETS_SETTINGS: readonly Setting[] = [SECRETS_NARRATOR_KNOWLEDGE_DEF, SECRETS_NARRATOR_SECRETS_DEF, SECRETS_TRACKED_DEF, SECRETS_THRESHOLD_DEF];
+
 /** Every setting the lore reads, as a config file writes it. */
-export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF];
+export const LORE_SETTINGS: readonly Setting[] = [...Object.values(LORE_SETTING_DEFS), LORE_STOP_WORDS_DEF, LORE_BOOKS_DEF, ...Object.values(LORE_INDEX_SETTING_DEFS), LORE_INDEX_ENTRY_DEF, ...SECRETS_SETTINGS];
