@@ -33,7 +33,7 @@ describe("the places' routes", () => {
   test("the list pages the chat's places, the record carries its parts at the head and the owner's base is his own change drawn against the bound entries", async () => {
     const { t, lore, list, oneRoute, baseRoute } = await open();
     const turn = await t.begin();
-    await t.write(turn, [{ part: "beat", item: null, value: { text: "The east wing burned down.", place: `place:${INN}` } }]);
+    await t.write(turn, [{ part: "beat", item: null, value: { text: "The east wing burned down.", place: "the inn", place_ref: `place:${INN}` } }]);
     const beat = t.record(turn).of("beat")[0]?.id ?? "";
     const doc = t.store.env.worlds(t.s.chat(CHAT)?.revision ?? "");
     if (doc === undefined) throw new Error("the invented world is held");

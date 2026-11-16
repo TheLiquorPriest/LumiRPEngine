@@ -48,7 +48,7 @@ export function hereOf(at: PlaceAt, place: string): PlaceHere[] {
 export function historyOf(at: PlaceAt, place: string, settings: Pick<PlacesSettings, "history">): { items: PlaceHistoryRow[]; more: number } {
   const story = new StoryRecord(storyAt(at.u, at.chat, at.turn), storySliceOf(at.state), questSliceOf(at.state));
   const ref = `place:${place}`;
-  const beats = story.of("beat").filter((b) => b.fields.place === ref || b.fields.from === ref || b.fields.to === ref);
+  const beats = story.of("beat").filter((b) => b.fields.place_ref === ref);
   const newest = beats.slice().reverse();
   return {
     items: newest.slice(0, settings.history).map((b) => ({ beat: b.id, text: typeof b.fields.text === "string" ? b.fields.text : null, message: story.beatAt(b), turn: b.opened })),
