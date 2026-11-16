@@ -283,6 +283,8 @@ export function compose(options: ComposeOptions = {}): Composition {
       // The history window the last prompt kept and the story so far at the head, as the next briefing works them out.
       window: (user, chat) => made().lane.windowOf(user, chat),
       soFar: (user, chat) => made().lane.soFarAt(user, chat),
+      // The places' settings for the chat; the lore a place is bound to joins once the turn lane reads it.
+      places: { settings: async (user, chat) => (await settings(user, chat)).places },
     })),
     worlds,
     build,
