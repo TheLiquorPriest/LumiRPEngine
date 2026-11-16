@@ -18,7 +18,7 @@ import { bigWorld } from "./measure";
 const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest of the world, in outline", "### Due", "### Open business here", "### Changed last turn", "### Unsettled"];
 
 /** The grid lane's map, as a test gives it: a map for the common room only. */
-const MAP: MapText = { text: ({ place }) => (place === "common_room" ? "+---+\n|W.B|\n+---+" : null) };
+const MAP: MapText = { text: ({ place }) => (place === "common_room" ? { grid: "grid_inn", drawn: "d1", text: "+---+\n|W.B|\n+---+" } : null) };
 /** What time brings due, as a test gives it: the market opening in the span asked for. */
 const DUE: DueSource = { due: (_state, span) => ({ items: [{ at: span.from + 90, kind: "schedule", where: "place:market_square", who: ["tam"], what: "the market opens" }], more: 0 }) };
 

@@ -43,9 +43,13 @@ export type WorldStateSettings = { -readonly [K in keyof typeof WORLD_STATE_DEFA
 export const WORLD_STATE_SECTIONS = ["horizon", "above", "around", "outline", "passed", "due", "open", "changed", "unsettled"] as const;
 export type WorldStateSection = (typeof WORLD_STATE_SECTIONS)[number];
 
-/** A place's map as text, from the grid lane (the engine tools' `MapView`): null for a place with no map. */
+/**
+ * A place's map as text, from the grid lane (the engine tools' `MapView`): null for a place with no map. `grid` names the grid it is
+ * drawn on, `drawn` the drawn layer's version; `layer` asks for one layer (both, in the layout's order, when absent), `around` names
+ * the tree refs the printed part of a big grid must hold.
+ */
 export interface MapText {
-  text(input: { state: StoreState; env: FoldEnv; place: string }): string | null;
+  text(input: { state: StoreState; env: FoldEnv; place: string; layer?: "drawn" | "moving"; around?: readonly string[] }): { grid: string; drawn: string; text: string } | null;
 }
 
 /** One thing a span of time brings due (the engine tools' `DueItem`). */
@@ -304,7 +308,8 @@ function dueShown(part: Part, source: DueSource, state: StoreState, span: { from
 function horizonLines(view: TreeView, ref: string, map: MapText | undefined): ViewLine[] {
   const lines = view.query(ref, "full")?.lines ?? [];
   if (!ref.startsWith("place:")) return lines;
-  const text = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
+  const printed = map === undefined ? null : map.text({ state: view.state, env: view.env, place: ref.slice("place:".length) });
+  const text = printed === null ? null : printed.text;
   const mapLine: ViewLine | null = text === null ? null : { kind: "map", depth: 1, fields: { text } };
   if (mapLine === null) return lines;
   const at = lines.findIndex((l, i) => i > 0 && l.kind.startsWith("level_"));
