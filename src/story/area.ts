@@ -1,6 +1,7 @@
 // The story's registration with the application (plan §4.1): its tables, its settings and its routes, those of the quests among them.
 
 import type { Area } from "../app";
+import { PLACES_SETTINGS } from "../places/settings";
 import { questRoutes, type QuestRoutesDeps } from "../quests/routes";
 import { storyRoutes, type StoryRoutesDeps } from "./routes";
 import { STORY_MIGRATIONS } from "./schema";
@@ -14,7 +15,7 @@ export function storyArea(takes: () => StoryTakes): Area {
   return {
     name: "story",
     tables: [{ area: "story", migrations: STORY_MIGRATIONS }],
-    settings: STORY_SETTINGS,
+    settings: [...STORY_SETTINGS, ...PLACES_SETTINGS],
     mounted: (at) => {
       const taken = takes();
       at.routes.add("story", storyRoutes({ ...taken, writes: at.writes }));

@@ -3,7 +3,7 @@
 // entry whose revision differs from the one the base was last drawn against (or that is gone, or was bound after) marks the base older
 // than its source. Code rewrites nothing; redrawing is the Author's.
 
-import type { BaseDoc } from "./fold";
+import type { BaseDoc, SourceDoc } from "./fold";
 
 /** An entry bound to a place, as the lore keeps the binding: the entry's id, the aspect it defines, and who bound it. */
 export interface PlaceBinding {
@@ -45,10 +45,15 @@ export interface PlaceSources {
   older: boolean;
 }
 
-/** Each binding of a place read live and set against the base as it stands (none written: nothing is older). */
-export async function sourcesNow(read: PlaceSourcesReader, scope: { user: string; chat: string }, place: string, base: BaseDoc | null): Promise<PlaceSources> {
+/**
+ * Each binding of a place read live and set against the base as it stands (none written: nothing is older): those the lore keeps
+ * (`read.bindings`) and those play bound when it made the place (`held`, from the place area's slice), an entry in both once.
+ */
+export async function sourcesNow(read: PlaceSourcesReader, scope: { user: string; chat: string }, place: string, base: BaseDoc | null, held: readonly SourceDoc[] = []): Promise<PlaceSources> {
+  const lore = read.bindings(scope.user, place);
+  const bound: PlaceBinding[] = [...lore, ...held.filter((h) => !lore.some((b) => b.entry === h.entry)).map((h): PlaceBinding => ({ entry: h.entry, aspect: h.aspect, by: h.by ?? "play" }))];
   const sources = await Promise.all(
-    read.bindings(scope.user, place).map(async (b): Promise<PlaceSourceShown> => {
+    bound.map(async (b): Promise<PlaceSourceShown> => {
       const now = await read.entry(scope, b.entry);
       const drawn = base !== null && Object.hasOwn(base.drawn, b.entry) ? (base.drawn[b.entry] ?? null) : null;
       return { ...b, title: now?.title ?? null, revision: now?.revision ?? null, drawn, newer: base !== null && (now === null || now.revision !== drawn) };

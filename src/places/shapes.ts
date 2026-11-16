@@ -88,7 +88,7 @@ export const wayRow = shape.named(
     route: T,
     to: shape.object({ id: T, name: T }),
     modes: shape.list(shape.object({ mode: T, minutes: N, km: nullable(N) })),
-    both: shape.yesNo(),
+    dir: field(shape.oneOf("both", "out", "in"), "Both ways, only out of this place, or only into it."),
     turn: nullable(shape.turnId()),
   }),
 );

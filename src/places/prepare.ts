@@ -11,17 +11,37 @@ import { drawnFrom, sourcesNow } from "./sources";
 export const BASE_KEYS: readonly string[] = ["base", "description"];
 
 const DRAWN = new WeakMap<object, Map<string, Record<string, string>>>();
+/** The entries a call names as where a place it makes comes from: each one's revision now, null where Lumiverse holds none. */
+const NAMED = new WeakMap<object, Map<string, string | null>>();
 
 /** Whether a call's operation writes a place's base: a `set` of one of the base's keys. */
 function writesBase(a: Asked): boolean {
   return a.def.name === "set" && typeof a.args.key === "string" && BASE_KEYS.includes(a.args.key.trim()) && typeof a.args.at === "string";
 }
 
-/** Reads the entries bound to each place the call writes a base of, as they stand now, and keeps them for the call's operations. */
+/** Whether a call's operation makes a place: a `place` that names one (and no thing to set down). */
+function makesPlace(a: Asked): boolean {
+  return a.def.name === "place" && a.args.what === undefined && typeof a.args.name === "string";
+}
+
+/** The entry ids a `place` operation names in its `sources`, whether sent as ids or as `{ entry, aspect }`. */
+function entriesNamed(a: Asked): string[] {
+  const given = a.args.sources;
+  if (!Array.isArray(given)) return [];
+  return given.flatMap((s) => (typeof s === "string" ? [s.trim()] : typeof s === "object" && s !== null && !Array.isArray(s) && typeof s.entry === "string" ? [s.entry.trim()] : [])).filter((e) => e !== "");
+}
+
+/** Reads the entries bound to each place the call writes a base of, and those a place it makes names, as they stand now, and keeps them for the call's operations. */
 export async function prepareBases(call: Call, asked: readonly Asked[]): Promise<void> {
   const read = call.deps.placeSources;
   const wanted = asked.filter(writesBase);
-  if (read === undefined || wanted.length === 0) return;
+  const making = asked.filter(makesPlace);
+  if (read === undefined || (wanted.length === 0 && making.length === 0)) return;
+  const named = new Map<string, string | null>();
+  for (const a of making) {
+    for (const entry of entriesNamed(a)) if (!named.has(entry)) named.set(entry, (await read.entry({ user: call.scope.user, chat: call.scope.chat }, entry))?.revision ?? null);
+  }
+  NAMED.set(call, named);
   const reading = Reading.of(call);
   if (!(reading instanceof Reading)) return;
   const drawn = new Map<string, Record<string, string>>();
@@ -37,4 +57,9 @@ export async function prepareBases(call: Call, asked: readonly Asked[]): Promise
 /** The revision of each entry bound to `place` as the call's operations are to draw its base against; none where nothing is bound or the call kept none. */
 export function drawnAgainst(call: object, place: string): Record<string, string> {
   return DRAWN.get(call)?.get(place) ?? {};
+}
+
+/** The entries a place the call makes names, each with its revision now (null: Lumiverse holds none). */
+export function namedEntries(call: object): ReadonlyMap<string, string | null> {
+  return NAMED.get(call) ?? new Map();
 }

@@ -16,7 +16,9 @@ export const PLACE_AREA_ID = "place";
 export const PLACE_OPS = {
   /** A place's base written whole: `{ place, text, drawn }`, `drawn` the revision of each bound entry it was drawn against, by entry id. */
   base: "place.base",
-  /** What undoes one: `{ place, was }` puts the base as it stood back, or, with `was` null, takes the base away. */
+  /** Entries bound to a place made in play, each with the aspect of the place it defines: `{ place, sources: [{ entry, aspect }] }`; an entry already bound is bound again with the aspect it now has. */
+  source: "place.source",
+  /** What undoes one: `{ place, base?, sources? }` puts each part named back as it stood: the base or the list of sources, or, null, none. */
   restore: "place.restore",
 } as const;
 
@@ -37,14 +39,25 @@ export interface BaseDoc extends BaseVersionDoc {
   versions: BaseVersionDoc[];
 }
 
+/** An entry bound to a place when play made it, as the slice keeps it: the entry, the aspect it defines, and the turn and writer that bound it. */
+export interface SourceDoc {
+  entry: string;
+  aspect: string;
+  turn: string;
+  n: number;
+  by: string | null;
+}
+
 /** The area's slice of the folded state. */
 export interface PlaceSlice {
   /** The bases written in play, by place id. */
   bases: Record<string, BaseDoc>;
+  /** The entries bound to places made in play, by place id: they go with the turn that made the place. */
+  sources: Record<string, SourceDoc[]>;
 }
 
 export function emptyPlaceSlice(): PlaceSlice {
-  return { bases: {} };
+  return { bases: {}, sources: {} };
 }
 
 /** The slice as the area holds it. */
@@ -87,26 +100,66 @@ const BASE: AreaOp = {
   undo(value, before) {
     const v = value as unknown as BaseValue;
     const was = Object.hasOwn(asSlice(before).bases, v.place) ? asSlice(before).bases[v.place] : null;
-    return [{ op: "restore", value: { place: v.place, was: was as unknown as JsonValue } }];
+    return [{ op: "restore", value: { place: v.place, base: was as unknown as JsonValue } }];
+  },
+};
+
+/** What a source change sends: the place, and each entry with the aspect it defines. */
+export interface SourceValue {
+  place: string;
+  sources: { entry: string; aspect: string }[];
+}
+
+const SOURCE: AreaOp = {
+  check(value) {
+    if (!isRecord(value) || typeof value.place !== "string" || value.place === "") return "a source change names its place by id";
+    if (!Array.isArray(value.sources) || value.sources.length === 0) return "a source change holds the entries bound, each with its aspect";
+    return value.sources.every((s) => isRecord(s) && typeof s.entry === "string" && s.entry !== "" && typeof s.aspect === "string") ? null : "each source is an entry id and the aspect it defines";
+  },
+  apply(slice, change: AreaChange): AreaOutcome {
+    const s = asSlice(slice);
+    const v = change.value as unknown as SourceValue;
+    const held = Object.hasOwn(s.sources, v.place) ? (s.sources[v.place] ?? []) : [];
+    const next = [...held];
+    for (const b of v.sources) {
+      const doc: SourceDoc = { entry: b.entry, aspect: b.aspect, turn: change.turn, n: change.n, by: change.by };
+      const at = next.findIndex((d) => d.entry === b.entry);
+      if (at < 0) next.push(doc);
+      else next[at] = doc;
+    }
+    return { slice: json({ ...s, sources: { ...s.sources, [v.place]: next } }) };
+  },
+  touches(value): readonly AreaPart[] {
+    return [{ ref: `place:${(value as unknown as SourceValue).place}`, part: "sources" }];
+  },
+  undo(value, before) {
+    const v = value as unknown as SourceValue;
+    const was = Object.hasOwn(asSlice(before).sources, v.place) ? (asSlice(before).sources[v.place] ?? null) : null;
+    return [{ op: "restore", value: { place: v.place, sources: was as unknown as JsonValue } }];
   },
 };
 
 const RESTORE: AreaOp = {
   check(value) {
     if (!isRecord(value) || typeof value.place !== "string" || value.place === "") return "a restore names its place by id";
-    if (value.was !== null && !isRecord(value.was)) return "a restore holds the base as it stood, or null";
-    return null;
+    if (value.base !== undefined && value.base !== null && !isRecord(value.base)) return "a restore holds the base as it stood, or null";
+    if (value.sources !== undefined && value.sources !== null && !Array.isArray(value.sources)) return "a restore holds the sources as they stood, or null";
+    return value.base === undefined && value.sources === undefined ? "a restore holds the base or the sources it puts back" : null;
   },
   apply(slice, change): AreaOutcome {
     const s = asSlice(slice);
-    const v = change.value as unknown as { place: string; was: BaseDoc | null };
+    const v = change.value as unknown as { place: string; base?: BaseDoc | null; sources?: SourceDoc[] | null };
     const bases = { ...s.bases };
-    if (v.was === null) delete bases[v.place];
-    else bases[v.place] = v.was;
-    return { slice: json({ ...s, bases }) };
+    const sources = { ...s.sources };
+    if (v.base === null) delete bases[v.place];
+    else if (v.base !== undefined) bases[v.place] = v.base;
+    if (v.sources === null) delete sources[v.place];
+    else if (v.sources !== undefined) sources[v.place] = v.sources;
+    return { slice: json({ ...s, bases, sources }) };
   },
   touches(value): readonly AreaPart[] {
-    return [{ ref: `place:${(value as unknown as { place: string }).place}`, part: "base" }];
+    const v = value as unknown as { place: string; base?: unknown; sources?: unknown };
+    return [...(v.base !== undefined ? [{ ref: `place:${v.place}`, part: "base" }] : []), ...(v.sources !== undefined ? [{ ref: `place:${v.place}`, part: "sources" }] : [])];
   },
 };
 
@@ -121,6 +174,11 @@ export function placeSliceOf(state: Pick<StoreState, "areas">): PlaceSlice {
   return slice === undefined ? emptyPlaceSlice() : asSlice(slice);
 }
 
+/** The entries bound to a place made in play, in the order they were bound. */
+export function sourcesOf(slice: Readonly<PlaceSlice>, place: string): SourceDoc[] {
+  return Object.hasOwn(slice.sources, place) ? (slice.sources[place] ?? []) : [];
+}
+
 const READS: NonNullable<StoreArea["reads"]> = {
   /** A place's base: `{ text, drawn, turn }`, null where none is written. */
   base(slice, args) {
@@ -133,6 +191,6 @@ const READS: NonNullable<StoreArea["reads"]> = {
 export const PLACE_STORE_AREA: StoreArea = {
   id: PLACE_AREA_ID,
   initial: () => json(emptyPlaceSlice()),
-  ops: { base: BASE, restore: RESTORE },
+  ops: { base: BASE, source: SOURCE, restore: RESTORE },
   reads: READS,
 };

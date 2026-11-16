@@ -3,7 +3,7 @@
 
 export { baseAt, type PlaceBaseShown } from "./base";
 export { BASE_KEYS, drawnAgainst, prepareBases } from "./prepare";
-export { baseOf, PLACE_AREA_ID, PLACE_OPS, PLACE_STORE_AREA, placeSliceOf, type BaseDoc, type BaseVersionDoc, type PlaceSlice } from "./fold";
+export { baseOf, PLACE_AREA_ID, PLACE_OPS, PLACE_STORE_AREA, placeSliceOf, type SourceDoc, sourcesOf, type SourceValue, type BaseDoc, type BaseVersionDoc, type PlaceSlice } from "./fold";
 export { type PlaceLinesInput, placeLines, placeLinesAt, withPlaceLines } from "./lines";
 export { isPlaceFactPart, PLACE_FACT_PARTS, PLACE_PARTS, type PlaceFactPart, type PlacePart } from "./parts";
 export { accessOf, doorsOf, entryOf, type FactReader, factReader, factsOfPart, featuresOf, fixturesOf, gridOf, newest, type PlaceAt, placeAt, placeAtState, placeDef, placeKindOf, rowFields, sinceOf, zonesOf } from "./record";

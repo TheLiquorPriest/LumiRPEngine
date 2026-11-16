@@ -9,6 +9,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { emptyQuests, type QuestSlice, questSliceOf } from "../quests/record";
+import type { Stamp } from "../iface/source";
 import type { ChangeInput, Source, Store } from "../store";
 import { applyStory, type HorizonEntry, mergeWrite, newItemId, STORY_OPS, type StoryItemDoc, type StoryPart, type StoryRowDoc, storySliceOf } from "./fold";
 import type { StoryAt } from "./path";
@@ -159,12 +160,16 @@ export interface StoryWrite {
    * item is made with, once its first write is recorded.
    */
   stand?: string;
+  /** The write's own provenance (its source, precision, standing and what it cites), which takes the place of the writer's source. */
+  stamp?: Stamp;
 }
 
 /** One lore overlay a call asks for (plan §9.3): a note on a lore entry, written with the story's own writes. */
 export interface StoryOverlayWrite {
   entry: string;
   note: string;
+  /** The note's own provenance, as for a write. */
+  stamp?: Stamp;
 }
 
 /** Who writes, and where: the chat and the turn it belongs to (none: his own change of no turn, placed after the chat's newest reply); an agent's definition, `player` or the import; its handle in its run; the job it was started as. */
@@ -204,12 +209,12 @@ export function recordStory(store: Store, writer: StoryWriter, list: readonly (S
     const base = { lane: "story" as const, by: writer.by, handle: writer.agent, source: writer.source ?? null };
     if ("entry" in w) {
       items.push(null);
-      return { ...base, op: STORY_OPS.overlay, value: { entry: w.entry, note: w.note } };
+      return { ...base, ...(w.stamp ?? {}), op: STORY_OPS.overlay, value: { entry: w.entry, note: w.note } };
     }
     const item = w.item === null ? newItemId(w.part, first + i) : (given.get(w.item) ?? w.item);
     if (w.item === null && w.stand !== undefined) given.set(w.stand, item);
     items.push(item);
-    return { ...base, op: STORY_OPS.write, value: { part: w.part, item, value: w.value } };
+    return { ...base, ...(w.stamp ?? {}), op: STORY_OPS.write, value: { part: w.part, item, value: w.value } };
   });
   const u = store.user(writer.user);
   const target = u.writeTarget({ chat: writer.chat, turn: writer.turn, job: writer.job });
