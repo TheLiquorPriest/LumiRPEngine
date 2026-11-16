@@ -1,0 +1,290 @@
+// Storage (plan §14, §5.1, §5.5): what RPE keeps and how much, on disk and in the database: each kind with how
+// many, how big, the oldest, how long it is kept (the setting that decides it opens on Settings) and when he last
+// pruned; every chat, a page at a time, with its folder by area and its rows of the database; the notes agents
+// lean on, each opening on Files; the backups and copies of the database; and pruning on request, told first
+// exactly what will go and what stays, then taken on his yes. What RPE refuses is shown in its words.
+
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { BackupShown, ChatStorageRow, StorageKindRow, StoragePruneAsk } from "../../../shared/api";
+import { useApp } from "../../app";
+import { Badge, Banner, Button, Fold, PageHeader, Row, Section } from "../../atoms";
+import type { PageEntry } from "../../page-entry";
+import { useUiSetting } from "../../ui-settings";
+import { bytesWords, counted, when } from "../../words";
+import { NO_STORAGE, type PruneShown, type StorageControl, storageCalls, storageControl, type StorageShown } from "./model";
+
+export { NO_STORAGE, storageCalls, storageControl } from "./model";
+export type { StorageShown } from "./model";
+
+const KIND_WORDS: Readonly<Record<string, string>> = {
+  notes: "Agents' notes",
+  "note-versions": "Versions of notes",
+  suggestions: "Suggestions",
+  "turn-folders": "Turn folders kept whole",
+  "turn-folders-pruned": "Turn folders pruned to what stays",
+  sessions: "Session files",
+  yours: "Your own files",
+  shipped: "The shipped level",
+  database: "The database",
+  "migration-backups": "The migration's backups",
+  "database-copies": "Copies of the database taken before a migration",
+  archives: "Archives rpe backup made",
+};
+
+function KeptWords(props: { row: StorageKindRow; onSetting(key: string): void }) {
+  const { kept } = props.row;
+  if (kept.by === "never") return <span>kept for good</span>;
+  if (kept.by === "chat") return <span>kept until its chat is deleted or you prune it</span>;
+  return (
+    <span>
+      {kept.value === null ? "all of it kept" : `the newest ${kept.value} kept`} by{" "}
+      <Button small kind="ghost" onClick={() => props.onSetting(kept.setting)}>
+        {kept.setting}
+      </Button>
+    </span>
+  );
+}
+
+function KindsSection(props: { shown: StorageShown; onSetting(key: string): void }) {
+  const { kinds, kindsProblem } = props.shown;
+  return (
+    <Section title="What RPE keeps" id="kinds">
+      {kindsProblem === null ? null : (
+        <Banner tone="neg" icon="alert" title="The kinds could not be read">
+          <span>{kindsProblem}</span>
+        </Banner>
+      )}
+      {kinds === null ? (
+        kindsProblem === null ? (
+          <p class="lre-muted rpe-line">Reading what RPE keeps…</p>
+        ) : null
+      ) : (
+        <div class="lre-stack" data-kinds>
+          {kinds.kinds.map((row) => (
+            <div key={row.kind} class="rpe-entry" data-kind={row.kind}>
+              <Row label={KIND_WORDS[row.kind] ?? row.kind} value={`${counted(row.count, "item")} · ${bytesWords(row.bytes)}`} sub={row.oldest === null ? undefined : `the oldest from ${when(row.oldest)}`} />
+              <p class="rpe-meta">
+                <KeptWords row={row} onSetting={props.onSetting} />
+              </p>
+            </div>
+          ))}
+          <p class="rpe-meta">{kinds.lastPrune === null ? "You have never pruned." : `You last pruned on ${when(kinds.lastPrune)}.`}</p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** One chat: its folder by area, its rows of the database, and what can be done with it. */
+function ChatLine(props: { chat: ChatStorageRow; open: boolean; onNotes(chat: string | null): void; onPrune(ask: StoragePruneAsk, title: string): void }) {
+  const { chat } = props;
+  const deleted = chat.deleted != null;
+  return (
+    <li class="lre-stack rpe-entry" data-chat={chat.chat}>
+      <Row label={chat.folder} value={bytesWords(chat.bytes)} sub={chat.rows === undefined ? undefined : `${bytesWords(chat.rows)} of the database`} />
+      <p class="rpe-meta">
+        Notes {bytesWords(chat.areas.notes)} · turns {bytesWords(chat.areas.turns)} · sessions {bytesWords(chat.areas.sessions)} · files {bytesWords(chat.areas.files)}
+        {chat.measured == null ? " · not measured yet; its sizes come at the next read" : ""}
+      </p>
+      {deleted ? <Badge tone="warn">Lumiverse deleted this chat</Badge> : null}
+      <div class="lre-inline rpe-wrap">
+        <Button small kind="ghost" current={props.open} onClick={() => props.onNotes(props.open ? null : chat.chat)}>
+          Its notes
+        </Button>
+        {deleted ? (
+          <Button small kind="danger" onClick={() => props.onPrune({ what: "chat", chat: chat.chat }, `What is left of the deleted chat ${chat.folder}`)}>
+            Prune what is left of it
+          </Button>
+        ) : (
+          <>
+            <Button small onClick={() => props.onPrune({ what: "turns", chat: chat.chat }, `Old turn folders of ${chat.folder}`)}>
+              Prune old turn folders
+            </Button>
+            <Button small kind="ghost" onClick={() => props.onPrune({ what: "sessions", chat: chat.chat }, `Closed sessions' files of ${chat.folder}`)}>
+              Prune closed sessions' files
+            </Button>
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function PruneQuestion(props: { prune: PruneShown; onConfirm(): void; onDismiss(): void }) {
+  const { prune } = props;
+  const plan = prune.done ?? prune.plan;
+  return (
+    <Banner tone={prune.done === null ? "warn" : "info"} icon={prune.done === null ? "alert" : "check"} title={prune.done === null ? `Prune: ${prune.title}` : "Pruned"}>
+      <div class="lre-stack" data-prune>
+        {prune.problem === null ? null : <span data-prune-problem>{prune.problem}</span>}
+        {plan === null ? (
+          prune.busy ? (
+            <span>Asking RPE what it would take…</span>
+          ) : null
+        ) : plan.files === 0 && plan.items.length === 0 ? (
+          <span>{prune.done === null ? "Nothing would go: nothing is old enough, or every turn and open session is still in use." : "It took nothing."}</span>
+        ) : (
+          <>
+            <span>
+              {prune.done === null ? "This would take" : "It took"} {counted(plan.files, "file")}, {bytesWords(plan.bytes)}:
+            </span>
+            <ul class="rpe-reports">
+              {plan.items.map((item) => (
+                <li key={`${item.kind}-${item.path}`}>
+                  {item.path} · {counted(item.files, "file")} · {bytesWords(item.bytes)}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <div class="lre-inline">
+          {prune.done === null && plan !== null && (plan.files > 0 || plan.items.length > 0) ? (
+            <Button kind="danger" busy={prune.busy} onClick={props.onConfirm}>
+              Yes, prune exactly that
+            </Button>
+          ) : null}
+          <Button kind="ghost" onClick={props.onDismiss}>
+            {prune.done === null ? "No" : "Close"}
+          </Button>
+        </div>
+      </div>
+    </Banner>
+  );
+}
+
+function BackupsSection(props: { backups: readonly BackupShown[]; onPrune(ask: StoragePruneAsk, title: string): void }) {
+  if (props.backups.length === 0) return null;
+  return (
+    <Section title="Backups and copies of the database" id="backups">
+      <ul class="rpe-plain lre-stack">
+        {props.backups.map((b) => (
+          <li key={b.name} class="rpe-entry" data-backup={b.name}>
+            <Row label={b.name} value={bytesWords(b.bytes)} sub={`${b.kind === "copy" ? "a copy taken before a migration" : b.kind === "archive" ? "an archive rpe backup made" : "the migration's backup"} · ${when(b.at)}`} />
+            <Button small kind="ghost" onClick={() => props.onPrune({ what: "backup", name: b.name }, `The backup ${b.name}`)}>
+              Prune it
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+export interface StorageViewProps {
+  shown: StorageShown;
+  onSetting(key: string): void;
+  onMore(): void;
+  onNotes(chat: string | null): void;
+  onOpenFile(chat: string, path: string): void;
+  onPrune(ask: StoragePruneAsk, title: string): void;
+  onConfirm(): void;
+  onDismiss(): void;
+}
+
+export function StorageView(props: StorageViewProps) {
+  const { shown } = props;
+  const totals = shown.chats;
+  return (
+    <div class="lre-stack rpe-page" data-page="storage">
+      <PageHeader title="Storage" sub="What RPE keeps, how much, and for how long." />
+      {shown.prune === null ? null : <PruneQuestion prune={shown.prune} onConfirm={props.onConfirm} onDismiss={props.onDismiss} />}
+      <KindsSection shown={shown} onSetting={props.onSetting} />
+      <Section title="Everything" id="totals">
+        {totals === null ? (
+          <p class="lre-muted rpe-line">Reading what the tree takes…</p>
+        ) : (
+          <div>
+            <Row label="Your own level" value={bytesWords(totals.global)} sub={`${bytesWords(totals.globalNotes)} of it notes every chat's agents read`} />
+            <Row label="The shipped level" value={bytesWords(totals.shipped)} />
+            <Row label="The database" value={bytesWords(totals.database)} sub={totals.rest === undefined ? undefined : `${bytesWords(totals.rest)} of it is no chat's`} />
+          </div>
+        )}
+      </Section>
+      <Section title="Chat by chat" id="chats">
+        {shown.problem === null ? null : (
+          <Banner tone="neg" icon="alert" title="The chats could not be read">
+            <span>{shown.problem}</span>
+          </Banner>
+        )}
+        {totals === null ? null : totals.chats.length === 0 ? (
+          <p class="lre-muted rpe-line">RPE keeps no chat's files.</p>
+        ) : (
+          <ul class="rpe-plain lre-stack" data-chats>
+            {totals.chats.map((chat) => (
+              <ChatLine key={chat.chat} chat={chat} open={shown.chat === chat.chat} onNotes={props.onNotes} onPrune={props.onPrune} />
+            ))}
+          </ul>
+        )}
+        {shown.more ? (
+          <Button busy={shown.loading} onClick={props.onMore}>
+            More chats
+          </Button>
+        ) : null}
+      </Section>
+      {shown.chat === null ? null : (
+        <Section title="The notes agents lean on" id="notes">
+          {shown.notesProblem === null ? null : (
+            <Banner tone="neg" icon="alert" title="The notes could not be read">
+              <span>{shown.notesProblem}</span>
+            </Banner>
+          )}
+          {shown.notes === null ? (
+            shown.notesProblem === null ? (
+              <p class="lre-muted rpe-line">Reading its notes…</p>
+            ) : null
+          ) : (
+            <div class="lre-stack" data-notes>
+              {([["The largest", shown.notes.largest], ["The most rewritten", shown.notes.rewritten]] as const).map(([title, list]) => (
+                <Fold key={title} open summary={title}>
+                  <ul class="rpe-plain lre-stack">
+                    {list.length === 0 ? <li class="lre-muted rpe-line">None.</li> : null}
+                    {list.map((note) => (
+                      <li key={note.path} data-note={note.path}>
+                        <Button small kind="ghost" onClick={() => props.onOpenFile(shown.chat as string, note.path)}>
+                          {note.path}
+                        </Button>
+                        <span class="rpe-meta">
+                          {" "}
+                          {bytesWords(note.bytes)} · written {counted(note.writes, "time")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </Fold>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+      <BackupsSection backups={shown.backups?.items ?? []} onPrune={props.onPrune} />
+    </div>
+  );
+}
+
+export function StoragePage() {
+  const app = useApp();
+  const [shown, setShown] = useState<StorageShown>(NO_STORAGE);
+  const [control, setControl] = useState<StorageControl | null>(null);
+  const perPage = useUiSetting("chatsAtATime");
+  const limit = useRef(perPage);
+  limit.current = perPage;
+  useEffect(() => {
+    const made = storageControl(storageCalls(app.client), () => limit.current, setShown);
+    setControl(made);
+    return () => made.stop();
+  }, []);
+  return (
+    <StorageView
+      shown={shown}
+      onSetting={(key) => app.go({ page: "settings", chat: app.route.get().chat ?? null, at: [key] })}
+      onMore={() => control?.more()}
+      onNotes={(chat) => control?.notes(chat)}
+      onOpenFile={(chat, path) => app.go({ page: "files", chat, at: [path] })}
+      onPrune={(ask, title) => control?.ask(ask, title)}
+      onConfirm={() => control?.confirm()}
+      onDismiss={() => control?.dismiss()}
+    />
+  );
+}
+
+export const entry: PageEntry = { id: "storage", title: "Storage", icon: "box", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 120, render: () => <StoragePage /> };

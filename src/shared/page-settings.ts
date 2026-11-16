@@ -31,6 +31,7 @@ export const PAGE_SETTING_DEFS = {
   turnsAtATime: { key: "pages.turnsAtATime", default: 30, least: 1, most: 500, name: "Turns read at a time", about: "Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500)." },
   folderEntries: { key: "pages.folderEntries", default: 200, least: 10, most: 1000, name: "Files shown per page of a folder", about: "Entries of a folder the Files page reads from RPE at a time; more are read on request." },
   filePieceBytes: { key: "pages.filePieceBytes", default: 65_536, least: 1024, most: 4_194_304, name: "Bytes of a file read per piece", about: "Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked." },
+  chatsAtATime: { key: "pages.chatsAtATime", default: 50, least: 1, most: 500, name: "Chats read at a time on Storage", about: "Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take." },
 } as const satisfies Record<string, PageSettingDef>;
 
 /** The page's settings by the name the page reads each under; every value is a whole number: milliseconds, or a count where the setting's words say so. */

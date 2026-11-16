@@ -104,6 +104,7 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.turnsAtATime` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns read at a time: Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500). |
 | `pages.folderEntries` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Files shown per page of a folder: Entries of a folder the Files page reads from RPE at a time; more are read on request. |
 | `pages.filePieceBytes` | `65536` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Bytes of a file read per piece: Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked. |
+| `pages.chatsAtATime` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chats read at a time on Storage: Chats the Storage page reads from RPE at a time, each with what its folder and its rows of the database take. |
 
 ## The store
 
