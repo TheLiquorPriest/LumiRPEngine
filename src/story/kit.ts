@@ -9,7 +9,7 @@ import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolRes
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { writtenTime } from "../engine/time";
-import { described, faultAnswer, Reply, type Writes } from "../iface/kit";
+import { described, faultAnswer, type LastUseKeeper, lastUse, Reply, type Writes } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
 import { type Fields, type GuidanceFiles, Lines, textOf, toolText } from "../iface/texts";
 import { clockRecorded, JoinedTurnError, type Store, StoreInputError, type StoreState, type TreeView } from "../store";
@@ -61,6 +61,8 @@ export interface StoryDeps {
   overlay: LoreOverlay;
   /** Settings over `STORY_DEFAULTS`. */
   settings?: Partial<StorySettings>;
+  /** Keeps the values each line a call said was filled with, as the answers part's last use in the call's chat (the Prompts preview reads them). Absent: none is kept. */
+  lastUse?: LastUseKeeper;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */
   now?: () => number;
 }
@@ -116,7 +118,10 @@ export async function storyHostTool(spec: StoryToolSpec, lines: Lines, deps: Sto
       // A job of no chat has no chat's story to work on: said in the answers' words, nothing read or written.
       const { scope } = ctx;
       if (scope.chat === undefined) return new Reply(lines).line("no_chat_run", { tool: spec.name }).fail().result();
-      const call: StoryCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines, reply: () => new Reply(lines) };
+      // Each line the call says is told to the chat's keeper as the answers part's last use there, once the call is over.
+      const use = lastUse(lines, deps.lastUse, scope, STORY_ANSWERS);
+      const said = use.lines;
+      const call: StoryCall = { scope, agent: ctx.agent, callId: ctx.callId, signal: ctx.signal, tool: spec.name, deps, settings, lines: said, reply: () => new Reply(said) };
       try {
         return (await spec.run(given, call)).result();
       } catch (error) {
@@ -124,7 +129,9 @@ export async function storyHostTool(spec: StoryToolSpec, lines: Lines, deps: Sto
         // A turn joined to another, met unresolved: told as the fact, nothing read or written. Input the store cannot read: told in the story's words.
         if (error instanceof JoinedTurnError) return call.reply().line("turn_joined", { turn: error.turn, joined: error.joined }).fail().result();
         if (error instanceof StoreInputError) return call.reply().line("store_unread", { why: error.message }).line("nothing_recorded", {}).fail().result();
-        return faultAnswer(lines, spec.name, error, deps.store.env.failed, ctx.scope.turn ?? "");
+        return faultAnswer(said, spec.name, error, deps.store.env.failed, ctx.scope.turn ?? "");
+      } finally {
+        await use.keep();
       }
     },
   };

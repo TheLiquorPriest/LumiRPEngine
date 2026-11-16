@@ -359,6 +359,17 @@ describe("story_record", () => {
   });
 });
 
+describe("the story answers' last use", () => {
+  test("each line a call says is kept with its fields as the story answers part's last use in the call's chat, and another chat has none", async () => {
+    const kept = new Map<string, Record<string, JsonObject>>();
+    const b = await bench({ lastUse: (scope, part, lines) => void kept.set(`${scope.chat}/${part}`, { ...(kept.get(`${scope.chat}/${part}`) ?? {}), ...lines }) });
+    const r = await b.call("story_query", { id: "th-999" });
+    expect(r.error).toBe(true);
+    expect(kept.get(`${CHAT}/story-answers`)?.unknown_id).toMatchObject({ id: expect.stringContaining("th-999") });
+    expect(kept.get("chat-b/story-answers")).toBeUndefined();
+  });
+});
+
 describe("a beat and the quests it moved", () => {
   test("is tied to the quest's ref, one that names no quest keeps its words and says so, and story_query finds the beats by quest", async () => {
     const b = await bench();
