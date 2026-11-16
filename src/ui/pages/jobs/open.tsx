@@ -14,6 +14,8 @@ import { useSelect } from "../../store";
 import { AgentTree } from "../../trace-view";
 import { counted, errorWords, num, tokenWords, when } from "../../words";
 import { type AgentWindow, CallsLine, WindowGauge } from "../usage";
+import { BootstrapAsk } from "./bootstrap";
+import { BootstrapBrief, isBootstrapJob } from "./bootstrap-mark";
 import { cancellable, JOB_STATE_WORDS } from "./words";
 import { limitsOf } from "./start";
 
@@ -59,6 +61,7 @@ export function JobOpen(props: JobOpenProps) {
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [word, setWord] = useState("");
   const can = controlsOf(job);
+  const bootstrap = isBootstrapJob(job);
   const press = (what: string, go: () => Promise<JobView | null>, done: string): void => {
     if (busy !== null) return;
     setBusy(what);
@@ -88,7 +91,7 @@ export function JobOpen(props: JobOpenProps) {
         </Button>{" "}
         <span class="rpe-meta">{chat === "~jobs" ? "no chat" : `chat ${chat}`}</span>
       </p>
-      <p class="rpe-line" data-brief>{job.brief}</p>
+      {bootstrap ? <BootstrapBrief job={job} /> : <p class="rpe-line" data-brief>{job.brief}</p>}
       <p class="rpe-meta">
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
         {job.repeats === undefined ? "" : ` · it starts again job ${job.repeats}`}
@@ -130,6 +133,7 @@ export function JobOpen(props: JobOpenProps) {
           <span data-problem>{problem}</span>
         </Banner>
       )}
+      {can.answer && bootstrap && typeof job.scope.chat === "string" ? <BootstrapAsk chat={job.scope.chat} job={job} stamp={props.stamp} onChanged={props.onChanged} /> : null}
       <div class="lre-inline rpe-wrap" data-controls>
         {can.cancel ? (
           <Button small kind="danger" busy={busy === "cancel"} onClick={() => press("cancel", () => app.client.call("POST /api/v1/jobs/:job/cancel", { job: job.id }).then((a) => a.job), "Cancelled.")}>
@@ -161,7 +165,7 @@ export function JobOpen(props: JobOpenProps) {
             Pause
           </Button>
         ) : null}
-        {can.answer ? (
+        {can.answer && !bootstrap ? (
           <>
             <Button small busy={busy === "on"} onClick={() => press("on", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "on" } }).then((a) => a.job), "It goes on.")}>
               Go on

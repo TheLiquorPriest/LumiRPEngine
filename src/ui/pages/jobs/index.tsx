@@ -10,6 +10,7 @@ import { Badge, Banner, Button, Pre, Section } from "../../atoms";
 import { type RpeClient, walk } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { errorWords, num, tokenWords, when } from "../../words";
+import { BootstrapBrief, BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
 import { JobsPage } from "./page";
 import { cancellable, JOB_STATE_WORDS } from "./words";
 
@@ -77,6 +78,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
       <div class="lre-inline rpe-wrap">
         <span class="rpe-strong">{job.agent}</span>
         <Badge tone={state.tone}>{state.words}</Badge>
+        {isBootstrapJob(job) ? <BootstrapMark job={job} /> : null}
         {props.withChat ? <span class="rpe-meta">chat {job.scope.chat}</span> : null}
         {cancellable(job) ? (
           <Button small kind="ghost" busy={shown.cancelling === job.id} onClick={() => props.onCancel(job.id)}>
@@ -84,7 +86,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
           </Button>
         ) : null}
       </div>
-      <p class="rpe-line">{job.brief}</p>
+      {isBootstrapJob(job) ? <BootstrapBrief job={job} /> : <p class="rpe-line">{job.brief}</p>}
       <span class="rpe-meta">
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
       </span>

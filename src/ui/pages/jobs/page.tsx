@@ -10,6 +10,8 @@ import { walk } from "../../client";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, cut, tokenWords, when } from "../../words";
+import { BootstrapPart } from "./bootstrap";
+import { BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
 import { JobOpen } from "./open";
 import { StartSection } from "./start";
 import { SwitchesSection } from "./switches";
@@ -38,11 +40,14 @@ function JobLine(props: { job: JobView; open: boolean; withChat: boolean; onOpen
           <span class="lre-listrow-text">
             <span class="lre-listrow-title">{job.agent}</span>
             <span class="lre-listrow-sub">
-              {cut(job.brief, briefChars)} · {when(job.started)} · {counted(job.usage.calls, "call")} · {tokenWords(job.usage)}
+              {isBootstrapJob(job) ? "the bootstrap skill's text" : cut(job.brief, briefChars)} · {when(job.started)} · {counted(job.usage.calls, "call")} · {tokenWords(job.usage)}
               {props.withChat && chatOfJob(job) !== null ? ` · chat ${chatOfJob(job)}` : ""}
             </span>
           </span>
-          <Badge tone={state.tone}>{state.words}</Badge>
+          <span class="lre-inline">
+            {isBootstrapJob(job) ? <BootstrapMark job={job} /> : null}
+            <Badge tone={state.tone}>{state.words}</Badge>
+          </span>
         </span>
       </button>
     </li>
@@ -88,6 +93,7 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
         <div class="rpe-files-browser lre-stack">
           <StartSection chat={chat} onStarted={(job) => (setChanged((held) => new Map(held).set(job.id, job)), setStamp((n) => n + 1), go(job.id))} />
           <SwitchesSection reload={stamp} onChanged={() => setStamp((n) => n + 1)} onSetting={(key) => app.go({ page: "settings", chat, at: [key] })} />
+          <BootstrapPart chat={chat} />
           <div class="lre-inline rpe-wrap">
             {chat === null ? null : (
               <>
