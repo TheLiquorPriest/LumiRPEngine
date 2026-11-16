@@ -30,7 +30,8 @@ import { resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
 import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { clockFix } from "../engine/time";
+import { applyMarker, TIME_CONTROLS, validMarkerBody } from "../engine/events";
+import { clockFix, pauseBookkeeping } from "../engine/time";
 import { currentStage } from "../engine/tracks";
 import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
 import { Working } from "../engine/working";
@@ -38,7 +39,7 @@ import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
-import type { FixOp, LedgerEvent } from "../shared/ledger";
+import type { FixOp, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage";
 import type { ErrorCode, ErrorMessage, FrontendToBackend, ResultBodies, ResultMessage } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
@@ -47,6 +48,7 @@ import { type ItemFix, parseItemFix } from "../shared/things";
 import type { ParamDef, WorldDoc } from "../shared/world";
 import { type ChangeRow, factStore, JoinedTurnError, readPart, type Report, type Store } from "../store";
 import { FACT_ABOUT } from "../store/facts";
+import { STORE_OPS } from "../store/types";
 import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import { editId, type Head, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
@@ -302,6 +304,15 @@ export class PlayService {
           if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
           return reply(r, "lre.chat.knowledge", { knowledge: null, narrator: null });
         }
+        case "lre.marker": {
+          // The HUD's Pause clock and Resume clock, and the other time controls today's time marker carries, each his own edit at
+          // once; a preview, and any other marker, is not served.
+          if (r.kind !== "time" || r.preview === true) throw new Refused("unavailable", { line: "other", fields: { type: r.type } });
+          const body = validMarkerBody({ kind: "time", control: r.control, scope: r.scope, to: r.to });
+          if (body === null || body.kind !== "time" || !TIME_CONTROLS.some((c) => c === body.control)) throw new Refused("bad_request", { line: "bad_marker" });
+          await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.timeMarker(head, body));
+          return reply(r, "lre.marker", { pending: false });
+        }
         case "lre.chip":
           throw new Refused("unavailable", { line: "plays_now" });
         case "lre.things":
@@ -460,6 +471,18 @@ export class PlayService {
     const edit = resolveEdit(registry, world, state, ops as unknown as FixOp[], { gm: true, runSeed: seed, opened: true });
     if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
     return played(edit.events);
+  }
+
+  /**
+   * A time control of his, recorded as today's time marker (the HUD's Pause clock and Resume clock among them): a pause holds the
+   * clock in the scene it is pressed in and is lifted by a change of scene (DESIGN §9.2), so it is pinned to that scene at once, as
+   * today's turn pinned it, and a resume clears the pin.
+   */
+  private timeMarker({ world, state }: Head, body: Extract<MarkerBody, { kind: "time" }>): Resolved {
+    const after = structuredClone(state) as WorldState;
+    applyMarker(after, body);
+    const pin = pauseBookkeeping(world, after).map((e) => ({ op: e.type, value: e as unknown as JsonValue }));
+    return { opened: [], events: [], store: [{ op: STORE_OPS.marker, value: body as unknown as JsonValue }, ...pin] };
   }
 
   /**
