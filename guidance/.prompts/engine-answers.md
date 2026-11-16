@@ -61,7 +61,6 @@ wants_object_or_null: an object, or null
 wants_day: a whole number of days from today: 0 today, 1 tomorrow, -1 yesterday
 time_from_now: {{#ahead}}{{ahead}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} from now{{/ahead}}{{#ago}}{{ago}} {{#one}}minute{{/one}}{{^one}}minutes{{/one}} before now{{/ago}}{{#now}}the time now{{/now}}
 not_applicable: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine cannot apply this ({{code}}){{#reason}}: {{reason}}{{/reason}}.{{#choices}} It is one of: {{choices}}.{{#records}} Whatever the story meant by it, the {{records}} operation records it as given.{{/records}}{{/choices}}
-not_open: Operation {{n}} ({{op}}): {{what}} is {{status}}, and the books take no money out of an account that is not open, on any path.
 nothing_recorded: Nothing was recorded. Send the call again with that put right.
 outside_list: Operation {{n}} ({{op}}): {{field}} {{value}} is not one of what a {{field}} can hold: {{choices}}. Whatever you meant by it, the {{records}} operation records it as given.
 never: Operation {{n}} ({{op}}) was not applied: it writes to the {{lane}} lane, where the player allows no writes.
@@ -143,6 +142,7 @@ wants_block_value: an object for one block of the routine (a label, an activity,
 wants_schedule_value: an object, either {"off": true, "until": a time or null} or its own slots as a list of {start, end} times (HH:MM) with an optional recurrence {every}, or null to put the world's schedule back.
 no_weather_region: Operation {{n}} ({{op}}): {{where}} has no weather region of its own, so {{state}} was kept on the place itself; the places inside it take it unless they have theirs.
 weather_state_unlisted: Operation {{n}} ({{op}}): the climate lists no state {{state}}; it was recorded as given. Its states are {{states}}.
+no_accounts: Operation {{n}} ({{op}}): {{what}} has no accounts in the world, so the cash was recorded as given, as the cash they carry; no account was opened and no sum made up.
 odds_no_roll: No roll is needed.
 odds_impossible: Too hard to try.
 odds_story: The story decides{{#chance}}, with odds of {{chance}}%{{/chance}}.
