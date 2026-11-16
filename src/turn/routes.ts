@@ -28,6 +28,7 @@ import type { RunRecord } from "./runs";
 import { turnSettings } from "./settings";
 import { givenRoutes } from "./given-routes";
 import { liveRoutes } from "./live-routes";
+import { rulesRoutes } from "./rules-routes";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
 import { stateRoutes } from "./state-routes";
@@ -543,5 +544,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     ...stateRoutes(turns),
     ...givenRoutes(turns),
     ...liveRoutes(turns),
+    ...rulesRoutes(turns),
   ] as const;
 }

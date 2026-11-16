@@ -20,7 +20,7 @@
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
-import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import { type App, LIVE_JOBS } from "../app";
@@ -45,6 +45,7 @@ import { JOB_KIND } from "./jobs";
 import { kvStore, servedUser, storeUsers } from "./kv";
 import { PROMPT_MAP_FILE, PROMPT_MAP_FILENAME, type TurnPrompts, turnPrompts } from "./prompt";
 import { TurnMarks } from "./marks";
+import { FOLDER_KIND } from "./live-routes";
 import { Requests, REQUESTS_KIND } from "./requests";
 import { Runs } from "./runs";
 import { stateSearcher, storySearcher } from "./searchers";
@@ -62,9 +63,10 @@ import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./tur
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
  * be set after the lane is built: before one is set every call is refused, and the tree's own port
  * refuses a scope of anyone else, an empty user's included. A pattern that parses is never refused for
- * being slow (R-55): the tree's grep stops a slow one itself, under `files.grepMs`.
+ * being slow (R-55): the tree's grep stops a slow one itself, under `files.grepMs`. Each file written
+ * is told to `written`, so a turn's folder growing is told live.
  */
-function servedFiles(owner: () => string | null, make: (user: string) => TreeFiles): TreeFiles {
+function servedFiles(owner: () => string | null, make: (user: string) => TreeFiles, written: (scope: Scope | UserScope, path: string) => void): TreeFiles {
   let made: { user: string; files: TreeFiles } | null = null;
   const now = (): TreeFiles => {
     const user = servedUser(owner);
@@ -76,8 +78,16 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
     places: async (scope) => now().places(scope),
     read: async (scope, path, range) => now().read(scope, path, range),
     find: async (scope, query) => now().find(scope, query),
-    write: async (scope, path, op, by) => now().write(scope, path, op, by),
-    update: async (scope, path, change) => now().update(scope, path, change),
+    write: async (scope, path, op, by) => {
+      const out = await now().write(scope, path, op, by);
+      if (out.status === "written") written(scope, out.path);
+      return out;
+    },
+    update: async (scope, path, change) => {
+      const out = await now().update(scope, path, change);
+      if (out.status === "written") written(scope, out.path);
+      return out;
+    },
     turnDisk: async (scope) => now().turnDisk(scope),
     sessionDisk: async (scope) => now().sessionDisk(scope),
   };
@@ -225,20 +235,26 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
   const notes = new TreeNotes({ files: app.paths.files, db: app.db, writes: app.writes, chats });
   const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now(), limits: (user, chat) => chats.suggestionLimits(user, chat) });
-  const files = servedFiles(owner, (user) =>
-    treeFiles({
-      files: app.paths.files,
-      user,
-      chats,
-      // A grep's pattern runs on the worker pool, ended at `files.grepMs` even inside one line.
-      workers: app.workers,
-      async turnFolder(scope) {
-        const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
-        return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);
-      },
-      writes: app.writes,
-      now: () => clock.now(),
-    }),
+  // A file written with a turn named is told on the chat's live socket, so the Live page shows the turn's folder as it is written.
+  const files = servedFiles(
+    owner,
+    (user) =>
+      treeFiles({
+        files: app.paths.files,
+        user,
+        chats,
+        // A grep's pattern runs on the worker pool, ended at `files.grepMs` even inside one line.
+        workers: app.workers,
+        async turnFolder(scope) {
+          const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
+          return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);
+        },
+        writes: app.writes,
+        now: () => clock.now(),
+      }),
+    (scope, path) => {
+      if ("chat" in scope && scope.turn !== undefined) FOLDER_KIND.publish(app.live, scope.chat, { turn: scope.turn, path });
+    },
   );
   // Each chat's PROMPT-MAP.md, laid out by the part `prompt-map-file` in force for the chat; switched off, none is written.
   const generated = new GeneratedFiles({ files: app.paths.files, chats });
