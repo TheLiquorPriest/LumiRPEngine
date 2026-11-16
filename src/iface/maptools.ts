@@ -35,8 +35,8 @@ import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type Call, ty
 import { editMap, type Stroke } from "./map/edit";
 import { type Fixture, fixtureAt } from "./map/fixture";
 import { MAP_DEFAULTS, METRES_PER_FOOT, type MapConfig } from "../shared/map-config";
-import { between, burst, cone, line, sees, within, type Spot } from "../packs/space/core/grid-measure";
-import { doorState, indexOf, lift, moveTime, place, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
+import { between, burst, cone, coverOf, cube, line, sees, within, type Spot } from "../packs/space/core/grid-measure";
+import { doorState, indexOf, lift, moveTime, place, runsOf, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
 import { move, walk } from "../packs/space/core/grid-path";
 import { idFrom, layForPlace, layOverSquare, plainRows, type Laid, type Laying, type Named } from "./map/lay";
 import { beside, inZone, softPositions, stackedOn } from "./map/moves";
@@ -58,7 +58,7 @@ const SPOT: JsonObject = { anyOf: [TEXT, SQUARE] };
 const SQUARES: JsonObject = { type: "array", items: SQUARE };
 const TWO_SQUARES: JsonObject = { type: "array", items: SQUARE, minItems: 2, maxItems: 2 };
 
-const AREAS = ["burst", "cone", "line"] as const;
+const AREAS = ["burst", "cone", "line", "cube"] as const;
 const BLOCKS = ["way", "view", "both", "none"] as const;
 type Blocks = (typeof BLOCKS)[number];
 
@@ -313,7 +313,7 @@ const measure: ReadDef = {
     if (area !== undefined && area !== null && !(AREAS as readonly unknown[]).includes(area)) return { line: "unreadable", fields: { field: "area", value: JSON.stringify(area), choices: textOf(AREAS) } };
     const size = args.size;
     if (area !== undefined && area !== null && !(typeof size === "number" && Number.isInteger(size) && size >= 0)) return { line: "needs_field", fields: { field: "size" } };
-    const aimed = area === "cone" || area === "line" ? spotOn(say, layers, "toward", args.toward ?? undefined, named("toward")) : undefined;
+    const aimed = area === "cone" || area === "line" || area === "cube" ? spotOn(say, layers, "toward", args.toward ?? undefined, named("toward")) : undefined;
     if (aimed !== undefined && isUnread(aimed)) return aimed;
     if (to === undefined && (range === undefined || range === null) && (area === undefined || area === null)) return { line: "needs_any", fields: { fields: ["to", "within", "area"] } };
     // What can be measured is: someone on no square is said to be, with where they are kept, and what depends on their square is left out.
@@ -340,21 +340,27 @@ const measure: ReadDef = {
         const way = walk(drawn, moving, start.square, end.square, start.id, end.id);
         reply.line("measure_distance", { from: fromText, to: toText, squares, far: farText(call.lines, drawn, squares) });
         reply.line(seen ? "measure_sees" : "measure_blind", { from: fromText, to: toText });
+        // What stands between them: the cover the one has from the other, by the rule in force.
+        const cover = coverOf(drawn, moving, spot(start), spot(end));
+        const by = (cover?.by ?? []).map((b) => (own(say.state.entities, b) !== undefined ? whoIs(say, b) : b));
+        if (cover) reply.line(cover.degree === "none" ? "measure_no_cover" : "measure_cover", { from: fromText, to: toText, degree: cover.degree, by: textOf(by) });
         const took = way ? moveTime(drawn.scale, way.cost, speed !== undefined && speed > 0 ? speed : undefined) : null;
         if (way && took) reply.line("measure_way", { from: fromText, to: toText, distance: way.distance, far: farText(call.lines, drawn, way.distance), cost: way.cost, time: timeText(say, took) });
         else reply.line("measure_no_way", { from: fromText, to: toText });
-        Object.assign(data, { to: atData(say, end), squares, distance: distanceData(drawn, squares), sees: seen, way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
+        Object.assign(data, { to: atData(say, end), squares, distance: distanceData(drawn, squares), sees: seen, ...(cover ? { cover: { degree: cover.degree, blocked: cover.blocked, of: 4, by } } : {}), way: way && took ? { squares: way.squares.map((s) => [...s]), distance: way.distance, cost: way.cost, ...tookData(took) } : null });
       }
       if (typeof range === "number") {
         const who = within(drawn, moving, spot(start), range).map((id) => whoIs(say, id));
         reply.line(who.length > 0 ? "measure_within" : "measure_within_none", { from: fromText, range, far: farText(call.lines, drawn, range), who });
         data.within = { range, who };
       }
-      if ((area === "burst" || ((area === "cone" || area === "line") && toward !== undefined)) && typeof size === "number") {
-        const covered = area === "burst" ? burst(drawn, moving, start.square, size) : area === "cone" ? cone(drawn, moving, start.square, toward?.square ?? start.square, size) : line(drawn, moving, start.square, toward?.square ?? start.square, size);
+      if ((area === "burst" || ((area === "cone" || area === "line" || area === "cube") && toward !== undefined)) && typeof size === "number") {
+        const aim = toward?.square ?? start.square;
+        const covered = area === "burst" ? burst(drawn, moving, start.square, size) : area === "cone" ? cone(drawn, moving, start.square, aim, size) : area === "line" ? line(drawn, moving, start.square, aim, size) : cube(drawn, moving, start.square, aim, size);
         const who = covered.who.map((id) => whoIs(say, id));
         reply.line("measure_area", { area, from: fromText, ...(toward ? { toward: spotText(say, toward.square, toward.id) } : {}), size, far: farText(call.lines, drawn, size), count: covered.squares.length, who: textOf(who) });
-        data.area = { kind: area, size, squares: covered.squares.map((s) => [...s]), who };
+        // The squares as runs by row, so a large area is no longer than the grid's rows.
+        data.area = { kind: area, size, count: covered.squares.length, runs: runsOf(covered.squares), who };
       }
     }
     if (lost.length > 0) data.unplaced = lost;

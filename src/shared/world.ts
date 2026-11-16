@@ -1206,6 +1206,10 @@ export interface RulesetDef {
   distances?: "feet" | "metres";
   /** How a diagonal step counts on the world's grids: as one square, or every second one in a row as two. Absent: the chat's setting (`map.diagonal`). */
   diagonal?: "one" | "alternate";
+  /** How an area counts on the world's grids (plan §8.2, R-160): where it starts (`corner`: at a point where squares meet; `middle`: at a square's middle) and the share of a square it must cover for the square to count (0 counts any it covers any of). Each part absent: the chat's setting (`map.areaStart`, `map.areaShare`). */
+  areas?: { start?: "corner" | "middle"; share?: number };
+  /** How cover counts on the world's grids: of the four lines from a corner of the attacker's square to the target's corners, how many blocked give half, three-quarters and total cover, and whether creatures obstruct. Each part absent: the chat's setting (`map.coverHalf`, `map.coverThreeQuarters`, `map.coverTotal`, `map.coverCreatures`). */
+  cover?: { half?: number; threeQuarters?: number; total?: number; creatures?: boolean };
   /** The profile the ruleset last started from (Build → Ruleset → Start from a profile), by id; nothing reads it as rules. */
   profile?: string;
 }

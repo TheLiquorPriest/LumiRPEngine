@@ -72,7 +72,7 @@ describe("placing on squares for the everyday operations", () => {
     const lines = await mapLines(shippedTexts());
     const { env, state } = stateOf(innWorld());
     const walled = gridMoves(lines).place({ state, env, who: "wren", place: "common_room", square: [1, 4] });
-    expect(walled).toEqual({ events: [{ type: "space.pos", data: { entity: "wren", at: { scope: "common_room", x: 0, y: 3 }, from: null } }], reports: [{ line: "grid_in_wall", fields: { what: "Wren [wren]", squares: ["(1,4)"] }, words: "Wren [wren] stands on (1,4), which block the way; it was put there all the same." }] });
+    expect(walled).toEqual({ events: [{ type: "space.pos", data: { entity: "wren", at: { scope: "common_room", x: 0, y: 3 }, from: null } }], reports: [{ line: "grid_in_wall", fields: { what: "Wren [wren]", squares: ["(1,4)"], count: 1 }, words: "Wren [wren] stands on (1,4), which block the way; it was put there all the same." }] });
     const crossed = gridMoves(lines).place({ state, env, who: "bram", place: "common_room", square: [11, 3] });
     expect("said" in crossed ? crossed.said : []).toEqual(["Bram [bram]: from (4,3) to (11,3) is 7 squares (35 ft), 7 squares of movement, 2 rounds, 12 seconds."]);
     // With the map's part switched off, nothing is said.

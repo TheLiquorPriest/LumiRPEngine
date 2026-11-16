@@ -46,7 +46,7 @@ describe("what moves", () => {
     const d = inn();
     const walled = place(d, NOTHING_MOVES, "bram", [5, 4]);
     expect(standsAt(walled.moving, "bram")).toEqual([5, 4]);
-    expect(walled.reports).toEqual([{ code: "in_wall", values: { what: "bram", squares: [[5, 4]] } }]);
+    expect(walled.reports).toEqual([{ code: "in_wall", values: { what: "bram", runs: [[4, 5, 5]], count: 1 } }]);
     const off = place(d, NOTHING_MOVES, "bram", [13, 2]);
     expect(standsAt(off.moving, "bram")).toBeNull();
     expect(off.reports[0]?.code).toBe("off_grid");

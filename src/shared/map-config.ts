@@ -10,6 +10,24 @@ export type Diagonal = (typeof DIAGONALS)[number];
 export const UNITS = ["feet", "metres"] as const;
 export type Unit = (typeof UNITS)[number];
 
+/** Where an area starts (a burst's middle, a cone's point, a line's end, a cube's face): at a point where squares meet, or at the middle of a square. */
+export const AREA_STARTS = ["corner", "middle"] as const;
+export type AreaStart = (typeof AREA_STARTS)[number];
+
+/** Where an area starts, and the share of a square it must cover for the square to count (a share of 0 counts any square it covers any of). */
+export interface AreaRule {
+  start: AreaStart;
+  share: number;
+}
+
+/** Cover (what stands between an attacker and a target): how many of the four lines between their corners, blocked, give half cover, three-quarters cover and total cover; and whether creatures obstruct. */
+export interface CoverRule {
+  half: number;
+  threeQuarters: number;
+  total: number;
+  creatures: boolean;
+}
+
 export const METRES_PER_FOOT = 0.3048;
 
 /** The map's settings for a chat. */
@@ -30,6 +48,18 @@ export interface MapConfig {
   distances: Unit;
   /** The world state prints the map's picture (§22 l.2120's remedy: off, the list carries the load). */
   picture: boolean;
+  /** Where an area starts, where the world's ruleset says nothing. */
+  areaStart: AreaStart;
+  /** The share of a square an area must cover for it to count, where the world's ruleset says nothing. */
+  areaShare: number;
+  /** Of the four lines between an attacker's corner and a target's corners, how many blocked give half cover, where the world's ruleset says nothing… */
+  coverHalf: number;
+  /** …three-quarters cover… */
+  coverThreeQuarters: number;
+  /** …and total cover. */
+  coverTotal: number;
+  /** Whether creatures obstruct the lines, where the world's ruleset says nothing. */
+  coverCreatures: boolean;
 }
 
 /** Appendix D.1: squares of 5 ft, rounds of 6 seconds, a map printed whole up to 40 by 30, a diagonal as one square, feet. */
@@ -43,4 +73,11 @@ export const MAP_DEFAULTS: Readonly<MapConfig> = Object.freeze({
   diagonal: "one",
   distances: "feet",
   picture: true,
+  // R-160: D&D's grid rules. An area starts where squares meet and counts a square it covers by half; one or two lines blocked of four are half cover, three three-quarters, four total, and creatures obstruct.
+  areaStart: "corner",
+  areaShare: 0.5,
+  coverHalf: 1,
+  coverThreeQuarters: 3,
+  coverTotal: 4,
+  coverCreatures: true,
 });

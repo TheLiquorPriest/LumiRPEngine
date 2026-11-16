@@ -131,13 +131,19 @@ export function squareGiven(v: unknown): Square | null {
   return Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 1) ? [Number(v[0]), Number(v[1])] : null;
 }
 
-/** A report of the grid's, its values worded: an id by its name, a square and a list of squares by the `spot` line. */
+/** Runs of squares by row (`[row, from, to]`) as the answers' words: a lone square as the `spot` line, a stretch as the `run` line. */
+export function runsText(say: Say, runs: readonly (readonly number[])[]): string[] {
+  return runs.map(([row = 0, from = 0, to = 0]) => (from === to ? spotText(say, [from, row]) : (say.lines.line("run", { row, from, to }) ?? "")));
+}
+
+/** A report of the grid's, its values worded: an id by its name, a square and a list of squares by the `spot` line, the runs of squares (`runs`) as `squares` by `runsText`. */
 export function reportFields(say: Say, values: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
     const square = squareGiven(v);
     const squares = Array.isArray(v) && v.length > 0 ? v.map(squareGiven) : [];
-    if (square) out[k] = spotText(say, square);
+    if (k === "runs" && Array.isArray(v)) out.squares = runsText(say, v as readonly (readonly number[])[]);
+    else if (square) out[k] = spotText(say, square);
     else if (squares.length > 0 && squares.every((s) => s !== null)) out[k] = squares.map((s) => spotText(say, s ?? [0, 0]));
     else if (typeof v === "string" && (own(say.state.entities, v) !== undefined || hasOwn(say.world.places, v))) out[k] = whoIs(say, v);
     else out[k] = v;

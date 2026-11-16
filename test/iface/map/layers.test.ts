@@ -19,7 +19,7 @@ const wording: MapWording = { lines: Lines.none(), layout: LAYOUT };
 function after(...events: LedgerEvent[]): StoreState {
   const w = new Working(reg, world, initialState(world, "r", reg));
   for (const e of events) expect(w.apply(e)).toBeNull();
-  return { world: w.state, horizon: [], notes: {}, touched: {}, marks: {}, facts: {} };
+  return { world: w.state, notes: {}, touched: {}, marks: {}, facts: {} };
 }
 
 describe("the map's two layers", () => {

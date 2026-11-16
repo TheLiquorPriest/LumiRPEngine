@@ -49,11 +49,14 @@ far_metres: {{amount}} m
 measure_distance: From {{from}} to {{to}}: {{squares}} squares, {{far}}.
 measure_sees: {{from}} and {{to}} can see each other.
 measure_blind: {{from}} and {{to}} cannot see each other: a wall, a door that is not open, or something that blocks the view is between them.
+measure_cover: {{to}} has {{degree}} cover from {{from}}{{#by}}, given by {{by}}{{/by}}.
+measure_no_cover: {{to}} has no cover from {{from}}.
 measure_way: The way from {{from}} to {{to}} is {{distance}} squares ({{far}}) and costs {{cost}} squares of movement: {{time}}.
 measure_no_way: There is no way from {{from}} to {{to}} as the map stands: walls, doors that are not open, or what blocks the way close it.
 measure_within: Within {{range}} squares ({{far}}) of {{from}}: {{who}}.
 measure_within_none: No one and nothing stands within {{range}} squares ({{far}}) of {{from}}.
 measure_area: The {{area}} from {{from}}{{#toward}} toward {{toward}}{{/toward}}, {{size}} squares ({{far}}), covers {{count}} squares.{{#who}} In it: {{who}}.{{/who}}
+run: columns {{from}} to {{to}} of row {{row}}
 piece_at: {{what}} stands at {{square}}.
 piece_walked: {{what}} walked from {{from}} to {{to}}: {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.
 way_taken: {{what}}: from {{from}} to {{to}} is {{distance}} squares ({{far}}), {{cost}} squares of movement, {{time}}.

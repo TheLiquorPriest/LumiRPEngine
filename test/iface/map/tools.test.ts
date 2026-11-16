@@ -208,7 +208,7 @@ describe("map_door and map_measure", () => {
     expect(zoned.error).toBeUndefined();
     await t.call("map_place", { at: "The Common Room", pieces: [{ who: "Wren", square: [3, 3] }, { who: "Bram", square: [4, 3] }], ...SRC });
     const said = async (name: string, args: JsonObject): Promise<string> => texts(await t.call(name, args))[0] ?? "";
-    expect(await said("map_measure", { from: "Wren", area: "square", size: 1 })).toBe('area cannot be read: you sent "square". It is one of: burst, cone, line.');
+    expect(await said("map_measure", { from: "Wren", area: "square", size: 1 })).toBe('area cannot be read: you sent "square". It is one of: burst, cone, line, cube.');
     expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Wren", blocks: "walls" }], ...SRC })).toBe('map_place: blocks cannot be read, you sent "walls". It is one of: way, view, both, none.');
     expect(await said("map_place", { at: "The Common Room", pieces: [{ who: "Tram", square: [2, 2] }], ...SRC })).toStartWith("map_place: there is nothing called Tram that is a person or a thing. Near: Bram [bram], Tam [tam]");
     expect(await said("map_door", { at: "The Common Room", door: [3, 3], state: "open", ...SRC })).toBe("map_door: there is no door at (3,3) on the map of The Common Room [common_room]. Its doors: (6,1), (12,5).");
@@ -216,8 +216,8 @@ describe("map_door and map_measure", () => {
     const bank = await t.call("map_place", { at: "The Far Road", pieces: [{ who: "Tam", zone: "bank" }], ...SRC });
     expect(bank.error).toBeUndefined();
     expect(bank.reports?.some((x) => x.includes("could not be put in bank") && x.includes("has no zone by that name"))).toBe(true);
-    const burst = await t.call("map_measure", { from: "Wren", area: "burst", size: 1 });
-    expect(texts(burst)).toContain("The burst from Wren (3,3), 1 squares (5 ft), covers 8 squares. In it: Bram [bram], Wren [wren].");
+    const burst = await t.call("map_measure", { from: "Wren", area: "burst", size: 2 });
+    expect(texts(burst)).toContain("The burst from Wren (3,3), 2 squares (10 ft), covers 9 squares. In it: Bram [bram], Wren [wren].");
     const edited = await t.call("map_edit", { at: "The Common Room", strokes: [{ symbol: "b", squares: [[2, 6]] }], legend: { b: { terrain: "bench", blocked: true }, s: { terrain: "straw" } }, ...SRC });
     expect(texts(edited)).toContain("1 squares of the map of The Common Room [common_room] were drawn anew, and its legend changed for b, s.");
   });
@@ -227,7 +227,7 @@ describe("map_door and map_measure", () => {
     await t.call("map_place", { at: "The Cellar", pieces: [{ who: "Odile", square: [2, 2] }, { who: "cask", square: [3, 4] }], ...SRC });
     const r = await t.call("map_measure", { from: "Odile", within: 2, area: "burst", size: 1 });
     expect(dataOf(r)).toMatchObject({ within: { range: 2, who: ["Cask of cider [cask]"] }, area: { kind: "burst", size: 1, who: ["Odile [odile]"] } });
-    expect(((dataOf(r).area as JsonObject).squares as unknown[]).length).toBe(4);
+    expect((dataOf(r).area as JsonObject).count).toBe(4);
     wordsFromFiles(r);
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { NOTHING_MOVES, place, setDoor, type Drawn, type Moving, type Piece, type Square } from "../../../src/packs/space/core/grid-model";
 import { MAP_DEFAULTS } from "../../../src/shared/map-config";
-import { between, burst, cone, distance, line, sees, within } from "../../../src/packs/space/core/grid-measure";
+import { between, burst, cone, coverOf, cube, distance, line, sees, within } from "../../../src/packs/space/core/grid-measure";
 import { CELLAR, drawn, HALL, INN, OPEN, PILLAR, SEALED } from "./fixtures";
 
 /** Where to stand: a square, or a square with a footprint and what it blocks. */
@@ -96,10 +96,10 @@ describe("line of sight", () => {
 });
 
 describe("areas", () => {
-  test("a burst of one square around the middle of open floor is the nine squares about it", () => {
+  test("a radius of one square about the point where four squares of open floor meet is the four about it", () => {
     const d = drawn(OPEN);
     const area = burst(d, stand(d, { wren: [2, 2], tam: [5, 5] }), [3, 3], 1);
-    expect(area.squares).toHaveLength(9);
+    expect(area.squares).toHaveLength(4);
     expect(area.who).toEqual(["wren"]);
   });
 
@@ -119,47 +119,64 @@ describe("areas", () => {
     expect(open.who).toEqual(["odile"]);
   });
 
-  test("a cone widens half a square each side for every square it runs", () => {
+  test("a cone of 15 ft widens half a square each side for every square it runs, and covers the squares half of which it covers", () => {
     const d = drawn(OPEN);
-    expect(cone(d, NOTHING_MOVES, [1, 3], [5, 3], 4).squares).toEqual([
-      [5, 1],
+    expect(cone(d, NOTHING_MOVES, [1, 3], [5, 3], 3).squares).toEqual([
       [3, 2],
       [4, 2],
-      [5, 2],
-      [2, 3],
       [3, 3],
       [4, 3],
-      [5, 3],
-      [3, 4],
-      [4, 4],
-      [5, 4],
-      [5, 5],
     ]);
   });
 
-  test("a line runs square by square to its length or the edge, and stops at a wall", () => {
+  test("a cube of 15 ft east of the origin is the block of three by three squares against its square", () => {
+    const d = drawn(OPEN);
+    expect(cube(d, NOTHING_MOVES, [1, 3], [5, 3], 3).squares).toEqual([
+      [2, 2],
+      [3, 2],
+      [4, 2],
+      [2, 3],
+      [3, 3],
+      [4, 3],
+      [2, 4],
+      [3, 4],
+      [4, 4],
+    ]);
+  });
+
+  test("a line runs to its length or the edge, a square wide from where it starts, and stops at a wall", () => {
     const d = drawn(OPEN);
     expect(line(d, NOTHING_MOVES, [1, 1], [5, 5], 3).squares).toEqual([
       [2, 2],
       [3, 3],
-      [4, 4],
     ]);
-    expect(line(d, NOTHING_MOVES, [1, 3], [2, 3], 10).squares).toEqual([
-      [2, 3],
-      [3, 3],
-      [4, 3],
-      [5, 3],
-    ]);
+    // From a point where squares meet, a line along a row's edge covers half of each row beside it: both count.
+    expect(line(d, NOTHING_MOVES, [1, 3], [2, 3], 10).squares).toHaveLength(8);
     const cellar = drawn(CELLAR);
     expect(line(cellar, setDoor(cellar, NOTHING_MOVES, [5, 3], "closed").moving, [2, 3], [8, 3], 6).squares).toEqual([
+      [3, 2],
+      [4, 2],
       [3, 3],
       [4, 3],
     ]);
-    expect(line(cellar, NOTHING_MOVES, [2, 3], [8, 3], 6).squares).toHaveLength(6);
+    expect(line(cellar, NOTHING_MOVES, [2, 3], [8, 3], 6).squares.filter(([, r]) => r === 3)).toHaveLength(6);
   });
 
-  test("under the alternating rule a diagonal burst reaches less far", () => {
-    const d = drawn(OPEN, { ...MAP_DEFAULTS, diagonal: "alternate" });
+  test("under a ruleset that starts an area at a square's middle and counts any square it covers, a radius of two is the twenty-one squares about it", () => {
+    const d = drawn(OPEN, { ...MAP_DEFAULTS, areaStart: "middle", areaShare: 0 });
     expect(burst(d, NOTHING_MOVES, [3, 3], 2).squares).toHaveLength(21);
+  });
+});
+
+describe("cover", () => {
+  test("a pillar beside the line between two corners gives half cover, a creature across it too, and none where creatures do not obstruct", () => {
+    const pillar = drawn(PILLAR);
+    expect(coverOf(pillar, NOTHING_MOVES, [1, 2], [3, 2])).toEqual({ degree: "half", blocked: 2, by: ["wall"] });
+    expect(coverOf(pillar, NOTHING_MOVES, [1, 1], [3, 1])?.degree).toBe("none");
+    const open = drawn(OPEN);
+    const crowd = stand(open, { bram: [3, 3] });
+    expect(coverOf(open, crowd, [1, 3], [5, 3])).toEqual({ degree: "half", blocked: 2, by: ["bram"] });
+    const polite = drawn(OPEN, { ...MAP_DEFAULTS, coverCreatures: false });
+    expect(coverOf(polite, crowd, [1, 3], [5, 3])?.degree).toBe("none");
   });
 });

@@ -5,9 +5,9 @@
 
 import type { ConfigRead } from "../../app/config-read";
 import type { Setting } from "../../app/setting-list";
-import { DIAGONALS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
+import { AREA_STARTS, DIAGONALS, MAP_DEFAULTS, UNITS, type MapConfig } from "../../shared/map-config";
 
-export { DIAGONALS, MAP_DEFAULTS, UNITS, type Diagonal, type MapConfig, type Unit } from "../../shared/map-config";
+export { AREA_STARTS, DIAGONALS, MAP_DEFAULTS, UNITS, type AreaStart, type Diagonal, type MapConfig, type Unit } from "../../shared/map-config";
 
 // D.1's rows name the width of a square laid in play, how a diagonal counts, a round's seconds and the size printed whole; a round's move, the unit and the picture are beyond D.1.
 
@@ -88,6 +88,60 @@ export const MAP_SETTING_DEFS = {
     perConnection: false,
     name: "World state prints the map's picture",
     about: "The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load.",
+    effect: "turn",
+  },
+  areaStart: {
+    key: "map.areaStart",
+    default: MAP_DEFAULTS.areaStart,
+    takes: { type: "oneOf", values: AREA_STARTS },
+    perConnection: false,
+    name: "Where an area starts",
+    about: "corner: at a point where squares meet, as D&D's grid rule has it; middle: at the middle of a square. Every area (a radius, a cone, a line, a cube) follows it. A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  areaShare: {
+    key: "map.areaShare",
+    default: MAP_DEFAULTS.areaShare,
+    takes: { type: "number", least: 0, most: 1 },
+    perConnection: false,
+    name: "Share of a square an area must cover",
+    about: "From 0 to 1: the share of a square an area must cover for the square to count; 0.5 is D&D's half, and 0 counts any square the area covers any of. A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  coverHalf: {
+    key: "map.coverHalf",
+    default: MAP_DEFAULTS.coverHalf,
+    takes: { type: "whole", least: 1, most: 4 },
+    perConnection: false,
+    name: "Lines blocked for half cover",
+    about: "Of the four lines from a corner of the attacker's square to the corners of the target's, how many blocked give half cover (D&D: one or two). A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  coverThreeQuarters: {
+    key: "map.coverThreeQuarters",
+    default: MAP_DEFAULTS.coverThreeQuarters,
+    takes: { type: "whole", least: 1, most: 4 },
+    perConnection: false,
+    name: "Lines blocked for three-quarters cover",
+    about: "How many of the four lines, blocked, give three-quarters cover (D&D: three). A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  coverTotal: {
+    key: "map.coverTotal",
+    default: MAP_DEFAULTS.coverTotal,
+    takes: { type: "whole", least: 1, most: 4 },
+    perConnection: false,
+    name: "Lines blocked for total cover",
+    about: "How many of the four lines, blocked, give total cover (D&D: four). A world's ruleset that says otherwise wins.",
+    effect: "turn",
+  },
+  coverCreatures: {
+    key: "map.coverCreatures",
+    default: MAP_DEFAULTS.coverCreatures,
+    takes: { type: "yesNo" },
+    perConnection: false,
+    name: "Creatures give cover",
+    about: "Whether other people and things standing between an attacker and a target obstruct the lines, as D&D has it. A world's ruleset that says otherwise wins.",
     effect: "turn",
   },
 } as const satisfies Record<keyof MapConfig, Setting>;

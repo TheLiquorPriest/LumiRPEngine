@@ -1,14 +1,19 @@
 // Measuring on squares (plan §8.2, `map_measure`): distance by the grid's rule for diagonals, who
-// is within a range, the squares an area covers (a burst, a cone, a line) and who stands in it,
-// and line of sight. What blocks is worked out as play stands (`blockersOf`): walls, every door
-// that is not open, and the footprints that block. Something bigger than a square is measured
-// from its nearest square, and is seen when a square along its edge is (a line out of it crosses
-// its edge), so sight between two footprints follows no more lines than the map's sides allow.
+// is within a range, the squares an area covers (a radius, a cone, a line, a cube) and who stands in
+// it, cover, and line of sight. What blocks is worked out as play stands (`blockersOf`): walls,
+// every door that is not open, and the footprints that block. Something bigger than a square is
+// measured from its nearest square, and is seen when a square along its edge is (a line out of it
+// crosses its edge), so sight between two footprints follows no more lines than the map's sides
+// allow. An area is a shape laid over the squares from a point of origin, and a square counts by the
+// rule the world's ruleset (or the settings) gives (`Scale.areas`): where the area starts, and the
+// share of the square it must cover. Cover is the least of the four corners of the attacker's square
+// by how many of the four lines to the corners of the target's square something blocks (`Scale.cover`).
 
 import type { EntityId } from "../../../shared/ids";
 import { hasOwn } from "../../../shared/json";
 import { SIGHT_MAX } from "../../../shared/grid";
 import { blockersOf, footprint, indexOf, standsAt, squareAt, type Diagonal, type Drawn, type Moving, type Square } from "./grid-model";
+import { counts, coneShape, cubeShape, discShape, lineShape, type Point, type Shape } from "./grid-area";
 
 /** A square, or someone or something on the grid by id. */
 export type Spot = Square | EntityId;
@@ -168,63 +173,159 @@ function covering(drawn: Drawn, moving: Moving, picked: ReadonlySet<number>): Ar
 }
 
 /**
- * An area from the squares chosen around `origin`: each on the grid, not a wall or a shut door,
- * and reached by a line from the origin that nothing blocking the view cuts (what walls stop,
- * an area does not pass).
+ * An area from a shape laid over the grid: each square on it that the shape covers by the rule in
+ * force, that is not a wall or a shut door, and is reached by a line from the origin that nothing
+ * blocking the view cuts (what walls stop, an area does not pass).
  */
-function areaFrom(drawn: Drawn, moving: Moving, origin: Square, chosen: (s: Square) => boolean): Area {
+function areaFrom(drawn: Drawn, moving: Moving, origin: Square, shape: Shape | null): Area {
+  if (shape === null) return { squares: [], who: [] };
   const view = maskOf(drawn, blockersOf(drawn, moving).view);
   const shut = blockersOf(drawn, { ...moving, pieces: {} }).view;
+  const [x0, y0, x1, y1] = shape.box;
   const picked = new Set<number>();
-  for (let i = 0; i < drawn.width * drawn.height; i++) {
-    const s = squareAt(drawn, i);
-    if (!shut.has(i) && chosen(s) && clear(drawn, view, origin, s)) picked.add(i);
+  for (let r = Math.max(1, Math.floor(y0) + 1); r <= Math.min(drawn.height, Math.ceil(y1)); r++) {
+    for (let c = Math.max(1, Math.floor(x0) + 1); c <= Math.min(drawn.width, Math.ceil(x1)); c++) {
+      const i = (r - 1) * drawn.width + (c - 1);
+      if (!shut.has(i) && counts(shape.covered(c, r), drawn.scale.areas.share) && clear(drawn, view, origin, [c, r])) picked.add(i);
+    }
   }
   return covering(drawn, moving, picked);
 }
 
-/** A burst: every square within `radius` squares of `centre`, the centre too. */
+/** The middle of a square. */
+const middleOf = (s: Square): Point => [s[0] - 0.5, s[1] - 0.5];
+
+/** Where an area starts at `origin`: the middle of its square, or, at a point where squares meet, the corner of it nearest `aim` (the first of the top left, top right, bottom left and bottom right where two are as near); with none to aim at, each corner. */
+function startsOf(drawn: Drawn, origin: Square, aim: Square | null): Point[] {
+  if (drawn.scale.areas.start === "middle") return [middleOf(origin)];
+  const [c, r] = origin;
+  const corners: Point[] = [
+    [c - 1, r - 1],
+    [c, r - 1],
+    [c - 1, r],
+    [c, r],
+  ];
+  if (aim === null) return corners;
+  const q = middleOf(aim);
+  const far = (p: Point): number => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2;
+  return [corners.reduce((best, p) => (far(p) < far(best) - 1e-9 ? p : best))];
+}
+
+/** A burst, a radius of `radius` squares about where the area starts: the squares it covers; started at a point where squares meet, from the corner of `centre`'s square that covers the most. */
 export function burst(drawn: Drawn, moving: Moving, centre: Square, radius: number): Area {
-  return areaFrom(drawn, moving, centre, (s) => distance(drawn.scale.diagonal, centre, s) <= radius);
+  return startsOf(drawn, centre, null)
+    .map((p) => areaFrom(drawn, moving, centre, discShape(p, radius)))
+    .reduce((best, a) => (a.squares.length > best.squares.length ? a : best));
 }
 
 /**
- * A cone from `origin` toward `toward`, `length` squares long: the squares whose middles lie
- * within it, as wide at each point as that point is far from the origin (half a square of width
- * either side for each square of length), the origin left out.
+ * A cone from `origin` toward `toward`, `length` squares long, as wide at each point as that point
+ * is far from its apex, which is where the area starts. The squares it covers.
  */
 export function cone(drawn: Drawn, moving: Moving, origin: Square, toward: Square, length: number): Area {
-  const vx = toward[0] - origin[0];
-  const vy = toward[1] - origin[1];
-  if (vx === 0 && vy === 0) return { squares: [], who: [] };
-  return areaFrom(drawn, moving, origin, (s) => {
-    const wx = s[0] - origin[0];
-    const wy = s[1] - origin[1];
-    const along = vx * wx + vy * wy;
-    const across = Math.abs(vx * wy - vy * wx);
-    return along > 0 && 2 * across <= along && distance(drawn.scale.diagonal, origin, s) <= length;
-  });
+  const [apex] = startsOf(drawn, origin, toward);
+  return apex ? areaFrom(drawn, moving, origin, coneShape(apex, middleOf(origin), middleOf(toward), length)) : { squares: [], who: [] };
 }
 
 /**
- * A line from `origin` toward `toward`, `length` squares long by the grid's count, one square
- * wide: the squares a straight line passes through, the origin left out. It stops at the grid's
- * edge and before a wall or a shut door; a footprint that blocks the view is in it and stops it.
+ * A line from `origin` toward `toward`, `length` squares long and one square wide, starting where the
+ * area starts: the squares it covers, stopping at the grid's edge, at a wall or a shut door, and
+ * after a footprint that blocks the view.
  */
 export function line(drawn: Drawn, moving: Moving, origin: Square, toward: Square, length: number): Area {
-  const view = blockersOf(drawn, moving).view;
-  const shut = maskOf(drawn, blockersOf(drawn, { ...moving, pieces: {} }).view);
-  const picked = new Set<number>();
-  const sx = Math.sign(toward[0] - origin[0]);
-  const sy = Math.sign(toward[1] - origin[1]);
-  follow(origin, toward, (c, r, corner) => {
-    const i = indexOf(drawn, [c, r]);
-    if (i === null || shut[i] === 1 || distance(drawn.scale.diagonal, origin, [c, r]) > length) return false;
-    if (corner && blocks(drawn, shut, c, r - sy) && blocks(drawn, shut, c - sx, r)) return false;
-    picked.add(i);
-    return !view.has(i);
-  });
-  return covering(drawn, moving, picked);
+  const [start] = startsOf(drawn, origin, toward);
+  return start ? areaFrom(drawn, moving, origin, lineShape(start, middleOf(origin), middleOf(toward), length)) : { squares: [], who: [] };
+}
+
+/**
+ * A cube of `side` squares from `origin` toward `toward`, its face against the origin: reaching the
+ * way `toward` lies most (east or west where it lies as far across as down), centred on the middle
+ * of the edge of `origin`'s square that faces that way, or, where an area starts at a square's
+ * middle, on the middle of the square. The squares it covers.
+ */
+export function cube(drawn: Drawn, moving: Moving, origin: Square, toward: Square, side: number): Area {
+  const dx = toward[0] - origin[0];
+  const dy = toward[1] - origin[1];
+  if (dx === 0 && dy === 0) return { squares: [], who: [] };
+  const across = Math.abs(dx) >= Math.abs(dy);
+  const [mx, my] = middleOf(origin);
+  const face: Point = drawn.scale.areas.start === "middle" ? [mx, my] : across ? [mx + Math.sign(dx) * 0.5, my] : [mx, my + Math.sign(dy) * 0.5];
+  return areaFrom(drawn, moving, origin, cubeShape(face, across ? Math.sign(dx) : 0, across ? 0 : Math.sign(dy), side));
+}
+
+/** How much cover stands between an attacker and a target: its degree, how many of the four lines something blocked, and what blocked them. */
+export interface Cover {
+  degree: "none" | "half" | "three-quarters" | "total";
+  blocked: number;
+  by: string[];
+}
+
+/** Whether the segment from `a` to `b` passes through the inside of the box (touching its edge or corner is not through it). */
+function through(a: Point, b: Point, x0: number, y0: number, x1: number, y1: number): boolean {
+  let lo = 0;
+  let hi = 1;
+  for (const [start, step, from, to] of [
+    [a[0], b[0] - a[0], x0, x1],
+    [a[1], b[1] - a[1], y0, y1],
+  ] as const) {
+    if (step === 0) {
+      if (!(start > from && start < to)) return false;
+      continue;
+    }
+    const [t0, t1] = [(from - start) / step, (to - start) / step].sort((p, q) => p - q);
+    lo = Math.max(lo, t0 ?? 0);
+    hi = Math.min(hi, t1 ?? 1);
+  }
+  return lo < hi - 1e-12;
+}
+
+/**
+ * The cover `b` has from `a`: from each corner of `a`'s square (or the box of its footprint), the
+ * lines to the four corners of `b`'s are tried, and each that something stands across is blocked; the
+ * corner that gives the least cover is the one taken. What stands across: walls, shut doors, and
+ * footprints that block the way or the view, and (where the rule says creatures obstruct) everyone
+ * and everything else on the grid. The degree is by how many of the four are blocked (`Scale.cover`).
+ * Null when one stands nowhere on the grid.
+ */
+export function coverOf(drawn: Drawn, moving: Moving, a: Spot, b: Spot): Cover | null {
+  const ra = rectOf(moving, a);
+  const rb = rectOf(moving, b);
+  if (!ra || !rb) return null;
+  const here = [a, b].filter((s): s is EntityId => typeof s === "string");
+  const blocking = blockersOf(drawn, moving, here);
+  const rule = drawn.scale.cover;
+  // What each obstructing square is: the one standing on it, else its terrain.
+  const across = new Map<number, string>();
+  for (const i of new Set([...blocking.way, ...blocking.view])) across.set(i, drawn.terrain[i] ?? "wall");
+  for (const [id, p] of Object.entries(moving.pieces)) {
+    if (here.includes(id) || p.on !== undefined) continue;
+    if (rule.creatures || p.blocks?.way || p.blocks?.view) for (const i of footprint(drawn, moving, id)) across.set(i, id);
+  }
+  const own = (r: Rect, i: number): boolean => {
+    const s = squareAt(drawn, i);
+    return s[0] >= r.c0 && s[0] <= r.c1 && s[1] >= r.r0 && s[1] <= r.r1;
+  };
+  const boxes = [...across].filter(([i]) => !own(ra, i) && !own(rb, i)).map(([i, what]) => ({ what, at: squareAt(drawn, i) }));
+  const corners = (r: Rect): Point[] => [
+    [r.c0 - 1, r.r0 - 1],
+    [r.c1, r.r0 - 1],
+    [r.c0 - 1, r.r1],
+    [r.c1, r.r1],
+  ];
+  let best: { blocked: number; by: string[] } | null = null;
+  for (const from of corners(ra)) {
+    const by: string[] = [];
+    let blocked = 0;
+    for (const to of corners(rb)) {
+      const stopped = boxes.filter((o) => through(from, to, o.at[0] - 1, o.at[1] - 1, o.at[0], o.at[1])).map((o) => o.what);
+      if (stopped.length > 0) blocked++;
+      for (const what of stopped) if (!by.includes(what)) by.push(what);
+    }
+    if (best === null || blocked < best.blocked) best = { blocked, by };
+  }
+  const { blocked, by } = best ?? { blocked: 0, by: [] };
+  const degree = blocked >= rule.total ? "total" : blocked >= rule.threeQuarters ? "three-quarters" : blocked >= rule.half ? "half" : "none";
+  return { degree, blocked, by: degree === "none" ? [] : by };
 }
 
 /**

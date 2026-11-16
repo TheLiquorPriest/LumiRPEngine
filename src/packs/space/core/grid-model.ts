@@ -14,7 +14,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
 import { cellIndex, costMinutes, DEFAULT_CELL_METRES, doorTerrainsOf, gridOf, isDoorTerrain, standingGrid, type Cell } from "../../../shared/grid";
-import { MAP_DEFAULTS, METRES_PER_FOOT, type Diagonal, type MapConfig, type Unit } from "../../../shared/map-config";
+import { MAP_DEFAULTS, METRES_PER_FOOT, type AreaRule, type CoverRule, type Diagonal, type MapConfig, type Unit } from "../../../shared/map-config";
 import { compileMaps, DEFAULT_LEGEND, VOID_TERRAIN } from "../../../shared/maps";
 import type { GridDef, MapCellDef, MapDoc, RulesetDef, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
@@ -43,13 +43,15 @@ export { METRES_PER_FOOT, type Diagonal, type Unit };
  */
 export type TimeStep = MapStep;
 
-/** A grid's scale: how wide a square is, how a diagonal counts, what its distances are told in, and how time passes on it. */
+/** A grid's scale: how wide a square is, how a diagonal counts, what its distances are told in, how time passes on it, how an area counts, and how cover does. */
 export interface Scale {
   metres: number;
   feet: number;
   diagonal: Diagonal;
   unit: Unit;
   step: TimeStep;
+  areas: AreaRule;
+  cover: CoverRule;
 }
 
 /** How wide a square of a grid laid in play is, in metres (the map's `cellMeters`). */
@@ -60,14 +62,22 @@ export function laidMetres(config: Readonly<MapConfig> = MAP_DEFAULTS): number {
 /**
  * The scale of a grid whose square is `metres` wide. Today's maps carry no time step, so it
  * follows the square: when a round's move crosses at least one square, the grid counts rounds. The
- * world's ruleset, where it says how a diagonal counts or whether distances are feet or metres,
- * says it over the settings.
+ * world's ruleset, where it says how a diagonal counts, whether distances are feet or metres, how an
+ * area counts or how cover does, says it over the settings.
  */
-export function scaleOf(metres: number, config: Readonly<MapConfig> = MAP_DEFAULTS, ruleset?: Pick<RulesetDef, "diagonal" | "distances">): Scale {
+export function scaleOf(metres: number, config: Readonly<MapConfig> = MAP_DEFAULTS, ruleset?: Pick<RulesetDef, "diagonal" | "distances" | "areas" | "cover">): Scale {
   // A hair over the quotient, so that 30 ft over 5 ft squares is six squares, not 5.999….
   const squares = Math.floor((config.roundFeet * METRES_PER_FOOT) / metres + 1e-9);
   const step: TimeStep = squares >= 1 ? { per: "round", seconds: config.roundSeconds, squares } : { per: "minute" };
-  return { metres, feet: metres / METRES_PER_FOOT, diagonal: ruleset?.diagonal ?? config.diagonal, unit: ruleset?.distances ?? config.distances, step };
+  return {
+    metres,
+    feet: metres / METRES_PER_FOOT,
+    diagonal: ruleset?.diagonal ?? config.diagonal,
+    unit: ruleset?.distances ?? config.distances,
+    step,
+    areas: { start: ruleset?.areas?.start ?? config.areaStart, share: ruleset?.areas?.share ?? config.areaShare },
+    cover: { half: ruleset?.cover?.half ?? config.coverHalf, threeQuarters: ruleset?.cover?.threeQuarters ?? config.coverThreeQuarters, total: ruleset?.cover?.total ?? config.coverTotal, creatures: ruleset?.cover?.creatures ?? config.coverCreatures },
+  };
 }
 
 /** What is drawn on a place's grid: the fixed layer. Indexes are row by row, from 0. */
@@ -290,6 +300,18 @@ export function squareKey(s: Square): string {
   return `${s[0]},${s[1]}`;
 }
 
+/** Squares as runs by row: `[row, first column, last column]` for each stretch of squares side by side, rows from the top and each row from the left. A footprint or an area of any size is no more runs than the grid has rows times half its columns. */
+export function runsOf(squares: readonly Square[]): [number, number, number][] {
+  const sorted = [...squares].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  const runs: [number, number, number][] = [];
+  for (const [column, row] of sorted) {
+    const last = runs.at(-1);
+    if (last && last[0] === row && last[2] === column - 1) last[2] = column;
+    else if (!(last && last[0] === row && last[2] === column)) runs.push([row, column, column]);
+  }
+  return runs;
+}
+
 // ---------------------------------------------------------------- what moves
 
 /** Someone or something on a grid. */
@@ -401,8 +423,8 @@ function problemsAt(drawn: Drawn, moving: Moving, id: EntityId): GridReport[] {
   const mine = footprint(drawn, moving, id);
   if (mine.length < w * h) reports.push({ code: "off_edge", values: { what: id, square: [...at] } });
   const shut = blockersOf(drawn, { ...moving, pieces: {} }).way;
-  const walls = mine.filter((i) => shut.has(i)).map((i) => [...squareAt(drawn, i)]);
-  if (walls.length > 0) reports.push({ code: "in_wall", values: { what: id, squares: walls } });
+  const walls = mine.filter((i) => shut.has(i)).map((i) => squareAt(drawn, i));
+  if (walls.length > 0) reports.push({ code: "in_wall", values: { what: id, runs: runsOf(walls), count: walls.length } });
   const me = pieceOf(moving, id);
   const covered = new Set(mine);
   for (const [other, p] of Object.entries(moving.pieces)) {
