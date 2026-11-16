@@ -179,6 +179,8 @@ export interface SwapRecord {
   earlier: string[];
   /** Each chat that was on today and on none of RPE's connections at the cutover, with the connection it was on (null: none of its own). */
   chats: { chat: string; pinned: string | null }[];
+  /** Whether RPE took the key today's connections hold: only then can a key made since have retired it. */
+  keyTaken: boolean;
 }
 
 // The two tables below are the migration's (`tables.ts`, step 8: `migration_swap`, `migration_no_going_back`); before that step
@@ -272,6 +274,6 @@ export function goingBackFacts(db: Database, user: string, input: { identifier: 
     own: input.own,
     moved: swap === null || input.chats === null ? [] : movedSince(swap, input.chats, new Set([...swap.taken, ...input.rpe])),
     earlier: swap?.earlier ?? [],
-    keyReplaced: swap !== null && swap.taken.length > 0 && takenKeyReplaced(db, user) ? swap.taken : [],
+    keyReplaced: swap !== null && swap.keyTaken && swap.taken.length > 0 && takenKeyReplaced(db, user) ? swap.taken : [],
   };
 }

@@ -419,7 +419,7 @@ export async function swapRun(plan: SwapPlan, rpe: RpeStart, io: SwapIo): Promis
     going();
     ran = run.report;
     // The cutover, recorded for going back: the identifier used, the connections taken, RPE's own earlier ones, and each chat left off RPE's connections with the one it was on.
-    const record: SwapRecord = { at: run.report.at, identifier, lumiverse: plan.sources.lumiverse, taken: plan.connections.map((c) => c.id), earlier: [...(rpe.earlier ?? [])], chats: (run.report.offRpe ?? []).map((c) => ({ chat: c.chat, pinned: c.pinned })) };
+    const record: SwapRecord = { at: run.report.at, identifier, lumiverse: plan.sources.lumiverse, taken: plan.connections.map((c) => c.id), earlier: [...(rpe.earlier ?? [])], chats: (run.report.offRpe ?? []).map((c) => ({ chat: c.chat, pinned: c.pinned })), keyTaken: took !== null && took.loopback.keyHash !== null };
     const database = dataPaths(plan.options.data).database;
     try {
       onRpe(database, (db) => keepSwap(db, plan.sources.userId, record));
