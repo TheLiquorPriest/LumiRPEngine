@@ -1,14 +1,13 @@
-// The GM page's view by part (DESIGN §7): the hook GmPanel reads it through. While the truth is
-// shown it keeps one chat's parts (`GmParts`): the open tab's are asked for when it opens, and again
-// when the chat moves on (`StateView.gmKey`); the rest go stale until their tab opens. While a turn
-// runs and the page holds (Settings → Speed → GM page while a turn runs, read each time the truth is
-// shown), a move only marks the parts stale, and the page says it shows the chat as it was, with
-// Refresh. A page's needs (`Editor.need`) are loaded with the tab's parts while it is open. Hiding
-// the truth, or another chat, lets it all go.
+// The GM page's view by part (DESIGN §7): the hook GmPanel and World's things browser read it through.
+// While the truth is shown it keeps one chat's parts (`GmParts`): the open tab's are asked for when it
+// opens, and again when the chat moves on (`StateView.gmKey`); the rest go stale until their tab
+// opens. RPE keeps no "GM page while a turn runs" setting of today's: the parts load again as the chat
+// moves, today's default. A page's needs (`Editor.need`) are loaded with the tab's parts while it is
+// open. Hiding the truth, or another chat, lets it all go.
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { GmReadPart } from "../../shared/gm-parts";
-import { GM_PAGE_DEFAULTS, gmPageSettingsOf, type GmDuringTurn } from "../../shared/settings";
+import { GM_PAGE_DEFAULTS } from "../../shared/settings";
 import type { ChatStatus, GmView } from "../../shared/state-view";
 import type { App } from "../app";
 import { GmParts, gmReload, type GmNeed, type GmWant } from "./parts";
@@ -33,7 +32,7 @@ export interface GmPartsPage {
  */
 export function useGmParts(app: App, chatId: string, revealed: boolean, parts: readonly GmReadPart[], gmKey: string, status: ChatStatus): GmPartsPage {
   const [, rerender] = useState(0);
-  const [hold, setHold] = useState<GmDuringTurn>(GM_PAGE_DEFAULTS.duringTurn);
+  const hold = GM_PAGE_DEFAULTS.duringTurn;
   const cache = useRef<GmParts | null>(null);
   // The GM key the parts were last loaded at (null: not yet), and whether a move since is held.
   const seen = useRef<string | null>(null);
@@ -68,17 +67,6 @@ export function useGmParts(app: App, chatId: string, revealed: boolean, parts: r
     }
     return { parts: now.current.parts, entities: [...entities], money: [...money] };
   };
-  // What the page does while a turn runs, read once each time the truth is shown.
-  useEffect(() => {
-    if (!revealed) return;
-    let live = true;
-    void app.request({ type: "lre.settings.get" }).then((result) => {
-      if (live && result) setHold(gmPageSettingsOf(result.settings.gm).duringTurn);
-    });
-    return () => {
-      live = false;
-    };
-  }, [revealed]);
   // Loaded when the truth is shown, and again when the chat moves on (a turn, an edit, an undo), unless held.
   useEffect(() => {
     const kept = cache.current;
