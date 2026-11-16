@@ -3,6 +3,7 @@
 // what the player sees changes only by the Author's visibility write. Code reads the refs; it judges nothing of what is known.
 
 import type { CastItem } from "../cast/record";
+import { knowledgeNaming } from "../places/known";
 import { questRef } from "./read";
 
 /** A character that holds something of a quest: who, and the knowledge, with the stage it names where it names one. */
@@ -21,16 +22,5 @@ export interface QuestHolder {
  */
 export function holdersOf(items: Iterable<CastItem>, nameOf: (character: string) => string | undefined, quest: string): QuestHolder[] {
   const ref = questRef(quest);
-  const out: QuestHolder[] = [];
-  for (const item of items) {
-    if (item.part !== "knowledge" || item.dropped) continue;
-    const about = item.fields.about_refs;
-    if (!Array.isArray(about)) continue;
-    for (const r of about) {
-      if (typeof r !== "string" || (r !== ref && !r.startsWith(`${ref}/`))) continue;
-      const said = item.fields.text ?? item.fields.secret;
-      out.push({ character: item.character, name: nameOf(item.character) ?? item.character, text: typeof said === "string" ? said : "", stage: r === ref ? null : r.slice(ref.length + 1) });
-    }
-  }
-  return out;
+  return knowledgeNaming({ items, nameOf }, (r) => r === ref || r.startsWith(`${ref}/`)).map((k) => ({ character: k.character, name: k.name, text: k.text, stage: k.ref === ref ? null : k.ref.slice(ref.length + 1) }));
 }

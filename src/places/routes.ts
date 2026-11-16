@@ -12,6 +12,7 @@ import type { GuidanceFiles } from "../iface/texts";
 import { JoinedTurnError, type Store } from "../store";
 import { storyLines } from "../story/kit";
 import { baseAt } from "./base";
+import type { CastKnowledge } from "./known";
 import { baseOf, placeSliceOf, sourcesOf } from "./fold";
 import { placeAt, type PlaceAt } from "./record";
 import { type PlaceReadDeps, placeRow, placeRows, readPlace, sourceRows } from "./read";
@@ -37,6 +38,8 @@ export interface PlacesRoutesDeps {
   settings(user: string, chat: string): Promise<Partial<PlacesSettings>>;
   /** What the record reads of the lore: the entries bound to a place and each as Lumiverse holds it now. Left out, no entry is bound to any place. */
   sources?: PlaceSourcesReader;
+  /** The cast at a point of the chat's path (null: its head), for who knows of a place: every character's record and their names. Left out, only the world's own record of who knows. */
+  cast?(user: string, chat: string, turn: string | null): CastKnowledge;
 }
 
 /** Why a page's request is not done: the line of the story's answers that says so. */
@@ -65,7 +68,7 @@ export function placesRoutes(deps: PlacesRoutesDeps) {
     const size = user === null ? PLACES_DEFAULTS.page : (await settingsOf(user, params.chat ?? "")).page;
     return { default: size, most: size * 10 };
   };
-  const readDeps = (settings: PlacesSettings): PlaceReadDeps => ({ settings, ...(deps.sources !== undefined ? { sources: deps.sources } : {}) });
+  const readDeps = (settings: PlacesSettings, user: string, chat: string, turn: string | null): PlaceReadDeps => ({ settings, ...(deps.sources !== undefined ? { sources: deps.sources } : {}), ...(deps.cast !== undefined ? { cast: deps.cast(user, chat, turn) } : {}) });
 
   return [
     route({
@@ -101,7 +104,7 @@ export function placesRoutes(deps: PlacesRoutesDeps) {
         const at = await readingAt(deps, user, params.chat, query.turn ?? null);
         const settings = await settingsOf(user, params.chat);
         const found = placeRow(at, params.place) !== null ? params.place : placeRows(at).find((r) => r.name.toLowerCase() === params.place.toLowerCase())?.place;
-        const record = found === undefined ? null : await readPlace(at, found, readDeps(settings));
+        const record = found === undefined ? null : await readPlace(at, found, readDeps(settings, user, params.chat, query.turn ?? null));
         return record ?? refuse(deps, user, params.chat, 404, "no_place", { id: params.place });
       },
     }),

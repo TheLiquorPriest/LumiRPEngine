@@ -5,7 +5,9 @@ import { describe, expect, test } from "bun:test";
 import { baseWorld } from "../../src/engine/places-in-play";
 import { DRAFT_EVENT, draftEvent, NO_DRAFT } from "../../src/engine/world-draft";
 import { shippedTexts } from "../../src/iface/texts";
+import type { CastItem } from "../../src/cast/record";
 import { PLACE_STORE_AREA } from "../../src/places/fold";
+import type { CastKnowledge } from "../../src/places/known";
 import { placesRoutes } from "../../src/places/routes";
 import type { PlaceBaseWritten, PlaceRecordAnswer, PlacesPage } from "../../src/places/shapes";
 import { factStore } from "../../src/store/facts";
@@ -24,7 +26,10 @@ function fact(about: string, key: string, value: string, more: { part?: string; 
 async function open() {
   const t = await openTable({ areas: [PLACE_STORE_AREA] });
   const lore = inventedLore();
-  const [listRoute, oneRoute, baseRoute] = placesRoutes({ store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({}), sources: lore });
+  // The cast as the lane gives it: Odile came to know of the inn from a perception she was told it in, by Bram.
+  const item = (character: string, part: "knowledge" | "perception", id: string, fields: Record<string, unknown>) => ({ part, id, character, fields, opened: "t", touched: "t", at: null, dropped: false, rows: [] }) as unknown as CastItem;
+  const cast: CastKnowledge = { items: [item("c-2", "perception", "p-1", { reach: "told", told_by: "Bram" }), item("c-2", "knowledge", "k-1", { text: "A crooked inn at the crossroads.", about_refs: [`place:${INN}`], from: "p-1" })], nameOf: (c) => ({ "c-2": "Odile" })[c] };
+  const [listRoute, oneRoute, baseRoute] = placesRoutes({ store: t.store, writes: t.writes, files: () => shippedTexts(), settings: async () => ({}), sources: lore, cast: () => cast });
   const list = listRoute.handle as unknown as (call: { params: { chat: string }; query: Record<string, string | number>; user: string }) => Promise<PlacesPage>;
   return { t, lore, list, oneRoute, baseRoute };
 }
@@ -57,6 +62,7 @@ describe("the places' routes", () => {
     expect(record.history.items.map((h) => h.text)).toEqual(["The east wing burned down."]);
     expect(record.sources.map((s) => [s.entry, s.aspect, s.title])).toEqual([["e-layout", "layout", "The Lamp and Ladle"]]);
     expect(record.base).toMatchObject({ text: "A crooked inn.", world: true });
+    expect(record.known).toEqual([{ who: "c-2", name: "Odile", by: "knowledge", how: "told by Bram", reach: "told", precision: null, standing: null }]);
 
     // The owner writes a base: his own change, drawn against the entry as it stands, so nothing is older than it.
     const written: PlaceBaseWritten = await callRoute(baseRoute, { params: { chat: CHAT, place: INN }, body: { text: "A crooked inn with a wide hearth." }, user: USER });

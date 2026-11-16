@@ -12,7 +12,7 @@ import { STORY_SETTINGS } from "./settings";
 /**
  * What the story takes from the turn lane: the store its record is in, the guidance files and the settings in force for a chat, and the reads of the prompt's window and the story so far. The quests' `knows` rides with them, and the places' settings and what they read of the lore (the entries bound to a place and each as Lumiverse holds it now); with neither, a place shows no sources.
  */
-export type StoryTakes = Omit<StoryRoutesDeps, "writes" | "now"> & Pick<QuestRoutesDeps, "knows" | "quests"> & { places?: Partial<Pick<PlacesRoutesDeps, "settings" | "sources">> };
+export type StoryTakes = Omit<StoryRoutesDeps, "writes" | "now"> & Pick<QuestRoutesDeps, "knows" | "quests"> & { places?: Partial<Pick<PlacesRoutesDeps, "settings" | "sources" | "cast">> };
 
 /** `takes` is asked once the turn lane is mounted: the routes are made then. */
 export function storyArea(takes: () => StoryTakes): Area {
@@ -24,7 +24,7 @@ export function storyArea(takes: () => StoryTakes): Area {
       const taken = takes();
       at.routes.add("story", storyRoutes({ ...taken, writes: at.writes }));
       at.routes.add("quests", questRoutes(taken));
-      at.routes.add("places", placesRoutes({ store: taken.store, writes: at.writes, files: taken.files, settings: taken.places?.settings ?? (async () => PLACES_DEFAULTS), ...(taken.places?.sources !== undefined ? { sources: taken.places.sources } : {}) }));
+      at.routes.add("places", placesRoutes({ store: taken.store, writes: at.writes, files: taken.files, settings: taken.places?.settings ?? (async () => PLACES_DEFAULTS), ...(taken.places?.sources !== undefined ? { sources: taken.places.sources } : {}), ...(taken.places?.cast !== undefined ? { cast: taken.places.cast } : {}) }));
     },
   };
 }

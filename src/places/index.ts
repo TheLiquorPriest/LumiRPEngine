@@ -16,3 +16,4 @@ export { adjoiningOf, routesLaidIn, type PlaceAdjoining, type PlaceWay, waysOf, 
 export { hereOf, historyOf, knownOf, type PlaceHere, type PlaceHistoryRow, type PlaceKnown } from "./whole";
 export { type PlaceWriter, writeBase } from "./write";
 export { type PlaceBaseBody, type PlaceBaseWritten, type PlaceRecordAnswer, type PlaceRowShown, type PlacesPage } from "./shapes";
+export { type CastKnowledge, knowledgeNaming, knownByCast, type Knowing } from "./known";

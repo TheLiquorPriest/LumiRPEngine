@@ -8,6 +8,7 @@ import { baseOf, placeSliceOf, sourcesOf } from "./fold";
 import { accessOf, featuresOf, gridOf, type PlaceAt, placeDef, placeKindOf, sinceOf, factReader } from "./record";
 import type { PlacesSettings } from "./settings";
 import type { PlaceRecordAnswer, PlaceRowShown, PlaceSourceRow } from "./shapes";
+import type { CastKnowledge } from "./known";
 import { type PlaceSourcesReader, sourcesNow } from "./sources";
 import { waysPart } from "./ways";
 import { hereOf, historyOf, knownOf } from "./whole";
@@ -18,6 +19,8 @@ export interface PlaceReadDeps {
   sources?: PlaceSourcesReader;
   settings: PlacesSettings;
   config?: MapConfig;
+  /** The cast at the point read, for who knows of a place; left out, only the world's own record of it. */
+  cast?: CastKnowledge;
 }
 
 /** One place as a row of the list: its name, the place it is in, its kind, and whether it draws a grid of its own. */
@@ -80,7 +83,7 @@ export async function readPlace(at: PlaceAt, place: string, deps: PlaceReadDeps)
     ways: waysPart(at, place),
     access: accessOf(at, place, deps.settings, config, reader),
     history: historyOf(at, place, deps.settings),
-    known: knownOf(at, place),
+    known: knownOf(at, place, deps.cast),
   };
 }
 

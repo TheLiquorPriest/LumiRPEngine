@@ -12,6 +12,7 @@ import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
 import { questSliceOf } from "../quests";
 import { type PlaceAt, placeDef } from "./record";
+import { type CastKnowledge, knownByCast } from "./known";
 import type { PlacesSettings } from "./settings";
 import type { hereRow, historyRow, knownRow } from "./shapes";
 
@@ -57,12 +58,13 @@ export function historyOf(at: PlaceAt, place: string, settings: Pick<PlacesSetti
 }
 
 /**
- * Who knows of a place: the people the world's own record says do (a `knows` link to it), marked as the world's. A character's
- * knowledge that names the place, with how it was learned and how well, is the cast's to say once its statements name places.
+ * Who knows of a place: the people the world's own record says do (a `knows` link to it), marked as the world's, and the characters
+ * whose knowledge names it (`cast`, where the application gives the cast), each with how it reached them and how well.
  */
-export function knownOf(at: PlaceAt, place: string): PlaceKnown[] {
+export function knownOf(at: PlaceAt, place: string, cast?: CastKnowledge): PlaceKnown[] {
   if (placeDef(at, place) === undefined) return [];
-  return Object.entries(at.world.entities)
+  const world = Object.entries(at.world.entities)
     .filter(([id, e]) => !isGone(at.world, id) && e.relations.some((r) => r.type === "knows" && r.to === place))
     .map(([id, e]): PlaceKnown => ({ who: `entity:${id}`, name: e.name, by: "world", how: null, reach: null, precision: null, standing: null }));
+  return [...world, ...(cast === undefined ? [] : knownByCast(cast, place))];
 }
