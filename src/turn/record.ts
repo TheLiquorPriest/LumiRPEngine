@@ -23,7 +23,7 @@ export const RECORD_PART = "turn-record";
 
 /** The Author's record of the scope's turn on its path, every field as `story_query` answers with it; null when the turn wrote none. */
 export function turnRecordFields(store: Store, scope: Scope & { turn: string }): JsonObject | null {
-  const record = StoryRecord.read(store.db, scope.user, storyAt(store.user(scope.user), scope.chat, scope.turn));
+  const record = StoryRecord.read(store, scope.user, storyAt(store.user(scope.user), scope.chat, scope.turn));
   const id = keyedItemId("record", scope.turn);
   const item = record.of("record").find((i) => i.id === id);
   return item === undefined ? null : itemView(record, item, storyClock(store, scope.user, scope.chat, scope.turn), allSpans(record));

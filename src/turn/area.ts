@@ -12,6 +12,7 @@ import { loreBooks } from "../adapter/lumiverse/books";
 import { connectionRoutes, type App, type Area } from "../app";
 import { harnessSettings } from "../app/setting-list";
 import type { LoreBooks, LoreProposals, ProjectionBooks } from "../lore";
+import { MEANING_TABLE } from "../search/meaning";
 import type { Store } from "../store";
 import { storyCoverage } from "../story";
 import { historyWindow } from "../story/window";
@@ -152,6 +153,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
     },
     async mount(at) {
       app = at;
+      // The index file's table of vectors for search by meaning (`src/search/meaning.ts`), made by the index's own writer.
+      await at.index.table(MEANING_TABLE);
       const store = openAppStore(at);
       turns = buildTurns(at, {
         store,

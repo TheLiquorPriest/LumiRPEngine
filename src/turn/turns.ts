@@ -88,6 +88,7 @@ export const ON_STAGE_VIEWS = "on_stage_views";
 export function tokenCount(charsPerToken: number): (text: string) => number {
   return (text) => Math.ceil(text.length / charsPerToken);
 }
+
 /** The first `count` words of a text, joined by single spaces. */
 function firstWords(text: string, count: number): string {
   return text.trim().split(/\s+/).slice(0, count).join(" ");
@@ -771,16 +772,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /** The projection book (`lore.projection`) brought up to date for the chat, beside everything else: a failure is logged and touches no turn. */
   #project(user: string, chat: string): void {
     this.#d.projection.refresh(user, chat).catch((error: unknown) => this.#d.log.error("The chat's projection book could not be brought up to date.", { chat, error: words(error) }));
-  }
-
-    // What changed while the socket was closed may have moved any chat's path: each chat played on RPE has its projection book checked.
-    const user = this.#d.owner();
-    if (user !== null) for (const { chat } of this.#d.runs.chats(user)) this.#project(user, chat);
-  }
-
-    // What changed while the socket was closed may have moved any chat's path: each chat played on RPE has its projection book checked.
-    const user = this.#d.owner();
-    if (user !== null) for (const { chat } of this.#d.runs.chats(user)) this.#project(user, chat);
   }
 
   /**

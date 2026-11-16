@@ -30,6 +30,7 @@ import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface
 import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
+import { MeaningIndex } from "../search/meaning";
 import { hashJson } from "../shared/hash";
 import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import type { StoreFailure } from "../store/store";
@@ -205,6 +206,8 @@ export interface Turns {
   suggestions: TreeSuggestions;
   /** The projection book of each chat's world, kept in step with the story (`lore.projection`). */
   projection: LoreProjection;
+  /** The vectors of search by meaning (plan §9.4, §10.5), in the index file: what a prune of a living chat's derived rows drops (`dropChat`). */
+  meaning: MeaningIndex;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -246,6 +249,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));
   const marks = new TurnMarks(app.db, app.writes);
   const since = new SinceKept(app.db);
+  // Search by meaning (plan §9.4, §10.5): one vector per lore entry, chat message, state thing and story item in the index file, made on
+  // his embedding connection through the model layer; with none set, nothing is embedded and every search is by words alone.
+  const meaning = new MeaningIndex({ index: app.index, embed: (user, texts) => harness.models.embed(user, texts) });
   // The lore may not reach the cast: a character's agent named by the cast's id is found in the world by the cast's name for it.
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
@@ -256,7 +262,21 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const secretSettings = secretSettingsFor(config);
   // The lore-answers lines in force for the chat word the secrets in an entry's text when an agent reads it.
   // A library past `lore.workerCatalogueAt` entries has its catalogue made on a worker thread (`workers/tasks.ts`).
-  const lore = new Lore({ books: options.books, worlds, turns: prompts.lore, numbers: new EntryNumbers(app.db, app.writes), settingsFor: loreSettings, lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })), away: (input) => app.workers.run("catalogue", input) });
+  // A lore search adds what is nearest in meaning where he has an embedding connection: each entry of the chat's catalogue its own vector,
+  // its title and readable text embedded again when its revision changes.
+  const lore = new Lore({
+    books: options.books,
+    worlds,
+    turns: prompts.lore,
+    numbers: new EntryNumbers(app.db, app.writes),
+    settingsFor: loreSettings,
+    lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+    away: (input) => app.workers.run("catalogue", input),
+    meaning: {
+      find: (at, text, limit) =>
+        meaning.nearest(at.user, at.chat, "lore", text, limit, async () => (await lore.catalog(at)).map((e) => ({ id: e.id, revision: hashJson([e.revision, e.title, e.text]), text: `${e.title}\n${e.text}` }))),
+    },
+  });
   // The index's readable file is written at the top of the chat's folder, worded by the lore's lines in force for the chat.
   const loreIndex = new LoreIndex({
     lore,
@@ -369,7 +389,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     tools: { all: async (scope) => (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) })) },
     // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
     searchers: [stateSearcher, storySearcher].map((make) => {
-      const searcher = make({ store, personPlayed: (at, plays) => lore.personPlayed(at, plays), snippet: async (scope) => (await turnSettings(files, scope, app.log)).gapSnippet });
+      const searcher = make({ store, meaning, personPlayed: (at, plays) => lore.personPlayed(at, plays), snippet: async (scope) => (await turnSettings(files, scope, app.log)).gapSnippet });
       return { name: searcher.name, search: (scope: Scope, query: GapQuery) => searcher.search(joined(scope), query) };
     }),
     facts: { defs: () => facts.defs(), read: (scope, names) => facts.read(joined(scope), names) },
@@ -438,5 +458,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning };
 }
