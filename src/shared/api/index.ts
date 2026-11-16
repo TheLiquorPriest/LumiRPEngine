@@ -4552,6 +4552,16 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
+  /** What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there. */
+  "GET /api/v1/chats/:chat/walk": {
+    params: { chat: string };
+    query: { x: number; y: number };
+    body: undefined;
+    reply: { minutes: number; disabled?: string };
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats. */
   "GET /api/v1/chats/:chat/window": {
     params: { chat: string };

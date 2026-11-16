@@ -644,6 +644,19 @@ The catalog the player's + Add offers: the types of things and the vehicle class
 | Body | none |
 | Reply | `JsonValue` |
 
+### `GET /api/v1/chats/:chat/walk`
+
+What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `x`: `number`<br>`y`: `number` |
+| Body | none |
+| Reply | `{ minutes: number; disabled?: string }` |
+
 ### `GET /api/v1/chats/:chat/world`
 
 The world's tree for a chat: the level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn.
