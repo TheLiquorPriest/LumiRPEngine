@@ -12,15 +12,21 @@
 // proposals and the writes' record (`lore_proposal`, `lore_write_log`), and gives the Lore page its lists, a page at a time.
 
 import type { Database } from "bun:sqlite";
-import type { AgentRef, Scope, Suggestion } from "rp-harness/contract";
+import type { AgentRef, JsonObject, Scope, Suggestion } from "rp-harness/contract";
 import { type EntryNumbers, loreRefOf, type LoreWrites } from "./ids";
 import type { LoreBookEntry, LoreBooks } from "./sources";
 
-/** An entry's fields RPE writes: its text, its title (Lumiverse's `comment`) and its keys. */
+/**
+ * An entry's fields RPE writes: its text, its title (Lumiverse's `comment`) and its keys, and, where a write names them, its on/off switch
+ * and its extension data (replaced whole, as Lumiverse's own write does). A write that names neither leaves them as they are; what
+ * the record keeps of an entry before and after a write always has both, so a put-back restores them.
+ */
 export interface LoreEntryFields {
   content: string;
   comment: string;
   keys: string[];
+  disabled?: boolean;
+  extensions?: JsonObject;
 }
 
 /** RPE's writes to the user's books, as the signed-in user, each refused when the entry is not at the revision given. */
@@ -168,7 +174,7 @@ interface WriteRow {
 }
 
 function fieldsOf(entry: LoreBookEntry): LoreEntryFields {
-  return { content: entry.content, comment: entry.comment, keys: [...entry.keys] };
+  return { content: entry.content, comment: entry.comment, keys: [...entry.keys], disabled: entry.disabled, extensions: structuredClone(entry.extensions) };
 }
 
 function parsedFields(raw: string | null): LoreEntryFields | null {
