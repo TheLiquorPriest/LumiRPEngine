@@ -34,7 +34,7 @@ The consent rule says which of this needs the Author's consent.
 
 ## When a place has no map
 
-Do nothing until position starts to matter: a fight, a chase, a search, a question of who can see or reach what. Then lay a simple grid with `map_lay`:
+Do nothing until position starts to matter: a fight, a chase, a search, a question of who can see or reach what. Then lay a simple grid of 5 ft squares with `map_lay` (the settings give the scale, and the world state prints each grid's own):
 
 1. Draw only what the prose and the lore support: the room's rough shape and size, its doors, the fixtures already mentioned.
 2. Keep it small and plain. Twelve by eight squares is a large room.
@@ -46,11 +46,11 @@ If the place is named in the lore and described there, follow the description.
 
 - A move: `world_apply` with a `move` operation. Give the square, or "next to" someone, or a zone.
 - Something put down, picked up, opened, closed or locked: `world_apply` with `place`, or `map_door`.
-- The place itself changing (a wall broken, a table overturned, a door barred): `map_edit`.
+- The place itself changing (a wall broken, a door barred): `map_edit`. A fixture that starts to move (a table overturned) is no longer drawn: make it a thing with a square of its own, so that it is placed, moved and measured like any other thing.
 
 ## Measure, do not guess
 
-Use `map_measure` for distance, for the path and how long it takes, for whether one square can see another, and for who is inside an area. A closed door blocks the way and the view. Give the Author the numbers.
+Use `map_measure` for distance, for the path and how long it takes, for whether one square can see another, for cover, and for who is inside an area. Cover and areas follow the world's ruleset, which says how an area is counted and how much cover is half, three-quarters or total; `map_measure` gives the degree and what gives it. A closed door blocks the way and the view. Give the Author the numbers.
 
 ## What a tool tells you
 

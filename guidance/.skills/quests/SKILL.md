@@ -38,10 +38,12 @@ A stage can be moved back when the story undoes what met it. Say why.
 The journal the player reads is drawn from these records.
 
 - A quest the character knows of is visible, with the stages they know.
-- A secret stays hidden until the character learns of it. Learning of it is a perception: the perceptions rule says how that is recorded.
+- A secret stays hidden until the character learns of it. Learning of it is a perception: the perceptions rule says how that is recorded, with the secret named by its id.
 - An agenda of someone else's is never visible. It is for you and the Author.
 
-Change what is visible with the same operation, when the story reveals it.
+The Author sets what the player may see with the same operation: the whole quest, the stages named, or nothing. The Author sets it back when the story takes it away.
+
+Closing a quest touches its thread, and closing a thread touches its quest, in that turn, with no call of yours. Whether the other closes too is the Author's call.
 
 ## Rewards and consequences
 
