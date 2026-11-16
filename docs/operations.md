@@ -12,9 +12,9 @@ An operation whose entry says it takes its provenance takes these three argument
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `source` | one of prose, lore, author, gm, character, player, default, invented, or object: from, lore, message, roll, gap_check, consent | Where it comes from (horizon takes none). lore, message and roll cite an entry, a message or a roll by id; an invention cites its gap_check and consent. |
-| `precision` | one of exact, approximate, vague, unknown | How exact. |
-| `standing` | one of established, proposed, assumed | How it stands. |
+| `source` | one of prose, lore, author, gm, character, player, default, invented, or object: from, lore, message, roll, gap_check, consent | Where it comes from (horizon takes none). lore, message and roll cite an entry, message or roll by id; an invention cites its gap_check and consent. |
+| `precision` | one of exact, approximate, vague, unknown |  |
+| `standing` | one of established, proposed, assumed |  |
 
 A scene set from nothing in one call (an island, a kitchen on it, two people there, a lamp):
 
@@ -82,10 +82,10 @@ Lane: engine. Needs: `who`, `to`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. |
-| `to` | text | move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard. |
+| `to` | text | move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard. |
 | `with` | list of text | move: others who go along. |
-| `square` | list of whole number | move, place: the square on the place's map, [column, row], counted from 1 at the top left as the map prints it. |
-| `near` | text | move, place: someone or something to stand beside on the map. |
+| `square` | list of whole number | move, place: the square on the map, [column, row] from 1 at the top left as the map prints it. |
+| `near` | text | move, place: who or what to stand beside on the map. |
 | `zone` | text | move, place: a zone of the place's map. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
@@ -122,11 +122,11 @@ Lane: engine. Needs: `what`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `what` | text | place, give, wear, store: the thing (for place and store, or the person). |
-| `at` | text | place: the place. spawn: where it is made; for a place, the place it is inside. set: someone, something, a place, or world for the time. |
-| `on` | text | place, spawn: the thing it is set on, a table or a shelf. |
+| `at` | text | place, spawn: the place (a spawned place: the place it is inside). set: someone, something, a place, or world for the time. |
+| `on` | text | place, spawn: what it is set on, a table or shelf. |
 | `by` | text | place: who picks it up. |
-| `square` | list of whole number | move, place: the square on the place's map, [column, row], counted from 1 at the top left as the map prints it. |
-| `near` | text | move, place: someone or something to stand beside on the map. |
+| `square` | list of whole number | move, place: the square on the map, [column, row] from 1 at the top left as the map prints it. |
+| `near` | text | move, place: who or what to stand beside on the map. |
 | `zone` | text | move, place: a zone of the place's map. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
@@ -159,10 +159,10 @@ Lane: engine. Needs: `what`, `to`, `how`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `what` | text | place, give, wear, store: the thing (for place and store, or the person). |
-| `to` | text | move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard. |
+| `to` | text | move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard. |
 | `from` | text | give: who gives it. |
-| `how` | text | give: handed (to hold), lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is. |
-| `until` | text | give: when a loan ends. pass_time: the time to pass until: YYYY-MM-DD HH:MM, a time of day (dawn, 22:00: its next time), or words (two days). |
+| `how` | text | give: handed, lent, returned, given, sold, traded or stolen. Given, sold and traded change whose it is. |
+| `until` | text | give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (dawn, 22:00), or words (two days). |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
 Reports its code (`src/iface/ops-things.ts`) can give: `kept_nowhere`, `not_holding`, `not_to_hand`, `not_wearable`.
@@ -190,7 +190,7 @@ Worked example:
 
 ### wear
 
-put on, ready or take off
+put on, ready, take off
 
 Lane: engine. Needs: `what`, `who`. Takes its provenance.
 
@@ -199,7 +199,7 @@ Lane: engine. Needs: `what`, `who`. Takes its provenance.
 | `what` | text | place, give, wear, store: the thing (for place and store, or the person). |
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. |
 | `off` | true or false | wear: true to take it off. |
-| `slot` | text | wear: ready (in hand), or a slot such as holster, sheath or back. |
+| `slot` | text | wear: ready, or a slot such as holster, sheath or back. |
 
 Reports its code (`src/iface/ops-things.ts`) can give: `kept_nowhere`, `not_holding`, `not_to_hand`, `not_wearable`.
 
@@ -231,7 +231,7 @@ Lane: engine. Needs: `what`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `what` | text | place, give, wear, store: the thing (for place and store, or the person). |
-| `in` | text | store: the bag, drawer, vehicle or room it goes into. spawn: the place it is made in, or who or what holds it. |
+| `in` | text | store: what it goes into (a bag, drawer, vehicle, room). spawn: the place or holder it is made in. |
 | `away` | true or false | store: true to put it back where it is kept. |
 | `driving` | true or false | store: true when a person put into a vehicle drives it. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
@@ -258,23 +258,23 @@ Worked example:
 
 ### pay
 
-money and the goods bought
+money and goods
 
 Lane: engine. Needs: `who`, `amount`. Takes its provenance.
 
 | Argument | Shape | What it is |
 |---|---|---|
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. |
-| `to` | text | move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard. |
-| `amount` | number | pay: how much, in the world's main coin (12.5 is twelve and a half). |
-| `for` | text | pay: what it was for. pass_time: how long, in words (two hours). |
-| `goods` | text | pay: what was bought; the money and the goods change hands as one change. |
+| `to` | text | move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard. |
+| `amount` | number | pay: how much, in the world's main coin. |
+| `for` | text | pay: what it was for. pass_time: how long, in words. |
+| `goods` | text | pay: what was bought, paid and handed over as one change. |
 | `qty` | whole number | pay, spawn: how many. |
-| `reason` | text | pay: a purchase, a gift, a bribe, a fine, a loss, a wage, a debt. |
-| `method` | text | pay: cash, card, or an account by name. |
-| `world_terms` | any value |  |
+| `reason` | text | pay: purchase, gift, bribe, fine, loss, wage or debt. |
+| `method` | text | pay: cash, card, credit, debit, charge, checking, savings, account, or the payer's own account or card by id or exact name. |
+| `world_terms` | true or false | pay: true to add the economy's own sums, as assumed changes. |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
@@ -300,16 +300,16 @@ Worked example:
 
 ### pass_time
 
-the clock moves on; the answer lists what falls due and applies none
+the clock moves on; lists what falls due, applies none
 
 Lane: engine. Takes its provenance.
 
 | Argument | Shape | What it is |
 |---|---|---|
 | `minutes` | number | pass_time: how many minutes. |
-| `for` | text | pay: what it was for. pass_time: how long, in words (two hours). |
-| `until` | text | give: when a loan ends. pass_time: the time to pass until: YYYY-MM-DD HH:MM, a time of day (dawn, 22:00: its next time), or words (two days). |
-| `at` | text | place: the place. spawn: where it is made; for a place, the place it is inside. set: someone, something, a place, or world for the time. |
+| `for` | text | pay: what it was for. pass_time: how long, in words. |
+| `until` | text | give: when a loan ends. pass_time: until when: YYYY-MM-DD HH:MM, a time of day (dawn, 22:00), or words (two days). |
+| `at` | text | place, spawn: the place (a spawned place: the place it is inside). set: someone, something, a place, or world for the time. |
 
 Reports its code (`src/iface/ops-time.ts`) can give: `before_start`, `clock_paused`, `time_back`, `time_differs`, `time_left_out`.
 
@@ -333,18 +333,18 @@ Worked example:
 
 ### set
 
-a value on someone, something, a place or the world's time
+a value on someone, something, a place or the time
 
 Lane: engine. Needs: `at`, `key`. Takes its provenance.
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `at` | text | place: the place. spawn: where it is made; for a place, the place it is inside. set: someone, something, a place, or world for the time. |
-| `key` | text | set: the value's name (hp, mood; time on the world). fact: a key of your choosing; the same key replaces. |
-| `value` | any value | set: the new value. fact: the statement in words. |
+| `at` | text | place, spawn: the place (a spawned place: the place it is inside). set: someone, something, a place, or world for the time. |
+| `key` | text | set: the value's name (hp, mood; time on the world). fact: your own key; the same key replaces. |
+| `value` | any value | set: the new value. fact: the statement. |
 | `add` | number | set: a number to add (negative to take away). |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
@@ -368,18 +368,18 @@ Worked example:
 
 ### fact
 
-a statement in words
+a statement
 
 Lane: engine. Needs: `about`, `key`, `value`. Takes its provenance.
 
 | Argument | Shape | What it is |
 |---|---|---|
 | `about` | text | fact: who, what or place it is about. |
-| `key` | text | set: the value's name (hp, mood; time on the world). fact: a key of your choosing; the same key replaces. |
-| `value` | any value | set: the new value. fact: the statement in words. |
+| `key` | text | set: the value's name (hp, mood; time on the world). fact: your own key; the same key replaces. |
+| `value` | any value | set: the new value. fact: the statement. |
 | `replaces` | text | fact: the id of a standing fact this one replaces. |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
@@ -410,12 +410,25 @@ Lane: engine. Needs: `quest`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `quest` | text | quest: the quest, secret, puzzle or agenda. |
+| `open` | any value |  |
 | `stage` | text | quest: the stage it moves to. |
 | `outcome` | text | quest: met or failed. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
-| `reveal` | true or false | quest: true to show the player the stage. |
+| `reveal` | true or false | quest: true to show the player. |
+| `show` | any value |  |
+| `close` | any value |  |
+| `objective` | any value |  |
+| `matters` | any value |  |
+| `stakes` | any value |  |
+| `rewards` | any value |  |
+| `thread` | any value |  |
+| `stages` | any value |  |
+| `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. |
+| `where` | any value |  |
+| `things` | any value |  |
+| `unbind` | any value |  |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
@@ -447,12 +460,12 @@ Lane: story. Needs: `who`, `to`, `change`. Takes its provenance.
 | Argument | Shape | What it is |
 |---|---|---|
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. |
-| `to` | text | move: the place. give: who receives it. pay: who is paid; leave it out for no one in the world. relate: whom they regard. |
+| `to` | text | move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard. |
 | `axis` | text | relate: the regard that changes (trust, liking); leave it out for all. |
 | `change` | number | relate: how much, up or down. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
@@ -483,19 +496,19 @@ Lane: engine. Needs: `name`. Takes its provenance.
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `name` | text | spawn: its name. |
-| `kind` | text | spawn: person (or the world's own kind), item, container, a vehicle or group kind; or place, which needs only its name (inside the place at, or in none); room, spot or venue needs at. |
-| `at` | text | place: the place. spawn: where it is made; for a place, the place it is inside. set: someone, something, a place, or world for the time. |
-| `in` | text | store: the bag, drawer, vehicle or room it goes into. spawn: the place it is made in, or who or what holds it. |
-| `on` | text | place, spawn: the thing it is set on, a table or a shelf. |
-| `tier` | text | spawn: its tier. |
+| `name` | text |  |
+| `kind` | text | spawn: person (or the world's own kind), item, container, a vehicle or group kind, or place (needs only its name; room, spot or venue needs at). |
+| `at` | text | place, spawn: the place (a spawned place: the place it is inside). set: someone, something, a place, or world for the time. |
+| `in` | text | store: what it goes into (a bag, drawer, vehicle, room). spawn: the place or holder it is made in. |
+| `on` | text | place, spawn: what it is set on, a table or shelf. |
+| `tier` | text |  |
 | `fields` | object | spawn: its sheet values, as field: value. |
 | `bestiary` | text | spawn: a bestiary row to take the sheet from. |
 | `type` | text | spawn: a thing's catalog type. |
 | `class` | text | spawn: a vehicle's class. |
 | `qty` | whole number | pay, spawn: how many. |
-| `owner` | text | spawn: whose it is. |
-| `description` | text | spawn: what it looks like. |
+| `owner` | text |  |
+| `description` | text |  |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 
 Reports its code (`src/iface/ops-things.ts`) can give: `kept_nowhere`, `not_holding`, `not_to_hand`, `not_wearable`.
@@ -521,15 +534,15 @@ Worked example:
 
 ### horizon
 
-what the next turn is expected to need
+what the next turn needs
 
 Lane: story. Needs: `list`.
 
 | Argument | Shape | What it is |
 |---|---|---|
-| `list` | list of text | horizon: the whole list the next turn is expected to need: places, people and things by name, or by place: or entity: and the id; anything else in your own words. An entry may be {at, depth} instead: at is the name as above, depth is how many levels of it the world state prints, a whole number or full; with no depth it is printed in full. The scene itself is always printed in full. |
+| `list` | list of text | horizon: the list the next turn needs: places, people and things by name, or place:<id> / entity:<id>; else your own words. An entry may be {at, depth}: how many levels of it the world state prints, a whole number or full. The scene is always printed in full. |
 
-Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `terms_added`, `way_not_held`.
+Reports its code (`src/iface/ops-values.ts`) can give: `fact_lane_default`, `goods_words`, `level_offers`, `money_untracked`, `not_applied`, `not_holding`, `off_path`, `off_the_sheet`, `paid_past_held`, `paid_past_owed`, `quest_world_part`, `terms_added`, `way_not_held`.
 
 Worked example:
 
