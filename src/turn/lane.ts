@@ -36,7 +36,7 @@ import { engineTools, gridMoves, mapView, mapWording } from "../iface";
 import type { CarriedPort, EngineDeps } from "../iface/kit";
 import { indexedSearch } from "../iface/search";
 import { bindingsInForce, EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretIds, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storedBindings, storePath, storeWorlds } from "../lore";
-import type { PlaceSourcesReader } from "../places";
+import type { CastKnowledge, PlaceSourcesReader } from "../places";
 import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
 import { MeaningIndex } from "../search/meaning";
@@ -254,6 +254,8 @@ export interface Turns {
   sources: SourceReader;
   /** A place's lore as it is bound and as Lumiverse holds it now, the places' reader: what a place shows as its sources and a base is drawn against. */
   placeSources: PlaceSourcesReader;
+  /** The cast as a place's or a quest's record reads it at a turn of the chat (the head where none is named): every character's items and names. */
+  castKnowledge(user: string, chat: string, turn: string | null): CastKnowledge;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -415,12 +417,17 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       return e === undefined ? null : { title: e.title, revision: e.revision ?? hashJson([e.title, e.keys, e.text]) };
     },
   };
-  // Who holds a quest's secret: the cast's items along the chat's line at the turn, each holder by the character's name.
-  const questHolders = (user: string, chat: string, turn: string | null, quest: string) => {
+  // The cast as a place's or a quest's record reads it at a point of the path: every item of every character's record along the chat's
+  // line at the turn (the head where none is named), and each character's name.
+  const castKnowledge = (user: string, chat: string, turn: string | null): CastKnowledge => {
     const u = store.user(user);
-    const record = CastRecord.read(store, user, castAt(u, chat, turn));
     const chars = charactersOf(store.db, user, chatLine(u, chat));
-    return holdersOf(record.items.values(), (id) => chars.find((c) => c.id === id)?.name, quest);
+    return { items: CastRecord.read(store, user, castAt(u, chat, turn)).items.values(), nameOf: (id) => chars.find((c) => c.id === id)?.name };
+  };
+  // Who holds a quest's secret: the cast's items at the turn, each holder by the character's name.
+  const questHolders = (user: string, chat: string, turn: string | null, quest: string) => {
+    const known = castKnowledge(user, chat, turn);
+    return holdersOf(known.items, (id) => known.nameOf(id), quest);
   };
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
   // Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use.
@@ -571,5 +578,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
 }

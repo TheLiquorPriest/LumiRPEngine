@@ -561,7 +561,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // judges a secret by what held at its point of the path.
       const startWorld = store.stateFor(begun.id, null).state.world;
       const knowledge = knowledgeChange(startWorld, await this.#d.secretSettings({ user, chat, world: this.#d.store.env.worlds(startWorld.revision) ?? null }));
-      if (knowledge.length > 0) await this.#d.writes.run(() => store.addChanges(begun.id, knowledge), "recording the knowledge settings");
+      if (knowledge.length > 0) await this.#d.writes.run(() => store.record(store.writeTarget({ chat, turn: begun.id }), knowledge), "recording the knowledge settings");
       // The session the turn plays in (plan §11): the one in force at it (`#sessionAt`), or one opened now for the scene the story record
       // holds open there (or for none), starting from the summary of the scene before it. A swipe or a regenerate may play on in the
       // session an earlier attempt at its message played in, any turn in the turn it follows; a continue plays in the session of the turn
