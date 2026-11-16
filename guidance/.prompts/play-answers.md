@@ -9,8 +9,6 @@ lines:
   chat_choices: "This chat's own choices (knowledge tracking, what the narrator knows, the engine, tidying) are not kept by this build of RPE: RPE plays every chat itself."
   not_world: "This chat does not play a world in RPE."
   no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
-  no_turn: "This chat has no turn yet, and a change made from a panel is kept with the chat's newest turn: nothing was changed."
-  branch_no_turn: "This chat was branched from another and has no turn of its own yet. A change made from a panel is kept with this chat's newest turn, and the newest one here is the other chat's, so nothing was changed. It can be made once a turn has been played in this chat."
   unknown_action: "unknown action {{action}}"
   needs_someone: "{{action}}: it needs someone"
   needs_place: "{{action}}: it needs a place"
@@ -39,9 +37,6 @@ lines:
   off_path: "Nothing was undone: the turn this change was kept with is no longer part of this chat's story."
   changed_since: "Nothing was undone: something has changed it since."
   no_undo_for: "Nothing was undone: this build keeps no undo for {{parts}}."
-  turn_running: "A turn of this chat is running, and a change from a panel is kept only between turns: nothing was changed. It can be made once the turn is over."
-  opened_stay: "The accounts this world gave, which opened when the money first moved, stay open as the world gave them."
-  worth_stays: "What this world takes someone it keeps no accounts for to be worth, which its defaults gave when the money first moved, stays as they gave it."
 keys:
   engine.hint: "a hint opened"
   spawn: "something made"

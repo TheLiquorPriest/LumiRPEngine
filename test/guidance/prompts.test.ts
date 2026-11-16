@@ -37,6 +37,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   job_interrupted: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_off_path: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place" },
+  player_edit: { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal: it is older than the turn"] },
   depth_asked: { depth: "full" },
   swipe_asked: { mode: "afresh" },
   change_awaiting: { what: "Wren's purse goes to the harbour master" },
@@ -302,6 +303,12 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const notices = await lines("notices");
     expect(notices.line("panel_request", { what: "Walk here", on: "the quay", from: "map", values: "square: 4,7", action: "walk" } as never)).toBe("From a panel (map): Walk here, on the quay, with square: 4,7 (action walk)");
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
+  });
+
+  test("notices.md tells an edit the player made before the turn with what took effect and what did not, and the undoing of one", async () => {
+    const notices = await lines("notices");
+    expect(notices.line("player_edit", { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal"] } as never)).toBe("The player made an edit to the record before this turn: Wren's coin, from 3 to 5. Recorded: set coin 5. Not applied: fact seal. What was pressed: {\"edit\":\"coin\"}");
+    expect(notices.line("player_edit", { undo: true, of: "Wren's coin, from 3 to 5", request: "{\"undo\":\"u-1\"}", changes: [], not_applied: [] } as never)).toBe("The player undid an earlier edit: Wren's coin, from 3 to 5. What was pressed: {\"undo\":\"u-1\"}");
   });
 
   test("notices.md tells the turns a deletion took with the first words of each reply, and a swipe flipped earlier with what did not apply again and why, the reasons worded under keys", async () => {
