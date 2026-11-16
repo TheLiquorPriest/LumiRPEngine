@@ -195,19 +195,29 @@ export const suggestionDismissedReply = shape.named("SuggestionDismissedReply", 
 const chatStorageRow = shape.named(
   "ChatStorageRow",
   "What a chat's folder takes in all, and by area: its notes, its turn folders, its sessions' own files, and the rest of its files.",
-  shape.object({ chat: T, folder: field(T, "Its folder below the tree's `chats/`."), bytes: N, areas: shape.object({ notes: N, turns: N, sessions: N, files: N }), deleted: opt(nullable(N), "When RPE heard that Lumiverse deleted the chat, epoch milliseconds; its session files are gone and its other files stay until he prunes them.") }),
+  shape.object({
+    chat: T,
+    folder: field(T, "Its folder below the tree's `chats/`."),
+    bytes: N,
+    areas: shape.object({ notes: N, turns: N, sessions: N, files: N }),
+    deleted: opt(nullable(N), "When RPE heard that Lumiverse deleted the chat, epoch milliseconds; its session files are gone and its other files stay until he prunes them."),
+    rows: opt(N, "What the chat's rows take of the database, by the length of its rows in every table that carries the chat."),
+    measured: opt(nullable(N), "When the sizes were last checked against the disk, epoch milliseconds; null for a chat not measured yet, whose sizes are then none and come at the next read."),
+  }),
 );
 type ChatStorageMirrored = Holds<Exactly<Infer<typeof chatStorageRow>, ChatStorage>>;
 
 export const storageReply = shape.named(
   "StorageReply",
-  "Each chat's folder; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log.",
+  "A page of chats, each with what its folder takes by area and what its rows take of the database; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log and what no chat's rows take of it.",
   shape.object({
     chats: shape.list(chatStorageRow),
+    next: opt(nullable(T), "The chat after which the next page starts: send it as `after`; null at the end."),
     global: field(N, "The user's own level, the chats' folders, the shipped level and its notes apart."),
     globalNotes: field(N, "The global level's notes, which every chat's agents read."),
     shipped: N,
     database: field(N, "RPE's database file, with its write-ahead log."),
+    rest: opt(N, "What the database takes beyond the chats' rows: the installation's own tables, and what no chat owns. The chats' rows and this add up to the database."),
   }),
 );
 type StorageMirrored = Holds<Exactly<Infer<typeof storageReply>, TreeStorage>>;

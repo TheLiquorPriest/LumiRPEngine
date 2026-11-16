@@ -21,9 +21,13 @@ export function storageRoutes(kit: RouteKit) {
       path: "/api/v1/storage",
       access: "page",
       group: "files",
-      does: "What the tree takes: each chat's folder by area, the user's own level, the shipped level, and RPE's database file.",
+      does: "What the tree takes, a page of chats at a time from the sizes RPE keeps (a chat not measured yet is measured meanwhile and shows its sizes at the next read): each chat's folder by area and its rows of the database, the user's own level, the shipped level, and RPE's database file with what no chat's rows take of it.",
+      query: { limit: shape.optional(shape.whole({ least: 1 }), "How many chats a page holds; the `storage.chatsListed` setting's when left out, and at most `files.listMost`."), after: shape.optional(shape.text(), "The chat after which the page starts: the `next` of the page before.") },
       reply: storageReply,
-      handle: ({ user }) => treeStorage(deps, user),
+      handle: async ({ user, query }) => {
+        const s = await treeSettingsOf(own.locationOf(user, null));
+        return await treeStorage(deps, user, { limit: Math.min(query.limit ?? s.chatsListed, s.listMost), after: query.after, staleMs: s.recheckHours * 3_600_000 });
+      },
     }),
     route({
       method: "GET",
@@ -62,6 +66,7 @@ export function storageRoutes(kit: RouteKit) {
         if (body.plan === undefined) return { plan, removed: false, files, bytes, items };
         if (body.plan !== plan) throw new RouteError(409, "What there is to prune has changed since you asked: ask again, and prune what that says.");
         await planned.take();
+        if (body.what !== "backup" && typeof body.chat === "string") deps.measurer.request(user, body.chat);
         return { plan, removed: true, files, bytes, items };
       },
     }),
@@ -75,7 +80,9 @@ export function storageRoutes(kit: RouteKit) {
       reply: pruneReply,
       handle: async ({ user, body }) => {
         if (deps.turning(user, body.chat)) throw new RouteError(409, "A turn of this chat is going on: prune once it is over.");
-        return { pruned: await pruneChat(deps, user, body.chat) };
+        const pruned = await pruneChat(deps, user, body.chat);
+        deps.measurer.request(user, body.chat);
+        return { pruned };
       },
     }),
   ] as const;

@@ -48,6 +48,10 @@ export const TREE_DEFAULTS = Object.freeze({
   suggestionsOpenMost: 50,
   /** How many decided suggestions of a chat are kept. */
   suggestionsDecidedKept: 500,
+  /** Chats the Storage page lists in one page. */
+  chatsListed: 50,
+  /** Hours between checks of the kept sizes against the disk. */
+  recheckHours: 6,
 });
 
 export type TreeSettings = { -readonly [K in keyof typeof TREE_DEFAULTS]: number };
@@ -77,6 +81,8 @@ export const TREE_SETTING_DEFS = {
   readLines: { key: "files.readLines", default: TREE_DEFAULTS.readLines, takes: { type: "whole", least: 1 }, perConnection: false, name: "Lines of a file read at once", about: "Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole.", effect: "use" },
   suggestionsOpenMost: { key: "suggestions.openMost", default: TREE_DEFAULTS.suggestionsOpenMost, takes: { type: "whole", least: 0 }, perConnection: false, name: "Open suggestions kept", about: "The most suggestions of a chat that wait for the user at once; past it an agent's new suggestion is not kept, and the agent is told so.", effect: "use" },
   suggestionsDecidedKept: { key: "suggestions.decidedKept", default: TREE_DEFAULTS.suggestionsDecidedKept, takes: { type: "whole", least: 0 }, perConnection: false, name: "Decided suggestions kept", about: "How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them.", effect: "use" },
+  chatsListed: { key: "storage.chatsListed", default: TREE_DEFAULTS.chatsListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Chats a Storage page lists", about: "Chats the Storage page lists in one page, with what each takes on the disk and in the database.", effect: "use" },
+  recheckHours: { key: "storage.recheckHours", default: TREE_DEFAULTS.recheckHours, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hours between checks of the kept sizes", about: "How often what each chat's folder takes, as RPE keeps it, is checked against the disk in the background, so an edit made in his own editor shows.", effect: "use" },
 } as const satisfies NumberSettings<keyof TreeSettings>;
 
 /** A name of a file in force as the files layer reads it: an instruction file by its own name, anything else by its folder and name. */

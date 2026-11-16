@@ -10,7 +10,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
-import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, id8, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER } from "./layout";
+import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, id8, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, type StorageArea } from "./layout";
 
 /** How RPE's database takes a write: the application's write queue. */
 export interface TreeWrites {
@@ -181,6 +181,23 @@ CREATE TABLE tree_prune (
 );
 `,
   },
+  {
+    version: 10,
+    name: "what each chat's folder takes, kept",
+    // By area, as `storage.ts` measures them: kept as the tree writes and prunes, and checked against the disk (`checked`) in the background.
+    sql: `
+CREATE TABLE tree_size (
+  user TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  notes INTEGER NOT NULL,
+  turns INTEGER NOT NULL,
+  sessions INTEGER NOT NULL,
+  files INTEGER NOT NULL,
+  checked INTEGER NOT NULL,
+  PRIMARY KEY (user, chat)
+);
+`,
+  },
 ];
 
 /** The tree's tables, under its one name among the migration areas: the application and the command line open them by this. */
@@ -254,8 +271,37 @@ export class TreeChats {
   async deleted(user: string, chat: string, at: number): Promise<void> {
     const folders = this.folders(user, chat);
     if (folders === null) return;
-    await this.writes.run((db) => db.run("UPDATE tree_chat SET deleted = ? WHERE user = ? AND chat = ? AND deleted IS NULL", [at, user, chat]), "marking a deleted chat");
+    await this.writes.run((db) => {
+      db.run("UPDATE tree_chat SET deleted = ? WHERE user = ? AND chat = ? AND deleted IS NULL", [at, user, chat]);
+      // What the folder took is not what it took: the Storage page measures it again.
+      db.run("DELETE FROM tree_size WHERE user = ? AND chat = ?", [user, chat]);
+    }, "marking a deleted chat");
     await rm(join(this.files, CHATS_FOLDER, folders.character, folders.chat, SESSIONS_FOLDER), { recursive: true, force: true });
+  }
+
+  /** What each chat's folder takes, by area, as kept (`tree_size`), with when each was last checked against the disk. A chat measured never has no entry. */
+  sizesKept(user: string): Map<string, { areas: Record<StorageArea, number>; checked: number }> {
+    return new Map(
+      this.db
+        .query<{ chat: string; notes: number; turns: number; sessions: number; files: number; checked: number }, [string]>("SELECT chat, notes, turns, sessions, files, checked FROM tree_size WHERE user = ?")
+        .all(user)
+        .map((r) => [r.chat, { areas: { notes: r.notes, turns: r.turns, sessions: r.sessions, files: r.files }, checked: r.checked }]),
+    );
+  }
+
+  /** Keeps what a chat's folder takes by area, as just measured on the disk. */
+  async keepSizes(user: string, chat: string, areas: Record<StorageArea, number>, checked: number): Promise<void> {
+    await this.writes.run((db) => {
+      db.run("INSERT OR REPLACE INTO tree_size (user, chat, notes, turns, sessions, files, checked) VALUES (?, ?, ?, ?, ?, ?, ?)", [user, chat, areas.notes, areas.turns, areas.sessions, areas.files, checked]);
+    }, "keeping what a chat's folder takes");
+  }
+
+  /** A file of the chat grew by `delta` bytes (shrank, when negative): the kept size of its area follows, for a chat whose sizes are kept. */
+  async grew(user: string, chat: string, area: StorageArea, delta: number): Promise<void> {
+    if (delta === 0) return;
+    await this.writes.run((db) => {
+      db.run(`UPDATE tree_size SET ${area} = MAX(0, ${area} + ?) WHERE user = ? AND chat = ?`, [delta, user, chat]);
+    }, "keeping what a chat's folder takes");
   }
 
   /**

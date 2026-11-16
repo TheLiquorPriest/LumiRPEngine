@@ -10,6 +10,7 @@ import { entryAt, listingContext, type TreeFileEntry, treeListing } from "./cata
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { defaultStanding } from "./defaults";
 import { OwnFiles } from "./own-files";
+import type { ChatMeasurer } from "./storage";
 import type { TreeSuggestions } from "./suggestions";
 import { type ChatLocation, locate } from "./view";
 
@@ -39,6 +40,8 @@ export interface TreeRoutesDeps {
   copiesKept: number;
   /** The ids of the chat's sessions that are open now: a prune leaves their files. */
   openSessions(user: string, chat: string): Promise<string[]>;
+  /** Measures chats' folders in the background and keeps what it finds: asked again for a chat after a prune. */
+  measurer: ChatMeasurer;
 }
 
 /** The levels a file may be written at (plan §5): every level but the shipped one's is the user's. */

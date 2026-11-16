@@ -102,6 +102,8 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `pages.keepRuns` | `4` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Runs the Live page keeps: Runs of a chat the Live page holds at once; once more have ended than this, the oldest ended is let go, named with a link to its Turn page. |
 | `pages.keepFailures` | `20` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Handler failures the Live page keeps: Handler failures told to a chat that the Live page holds at once; once more have come than this, the oldest is let go. A failure stays on the page until it is dismissed. |
 | `pages.turnsAtATime` | `30` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Turns read at a time: Turns the Turns list and the World page's turn picker read from RPE at a time (RPE gives at most 500). |
+| `pages.folderEntries` | `200` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Files shown per page of a folder: Entries of a folder the Files page reads from RPE at a time; more are read on request. |
+| `pages.filePieceBytes` | `65536` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Bytes of a file read per piece: Bytes of a file the Files page reads from RPE at a time, so a file of any size opens its first piece at once and goes on when asked. |
 
 ## The store
 
@@ -111,6 +113,26 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `store.foldsKept` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World states held in memory: Worked-out world states held in memory, the least recently used going first. |
 | `store.notable` | `3` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Names of note in a reflection: Names of note each reflection of the world lists. |
 | `store.worldsKept` | `8` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | World revisions held in memory: Revisions of world documents held in memory once read, the least recently used going first. |
+
+## The engine's tools
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `engine.kindChain` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Kinds followed up a kind's chain: How many kinds up a kind's chain the engine follows to learn what something is; past it, it says where it stopped. |
+| `engine.holderDepth` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Holders followed to find a thing's place: How many holders up the engine looks for the place a thing is at; past it, it says where it stopped. |
+| `engine.nearMatches` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Near matches listed: How many near matches an answer about a name that is not there lists. |
+| `engine.nearDistance` | `0.25` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Spelling distance of a near match: How far off in spelling a name may be and still be offered as a near match, as a part of the name's length: 0.25 lets a quarter of its letters differ. |
+| `engine.queryDepth` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Depth of a world query: How many levels below its point world_query shows when it names no depth. |
+| `engine.searchHits` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Hits a world search gives: The most things one world_search answers with. |
+| `engine.dueItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Things falling due listed: The most things falling due in a span an answer lists, soonest first; how many more fall in it is said. |
+| `engine.creditScoreAssumed` | `700` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Score assumed for someone with none: The credit score the finance tables are read at for someone with no score recorded. |
+| `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
+
+## `space`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `space.visitDepth` | `32` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Places a visit counts for: How many places up the place tree a visit of the point of view counts for; past it, it says where it stopped. |
 
 ## The world state
 
@@ -132,18 +154,6 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `lore.index.batchChars` | `48000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore indexing, characters per call: The most characters of entry text handed to one call of a lore indexing run, so long entries never overrun a small model's window; one entry is handed at least, however long. |
 | `lore.index.page` | `50` | RPE-global.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lore index, entries per page: Entries one page of the lore index on the Lore page holds. |
 | `lore.index.entry` | none (no index entry of his own) | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Your own lore index entry: A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse. |
-
-## The engine's tools
-
-| Setting | Default | Where | In force | Appendix D.1 | What it does |
-|---|---|---|---|---|---|
-| `engine.nearMatches` | `5` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Near matches listed: How many near matches an answer about a name that is not there lists. |
-| `engine.nearDistance` | `0.25` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Spelling distance of a near match: How far off in spelling a name may be and still be offered as a near match, as a part of the name's length: 0.25 lets a quarter of its letters differ. |
-| `engine.queryDepth` | `1` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Depth of a world query: How many levels below its point world_query shows when it names no depth. |
-| `engine.searchHits` | `10` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Hits a world search gives: The most things one world_search answers with. |
-| `engine.dueItems` | `50` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Things falling due listed: The most things falling due in a span an answer lists, soonest first; how many more fall in it is said. |
-| `engine.creditScoreAssumed` | `700` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Score assumed for someone with none: The credit score the finance tables are read at for someone with no score recorded. |
-| `engine.editOps` | `64` | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Operations one GM edit carries: The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it. |
 
 ## `migration`
 
@@ -174,6 +184,13 @@ Each row says when a change is in force: at the setting's next use, from the nex
 |---|---|---|---|---|---|
 | `suggestions.openMost` | `50` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Open suggestions kept: The most suggestions of a chat that wait for the user at once; past it an agent's new suggestion is not kept, and the agent is told so. |
 | `suggestions.decidedKept` | `500` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Decided suggestions kept: How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them. |
+
+## `storage`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `storage.chatsListed` | `50` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Chats a Storage page lists: Chats the Storage page lists in one page, with what each takes on the disk and in the database. |
+| `storage.recheckHours` | `6` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Hours between checks of the kept sizes: How often what each chat's folder takes, as RPE keeps it, is checked against the disk in the background, so an edit made in his own editor shows. |
 
 ## The files in force
 
@@ -344,6 +361,13 @@ Each row says when a change is in force: at the setting's next use, from the nex
 | `map.diagonal` | `one` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | How a diagonal counts: one: a diagonal step is one square; alternate: every second diagonal in a row is two. A world's ruleset that says otherwise wins. |
 | `map.distances` | `feet` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A grid laid in play | Distances told in: feet or metres. A world's ruleset that says otherwise wins. |
 | `map.picture` | `true` | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: World state: the map | World state prints the map's picture: The world state prints the map's picture with its legend; off, it gives the title and the legend and the list of who and what is where carries the load. |
+
+## `taps`
+
+| Setting | Default | Where | In force | Appendix D.1 | What it does |
+|---|---|---|---|---|---|
+| `taps.nameMost` | `80` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Longest name a refusal quotes: The most characters of a name a tap's refusal quotes back; a longer one reads as naming no one. |
+| `taps.thingsMost` | `64` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Things one fix changes: The most things one ✎ things fix changes; past it the tap is answered in words and changes nothing. |
 
 ## Bootstrap
 

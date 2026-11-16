@@ -84,3 +84,13 @@ export function folderFor(name: string, id: string): string {
 export function turnFolderName(n: number, turn: string): string {
   return `turn-${n}-${id8(turn)}`;
 }
+
+/** What a chat's folder takes is told by area (the Storage page): its notes, its turn folders, its sessions' own files, and the rest of its files. */
+export type StorageArea = "notes" | "turns" | "sessions" | "files";
+
+/** The area of a file of a chat by its segments below the chat's folder. */
+export function areaOf(rest: readonly string[]): StorageArea {
+  if (rest[0] === NOTES_FOLDER) return "notes";
+  if (rest[0] === SESSIONS_FOLDER) return rest[2] === TURNS_FOLDER ? "turns" : "sessions";
+  return "files";
+}

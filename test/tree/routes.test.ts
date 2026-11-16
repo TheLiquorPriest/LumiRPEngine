@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { YAML } from "bun";
 import { loadGuidance } from "rp-harness";
 import type { App, RunningServer } from "../../src/app";
-import { CHATS_FOLDER, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
+import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
 import { bearer, type Bed, makeBed, makeKey, OWNER } from "../app/helpers";
 
@@ -59,6 +59,8 @@ describe("the Files page's routes", () => {
   /** The chat's open session, if one is, and the chats whose opening block "Apply now" started afresh. */
   let open: string | null = null;
   const applied: string[] = [];
+  /** Measures the chats' folders as the Storage page asks. */
+  let measurer: ChatMeasurer;
   /** The file port agents write through. */
   let port: TreeFiles;
 
@@ -97,7 +99,8 @@ describe("the Files page's routes", () => {
             };
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, suggestions, turning: () => turning, stack, apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
+            measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: (user, chat) => loadGuidance(port, { user, chat: chat ?? NO_CHAT, session: "none" }) }));
           },
         },
       ],
@@ -502,15 +505,25 @@ describe("the Files page's routes", () => {
     await writeFile(join(chatFolder, "sessions", "s-1", "s-1.jsonl"), "s".repeat(40));
     await writeFile(join(chatFolder, "WORLD.md"), "w".repeat(20));
 
+    // Not measured yet: the page answers at once with nothing for the chat, which is measured meanwhile.
+    expect((await call<TreeStorage>("GET", "/api/v1/storage")).body.chats[0]).toMatchObject({ chat: CHAT, bytes: 0, measured: null });
+    await measurer.idle();
     const storage = (await call<TreeStorage>("GET", "/api/v1/storage")).body;
     expect(storage.chats).toHaveLength(1);
     expect(storage.chats[0]).toMatchObject({ chat: CHAT, areas: { notes: 5_000 + "One, two, three.\n".length, turns: 300, sessions: 40, files: 20 } });
     expect(storage.chats[0]?.bytes).toBe(5_000 + 17 + 300 + 40 + 20);
     expect(storage.shipped).toBe(Object.values(SHIPPED_RPH).join("").length + Object.values(SHIPPED_RPE).join("").length);
     expect(storage.database).toBeGreaterThan(0);
+    // The chat's rows and the rest add up to the database.
+    expect((storage.chats[0]?.rows ?? 0) + (storage.rest ?? 0)).toBe(storage.database);
+    expect(storage.chats[0]?.rows).toBeGreaterThan(0);
+    // A file the port writes is in the kept sizes at once, with no walk.
+    await port.write(scope, "persistent-workspace/ledger.md", { op: "append", text: "More.\n" }, author);
+    expect((await call<TreeStorage>("GET", "/api/v1/storage")).body.chats[0]?.areas.notes).toBe(5_000 + 17 + 6);
+    expect((await call<TreeStorage>("GET", "/api/v1/storage?limit=1&after=zzz")).body).toMatchObject({ chats: [], next: null });
 
     const notes = (await call<NoteFiles>("GET", `/api/v1/storage/notes?chat=${CHAT}&limit=1`)).body;
-    expect(notes).toEqual({ largest: [{ path: "persistent-workspace/long.md", bytes: 5_000, writes: 1 }], rewritten: [{ path: "persistent-workspace/ledger.md", bytes: 17, writes: 3 }] });
+    expect(notes).toEqual({ largest: [{ path: "persistent-workspace/long.md", bytes: 5_000, writes: 1 }], rewritten: [{ path: "persistent-workspace/ledger.md", bytes: 23, writes: 4 }] });
 
     await call("PUT", "/api/v1/files/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, text: "---\nname: gm\ndescription: This chat's GM.\nreads: [ALL-AGENTS, WORLD]\n---\nMine.\n" });
     const stack = (await call<{ agent: string; parts: { part: string; path: string; level: string; left?: string }[] }>("GET", `/api/v1/files-stack?chat=${CHAT}&agent=gm`)).body;

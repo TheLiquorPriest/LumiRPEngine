@@ -15,7 +15,7 @@ export { treeRoutes, type TreeRoutesDeps } from "./routes";
 export { type TreeFileDiff, type TreeFileText, type TreeSuggestionView } from "./shapes";
 export { FILE_SETTINGS, levelFiles, levelTexts, sharedLevels, TREE_DEFAULTS, TREE_SETTING_DEFS, TREE_SETTINGS, type TreeReaderDeps, treeReader, type TreeSettings, treeSettingsOf } from "./settings";
 export { CHAT_DEFAULTS, layShipped, layShippedChanges, RPE_GUIDANCE, type ShippedChange } from "./shipped";
-export { type ChatStorage, type NoteFile, type NoteFiles, noteFiles, type StorageDeps, treeStorage, type TreeStorage } from "./storage";
+export { type ChatStorage, ChatMeasurer, type MeasurerDeps, measureFolder, type NoteFile, type NoteFiles, noteFiles, type StorageDeps, treeStorage, type TreeStorage } from "./storage";
 export { SUGGESTION_STATES, type SuggestionState, type SuggestionsDeps, type TreeSuggestion, TreeSuggestions } from "./suggestions";
 export { mergedTurnRecord, mergeTurnRecord, receivedOf, TURN_RECORD, type TurnRecordChange, type TurnRecordMessage, type TurnRecordRun, type TurnRecordTokens } from "./turn-record";
 export { type ChatLocation, locate, placesOf, treeLayers } from "./view";

@@ -445,6 +445,19 @@ Where a chat's lore indexing stands: its entries and how many no run has indexed
 | Body | none |
 | Reply | [`LoreIndexStatus`](#loreindexstatus) |
 
+### `GET /api/v1/chats/:chat/lore/overlays`
+
+The overlays on a chat's path, in the path's order: each with its entry and the entry's title, the note, the turn that wrote it (its place on the path, from 1, and its id) and who wrote it. A turn that was swiped away or deleted has none on the path.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | none |
+| Body | none |
+| Reply | [`LoreOverlays`](#loreoverlays) |
+
 ### `GET /api/v1/chats/:chat/turns/:turn/lore`
 
 The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry's lore map id, its id and book in Lumiverse, its title and how it activated where the tag says; none for a turn RPE holds no tag for, or one of another chat.
@@ -632,14 +645,14 @@ Removes a file of the user's; for one in place of a default, that is resetting t
 
 ### `GET /api/v1/storage`
 
-What the tree takes: each chat's folder by area, the user's own level, the shipped level, and RPE's database file.
+What the tree takes, a page of chats at a time from the sizes RPE keeps (a chat not measured yet is measured meanwhile and shows its sizes at the next read): each chat's folder by area and its rows of the database, the user's own level, the shipped level, and RPE's database file with what no chat's rows take of it.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
-| Query | none |
+| Query | `limit` (may be left out): `number`, How many chats a page holds; the `storage.chatsListed` setting's when left out, and at most `files.listMost`<br>`after` (may be left out): `string`, The chat after which the page starts: the `next` of the page before |
 | Body | none |
 | Reply | [`StorageReply`](#storagereply) |
 
@@ -1816,6 +1829,10 @@ export interface ChatStorageRow {
   areas: { notes: number; turns: number; sessions: number; files: number };
   /** When RPE heard that Lumiverse deleted the chat, epoch milliseconds; its session files are gone and its other files stay until he prunes them. */
   deleted?: number | null;
+  /** What the chat's rows take of the database, by the length of its rows in every table that carries the chat. */
+  rows?: number;
+  /** When the sizes were last checked against the disk, epoch milliseconds; null for a chat not measured yet, whose sizes are then none and come at the next read. */
+  measured?: number | null;
 }
 ```
 
@@ -2774,6 +2791,17 @@ export interface LoreIndexStatus {
 }
 ```
 
+### `LoreOverlays`
+
+The overlays on a chat's path: the Author's notes that the story has moved past part of an entry, each tied to the turn that wrote it.
+
+```ts
+export interface LoreOverlays {
+  /** In the path's order, and within a turn in the order they were written. */
+  overlays: ({ id: number; entry: string; title: string | null; note: string; turn: number; turnId: string; by: string | null; agent: string | null })[];
+}
+```
+
 ### `LumiverseSave`
 
 What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block.
@@ -3677,11 +3705,13 @@ export interface StoragePruneReply {
 
 ### `StorageReply`
 
-Each chat's folder; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log.
+A page of chats, each with what its folder takes by area and what its rows take of the database; the user's own level, its notes and the shipped level; and RPE's database file, with its write-ahead log and what no chat's rows take of it.
 
 ```ts
 export interface StorageReply {
   chats: ChatStorageRow[];
+  /** The chat after which the next page starts: send it as `after`; null at the end. */
+  next?: string | null;
   /** The user's own level, the chats' folders, the shipped level and its notes apart. */
   global: number;
   /** The global level's notes, which every chat's agents read. */
@@ -3689,6 +3719,8 @@ export interface StorageReply {
   shipped: number;
   /** RPE's database file, with its write-ahead log. */
   database: number;
+  /** What the database takes beyond the chats' rows: the installation's own tables, and what no chat owns. The chats' rows and this add up to the database. */
+  rest?: number;
 }
 ```
 

@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Places, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "rp-harness/contract";
 import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
-import { MOUNTS } from "./layout";
+import { areaOf, MOUNTS } from "./layout";
 import { treeSettingsOf } from "./settings";
 import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
 
@@ -107,6 +107,14 @@ function below(at: Located, rest: readonly string[]): string {
 
 async function fileHit(level: LayerLevel, rest: string[], disk: string): Promise<FileHit> {
   return { path: viewPath(level, rest), type: "file", level, kind: kindOf(level, rest), bytes: (await stat(disk)).size };
+}
+
+/** A file's size now; 0 for none. */
+async function sizeOfFile(disk: string): Promise<number> {
+  return await stat(disk).then(
+    (s) => s.size,
+    () => 0,
+  );
 }
 
 function occurrences(text: string, old: string): number {
@@ -337,7 +345,9 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         const again = await locate(loc, path);
         if (!again.ok) return await refusal(scope, again.path, again.reason, by);
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", by);
+        const before = await sizeOfFile(again.at.disk);
         const { result, old, after } = await apply({ ...again.at, disk: again.at.disk }, op);
+        if (result.status === "written" && again.at.level === "chat") await deps.chats.grew(scope.user, scope.chat, areaOf(again.at.rest), result.bytes - before);
         // A note written in a turn is recorded against it, with what the file held before and after, and stands in the chat's notes
         // folder (`notes.ts`), so a swipe, a delete, a branch or the lead dropping a sub-agent's writes can put the notes back.
         if (result.status === "written" && result.kind === "notes" && by !== "harness" && scope.turn !== undefined) {
@@ -371,8 +381,10 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
         if (!again.ok) return await refusal(scope, again.path, again.reason, "harness");
         if (again.at.disk === null) return await refusal(scope, again.at.path, "outside", "harness");
         const old = again.at.is === "file" ? await readFile(again.at.disk, "utf8") : null;
+        const before = await sizeOfFile(again.at.disk);
         const { result } = await apply({ ...again.at, disk: again.at.disk }, { op: "write", text: change(old) });
         if (result.status !== "written") throw new Error(`${again.at.path} could not be changed (${result.reason}).`);
+        await deps.chats.grew(scope.user, scope.chat, areaOf(again.at.rest), result.bytes - before);
         return result;
       });
     },
