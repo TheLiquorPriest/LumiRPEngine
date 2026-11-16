@@ -67,12 +67,12 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
   const parts = part === undefined ? QUERY_PARTS : [part as QueryPart];
 
   if (parts.includes("sources") || parts.includes("base")) {
-    const base = baseOf(db, user, character.id);
+    const base = baseOf(db, user, character.id, call.scope.chat);
     const states = await sourcesNow(call.deps.sources, { user, chat: call.scope.chat }, bindingsOf(db, user, character.id), base.values());
     if (parts.includes("sources")) data.sources = states.map(sourceView);
     if (parts.includes("base")) {
       const older = states.filter((s) => s.newer);
-      data.base = { ...baseView(base, history ? baseHistory(db, user, character.id) : null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
+      data.base = { ...baseView(base, history ? baseHistory(db, user, character.id, call.scope.chat) : null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
     }
   }
   if (parts.includes("casting") && history) {

@@ -8,7 +8,7 @@ describe("stage.unperceived and path.unperceived", () => {
   test("count exactly the characters on stage with no perception of the turn, by casting with their names, this turn and earlier ones", async () => {
     const b = await openBench();
     const stage = new Map<string, string[]>();
-    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : []))) });
+    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : []))) });
     const read = async (turn: string) => {
       const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["stage.unperceived", "path.unperceived"]);
       expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
@@ -66,7 +66,7 @@ describe("stage.unperceived and path.unperceived", () => {
 
   test("a chat with no record yet counts no one", async () => {
     const b = await openBench();
-    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map() });
+    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => false });
     const values = await facts.read({ user: USER, chat: "no-such-chat", session: "s-1" }, ["stage.unperceived", "path.unperceived"]);
     expect(values["stage.unperceived"]?.count).toBe(0);
     expect(values["path.unperceived"]?.count).toBe(0);
@@ -75,7 +75,7 @@ describe("stage.unperceived and path.unperceived", () => {
   test("an entry bound as her voice changes: cast.base.older names her, the entry and the aspect; a growth a reflection proposed is counted until accepted", async () => {
     const b = await openBench();
     b.t.shelf.put("entry", "e-112", "Bram's way of speaking", "r1");
-    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map() });
+    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => false });
     const read = async (turn: string) => {
       const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["cast.base.older", "cast.growth.proposed"]);
       expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
@@ -89,5 +89,23 @@ describe("stage.unperceived and path.unperceived", () => {
     const [bram] = charactersOf(b.t.db, USER, [CHAT]);
     await b.t.write(turn, [{ character: bram?.id ?? "", part: "growth", item: null, value: { text: "Less trusting.", proposed: true } }], "character");
     expect((await read(turn.id))["cast.growth.proposed"]).toMatchObject({ count: 1, names: ["Bram"] });
+  });
+
+  test("a memory entity bound to her is read like any source, its change marks the base older, and cast.playerMind follows his setting", async () => {
+    const b = await openBench();
+    b.t.shelf.put("memory", "ent-7", "Bram", "100");
+    let on = false;
+    const facts = castFacts({ store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => on });
+    const read = async (turn: string) => {
+      const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["cast.base.older", "cast.playerMind"]);
+      expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
+      return values;
+    };
+    const turn = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }, { op: "bind", who: "Bram", memory: "ent-7" }, { op: "base", who: "Bram", seed: "An innkeeper." }] }, turn.id);
+    expect(await read(turn.id)).toMatchObject({ "cast.base.older": { count: 0 }, "cast.playerMind": { count: 0 } });
+    b.t.shelf.put("memory", "ent-7", "Bram", "101");
+    on = true;
+    expect(await read(turn.id)).toMatchObject({ "cast.base.older": { count: 1, names: ["Bram"], fields: { sources: [{ kind: "memory", id: "ent-7" }] } }, "cast.playerMind": { count: 1, names: ["on"] } });
   });
 });

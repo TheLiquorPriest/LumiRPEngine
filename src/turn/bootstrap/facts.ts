@@ -219,8 +219,8 @@ function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): HorizonF
   return { entries: entries.length, named: entries.filter((e) => e.ref !== null).length, clock: clockRecorded(store.headState(chat).state) };
 }
 
-function principalsFact(deps: DoneEnoughDeps, user: string, now: CastNow): PrincipalsFact {
-  return { principals: now.principals.map((c) => ({ id: c.id, name: c.name, base: [...baseOf(deps.store.db, user, c.id).keys()], memories: now.record?.of(c.id, "memory").length ?? 0 })) };
+function principalsFact(deps: DoneEnoughDeps, user: string, chat: string, now: CastNow): PrincipalsFact {
+  return { principals: now.principals.map((c) => ({ id: c.id, name: c.name, base: [...baseOf(deps.store.db, user, c.id, chat).keys()], memories: now.record?.of(c.id, "memory").length ?? 0 })) };
 }
 
 /** The six facts for one chat, at its head. */
@@ -253,6 +253,6 @@ export async function doneEnough(deps: DoneEnoughDeps, user: string, chat: strin
     cast: await known("cast", fromCast(castFact)),
     story: await known("story", fromCast((c) => storyFact(deps, user, chat, c.principals))),
     horizon: await known("horizon", () => horizonFact(deps, user, chat)),
-    principals: await known("principals", fromCast((c) => principalsFact(deps, user, c))),
+    principals: await known("principals", fromCast((c) => principalsFact(deps, user, chat, c))),
   };
 }

@@ -105,7 +105,7 @@ test("each fact's counts change exactly when its own records are written, and ne
   expect([step.moved, step.now.horizon]).toEqual([["horizon"], { known: true, entries: 1, named: 1, clock: true }]);
 
   // 6. The principal's base, then a memory written by its own agent.
-  await b.app.writes.run((db) => writeBase(db, { user: USER, turn, by: "author", agent: "author-1", now: Date.now() }, wren.id, { seed: "A keeper's daughter who never sleeps before the lamp is lit." }, {}));
+  await b.app.writes.run((db) => writeBase(db, { user: USER, chat: CHAT, turn, by: "author", agent: "author-1", now: Date.now() }, wren.id, { seed: "A keeper's daughter who never sleeps before the lamp is lit." }, {}));
   step = await next();
   expect([step.moved, step.now.principals]).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 0 }] }]);
   await b.app.writes.run(() => writeCast(b.turns.store, { ...at, by: "character", agent: "character-1", at: null }, [{ character: wren.id, part: "memory", item: null, value: { text: "The night the lamp nearly failed." } }]));

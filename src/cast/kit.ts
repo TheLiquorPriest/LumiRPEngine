@@ -5,6 +5,7 @@
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
 import type { AgentRef, HostTool, JsonObject, JsonValue, Scope, ToolCtx, ToolResult, ToolTier } from "rp-harness/contract";
+import type { ConfigRead } from "../app/config-read";
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
@@ -78,8 +79,28 @@ export const CAST_SETTING_DEFS = {
   dimensionScale: { key: "cast.dimensionScale", default: CAST_DEFAULTS.dimensionScale, takes: { type: "number", least: 1 }, perConnection: false, name: "Scale of a relationship's dimensions", about: "The scale a relationship's trust, warmth, respect and fear are read and reported against: from minus this to this. A value past it is kept as sent, and said to be past.", effect: "turn" },
 } as const satisfies NumberSettings<keyof CastSettings>;
 
+/**
+ * Whether his own character has a mind: the persona is cast with its own agent and memory work only when he turns this on (plan §7.1,
+ * "the existing setting"; "Play as" stays disabled). Off as shipped, as today's `story.minds.playerMind` is carried by the migration. It
+ * reaches the guidance as the fact `cast.playerMind`; code never casts the persona or refuses it.
+ */
+export const CAST_PLAYER_MIND: Setting = {
+  key: "cast.playerMind",
+  default: false,
+  takes: { type: "yesNo" },
+  perConnection: false,
+  name: "His character has a mind",
+  about: "His own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind.",
+  effect: "turn",
+};
+
+/** Whether his own character has a mind, as the levels set it. */
+export function playerMindOf(read: Pick<ConfigRead, "value">): boolean {
+  return read.value(CAST_PLAYER_MIND) === true;
+}
+
 /** Every setting the cast reads, as a config file writes it. */
-export const CAST_SETTINGS: readonly Setting[] = Object.values(CAST_SETTING_DEFS);
+export const CAST_SETTINGS: readonly Setting[] = [...Object.values(CAST_SETTING_DEFS), CAST_PLAYER_MIND];
 
 /** The prompt part every answer's sentences come from. */
 export const CAST_ANSWERS = "cast-answers";

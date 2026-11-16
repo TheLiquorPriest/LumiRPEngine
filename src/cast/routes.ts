@@ -338,7 +338,7 @@ function characterShown(r: Reading, character: Character, settings: CastSettings
   const { db } = r.store;
   const all = (part: RowPart): CastItem[] => r.record.of(character.id, part, true);
   const standing = new Map(memoriesNow(r.record, character.id, r.clock?.now ?? null, settings).map((m) => [m.item.id, m]));
-  const versions = baseHistory(db, r.user, character.id);
+  const versions = baseHistory(db, r.user, character.id, r.record.at.chat);
   const newest = new Map(versions.map((v) => [v.part, v.version]));
   const [member] = membersOf(r, [character]);
   return {

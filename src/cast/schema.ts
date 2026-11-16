@@ -78,6 +78,27 @@ CREATE INDEX cast_entry_turn ON cast_entry (user, turn, ord);
       db.run("ALTER TABLE character ADD COLUMN person TEXT");
     },
   },
+  {
+    version: 4,
+    name: "a branch keeps the bases and the pins as they stood when it was made",
+    // The chat a version of a base was written in, and each pin as a row of the chat it was made in: a chat sees its own and, of a chat it
+    // was branched from, those from before the branch was made. A version written on a turn is of that turn's chat, any other of the character's.
+    sql: `
+ALTER TABLE character_doc ADD COLUMN chat TEXT;
+UPDATE character_doc SET chat = COALESCE((SELECT t.chat FROM turn t WHERE t.user = character_doc.user AND t.id = character_doc.turn), (SELECT c.chat FROM character c WHERE c.user = character_doc.user AND c.id = character_doc.character));
+CREATE TABLE character_pin (
+  n INTEGER PRIMARY KEY AUTOINCREMENT,
+  user TEXT NOT NULL,
+  character TEXT NOT NULL,
+  chat TEXT NOT NULL,
+  casting TEXT,
+  created INTEGER NOT NULL
+);
+CREATE INDEX character_pin_character ON character_pin (user, character, n);
+INSERT INTO character_pin (user, character, chat, casting, created) SELECT user, id, chat, pinned, 0 FROM character WHERE pinned IS NOT NULL ORDER BY n;
+ALTER TABLE character DROP COLUMN pinned;
+`,
+  },
 ];
 
 /**

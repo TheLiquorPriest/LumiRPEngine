@@ -46,7 +46,7 @@ async function bram(t: Table, more: (id: string) => CastWrite[] = () => []): Pro
     bindSource(db, USER, id, { kind: "entry", ref: "e-112", defines: "background" }, 3);
     writeBase(
       db,
-      { user: USER, turn: null, by: "author", agent: "author-1", now: 4 },
+      { user: USER, chat: CHAT, turn: null, by: "author", agent: "author-1", now: 4 },
       id,
       { seed: "An innkeeper who keeps his head down.", soul: "Wants a quiet life.", inner_voice: "Counts things when nervous.", background: "Born in the inn's cellar." },
       { [sourceKey("card", "card-bram")]: "c1", [sourceKey("entry", "e-112")]: "r1" },
@@ -378,7 +378,7 @@ describe("the base's versions", () => {
     const id = await bram(t);
     const named = async (): Promise<{ parts: Record<string, number>; newest: number } | undefined> => (await castViews(["base"], input(t)))[0]?.version;
     expect(await named()).toEqual({ parts: { seed: 1, soul: 1, inner_voice: 1, background: 1 }, newest: 4 });
-    await t.writes.run((db) => writeBase(db, { user: USER, turn: null, by: "author", agent: "author-1", now: 5 }, id, { soul: "Wants a quiet life, and a locked cellar." }, {}));
+    await t.writes.run((db) => writeBase(db, { user: USER, chat: CHAT, turn: null, by: "author", agent: "author-1", now: 5 }, id, { soul: "Wants a quiet life, and a locked cellar." }, {}));
     expect(await named()).toEqual({ parts: { seed: 1, soul: 2, inner_voice: 1, background: 1 }, newest: 5 });
   });
 });

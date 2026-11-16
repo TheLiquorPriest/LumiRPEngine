@@ -546,7 +546,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         if (p.value.drop === true) unbindSource(db, user, id, p.source.kind, p.source.ref);
         else bindSource(db, user, id, { kind: p.source.kind, ref: p.source.ref, defines: typeof p.value.defines === "string" ? p.value.defines : null }, now);
       } else if (p.op === "base") {
-        writeBase(db, { user, turn, by, agent: call.agent.id, now }, id, p.value as Partial<Record<BasePart, string>>, p.seen ?? {});
+        writeBase(db, { user, chat: scope.chat, turn, by, agent: call.agent.id, now }, id, p.value as Partial<Record<BasePart, string>>, p.seen ?? {});
       } else if (p.op === "filed" && p.files !== undefined && turn !== null) {
         writeCast(
           store,
@@ -587,11 +587,11 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
       done.now = casting === null ? null : { as: casting.as, ...(casting.pinned ? { pinned: true } : {}), ...(casting.line !== null ? { line: casting.line } : {}) };
       if (casting?.pinned === true && casting.as !== p.value.as) reply.report("pinned", { n: p.n, who: p.name, as: casting.as });
     } else if (p.op === "bind" || p.op === "base") {
-      const states = await sourcesNow((_s, src) => read(src.kind, src.ref), scope, bindingsOf(store.db, user, id), baseOf(store.db, user, id).values());
+      const states = await sourcesNow((_s, src) => read(src.kind, src.ref), scope, bindingsOf(store.db, user, id), baseOf(store.db, user, id, scope.chat).values());
       if (p.op === "bind") done.now = states.map(sourceView);
       else {
         const older = states.filter((s) => s.newer);
-        done.now = { ...baseView(baseOf(store.db, user, id), null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
+        done.now = { ...baseView(baseOf(store.db, user, id, scope.chat), null), ...(older.length > 0 ? { older_than: older.map(sourceView) } : {}) };
       }
     } else if (p.op === "filed") {
       done.now = { files: importedFiles(after.record, id).map((f) => ({ file: fileName(f), filed: isFiled(f) })) };

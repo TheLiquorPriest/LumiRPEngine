@@ -73,6 +73,19 @@ interface CharacterDb {
   created: number;
 }
 
+/**
+ * The chats whose rows the reading `?2` sees, each with the moment up to which it sees them (`cut`): its own chat to the end, a chat it
+ * was branched from up to the moment the branch below it was made (a branch shares what came before it, plan §6.3 and §10.10; what is
+ * written after, in either chat, is that chat's own). `?1` is the user. Used inside `WITH RECURSIVE`.
+ */
+const SEEN = `line(id, src, cut, depth) AS (
+  SELECT ?2, (SELECT source_chat FROM chat WHERE user = ?1 AND id = ?2), ${Number.MAX_SAFE_INTEGER}, 0
+  UNION ALL
+  SELECT c.id, c.source_chat, min(l.cut, (SELECT created FROM chat WHERE user = ?1 AND id = l.id)), l.depth + 1
+  FROM line l JOIN chat c ON c.user = ?1 AND c.id = l.src
+  WHERE l.depth < 64
+)`;
+
 /** The chats whose characters `chat` knows: itself, then each chat it was branched from, nearest first. */
 export function chatLine(user: UserStore, chat: string): string[] {
   const out: string[] = [];
@@ -84,11 +97,19 @@ export function chatLine(user: UserStore, chat: string): string[] {
   return out;
 }
 
-/** Every character the chats know, in the order they were made. */
+/**
+ * Every character the chats know, in the order they were made, with the casting the player pinned as the first of `chats` (the chat
+ * read) sees it: its own pin, or a source chat's up to the moment it was branched.
+ */
 export function charactersOf(db: Database, user: string, chats: readonly string[]): Character[] {
   return db
-    .query<CharacterDb, [string, string]>("SELECT id, chat, name, pinned, person, created FROM character WHERE user = ?1 AND chat IN (SELECT value FROM json_each(?2)) ORDER BY n")
-    .all(user, JSON.stringify(chats))
+    .query<CharacterDb, [string, string, string]>(
+      `WITH RECURSIVE ${SEEN}
+SELECT c.id, c.chat, c.name, c.person, c.created,
+  (SELECT p.casting FROM character_pin p WHERE p.user = c.user AND p.character = c.id AND EXISTS (SELECT 1 FROM line l WHERE l.id = p.chat AND p.created <= l.cut) ORDER BY p.n DESC LIMIT 1) AS pinned
+FROM character c WHERE c.user = ?1 AND c.chat IN (SELECT value FROM json_each(?3)) ORDER BY c.n`,
+    )
+    .all(user, chats[0] ?? "", JSON.stringify(chats))
     .map((r) => ({ id: r.id, chat: r.chat, name: r.name, pinned: r.pinned as Casting | null, person: r.person, created: r.created }));
 }
 
@@ -118,9 +139,17 @@ export function setPerson(db: Database, user: string, character: string, person:
   db.run("UPDATE character SET person = ? WHERE user = ? AND id = ?", [person, user, character]);
 }
 
-/** The player pins a casting (null takes the pin away), inside the caller's write. It stands over whatever the Author casts. */
-export function pinCasting(db: Database, user: string, character: string, casting: Casting | null): void {
-  db.run("UPDATE character SET pinned = ? WHERE user = ? AND id = ?", [casting, user, character]);
+/**
+ * The player pins a casting (null takes the pin away), inside the caller's write. It stands over whatever the Author casts, in the
+ * chat he pinned it in, and in a chat branched from that one after, but not in the chat it was branched from, whose pin stays as it was.
+ * `where` is that chat and the moment; none (the migration's pins, as each chat showed them) is the character's own chat, from the start.
+ */
+export function pinCasting(db: Database, user: string, character: string, casting: Casting | null, where: { chat: string; now: number } | null = null): void {
+  const chat = where?.chat ?? db.query<{ chat: string }, [string, string]>("SELECT chat FROM character WHERE user = ? AND id = ?").get(user, character)?.chat;
+  if (chat === undefined) return;
+  // Taking away a pin there is none of is nothing to record.
+  if (casting === null && !db.query<unknown, [string, string]>("SELECT 1 FROM character_pin WHERE user = ? AND character = ?").get(user, character)) return;
+  db.run("INSERT INTO character_pin (user, character, chat, casting, created) VALUES (?, ?, ?, ?, ?)", [user, character, chat, casting, where?.now ?? 0]);
 }
 
 /** A character given another name, inside the caller's write: the migration names a person as the world now names it. The caller keeps the name free in the character's chat. */
@@ -210,18 +239,25 @@ interface DocDb {
   created: number;
 }
 
-/** Every version of a character's base, oldest first. */
-export function baseHistory(db: Database, user: string, character: string): BaseVersion[] {
+/**
+ * Every version of a character's base that the reading in `chat` sees, oldest first: those written in that chat, and those a chat it
+ * was branched from had written when the branch was made. A version written there since, or here since, is that chat's own.
+ */
+export function baseHistory(db: Database, user: string, character: string, chat: string): BaseVersion[] {
   return db
-    .query<DocDb, [string, string]>("SELECT id, part, version, text, seen, turn, by, agent, created FROM character_doc WHERE user = ? AND character = ? AND kind = 'base' ORDER BY id")
-    .all(user, character)
+    .query<DocDb, [string, string, string]>(
+      `WITH RECURSIVE ${SEEN}
+SELECT d.id, d.part, d.version, d.text, d.seen, d.turn, d.by, d.agent, d.created FROM character_doc d
+WHERE d.user = ?1 AND d.character = ?3 AND d.kind = 'base' AND (d.chat IS NULL OR EXISTS (SELECT 1 FROM line l WHERE l.id = d.chat AND d.created <= l.cut)) ORDER BY d.id`,
+    )
+    .all(user, chat, character)
     .map((r) => ({ part: r.part as BasePart, version: r.version, text: r.text, seen: JSON.parse(r.seen) as Record<string, string>, turn: r.turn, by: r.by, agent: r.agent, created: r.created }));
 }
 
-/** A character's base as it stands: the newest version of each part written. */
-export function baseOf(db: Database, user: string, character: string): Map<BasePart, BaseVersion> {
+/** A character's base as the reading in `chat` sees it: the newest version of each part written. */
+export function baseOf(db: Database, user: string, character: string, chat: string): Map<BasePart, BaseVersion> {
   const out = new Map<BasePart, BaseVersion>();
-  for (const v of baseHistory(db, user, character)) out.set(v.part, v);
+  for (const v of baseHistory(db, user, character, chat)) out.set(v.part, v);
   return out;
 }
 
@@ -242,18 +278,18 @@ export interface BaseWriter {
   now: number;
 }
 
-/** Adds a version of each part given, inside the caller's write; `seen` is the sources' revisions as read just before. */
-export function writeBase(db: Database, writer: BaseWriter, character: string, texts: Partial<Record<BasePart, string>>, seen: Record<string, string>): BaseVersion[] {
+/** Adds a version of each part given in `chat`, inside the caller's write; `seen` is the sources' revisions as read just before. Version numbers run on across every chat the character is known in. */
+export function writeBase(db: Database, writer: BaseWriter & { chat: string }, character: string, texts: Partial<Record<BasePart, string>>, seen: Record<string, string>): BaseVersion[] {
   const next = db.query<{ n: number | null }, [string, string, string]>("SELECT max(version) AS n FROM character_doc WHERE user = ? AND character = ? AND part = ? AND kind = 'base'");
-  const put = db.query<unknown, [string, string, string, number, string, string, string | null, string | null, string | null, number]>(
-    "INSERT INTO character_doc (user, character, kind, part, version, text, seen, turn, by, agent, created) VALUES (?, ?, 'base', ?, ?, ?, ?, ?, ?, ?, ?)",
+  const put = db.query<unknown, [string, string, string, number, string, string, string | null, string | null, string | null, number, string]>(
+    "INSERT INTO character_doc (user, character, kind, part, version, text, seen, turn, by, agent, created, chat) VALUES (?, ?, 'base', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const out: BaseVersion[] = [];
   for (const part of BASE_PARTS) {
     const text = texts[part];
     if (text === undefined) continue;
     const version = (next.get(writer.user, character, part)?.n ?? 0) + 1;
-    put.run(writer.user, character, part, version, text, JSON.stringify(seen), writer.turn, writer.by, writer.agent, writer.now);
+    put.run(writer.user, character, part, version, text, JSON.stringify(seen), writer.turn, writer.by, writer.agent, writer.now, writer.chat);
     out.push({ part, version, text, seen, turn: writer.turn, by: writer.by, agent: writer.agent, created: writer.now });
   }
   return out;

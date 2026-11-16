@@ -89,7 +89,7 @@ describe("lore stays the authority for what it defines", () => {
       older_than: [{ kind: "entry", id: "e-31", defines: "background", title: "Mira Thornwood", newer_than_base: true }],
     });
     const mira = charactersOf(b.t.db, USER, [CHAT])[0]?.id ?? "";
-    expect(baseHistory(b.t.db, USER, mira).map((v) => [v.part, v.version, v.text])).toEqual([
+    expect(baseHistory(b.t.db, USER, mira, CHAT).map((v) => [v.part, v.version, v.text])).toEqual([
       ["seed", 1, "A herbalist who left the guild."],
       ["background", 1, "Raised in the guild's hall."],
     ]);

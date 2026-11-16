@@ -23,9 +23,10 @@ import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
+import type { Stores } from "../adapter/lumiverse/stores";
 import { type App, LIVE_JOBS } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
-import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
+import { type BookReader, CAST_PLAYER_MIND, castFacts, castTools, chatLine, findCharacter, playerMindOf, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { engineTools, gridMoves, mapView, mapWording } from "../iface";
 import { indexedSearch } from "../iface/search";
@@ -95,13 +96,15 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
 
 /**
  * A character's sources as Lumiverse holds them now (the cast's `SourceReader`): a card or a persona
- * through the adapter's reads, a lore entry through the lore, each with a revision that changes
- * whenever its text does. RPE has no read of Lumiverse's memory entities, so a memory source fails.
- * A read that cannot be made fails in the words of the turn-errors part in force for the chat.
+ * through the adapter's reads, a lore entry through the lore, a memory entity through the adapter's
+ * stores, each with a revision that changes whenever its text does: an entry's is the lore's own
+ * (the one the catalog, `lore_read` and the index give), a memory entity's Lumiverse's own. A memory
+ * entity is a chat's, so a job of no chat finds none. A read that cannot be made fails in the words
+ * of the turn-errors part in force for the chat.
  */
-function liveSources(reads: () => LumiverseReads | null, lore: Lore, files: TreeFiles): SourceReader {
-  const lumiverse = async (scope: { user: string; chat: string }): Promise<LumiverseReads> => {
-    const now = reads();
+function liveSources(lumiverse: () => { reads: LumiverseReads; stores: Stores } | null, lore: Lore, files: TreeFiles): SourceReader {
+  const parts = async (scope: { user: string; chat: string }): Promise<{ reads: LumiverseReads; stores: Stores }> => {
+    const now = lumiverse();
     if (now === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_sources"));
     return now;
   };
@@ -109,18 +112,24 @@ function liveSources(reads: () => LumiverseReads | null, lore: Lore, files: Tree
     switch (source.kind) {
       case "entry": {
         const [entry] = await lore.read({ user: scope.user, chat: scope.chat }, [source.ref]);
-        return entry === undefined ? null : { title: entry.title, revision: entry.revision ?? hashJson([entry.title, entry.keys, entry.text]) };
+        if (entry === undefined) return null;
+        if (entry.revision === undefined) throw new Error(`The lore gave no revision for ${source.ref}.`);
+        return { title: entry.title, revision: entry.revision };
       }
       case "card": {
-        const card = await (await lumiverse(scope)).character(source.ref);
+        const card = await (await parts(scope)).reads.character(source.ref);
         return card === null ? null : { title: card.name, revision: hashJson([card.name, card.description, card.personality, card.scenario, card.firstMessage, card.exampleMessages, card.systemPrompt, card.postHistoryInstructions]) };
       }
       case "persona": {
-        const persona = await (await lumiverse(scope)).persona(source.ref);
+        const persona = await (await parts(scope)).reads.persona(source.ref);
         return persona === null ? null : { title: persona.name, revision: hashJson([persona.name, persona.title, persona.description]) };
       }
-      case "memory":
-        throw new Error(await turnErrorWords(files, scope, "memory_source"));
+      case "memory": {
+        const { stores } = await parts(scope);
+        if (scope.chat === "") return null;
+        const entity = await stores.entity(scope.chat, source.ref);
+        return entity === null ? null : { title: entity.name, revision: String(entity.revision) };
+      }
     }
   };
 }
@@ -175,7 +184,7 @@ export interface TurnsOptions {
    * user's (false when it was not going on); null before it is mounted, or when RPE is not set up for a
    * Lumiverse.
    */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: StoresPort; stopGeneration(generation: string): Promise<boolean> } | null;
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
@@ -369,9 +378,17 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     if (parts === null) throw new Error(await turnErrorWords(files, scope, "no_lumiverse_chat"));
     return parts.stores;
   };
-  const sources = liveSources(() => options.lumiverse()?.reads ?? null, lore, files);
+  const sources = liveSources(() => options.lumiverse(), lore, files);
   // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
-  facts.add(castFacts({ store, sources, onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])) }));
+  // Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use.
+  facts.add(
+    castFacts({
+      store,
+      sources,
+      onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])),
+      playerMind: async (scope) => playerMindOf(readConfig(await portTexts(files, scope), app.log, [CAST_PLAYER_MIND])),
+    }),
+  );
   // What time brings due over the store's states: listed by the world state's due section and by an answer that lets time pass.
   const due = timeDue(store);
   /**

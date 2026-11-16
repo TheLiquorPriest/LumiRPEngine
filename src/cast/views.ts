@@ -161,9 +161,9 @@ export async function castViews(names: readonly string[], input: CastViewInput):
     let fields: ViewFields | null = null;
     let version: BaseVersions | undefined;
     if (name === "base") {
-      const base = baseOf(db, input.user, character.id);
+      const base = baseOf(db, input.user, character.id, input.chat);
       // The base's newest version: how many versions of its parts have been written, which any redraw of any part raises.
-      const baseVersion = baseHistory(db, input.user, character.id).length;
+      const baseVersion = baseHistory(db, input.user, character.id, input.chat).length;
       const states = await sourcesNow(input.sources, { user: input.user, chat: input.chat }, bindingsOf(db, input.user, character.id), base.values());
       // Why a source is newer than the base: it is gone, it changed since it was drawn from, or it was bound after.
       const sources = listed(

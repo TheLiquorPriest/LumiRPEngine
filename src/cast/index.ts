@@ -8,7 +8,7 @@
 export { CAST_MIGRATIONS } from "./schema";
 export { CAST_STORE_AREA, CAST_WRITE } from "./fold";
 export { castTools, CAST_TOOLS } from "./tools";
-export { CAST_ANSWERS, CAST_DEFAULTS, CAST_SETTING_DEFS, CAST_SETTINGS, type CastDeps, type CastSettings } from "./kit";
+export { CAST_ANSWERS, CAST_DEFAULTS, CAST_PLAYER_MIND, CAST_SETTING_DEFS, CAST_SETTINGS, type CastDeps, type CastSettings, playerMindOf } from "./kit";
 export { CAST_LANE, UPDATE_OPERATIONS } from "./update";
 export { QUERY_PARTS } from "./query";
 export { REACHES } from "./perceive";

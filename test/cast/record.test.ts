@@ -8,7 +8,9 @@ import {
   awayItemId,
   castingItemId,
   charactersOf,
+  chatLine,
   findCharacter,
+  pinCasting,
   relationshipItemId,
   ROW_PARTS,
   sourceKey,
@@ -49,7 +51,7 @@ describe("a character's record", () => {
       bindSource(db, USER, bram, { kind: "memory", ref: "mem-7", defines: null }, 5);
       writeBase(
         db,
-        { user: USER, turn: turn.id, by: "author", agent: "author-1", now: 6 },
+        { user: USER, chat: CHAT, turn: turn.id, by: "author", agent: "author-1", now: 6 },
         bram,
         { seed: "An innkeeper who keeps his head down.", soul: "Wants a quiet life; will not lie to a guest.", inner_voice: "Counts things when he is nervous.", background: "Born in the cellar of the inn he now keeps." },
         { [sourceKey("entry", "e-112")]: "r1", [sourceKey("card", "card-bram")]: "r9" },
@@ -70,7 +72,7 @@ describe("a character's record", () => {
       ["persona", "persona-x", "voice"],
       ["memory", "mem-7", null],
     ]);
-    const base = baseOf(t.db, USER, bram);
+    const base = baseOf(t.db, USER, bram, CHAT);
     expect([...base.values()].map((v) => [v.part, v.version, v.turn])).toEqual([
       ["seed", 1, turn.id],
       ["soul", 1, turn.id],
@@ -108,14 +110,14 @@ describe("a character's record", () => {
     expect(t.record().of(bram, "knowledge", true)[0]?.rows.map((r) => r.turn)).toHaveLength(3);
 
     await t.writes.run((db) => {
-      writeBase(db, { user: USER, turn: null, by: null, agent: null, now: 10 }, bram, { seed: "An innkeeper." }, {});
-      writeBase(db, { user: USER, turn: null, by: null, agent: null, now: 11 }, bram, { seed: "An innkeeper who keeps his head down." }, {});
+      writeBase(db, { user: USER, chat: CHAT, turn: null, by: null, agent: null, now: 10 }, bram, { seed: "An innkeeper." }, {});
+      writeBase(db, { user: USER, chat: CHAT, turn: null, by: null, agent: null, now: 11 }, bram, { seed: "An innkeeper who keeps his head down." }, {});
     });
-    expect(baseHistory(t.db, USER, bram).map((v) => [v.part, v.version, v.text])).toEqual([
+    expect(baseHistory(t.db, USER, bram, CHAT).map((v) => [v.part, v.version, v.text])).toEqual([
       ["seed", 1, "An innkeeper."],
       ["seed", 2, "An innkeeper who keeps his head down."],
     ]);
-    expect(baseOf(t.db, USER, bram).get("seed")?.version).toBe(2);
+    expect(baseOf(t.db, USER, bram, CHAT).get("seed")?.version).toBe(2);
   });
 
   test("a relationship and a piece of knowledge written in a turn go with that turn's swipe and come back when it is shown again; the base and sources stay", async () => {
@@ -126,7 +128,7 @@ describe("a character's record", () => {
     await t.write(played, everyRowPart(bram).slice(1));
     await t.writes.run((db) => {
       bindSource(db, USER, bram, { kind: "entry", ref: "e-9", defines: "appearance" }, 9);
-      writeBase(db, { user: USER, turn: played.id, by: "author", agent: "author-1", now: 9 }, bram, { soul: "Will not lie to a guest." }, {});
+      writeBase(db, { user: USER, chat: CHAT, turn: played.id, by: "author", agent: "author-1", now: 9 }, bram, { soul: "Will not lie to a guest." }, {});
     });
     await t.tie(played);
     const rel = relationshipItemId(bram, "Wren");
@@ -142,7 +144,7 @@ describe("a character's record", () => {
     expect(after.castingOf(bram)?.as).toBe("principal");
     // Outside turns: the swipe leaves them.
     expect(bindingsOf(t.db, USER, bram).map((b) => b.ref)).toEqual(["e-9"]);
-    expect(baseOf(t.db, USER, bram).get("soul")?.text).toBe("Will not lie to a guest.");
+    expect(baseOf(t.db, USER, bram, CHAT).get("soul")?.text).toBe("Will not lie to a guest.");
 
     await t.showSwipe(played);
     const back = t.record();
@@ -175,5 +177,37 @@ describe("a character's record", () => {
     expect(bindingsOf(t.db, USER, bram).map((b) => [b.ref, b.defines])).toEqual([["e-1", "voice"]]);
     expect(await t.writes.run((db) => unbindSource(db, USER, bram, "entry", "e-1"))).toBe(true);
     expect(bindingsOf(t.db, USER, bram)).toEqual([]);
+  });
+
+  test("a base redrawn and a casting pinned in the source after the branch point do not change the branch's; one made in the branch is its own", async () => {
+    const t = await openTable();
+    const bram = await cast(t, "Bram");
+    // A time that is before the branch was made (the store's clock here counts from 1) and one far after it.
+    await t.writes.run((db) => {
+      writeBase(db, { user: USER, chat: CHAT, turn: null, by: "author", agent: "author-1", now: 1 }, bram, { soul: "Wants a quiet life." }, {});
+      pinCasting(db, USER, bram, "principal", { chat: CHAT, now: 1 });
+    });
+    await t.play();
+    const [first, reply] = t.shown;
+    if (first === undefined || reply === undefined) throw new Error("the chat has no first exchange");
+    await t.writes.run(() => t.s.branchChat({ id: "chat-b", from: CHAT, map: { [first.id]: "b0", [reply.id]: "b1" }, at: reply.id }));
+    const later = 1_000_000_000;
+    await t.writes.run((db) => {
+      writeBase(db, { user: USER, chat: CHAT, turn: null, by: "author", agent: "author-1", now: later }, bram, { soul: "Wants no guests at all." }, {});
+      pinCasting(db, USER, bram, "supporting", { chat: CHAT, now: later });
+    });
+    const soulIn = (chat: string) => baseOf(t.db, USER, bram, chat).get("soul");
+    const pinIn = (chat: string) => charactersOf(t.db, USER, chatLine(t.s, chat))[0]?.pinned;
+    expect([soulIn(CHAT)?.text, soulIn("chat-b")?.text]).toEqual(["Wants no guests at all.", "Wants a quiet life."]);
+    expect([pinIn(CHAT), pinIn("chat-b")]).toEqual(["supporting", "principal"]);
+
+    // The branch redraws its own: the source keeps what it has, and the version numbers run on.
+    await t.writes.run((db) => {
+      writeBase(db, { user: USER, chat: "chat-b", turn: null, by: "author", agent: "author-1", now: later + 1 }, bram, { soul: "Wants to leave." }, {});
+      pinCasting(db, USER, bram, null, { chat: "chat-b", now: later + 1 });
+    });
+    expect([soulIn(CHAT)?.text, soulIn("chat-b")?.text, soulIn("chat-b")?.version]).toEqual(["Wants no guests at all.", "Wants to leave.", 3]);
+    expect([pinIn(CHAT), pinIn("chat-b")]).toEqual(["supporting", null]);
+    expect(baseHistory(t.db, USER, bram, "chat-b").map((v) => v.text)).toEqual(["Wants a quiet life.", "Wants to leave."]);
   });
 });

@@ -52,6 +52,7 @@ export const CAST_FACT_DEFS: readonly FactDef[] = [
     fields: ["sources"],
   },
   { name: "cast.growth.proposed", counts: "Characters with growth a reflection proposed that the Author has not accepted." },
+  { name: "cast.playerMind", counts: "1 when the owner has switched on a mind of his own for his character (the setting cast.playerMind), so his persona is cast with an agent and memory work as any principal is; 0 when it has none." },
 ];
 
 /** Each character whose base is older than a source bound to it, with the source and the aspect it defines, as the sources stand now in Lumiverse. */
@@ -62,7 +63,7 @@ async function baseOlder(deps: { store: Store; sources: SourceReader }, scope: S
   for (const character of charactersOf(db, scope.user, chats)) {
     const bindings = bindingsOf(db, scope.user, character.id);
     if (bindings.length === 0) continue;
-    const states = await sourcesNow(deps.sources, { user: scope.user, chat: scope.chat }, bindings, baseOf(db, scope.user, character.id).values());
+    const states = await sourcesNow(deps.sources, { user: scope.user, chat: scope.chat }, bindings, baseOf(db, scope.user, character.id, scope.chat).values());
     const older = states.filter((s) => s.newer);
     if (older.length === 0) continue;
     who.push(character.name);
@@ -107,13 +108,15 @@ function readsOf(hows: readonly StageHow[]): Record<StageHow, number> {
 }
 
 /** `stage.unperceived` and `path.unperceived`, counted from the cast and from who `onStage` says was there. */
-export function castFacts(deps: { store: Store; onStage: OnStage; sources: SourceReader }): CastFacts {
+export function castFacts(deps: { store: Store; onStage: OnStage; sources: SourceReader; playerMind(scope: Scope): Promise<boolean> }): CastFacts {
   return {
     area: "cast",
     defs: CAST_FACT_DEFS,
     async read(scope, names) {
       const user = deps.store.user(scope.user);
-      const wanted = { stage: names.includes("stage.unperceived"), path: names.includes("path.unperceived"), older: names.includes("cast.base.older"), proposed: names.includes("cast.growth.proposed") };
+      const wanted = { stage: names.includes("stage.unperceived"), path: names.includes("path.unperceived"), older: names.includes("cast.base.older"), proposed: names.includes("cast.growth.proposed"), mind: names.includes("cast.playerMind") };
+      // His own setting for the chat, whether or not RPE has met it: 1 when his character has a mind.
+      const mind: Record<string, FactValue> = wanted.mind ? { "cast.playerMind": await deps.playerMind(scope).then((on): FactValue => ({ count: on ? 1 : 0, names: [on ? "on" : "off"] })) } : {};
       // A chat RPE has not met yet has no one on stage and no character: every count is 0.
       if (user.chat(scope.chat) === null) {
         return {
@@ -121,6 +124,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; sources: Sourc
           ...(wanted.path ? { "path.unperceived": valueOf([], { messages: [], read: readsOf([]) }) } : {}),
           ...(wanted.older ? { "cast.base.older": { count: 0, names: [], fields: { sources: [] } } } : {}),
           ...(wanted.proposed ? { "cast.growth.proposed": { count: 0, names: [] } } : {}),
+          ...mind,
         };
       }
       const turn = scope.turn ?? null;
@@ -165,6 +169,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; sources: Sourc
         }
       }
       if (wanted.proposed) values["cast.growth.proposed"] = growthProposed(record, charactersOf(deps.store.db, scope.user, chats));
+      Object.assign(values, mind);
       return values;
     },
   };
