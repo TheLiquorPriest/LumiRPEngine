@@ -179,8 +179,8 @@ describe("what the real run carries besides the chats", () => {
       const chats = new TreeChats(db, { run: async (write) => write(db) }, files);
       const own = chats.folders(USER, CHAT.harness);
       if (own === null) throw new Error("the harness chat has no folders");
-      // Another chat with the same character, placed as RPE places it the first time it plays it: none of them either.
-      const sibling = await chats.place(USER, CHAT.classic, { character: CHARACTER, chat: { name: "Harbour (classic)" } });
+      // Another chat with the same character, one the run did not place, placed as RPE places it the first time it plays it: none of them either.
+      const sibling = await chats.place(USER, "chat-sibling", { character: CHARACTER, chat: { name: "Harbour (sibling)" } });
       expect(sibling.character).toBe(own.character);
       expect(holding(await readable({ files, ...sibling }))).toEqual([]);
       // The chat's own agents read them in its notes folder: the area at its latest turn, the characters' mind files left to their own row; and its learned/.
