@@ -6,18 +6,24 @@
 //
 // The shapes the lore matches (`LoreBookWrites`, `ProjectionBooks`, `src/lore/`) are matched here: the adapter does not import lore.
 
-import { isRecord } from "../../shared/json";
+import { isRecord, type JsonObject } from "../../shared/json";
 import { ENGINE_BOOK_MARK } from "./books";
 import { chatBooksNow, removeBook, setChatBooks, type BookRemoved } from "./book-removal";
 import type { LumiverseReads } from "./reads";
 import { entryFrom, messageFrom, type LvEntry, type LvMessage } from "./rows";
 import { LumiverseError, type LumiverseSession } from "./session";
 
-/** The fields of an entry RPE writes: its text, its title (Lumiverse's `comment`) and its keys. */
+/**
+ * The fields of an entry RPE writes: its text, its title (Lumiverse's `comment`) and its keys; and, where given, whether it is
+ * off and its `extensions` (Lumiverse's `UpdateWorldBookEntryInput`: `extensions` replaces the entry's, and Lumiverse puts its
+ * own managed keys back).
+ */
 export interface EntryFields {
   content: string;
   comment: string;
   keys: string[];
+  disabled?: boolean;
+  extensions?: JsonObject;
 }
 
 /** An entry write: what was written, or why not (the entry as it now stands; null where it is gone). */
@@ -107,7 +113,13 @@ export function createWrites(deps: WriteDeps): Writes {
   }
 
   /** The entry's fields as the routes take them (`key` is Lumiverse's name for the keys). */
-  const fieldsOf = (f: EntryFields): Record<string, unknown> => ({ content: f.content, comment: f.comment, key: f.keys });
+  const fieldsOf = (f: EntryFields): Record<string, unknown> => ({
+    content: f.content,
+    comment: f.comment,
+    key: f.keys,
+    ...(f.disabled === undefined ? {} : { disabled: f.disabled }),
+    ...(f.extensions === undefined ? {} : { extensions: f.extensions }),
+  });
 
   async function bookOf(entry: string): Promise<string | null> {
     return (await deps.reads.entry(entry))?.book ?? null;
