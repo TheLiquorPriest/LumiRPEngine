@@ -18,6 +18,10 @@ export type AreaStart = (typeof AREA_STARTS)[number];
 export const LIGHTS = ["lit", "dark"] as const;
 export type Light = (typeof LIGHTS)[number];
 
+/** How the map panel shows what the character knows: as the world says (`world`), only what it knows (`knowledge`), or with fog over what it has not seen (`fog`). */
+export const DISPLAYS = ["world", "knowledge", "fog"] as const;
+export type Display = (typeof DISPLAYS)[number];
+
 /** Where an area starts, and the share of a square it must cover for the square to count (a share of 0 counts any square it covers any of). */
 export interface AreaRule {
   start: AreaStart;
@@ -66,6 +70,8 @@ export interface MapConfig {
   coverCreatures: boolean;
   /** What a place with no light recorded (and none above it that has) reads as. */
   lightUnset: Light;
+  /** How the map panel shows the map: the world's own display (`world`), or this chat's own pick. */
+  display: Display;
 }
 
 /** Appendix D.1: squares of 5 ft, rounds of 6 seconds, a map printed whole up to 40 by 30, a diagonal as one square, feet. */
@@ -88,4 +94,5 @@ export const MAP_DEFAULTS: Readonly<MapConfig> = Object.freeze({
   coverCreatures: true,
   // A place nobody has said is dark is lit.
   lightUnset: "lit",
+  display: "world",
 });
