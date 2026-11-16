@@ -21,6 +21,10 @@ export interface FactInput {
   value: string;
   /** The id of a fact this one replaces, whatever its key or what it is about. */
   replaces?: string | null;
+  /** The part of a record it belongs to (a place's: since, feature, access). */
+  part?: string;
+  /** The id of the story beat that caused it. */
+  beat?: string;
 }
 
 /** How long a fact's id is, in hex digits after its `f-`: enough that two facts of one chat never share one. */
@@ -49,6 +53,8 @@ export const factStore = {
     const id = `f-${crypto.randomUUID().replaceAll("-", "").slice(0, ID_DIGITS)}`;
     const value: JsonObject = { id, about: fact.about, key: fact.key, value: fact.value };
     if (fact.replaces !== undefined && fact.replaces !== null && fact.replaces !== "") value.replaces = fact.replaces;
+    if (fact.part !== undefined && fact.part !== "") value.part = fact.part;
+    if (fact.beat !== undefined && fact.beat !== "") value.beat = fact.beat;
     return { op: STORE_OPS.fact, value };
   },
   /** The facts standing on `about`, oldest first, each with its provenance and its turn's number. */
@@ -87,6 +93,8 @@ export function applyFact(state: StoreState, value: JsonValue, at: FactContext):
     by: at.by,
     turn: at.turn,
     n: at.n,
+    ...(typeof v.part === "string" && v.part !== "" ? { part: v.part } : {}),
+    ...(typeof v.beat === "string" && v.beat !== "" ? { beat: v.beat } : {}),
   };
   const reports: Report[] = [];
   // A fact replaced is kept as a new record, marked: the old one may be another state's too.

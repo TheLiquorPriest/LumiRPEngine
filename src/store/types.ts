@@ -345,6 +345,10 @@ export type Fact = {
   /** The fact that replaced it, and the number of the turn that did; absent while it stands. */
   replacedBy?: string;
   replacedAt?: number;
+  /** The part of a record it belongs to when its writer named one (a place's: since, feature, access). */
+  part?: string;
+  /** The id of the story beat that caused it, when named. */
+  beat?: string;
 };
 
 /** The state the store folds: the engine's world state, and what the store keeps beside it. */

@@ -227,6 +227,8 @@ export function factFields(f: Fact): JsonObject {
   if (f.source !== null) out.source = f.source;
   else out.unsourced = true;
   if (f.by !== null) out.by = f.by;
+  if (f.part !== undefined) out.part = f.part;
+  if (f.beat !== undefined) out.beat = f.beat;
   return out;
 }
 
