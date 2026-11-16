@@ -90,7 +90,7 @@ export function compose(options: ComposeOptions = {}): Composition {
   // What the areas that read the turn lane's store are handed: whether a turn of a chat goes on, and the guidance files and settings in force for it.
   const scope = (user: string, chat: string) => ({ user, chat, session: NO_SESSION });
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
-  const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat));
+  const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat), made().env.log);
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
 
   const areas: Area[] = [
