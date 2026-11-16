@@ -27,13 +27,14 @@ import type { App } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, castFacts, castTools, chatLine, findCharacter, type SourceReader } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
-import { engineTools, gridMoves, mapView, mapWording, stateScan } from "../iface";
+import { engineTools, gridMoves, mapView, mapWording } from "../iface";
+import { indexedSearch } from "../iface/search";
 import { EntryNumbers, Lore, type LoreBooks, LoreIndex, LORE_INDEX_SETTING_DEFS, LORE_SETTINGS, LoreProjection, type LoreProposals, type LoreScope, loreLines, lorePort, loreSettingsFor, loreTools, overlayCheck, type ProjectionBooks, secretMarkLines, type SecretSettingsFor, secretSettingsFor, storePath, storeWorlds } from "../lore";
 import { madeOf } from "../lore/made";
 import { ALL_PACKS } from "../packs/index";
 import { MeaningIndex } from "../search/meaning";
 import { hashJson } from "../shared/hash";
-import { openStore, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
+import { openStore, STATE_SEARCH_SETTING_DEFS, StateIndex, type Store, STORE_SETTING_DEFS, storedWorlds, timeDue, WORLD_DOCS_SETTING_DEFS } from "../store";
 import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
@@ -209,6 +210,8 @@ export interface Turns {
   projection: LoreProjection;
   /** The vectors of search by meaning (plan §9.4, §10.5), in the index file: what a prune of a living chat's derived rows drops (`dropChat`). */
   meaning: MeaningIndex;
+  /** A world search's index of tokens in the index file: what a prune of a living chat's derived rows forgets (`forget`). */
+  stateIndex: StateIndex;
 }
 
 export function buildTurns(app: App, options: TurnsOptions): Turns {
@@ -257,6 +260,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
   // What is made once for every chat takes its limits from the global level's settings, read once.
   const global = globalConfig(app.paths.files, app.log);
+  // A world search's index of tokens in the index file (`store/search.ts`), following each chat's head as the store's writes change it.
+  const stateIndex = new StateIndex({ store, index: app.index, log: (message) => app.log.warn(message), ...global.numbers(STATE_SEARCH_SETTING_DEFS) });
+  store.onWrite((user, chats) => stateIndex.notify(user, chats));
   // The lore's settings for a chat, read once for the lore, its index and the secrecy a turn starts with.
   const config = async (at: LoreScope) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS);
   const loreSettings = loreSettingsFor(config);
@@ -352,7 +358,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const asked = env.approvals === undefined ? {} : { approvals: env.approvals };
     const [wording, settings] = await Promise.all([mapWording(texts), turnSettings(files, scope, app.log)]);
     const [engine, cast, story, indexing] = await Promise.all([
-      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: stateScan, grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, ...asked }),
+      engineTools({ store: store.user(scope.user), env: store.env, writes: app.writes, files: texts, search: indexedSearch(stateIndex, { user: scope.user, chat: scope.chat }), grid: gridMoves(wording.lines, settings.map), map: mapView(wording, settings.map), mapSettings: settings.map, due, dueAhead: settings.worldState.dueAhead, settings: settings.engine, ...asked }),
       castTools({ store, writes: app.writes, files: texts, sources, books: bookTexts(options.books), now: () => clock.now(), settings: settings.cast }),
       storyTools({ store, writes: app.writes, files: texts, overlay, settings: settings.story }),
       loreTools({ index: loreIndex, guidance: loadGuidance(files, scope), log: app.log }),
@@ -431,6 +437,10 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     since,
     notes,
     projection,
+    // A chat deleted in Lumiverse: what is derived of it in the index file goes (rebuilt from its sources were it ever played again).
+    forgetChat: async (user, chat) => {
+      await Promise.all([stateIndex.forget(user, chat), meaning.dropChat(user, chat)]);
+    },
     // The older turn folders, and with them the prompt each of their turns carried and where its slices were (plan §5.5, App. B): kept
     // for as many of the chat's newest turns as its folders are, a turn going on kept whatever its age.
     pruneTurns: async (user, chat, spare) => {
@@ -461,5 +471,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning };
+  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex };
 }

@@ -193,6 +193,8 @@ export interface TurnLaneDeps {
   notes: TreeNotes;
   /** The projection book (`lore.projection`), brought up to date after a run's reply and at each change of the path, never on the reply's path. */
   projection: Pick<LoreProjection, "refresh">;
+  /** What the index file derives of a chat (the state's search index, the vectors of search by meaning), dropped when Lumiverse deletes the chat. */
+  forgetChat(user: string, chat: string): Promise<void>;
   /** Prunes the chat's older turn folders (plan §5.5), sparing these folders of turns going on. */
   pruneTurns(user: string, chat: string, spare: ReadonlySet<string>): Promise<Pruned>;
   /** What time brings due, for the world state's due section. */
@@ -780,7 +782,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
     // A chat deleted in Lumiverse: its folders are kept as a deleted chat's, and its turns stay in the store.
-    else if (change.kind === "chat-deleted") work = this.#d.chats.deleted(user, change.chat, this.#d.clock.now());
+    else if (change.kind === "chat-deleted") work = this.#d.chats.deleted(user, change.chat, this.#d.clock.now()).then(() => this.#d.forgetChat(user, change.chat));
     if (work === null) return;
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
