@@ -8,6 +8,7 @@ arguments:
   relationships.warmth: "From -100 to 100, when useful."
   relationships.respect: "From -100 to 100, when useful."
   relationships.fear: "From -100 to 100, when useful."
+  relationships.from: "The ids of the perceptions or memories it comes from, a realization among them."
   relationships.drop: "true when there is nothing left to say about them; false to take it back."
   relationships.why: "Why it changed."
 ---

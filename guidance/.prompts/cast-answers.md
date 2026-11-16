@@ -44,6 +44,7 @@ plays_none: {{tool}} is a character's own, and this agent plays no one.
 no_memories_sent: memories cannot be read: send a list of memories.
 no_memories: Nothing comes back for {{cue}}.
 more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{skip}} to bring them back.
+top_left: Top of mind holds {{limit}} at most, so {{count}} left it to make room, the weakest first: {{ids}}. They stay memories; recall brings them back.
 no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
 no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.
 page_turning: A turn of this chat is going on: nothing is struck or restored until it is over.

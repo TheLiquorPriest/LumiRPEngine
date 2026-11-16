@@ -6,7 +6,7 @@ arguments:
   entries.kind: "attention, feeling, belief, want, plan or hiding (what you hide)."
   entries.text: "What it is, in your own words."
   entries.about: "The people, places, things and topics it is about."
-  entries.from: "The ids of the perceptions it comes from."
+  entries.from: "The ids of the perceptions or memories it comes from, a realization among them."
   entries.drop: "true when it is no longer on your mind; false to bring it back."
   entries.why: "Why it changed or went."
 ---

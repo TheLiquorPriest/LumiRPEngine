@@ -23,8 +23,11 @@ import { CAST_LANE, DIMENSION_RANGE, ignoredOf, type ItemRead, type Kind, leftOu
 const ENTRY: Readonly<Record<string, Kind>> = { id: "name", kind: MIND_KINDS, text: "text", about: "texts", from: "texts", drop: "flag", why: "text" };
 const ENTRY_READS: Reads = { reads: Object.keys(ENTRY), needs: [], newNeeds: ["kind", "text"] };
 
+/** Where a feeling, a plan or a stand toward someone can come from: the character's own perceptions and memories, a realization among them. */
+const FROM_PARTS = ["perception", "memory"] as const;
+
 /** What one relationship reads, each as its kind. */
-const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION_RANGE])), drop: "flag", why: "text" };
+const RELATIONSHIP: Readonly<Record<string, Kind>> = { with: "name", text: "text", ...Object.fromEntries(RELATIONSHIP_DIMENSIONS.map((d) => [d, DIMENSION_RANGE])), from: "texts", drop: "flag", why: "text" };
 const RELATIONSHIP_READS: Reads = { reads: Object.keys(RELATIONSHIP), needs: ["with"], newNeeds: [] };
 
 /** Writes what a call read, and answers with each item it wrote as it now stands, and with what was left out. */
@@ -70,7 +73,7 @@ async function mindSet(args: JsonObject, call: CastCall): Promise<Reply> {
       continue;
     }
     if (fields.from !== undefined) {
-      const from = ownIds(self, it, "perception", "from", fields.from, false);
+      const from = ownIds(self, it, FROM_PARTS, "from", fields.from, false);
       if (from.length > 0) fields.from = from;
       else delete fields.from;
     }
@@ -121,6 +124,11 @@ async function relate(args: JsonObject, call: CastCall): Promise<Reply> {
     if (typeof value.with !== "string") {
       needed(it, ["with"]);
       continue;
+    }
+    if (value.from !== undefined) {
+      const from = ownIds(self, it, FROM_PARTS, "from", value.from, false);
+      if (from.length > 0) value.from = from;
+      else delete value.from;
     }
     if (!Object.keys(value).some((k) => k !== "with" && k !== "why")) {
       it.fatal.push({ line: "needs_one", fields: { n, op: "relationship", fields: RELATIONSHIP_READS.reads.filter((f) => f !== "with" && f !== "why") } });

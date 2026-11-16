@@ -92,15 +92,57 @@ describe("a character's memory", () => {
     const letter = String(mind.get("The letter.")?.item.id);
     const r = await b.call("dream", { keep: [letter], fade: [rain ?? ""], connect: [{ memories: [letter, rain ?? ""], text: "The rain came the night the letter did.", gist: "Rain and the letter." }] }, turn.id, BRAM);
     expect(wordsFromFiles(r)).toBe(true);
-    expect(dataOf(r)).toMatchObject({ settled: [letter, rain], kept: [letter], faded: [rain] });
+    expect(dataOf(r)).toMatchObject({ settled: [letter, mind.get("The cellar bolt.")?.item.id, rain, mind.get("The reeve's seal.")?.item.id], kept: [letter], faded: [rain] });
     await b.t.tie(turn);
     mind = now(b, settings);
     expect(mind.get("The letter.")).toMatchObject({ tier: "long" });
     expect(mind.get("The letter.")?.item.fields.weight).toBe(2);
-    expect(mind.get("Rain on the shutters.")?.item.fields.weight).toBe(1);
+    expect(mind.get("Rain on the shutters.")?.strength).toBe(0.5);
     expect(mind.get("The cellar bolt.")?.tier).toBe("top");
     expect(mind.get("Rain and the letter.")).toMatchObject({ tier: "short" });
     expect(mind.get("Rain and the letter.")?.item.fields).toMatchObject({ kind: "connection", memories: [letter, rain] });
+  });
+
+  test("recall with top puts what it brings back at top of mind and the weakest there leave, said; a memory is dated at the moment it comes from; a dream lets the weak of its stretch fade at once, and what it is told to, and nothing else", async () => {
+    const b = await openBench({ settings: { topOfMind: 2 } });
+    const seen = await bram(b);
+    await days(b, 5);
+    const [letter, bolt, rain, pale] = (await remember(b, [
+      { text: "The letter.", gist: "The letter.", top: true },
+      { text: "The cellar bolt.", gist: "The cellar bolt.", top: true },
+      { text: "Rain on the shutters.", gist: "Rain on the shutters." },
+      { text: "Wren went pale.", gist: "Wren went pale.", from: [seen] },
+    ])).map((m) => String(m.id));
+    const settings = { ...CAST_DEFAULTS, topOfMind: 2 };
+    // Written five story days after the moment it comes from, it is of that moment, and long term at once.
+    expect(now(b, settings).get("Wren went pale.")).toMatchObject({ tier: "long" });
+    expect(now(b, settings).get("Wren went pale.")?.item.at).toBeLessThan(now(b, settings).get("Rain on the shutters.")?.item.at ?? 0);
+
+    const turn = await b.t.begin();
+    const r = await b.call("recall", { cue: "shutters", top: true }, turn.id, BRAM);
+    expect(wordsFromFiles(r)).toBe(true);
+    expect(texts(r).join("\n")).toContain(`the weakest first: ${letter}`);
+    await b.t.tie(turn);
+    expect([...now(b, settings).values()].filter((m) => m.tier === "top").map((m) => m.item.id)).toEqual([bolt, rain]);
+
+    // Ten more days: the stretch since no dream is all weak; the dream lets each fade at once, and says which.
+    await days(b, 10);
+    const before = now(b, settings).get("The letter.")?.strength ?? 0;
+    const dreamt = await b.t.begin();
+    const first = await b.call("dream", {}, dreamt.id, BRAM);
+    expect(dataOf(first).faded).toEqual([letter, bolt, rain, pale]);
+    await b.t.tie(dreamt);
+    expect(now(b, settings).get("The letter.")?.strength).toBeCloseTo(before / 2, 5);
+    // A dream does not clear the top of the mind.
+    expect(now(b, settings).get("The cellar bolt.")?.tier).toBe("top");
+
+    // Nothing is left of that stretch: only what the character names fades now, and the words stay.
+    const next = await b.t.begin();
+    const second = await b.call("dream", { fade: [letter] }, next.id, BRAM);
+    expect(dataOf(second)).toMatchObject({ faded: [letter], settled: [] });
+    await b.t.tie(next);
+    expect(now(b, settings).get("The letter.")?.strength).toBeCloseTo(before / 4, 5);
+    expect(now(b, settings).get("The letter.")?.item.fields.text).toBe("The letter.");
   });
 
   test("a reflection is a memory of the memories it came from; the growth it proposes counts once the Author accepts it", async () => {

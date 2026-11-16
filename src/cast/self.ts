@@ -60,12 +60,16 @@ export function readFields(call: CastCall, it: ItemRead, given: JsonObject, kind
   }
 }
 
-/** The ids of `part` a list names that are none of the character's on this path. */
-export function strangers(self: Self, part: "memory" | "perception", ids: unknown): string[] {
+/** The parts whose items a character's own tools name by id as where something comes from. */
+export type OwnPart = "memory" | "perception";
+
+/** The ids of `part` (or of either of several) a list names that are none of the character's on this path. */
+export function strangers(self: Self, part: OwnPart | readonly OwnPart[], ids: unknown): string[] {
   const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+  const parts: readonly string[] = typeof part === "string" ? [part] : part;
   return list.filter((id) => {
     const item = self.reading.record.items.get(id);
-    return item === undefined || item.part !== part || item.character !== self.character.id;
+    return item === undefined || !parts.includes(item.part) || item.character !== self.character.id;
   });
 }
 
@@ -73,11 +77,11 @@ export function strangers(self: Self, part: "memory" | "perception", ids: unknow
  * The ids of `part` an item's `field` names that are the character's: those that are not are left
  * out, each said; none left of a list it needs, they make the item unreadable.
  */
-export function ownIds(self: Self, it: ItemRead, part: "memory" | "perception", field: string, ids: JsonValue | undefined, need: boolean): string[] {
+export function ownIds(self: Self, it: ItemRead, part: OwnPart | readonly OwnPart[], field: string, ids: JsonValue | undefined, need: boolean): string[] {
   const list = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
   const unknown = strangers(self, part, list);
   const kept = list.filter((id) => !unknown.includes(id));
-  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part, id: JSON.stringify(id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
+  const said: Unread[] = unknown.map((id) => ({ line: "unknown_id", fields: { n: it.n, op: it.op, field, who: self.character.name, part: typeof part === "string" ? part : part.join(" or "), id: JSON.stringify(id) }, ...(kept.length > 0 ? { kept: true } : {}) }));
   (need && kept.length === 0 ? it.fatal : it.unread).push(...said);
   return kept;
 }

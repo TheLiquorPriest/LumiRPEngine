@@ -15,14 +15,14 @@ import type { JsonObject } from "rp-harness/contract";
 import type { Reply } from "../iface/kit";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastClock, type CastSettings, type CastToolSpec, datedAt, readingOr } from "./kit";
-import { memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
+import { dimmedOf, memoriesNow, type MemoryNow, strongestFirst, touches, weightOf } from "./memory";
 import { type CastWrite, writeCast } from "./record";
 import { listOf, notAnItem, ownIds, readFields, type Self, selfOr, strangers, unchecked } from "./self";
 import { CAST_LANE, ignoredOf, type ItemRead, type Kind, leftOut, needed, type Reads, refused } from "./update";
 
 /** A memory as the character's own answers show it: in full, or as its gist alone, marked faint, once it has faded. */
 export function memoryView(m: MemoryNow, clock: CastClock | null): JsonObject {
-  const { text, gist, recalled: _recalled, settled: _settled, top: _top, ...rest } = m.item.fields;
+  const { text, gist, recalled: _recalled, settled: _settled, top: _top, dimmed: _dimmed, ...rest } = m.item.fields;
   return {
     id: m.item.id,
     tier: m.tier,
@@ -39,9 +39,9 @@ function memoryKinds(s: CastSettings): Readonly<Record<string, Kind>> {
 
 const MEMORY_FIELDS = ["text", "gist", "weight", "tone", "who", "about"];
 
-const RECALL_READS: Reads = { reads: ["cue", "skip"], needs: ["cue"], newNeeds: [] };
+const RECALL_READS: Reads = { reads: ["cue", "skip", "top"], needs: ["cue"], newNeeds: [] };
 const MEMORY_READS: Reads = { reads: ["id", ...MEMORY_FIELDS, "from", "top"], needs: [], newNeeds: ["text", "gist"] };
-const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth"], needs: ["from", "text", "gist"], newNeeds: [] };
+const REFLECT_READS: Reads = { reads: ["from", ...MEMORY_FIELDS, "growth", "top"], needs: ["from", "text", "gist"], newNeeds: [] };
 const DREAM_READS: Reads = { reads: ["keep", "fade", "connect"], needs: [], newNeeds: [] };
 const CONNECTION_READS: Reads = { reads: ["memories", ...MEMORY_FIELDS], needs: ["memories", "text", "gist"], newNeeds: [] };
 
@@ -56,13 +56,43 @@ function after(call: CastCall, reply: Reply, self: Self, ids: readonly string[])
   });
 }
 
+/** The earliest story time a character's perceptions of these ids are of; none where none keeps one. */
+function earliestOf(self: Self, ids: readonly string[]): number | undefined {
+  const times = ids.flatMap((id) => {
+    const at = self.reading.record.items.get(id)?.at;
+    return typeof at === "number" ? [at] : [];
+  });
+  return times.length === 0 ? undefined : Math.min(...times);
+}
+
+/**
+ * The weakest memories at top of mind that leave it to make room for `putting` (memories already
+ * there or not) and `fresh` more yet to be made, as many as pass the setting's limit. They stay
+ * memories: only no longer put at top.
+ */
+function leavingTop(self: Self, s: CastSettings, putting: ReadonlySet<string>, fresh: number): MemoryNow[] {
+  if (putting.size + fresh === 0) return [];
+  const staying = memoriesNow(self.reading.record, self.character.id, self.now, s).filter((m) => m.tier === "top" && !putting.has(m.item.id));
+  return staying.sort((a, b) => strongestFirst(b, a)).slice(0, Math.max(0, staying.length + putting.size + fresh - s.topOfMind));
+}
+
+/** The writes that take those who leave top of mind off it. */
+function offTop(self: Self, leaving: readonly MemoryNow[]): CastWrite[] {
+  return leaving.map((m) => ({ character: self.character.id, part: "memory", item: m.item.id, value: { top: false } }));
+}
+
+/** Says who left top of mind to make room, weakest first. */
+function saidLeft(reply: Reply, s: CastSettings, leaving: readonly MemoryNow[]): void {
+  if (leaving.length > 0) reply.line("top_left", { limit: s.topOfMind, count: leaving.length, ids: leaving.map((m) => m.item.id).join(", ") });
+}
+
 // ---------------------------------------------------------------- recall
 
 async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
   const reply = call.reply();
   const it: ItemRead = { n: 1, op: "recall", fatal: [], unread: [], ignored: ignoredOf(args, RECALL_READS.reads) };
   const value: JsonObject = {};
-  readFields(call, it, args, { cue: "text", skip: "whole" }, value);
+  readFields(call, it, args, { cue: "text", skip: "whole", top: "flag" }, value);
   if (value.cue === undefined) needed(it, ["cue"]);
   if (it.fatal.length > 0) return refused(reply, [it], () => RECALL_READS);
   const cue = value.cue as string;
@@ -75,16 +105,23 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
     .sort(strongestFirst);
   const back = touched.slice(from, from + call.settings.recallItems);
   if (back.length === 0) return reply.line("no_memories", { cue });
-  // Recalling strengthens each memory it brings back: one more recall, as of now.
+  // Recalling strengthens each memory it brings back: one more recall, as of now, and it comes back in full. With `top`, what comes back is put at top of mind.
+  const putting = value.top === true ? new Set(back.map((m) => m.item.id)) : new Set<string>();
+  const leaving = leavingTop(self, call.settings, putting, 0);
   await call.deps.writes.run(
     () =>
-      writeCast(
-        call.deps.store,
-        self.writer,
-        back.map((m) => ({ character: self.character.id, part: "memory", item: m.item.id, value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}) } })),
-      ),
+      writeCast(call.deps.store, self.writer, [
+        ...back.map((m) => ({
+          character: self.character.id,
+          part: "memory" as const,
+          item: m.item.id,
+          value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}), ...(dimmedOf(m.item) < 1 ? { dimmed: 1 } : {}), ...(putting.has(m.item.id) ? { top: true } : {}) },
+        })),
+        ...offTop(self, leaving),
+      ]),
     call.tool,
   );
+  saidLeft(reply, call.settings, leaving);
   const shown = after(call, reply, self, back.map((m) => m.item.id));
   if (shown === null) return reply;
   reply.data({ cue, memories: shown });
@@ -130,19 +167,26 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
       it.fatal.push({ line: "unknown_id", fields: { n, op: "memory", who: self.character.name, part: "memory", id: JSON.stringify(id) } });
       continue;
     }
+    // A memory is of the moment it comes from: the earliest of the perceptions it names; the moment it is written where it names none.
+    let moment: number | undefined;
     if (fields.from !== undefined) {
       const from = ownIds(self, it, "perception", "from", fields.from, false);
-      if (from.length > 0) fields.from = from;
-      else delete fields.from;
+      if (from.length > 0) {
+        fields.from = from;
+        moment = earliestOf(self, from);
+      } else delete fields.from;
     }
     if (id === undefined) needed(it, ["text", "gist"].filter((f) => fields[f] === undefined));
     else if (Object.keys(fields).length === 0) it.fatal.push({ line: "needs_one", fields: { n, op: "memory", fields: MEMORY_READS.reads.filter((f) => f !== "id") } });
-    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields });
+    if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields, ...(id === undefined && moment !== undefined ? { at: moment } : {}) });
   }
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => MEMORY_READS);
-  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, writes), call.tool);
+  const putting = writes.filter((w) => w.value.top === true);
+  const leaving = leavingTop(self, call.settings, new Set(putting.flatMap((w) => (w.item === null ? [] : [w.item]))), putting.filter((w) => w.item === null).length);
+  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, [...writes, ...offTop(self, leaving)]), call.tool);
   for (const it of items) leftOut(reply, it, MEMORY_READS.reads);
-  const shown = after(call, reply, self, rows.map((r) => r.item));
+  saidLeft(reply, call.settings, leaving);
+  const shown = after(call, reply, self, rows.slice(0, writes.length).map((r) => r.item));
   return shown === null ? reply : reply.data({ memories: shown });
 }
 
@@ -163,21 +207,26 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const reply = call.reply();
   const it: ItemRead = { n: 1, op: "reflect", fatal: [], unread: [], ignored: ignoredOf(args, REFLECT_READS.reads) };
   const value: JsonObject = {};
-  readFields(call, it, args, { from: "texts", ...memoryKinds(call.settings), growth: "text" }, value);
+  readFields(call, it, args, { from: "texts", ...memoryKinds(call.settings), growth: "text", top: "flag" }, value);
   needed(it, REFLECT_READS.needs.filter((f) => value[f] === undefined));
   if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
   const self = selfOr(call, reply);
   if (self === null) return reply;
-  const { from: named, growth, ...fields } = value;
+  const { from: named, growth, top, ...fields } = value;
   const from = ownIds(self, it, "memory", "from", named, true);
   if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
+  const leaving = leavingTop(self, call.settings, new Set(), top === true ? 1 : 0);
   const written = await call.deps.writes.run(() => {
-    const [realization] = writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization" } }]);
+    const [realization] = writeCast(call.deps.store, self.writer, [
+      { character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization", ...(top === true ? { top: true } : {}) } },
+      ...offTop(self, leaving),
+    ]);
     const id = realization?.item ?? "";
     // A change the realization proposes is growth the Author has yet to accept (`cast_update`'s growth `accept`).
     const proposed = typeof growth === "string" ? writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true } }]) : [];
     return { id, growth: proposed[0]?.item ?? null };
   }, call.tool);
+  saidLeft(reply, call.settings, leaving);
   leftOut(reply, it, REFLECT_READS.reads);
   const shown = after(call, reply, self, [written.id]);
   return shown === null ? reply : reply.data({ realization: shown[0] ?? null, ...(written.growth !== null ? { proposed_growth: written.growth } : {}) });
@@ -229,12 +278,23 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   const memories = memoriesNow(self.reading.record, self.character.id, self.now, call.settings);
   const byId = new Map(memories.map((m) => [m.item.id, m]));
   const writes: CastWrite[] = [];
+  const faded: string[] = [];
+  const kept: string[] = [];
   for (const m of memories) {
     const change: JsonObject = {};
-    // What is still short term settles into long term.
-    if (m.tier === "short") change.settled = self.now ?? true;
-    if (fade.has(m.item.id)) change.weight = 1;
-    else if (keep.has(m.item.id)) change.weight = Math.min(call.settings.weightMax, weightOf(m.item, call.settings) + 1);
+    // What came to be since the last dream settles with this one: what is still short term becomes long term.
+    const stretch = m.item.fields.settled === undefined;
+    if (stretch) change.settled = self.now ?? true;
+    // A weak memory of that stretch lets go at once, as does each one named: part of its strength goes now, its words stay, and time goes on fading it.
+    if ((fade.has(m.item.id) || (stretch && m.strength < call.settings.weakBelow)) && call.settings.dreamFade < 1) {
+      change.dimmed = dimmedOf(m.item) * call.settings.dreamFade;
+      faded.push(m.item.id);
+    }
+    const weight = Math.min(call.settings.weightMax, weightOf(m.item, call.settings) + call.settings.dreamKeep);
+    if (keep.has(m.item.id) && weight > weightOf(m.item, call.settings)) {
+      change.weight = weight;
+      kept.push(m.item.id);
+    }
     if (Object.keys(change).length > 0) writes.push({ character: self.character.id, part: "memory", item: m.item.id, value: change });
   }
   for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" } });
@@ -245,8 +305,8 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
   if (shown === null) return reply;
   return reply.data({
     settled: writes.filter((w) => w.value.settled !== undefined).map((w) => w.item),
-    kept: [...keep],
-    faded: [...fade],
+    kept,
+    faded,
     connections: made,
     memories: shown,
   });

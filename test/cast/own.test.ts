@@ -113,9 +113,9 @@ describe("relate", () => {
     expect(r.error).toBeUndefined();
     expect(wordsFromFiles(r)).toBe(true);
     expect(r.reports).toEqual([
-      "Operation 1 (relationship) was written without mood. It reads with, text, trust, warmth, respect, fear, drop, why.",
+      "Operation 1 (relationship) was written without mood. It reads with, text, trust, warmth, respect, fear, from, drop, why.",
       "Operation 2 (relationship): fear runs from -100 to 100, and you sent 140.",
-      "Operation 2 (relationship) was written without fear. It reads with, text, trust, warmth, respect, fear, drop, why.",
+      "Operation 2 (relationship) was written without fear. It reads with, text, trust, warmth, respect, fear, from, drop, why.",
     ]);
     const [wren, hale] = dataOf(r).relationships as JsonObject[];
     expect(wren).toMatchObject({ with: "Wren", trust: -10, warmth: 30 });
@@ -137,9 +137,9 @@ describe("relate", () => {
     expect(wordsFromFiles(r)).toBe(true);
     expect(texts(r)).toEqual([
       "Operation 1 (relationship) needs with.",
-      "relationship reads with, text, trust, warmth, respect, fear, drop, why, and needs with.",
-      "Operation 2 (relationship) needs at least one of text, trust, warmth, respect, fear, drop.",
-      "relationship reads with, text, trust, warmth, respect, fear, drop, why, and needs with.",
+      "relationship reads with, text, trust, warmth, respect, fear, from, drop, why, and needs with.",
+      "Operation 2 (relationship) needs at least one of text, trust, warmth, respect, fear, from, drop.",
+      "relationship reads with, text, trust, warmth, respect, fear, from, drop, why, and needs with.",
       "Nothing was written. Send the call again with that put right.",
     ]);
     expect(b.t.record(turn).items.size).toBe(1);

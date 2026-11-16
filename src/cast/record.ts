@@ -407,6 +407,8 @@ export interface CastWrite {
   part: RowPart;
   item: string | null;
   value: JsonObject;
+  /** The story time the write is of, where it is none of the writer's moment: a memory is of the moment it comes from. */
+  at?: number | null;
 }
 
 /** Who writes, on which turn, at what story time, and when. */
@@ -442,11 +444,11 @@ export function writeCast(store: Store, writer: CastWriter, writes: readonly Cas
     return { ...w, item: w.item ?? newItemId(w.part as keyof typeof PREFIX, first + i) };
   });
   const inputs = made.map((w): ChangeInput => {
-    const value: WriteValue = { character: w.character, part: w.part, item: w.item, value: w.value, at: writer.at, agent: writer.agent, when: writer.now };
+    const value: WriteValue = { character: w.character, part: w.part, item: w.item, value: w.value, at: w.at === undefined ? writer.at : w.at, agent: writer.agent, when: writer.now };
     const source = writer.source ?? (writer.by === "player" ? "player" : undefined);
     return { lane: "story", op: CAST_WRITE, value: value as unknown as JsonObject, by: writer.by, handle: writer.agent, job: writer.job, ...(source !== undefined ? { source } : {}) };
   });
   const u = store.user(writer.user);
   u.record(u.writeTarget({ chat: writer.chat ?? "", turn: writer.turn, job: writer.job }), inputs);
-  return made.map((w) => ({ s: 0, turn: writer.turn ?? "", character: w.character, part: w.part, item: w.item, value: w.value, at: writer.at, by: writer.by, agent: writer.agent, when: writer.now }));
+  return made.map((w) => ({ s: 0, turn: writer.turn ?? "", character: w.character, part: w.part, item: w.item, value: w.value, at: w.at === undefined ? writer.at : w.at, by: writer.by, agent: writer.agent, when: writer.now }));
 }

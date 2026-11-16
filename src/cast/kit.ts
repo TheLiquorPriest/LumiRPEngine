@@ -36,6 +36,12 @@ export const CAST_DEFAULTS = Object.freeze({
   fadeDays: 3,
   /** The strength, from 0 to 1, under which a memory is faint, and is shown as its gist. */
   faintBelow: 0.25,
+  /** The strength, from 0 to 1, under which a memory formed since the character's last dream is weak: the next dream lets it fade at once. */
+  weakBelow: 0.5,
+  /** The share, from 0 to 1, of its strength a memory keeps when a dream lets it fade at once (a weak one of the stretch, or one the character names). */
+  dreamFade: 0.5,
+  /** The weight a memory gains when a dream keeps it. */
+  dreamKeep: 1,
   /** The weight of a memory given none. */
   memoryWeight: 1,
   /** The highest weight a memory can have; weights run from 1. */
@@ -62,6 +68,9 @@ export const CAST_SETTING_DEFS = {
   // A memory that fades in no time at all would have no strength to measure.
   fadeDays: { key: "cast.fadeDays", default: CAST_DEFAULTS.fadeDays, takes: { type: "number", least: 1 }, perConnection: false, name: "Days a memory takes to fade", about: "Story days in which a memory of weight 1, never recalled, falls to half its strength; each point of weight doubles it, each recall adds as much again.", effect: "turn" },
   faintBelow: { key: "cast.faintBelow", default: CAST_DEFAULTS.faintBelow, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Faint below", about: "The strength, from 0 to 1, under which a memory is faint and shown as its gist.", effect: "turn" },
+  weakBelow: { key: "cast.weakBelow", default: CAST_DEFAULTS.weakBelow, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Weak below", about: "The strength, from 0 to 1, under which a memory formed since a character's last dream is weak, and the next dream lets it fade at once.", effect: "turn" },
+  dreamFade: { key: "cast.dreamFade", default: CAST_DEFAULTS.dreamFade, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "Share a dream leaves", about: "The share, from 0 to 1, of its strength a memory keeps when a dream lets it fade: the weak ones of the stretch and each the character names. 1 lets none fade.", effect: "turn" },
+  dreamKeep: { key: "cast.dreamKeep", default: CAST_DEFAULTS.dreamKeep, takes: { type: "whole", least: 0 }, perConnection: false, name: "Weight a dream adds", about: "The weight a memory gains when a dream keeps it.", effect: "turn" },
   memoryWeight: { key: "cast.memoryWeight", default: CAST_DEFAULTS.memoryWeight, takes: { type: "whole", least: 1 }, perConnection: false, name: "Weight of a memory given none", about: "The weight a memory has when it is written with none.", effect: "turn" },
   weightMax: { key: "cast.weightMax", default: CAST_DEFAULTS.weightMax, takes: { type: "whole", least: 1 }, perConnection: false, name: "Highest weight of a memory", about: "The highest weight a memory can have; weights run from 1.", effect: "turn" },
   comesToMindTokens: { key: "cast.comesToMindTokens", default: CAST_DEFAULTS.comesToMindTokens, takes: { type: "whole", least: 0 }, perConnection: false, name: "What comes to mind", about: "Tokens of a character's memories that come to mind for a scene.", effect: "turn", row: "What comes to mind" },

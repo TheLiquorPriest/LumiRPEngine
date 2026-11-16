@@ -48,17 +48,23 @@ export function weightOf(item: CastItem, s: Pick<CastSettings, "memoryWeight" | 
   return Math.min(s.weightMax, Math.max(1, num(item.fields.weight) ?? s.memoryWeight));
 }
 
+/** How much of its strength a memory has kept through the dreams that let it fade at once: a share from 0 to 1, 1 where none did. */
+export function dimmedOf(item: CastItem): number {
+  return Math.min(1, Math.max(0, num(item.fields.dimmed) ?? 1));
+}
+
 /**
  * Strength at story time `now` (minutes): 1 when formed or recalled, halving every `fadeDays` story
  * days for a memory of weight 1, a stretch that doubles with each point of weight and grows by one
- * more such stretch with each recall. 1 where the chat keeps no story time.
+ * more such stretch with each recall; less by the share each dream that let it fade took at once
+ * (`dimmedOf`). 1 where the chat keeps no story time.
  */
 export function strengthOf(item: CastItem, now: number | null, s: Pick<CastSettings, "fadeDays" | "memoryWeight" | "weightMax">): number {
-  if (now === null || item.at === null) return 1;
+  if (now === null || item.at === null) return dimmedOf(item);
   const recalls = num(item.fields.recalls) ?? 0;
   const since = Math.max(0, now - (num(item.fields.recalled) ?? item.at));
   const halfLife = s.fadeDays * DAY * 2 ** (weightOf(item, s) - 1) * (1 + recalls);
-  return 0.5 ** (since / halfLife);
+  return 0.5 ** (since / halfLife) * dimmedOf(item);
 }
 
 /** The memories a character holds at top of mind: those put there, the most recently put first, as many as the setting holds. */
