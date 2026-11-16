@@ -36,7 +36,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   job_cancelled: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_interrupted: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_off_path: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
-  panel_request: { what: "Add a quay", on: "the harbour" },
+  panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place" },
   settle_asked: {},
   previous_run_stopped: {},
   saved_differs: { message: 4, released: "Wren waved.", saved: "Wren waved twice." },
@@ -257,6 +257,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       }
       expect(part.line(name, { detail: "The key is missing." })).toContain(name === "pass-stopped" ? "stopped" : "The key is missing.");
     }
+  });
+
+  test("request-answers.md words why a request from a panel cannot be kept or withdrawn, and a panel's request is told with what was pressed, on what, from where and with which values", async () => {
+    const part = await lines("request-answers");
+    expect([...part.names].sort()).toEqual(["kept", "no_chat", "not_found", "too_long"]);
+    for (const [name, fields] of Object.entries({ too_long: { length: 9000, most: 4000 }, kept: { turn: "t-3" }, not_found: { request: "r-9" }, no_chat: { chat: "c-4" } })) {
+      const said = part.line(name, fields as never) ?? "";
+      expect({ name, said: said.trim().length > 0, unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ name, said: true, unfilled: false, asks: false });
+    }
+    const notices = await lines("notices");
+    expect(notices.line("panel_request", { what: "Walk here", on: "the quay", from: "map", values: "square: 4,7", action: "walk" } as never)).toBe("From a panel (map): Walk here, on the quay, with square: 4,7 (action walk)");
+    expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
   });
 
   test("judge.md and engine-answers.md stay, the build's own for the owner's approval: the judge's question and the engine's sentences", async () => {

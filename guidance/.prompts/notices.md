@@ -18,7 +18,7 @@ job_failed: A job failed before it finished: {{job}} ({{agent}}). Its brief: {{b
 job_cancelled: A job was cancelled before it finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}{{#applied}} Of what it recorded, these took effect now: {{applied}}.{{/applied}}{{#not_applied}} These did not: {{not_applied}}.{{/not_applied}}
 job_interrupted: A job was interrupted by a restart before it finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}{{#applied}} Of what it recorded, these took effect now: {{applied}}.{{/applied}}{{#not_applied}} These did not: {{not_applied}}.{{/not_applied}}
 job_off_path: A job was cut off before it finished, when the turn that started it left the chat's path: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}
-panel_request: From a panel: {{what}}{{#on}}, on {{on}}{{/on}}
+panel_request: From a panel{{#from}} ({{from}}){{/from}}: {{what}}{{#on}}, on {{on}}{{/on}}{{#values}}, with {{values}}{{/values}}{{#action}} (action {{action}}){{/action}}
 settle_asked: The player asked, from the Turn page, for this turn to be settled now against the chat as it reads. This run writes no reply, and nothing of it reaches the chat.
 previous_run_stopped: The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
