@@ -16,7 +16,9 @@
 // turn lane reads no migration: what one carried of a chat is handed to it from here.
 
 import { type Clock, type CreateHarnessOptions, loadGuidance } from "rp-harness";
+import type { SessionView } from "rp-harness/contract";
 import { doorArea } from "../adapter/lumiverse/area";
+import { loreBooks } from "../adapter/lumiverse/books";
 import { EXTENSION_IDENTIFIER } from "../adapter/lumiverse/pipe-wire";
 import { bunSocket } from "../adapter/lumiverse/socket";
 import type { AdapterDeps, LumiverseDoor } from "../adapter/lumiverse/mount";
@@ -24,6 +26,8 @@ import { buildArea } from "../build/area";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
+import { EntryNumbers, type LoreBooks, LoreProposals } from "../lore";
+import { LORE_PROPOSAL_SETTING_DEFS } from "../lore/settings";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { migrateArea } from "../migrate/area";
 import { lastReport } from "../migrate/tables";
@@ -34,6 +38,7 @@ import { treeArea } from "../tree/area";
 import { levelFiles, NO_CHAT, RPE_GUIDANCE, treeReader } from "../tree";
 import { MACHINE_CLOCK, NO_SESSION, turnSettings, type Turns } from "../turn";
 import { turnArea } from "../turn/area";
+import { globalConfig } from "../turn/settings";
 import { bootstrapArea } from "../turn/bootstrap/area";
 import { sessionRoutes } from "../turn/session-routes";
 import { guidanceTexts } from "../turn/texts";
@@ -90,6 +95,39 @@ export function compose(options: ComposeOptions = {}): Composition {
     if (turns === null) throw new Error("RPE's turn lane is not mounted yet.");
     return turns;
   };
+  // The user's books as the lore reads them, and what RPE writes to them, through the door's parts once it is set up for a Lumiverse.
+  const lumiverse = () => {
+    const parts = door.lumiverse();
+    if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no books to read or write.");
+    return parts;
+  };
+  const booksNow = (): LoreBooks => loreBooks(lumiverse().reads, app().config.lumiverse.user ?? "");
+  const books: LoreBooks = {
+    attached: (user, chat, at) => booksNow().attached(user, chat, at),
+    book: (user, id) => booksNow().book(user, id),
+    entries: (user, book) => booksNow().entries(user, book),
+    entry: (user, id) => booksNow().entry(user, id),
+    list: async (user, chat) => {
+      const now = booksNow();
+      if (now.list === undefined) throw new Error("The door's books give no list of the user's books.");
+      return await now.list(user, chat);
+    },
+  };
+  // The agents' suggestions about lore, kept as proposals and written to his books only on his approval: one queue, made when first asked for.
+  let proposed: LoreProposals | null = null;
+  const proposals = (): LoreProposals =>
+    (proposed ??= new LoreProposals({
+      db: app().db,
+      writes: app().writes,
+      numbers: new EntryNumbers(app().db, app().writes),
+      books,
+      write: {
+        update: (user, entry, fields, revision) => lumiverse().writes.update(user, entry, fields, revision),
+        create: (user, book, fields) => lumiverse().writes.create(user, book, fields),
+        remove: (user, entry, revision) => lumiverse().writes.remove(user, entry, revision),
+      },
+      settings: globalConfig(app().paths.files, app().log).numbers(LORE_PROPOSAL_SETTING_DEFS),
+    }));
   // What the areas that read the turn lane's store are handed: whether a turn of a chat goes on, and the guidance files and settings in force for it.
   const scope = (user: string, chat: string) => ({ user, chat, session: NO_SESSION });
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
@@ -109,8 +147,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     return await made().chats.place(owner, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
   };
   // Every session of a chat, page by page.
-  const sessionsOf = async (user: string, chat: string) => {
-    const all: Awaited<ReturnType<ReturnType<typeof made>["harness"]["sessions"]["list"]>>["sessions"] = [];
+  const sessionsOf = async (user: string, chat: string): Promise<SessionView[]> => {
+    const all: SessionView[] = [];
     for (let after: string | undefined; ; ) {
       const page = await made().harness.sessions.list(user, chat, after === undefined ? undefined : { after });
       all.push(...page.sessions);
@@ -162,7 +200,13 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
     }),
     storeArea(),
-    loreArea(() => ({ store: made().store, turns: made().prompts.lore, indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) }, secrecy: { settingsFor: made().secretSettings, wording: made().secretMarks, log: (message) => made().env.log.warn(message) } })),
+    loreArea(() => ({
+      store: made().store,
+      turns: made().prompts.lore,
+      indexing: { index: made().loreIndex, jobs: made().harness.jobs, definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat) },
+      secrecy: { settingsFor: made().secretSettings, wording: made().secretMarks, log: (message) => made().env.log.warn(message) },
+      proposals: proposals(),
+    })),
     ifaceArea(() => ({ store: made().store })),
     migrateArea({ identifier: EXTENSION_IDENTIFIER }),
     // The tree lays the shipped files before the areas after it read them.

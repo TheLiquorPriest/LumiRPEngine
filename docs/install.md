@@ -96,7 +96,7 @@ By default RPE listens on `127.0.0.1`, port `7871`.
 
 ### Keep it running on macOS, Windows and in a container
 
-Without systemd, `rpe up --systemd` says so and serves in the foreground; you keep RPE running with your system's own service manager, running this line, as your account: `bun <folder>/dist/rpe.js serve`. RPE does not restart itself onto an update there: stop it and start it again after you update the extension, and copy the new `dist/rpe.js` and its folders over the ones the service runs.
+Without systemd, `rpe up` starts RPE itself and stays in the foreground (where `--systemd` was asked for and there is none, it says so and does the same); you keep RPE running across logouts and reboots with your system's own service manager, running this line, as your account: `bun <folder>/dist/rpe.js serve`. RPE does not restart itself onto an update there: stop it and start it again after you update the extension, and copy the new `dist/rpe.js` and its folders over the ones the service runs.
 
 **macOS (launchd).** First run `rpe up` once in the foreground, to sign in and write RPE's config; stop it with Ctrl-C. Copy RPE where an update of the extension will not change it:
 
@@ -146,7 +146,7 @@ Start-ScheduledTask -TaskName "rpe"
 
 Stop it with `Stop-ScheduledTask -TaskName "rpe"`, and remove it with `Unregister-ScheduledTask -TaskName "rpe" -Confirm:$false`. Task Scheduler keeps no log of its words: to read them, stop the task and run its line yourself.
 
-**In a container.** Lumiverse's 127.0.0.1 is the container's own: run RPE inside Lumiverse's container as a second process (`bun <folder>/dist/rpe.js up --url <address>`, then keep its `serve` line running), or as a compose service that shares Lumiverse's network (`network_mode: "service:lumiverse"`, `command: ["bun", "/path/rpe.js", "serve"]`, `restart: always`, a `mem_limit`), with RPE's data folder on a volume.
+**In a container.** Lumiverse's 127.0.0.1 is the container's own: run RPE inside Lumiverse's container as a second process (`bun <folder>/dist/rpe.js up --url <address>` once, which signs in, writes RPE's config and starts RPE in the foreground; stop it with Ctrl-C, then keep its `serve` line as the process that runs), or as a compose service that shares Lumiverse's network (`network_mode: "service:lumiverse"`, `command: ["bun", "/path/rpe.js", "serve"]`, `restart: always`, a `mem_limit`), with RPE's data folder on a volume.
 
 ## RPE's connection in Lumiverse
 

@@ -87,8 +87,8 @@ function harnessImport(spec: string, typeOnly: boolean, zone: Zone, rule: Rule):
   return `${zone}: the harness package is not imported here`;
 }
 
-/** The one place everything is put together: the application's entry may import every server zone. */
-const COMPOSITION = /^app\/(main|cli|compose|commands\/[\w-]+)\.ts$/;
+/** The one place everything is put together: the application's entry may import every server zone, and so may the list of worker tasks, which puts each lane's heavy function on it. */
+const COMPOSITION = /^app\/(main|cli|compose|workers\/tasks|commands\/[\w-]+)\.ts$/;
 
 /** Adapter modules the extension shares with RPE must hold no server code; they are checked as sandboxed too. */
 function sharedWithExtension(): Set<string> {

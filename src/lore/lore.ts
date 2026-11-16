@@ -54,9 +54,11 @@ export interface LoreSettings {
   wordCap: number;
   /** Tokens the secrets a character holds may take in what it is given as its own (`lore.held.budget`). */
   heldBudget: number;
+  /** Entries past which the catalogue's deterministic step (title, text, keys, size, activation, revision) runs on a worker thread (`lore.workerCatalogueAt`). */
+  workerCatalogueAt: number;
 }
 
-export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8, minTerm: SEARCH_LIMITS.minTerm, wordCap: SEARCH_LIMITS.wordCap, heldBudget: 1600 });
+export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8, minTerm: SEARCH_LIMITS.minTerm, wordCap: SEARCH_LIMITS.wordCap, heldBudget: 1600, workerCatalogueAt: 200 });
 
 /** What one call reads of the lore's settings for its chat. */
 interface Chosen {
@@ -76,6 +78,8 @@ export interface LoreOptions {
   settingsFor?: LoreSettingsFor;
   /** The lines of `.prompts/lore-answers.md` in force for a chat, which word a secret in an entry the lead reads; absent, no secret's text is shown. */
   lines?: (at: LoreScope) => Promise<LinesPart | undefined>;
+  /** Runs the catalogue's deterministic step somewhere else (a worker thread) when a library is long; absent, it runs where it is asked. */
+  away?: (input: CatalogueInput) => Promise<LoreCatalogEntry[]>;
 }
 
 /** Whose lore, which chat, and where on its path: at a turn, with what it has staged, else at the head. */
@@ -232,6 +236,9 @@ type Found = { kind: "world"; key: string; source: string; title: string; text: 
 /** An entry of the chat's lore as today's lore reads it, with what any reader may read of its text. */
 type Gathered = { kind: "world"; key: string; entry: LoreEntryDef; source: string; title: string; text: string } | { kind: "book"; book: LoreBook; row: LoreBookEntry; title: string; text: string };
 
+/** An entry of the chat's lore as it is held, before its title and the text any reader may read of it are worked out. */
+type Raw = { kind: "world"; key: string; entry: LoreEntryDef; source: string } | { kind: "book"; book: LoreBook; row: LoreBookEntry };
+
 /**
  * How an entry comes into play by itself: a book entry by Lumiverse's ways (always, by its keys, by
  * meaning); a world entry by its keys, in the lore map. None for one that never does (switched off,
@@ -270,6 +277,35 @@ function bookActivation(row: LoreBookEntry): LoreActivation[] {
   return [...(row.keys.some((k) => k.trim() !== "") ? (["keyword"] as const) : []), ...(row.vectorized ? (["vector"] as const) : [])];
 }
 
+/** What the catalogue is made from: each entry of the chat's lore with its number, as it is held. Plain data, so a thread may be handed it. */
+export interface CatalogueInput {
+  /** The chat's world's id; '' for none. */
+  world: string;
+  /** Words of its text that title a book entry with no title of its own. */
+  titleWords: number;
+  entries: CatalogueRow[];
+}
+
+/** One entry of `CatalogueInput`: a world entry by its key, or a book entry by its row, with its number. */
+export type CatalogueRow = { kind: "world"; n: number; key: string; entry: LoreEntryDef; source: string } | { kind: "book"; n: number; book: { id: string; name: string }; row: LoreBookEntry };
+
+/**
+ * The catalogue's deterministic part (plan §9.1): each entry's id, book, title, keys, size, how it activates, revision and the text
+ * any reader may read of it, worked out from the rows alone. It reads nothing and writes nothing, so it runs as well on a thread.
+ */
+export function catalogueOf(input: CatalogueInput): LoreCatalogEntry[] {
+  return input.entries.map((e): LoreCatalogEntry => {
+    if (e.kind === "world") {
+      const content = typeof e.entry.content === "string" ? e.entry.content : "";
+      const keys = keysOf(e.entry);
+      // The revision `lore_read` gives the same entry (`worldEntry`).
+      return { id: worldEntryId(e.n), world: input.world, source: e.source, book: null, key: e.key, lumiverse: null, title: worldTitle(e.entry, e.key), keys, size: content.length, activation: keys.some((k) => k !== "") ? ["keyword"] : [], revision: worldRevision(e.entry, e.key), text: publicText(content) };
+    }
+    const text = publicText(e.row.content);
+    return { id: bookEntryId(e.n), world: "", source: e.book.name, book: e.book.id, key: null, lumiverse: e.row.id, title: bookTitle(e.row, input.titleWords, text), keys: e.row.keys.filter((k) => k.trim() !== ""), size: e.row.content.length, activation: bookActivation(e.row), revision: String(e.row.revision), text };
+  });
+}
+
 export class Lore {
   private readonly books: LoreBooks;
   private readonly worlds: LoreWorlds;
@@ -278,6 +314,7 @@ export class Lore {
   private readonly settings: Readonly<LoreSettings>;
   private readonly settingsFor: LoreSettingsFor | undefined;
   private readonly lines: LoreOptions["lines"];
+  private readonly away: LoreOptions["away"];
   private blank: WorldAt | null = null;
 
   constructor(options: LoreOptions) {
@@ -288,6 +325,7 @@ export class Lore {
     this.settings = Object.freeze({ ...LORE_DEFAULTS, ...options.settings });
     this.settingsFor = options.settingsFor;
     this.lines = options.lines;
+    this.away = options.away;
   }
 
   /**
@@ -505,23 +543,23 @@ export class Lore {
    */
   async catalog(at: LoreAt): Promise<LoreCatalogEntry[]> {
     const world = this.worlds.at(at.user, at.chat, at.turn);
-    const gathered = await this.gather(at, world, () => true, await this.settingsOf(at));
+    const s = await this.settingsOf(at);
+    const gathered = await this.gatherRaw(at, world, () => true, s);
     const numbers = await this.numbers.of(at.user, gathered.flatMap((g) => (g.kind === "book" ? [g.row.id] : [])));
     const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, gathered.flatMap((g) => (g.kind === "world" ? [g.key] : [])));
-    return gathered.flatMap((g): LoreCatalogEntry[] => {
-      if (g.kind === "world") {
-        const n = worldNumbers.get(g.key);
-        if (n === undefined) return [];
-        const keys = Array.isArray(g.entry.keys) ? g.entry.keys.filter((k): k is string => typeof k === "string") : [];
-        const content = typeof g.entry.content === "string" ? g.entry.content : "";
-        const activation: LoreActivation[] = keys.some((k) => k !== "") ? ["keyword"] : [];
-        // The revision `lore_read` gives the same entry (`worldEntry`).
-        return [{ id: worldEntryId(n), world: world?.world.id ?? "", source: g.source, book: null, key: g.key, lumiverse: null, title: g.title, keys, size: content.length, activation, revision: worldRevision(g.entry, g.key), text: g.text }];
-      }
-      const n = numbers.get(g.row.id);
+    const entries = gathered.flatMap((g): CatalogueRow[] => {
+      const n = g.kind === "world" ? worldNumbers.get(g.key) : numbers.get(g.row.id);
       if (n === undefined) return [];
-      return [{ id: bookEntryId(n), world: "", source: g.book.name, book: g.book.id, key: null, lumiverse: g.row.id, title: g.title, keys: g.row.keys.filter((k) => k.trim() !== ""), size: g.row.content.length, activation: bookActivation(g.row), revision: String(g.row.revision), text: g.text }];
+      return [g.kind === "world" ? { kind: "world", n, key: g.key, entry: g.entry, source: g.source } : { kind: "book", n, book: { id: g.book.id, name: g.book.name }, row: g.row }];
     });
+    const input: CatalogueInput = { world: world?.world.id ?? "", titleWords: s.lore.titleWords, entries };
+    if (this.away === undefined || entries.length <= s.lore.workerCatalogueAt) return catalogueOf(input);
+    try {
+      return await this.away(input);
+    } catch {
+      // A thread that failed has told the log; the catalogue is made here, as it always was.
+      return catalogueOf(input);
+    }
   }
 
   /**
@@ -533,11 +571,20 @@ export class Lore {
    * disabled entries, `shared/lore.ts` `engineWroteEntry`).
    */
   private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen): Promise<Gathered[]> {
-    const out: Gathered[] = [];
+    return (await this.gatherRaw(at, world, asked, s)).map((r): Gathered => {
+      if (r.kind === "world") return { ...r, title: worldTitle(r.entry, r.key), text: publicText(typeof r.entry.content === "string" ? r.entry.content : "") };
+      const text = publicText(r.row.content);
+      return { ...r, title: bookTitle(r.row, s.lore.titleWords, text), text };
+    });
+  }
+
+  /** The entries `gather` finds, as they are held: the rows alone, with nothing worked out of them. */
+  private async gatherRaw(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen): Promise<Raw[]> {
+    const out: Raw[] = [];
     if (world !== null && asked(world.world.name)) {
       for (const [key, entry] of Object.entries(world.world.lore)) {
         if (!hasOwn(world.world.lore, key) || isCopy(entry)) continue;
-        out.push({ kind: "world", key, entry, source: world.world.name, title: worldTitle(entry, key), text: publicText(typeof entry.content === "string" ? entry.content : "") });
+        out.push({ kind: "world", key, entry, source: world.world.name });
       }
     }
     const read = (await this.booksOf(at, world, s.books)).filter((book) => asked(book.name));
@@ -545,7 +592,7 @@ export class Lore {
     for (const [i, book] of read.entries()) {
       for (const row of rows[i] ?? []) {
         if (engineWroteEntry(row.extensions)) continue;
-        out.push({ kind: "book", book, row, title: bookTitle(row, s.lore.titleWords), text: publicText(row.content) });
+        out.push({ kind: "book", book, row });
       }
     }
     return out;

@@ -32,6 +32,7 @@ import { BLANK_REVISION, blankWorld } from "./blank";
 import { MIGRATED_REVISION, readWorldDoc, type WorldRevisionRow } from "./worlds";
 import { isWorldDoc } from "../engine/authoring";
 import { migrateStore, missingStoreTables } from "./schema";
+import { FoldAway, type AwayFold, type AwayHeld, type FoldJob, type StoreAway, type StoreBrief } from "./away";
 import { TreeView } from "./view";
 import {
   JoinedTurnError,
@@ -84,6 +85,8 @@ export const STORE_DEFAULTS = Object.freeze({
   kindChain: WALK_DEFAULTS.kindChain,
   holderDepth: WALK_DEFAULTS.holderDepth,
   visitDepth: WALK_DEFAULTS.visitDepth,
+  /** Changes a fold may run over here: past it, a caller that can wait (`Store.afar`) has the fold run on a worker thread (plan §4.1 l.199). */
+  workerFoldAt: 500,
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
@@ -130,6 +133,10 @@ export interface StoreOptions {
   log?: (message: string, data: Record<string, unknown>) => void;
   /** The areas whose operations (`<area>.<op>`) fold beside the engine's: the story, the cast, lore overlays (`StoreArea`). */
   areas?: readonly StoreArea[];
+  /** The most changes a fold runs over before `afar` hands it to a thread (`store.workerFoldAt`, 500 by default). */
+  workerFoldAt?: number;
+  /** Where a long fold runs, with the database file it reads there; none: every fold runs where it is asked (`afar` just reads). */
+  away?: StoreAway;
 }
 
 /** A handler's failure, as the store tells it (`StoreOptions.handlerFailed`). */
@@ -387,6 +394,12 @@ export class Store {
   private readonly views = new WeakMap<StoreState, TreeView>();
   private readonly envs = new Map<string, FoldEnv>();
   private readonly handlerFailed: (failure: StoreFailure) => void;
+  /** Where a long fold runs (`afar`), the number of changes past which one is long, and what a thread needs to fold as this store does. */
+  private readonly away: StoreAway | null;
+  /** @internal */ readonly workerFoldAt: number;
+  private readonly forThreads: Omit<StoreBrief, "path">;
+  /** @internal Whether a fold longer than `workerFoldAt` throws `FoldAway`: set by `afar` for the one synchronous read it makes. */
+  guarding = false;
 
   constructor(options: StoreOptions) {
     if (typeof options.db === "string") {
@@ -422,6 +435,9 @@ export class Store {
     this.snapshotsHeld = whole(options.snapshotsHeld, STORE_DEFAULTS.snapshotsHeld, 0);
     this.branchHops = whole(options.branchHops, STORE_DEFAULTS.branchHops, 1);
     this.log = options.log ?? null;
+    this.workerFoldAt = whole(options.workerFoldAt, STORE_DEFAULTS.workerFoldAt, 1);
+    this.away = options.away ?? null;
+    this.forThreads = { fingerprint: options.fingerprint, snapshotEvery: this.snapshotEvery, statesPerChat: this.statesPerChat, snapshotsHeld: this.snapshotsHeld, kindChain: options.kindChain, holderDepth: options.holderDepth, visitDepth: options.visitDepth };
     // The engine's walks, read once for every fold: a store opened without them (a script's, the migration's) keeps the process's. A
     // walk one cuts short goes to the log, once for each chain.
     const log = options.log;
@@ -469,6 +485,60 @@ export class Store {
     this.byChat.clear();
     this.held.clear();
     this.compared.clear();
+  }
+
+  /**
+   * Runs `read`, a call that only reads and may be made again, where a fold over more than `workerFoldAt` changes runs on a worker
+   * thread and not here: the fold is handed over, the states the thread held are held here when it answers, and the read is made
+   * again, now answered from memory. A read with nothing long in it is made once, as it always was; so is every read where no
+   * thread is given, and where a thread's fold fails (the failure is logged).
+   */
+  async afar<T>(read: () => T): Promise<T> {
+    const away = this.away;
+    if (away === null) return read();
+    for (let tries = 0; tries < 4; tries++) {
+      let job: FoldJob;
+      this.guarding = true;
+      try {
+        return read();
+      } catch (error) {
+        if (!(error instanceof FoldAway)) throw error;
+        job = error.job;
+      } finally {
+        this.guarding = false;
+      }
+      try {
+        await this.foldAway(away, job);
+      } catch (error) {
+        this.log?.("A long fold could not run on a worker thread, so it runs here.", { error: error instanceof Error ? error.message : String(error) });
+        return read();
+      }
+    }
+    return read();
+  }
+
+  /** Hands `job` to a thread and takes what it held: a state folded under a mark that moved since is not held, and a snapshot waits for the user's next write as any found by a fold here does. */
+  private async foldAway(away: StoreAway, job: FoldJob): Promise<void> {
+    const before = new Map(this.db.query<{ chat: string; mark: string }, [string]>("SELECT chat, mark FROM fold_mark WHERE user = ?").all(job.user).map((r) => [r.chat, r.mark]));
+    const done = await away.run({ path: away.path, ...this.forThreads }, job);
+    for (const f of done.folds) {
+      if (f.chat !== null && (f.mark !== (before.get(f.chat) ?? "") || f.mark !== this.markOf(job.user, f.chat))) continue;
+      this.keep(f.key, f.folded, f.upto, job.user, f.chat, f.mark);
+    }
+    this.hold(job.user, done.held);
+    for (const said of done.logs) this.log?.(said.message, said.data);
+    for (const f of done.failures) this.handlerFailed({ op: f.op, error: new Error(f.message), user: f.user, ...(f.chat === undefined ? {} : { chat: f.chat }), turn: f.turn, change: f.change });
+  }
+
+  /** @internal What `user`'s folds hold in memory, for a thread to hand back. */
+  takeFolds(user: string): AwayFold[] {
+    const prefix = `${user}\u0000`;
+    return [...this.folds].filter(([key]) => key.startsWith(prefix)).map(([key, c]) => ({ key, chat: c.chat, mark: c.mark, folded: c.folded, upto: c.upto }));
+  }
+
+  /** @internal The snapshots `user`'s folds found worth storing, as `hold` takes them back. */
+  takeHeld(user: string): AwayHeld[] {
+    return [...(this.held.get(user) ?? [])].map(([node, row]): AwayHeld => [node, row.upto, row.rows, row.chat, row.mark]);
   }
 
   /** Closes the database if the store opened it; one it was handed stays open, its owner's to close. */
@@ -1921,6 +1991,7 @@ export class UserStore {
     }
     const rest = chain.slice(from + 1);
     const ids = (stored === null ? rest : [first, ...rest]).map((c) => c.turn);
+    this.guardLong(ids, () => ({ user: this.id, node }));
     const turns = new Map(
       this.db
         .query<{ id: string; node: string; status: string }, [string, string]>("SELECT t.id, t.node, t.status FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value")
@@ -1982,6 +2053,7 @@ export class UserStore {
         .all(this.id, JSON.stringify(nodes.map(([, , turn]) => turn)))
         .map((t) => [t.id, t]),
     );
+    this.guardLong(nodes.slice(deepest + 1).map(([, , t]) => t), () => ({ user: this.id, end, turn, nodes }));
     const marks = new Map<string, string>();
     const markFor = (c: string): string => {
       const m = marks.get(c) ?? this.store.markOf(this.id, c);
@@ -2008,6 +2080,19 @@ export class UserStore {
     const folded: Folded = { node: end, state: result.state, notApplied: [...base.folded.notApplied, ...result.notApplied], rebased: [...base.folded.rebased, ...result.rebased] };
     this.store.keep(this.cacheKey(end), folded, result.upto, this.id, chat, mark);
     return folded;
+  }
+
+  /** Throws `FoldAway` for a fold about to run over the turns `ids` when `afar` waits for a thread and they hold more changes than `workerFoldAt`. */
+  private guardLong(ids: readonly string[], job: () => FoldJob): void {
+    if (!this.store.guarding) return;
+    const n = this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM change WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2)) AND job IS NULL").get(this.id, JSON.stringify(ids))?.n ?? 0;
+    if (n > this.store.workerFoldAt) throw new FoldAway(job());
+  }
+
+  /** @internal Folds what a thread was asked to (`FoldJob`), the states left held for `Store.takeFolds`. */
+  foldJob(job: FoldJob): void {
+    if ("node" in job) this.foldNode(job.node);
+    else this.foldPath(job.end, job.turn, () => job.nodes);
   }
 
   /** The state the chat a turn was made in starts from (`initial`). */

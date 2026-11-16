@@ -27,7 +27,7 @@ In these steps, `rpe` stands for `bun <the folder of this repository>/dist/rpe.j
    bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --url <Lumiverse's address> --user <your Lumiverse username> --systemd
    ```
 
-   It asks for your Lumiverse password once, and does not keep it. It makes a connection called "RPE" in Lumiverse, starts RPE as a service of your account, and ends with a numbered list of what is left to do. Without systemd, leave out `--systemd`, and then start RPE with `rpe serve` and keep it running.
+   It asks for your Lumiverse password once, and does not keep it. It makes a connection called "RPE" in Lumiverse, starts RPE as a service of your account, and ends with a numbered list of what is left to do. Without `--systemd` (anywhere without systemd), it starts RPE itself and stays in the foreground until you press Ctrl-C: leave it running and use another terminal for the steps that follow. To start it again later, run `rpe serve`, or `rpe up` again.
 3. **Add a model connection to RPE.** For example:
 
    ```sh
