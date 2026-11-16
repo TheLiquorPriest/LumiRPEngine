@@ -1,8 +1,6 @@
 ---
 description: The words RPE answers a play page with when it does not do what a panel asked of it, or does it and leaves something as it was. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values, and the keys give the words for what an answer names by a code. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing. A tap that manages keeps the rules its action has in this world as advice. One the rules would turn down (paying someone who is not there, say) is applied all the same, and what does not add up is told with it (applied_advised).
 lines:
-  next_message: "A tap that goes with your next message is not kept by this build of RPE from this page yet."
-  plays_now: "A tap that plays at once as your message is not served by this build of RPE yet: it writes no message to the chat and starts no reply from this page."
   things: "The things browser is not served by this build of RPE yet."
   map: "Walking on the map and choosing how the map is shown are not served by this build of RPE yet."
   other: "This page's request {{type}} is not served by this build of RPE yet."
@@ -37,6 +35,7 @@ lines:
   off_path: "Nothing was undone: the turn this change was kept with is no longer part of this chat's story."
   changed_since: "Nothing was undone: something has changed it since."
   no_undo_for: "Nothing was undone: this build keeps no undo for {{parts}}."
+  no_request: "There is no request {{request}} waiting in this chat to send now."
 keys:
   engine.hint: "a hint opened"
   spawn: "something made"
