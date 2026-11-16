@@ -128,12 +128,6 @@ export function turnArea(takes: TurnTakes): TurnArea {
           const { store } = made();
           return await store.afar(() => store.user(owner()).turnStart(ask.chat, ask.path, ask.point));
         },
-        // The window as a page shows it, read at the chat's head: whether it is on, the first message it keeps, and what the story has covered.
-        windowView: async (chat, path) => {
-          const { window } = await chatSettings(chat);
-          const held = covered(chat);
-          return { on: window.size !== null, first: window.size === null ? null : historyWindow(path, window, held).first, covered: held };
-        },
         hiddenReadable: async (chat) => (await chatSettings(chat)).hiddenReadable,
         ranges: async (chat, turn) => namedStretches(made().store, owner(), chat, turn),
         summarized: async (chat) => made().prompts.summarized(owner(), chat),
