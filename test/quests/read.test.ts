@@ -91,3 +91,20 @@ describe("who holds a quest's secret", () => {
     ]);
   });
 });
+
+describe("the engine's reading of a quest and its stages", () => {
+  test("finds a quest by id, name or ref and a stage by its id, ref or label, and a stage it does not hold is answered with the quest's stages", async () => {
+    const t = await opened();
+    const { Reading } = await import("../../src/iface/reading");
+    const call = { scope: { user: "user-a", chat: "chat-a", session: "s-1", turn: t.turn.id }, agent: { id: "gm-1", definition: "gm" }, deps: t.deps, settings: { nearMatches: 5, nearDistance: 0.25 }, lines: undefined } as never;
+    const reading = Reading.of(call);
+    if (!(reading instanceof Reading)) throw new Error("the invented chat reads");
+    const quest = reading.find("the missing ferryman", "quest");
+    if (!("ref" in quest)) throw new Error("the quest is found by its name");
+    expect(quest.ref).toMatch(/^quest:/);
+    expect(reading.find(quest.ref, "quest")).toMatchObject({ id: quest.id });
+    expect(reading.stage(quest, "Search the reeds")).toMatchObject({ ref: `${quest.ref}/search`, name: "Search the reeds" });
+    expect(reading.stage(quest, `${quest.ref}/ask`)).toMatchObject({ id: "ask" });
+    expect(reading.stage(quest, "the third")).toEqual({ stages: [expect.objectContaining({ id: "ask" }), expect.objectContaining({ id: "search" })] });
+  });
+});

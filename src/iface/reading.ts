@@ -15,13 +15,15 @@ import type { Registry } from "../engine/registry-impl";
 import { isGone, kindDef, kindIs } from "../engine/scope";
 import { resolveThing as resolveThingWords } from "../engine/thing-resolve";
 import { holdsOf, isThing } from "../engine/things";
+import { findStage } from "../quests/read";
+import { questSliceOf, questViews } from "../quests/record";
 import type { TreeView } from "../store/view";
 import { JoinedTurnError, type StoreState, type TurnRow } from "../store/types";
 import type { Call, EngineDeps, IfaceSettings, Reply } from "./kit";
 import { type Lines, textOf } from "./texts";
 
 /** What a name is wanted as. */
-export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track" | "party" | "organization";
+export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track" | "quest" | "party" | "organization";
 
 /** A name that was found. `ref` is its place in the tree (`entity:<id>`, `place:<id>`, `world`); a track's is `track:<id>`. */
 export interface Found {
@@ -183,7 +185,7 @@ export class Reading {
 
   private candidates(want: Want, gone: boolean): Candidate[] {
     const out: Candidate[] = [];
-    const entities = want !== "place" && want !== "track";
+    const entities = want !== "place" && want !== "track" && want !== "quest";
     if (entities) {
       for (const [id, e] of Object.entries(this.state.world.entities)) {
         if (!gone && isGone(this.state.world, id)) continue;
@@ -200,6 +202,8 @@ export class Reading {
       for (const [id, p] of Object.entries(this.world.places)) out.push({ id, ref: `place:${id}`, names: [p.name, ...placeAliases(p)], what: "place", place: true });
     }
     if (want === "point") for (const [id, ref] of Object.entries(POINTS)) out.push({ id, ref, names: [id], what: id, place: false });
+    // (S17Story, quests) A quest: the world's own track or one the story opened, by its id or name; its ref is `quest:<id>`.
+    if (want === "quest") for (const q of questViews(this.doc.tracks, questSliceOf(this.state))) out.push({ id: q.id, ref: `quest:${q.id}`, names: [q.name], what: q.kind, place: false });
     if (want === "track") for (const [id, t] of Object.entries(this.doc.tracks)) out.push({ id, ref: `track:${id}`, names: [t.label], what: t.kind, place: false });
     return out;
   }
@@ -213,7 +217,7 @@ export class Reading {
   find(said: string, want: Want, gone = false): Found | Missed {
     const trimmed = said.trim();
     const all = this.candidates(want, gone);
-    const bare = trimmed.replace(/^(?:entity|place|track):/, "");
+    const bare = trimmed.replace(/^(?:entity|place|track|quest):/, "");
     const lower = bare.toLowerCase();
     const rules: ((c: Candidate) => boolean)[] = [
       (c) => c.ref === trimmed || c.id === bare,
@@ -247,6 +251,17 @@ export class Reading {
     const wanted = new Set(all.map((c) => c.ref));
     const other = this.candidates("point", gone).filter((c) => !wanted.has(c.ref) && rules.slice(0, 3).some((rule) => rule(c)));
     return { name: said, near: this.nearest(bare, all), several: [], other: other.map((c) => this.near(c)), ...(all.length === 0 ? { empty: true as const } : {}) };
+  }
+
+  /**
+   * A stage of a quest this reading found (`want: "quest"`), by its id or its ref (`quest:<id>/<stage>`) within the quest, or by its
+   * label; a stage the quest does not hold is answered with the quest's stages as near matches, never refused without them.
+   */
+  stage(quest: Found, said: string): Found | { stages: Near[] } {
+    const view = questViews(this.doc.tracks, questSliceOf(this.state)).find((q) => q.id === quest.id);
+    const found = view === undefined ? undefined : findStage(view, said);
+    if (found !== undefined && "stage" in found) return { id: found.stage.id, ref: `quest:${quest.id}/${found.stage.id}`, name: found.stage.label };
+    return { stages: (view?.stages ?? []).map((s) => ({ id: s.id, name: s.label, what: "stage" })) };
   }
 
   private found(c: Candidate): Found {
