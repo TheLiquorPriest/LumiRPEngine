@@ -85,6 +85,17 @@ export function editId(undo: string): string {
   return /^tap:[^:]+:([^:]+)$/.exec(undo)?.[1] ?? undo;
 }
 
+/** The chat's head as a tap that records nothing reads it: the world as its state plays it; refused for a chat that plays none, or one whose revision is not held. */
+export function headOf(store: Store, user: string, chat: string): Omit<Head, "seed"> {
+  const s = store.user(user);
+  const row = s.chat(chat);
+  if (row === null || row.world === null) throw new Refused("not_world_chat", { line: "not_world" });
+  const state = s.headState(chat).state.world;
+  const doc = store.env.worlds(state.revision);
+  if (doc === undefined) throw new Refused("unavailable", { line: "no_revision" });
+  return { registry: store.env.registry, world: playedWorld(doc, state), state };
+}
+
 /**
  * Records an edit of his on the chat in one write, so the state it is resolved on is the one it lands on: the accounts the world gave
  * that opened for it, each a change of its own, then what he did, in which the economy's bookkeeping for someone it keeps no accounts

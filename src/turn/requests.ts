@@ -25,8 +25,8 @@ export function requestText(asked: PanelAsk | ComposerAsk): string {
 /** A request's kind: a panel's tap, or one of the composer's two controls. */
 export type RequestKind = "panel" | "depth" | "swipe";
 
-/** Where a panel's tap was made. */
-export type TapFrom = "palette" | "map" | "panel" | "chip" | "send-now";
+/** Where a panel's tap was made: a command typed on the previous build's pages plays now, as a chip does. */
+export type TapFrom = "palette" | "map" | "panel" | "chip" | "send-now" | "command";
 
 /** What a panel's tap asked: its action and values where it has one, where it came from, and the words of what was pressed and on what. */
 export interface PanelAsk {
@@ -100,20 +100,39 @@ export class Requests {
     this.told(chat, this.waiting(user, chat).length);
   }
 
-  /** What waits in the chat, oldest first. */
+  /** What waits in the chat for the next message, oldest first: a tap played now as his message is not listed, though its turn is told it. */
   waiting(user: string, chat: string): RequestRecord[] {
+    return this.#pending(user, chat).filter((r) => !r.played);
+  }
+
+  /** What the chat's next turn that answers a new message is told, oldest first: what waits, and each tap played now as his message. */
+  #pending(user: string, chat: string): RequestRecord[] {
     return this.db.query<RequestRow, [string, string]>(`SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS} ORDER BY r.at, r.rowid`).all(user, chat).map(recordOf);
   }
 
-  /** Holds a request: it waits for the next turn that answers a new message, in place of one of its kind that waited. */
+  /**
+   * Holds a request: it waits for the next turn that answers a new message, in place of one of its kind that waited. One played now
+   * as his message (`played`, with the message it was sent as) replaces nothing, and is told to the turn that answers it.
+   */
   async hold(user: string, chat: string, ask: { kind: RequestKind; asked: PanelAsk | ComposerAsk; played?: boolean; message?: string | null }, at: number): Promise<RequestRecord> {
     const request: RequestRecord = { id: crypto.randomUUID(), chat, kind: ask.kind, asked: ask.asked, played: ask.played === true, message: ask.message ?? null, turn: null, at };
     await this.writes.run((db) => {
-      db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, chat, ask.kind, user, chat]);
+      if (!request.played) db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND played = 0 AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, chat, ask.kind, user, chat]);
       db.run("INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)", [user, request.id, chat, request.kind, JSON.stringify(request.asked), request.played ? 1 : 0, request.message, at]);
     }, "holding what the player asked for");
     this.changed(user, chat);
     return request;
+  }
+
+  /** A request that waits, sent now as his message (`message`): it waits no more, and is told to the turn that answers that message; null when none such waits. */
+  async played(user: string, chat: string, id: string, message: string): Promise<RequestRecord | null> {
+    const sent = await this.writes.run((db) => {
+      db.run(`UPDATE request SET played = 1, message = ?, turn = NULL WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 0 AND ${WAITS})`, [message, user, chat, id]);
+      return db.query<RequestRow, [string, string, string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 1 AND r.message IS ?").get(user, chat, id, message);
+    }, "sending what the player asked for as his message");
+    if (sent === null) return null;
+    this.changed(user, chat);
+    return recordOf(sent);
   }
 
   /** Withdraws a request that waits; one kept with a turn stays, and the answer names the turn. */
@@ -143,7 +162,7 @@ export class Requests {
    * the mode of an earlier swipe, and the swipe's mode that waits, asked for this attempt.
    */
   forTurn(user: string, chat: string, attempts: readonly string[] | null): RequestRecord[] {
-    const waiting = this.waiting(user, chat);
+    const waiting = this.#pending(user, chat);
     if (attempts === null) return waiting.filter((r) => r.kind !== "swipe");
     const told = this.db
       .query<RequestRow, [string, string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.turn IN (SELECT value FROM json_each(?)) ORDER BY r.at, r.rowid")

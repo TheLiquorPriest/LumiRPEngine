@@ -671,9 +671,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
             const { choice, words: typed } = r.asked as ComposerAsk;
             return said(lines(notices)?.line(r.kind === "depth" ? "depth_asked" : "swipe_asked", { [r.kind === "depth" ? "depth" : "mode"]: choice, ...(typed !== null && typed.trim() !== "" ? { words: typed } : {}) }));
           }
+          // A tap played now went into the chat as his message: the line marks it so (`sent`), with the values the message may not carry.
           const tap = r.asked as PanelAsk;
           const values = Object.entries(tap.values).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
-          return said(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}) }));
+          return said(lines(notices)?.line("panel_request", { what: tap.what, from: tap.from, ...(tap.on !== null ? { on: tap.on } : {}), ...(tap.action !== null ? { action: tap.action } : {}), ...(values.length > 0 ? { values: values.join(", ") } : {}), ...(r.played ? { sent: true } : {}) }));
         });
         // The feedback he typed in Lumiverse's regenerate dialog, where the door told it apart for certain (R-198): a line of `asked` too,
         // before the Author's first call. Not told apart, it stands where Lumiverse put it in the prompt, and no line comes from it.

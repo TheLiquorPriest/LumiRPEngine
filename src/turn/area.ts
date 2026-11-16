@@ -111,6 +111,12 @@ export function turnArea(takes: TurnTakes): TurnArea {
           const { window } = await chatSettings(ask.chat);
           return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat, (await ask.follows())?.turn ?? null)).first;
         },
+        // The window as a page shows it, read at the chat's head: whether it is on, the first message it keeps, and what the story has covered.
+        windowView: async (chat, path) => {
+          const { window } = await chatSettings(chat);
+          const held = covered(chat);
+          return { on: window.size !== null, first: window.size === null ? null : historyWindow(path, window, held).first, covered: held };
+        },
         // Where a turn not yet begun will start on the question's path, from RPE's own store alone (R-5): the hidden marks it holds laid on
         // the path. A long fold runs on a worker (`afar`), so the question never stalls other chats.
         start: async (ask) => {

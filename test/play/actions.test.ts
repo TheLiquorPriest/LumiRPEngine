@@ -330,13 +330,8 @@ describe("what is not served", () => {
     const newest = await bed.turn();
     bed.listen();
     const asked: [Record<string, unknown>, string, Record<string, unknown>?][] = [
-      // A tap from the palette with no words goes with the next message.
-      [{ type: "lre.action", action: "timelapse", params: { target: { minutes: 60 } }, source: "palette" }, "next_message"],
-      [{ type: "lre.action", action: "haul_stone", params: {}, source: "palette" }, "next_message"],
-      // Send now, words, a chip: each plays at once.
-      [{ type: "lre.action", action: "haul_stone", params: {}, source: "palette", now: true }, "plays_now"],
-      [{ type: "lre.action", action: "haul_stone", params: {}, source: "command", text: "I haul the stone up the hill" }, "plays_now"],
-      [{ type: "lre.chip", chip: "chip-1", choice: "confirm" }, "plays_now"],
+      // A tap that does not manage is held or played now (`requests.test.ts`, `plays.test.ts`); a chip of the previous build's is no request this route serves.
+      [{ type: "lre.chip", chip: "chip-1", choice: "confirm" }, "other", { type: "lre.chip" }],
       [{ type: "lre.things", scope: "gm", op: "list" }, "things"],
       [{ type: "lre.map", op: "walk", place: "market_square" }, "map"],
       [{ type: "lre.view.open", panel: "economy.money", entity: null }, "other", { type: "lre.view.open" }],

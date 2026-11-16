@@ -145,7 +145,7 @@ const source = shape.named("FactSource", "Where a value or a fact came from.", s
 const panelAsk = shape.object({
   action: field(nullable(T), "The panel action's id; null where the tap names none."),
   values: field(shape.record(shape.json()), "The action's values."),
-  from: field(shape.oneOf("palette", "map", "panel", "chip", "send-now"), "Where the tap was made."),
+  from: field(shape.oneOf("palette", "map", "panel", "chip", "send-now", "command"), "Where the tap was made."),
   what: field(T, "The words of what was pressed."),
   on: field(nullable(T), "What it was pressed on; null for nothing."),
 });

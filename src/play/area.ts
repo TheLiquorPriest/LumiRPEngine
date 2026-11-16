@@ -5,8 +5,11 @@ import type { Area } from "../app";
 import { playRoutes } from "./routes";
 import { PlayService, type PlayDeps } from "./service";
 
-/** What the play panels take from the composition: the store each chat's state is in, whether a turn of a chat goes on, the guidance folder holding their words, and the chat's settings they read. */
-export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "settings">;
+/**
+ * What the play panels take from the composition: the store each chat's state is in, whether a turn of a chat goes on, the guidance
+ * folder holding their words, the chat's settings they read, the turn lane's requests, and Lumiverse's own routes as him.
+ */
+export type PlayTakes = Pick<PlayDeps, "store" | "turning" | "guidance" | "settings" | "requests" | "lumiverse">;
 
 /** `takes` is asked once the turn lane is mounted, whose store the panels read: the routes are made then. */
 export function playArea(takes: () => PlayTakes): Area {

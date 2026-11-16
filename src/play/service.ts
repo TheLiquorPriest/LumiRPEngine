@@ -10,10 +10,12 @@
 // does not exist or that his character cannot know of, input that cannot be parsed) says its true reason,
 // case by case (`unfit.ts`). An Undo, by the edit's own id, records the reversal of all of an edit's
 // changes, the world's defaults given with it included (`UserStore.undo`), or of none and says why. A chat's own choices (today's
-// `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that goes with the next message, a tap
-// that plays now, setting a chat's own choice, the things browser and the map's walk and display are not
-// served here, and say so. Every word is a line of `.prompts/play-answers.md`. After each change the
-// chat's followers are told its state changed.
+// `lre.chat.knowledge`) read as RPE has them: it keeps none. A tap that is no tap that manages is a request of his to the Author (plan
+// §10.10): from the palette, the map or a panel with no words it waits for his next message (`requests.ts`), and the same tap again
+// takes it back; with words, a chip, Send now or a Timelapse with words it plays now, its line put in the chat as his message and a
+// reply started through Lumiverse's own routes as him, nothing written into the message's or the chat's metadata. Setting a chat's
+// own choice, the things browser and the map's display are not served here, and say so. Every word is a line of
+// `.prompts/play-answers.md`. After each change the chat's followers are told its state changed.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,6 +38,7 @@ import { currentStage } from "../engine/tracks";
 import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, unrevealedSecrets } from "../engine/visibility";
 import { Working } from "../engine/working";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
+import type { Writes as LumiverseWrites } from "../adapter/lumiverse/writes";
 import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
@@ -45,13 +48,14 @@ import type { ErrorCode, ErrorMessage, FrontendToBackend, ResultBodies, ResultMe
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { type ItemFix, parseItemFix } from "../shared/things";
-import type { ParamDef, WorldDoc } from "../shared/world";
+import { formatMoney, type ParamDef, type WorldDoc } from "../shared/world";
 import { type ChangeRow, factStore, JoinedTurnError, readPart, type Report, type Store } from "../store";
 import { FACT_ABOUT } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
-import { editId, type Head, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
+import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
+import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
 import type { TapSettings } from "./settings";
 import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
@@ -90,11 +94,29 @@ export interface PlayDeps {
   turning(user: string, chat: string): boolean;
   /** The chat's settings the taps and reads take. */
   settings(user: string, chat: string): Promise<PlaySettings>;
+  /** What he asks for beside his words: a panel's tap held for his next message, or kept as played now with the message it was sent as. */
+  requests: Requests;
+  /** Lumiverse's own routes as him, which put a tap's line in the chat as his message and start the reply. */
+  lumiverse(): Pick<LumiverseWrites, "appendMessage" | "startGeneration">;
   log: Log;
 }
 
-/** Where a tap was made. */
-export type TapSource = "palette" | "map" | "panel" | "chip" | "send-now";
+/** The status a refusal of a tap's own route is answered with, by its code. */
+const REFUSED_STATUS: Readonly<Record<ErrorCode, number>> = { bad_request: 400, not_found: 404, not_world_chat: 404, conflict: 409, paused: 409, validation: 422, forbidden: 403, unavailable: 409, internal: 500 };
+
+/** A panel's tap that is no tap that manages: its action, its values, and where it was made. */
+export interface PanelTap {
+  action: string;
+  values: JsonObject;
+  from: TapFrom;
+}
+
+/** What a tap played now came to: the message his line went into the chat as, the generation that answers it, and the request kept with it. */
+export interface Played {
+  message: string;
+  generation: string;
+  request: string;
+}
 
 /** A tap that does one of the world's actions at once (money, a group, gear, a vehicle). */
 export interface ActionAsk {
@@ -173,6 +195,11 @@ function openGiven(registry: Registry, w: Working, parties: readonly string[], s
   return opened;
 }
 
+/** Where a tap was made, as a request keeps it; a source of no such place (an older page's) is a chip's, a tap that plays now. */
+function tapFrom(source: string): TapFrom {
+  return source === "palette" || source === "map" || source === "panel" || source === "send-now" || source === "command" ? source : "chip";
+}
+
 /** Who an action names: the one acting, and whoever its references name, as today's resolver takes them in. */
 function partiesOf(params: Readonly<Record<string, ParamDef>>, actor: string, given: JsonObject): string[] {
   return [
@@ -244,6 +271,8 @@ export class PlayService {
   /** A tap on the typed route, recorded as his own edit; a refusal answered in words with nothing changed. */
   async tap(user: string, chat: string, ask: TapAsk): Promise<TapAnswer> {
     try {
+      // A tap of an action that does not manage is a request of his to the Author: held, taken back, or played now.
+      if (ask.kind === "action" && (await this.requested(user, chat, ask)) !== undefined) return { applied: true, reports: [], undo: null, words: "" };
       const settings = await this.deps.settings(user, chat);
       const tell = ask.tell ?? null;
       const { kind: _kind, tell: _tell, ...request } = ask;
@@ -286,6 +315,9 @@ export class PlayService {
     try {
       switch (r.type) {
         case "lre.action": {
+          // A tap that does not manage is held for his next message (staged: false when the same tap took it back) or played now.
+          const requested = await this.requested(user, chat, r);
+          if (requested !== undefined) return reply(r, "lre.action", "held" in requested ? { staged: requested.held !== null } : { messageId: requested.message });
           const settings = await this.deps.settings(user, chat);
           const { undo } = await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.action(head, r, settings));
           return reply(r, "lre.action", { applied: true, pending: false, undo });
@@ -313,8 +345,6 @@ export class PlayService {
           await recordOwnerEdit(this.deps, user, chat, this.cited(r), null, (head) => this.timeMarker(head, body));
           return reply(r, "lre.marker", { pending: false });
         }
-        case "lre.chip":
-          throw new Refused("unavailable", { line: "plays_now" });
         case "lre.things":
           throw new Refused("unavailable", { line: "things" });
         case "lre.map":
@@ -345,17 +375,117 @@ export class PlayService {
   }
 
   /**
-   * One of the world's actions, done at once on the head. The world's rules advise (plan §6.1): a requirement the action does not
-   * meet, or a payee who is not there, is applied all the same and given back to be kept and answered. What is still refused is a
-   * pick that names nothing he may know of, or no one fit to pay, each with its true reason (`unfit.ts`).
+   * A tap of one of the world's actions that is no tap that manages (plan §10.10), as a request of his to the Author: from the palette,
+   * the map or a panel with no words and no Send now, held for his next message (`held` null: the same tap again took it back); with
+   * words, a chip, a command or Send now, played now. Undefined for a tap that manages, which is recorded as his edit.
+   */
+  private async requested(user: string, chat: string, r: ActionAsk & { offstage?: boolean }): Promise<{ held: RequestRecord | null } | Played | undefined> {
+    const { registry, world } = headOf(this.deps.store, user, chat);
+    const action = r.action === TIMELAPSE_ACTION ? undefined : (own(world.actions, r.action) ?? registry.actions.get(r.action));
+    if (action !== undefined && playsOffstage(r.action, r, action.mechanical === true)) return undefined;
+    const from = tapFrom(r.source);
+    const tap: PanelTap = { action: r.action, values: r.params, from };
+    const words = r.text?.trim() ?? "";
+    if ((from === "palette" || from === "map" || from === "panel") && words === "" && r.now !== true) return { held: await this.hold(user, chat, tap) };
+    return await this.playNow(user, chat, { tap, words });
+  }
+
+  /** A panel's tap for his next message, on its own route: held, or taken back (null); a refusal is answered with its status and words. */
+  async holdTap(user: string, chat: string, tap: PanelTap): Promise<{ request: RequestRecord | null }> {
+    return { request: await this.routed(() => this.hold(user, chat, tap)) };
+  }
+
+  /** A tap that plays now, or a request that waits sent now, on its own route; a refusal is answered with its status and words. */
+  async playTap(user: string, chat: string, ask: { tap: PanelTap; words: string } | { request: string }): Promise<Played> {
+    return await this.routed(() => this.playNow(user, chat, ask));
+  }
+
+  private async routed<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (!(error instanceof Refused)) throw error;
+      throw new RouteError(REFUSED_STATUS[error.code], await this.refusalWords(error));
+    }
+  }
+
+  /** A panel's tap held for his next message, in place of one that waited; the same tap again takes it back, and the answer is null. */
+  private async hold(user: string, chat: string, tap: PanelTap): Promise<RequestRecord | null> {
+    const asked = await this.pressed(user, chat, tap, "");
+    const same = this.deps.requests.waiting(user, chat).find((w) => w.kind === "panel" && (w.asked as PanelAsk).action === asked.action && JSON.stringify((w.asked as PanelAsk).values) === JSON.stringify(asked.values));
+    if (same !== undefined) {
+      await this.deps.requests.withdraw(user, chat, same.id);
+      return null;
+    }
+    return await this.deps.requests.hold(user, chat, { kind: "panel", asked }, Date.now());
+  }
+
+  /**
+   * A tap played now (plan §10.10, §4.2): its line, the words typed or else what was pressed, put in the chat as his message, text only,
+   * and the reply started, both through Lumiverse's own routes as him; nothing is written into the message's or the chat's metadata. The
+   * request is kept as played now with that message, so the turn that answers it is told what was pressed and its values. A request that
+   * waits (Send now) is played so, and waits no more.
+   */
+  private async playNow(user: string, chat: string, ask: { tap: PanelTap; words: string } | { request: string }): Promise<Played> {
+    let asked: PanelAsk;
+    let words = "";
+    if ("request" in ask) {
+      const waits = this.deps.requests.waiting(user, chat).find((w) => w.id === ask.request && w.kind === "panel");
+      if (waits === undefined) throw new Refused("not_found", { line: "no_request", fields: { request: ask.request } });
+      asked = waits.asked as PanelAsk;
+    } else {
+      asked = await this.pressed(user, chat, ask.tap, ask.words);
+      words = ask.words.trim();
+    }
+    const lumiverse = this.deps.lumiverse();
+    const message = await lumiverse.appendMessage(user, chat, words !== "" ? words : asked.what);
+    const sent = "request" in ask ? await this.deps.requests.played(user, chat, ask.request, message.id) : null;
+    const kept = sent ?? (await this.deps.requests.hold(user, chat, { kind: "panel", asked, played: true, message: message.id }, Date.now()));
+    const generation = await lumiverse.startGeneration(user, chat, {});
+    return { message: message.id, generation, request: kept.id };
+  }
+
+  /**
+   * What was pressed and on what, in the world's own words: the action's label, and the names of what was picked (an amount of money as
+   * the world prints it; a square of the grid with the place whose grid it is); a Timelapse by the label it was sent with among its values.
+   * An unknown action is not there, and an id his character cannot know of names no one (`unfit.ts`).
+   */
+  private async pressed(user: string, chat: string, tap: PanelTap, text: string): Promise<PanelAsk> {
+    const { registry, world, state } = headOf(this.deps.store, user, chat);
+    const ask = (what: string, on: string[]): PanelAsk => ({ action: tap.action, values: tap.values, from: tap.from, what, on: on.length > 0 ? on.join(", ") : null });
+    if (tap.action === TIMELAPSE_ACTION) {
+      const label = tap.values.label;
+      return ask(typeof label === "string" && label.trim() !== "" ? label.trim() : tap.action, []);
+    }
+    const action = own(world.actions, tap.action) ?? registry.actions.get(tap.action);
+    if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: tap.action } });
+    // A request plays no id the player character can't know of, so a guessed id of someone hidden reads as one that names no one.
+    const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
+    const unfit = unfitRef(registry, action, tap.values, world, state, mayKnow, undefined, false);
+    if (unfit !== null) {
+      const why = unfitWords(registry, world, state, unfit, text, unrevealedSecrets(registry, world, state), mayKnow, (await this.deps.settings(user, chat)).taps.nameMost);
+      throw new Refused("validation", { line: why.line, fields: { action: action.label, ...why.fields } });
+    }
+    const nameOf = (id: string): string => own(state.entities, id)?.name ?? own(world.places, id)?.name ?? id;
+    // A square of the grid he stands on is named with the place whose grid it is.
+    const square = action.params.x?.type === "number" && action.params.y?.type === "number" && typeof tap.values.x === "number" && typeof tap.values.y === "number";
+    const here = square ? placeOfEntity(state, world.pov) : null;
+    const picked = Object.entries(tap.values).flatMap(([key, v]) => {
+      if (typeof v === "number") return [own(action.params, key)?.type === "money" ? formatMoney(v, world.currency) : String(v)];
+      return typeof v === "string" && v !== "" ? [nameOf(v)] : [];
+    });
+    return ask(action.label, here === null ? picked : [nameOf(here), ...picked]);
+  }
+
+  /**
+   * One of the world's actions that manages, done at once on the head (a tap that does not manage is a request: `requested`). The
+   * world's rules advise (plan §6.1): a requirement the action does not meet, or a payee who is not there, is applied all the same and
+   * given back to be kept and answered. What is still refused is a pick that names nothing he may know of, or no one fit to pay, each
+   * with its true reason (`unfit.ts`).
    */
   private action({ registry, world, state, seed }: Head, r: ActionAsk, settings: PlaySettings): Resolved {
-    // From the palette, a panel or the map with no words, a tap goes with the next message; with words, Send now, a chip or a command, it plays at once.
-    const later = (r.source === "palette" || r.source === "map") && (r.text?.trim() ?? "") === "" && r.now !== true;
-    if (r.action === TIMELAPSE_ACTION) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
     const action = own(world.actions, r.action) ?? registry.actions.get(r.action);
     if (action === undefined) throw new Refused("not_found", { line: "unknown_action", fields: { action: r.action } });
-    if (!playsOffstage(r.action, r, action.mechanical === true)) throw new Refused("unavailable", { line: later ? "next_message" : "plays_now" });
     // A request plays no id the player character can't know of, so a guessed id of someone hidden reads as one that names no one.
     const mayKnow = (id: string): boolean => id === world.pov || canSeeEntity(registry, world, state, world.pov, id);
     const unfit = unfitRef(registry, action, r.params, world, state, mayKnow, undefined, false);

@@ -6,6 +6,7 @@
 // panels have routes of their own.
 
 import { errorMessage, requestMessage, resultMessage, route, RouteError, shape, stateView } from "../app";
+import { requestShown } from "../turn/shapes";
 import { isRecord } from "../shared/json";
 import type { FrontendToBackend } from "../shared/protocol";
 import type { PlayService } from "./service";
@@ -16,6 +17,8 @@ export const UNDO_PATH = "/api/v1/chats/:chat/actions/undo";
 export const DUE_PATH = "/api/v1/chats/:chat/state/due";
 export const TAPS_PATH = "/api/v1/chats/:chat/taps";
 export const EDIT_UNDO_PATH = "/api/v1/chats/:chat/edits/:edit/undo";
+export const PANEL_REQUEST_PATH = "/api/v1/chats/:chat/requests/panel";
+export const PLAYS_PATH = "/api/v1/chats/:chat/plays";
 
 const T = shape.text();
 const opt = shape.optional;
@@ -57,6 +60,31 @@ const tapReply = shape.named(
   "TapReply",
   "What a tap or its Undo came to: whether it was applied, what the world's rules reported of it (kept with it, listed under unsettled), the id its Undo takes (null where nothing was recorded), and the answer in words.",
   shape.object({ applied: shape.yesNo(), reports: shape.list(T), undo: shape.nullable(T), words: T }),
+);
+
+const values = shape.record(shape.json());
+const panelTapAsk = shape.named(
+  "PanelTapAsk",
+  "A panel's tap for his next message: one of the world's actions (Walk here among them, or a Timelapse with its label and its \"follow my routine\" choice among its values), its values, and where it was made.",
+  shape.object({ action: T, values, from: shape.oneOf("palette", "map", "panel") }),
+);
+const panelHeldReply = shape.named(
+  "PanelHeldReply",
+  "The tap held: it waits for his next message, in place of a panel's tap that waited; null where the same tap again took the one that waited back.",
+  shape.object({ request: shape.nullable(requestShown) }),
+);
+const playAsk = shape.named(
+  "PlayAsk",
+  "A tap that plays now: one of the world's actions with its values, where it was made, and any words typed with it (its line in the chat; with none, what was pressed); or the id of a request that waits (Send now).",
+  shape.union(
+    shape.object({ action: T, values, from: shape.oneOf("palette", "map", "panel", "chip", "send-now", "command"), words: opt(T, "Words typed with it: the line put in the chat as his message.") }),
+    shape.object({ request: T }),
+  ),
+);
+const playedReply = shape.named(
+  "PlayedReply",
+  "The tap played: the message its line went into the chat as, the generation Lumiverse started to answer it, and the request kept with it as played now.",
+  shape.object({ message: T, generation: T, request: T }),
 );
 
 const dueShown = shape.named(
@@ -170,6 +198,26 @@ export function playRoutes(play: PlayService) {
       does: "The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): all of it, the world's defaults given with it included, or none and the answer says why; at once, whatever runs.",
       reply: tapReply,
       handle: ({ user, params }) => play.undoEdit(user, params.chat, params.edit),
+    }),
+    route({
+      method: "POST",
+      path: PANEL_REQUEST_PATH,
+      access: "page",
+      group: "state",
+      does: "A panel's tap for his next message (the palette, Walk here, any tap with no words): held as a request in place of the panel's tap that waited, and the same tap again takes it back; the turn that answers his next message is told what was pressed and on what.",
+      body: panelTapAsk,
+      reply: panelHeldReply,
+      handle: ({ user, params, body }) => play.holdTap(user, params.chat, body),
+    }),
+    route({
+      method: "POST",
+      path: PLAYS_PATH,
+      access: "page",
+      group: "state",
+      does: "A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed.",
+      body: playAsk,
+      reply: playedReply,
+      handle: ({ user, params, body }) => play.playTap(user, params.chat, "request" in body ? { request: body.request } : { tap: { action: body.action, values: body.values, from: body.from }, words: body.words ?? "" }),
     }),
   ] as const;
 }
