@@ -196,15 +196,15 @@ async function perceive(args: JsonObject, call: CastCall): Promise<Reply> {
     const out: { character: string; perception: string; knowledge: string[] }[] = [];
     for (const p of planned) {
       const character = ids.get(p.character) ?? p.character;
-      const [row] = writeCast(db, writer, [{ character, part: "perception", item: p.item, value: p.value }]);
+      const [row] = writeCast(call.deps.store, writer, [{ character, part: "perception", item: p.item, value: p.value }]);
       const perception = row?.item ?? "";
       const source: JsonObject = { from: perception, ...(typeof p.value.told_by === "string" ? { told_by: p.value.told_by } : {}) };
       const knowledge: CastWrite[] = [
         ...p.knows.map((text): CastWrite => ({ character, part: "knowledge", item: null, value: { text, ...source } })),
         ...p.newSecrets.map((fact): CastWrite => ({ character, part: "knowledge", item: null, value: { secret: fact, ...source } })),
       ];
-      out.push({ character, perception, knowledge: writeCast(db, writer, knowledge).map((k) => k.item) });
-      writeCast(db, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) } })));
+      out.push({ character, perception, knowledge: writeCast(call.deps.store, writer, knowledge).map((k) => k.item) });
+      writeCast(call.deps.store, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) } })));
     }
     // A secret's fact is recorded before anyone holds it; each perception's holdings, then what its strike lets go.
     const events = [...world.facts, ...planned.flatMap((p) => [...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)])];

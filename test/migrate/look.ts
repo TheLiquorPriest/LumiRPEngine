@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { dataPaths } from "../../src/app/config";
 import { castAt } from "../../src/cast/path";
 import { CastRecord, chatLine, findCharacter } from "../../src/cast/record";
+import { CAST_STORE_AREA } from "../../src/cast";
+import { importedText } from "../../src/cast/imported";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { MigrationReport } from "../../src/migrate/report";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -20,12 +22,17 @@ import { readable } from "./tree";
 
 const registry = createRegistry(ALL_PACKS);
 
+/** The store each user's store was opened by, so a look at a character reads through it. */
+const opened = new WeakMap<UserStore, Store>();
+
 /** RPE's database in the data folder `data` and the user's store in it, its worlds the store's own, for one look. */
 export function look<T>(data: string, at: (db: Database, s: UserStore, store: Store) => T): T {
   const db = new Database(join(data, "rpe.db"));
   try {
-    const store = openStore({ db, registry, worlds: storedWorlds(db) });
-    return at(db, store.user(USER), store);
+    const store = openStore({ db, registry, worlds: storedWorlds(db), areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
+    const s = store.user(USER);
+    opened.set(s, store);
+    return at(db, s, store);
   } finally {
     db.close();
   }
@@ -41,9 +48,19 @@ export function turnOf(db: Database, chat: string, message: string, swipe: numbe
 /** A character's imported mind files in a chat at a turn (null: the chat's head), by file: each item's fields as they stand there, those a turn removed left out. */
 export function mindAt(db: Database, s: UserStore, chat: string, name: string, turn: string | null): Record<string, Record<string, unknown>> {
   const character = findCharacter(db, USER, chatLine(s, chat), name);
-  if (character === null) throw new Error(`no character ${name}`);
-  const record = CastRecord.read(db, USER, castAt(s, chat, turn));
-  return Object.fromEntries(record.of(character.id, "mind").filter((m) => m.fields.kind === "imported").map((m) => [String(m.fields.file), m.fields]));
+  const store = opened.get(s);
+  if (character === null || store === undefined) throw new Error(`no character ${name}`);
+  const record = CastRecord.read(store, USER, castAt(s, chat, turn));
+  // Each file as the earlier build kept it: its text is the version the item names.
+  return Object.fromEntries(
+    record
+      .of(character.id, "mind")
+      .filter((m) => m.fields.kind === "imported")
+      .map((m) => {
+        const { version: _version, ...rest } = m.fields;
+        return [String(m.fields.file), { ...rest, text: importedText(db, USER, m) }];
+      }),
+  );
 }
 
 /** A chat's notes the run wrote, as its own agents read them: each by its path under `imported/`, with its text; null where the chat has no folders. */

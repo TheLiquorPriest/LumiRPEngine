@@ -1,21 +1,21 @@
 // Each character's mind files (STANDALONE-PLAN §15.2, §12): attached to the character's record in the
 // cast as they are, every word, per turn, until they are filed. Today's harness kept a person's mind as
 // files in the chat's area, under `minds/<entity>/` (`backend/story/minds.ts:38-52`). Each version of
-// a file is a row of the cast's `mind` part on the turn whose area first held it on its path, and a
-// file a turn removed is a row that drops it; so reading the record at a turn gives each file as that
-// turn left it, and a swipe takes its versions with it. Every row says what it is, and that it is not
-// filed yet:
+// a file is attached to the character as `character_doc` text on the turn whose area first held it on
+// its path, and the character's mind item for the file names that version in a change of that turn (a
+// file a turn removed is a change that drops it); so reading the record at a turn gives each file as
+// that turn left it, and a swipe takes its versions with it. Every write says what it is, and that it
+// is not filed yet:
 //
 //   item   `imported:<character>:<file>`, one per character and file
-//   value  { kind: "imported", file: "core.md", text: <the file's text, byte for byte>, entity: <today's entity id>, filed: false }
+//   value  { kind: "imported", file: "core.md", version: <the version of the file's text attached>, entity: <today's entity id>, filed: false }
 //
 // How a character's agent is given them, and the filing that marks them filed, are the cast's view
 // (`cast:self(imported)`) and the filing job's: here they are only recorded.
 
 import type { Database } from "bun:sqlite";
-import { type CastWrite, chatLine, findCharacter, writeCast } from "../cast";
-import { CastRecord } from "../cast/record";
-import type { TurnRow, UserStore } from "../store";
+import { attachFile, type CastWrite, chatLine, filesAttachedOn, findCharacter, importedItemId, writeCast } from "../cast";
+import type { Store, TurnRow, UserStore } from "../store";
 import { AREA_DOC, type AreaChange, chatOfKey, docKey, importedTurns, pathTurns, type TurnAreas } from "./history";
 import { MIND_FILE } from "./inside";
 import type { People } from "./people";
@@ -23,9 +23,6 @@ import { type Apart, apartBy, type ChatFate } from "./report";
 
 /** Who the migration's rows say wrote them, on the cast's and the story's records. */
 export const MIGRATION_WRITER = "migration";
-
-/** The cast's item of one imported mind file of a character. */
-export const importedItem = (character: string, file: string): string => `imported:${character}:${file}`;
 
 export interface MindsCarried {
   /** Versions this run put on a record, each once by chat, file and text. */
@@ -68,8 +65,8 @@ function mindOf(path: string): { entity: string; file: string } | null {
  * version found in today's areas is accounted for: on a record, or why not; `fate` says what came of a
  * chat this run did not import.
  */
-export async function carryMinds(input: { db: Database; s: UserStore; chats: readonly string[]; areas: TurnAreas; people: People; now: number; fate: (chat: string) => ChatFate }): Promise<MindsCarried> {
-  const { db, s, areas, people } = input;
+export async function carryMinds(input: { db: Database; store: Store; s: UserStore; chats: readonly string[]; areas: TurnAreas; people: People; now: number; fate: (chat: string) => ChatFate }): Promise<MindsCarried> {
+  const { db, store, s, areas, people } = input;
   const isMind = (path: string): boolean => mindOf(path) !== null;
   const changed: { turn: TurnRow; changes: AreaChange[] }[] = [];
   /** Every version this run puts on a record, by chat, path and text: each is written on the first turn of its path that holds it. */
@@ -121,18 +118,19 @@ export async function carryMinds(input: { db: Database; s: UserStore; chats: rea
         const mind = mindOf(change.path);
         if (mind === null) continue;
         const person = people.of(turn, mind.entity);
-        const item = importedItem(person.id, mind.file);
+        const item = importedItemId(person.id, mind.file);
         if (change.now === null) {
           writes.push({ character: person.id, part: "mind", item, value: { drop: true } });
           continue;
         }
-        writes.push({ character: person.id, part: "mind", item, value: { kind: "imported", file: mind.file, text: change.now.text, entity: mind.entity, filed: false } });
+        const version = attachFile(db, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, now: input.now }, person.id, mind.file, change.now.text);
+        writes.push({ character: person.id, part: "mind", item, value: { kind: "imported", file: mind.file, version, entity: mind.entity, filed: false } });
         const key = `${turn.chat}\u0000${person.id}`;
         const entry = characters.get(key) ?? { chat: turn.chat, character: person.id, name: person.name, entity: mind.entity, files: [] };
         if (!entry.files.includes(mind.file)) entry.files.push(mind.file);
         characters.set(key, entry);
       }
-      rows += writeCast(db, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, at: turn.storyTime, now: input.now }, writes).length;
+      rows += writeCast(store, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, job: null, at: turn.storyTime, now: input.now, source: "import" }, writes).length;
     }
   })();
   return { versions: held.size, unlisted, rows, characters: [...characters.values()].map((c) => ({ ...c, files: c.files.sort() })), untied, shared, gone, apart };
@@ -144,13 +142,7 @@ export async function carryMinds(input: { db: Database; s: UserStore; chats: rea
  * from included), by the name the cast knows it by, with the files.
  */
 export function attachedOn(db: Database, s: UserStore, chat: string, turns: readonly string[]): { name: string; files: string[] }[] {
-  const record = CastRecord.read(db, s.id, { chat, turn: null, turns, order: new Map(turns.map((t, i) => [t, i])), replyOf: () => null });
-  const files = new Map<string, Set<string>>();
-  for (const item of record.items.values()) {
-    const file = item.fields.file;
-    if (item.part !== "mind" || item.fields.kind !== "imported" || typeof file !== "string" || !item.rows.some((r) => r.by === MIGRATION_WRITER)) continue;
-    files.set(item.character, (files.get(item.character) ?? new Set<string>()).add(file));
-  }
+  const files = filesAttachedOn(s, turns, MIGRATION_WRITER);
   const line = chatLine(s, chat);
   return [...files].map(([character, names]) => ({ name: findCharacter(db, s.id, line, character)?.name ?? character, files: [...names].sort() }));
 }

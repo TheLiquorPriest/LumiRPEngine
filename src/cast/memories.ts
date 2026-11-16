@@ -77,9 +77,9 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
   if (back.length === 0) return reply.line("no_memories", { cue });
   // Recalling strengthens each memory it brings back: one more recall, as of now.
   await call.deps.writes.run(
-    (db) =>
+    () =>
       writeCast(
-        db,
+        call.deps.store,
         self.writer,
         back.map((m) => ({ character: self.character.id, part: "memory", item: m.item.id, value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}) } })),
       ),
@@ -140,7 +140,7 @@ async function remember(args: JsonObject, call: CastCall): Promise<Reply> {
     if (it.fatal.length === 0) writes.push({ character: self.character.id, part: "memory", item: (id as string | undefined) ?? null, value: fields });
   }
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => MEMORY_READS);
-  const rows = await call.deps.writes.run((db) => writeCast(db, self.writer, writes), call.tool);
+  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, writes), call.tool);
   for (const it of items) leftOut(reply, it, MEMORY_READS.reads);
   const shown = after(call, reply, self, rows.map((r) => r.item));
   return shown === null ? reply : reply.data({ memories: shown });
@@ -171,11 +171,11 @@ async function reflect(args: JsonObject, call: CastCall): Promise<Reply> {
   const { from: named, growth, ...fields } = value;
   const from = ownIds(self, it, "memory", "from", named, true);
   if (it.fatal.length > 0) return refused(reply, [it], () => REFLECT_READS);
-  const written = await call.deps.writes.run((db) => {
-    const [realization] = writeCast(db, self.writer, [{ character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization" } }]);
+  const written = await call.deps.writes.run(() => {
+    const [realization] = writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "memory", item: null, value: { ...fields, memories: from, kind: "realization" } }]);
     const id = realization?.item ?? "";
     // A change the realization proposes is growth the Author has yet to accept (`cast_update`'s growth `accept`).
-    const proposed = typeof growth === "string" ? writeCast(db, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true } }]) : [];
+    const proposed = typeof growth === "string" ? writeCast(call.deps.store, self.writer, [{ character: self.character.id, part: "growth", item: null, value: { text: growth, cause: id, proposed: true } }]) : [];
     return { id, growth: proposed[0]?.item ?? null };
   }, call.tool);
   leftOut(reply, it, REFLECT_READS.reads);
@@ -238,7 +238,7 @@ async function dream(args: JsonObject, call: CastCall): Promise<Reply> {
     if (Object.keys(change).length > 0) writes.push({ character: self.character.id, part: "memory", item: m.item.id, value: change });
   }
   for (const c of connections) writes.push({ character: self.character.id, part: "memory", item: null, value: { ...c.fields, kind: "connection" } });
-  const rows = await call.deps.writes.run((db) => writeCast(db, self.writer, writes), call.tool);
+  const rows = await call.deps.writes.run(() => writeCast(call.deps.store, self.writer, writes), call.tool);
   for (const x of items) leftOut(reply, x, readsOf(x.op ?? "").reads);
   const made = rows.filter((r) => !byId.has(r.item)).map((r) => r.item);
   const shown = after(call, reply, self, [...rows.filter((r) => byId.has(r.item)).map((r) => r.item), ...made]);

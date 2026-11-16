@@ -332,12 +332,12 @@ describe("striking from the page", () => {
       [true, "player"],
     ]);
     // The holding is taken back by the player's own change, on the turn the strike is written on.
-    expect(b.t.s.changes(tied.id).flatMap((c) => (c.by === "player" ? [{ op: c.op, lane: c.lane, source: c.source }] : []))).toEqual([{ op: "minds.forget", lane: "story", source: "player" }]);
+    expect(b.t.s.changes(tied.id).flatMap((c) => (c.by === "player" && c.op !== "cast.write" ? [{ op: c.op, lane: c.lane, source: c.source }] : []))).toEqual([{ op: "minds.forget", lane: "story", source: "player" }]);
   });
 
   test("refuses in the cast's words while a turn of the chat runs, for an entry the character has not, and for what it cannot read; writes nothing", async () => {
     const { page, wren, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM cast_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
     const before = rows();
     page.running.add(CHAT);
     await expect(page.strike("Wren", { id: ids.seal, struck: true })).rejects.toMatchObject({ status: 409, message: words("page_turning") });
@@ -383,7 +383,7 @@ describe("striking from the page", () => {
     expect(knowersOf(minds(b.t), SECRET)).toEqual([]);
     expect(await page.strike("Wren", { id: secret, struck: false })).toMatchObject({ changed: true, alsoStood: [], heldAgain: [SECRET], notes: [] });
     expect(knowersOf(minds(b.t), SECRET)).toEqual(["wren"]);
-    expect(b.t.s.changes(turn.id).flatMap((c) => (c.by === "player" ? [{ op: c.op, source: c.source }] : []))).toEqual([
+    expect(b.t.s.changes(turn.id).flatMap((c) => (c.by === "player" && c.op !== "cast.write" ? [{ op: c.op, source: c.source }] : []))).toEqual([
       { op: "minds.forget", source: "player" },
       { op: "minds.learn", source: "player" },
     ]);
@@ -391,7 +391,7 @@ describe("striking from the page", () => {
 
   test("in a branch with no turn of its own, a strike is refused in the cast's words and the chat it was branched from keeps its record; once the branch has played a turn, its strike is its own", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM cast_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
     const shown = await branchOf(page.t);
     const before = rows();
     await expect(page.strike("Wren", { id: ids.seal, struck: true }, USER, BRANCH)).rejects.toMatchObject({ status: 409, message: words("page_branch_no_turn") });
@@ -413,7 +413,7 @@ describe("striking from the page", () => {
 
   test("a turn that begins while a strike waits for its write is not written under: the strike is refused in that write, in the cast's words", async () => {
     const { page, ids } = await played();
-    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM cast_entry").get()?.n ?? 0;
+    const rows = (): number => page.t.db.query<{ n: number }, []>("SELECT count(*) AS n FROM change WHERE op = 'cast.write'").get()?.n ?? 0;
     const before = rows();
     // A continue takes its marks and holds its run in one write, queued before the strike's own.
     const began = page.t.writes.run(() => page.running.add(CHAT));

@@ -69,7 +69,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage }): CastFacts {
       if (user.chat(scope.chat) === null) return { ...(wanted.stage ? { "stage.unperceived": valueOf([]) } : {}), ...(wanted.path ? { "path.unperceived": valueOf([], { messages: [] }) } : {}) };
       const turn = scope.turn ?? null;
       const at = castAt(user, scope.chat, turn);
-      const record = CastRecord.read(deps.store.db, scope.user, at);
+      const record = CastRecord.read(deps.store, scope.user, at);
       const earlier = at.turns.filter((t) => t !== turn);
       const asked = [...(wanted.stage && turn !== null ? [turn] : []), ...(wanted.path ? earlier : [])];
       const stage = asked.length === 0 ? new Map<string, readonly string[]>() : await deps.onStage({ user: scope.user, chat: scope.chat }, asked);

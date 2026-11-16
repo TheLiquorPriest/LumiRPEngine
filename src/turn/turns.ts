@@ -30,7 +30,7 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import type { LiveHub } from "../app";
-import { CAST_VIEWS, castMark, castPresentViews, castViews, type CastViewName, joinCast, type SourceReader, takeBackCast } from "../cast";
+import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { mapView, mapWording } from "../iface";
 import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, type SecretSettingsFor } from "../lore";
@@ -290,9 +290,9 @@ function joinOf(saved: string, base: string, reply: string): string | null {
   return join.trim() === "" ? join : null;
 }
 
-/** Where what a run that goes on with a turn records begins (`RunRecord.mark`, `castMark`, `storyMark`): taken inside the write that keeps the run. */
-function marksOf(store: UserStore, db: Database, user: string, turn: string): Pick<RunRecord, "mark" | "castMark" | "storyMark"> {
-  return { mark: store.changes(turn).at(-1)?.ord ?? -1, castMark: castMark(db, user, turn), storyMark: storyMark(db, user, turn) };
+/** Where what a run that goes on with a turn records begins (`RunRecord.mark`, which holds the story's and the cast's changes with the engine's): taken inside the write that keeps the run. */
+function marksOf(store: UserStore, turn: string): Pick<RunRecord, "mark"> {
+  return { mark: store.changes(turn).at(-1)?.ord ?? -1 };
 }
 
 /** What a turn's intake found that the block of what has happened since the last turn tells. */
@@ -413,7 +413,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const row = store.turn(turn);
     if (row === null || row.status === "dropped" || row.joined !== null) return;
     const own = r.held !== null;
-    takeBackCast(db, r.user, turn, own ? -1 : (r.castMark ?? -1));
     store.takeBack(turn, own ? -1 : (r.mark ?? -1));
   }
 
@@ -588,7 +587,6 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         settled: null,
         held: tag.kind === "continue" ? begun.id : null,
         mark: null,
-        castMark: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
@@ -937,14 +935,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         held: null,
         // What it records is the turn's, counted from marks taken as a continue's are, in the write that keeps it and holds it.
         mark: null,
-        castMark: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
       };
       await this.#d.writes
         .run((db) => {
-          Object.assign(run, marksOf(store, db, user, turn.id));
+          Object.assign(run, marksOf(store, turn.id));
           this.#d.runs.put(db, run);
           this.#d.runs.hold(run);
         }, "keeping a Settle now run")
@@ -1893,8 +1890,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           store.dropTurn(heldTurn);
           return true;
         }
-        // The owners' take-backs of the held turn first, which leave a job's rows; then the joins, which move those.
-        takeBackCast(db, user, heldTurn, -1);
+        // The held turn's own changes go first, which leave a job's; then the join moves what is left.
         store.takeBack(heldTurn, -1);
         this.#join(db, user, record, heldTurn, into.id);
         if (tiedAgain) store.tieTurn(into.id, { message: written.message.id, hash: textHash(written.text), date: written.date, status: into.status === "cut" ? "cut" : "done" });
@@ -1954,20 +1950,17 @@ export class TurnLane implements TurnPlayer, ChatChanges {
 
   /**
    * A continue's held turn joins the turn Lumiverse's end decided it extended (plan §10.10, R-192 (e), (f), R-203), inside the caller's
-   * write: the cast's rows and the story's, then the store's changes, each checked again there; what the held turn was told is that
+   * write: the store's changes, the cast's and the story's among them, each checked again there; what the held turn was told is that
    * turn's told; the run names that turn from now on, its marks where its rows begin there, so the turn's counts are of the run's own
    * changes; and the turn's tokens are what all its runs spent, this one's among them.
    */
   #join(db: Database, user: string, run: RunRecord, held: string, into: string): void {
     const store = this.#d.store.user(user);
-    const castFrom = castMark(db, user, into);
     const ownLast = store.changes(into).at(-1)?.ord ?? -1;
-    joinCast(this.#d.store, user, held, into);
     const moved = store.joinTurn(held, into);
     this.#d.since.told(db, user, into, [...this.#d.since.toldTo(user, held)]);
     this.#d.marks.join(db, user, held, into);
     run.mark = (moved[0]?.ord ?? ownLast + 1) - 1;
-    run.castMark = castFrom;
     this.#d.runs.join(db, run, into);
     const spent = this.#d.runs.ofTurn(user, into).flatMap((r) => (r.usage === null ? [] : [r.usage]));
     if (spent.length > 0) store.updateTurn(into, { tokensIn: spent.reduce((n, u) => n + u.input, 0), tokensOut: spent.reduce((n, u) => n + u.output, 0) });

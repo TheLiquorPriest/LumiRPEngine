@@ -29,7 +29,7 @@
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, ConsentGrant, ContextBlock, FilesPort, GapCheck, Log, RuleFiring, Scope, TurnEvents } from "rp-harness/contract";
-import { castViews, dropCastStaged, type SourceReader } from "../cast";
+import { castViews, type SourceReader } from "../cast";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
@@ -364,7 +364,6 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
       const turn = turnOf(scope);
       await deps.writes.run(() => {
         deps.store.user(scope.user).dropStaged(turn, agent.id);
-        dropCastStaged(deps.store, scope.user, turn, agent.id);
       }, "dropping a sub-agent's staged changes");
       // The notes queue writes of their own, so they are taken back after the block above, never inside it.
       await deps.notes.drop(scope.user, scope.chat, turn, agent.id);

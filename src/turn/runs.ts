@@ -153,7 +153,6 @@ export interface RunRecord {
    * continue's, set when its held turn joins the turn it extended, so that turn's counts are of this run's changes. Null for any other run.
    */
   mark: number | null;
-  castMark: number | null;
 }
 
 /** A run's lore lookups: its `lore_search` calls and its `lore_read` calls. */
@@ -205,7 +204,6 @@ interface RunRow {
   settled: number | null;
   held: string | null;
   mark: number | null;
-  cast_mark: number | null;
   // Its `usage` row, null where it has none.
   calls: number | null;
   input: number | null;
@@ -258,7 +256,6 @@ function recordOf(user: string, r: RunRow): RunRecord {
     settled: r.settled,
     held: r.held,
     mark: r.mark,
-    castMark: r.cast_mark,
   };
 }
 
@@ -279,13 +276,13 @@ export class Runs {
    */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, cast_mark, story_mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
-         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, cast_mark = excluded.cast_mark, story_mark = excluded.story_mark`,
+         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark`,
       [
         r.user,
         r.id,
@@ -321,7 +318,6 @@ export class Runs {
         r.settled,
         r.held,
         r.mark,
-        r.castMark,
       ],
     );
     const { usage } = r;

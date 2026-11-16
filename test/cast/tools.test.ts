@@ -118,7 +118,7 @@ describe("cast_update", () => {
       background: { text: "Born in the inn's cellar.", version: 1 },
     });
     expect(cast?.now).toEqual({ as: "supporting", line: "The innkeeper of the Gilded Hart." });
-    expect(growth?.id).toMatch(/^g-\d+$/);
+    expect(growth?.id).toMatch(/^g-[0-9a-f]+$/);
     expect(growth?.now).toMatchObject({ text: "No longer trusts a sealed letter.", cause: "The forged seal.", since: null, touched: null });
     expect(history?.now).toMatchObject({ text: "Handed Wren the sealed letter and would not meet her eye.", beats: ["b-3"] });
     expect(rel?.now).toMatchObject({ with: "Wren", text: "She pays on time. I would not cross her.", trust: 40, fear: 10 });

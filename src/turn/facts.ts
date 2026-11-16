@@ -65,11 +65,8 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-  return store.db.query<{ n: number }, [string, string, number]>(`SELECT count(*) AS n FROM ${table} WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL`).get(user, turn, after)?.n ?? 0;
-}
-
 /** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, and whether that was before its intent record. */
-export type FactsRun = Pick<RunRecord, "mark" | "castMark" | "storyMark" | "kind" | "released" | "withoutIntent">;
+export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "withoutIntent">;
 
 /**
  * The turn lane's own facts, counted from the store and, for what a turn recorded and owes, from the runs it has: `runs` gives a turn's
@@ -100,8 +97,7 @@ export function turnFacts(store: Store, runs: (user: string, turn: string) => re
       const recorded = (): number =>
         turn === null
           ? 0
-          : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null).length +
-            rowsAfter(store, "cast_entry", scope.user, turn, runNow?.castMark ?? -1);
+          : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null).length;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
         let count = 0;

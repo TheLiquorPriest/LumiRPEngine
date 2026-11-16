@@ -66,7 +66,7 @@ export function topOfMind(memories: readonly CastItem[], s: Pick<CastSettings, "
   const put = memories.flatMap((m) => {
     if (m.fields.top !== true) return [];
     const last = m.rows.findLast((r) => r.value.top === true);
-    return last === undefined ? [] : [{ id: m.id, row: last.id }];
+    return last === undefined ? [] : [{ id: m.id, row: last.s }];
   });
   return new Set(put.sort((a, b) => b.row - a.row).slice(0, s.topOfMind).map((p) => p.id));
 }
@@ -106,5 +106,5 @@ export function touches(item: CastItem, cues: readonly string[]): boolean {
 
 /** Strongest first; of two as strong, the one formed later. */
 export function strongestFirst(a: MemoryNow, b: MemoryNow): number {
-  return b.strength - a.strength || (b.item.at ?? 0) - (a.item.at ?? 0) || (b.item.rows[0]?.id ?? 0) - (a.item.rows[0]?.id ?? 0);
+  return b.strength - a.strength || (b.item.at ?? 0) - (a.item.at ?? 0) || (b.item.rows[0]?.s ?? 0) - (a.item.rows[0]?.s ?? 0);
 }

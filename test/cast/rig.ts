@@ -11,9 +11,9 @@ import { loadGuidance, type TemplatePart } from "rp-harness";
 import type { AgentRef, HostTool, JsonObject, ToolResult } from "rp-harness/contract";
 import { createFolderHost } from "rp-harness/hosts/folder";
 import { WriteQueue } from "../../src/app/database";
-import { castTools, type CastDeps } from "../../src/cast/index";
+import { CAST_STORE_AREA, castTools, type CastDeps } from "../../src/cast/index";
 import { castAt } from "../../src/cast/path";
-import { CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
+import { attachFile, CastRecord, type CastRow, type CastWrite, type SourceKind, writeCast } from "../../src/cast/record";
 import { CAST_MIGRATIONS } from "../../src/cast/schema";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import type { SourceNow, SourceReader } from "../../src/cast/sources";
@@ -81,11 +81,14 @@ export async function openTable(world: WorldDoc | null = inventedWorld()): Promi
   const revision = world === null ? null : hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
-  for (const m of CAST_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+  for (const m of CAST_MIGRATIONS) {
+    if ("sql" in m) db.run(m.sql);
+    else m.up(db, USER);
+  }
   // The lore keeps the bindings of lore entries, which the cast binds a character to.
   for (const m of LORE_MIGRATIONS) if ("sql" in m) db.run(m.sql);
   let clock = 0;
-  const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock });
+  const store = openStore({ db, registry: registry(), worlds: (r) => (world !== null && r === revision ? world : undefined), now: () => ++clock, areas: [CAST_STORE_AREA] });
   const writes = new WriteQueue(db, 10);
   const s = store.user(USER);
   await writes.run(() => s.createChat(world === null ? { id: CHAT } : { id: CHAT, world: world.id, revision }));
@@ -138,10 +141,20 @@ export async function openTable(world: WorldDoc | null = inventedWorld()): Promi
       return table.tie(turn);
     },
     write(turn, list, by = "author") {
-      return writes.run((d) => writeCast(d, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null, at: null, now: 5 }, list));
+      return writes.run(() => {
+        // A carried file's text is attached as the migration attaches it, and its write names the version.
+        const attached = list.map((w): CastWrite => {
+          const { text, file } = w.value;
+          if (w.value.kind !== "imported" || typeof text !== "string" || typeof file !== "string") return w;
+          const { text: _text, ...rest } = w.value;
+          const version = attachFile(db, { user: USER, turn: turn.id, by, agent: `${by}-1`, now: 5 }, w.character, file, text);
+          return { ...w, value: { ...rest, version } };
+        });
+        return writeCast(store, { user: USER, turn: turn.id, by, agent: `${by}-1`, job: null, at: null, now: 5 }, attached);
+      });
     },
     record(turn = null) {
-      return CastRecord.read(db, USER, castAt(s, CHAT, turn?.id ?? null));
+      return CastRecord.read(store, USER, castAt(s, CHAT, turn?.id ?? null));
     },
   };
   return table;

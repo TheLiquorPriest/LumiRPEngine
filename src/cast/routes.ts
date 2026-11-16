@@ -24,7 +24,7 @@ import type { Writes } from "../iface/kit";
 import { type Fields, type GuidanceFiles } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
-import { fileName, IMPORTED_KIND, isFiled } from "./imported";
+import { fileName, IMPORTED_KIND, importedText, isFiled } from "./imported";
 import { CAST_DEFAULTS, type CastClock, castClock, castLines, type CastSettings } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
 import { castAt } from "./path";
@@ -116,7 +116,7 @@ function readingAt(store: Store, user: string, chat: string, turn: string | null
     user,
     s,
     chats: chatLine(s, chat),
-    record: CastRecord.read(store.db, user, castAt(s, chat, turn)),
+    record: CastRecord.read(store, user, castAt(s, chat, turn)),
     clock: castClock(store, user, chat, turn),
     imported(t) {
       let was = known.get(t);
@@ -190,7 +190,7 @@ function struckWith(perception: CastItem, gave: readonly CastItem[]): { with: Ca
   const out: { with: CastItem[]; apart: CastItem[] } = { with: [], apart: [] };
   for (const k of gave.filter((g) => g.dropped)) {
     const row = strikeRow(k);
-    const same = its !== undefined && row !== undefined && row.id > its.id && row.turn === its.turn && row.by === its.by && row.agent === its.agent && row.job === its.job && row.created === its.created;
+    const same = its !== undefined && row !== undefined && row.s > its.s && row.turn === its.turn && row.by === its.by && row.agent === its.agent && row.when === its.when;
     (same ? out.with : out.apart).push(k);
   }
   return out;
@@ -223,7 +223,7 @@ function struck(deps: CastRoutesDeps, user: string, chat: string, said: string, 
     const back = ask.struck ? null : struckWith(item, gave);
     const also = back === null ? gave.filter((k) => !k.dropped) : back.with;
     writeCast(
-      db,
+      deps.store,
       writer,
       [item, ...also].map((i) => ({ character: character.id, part: i.part, item: i.id, value })),
     );
@@ -363,7 +363,7 @@ function characterShown(r: Reading, character: Character, settings: CastSettings
     }),
     files: all("mind")
       .filter((i) => i.fields.kind === IMPORTED_KIND)
-      .map((i) => ({ ...entryShown(r, i), file: fileName(i), text: typeof i.fields.text === "string" ? i.fields.text : null, filed: isFiled(i) })),
+      .map((i) => ({ ...entryShown(r, i), file: fileName(i), text: importedText(r.store.db, r.user, i), filed: isFiled(i) })),
   };
 }
 

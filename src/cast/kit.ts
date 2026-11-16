@@ -12,6 +12,7 @@ import { described, Reply, type Writes } from "../iface/kit";
 import { type GuidanceFiles, Lines, toolText } from "../iface/texts";
 import { clockRecorded, type Store, type UserStore } from "../store";
 import { castAt } from "./path";
+import { IMPORTED_KIND, importedText } from "./imported";
 import { type BaseVersion, type CastItem, CastRecord, type Character, chatLine } from "./record";
 import type { BookReader } from "./secrets";
 import type { SourceReader, SourceState } from "./sources";
@@ -182,6 +183,7 @@ export function datedAt(clock: CastClock | null, at: number | null): { date: str
 
 /** What a call reads: the user's store, the chats whose characters it knows, the rows on its path, and story time. */
 export interface CastReading {
+  store: Store;
   user: UserStore;
   /** The call's chat, then each chat it was branched from. */
   chats: string[];
@@ -205,9 +207,10 @@ export function readingOr(call: CastCall, reply: Reply): CastReading | null {
     return null;
   }
   return {
+    store: call.deps.store,
     user,
     chats: chatLine(user, call.scope.chat),
-    record: CastRecord.read(call.deps.store.db, call.scope.user, castAt(user, call.scope.chat, turn), call.agent.job ?? null),
+    record: CastRecord.read(call.deps.store, call.scope.user, castAt(user, call.scope.chat, turn), call.agent.job ?? null),
     clock: castClock(call.deps.store, call.scope.user, call.scope.chat, turn),
   };
 }
@@ -219,6 +222,13 @@ export function whoView(character: Pick<Character, "id" | "name">): JsonObject {
   return { id: character.id, name: character.name };
 }
 
+/** An item's fields as answers show them: a carried mind file shows its text, as it was attached, where the item names its version. */
+function fields(reading: CastReading, item: CastItem): JsonObject {
+  if (item.fields.kind !== IMPORTED_KIND) return item.fields;
+  const { version: _version, ...rest } = item.fields;
+  return { ...rest, text: importedText(reading.store.db, reading.user.id, item) };
+}
+
 /**
  * An item as it stands, as answers show it: its id, its fields, its date in story time, the message
  * of the turn that first wrote it and of the one that last did (null: this turn's reply, not saved
@@ -226,7 +236,7 @@ export function whoView(character: Pick<Character, "id" | "name">): JsonObject {
  */
 export function itemView(reading: CastReading, item: CastItem, history = false): JsonObject {
   const { record, clock } = reading;
-  const out: JsonObject = { id: item.id, ...item.fields, ...datedAt(clock, item.at) };
+  const out: JsonObject = { id: item.id, ...fields(reading, item), ...datedAt(clock, item.at) };
   out.since = record.at.replyOf(item.opened);
   out.touched = record.at.replyOf(item.touched);
   if (item.dropped) out.dropped = true;

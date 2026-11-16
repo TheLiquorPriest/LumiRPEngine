@@ -15,7 +15,7 @@ import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } 
 import { castAt } from "./path";
 import { baseOf, bindingsOf, type Casting, CASTINGS, type Character, castingInForce, CastRecord, chatLine, findCharacter, MIND_KINDS, nameKey, RELATIONSHIP_DIMENSIONS } from "./record";
 import { gameSide } from "./game";
-import { fileName, importedFiles, isFiled } from "./imported";
+import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import { memoriesNow, type MemoryNow, strongestFirst, type Tier, touches, untakenPerceptions } from "./memory";
 import { perceptionView } from "./perceive";
 import { type SourceReader, sourcesNow } from "./sources";
@@ -130,7 +130,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
   const user = input.store.user(input.user);
   const character = findCharacter(db, input.user, chatLine(user, input.chat), input.character);
   if (character === null) return asked.map((name) => ({ name, text: "" }));
-  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
+  const record = CastRecord.read(input.store, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
   const clock = castClock(input.store, input.user, input.chat, input.turn);
   const settings: CastSettings = { ...CAST_DEFAULTS, ...(input.settings ?? {}) };
   const casting = castingInForce(record, character);
@@ -179,7 +179,7 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       if (perceptions !== undefined) fields = { ...head, perceptions };
     } else if (name === "imported") {
       // Whole, word for word, each under its name, outside every budget, until it is marked filed.
-      const files = listed(importedFiles(record, character.id).flatMap((f) => (isFiled(f) ? [] : [{ file: fileName(f), text: typeof f.fields.text === "string" ? f.fields.text : "" }])));
+      const files = listed(importedFiles(record, character.id).flatMap((f) => (isFiled(f) ? [] : [{ file: fileName(f), text: importedText(db, input.user, f) ?? "" }])));
       if (files !== undefined) fields = { ...head, files };
     } else if (name === "relationships:present") {
       const here = new Set(input.present.map(nameKey));
@@ -237,7 +237,7 @@ export async function castPresentViews(names: readonly string[], input: Omit<Cas
   const { db } = input.store;
   const user = input.store.user(input.user);
   const chats = chatLine(user, input.chat);
-  const record = CastRecord.read(db, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
+  const record = CastRecord.read(input.store, input.user, castAt(user, input.chat, input.turn), input.job ?? null);
   // Each character on stage the cast holds, once, in the stage's order, with the casting in force.
   const onStage = new Map<string, Casting | null>();
   for (const said of input.present) {

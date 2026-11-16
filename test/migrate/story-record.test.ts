@@ -77,7 +77,7 @@ describe("today's story record as RPE's", () => {
           expect(draft).toMatchObject({ who: [], notes: null, place: "Home" });
           const ada = findCharacter(db, USER, chatLine(s, CHAT.harness), PEOPLE.ada.name);
           if (ada === null) throw new Error("Ada has no character");
-          expect(CastRecord.read(db, USER, castAt(s, CHAT.harness, null)).items.get(castingItemId(ada.id))?.fields).toEqual({ as: "principal", why: null });
+          expect(CastRecord.read(store, USER, castAt(s, CHAT.harness, null)).items.get(castingItemId(ada.id))?.fields).toEqual({ as: "principal", why: null });
         }),
     );
   });

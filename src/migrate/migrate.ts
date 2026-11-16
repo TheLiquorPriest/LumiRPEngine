@@ -19,7 +19,7 @@ import { migrate as migrateTables, Migrations } from "../app/migrations";
 import { diskTexts, readConfig } from "../app/config-read";
 import { BUILD_MIGRATIONS } from "../build/schema";
 import { seedCarriedWorlds } from "../build/seed";
-import { CAST_MIGRATIONS } from "../cast";
+import { CAST_MIGRATIONS, CAST_STORE_AREA } from "../cast";
 import { createRegistry } from "../engine/registry-impl";
 import { LORE_MIGRATIONS } from "../lore";
 import { ALL_PACKS } from "../packs/index";
@@ -148,7 +148,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
           if (doc) worlds.set(r, doc);
         }
       }
-      const store = openStore({ db, registry, worlds: (r) => worlds.get(r) });
+      const store = openStore({ db, registry, worlds: (r) => worlds.get(r), areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
       step = "importing the chats";
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();

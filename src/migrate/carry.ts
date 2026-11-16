@@ -12,7 +12,6 @@ import type { Database } from "bun:sqlite";
 import { modelsPort } from "../app/connections";
 import type { DataPaths } from "../app/config";
 import { SecretsFile } from "../app/secrets";
-import { dropLeftoverCast } from "../cast";
 import type { Store, UserStore } from "../store";
 import { bookTrouble, carryConnections, type ConnectionsCarried } from "./connections";
 import { TurnAreas } from "./history";
@@ -115,11 +114,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const turnAreas = new TurnAreas(today, db, s, report.items);
   const ownFiles = tree === null ? null : await carryOwnFiles(today, report.items, tree, { db, s, areas: turnAreas, carried: new Set(chats) });
 
-  // The earlier import's rows on the turns it replaced or removed go with those turns, as the cast's and the story's clean-up has it; then what today's build recorded beside each turn.
-  db.transaction(() => {
-    dropLeftoverStory(store, s.id);
-    dropLeftoverCast(store, s.id);
-  })();
+  // The earlier import's changes on the turns it replaced or removed (the cast's and the story's among them) went with those turns; what today's build recorded beside each turn is carried next.
   const people = new People(db, store, s, now);
   // What came of each chat this run did not import, for what of it the run did not carry: its outcome, and whether an earlier run's import of it stands.
   const fate = (chat: string): ChatFate => {
@@ -127,7 +122,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     const why = c !== undefined ? `${c.outcome}${c.why ? `: ${c.why}` : ""}` : today.chats.some((row) => row.id === chat) ? "not read: today's build plays no world in it" : "gone from Lumiverse";
     return { why, kept: s.chat(chat) !== null };
   };
-  const minds = await carryMinds({ db, s, chats, areas: turnAreas, people, now, fate });
+  const minds = await carryMinds({ db, store, s, chats, areas: turnAreas, people, now, fate });
   const story = db.transaction(() => carryStory({ db, store, s, chats, people, now, inside: new Map(report.chats.map((c) => [c.chatId, c.story])), fate }))();
   const [mindsFound, storyFound] = (["mind-files", "story-record"] as const).map((row) => report.rows.find((r) => r.row === row)?.inside?.count ?? 0);
   const files = new Set(minds.characters.flatMap((c) => c.files.map((f) => `${c.character}\u0000${f}`))).size;

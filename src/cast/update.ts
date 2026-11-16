@@ -483,13 +483,13 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         writeBase(db, { user, turn, by, agent: call.agent.id, now }, id, p.value as Partial<Record<BasePart, string>>, p.seen ?? {});
       } else if (p.op === "filed" && p.files !== undefined && turn !== null) {
         writeCast(
-          db,
+          store,
           { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now },
           p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true } })),
         );
       } else if (p.part !== undefined && turn !== null) {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.value.with as string) : (p.item ?? null);
-        const [row] = writeCast(db, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
+        const [row] = writeCast(store, { user, turn, by, agent: call.agent.id, job: call.agent.job ?? null, at: cast.clock?.now ?? null, now }, [{ character: id, part: p.part, item, value: p.value }]);
         if (row !== undefined) items.set(p.n, row.item);
         const events = [...(p.holds?.events ?? []), ...(p.forgets?.flatMap((f) => f.events) ?? [])];
         if (events.length > 0) store.user(user).addChanges(turn, holdingChanges(events, CAST_LANE, call.agent.id, call.agent.job ?? null));

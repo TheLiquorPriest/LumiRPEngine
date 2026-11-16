@@ -109,16 +109,16 @@ describe("what today's build recorded beside each turn", () => {
   });
 
   test("each casting is in the cast on its turn, and the casting the player pinned is pinned", () => {
-    look(data, (db, s) => {
+    look(data, (db, s, store) => {
       const line = chatLine(s, CHAT.harness);
       const ada = findCharacter(db, USER, line, PEOPLE.ada.name);
       const bo = findCharacter(db, USER, line, PEOPLE.bo.name);
       if (ada === null || bo === null) throw new Error("a person of the chat has no character");
-      const head = CastRecord.read(db, USER, castAt(s, CHAT.harness, null));
+      const head = CastRecord.read(store, USER, castAt(s, CHAT.harness, null));
       expect(castingInForce(head, ada)).toEqual({ as: "principal", pinned: true, line: null });
       // Bo was cast on the swipe that doesn't show: there, and only there.
       expect(castingInForce(head, bo)).toBeNull();
-      const lit = CastRecord.read(db, USER, castAt(s, CHAT.harness, turnOf(db, CHAT.harness, "m-h6", 0)));
+      const lit = CastRecord.read(store, USER, castAt(s, CHAT.harness, turnOf(db, CHAT.harness, "m-h6", 0)));
       expect(castingInForce(lit, bo)).toEqual({ as: "supporting", pinned: false, line: null });
       expect(lit.castingOf(bo.id)).toEqual({ as: "supporting", line: null });
     });
@@ -153,8 +153,8 @@ describe("what today's build recorded beside each turn", () => {
   test("a second run over the same data duplicates nothing: each character once, the same rows read the same, the same notes, the migration's own tables the same", async () => {
     const snapshot = async (): Promise<unknown> => ({
       ...look(data, (db, s, store) => ({
-        characters: db.query<{ name: string }, [string]>("SELECT name FROM cast_character WHERE user = ? ORDER BY n").all(USER).map((c) => c.name),
-        counts: Object.fromEntries(["cast_character", "cast_entry", "story_entry", "migration_person", "migration_file"].map((t) => [t, db.query<{ n: number }, [string]>(`SELECT count(*) AS n FROM ${t} WHERE user = ?`).get(USER)?.n])),
+        characters: db.query<{ name: string }, [string]>("SELECT name FROM character WHERE user = ? ORDER BY n").all(USER).map((c) => c.name),
+        counts: Object.fromEntries(["character", "change", "migration_person", "migration_file"].map((t) => [t, db.query<{ n: number }, [string]>(`SELECT count(*) AS n FROM ${t} WHERE user = ?`).get(USER)?.n])),
         ada: mindAt(db, s, CHAT.harness, PEOPLE.ada.name, null),
         bo: mindAt(db, s, CHAT.harness, PEOPLE.bo.name, turnOf(db, CHAT.harness, "m-h6", 0)),
         beats: storyRecordParts({ store, user: USER, chat: CHAT.harness, turn: null }).beats,

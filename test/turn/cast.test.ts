@@ -28,10 +28,14 @@ async function play(b: TurnBed, type: "normal" | "continue", said?: string): Pro
   return out.generationId!;
 }
 
-/** A turn's rows in the cast's and the story's records, as `[who wrote it, what]`: the agent's definition, and the item. */
+/** A turn's writes to the cast's and the story's records, as `[who wrote it, what]`: the agent's definition, and the item (a job's left out, as the take-back leaves them). */
 function rowsOf(b: TurnBed, turn: string): { cast: string[][]; story: string[][] } {
-  const of = (table: string): string[][] => b.app.db.query<{ by: string | null; item: string }, [string, string]>(`SELECT by, item FROM ${table} WHERE user = ? AND turn = ? ORDER BY ord`).all(USER, turn).map((r) => [r.by ?? "", r.item]);
-  return { cast: of("cast_entry"), story: of("story_entry") };
+  const of = (op: string): string[][] =>
+    b.app.db
+      .query<{ by: string | null; item: string }, [string, string, string]>("SELECT by, json_extract(value, '$.item') AS item FROM change WHERE user = ? AND turn = ? AND op = ? AND job IS NULL ORDER BY ord")
+      .all(USER, turn, op)
+      .map((r) => [r.by ?? "", r.item]);
+  return { cast: of("cast.write"), story: of("story.write") };
 }
 
 /** One answer that makes one tool call, after the intent record when one is given. */

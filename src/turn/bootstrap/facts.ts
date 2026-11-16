@@ -133,7 +133,7 @@ function castNow(deps: DoneEnoughDeps, user: string, chat: string): CastNow {
   const { db } = deps.store;
   const store = deps.store.user(user);
   // A chat the store has not met has no turns, so no rows of the cast: a casting in force there is the player's pin alone.
-  const record = store.chat(chat) === null ? null : CastRecord.read(db, user, castAt(store, chat, null));
+  const record = store.chat(chat) === null ? null : CastRecord.read(deps.store, user, castAt(store, chat, null));
   const cast = charactersOf(db, user, chatLine(store, chat)).map((character) => ({ character, as: record === null ? character.pinned : (castingInForce(record, character)?.as ?? null) }));
   return { record, cast, principals: cast.filter((c) => c.as === "principal").map((c) => c.character) };
 }
@@ -193,7 +193,7 @@ function castFact(now: CastNow): CastFact {
 
 function storyFact(deps: DoneEnoughDeps, user: string, chat: string, principals: readonly Character[]): StoryModelFact {
   const store = deps.store.user(user);
-  const record = store.chat(chat) === null ? null : StoryRecord.read(deps.store.db, user, storyAt(store, chat, null));
+  const record = store.chat(chat) === null ? null : StoryRecord.read(deps.store, user, storyAt(store, chat, null));
   const of = (part: Parameters<StoryRecord["of"]>[0]) => record?.of(part) ?? [];
   const threads = of("thread");
   const arcs = of("arc");

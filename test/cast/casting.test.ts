@@ -83,6 +83,6 @@ describe("casting", () => {
     const chats = chatLine(t.s, "chat-b");
     expect(chats).toEqual(["chat-b", CHAT]);
     expect(findCharacter(t.db, USER, chats, "bram")?.id).toBe(bram);
-    expect(names(CastRecord.read(t.db, USER, castAt(t.s, "chat-b", null)), chats)).toEqual([["Bram", "principal"]]);
+    expect(names(CastRecord.read(t.store, USER, castAt(t.s, "chat-b", null)), chats)).toEqual([["Bram", "principal"]]);
   });
 });

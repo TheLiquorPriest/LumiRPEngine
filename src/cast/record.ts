@@ -4,20 +4,25 @@
 // bindings (which card, persona, lore entry or Lumiverse memory entity defines which side of them;
 // the text stays in Lumiverse and is read live by whoever asks), and its base as versioned documents
 // (Seed, Soul, Inner Voice, Background), each version keeping the revision of every source it was
-// drawn against, so that a source changed since shows. A swipe changes none of these.
+// drawn against, so that a source changed since shows. A swipe changes none of these. The text of a
+// migrated character's old mind files is attached to it the same way, each version as it was, on the
+// turn that held it.
 //
-// Tied to turns, the way the story record is: casting, growth, mind, relationships, knowledge and
-// history. Every write is a row of the item it touches, holding only what that write said; an item
-// as it stands is its rows on the reading's path, merged in order, and its history is those rows. A
-// job's rows are recorded with the turn that started it and take effect where the store places the
-// job's changes (plan §10.9): after its end, just before the next turn to begin, a field a turn has
-// written since keeping that turn's value; the job reads its own at once. Code merges and keeps; it
-// never judges what a row says, and keeps everything for every casting.
+// Tied to turns, as changes of the store like everything else in the story (`fold.ts`): casting,
+// growth, mind, memories, relationships, knowledge, perceptions and history. Every write is a change
+// of the item it touches, holding only what that write said; an item as it stands is its writes at
+// the reading's point, merged in the order they take effect, and its history is those writes. A
+// job's are recorded with the turn that started it and take effect where the store places a job's
+// changes (plan §10.9). Code merges and keeps; it never judges what a write says, and keeps
+// everything for every casting.
 
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
-import { joinable, refuseJoined, type Store, StoreInputError, type UserStore } from "../store";
+import type { ChangeInput, Source, Store, UserStore } from "../store";
+import { CAST_WRITE, type CastSlice, fieldsOf, type RowPart, ROW_PARTS, type RowState, sliceOf, type WriteValue } from "./fold";
 import type { CastAt } from "./path";
+
+export { ROW_PARTS, type RowPart };
 
 /** How large a part a character plays (§7.2). What each has is the casting skill's to say. */
 export const CASTINGS = ["principal", "supporting", "extra"] as const;
@@ -30,10 +35,6 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 /** The base's four documents, as the casting skill names them. */
 export const BASE_PARTS = ["seed", "soul", "inner_voice", "background"] as const;
 export type BasePart = (typeof BASE_PARTS)[number];
-
-/** The parts kept as rows tied to turns. */
-export const ROW_PARTS = ["casting", "growth", "mind", "relationship", "knowledge", "history", "perception", "memory"] as const;
-export type RowPart = (typeof ROW_PARTS)[number];
 
 /** What a mind row holds, by kind, as the plan names them (§7.1): attention, feeling, beliefs, wants, plans, what they hide. */
 export const MIND_KINDS = ["attention", "feeling", "belief", "want", "plan", "hiding"] as const;
@@ -83,7 +84,7 @@ export function chatLine(user: UserStore, chat: string): string[] {
 /** Every character the chats know, in the order they were made. */
 export function charactersOf(db: Database, user: string, chats: readonly string[]): Character[] {
   return db
-    .query<CharacterDb, [string, string]>("SELECT id, chat, name, pinned, created FROM cast_character WHERE user = ?1 AND chat IN (SELECT value FROM json_each(?2)) ORDER BY n")
+    .query<CharacterDb, [string, string]>("SELECT id, chat, name, pinned, created FROM character WHERE user = ?1 AND chat IN (SELECT value FROM json_each(?2)) ORDER BY n")
     .all(user, JSON.stringify(chats))
     .map((r) => ({ id: r.id, chat: r.chat, name: r.name, pinned: r.pinned as Casting | null, created: r.created }));
 }
@@ -102,21 +103,21 @@ export function findCharacter(db: Database, user: string, chats: readonly string
 /** A new character of `chat`, inside the caller's write. Its id is given from its row. */
 export function addCharacter(db: Database, user: string, chat: string, name: string, now: number): Character {
   const n = Number(
-    db.query<unknown, [string, string, string, string, string, number]>("INSERT INTO cast_character (user, id, chat, name, name_key, created) VALUES (?, ?, ?, ?, ?, ?)").run(user, `new:${crypto.randomUUID()}`, chat, name.trim(), nameKey(name), now).lastInsertRowid,
+    db.query<unknown, [string, string, string, string, string, number]>("INSERT INTO character (user, id, chat, name, name_key, created) VALUES (?, ?, ?, ?, ?, ?)").run(user, `new:${crypto.randomUUID()}`, chat, name.trim(), nameKey(name), now).lastInsertRowid,
   );
   const id = `c-${n}`;
-  db.run("UPDATE cast_character SET id = ? WHERE n = ?", [id, n]);
+  db.run("UPDATE character SET id = ? WHERE n = ?", [id, n]);
   return { id, chat, name: name.trim(), pinned: null, created: now };
 }
 
 /** The player pins a casting (null takes the pin away), inside the caller's write. It stands over whatever the Author casts. */
 export function pinCasting(db: Database, user: string, character: string, casting: Casting | null): void {
-  db.run("UPDATE cast_character SET pinned = ? WHERE user = ? AND id = ?", [casting, user, character]);
+  db.run("UPDATE character SET pinned = ? WHERE user = ? AND id = ?", [casting, user, character]);
 }
 
 /** A character given another name, inside the caller's write: the migration names a person as the world now names it. The caller keeps the name free in the character's chat. */
 export function renameCharacter(db: Database, user: string, character: string, name: string): void {
-  db.run("UPDATE cast_character SET name = ?, name_key = ? WHERE user = ? AND id = ?", [name.trim(), nameKey(name), user, character]);
+  db.run("UPDATE character SET name = ?, name_key = ? WHERE user = ? AND id = ?", [name.trim(), nameKey(name), user, character]);
 }
 
 // ---------------------------------------------------------------- sources
@@ -204,7 +205,7 @@ interface DocDb {
 /** Every version of a character's base, oldest first. */
 export function baseHistory(db: Database, user: string, character: string): BaseVersion[] {
   return db
-    .query<DocDb, [string, string]>("SELECT * FROM cast_doc WHERE user = ? AND character = ? ORDER BY id")
+    .query<DocDb, [string, string]>("SELECT id, part, version, text, seen, turn, by, agent, created FROM character_doc WHERE user = ? AND character = ? AND kind = 'base' ORDER BY id")
     .all(user, character)
     .map((r) => ({ part: r.part as BasePart, version: r.version, text: r.text, seen: JSON.parse(r.seen) as Record<string, string>, turn: r.turn, by: r.by, agent: r.agent, created: r.created }));
 }
@@ -235,9 +236,9 @@ export interface BaseWriter {
 
 /** Adds a version of each part given, inside the caller's write; `seen` is the sources' revisions as read just before. */
 export function writeBase(db: Database, writer: BaseWriter, character: string, texts: Partial<Record<BasePart, string>>, seen: Record<string, string>): BaseVersion[] {
-  const next = db.query<{ n: number | null }, [string, string, string]>("SELECT max(version) AS n FROM cast_doc WHERE user = ? AND character = ? AND part = ?");
+  const next = db.query<{ n: number | null }, [string, string, string]>("SELECT max(version) AS n FROM character_doc WHERE user = ? AND character = ? AND part = ? AND kind = 'base'");
   const put = db.query<unknown, [string, string, string, number, string, string, string | null, string | null, string | null, number]>(
-    "INSERT INTO cast_doc (user, character, part, version, text, seen, turn, by, agent, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO character_doc (user, character, kind, part, version, text, seen, turn, by, agent, created) VALUES (?, ?, 'base', ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const out: BaseVersion[] = [];
   for (const part of BASE_PARTS) {
@@ -250,13 +251,34 @@ export function writeBase(db: Database, writer: BaseWriter, character: string, t
   return out;
 }
 
-// ---------------------------------------------------------------- rows tied to turns
+// ---------------------------------------------------------------- the carried files
 
-/** One write of an item, as stored. */
+/** A carried mind file's item id, as the migration names it: its character and its file. */
+export const importedItemId = (character: string, file: string): string => `imported:${character}:${file}`;
+
+/**
+ * Attaches a version of a migrated character's mind file as it was, every word, on the turn that held it (`character_doc`, kind
+ * `file`, the file's name its part), inside the caller's write; the version is its number among that file's. Which version a reading
+ * sees is the item's write that names it, a change of the turn, so a swipe shows the version its turn held.
+ */
+export function attachFile(db: Database, writer: BaseWriter, character: string, file: string, text: string): number {
+  const version = (db.query<{ n: number | null }, [string, string, string]>("SELECT max(version) AS n FROM character_doc WHERE user = ? AND character = ? AND part = ? AND kind = 'file'").get(writer.user, character, file)?.n ?? 0) + 1;
+  db.run("INSERT INTO character_doc (user, character, kind, part, version, text, seen, turn, by, agent, created) VALUES (?, ?, 'file', ?, ?, ?, '{}', ?, ?, ?, ?)", [writer.user, character, file, version, text, writer.turn, writer.by, writer.agent, writer.now]);
+  return version;
+}
+
+/** The text of one version of a carried file; null when no such version is attached. */
+export function fileText(db: Database, user: string, character: string, file: string, version: number): string | null {
+  return db.query<{ text: string }, [string, string, string, number]>("SELECT text FROM character_doc WHERE user = ? AND character = ? AND part = ? AND kind = 'file' AND version = ?").get(user, character, file, version)?.text ?? null;
+}
+
+// ---------------------------------------------------------------- writes tied to turns
+
+/** One write of an item as a reading shows it: its fields and where it came from. */
 export interface CastRow {
-  id: number;
+  /** Its place among every write of the reading, in the order they took effect. */
+  s: number;
   turn: string;
-  ord: number;
   character: string;
   part: RowPart;
   item: string;
@@ -267,11 +289,11 @@ export interface CastRow {
   /** The agent's definition that wrote it, or the player. */
   by: string | null;
   agent: string | null;
-  job: string | null;
-  created: number;
+  /** The moment its writer made the call, in milliseconds. */
+  when: number | null;
 }
 
-/** An item as it stands on a path. */
+/** An item as it stands at a reading's point. */
 export interface CastItem {
   part: RowPart;
   id: string;
@@ -284,72 +306,8 @@ export interface CastItem {
   /** Story time of its first write: its date. */
   at: number | null;
   dropped: boolean;
-  /** Its writes on the path, oldest first. */
+  /** Its writes, in the order they took effect. */
   rows: CastRow[];
-}
-
-interface RowDb {
-  id: number;
-  turn: string;
-  ord: number;
-  character: string;
-  part: string;
-  item: string;
-  value: string;
-  at: number | null;
-  by: string | null;
-  agent: string | null;
-  job: string | null;
-  created: number;
-  /** When the store recorded the end of the job that wrote it (`job_end`); null for a turn's own row, or a job's not ended. */
-  ended: number | null;
-}
-
-/** A row of a reading, where it takes effect. */
-interface Placed {
-  row: CastRow;
-  /** The place on the path of the turn it takes effect at: its own turn's, or for a job's, the turn it is placed just before. */
-  at: number;
-  /** For a job's row placed after the turn that started the job: that turn's place; null for a row read where it was written. */
-  from: number | null;
-}
-
-/**
- * The rows of a reading in the order they take effect. A turn's own rows, and those of the job the
- * reading is made in (`own`), are read where they were written. Any other job's are recorded with the
- * turn that started it and take effect where the store places its changes (plan §10.9,
- * `UserStore.jobsPlaced`): once the store has recorded the job's end, just before the first turn on
- * the path after that one to have begun after the end, in the order they were written; until then,
- * or on a path with no such turn, they are not read.
- */
-function placedRows(db: Database, user: string, at: CastAt, rows: readonly RowDb[], own: string | null): Placed[] {
-  let began: Map<string, number> | undefined;
-  const places = new Map<string, number>();
-  const out: Placed[] = [];
-  for (const { ended, ...r } of rows) {
-    const row: CastRow = { ...r, part: r.part as RowPart, value: JSON.parse(r.value) as JsonObject };
-    const from = at.order.get(r.turn) ?? 0;
-    if (r.job === null || r.job === own) {
-      out.push({ row, at: from, from: null });
-      continue;
-    }
-    if (ended === null) continue;
-    const key = `${r.job}\u0000${r.turn}`;
-    let place = places.get(key);
-    if (place === undefined) {
-      const times = (began ??= new Map(
-        db
-          .query<{ id: string; created: number }, [string, string]>("SELECT id, created FROM turn WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2))")
-          .all(user, JSON.stringify(at.turns))
-          .map((t) => [t.id, t.created]),
-      ));
-      place = at.turns.findIndex((t, i) => i > from && (times.get(t) ?? Number.NEGATIVE_INFINITY) > ended);
-      places.set(key, place);
-    }
-    if (place >= 0) out.push({ row, at: place, from });
-  }
-  // At one place a job's rows come first, in the order they were written, then the turn's own, in its order.
-  return out.sort((a, b) => a.at - b.at || (a.from === null ? 1 : 0) - (b.from === null ? 1 : 0) || (a.from === null ? a.row.ord - b.row.ord : a.row.id - b.row.id));
 }
 
 /** The id of the one casting item a character has. */
@@ -358,55 +316,52 @@ export const castingItemId = (character: string): string => `casting:${character
 /** The id of the one relationship item a character has toward a person. */
 export const relationshipItemId = (character: string, toward: string): string => `rel:${character}:${nameKey(toward)}`;
 
-/** The id a new item of `part` is given from its first row's id. */
-export function newItemId(part: keyof typeof PREFIX, row: number): string {
-  return `${PREFIX[part]}-${row}`;
+/** The id a new item of `part` is given from the number of the change that writes it. */
+export function newItemId(part: keyof typeof PREFIX, change: number): string {
+  return `${PREFIX[part]}-${change}`;
 }
 
-/** The rows of the cast as one reading sees them. */
+/** An item of the slice as a reading shows it. */
+function itemOf(character: string, id: string, part: RowPart, rows: readonly RowState[]): CastItem {
+  const shown = rows.map((r): CastRow => ({ s: r.s, turn: r.turn, character, part, item: id, value: r.value, at: r.at, by: r.by, agent: r.agent, when: r.when }));
+  const { fields, dropped } = fieldsOf(rows);
+  // The turn that wrote it last is the one at the latest place; of writes at one place, the later.
+  let last = rows[0] as RowState;
+  for (const r of rows) if (r.n >= last.n) last = r;
+  return { part, id, character, fields, opened: (rows[0] as RowState).turn, touched: last.turn, at: (rows[0] as RowState).at, dropped, rows: shown };
+}
+
+/** The writes of the cast as one reading sees them. */
 export class CastRecord {
-  readonly items = new Map<string, CastItem>();
-  /** For each item, the place on the path of the turn whose write each of its fields (`drop` among them) last took. */
-  readonly #marks = new Map<string, Map<string, number>>();
+  readonly #slice: CastSlice;
+  #items: Map<string, CastItem> | undefined;
 
-  constructor(readonly at: CastAt) {}
-
-  /** The record at `at`: the rows of the turns on its path, in the order they take effect there (`placedRows`); `job`, the job the reading is made in, reads its own at once. */
-  static read(db: Database, user: string, at: CastAt, job: string | null = null): CastRecord {
-    const rows = db
-      .query<RowDb, [string, string]>("SELECT r.*, e.ended FROM cast_entry r LEFT JOIN job_end e ON e.user = r.user AND e.job = r.job WHERE r.user = ?1 AND r.turn IN (SELECT value FROM json_each(?2))")
-      .all(user, JSON.stringify(at.turns));
-    const record = new CastRecord(at);
-    for (const p of placedRows(db, user, at, rows, job)) record.apply(p.row, p.from);
-    return record;
+  constructor(
+    readonly at: CastAt,
+    slice: CastSlice,
+  ) {
+    this.#slice = slice;
   }
 
   /**
-   * Merges one write in. `from` is set for a job's write placed after turns since the job's own (the
-   * place of the turn that started it): a field one of those turns wrote keeps that turn's value, as
-   * the store keeps a later turn's value over a job's, and the item stays touched by the later turn.
+   * The record at `at`, from the store's held state: at the chat's head, or at a turn with its own writes (and, for `job`, what that
+   * job wrote so far, at once; another job's take effect where the store places them, §10.9). Never reads or parses a stored change.
    */
-  apply(row: CastRow, from: number | null = null): CastItem {
-    let item = this.items.get(row.item);
-    if (item === undefined) {
-      item = { part: row.part, id: row.item, character: row.character, fields: {}, opened: row.turn, touched: row.turn, at: row.at, dropped: false, rows: [] };
-      this.items.set(row.item, item);
+  static read(store: Store, user: string, at: CastAt, job: string | null = null): CastRecord {
+    const u = store.user(user);
+    const folded = at.turn === null ? u.headState(at.chat) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
+    return new CastRecord(at, sliceOf(folded.state.areas));
+  }
+
+  /** Every item, in the order it was first written: those of one character together, the characters in the order they were first written. */
+  get items(): ReadonlyMap<string, CastItem> {
+    if (this.#items === undefined) {
+      const all: CastItem[] = [];
+      for (const [character, items] of Object.entries(this.#slice.items)) for (const [id, state] of Object.entries(items)) if (state.rows.length > 0) all.push(itemOf(character, id, state.part, state.rows));
+      all.sort((a, b) => (a.rows[0] as CastRow).s - (b.rows[0] as CastRow).s);
+      this.#items = new Map(all.map((i) => [i.id, i]));
     }
-    let marks = this.#marks.get(row.item);
-    if (marks === undefined) {
-      marks = new Map();
-      this.#marks.set(row.item, marks);
-    }
-    const place = from ?? this.at.order.get(row.turn) ?? 0;
-    for (const [key, value] of Object.entries(row.value)) {
-      if (from !== null && (marks.get(key) ?? Number.NEGATIVE_INFINITY) > from) continue;
-      marks.set(key, place);
-      if (key === "drop") item.dropped = value === true;
-      else item.fields[key] = value;
-    }
-    if (place >= (this.at.order.get(item.touched) ?? Number.NEGATIVE_INFINITY)) item.touched = row.turn;
-    item.rows.push(row);
-    return item;
+    return this.#items;
   }
 
   /** A character's items of a part, in the order they were first written; those dropped only when asked. */
@@ -457,98 +412,41 @@ export interface CastWrite {
 /** Who writes, on which turn, at what story time, and when. */
 export interface CastWriter {
   user: string;
-  turn: string;
+  /** The turn the writes belong to; null: the player's own, of no turn (a job he started, his own edit), which names `chat`. */
+  turn: string | null;
+  chat?: string;
   by: string | null;
   agent: string | null;
   job: string | null;
   /** Story time at the turn, minutes since the world's epoch; null in a chat that keeps no clock. */
   at: number | null;
   now: number;
+  /** Where what it writes came from, as the store keeps it; none given, the player's own writes are the player's. */
+  source?: Source;
+}
+
+/** The number the next change the store records will have: the writes of one queued call are recorded one after another, so a new item's id is made from the number of the change that writes it. */
+function nextChange(store: Store): number {
+  return (store.db.query<{ seq: number }, []>("SELECT seq FROM sqlite_sequence WHERE name = 'change'").get()?.seq ?? 0) + 1;
 }
 
 /**
- * Records `writes` on the writer's turn, in order, inside the caller's queued write: the rows as
- * stored, a new item's id given from its first row. A turn joined to another is refused first, with
- * the typed error naming the turn it joined (`refuseJoined`).
+ * Records `writes` where the store puts a write (R-73: the writer's turn, or his own changes), in order, inside the caller's
+ * queued write: each a change of the story lane, a new item's id made here. A turn joined to another is refused first by the
+ * store, with the typed error naming the turn it joined.
  */
-export function writeCast(db: Database, writer: CastWriter, writes: readonly CastWrite[]): CastRow[] {
-  refuseJoined(db, writer.user, writer.turn);
-  let ord = (db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM cast_entry WHERE user = ? AND turn = ?").get(writer.user, writer.turn)?.n ?? -1) + 1;
-  const put = db.query<unknown, [string, string, number, string, string, string, string, number | null, string | null, string | null, string | null, number]>(
-    "INSERT INTO cast_entry (user, turn, ord, character, part, item, value, at, by, agent, job, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  );
-  const name = db.query<unknown, [string, number]>("UPDATE cast_entry SET item = ? WHERE id = ?");
-  return writes.map((w) => {
-    const id = Number(put.run(writer.user, writer.turn, ord, w.character, w.part, w.item ?? "", JSON.stringify(w.value), writer.at, writer.by, writer.agent, writer.job, writer.now).lastInsertRowid);
-    let item = w.item;
-    if (item === null) {
-      if (!(w.part in PREFIX)) throw new Error(`a ${w.part} item is named by its key, never made new`);
-      item = newItemId(w.part as keyof typeof PREFIX, id);
-      name.run(item, id);
-    }
-    return { id, turn: writer.turn, ord: ord++, character: w.character, part: w.part, item, value: w.value, at: writer.at, by: writer.by, agent: writer.agent, job: writer.job, created: writer.now };
+export function writeCast(store: Store, writer: CastWriter, writes: readonly CastWrite[]): CastRow[] {
+  const first = nextChange(store);
+  const made = writes.map((w, i) => {
+    if (w.item === null && !(w.part in PREFIX)) throw new Error(`a ${w.part} item is named by its key, never made new`);
+    return { ...w, item: w.item ?? newItemId(w.part as keyof typeof PREFIX, first + i) };
   });
-}
-
-/**
- * Takes back one agent's cast rows on an open turn (every agent's when none is named), inside the
- * caller's queued write, beside the store's `dropStaged`: the lead dropping a sub-agent's writes. How
- * many went. A turn that is not open has nothing staged, and is refused as the store refuses it: one
- * joined to another turn with the typed error naming the turn it joined.
- */
-export function dropCastStaged(store: Store, user: string, turn: string, agent?: string): number {
-  refuseJoined(store.db, user, turn);
-  const row = store.user(user).turn(turn);
-  if (row === null) throw new StoreInputError(`turn ${turn} is not there`);
-  if (row.status !== "open") throw new StoreInputError(`turn ${turn} is ${row.status}: only an open turn's staged cast rows can be taken back`);
-  const gone = agent === undefined ? store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ?", [user, turn]) : store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ? AND agent = ?", [user, turn, agent]);
-  return gone.changes;
-}
-
-/** The cast's mark on a turn now: the place of its last row, -1 when it has none. A continue takes it as it begins, beside the store's mark. */
-export function castMark(db: Database, user: string, turn: string): number {
-  return db.query<{ n: number | null }, [string, string]>("SELECT max(ord) AS n FROM cast_entry WHERE user = ? AND turn = ?").get(user, turn)?.n ?? -1;
-}
-
-/**
- * Takes back a turn's cast rows written after `after` (a `castMark`), tied or not, inside the
- * caller's queued write, beside the store's `takeBack`: what a continue wrote when it saved nothing.
- * A job's rows are the job's and stay, as the store keeps a job's changes. How many went. A turn
- * joined to another is refused first, naming the turn it joined.
- */
-export function takeBackCast(db: Database, user: string, turn: string, after: number): number {
-  refuseJoined(db, user, turn);
-  return db.run("DELETE FROM cast_entry WHERE user = ? AND turn = ? AND ord > ? AND job IS NULL", [user, turn, after]).changes;
-}
-
-/**
- * A continue's held turn's cast rows become the rows of the turn it extended (plan §10.10, "Continue: the same turn, extended";
- * R-192 (e), (f)), inside the caller's queued write, before the store's `joinTurn` there, which marks the held turn joined: every
- * row of the held turn, a job's included, takes `into`, after that turn's own rows, in the order the rows were made, each as it was
- * written (its id, value, writer, agent, job and time), nothing worked out again. A job's rows keep their job: a job is recorded
- * with the turn that started it (§10.9), and after the end that is the turn the continue extended. What may be joined is the
- * store's one check (`joinable`), refused as the store refuses the join. How many moved.
- */
-export function joinCast(store: Store, user: string, held: string, into: string): number {
-  joinable(store.db, user, held, into);
-  const next = castMark(store.db, user, into) + 1;
-  const rows = store.db.query<{ id: number }, [string, string]>("SELECT id FROM cast_entry WHERE user = ? AND turn = ? ORDER BY ord, id").all(user, held);
-  const put = store.db.query<unknown, [string, number, number]>("UPDATE cast_entry SET turn = ?, ord = ? WHERE id = ?");
-  rows.forEach((r, i) => put.run(into, next + i, r.id));
-  return rows.length;
-}
-
-/**
- * Removes the cast rows of turns the store no longer holds, inside the caller's queued write, right
- * after the store removed them: a chat deleted (`UserStore.deleteChat` when it is not kept for a
- * branch), or an import forgotten (`UserStore.forgetImport`). Rows of a turn a branch still shares
- * stay with the turn. The characters, their bindings and their base stand outside turns and stay.
- * How many went.
- */
-export function dropLeftoverCast(store: Store, user: string): number {
-  const u = store.user(user);
-  const turns = store.db.query<{ turn: string }, [string]>("SELECT DISTINCT turn FROM cast_entry WHERE user = ?").all(user);
-  const gone = turns.flatMap((r) => (u.turn(r.turn) === null ? [r.turn] : []));
-  if (gone.length === 0) return 0;
-  return store.db.run("DELETE FROM cast_entry WHERE user = ? AND turn IN (SELECT value FROM json_each(?))", [user, JSON.stringify(gone)]).changes;
+  const inputs = made.map((w): ChangeInput => {
+    const value: WriteValue = { character: w.character, part: w.part, item: w.item, value: w.value, at: writer.at, agent: writer.agent, when: writer.now };
+    const source = writer.source ?? (writer.by === "player" ? "player" : undefined);
+    return { lane: "story", op: CAST_WRITE, value: value as unknown as JsonObject, by: writer.by, handle: writer.agent, job: writer.job, ...(source !== undefined ? { source } : {}) };
+  });
+  const u = store.user(writer.user);
+  u.record(u.writeTarget({ chat: writer.chat ?? "", turn: writer.turn, job: writer.job }), inputs);
+  return made.map((w) => ({ s: 0, turn: writer.turn ?? "", character: w.character, part: w.part, item: w.item, value: w.value, at: writer.at, by: writer.by, agent: writer.agent, when: writer.now }));
 }

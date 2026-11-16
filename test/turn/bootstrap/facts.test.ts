@@ -108,7 +108,7 @@ test("each fact's counts change exactly when its own records are written, and ne
   await b.app.writes.run((db) => writeBase(db, { user: USER, turn, by: "author", agent: "author-1", now: Date.now() }, wren.id, { seed: "A keeper's daughter who never sleeps before the lamp is lit." }, {}));
   step = await next();
   expect([step.moved, step.now.principals]).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 0 }] }]);
-  await b.app.writes.run((db) => writeCast(db, { ...at, by: "character", agent: "character-1", at: null }, [{ character: wren.id, part: "memory", item: null, value: { text: "The night the lamp nearly failed." } }]));
+  await b.app.writes.run(() => writeCast(b.turns.store, { ...at, by: "character", agent: "character-1", at: null }, [{ character: wren.id, part: "memory", item: null, value: { text: "The night the lamp nearly failed." } }]));
   step = await next();
   expect([step.moved, step.now.principals]).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 1 }] }]);
 

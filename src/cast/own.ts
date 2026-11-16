@@ -30,7 +30,7 @@ const RELATIONSHIP_READS: Reads = { reads: Object.keys(RELATIONSHIP), needs: ["w
 /** Writes what a call read, and answers with each item it wrote as it now stands, and with what was left out. */
 async function writeOwn(call: CastCall, reply: Reply, writer: CastWriter, items: readonly ItemRead[], writes: readonly CastWrite[], reads: Reads, key: string): Promise<Reply> {
   if (items.some((it) => it.fatal.length > 0)) return refused(reply, items, () => reads);
-  const rows: CastRow[] = await call.deps.writes.run((db) => writeCast(db, writer, writes), call.tool);
+  const rows: CastRow[] = await call.deps.writes.run(() => writeCast(call.deps.store, writer, writes), call.tool);
   for (const it of items) leftOut(reply, it, reads.reads);
   const after = readingOr(call, reply);
   if (after === null) return reply;
