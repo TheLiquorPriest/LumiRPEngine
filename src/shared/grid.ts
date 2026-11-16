@@ -156,6 +156,32 @@ export function nearestMiddle(cells: readonly number[], width: number): Cell | n
 
 type GridWorld = Pick<WorldDoc, "places" | "grids">;
 
+/** The terrain words a world's grids take for a door when the world names none (`mapSettings.doorTerrains`): shipped as data. */
+export const DEFAULT_DOOR_TERRAINS: readonly string[] = Object.freeze(["door", "doorway", "gate"]);
+
+/** The terrain words the world says are doors: its `mapSettings.doorTerrains`, a list of words, else the shipped ones. */
+export function doorTerrainsOf(world: { readonly mapSettings?: unknown }): readonly string[] {
+  const raw = typeof world.mapSettings === "object" && world.mapSettings !== null ? (world.mapSettings as Record<string, unknown>).doorTerrains : undefined;
+  return Array.isArray(raw) && raw.every((w) => typeof w === "string") ? (raw as string[]) : DEFAULT_DOOR_TERRAINS;
+}
+
+const WORDS = /[^\p{L}\p{N}]+/u;
+
+/** The words of a terrain's name, lower case, each one space apart: "Garden door" is " garden door ". */
+function wordsOf(name: string): string {
+  return ` ${name.toLowerCase().split(WORDS).filter((w) => w !== "").join(" ")} `;
+}
+
+/** Whether a terrain is a door: its name is, or holds as words, one of `doors` ("front door" holds "door"; "trapdoor" does not). A map legend's own door is the terrain "door", whatever the list. */
+export function isDoorTerrain(terrain: string, doors: readonly string[] = DEFAULT_DOOR_TERRAINS): boolean {
+  if (terrain === "door") return true;
+  const name = wordsOf(terrain);
+  return doors.some((d) => {
+    const word = wordsOf(d);
+    return word.trim() !== "" && name.includes(word);
+  });
+}
+
 /** Where someone stands: the place whose grid it is, the grid, and (once known) the cell. */
 export interface Standing {
   scope: PlaceId;
@@ -199,17 +225,16 @@ export function areaPlaceAt(world: Pick<WorldDoc, "places">, scope: PlaceId, gri
   return null;
 }
 
-const DOOR_TERRAIN = /door|gate|arch/i;
 
 /** Where someone entering a gridded place stands: a door on the grid's edge, else any door, else the open cell nearest its middle. */
-export function entranceCell(grid: GridDef): Cell | null {
+export function entranceCell(grid: GridDef, terrains: readonly string[] = DEFAULT_DOOR_TERRAINS): Cell | null {
   const blocked = new Set(grid.blocked);
   const open: number[] = [];
   const doors: number[] = [];
   for (let i = 0; i < grid.width * grid.height; i++) {
     if (blocked.has(i)) continue;
     open.push(i);
-    if (DOOR_TERRAIN.test(grid.terrain[i] ?? "")) doors.push(i);
+    if (isDoorTerrain(grid.terrain[i] ?? "", terrains)) doors.push(i);
   }
   const door = doors.find((i) => i % grid.width === 0 || i % grid.width === grid.width - 1 || i < grid.width || i >= grid.width * (grid.height - 1)) ?? doors[0];
   return door !== undefined ? cellAt(grid, door) : nearestMiddle(open, grid.width);
@@ -220,11 +245,11 @@ export function entranceCell(grid: GridDef): Cell | null {
  * entrance of a place with a grid of its own; else on the cell the place is drawn at on its
  * parent's grid, or, for a room drawn only as an area, the cell nearest its middle. Null off any grid.
  */
-export function arrivalCell(world: GridWorld, place: PlaceId): (Standing & { cell: Cell }) | null {
+export function arrivalCell(world: GridWorld & { readonly mapSettings?: unknown }, place: PlaceId): (Standing & { cell: Cell }) | null {
   const stand = standingGrid(world, place);
   if (!stand) return null;
   if (stand.scope === place) {
-    const cell = entranceCell(stand.grid);
+    const cell = entranceCell(stand.grid, doorTerrainsOf(world));
     return cell ? { ...stand, cell } : null;
   }
   const at = placeOf(world, place)?.cell;

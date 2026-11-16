@@ -1266,6 +1266,8 @@ export interface MapSettings {
   travelSimulation?: boolean;
   /** Absent, or any part of it: `DEFAULT_TRAVEL` (`shared/maps` `travelTuningOf`). */
   travel?: Partial<TravelTuning>;
+  /** The words a grid's terrain holds for a door where its map has no legend (an authored grid): a terrain whose name is, or holds as words, one of them is a door. Absent: `DEFAULT_DOOR_TERRAINS` (door, doorway, gate). */
+  doorTerrains?: string[];
 }
 
 /**

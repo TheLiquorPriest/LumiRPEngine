@@ -92,6 +92,7 @@
           }
         },
         "travelSimulation": { "type": "boolean", "description": "Moves need a route: a narrated move no route reaches is refused, and Go needs a walking route. Off or absent: moves are story first." },
+        "doorTerrains": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "The words a grid's terrain holds for a door where its map has no legend (a grid authored without a map): a terrain whose name is, or holds as words, one of them is a door. Absent: door, doorway, gate." },
         "travel": {
           "type": "object",
           "description": "Travel times. A speed set (km/h) times every leg of its way, or every leg a vehicle of the class takes, by its distance in place of the route's minutes; then a vehicle trip's overheads. Absent, or any part: routes keep their own minutes; 1, 1 and 30 minutes.",

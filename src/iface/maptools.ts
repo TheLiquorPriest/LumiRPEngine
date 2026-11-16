@@ -33,6 +33,7 @@ import type { ChangeInput, Report } from "../store/types";
 import { foundIn, readTool, writeTool, type ReadDef, type WriteDef } from "./families/run";
 import { NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, WHOLE, YES_NO, type Call, type ToolSpec } from "./kit";
 import { editMap, type Stroke } from "./map/edit";
+import { type Fixture, fixtureAt } from "./map/fixture";
 import { MAP_DEFAULTS, METRES_PER_FOOT, type MapConfig } from "../shared/map-config";
 import { between, burst, cone, line, sees, within, type Spot } from "../packs/space/core/grid-measure";
 import { doorState, indexOf, lift, moveTime, place, setDoor, squareAt, standsAt, type Piece, type Square, type Took } from "../packs/space/core/grid-model";
@@ -43,7 +44,7 @@ import { doorEvent, positionEvent, shapeEvent } from "./map/record";
 import { distanceData, farText, layersAt, mapsNear, mapWording, mapWords, reportFields, type MapWording, type Say, spotText, squareGiven, stepFields, timeText, whereWords, whoIs, type Layers } from "./map/words";
 import { NO_LAYOUT } from "./map/layout";
 import { find, isUnread, notOneOf, numberArg, textArg, type OpContext, type Unread } from "./ops";
-import { keepWhere, moveTo, noSoft, putOnSupport, putThing } from "./ops-things";
+import { keepWhere, makeThing, moveTo, noSoft, putOnSupport, putThing } from "./ops-things";
 import { type Found, isFound, type Reading } from "./reading";
 import { PROVENANCE_PROPERTIES, type Provenance, provenanceData, provenanceOf } from "./source";
 import { textOf } from "./texts";
@@ -787,13 +788,36 @@ const EDIT_REFUSALS: Readonly<Record<string, true>> = { no_map: true, nothing_dr
 /** Why a stroke drew nothing: when no stroke drew anything, the first of these says more than that nothing was drawn. */
 const STROKE_LOST: Readonly<Record<string, true>> = { fell_off: true, bad_symbol: true };
 
+/** Fixtures the call lifts into things, each as its footprint and name, with the squares of it as strokes that make them floor; and what could not be lifted, as reports. */
+function liftsOf(o: OpContext, say: Say, layers: Layers): { lifted: { fixture: Fixture; name: string }[]; strokes: Stroke[]; reports: Report[] } | Unread {
+  const out = { lifted: [] as { fixture: Fixture; name: string }[], strokes: [] as Stroke[], reports: [] as Report[] };
+  const asked = o.args.things;
+  if (asked === undefined || asked === null) return out;
+  if (!Array.isArray(asked)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "things", value: JSON.stringify(asked) } };
+  for (const raw of asked) {
+    if (!isRecord(raw)) return { line: "unreadable_op", fields: { n: o.n, op: o.op, field: "things", value: JSON.stringify(raw) } };
+    const square = squareOn(say, layers, "things", raw.square);
+    if (isUnread(square)) return square;
+    const fixture = fixtureAt(layers.drawn, square);
+    if (fixture === null) {
+      out.reports.push({ code: "not_a_fixture", values: { square: [...square] } });
+      continue;
+    }
+    // A fixture named twice is lifted once.
+    if (out.lifted.some((l) => l.fixture.squares.some((s) => s[0] === square[0] && s[1] === square[1]))) continue;
+    out.lifted.push({ fixture, name: typeof raw.name === "string" && raw.name.trim() !== "" ? raw.name.trim() : fixture.name });
+    out.strokes.push({ symbol: ".", squares: fixture.squares });
+  }
+  return out;
+}
+
 const editDef: WriteDef = {
   name: "map_edit",
   family: FAMILY,
   lane: "engine",
-  properties: { at: TEXT, strokes: { type: "array", items: { type: "object", properties: { symbol: TEXT, squares: SQUARES, rect: TWO_SQUARES, line: TWO_SQUARES }, required: ["symbol"] } }, legend: OBJECT },
+  properties: { at: TEXT, strokes: { type: "array", items: { type: "object", properties: { symbol: TEXT, squares: SQUARES, rect: TWO_SQUARES, line: TWO_SQUARES }, required: ["symbol"] } }, legend: OBJECT, things: { type: "array", items: { type: "object", properties: { square: SQUARE, name: TEXT }, required: ["square"] } } },
   required: ["at"],
-  example: { at: "The Cellar", strokes: [{ symbol: "#", squares: [[5, 3]] }, { symbol: "t", rect: [[6, 2], [7, 2]] }], legend: { t: { terrain: "table", blocked: true } }, source: { from: "gm" } },
+  example: { at: "The Cellar", strokes: [{ symbol: "#", squares: [[5, 3]] }, { symbol: "t", rect: [[6, 2], [7, 2]] }], legend: { t: { terrain: "table", blocked: true } }, things: [{ square: [8, 4], name: "overturned table" }], source: { from: "gm" } },
   run(o) {
     const w = o.draft.w;
     const at = find(o, "at", "point");
@@ -806,20 +830,33 @@ const editDef: WriteDef = {
     if (isUnread(given)) return given;
     const legend = given.legend;
     const say: Say = { lines: o.call.lines, world: layers.world, state: w.state };
-    const done = editMap(o.reading.doc, w.state, layers.drawn.scope, strokes, legend);
+    const lifts = liftsOf(o, say, layers);
+    if (isUnread(lifts)) return lifts;
+    const done = editMap(o.reading.doc, w.state, layers.drawn.scope, [...lifts.strokes, ...strokes], legend);
     const refusal = done.reports.find((rep) => EDIT_REFUSALS[rep.code]);
     if (done.changes.length === 0 || refusal) {
-      const why = refusal?.code === "nothing_drawn" ? (done.reports.find((rep) => STROKE_LOST[rep.code]) ?? refusal) : (refusal ?? done.reports[0]);
+      const why = lifts.reports[0] ?? (refusal?.code === "nothing_drawn" ? (done.reports.find((rep) => STROKE_LOST[rep.code]) ?? refusal) : (refusal ?? done.reports[0]));
       return why ? { line: `grid_${why.code}`, fields: { n: o.n, op: o.op, ...reportFields(say, why.values) } } : { line: "nothing_recorded", fields: {} };
     }
-    reportAll(o, say, done.reports);
+    reportAll(o, say, [...lifts.reports, ...done.reports]);
     const from = w.events.length;
     const bad = applyLaid(o, done.changes);
     if (bad) return bad;
+    // Each fixture lifted is a thing of its name now, standing where it was drawn, with its footprint and what it blocks.
+    const things: JsonObject[] = [];
+    for (const { fixture, name } of lifts.lifted) {
+      const made = makeThing(o, { do: "make", name, at: { place: roomAt(layers, fixture.at) }, why: "" });
+      if (made === undefined) continue;
+      if (isUnread(made)) return made;
+      const placed = applied(o, [positionEvent(layers.drawn, made, fixture.at, null), shapeEvent(made, { size: [fixture.size[0], fixture.size[1]], blocks: fixture.blocks })]);
+      if (placed) return placed;
+      o.reply.line("fixture_lifted", { what: whoIs({ ...say, state: w.state }, made), square: spotText(say, fixture.at), columns: fixture.size[0], rows: fixture.size[1], blocksWay: fixture.blocks.way, blocksView: fixture.blocks.view });
+      things.push({ who: whoIs({ ...say, state: w.state }, made), at: [...fixture.at], size: [...fixture.size], blocks: { ...fixture.blocks } });
+    }
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     const count = done.changes.reduce((n, c) => n + (isRecord(c.value) && isRecord(c.value.data) && Array.isArray(c.value.data.squares) ? c.value.data.squares.length : 0), 0);
     o.reply.line("edited", { place: whoIs(say, layers.drawn.scope), count, symbols: textOf(Object.keys(legend)) });
-    o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count, legend: Object.keys(legend) } }));
+    o.after(() => ({ edited: { map: layers.drawn.map ?? layers.drawn.id, squares: count, legend: Object.keys(legend), ...(things.length > 0 ? { things } : {}) } }));
     sayRead(o, given.read);
     return undefined;
   },

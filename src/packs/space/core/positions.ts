@@ -8,7 +8,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { areaPlaceAt, cellIndex, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
+import { areaPlaceAt, cellIndex, doorTerrainsOf, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
 import type { GridTrigger } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
@@ -136,7 +136,7 @@ export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): Ledger
   out.push({ type: "set", entity, field: "place", value: room });
   // A room with a grid of its own is a map of its own: it is entered at its entrance, on that grid.
   const inner = room !== stand.scope ? gridOf(ctx.world, room) : undefined;
-  const entry = inner ? entranceCell(inner) : null;
+  const entry = inner ? entranceCell(inner, doorTerrainsOf(ctx.world)) : null;
   if (inner) out.push(posEvent(entity, entry ? { scope: room, ...entry } : null, from));
   else out.push(posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from));
   return out;

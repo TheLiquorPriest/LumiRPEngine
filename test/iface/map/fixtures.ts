@@ -93,3 +93,27 @@ export function drawn(map: MapDoc, config: Readonly<MapConfig> = MAP_DEFAULTS): 
   if (!d) throw new Error(`${map.scope} has no grid`);
   return d;
 }
+
+/**
+ * The market square's grid authored with no map, as every starter world's is: six by four squares of cobble
+ * walled round, a doorway and a hatch in the wall, and a stall two squares wide. `doors` is the world's list of
+ * door terrains (`mapSettings.doorTerrains`); none leaves the shipped one.
+ */
+export function withAuthoredMarket(w: WorldDoc, doors?: string[]): WorldDoc {
+  const names: Record<string, string> = { "#": "wall", d: "doorway", h: "hatch", ".": "cobble", s: "stall" };
+  const rows = ["##d###", "#.ss.#", "#....h", "######"];
+  const cells = rows.join("");
+  w.grids.market_square_grid = {
+    id: "market_square_grid",
+    width: 6,
+    height: 4,
+    cellMeters: 1.524,
+    terrain: [...cells].map((c) => names[c] ?? "cobble"),
+    blocked: [...cells].flatMap((c, i) => (c === "#" || c === "s" ? [i] : [])),
+    zones: {},
+  };
+  const square = w.places.market_square;
+  if (square) square.grid = "market_square_grid";
+  if (doors) w.mapSettings = { display: "knowledge", grid: { movement: false, sightRadius: 3 }, doorTerrains: doors };
+  return w;
+}

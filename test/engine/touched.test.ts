@@ -18,6 +18,8 @@ import { chatDraftOf, draftEvent, NO_DRAFT } from "../../src/engine/world-draft"
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
 import { doorsAt, editedMap, shapeOf, squareEditsOf, type DoorState, type Shape, whereOf } from "../../src/packs/space/core/grid-play";
+import { drawnOf } from "../../src/packs/space/core/grid-model";
+import { MAP_DEFAULTS } from "../../src/shared/map-config";
 import { baseWorld, fold, POV, startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -210,6 +212,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "space.door", data: { scope: "inn", x: 6, y: 2, state: "locked" } },
   { type: "space.shape", data: { entity: "table", size: [2, 1], way: true, view: false } },
   { type: "space.squares", data: { map: "inn_ground", squares: [{ x: 9, y: 3, symbol: "o" }], legend: { o: { terrain: "oven", blocked: true } } } },
+  // The same event on a grid authored without a map (a starter world's), kept under the grid's own id: it too is the space slice's alone, so it declares nothing.
+  { type: "space.squares", data: { map: "yard_grid", squares: [{ x: 1, y: 0, symbol: "x" }], legend: { x: { terrain: "rubble", blocked: true } } } },
   { type: "space.where", data: { entity: "you", zone: "by the hearth", words: "behind the bar" } },
   // This chat's own change to the world's places, paths and maps is the engine's world slice (DEPTH2-PLAN §2), never an entity's definition: an Upgrade carries it to the new revision itself (`carryDraft`), as the last test here shows.
   { type: "engine.world", data: { collection: "routes", id: "back_way", value: { id: "back_way", from: "inn", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true }, over: null } },
@@ -399,6 +403,9 @@ describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
       w.places.inn = { id: "inn", name: "The Gull", fields: {} };
       w.maps.room = { id: "room", scope: "inn", layout: rows, legend };
       w.entities.table = { id: "table", kind: "thing", name: table, tier: "background", fields: { place: "inn" }, relations: [] };
+      // The yard's grid is authored with no map: three squares of cobble.
+      w.places.yard = { id: "yard", name: "The yard", grid: "yard_grid", fields: {} };
+      w.grids.yard_grid = { id: "yard_grid", width: 3, height: 1, terrain: ["cobble", "cobble", "cobble"], blocked: [], zones: {} };
       return migrateWorld(w);
     };
     const a = revision(["#########", "#.......#", "#.......+", "#########"], {}, "Long table");
@@ -407,6 +414,7 @@ describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
       { type: "space.door", data: { scope: "inn", x: 8, y: 2, state: "locked" } },
       { type: "space.shape", data: { entity: "table", size: [3, 1], way: true, view: false } },
       { type: "space.squares", data: { map: "room", squares: [{ x: 3, y: 1, symbol: "x" }], legend: { x: rubble } } },
+      { type: "space.squares", data: { map: "yard_grid", squares: [{ x: 1, y: 0, symbol: "x" }], legend: { x: rubble } } },
       { type: "space.where", data: { entity: "table", zone: "under the window" } },
     ]);
     // The next revision is the user's own edit of the map in Build: a hearth in a corner, and a bench on the square the rubble covers.
@@ -431,6 +439,9 @@ describe("what play changed on a grid, across an Upgrade (plan §8.2)", () => {
     expect(room(c)).toEqual({ ...asPlayed, layout: ["####w####", "#H.x....#", "#.......+", "#########"], legend: { H: hearth, b: bench, w: pane, x: rubble } });
     // Where it stands within its place is play's as it left it, through both.
     expect(whereOf(state, "table")).toEqual({ zone: "under the window" });
+    // A grid authored with no map keeps what play drew on it through both revisions as well.
+    const yard = drawnOf(playedWorld(c, state), "yard", MAP_DEFAULTS, state);
+    expect([yard?.terrain, [...(yard?.blocked ?? [])]]).toEqual([["cobble", "rubble", "cobble"], [1]]);
   });
 });
 

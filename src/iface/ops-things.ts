@@ -506,7 +506,7 @@ function scenePlace(o: OpContext): string | null {
  * A thing made at a spot, or at none, by today's things model asked for advice: the ones of its name already there, a holder that holds
  * nothing or a rule bent are reports on the operation, and what the catalog's row gives it comes back apart, to be recorded as filled in.
  */
-function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }>): EntityId | undefined | Unread {
+export function makeThing(o: OpContext, op: Extract<ItemOp, { do: "make" }>): EntityId | undefined | Unread {
   const out = applyItemOp(o.draft.w, op, { ...itemOptions(o), advise: true });
   if ("code" in out) {
     if (out.code === "missing_type") return unknownType(o, op.type ?? "");

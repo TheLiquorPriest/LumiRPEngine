@@ -1,7 +1,8 @@
 // Changing part of a grid in play (plan §8.2, `map_edit`): squares, rectangles and lines drawn with
 // a symbol, and the legend added to or taken from, the rest of the map left as it is. The change is
 // kept as that change, square by square, over the map (`space.squares`), so a later edit of the
-// world's own map still shows through wherever this one did not draw.
+// world's own map still shows through wherever this one did not draw. A grid authored without a
+// map (the starter worlds') is changed the same way, its change kept under the grid's own id.
 
 import type { PlaceId } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
@@ -13,7 +14,7 @@ import type { WorldState } from "../../engine/state";
 import { cellKey, editedMap, SQUARES_EVENT, squareEditsOf } from "../../packs/space/core/grid-play";
 import { pathText } from "../../shared/schema-check";
 import type { ChangeInput, Report } from "../../store/types";
-import { cellOf, indexOf, squareKey, type Drawn, type Square } from "../../packs/space/core/grid-model";
+import { cellOf, drawnOf, indexOf, squareKey, type Drawn, type Square } from "../../packs/space/core/grid-model";
 import type { Laid } from "./lay";
 import { squaresEvent } from "./record";
 
@@ -74,8 +75,12 @@ export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: Pla
   const played = playedWorld(world, state);
   const grid = gridOf(played, place);
   const map = grid?.map !== undefined && hasOwn(played.maps, grid.map) ? played.maps[grid.map] : undefined;
-  if (!grid || !map?.layout) return { changes: [], scope: null, reports: [{ code: "no_map", values: { place } }] };
-  const was = squareEditsOf(state, map.id);
+  // A map drawn row by row, or a grid authored without a map: the change is kept under the id of either.
+  const authored = grid !== undefined && grid.map === undefined;
+  if (!grid || (!authored && !map?.layout)) return { changes: [], scope: null, reports: [{ code: "no_map", values: { place } }] };
+  const key = authored ? grid.id : (map?.id ?? grid.id);
+  const now = authored ? drawnOf(played, place, undefined, state) : null;
+  const was = squareEditsOf(state, key);
   const legendNow: Record<string, MapCellDef | null> = { ...(was?.legend ?? {}), ...legend };
   const reports: Report[] = [];
   const drawn = new Map<string, { at: Square; symbol: string }>();
@@ -85,7 +90,7 @@ export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: Pla
       reports.push({ code: "bad_symbol", values: { symbol: stroke.symbol } });
       continue;
     }
-    const named = hasOwn(legendNow, stroke.symbol) ? legendNow[stroke.symbol] !== null : hasOwn(map.legend ?? {}, stroke.symbol) || hasOwn(DEFAULT_LEGEND, stroke.symbol);
+    const named = hasOwn(legend, stroke.symbol) ? legend[stroke.symbol] !== null : now !== null ? hasOwn(now.legend, stroke.symbol) : hasOwn(legendNow, stroke.symbol) ? legendNow[stroke.symbol] !== null : hasOwn(map?.legend ?? {}, stroke.symbol) || hasOwn(DEFAULT_LEGEND, stroke.symbol);
     if (!named && !unnamed.has(stroke.symbol)) {
       unnamed.add(stroke.symbol);
       reports.push({ code: "not_in_legend", values: { symbol: stroke.symbol } });
@@ -100,13 +105,13 @@ export function editMap(world: WorldDoc, state: Readonly<WorldState>, place: Pla
     const c = cellOf(d.at);
     cells[cellKey(c.x, c.y)] = d.symbol;
   }
-  const { problems } = readMap(editedMap(map, { cells, legend: legendNow }));
+  const { problems } = readMap(map?.layout !== undefined ? editedMap(map, { cells, legend: legendNow }) : { id: key, scope: place, layout: ["."], legend: Object.fromEntries(Object.entries(legendNow).filter(([, cell]) => cell !== null)) });
   if (problems.length > 0) return { changes: [], scope: place, reports: [...reports, ...problems.map((p) => ({ code: "bad_map", values: { at: pathText(p.path), why: p.message } }))] };
   const squares = [...drawn.values()];
   const kept = squares.filter((d) => !unnamed.has(d.symbol));
   const guessed = squares.filter((d) => unnamed.has(d.symbol));
   const changes: ChangeInput[] = [];
-  if (kept.length > 0 || Object.keys(legend).length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, kept, legend) });
-  if (guessed.length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(map.id, guessed, {}), standing: "assumed", source: "default" });
+  if (kept.length > 0 || Object.keys(legend).length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(key, kept, legend) });
+  if (guessed.length > 0) changes.push({ lane: "engine", op: SQUARES_EVENT, value: squaresEvent(key, guessed, {}), standing: "assumed", source: "default" });
   return { changes, scope: place, reports };
 }

@@ -179,19 +179,22 @@ export const shapeEventDef: EventTypeDef<PackEvent> = {
   describe: () => "",
 };
 
-/** Squares of a map drawn anew, and its legend changed (`{map, squares: [{x, y, symbol}], legend: {symbol: cell or null}}`): laid over what play changed before. */
+/** Squares of a map, or of a grid authored without one, drawn anew, and its legend changed (`{map, squares: [{x, y, symbol}], legend: {symbol: cell or null}}`, `map` the id of the map or the grid): laid over what play changed before. */
 export const squaresEventDef: EventTypeDef<PackEvent> = {
   type: SQUARES_EVENT,
   validate(e, ctx) {
     const map = strOf(e.data.map);
+    // A map drawn row by row, or a grid authored without a map (its id is the grid's own).
     const doc = safeKey(map) ? own(ctx.world.maps, map) : undefined;
-    if (!doc?.layout) return reject("missing_map", `no grid map ${map}`);
+    const authored = doc === undefined && safeKey(map) ? own(ctx.world.grids, map) : undefined;
+    if (!doc?.layout && authored?.map !== undefined) return reject("missing_map", `no grid map ${map}`);
+    if (!doc?.layout && authored === undefined) return reject("missing_map", `no grid map ${map}`);
     const squares = e.data.squares ?? [];
     if (!Array.isArray(squares) || !squares.every((s) => isRecord(s) && fromZero(s.x) && fromZero(s.y) && oneSymbol(s.symbol))) return reject("bad_squares", "each square is x and y from 0 and one symbol");
     const legend = e.data.legend ?? {};
     if (!isRecord(legend) || !Object.keys(legend).every(oneSymbol)) return reject("bad_legend", "a legend's symbols are one character each");
     const given = Object.fromEntries(Object.entries(legend).filter(([, cell]) => cell !== null));
-    if (Object.keys(given).length > 0 && readMap({ id: doc.id, scope: doc.scope, layout: ["."], legend: given }).problems.length > 0) return reject("bad_legend", "that is not what a legend's symbol can stand for");
+    if (Object.keys(given).length > 0 && readMap({ id: map, scope: doc?.scope ?? map, layout: ["."], legend: given }).problems.length > 0) return reject("bad_legend", "that is not what a legend's symbol can stand for");
     return squares.length > 0 || Object.keys(legend).length > 0 ? null : reject("no_change", "no square and no symbol is changed");
   },
   apply(e, state) {

@@ -70,6 +70,7 @@ door_set: The door at {{square}} is {{state}} now{{#was}}; it was {{was}}{{/was}
 laid: {{place}} has a map now: {{width}} by {{height}} squares of {{size}}{{#defaulted}} (nobody gave a width, so the setting's is taken as an assumption){{/defaulted}}{{#round}}, counted in rounds of {{seconds}} seconds{{/round}}.
 laid_off: {{who}} stood on the square the map was laid over, and stand on no square of the new map yet.
 edited: {{count}} squares of the map of {{place}} were drawn anew{{#symbols}}, and its legend changed for {{symbols}}{{/symbols}}.
+fixture_lifted: {{what}} was drawn on the map; it is a thing now, at {{square}}, {{columns}} by {{rows}} squares{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}, and the squares it was drawn on are floor.
 legend_read_floor: {{op}}: {{symbol}} was read as floor named {{words}}; with "blocks": true it would be a square nobody walks through.
 legend_read_blocks: {{op}}: {{symbol}} was read as {{words}}, a square nobody walks through.
 legend_unreadable: {{op}}: legend{{#symbol}} {{symbol}}{{/symbol}} cannot be read, you sent {{value}}. A legend entry is one character, and what its squares are: wall, floor or door; words, read as floor named by them, or with "blocks": true as a square nobody walks through, such as {"terrain": "deep water", "blocks": true}; {"item": a thing}; {"place": a place's id}; {"door": true, "place": a room's id}; or {"zone": a name}. A symbol not in the legend is # wall, . floor, + door, or a space for nothing.
@@ -77,6 +78,7 @@ grid_off_grid: {{#op}}{{op}}: {{/op}}{{#what}}{{what}}: {{/what}}square {{square
 grid_fell_off: {{#op}}{{op}}: {{/op}}{{count}} squares of stroke {{stroke}} ({{symbol}}) are off the map, which is {{width}} by {{height}} squares, and were not drawn.
 grid_door_off: {{#op}}{{op}}: {{/op}}the door at {{square}} is outside the room, which is {{width}} by {{height}} squares, and was not drawn.
 grid_stands_nowhere: {{#op}}{{op}}: {{/op}}{{what}} stands on no square.
+grid_not_a_fixture: {{#op}}{{op}}: {{/op}}square {{square}} is not a fixture drawn on the map (terrain of a name, drawn with one symbol), so nothing was lifted there.
 grid_off_edge: {{#op}}{{op}}: {{/op}}{{what}} at {{square}} reaches past the edge of the map.
 grid_in_wall: {{#op}}{{op}}: {{/op}}{{what}} stands on {{squares}}, which block the way; it was put there all the same.
 grid_overlaps: {{#op}}{{op}}: {{/op}}{{what}} stands over {{with}}.

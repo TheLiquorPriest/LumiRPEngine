@@ -13,7 +13,7 @@
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
-import { cellIndex, costMinutes, DEFAULT_CELL_METRES, gridOf, standingGrid, type Cell } from "../../../shared/grid";
+import { cellIndex, costMinutes, DEFAULT_CELL_METRES, doorTerrainsOf, gridOf, isDoorTerrain, standingGrid, type Cell } from "../../../shared/grid";
 import { MAP_DEFAULTS, METRES_PER_FOOT, type Diagonal, type MapConfig, type Unit } from "../../../shared/map-config";
 import { compileMaps, DEFAULT_LEGEND, VOID_TERRAIN } from "../../../shared/maps";
 import type { GridDef, MapCellDef, MapDoc, RulesetDef, WorldDoc } from "../../../shared/world";
@@ -97,27 +97,91 @@ export interface Drawn {
   scale: Scale;
 }
 
-/** Terrain a door can be opened and shut on; today's entrance finder reads the same words. */
-const DOOR = /door|gate/i;
+const TERRAIN_SYMBOL: Readonly<Record<string, string>> = { wall: "#", floor: ".", "": ".", [VOID_TERRAIN]: " " };
 
-const TERRAIN_SYMBOL: Readonly<Record<string, string>> = { wall: "#", door: "+", floor: ".", "": ".", [VOID_TERRAIN]: " " };
+/** The symbols a grid authored without a map draws its other terrains with: letters and digits, then the letters of every script in turn, so none runs out or repeats. */
+function* freeSymbols(taken: ReadonlySet<string>): Generator<string> {
+  for (const s of "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") if (!taken.has(s)) yield s;
+  for (let c = 0xc0; c <= 0x10ffff; c++) {
+    const s = String.fromCodePoint(c);
+    if (/^\p{L}$/u.test(s) && !taken.has(s)) yield s;
+  }
+}
 
-/** Symbols for a grid authored without a map: the default legend's, and a letter for each other terrain. */
-function symbolsOfTerrain(grid: GridDef): { symbols: string[]; legend: Record<string, MapCellDef> } {
+/**
+ * Symbols for a grid authored without a map, as the plan's map draws one: `#` wall, `.` floor, `+`
+ * for each terrain `doors` names, and a symbol of its own for every other terrain (and a legend line).
+ */
+function symbolsOfTerrain(grid: GridDef, doors: readonly string[]): { symbols: string[]; legend: Record<string, MapCellDef> } {
   const legend: Record<string, MapCellDef> = { ...DEFAULT_LEGEND };
   const blocked = new Set(grid.blocked);
   const given = new Map<string, string>(Object.entries(TERRAIN_SYMBOL));
-  const free = [..."abcdefghijklmnopqrstuvwxyz0123456789"];
+  const free = freeSymbols(new Set(["#", ".", "+", " "]));
   const symbols = grid.terrain.map((t, i) => {
     let s = given.get(t);
-    if (s === undefined) {
-      s = free.shift() ?? "?";
+    if (s === undefined && isDoorTerrain(t, doors)) {
+      s = "+";
       given.set(t, s);
-      legend[s] = { terrain: t, ...(blocked.has(i) ? { blocked: true } : {}) };
+    }
+    if (s === undefined) {
+      const fresh: string = free.next().value ?? "?";
+      s = fresh;
+      given.set(t, fresh);
+      legend[fresh] = { terrain: t, ...(blocked.has(i) ? { blocked: true } : {}) };
     }
     return s;
   });
   return { symbols, legend };
+}
+
+/** What one square drawn with a legend entry is, as the compiler reads a layout (`shared/maps.ts compileGrid`): its terrain, whether it blocks, the zone it joins and the thing it carries. */
+function drawnCell(cell: MapCellDef | undefined): { terrain: string; blocked: boolean; zone?: string; item?: string } {
+  if (cell === undefined || cell === "floor") return { terrain: "floor", blocked: false };
+  if (cell === "wall") return { terrain: "wall", blocked: true };
+  if (cell === "door") return { terrain: "door", blocked: false };
+  if ("door" in cell) return { terrain: "door", blocked: false, zone: cell.place };
+  if ("terrain" in cell) return { terrain: cell.terrain, blocked: cell.blocked === true };
+  if ("item" in cell) return { terrain: "floor", blocked: false, item: cell.item };
+  return { terrain: "floor", blocked: false, zone: "place" in cell ? cell.place : cell.zone };
+}
+
+/** A grid authored without a map as play drew it anew: the squares the chat's changes name, and every square whose symbol the changes' legend redefines, read through that legend as the compiler reads a layout; the rest as authored. */
+function overlaid(grid: GridDef, symbols: readonly string[], legend: Readonly<Record<string, MapCellDef>>, edits: SquareEdits) {
+  const shown = [...symbols];
+  const meaning: Record<string, MapCellDef> = { ...legend };
+  for (const [symbol, cell] of Object.entries(edits.legend)) {
+    if (cell === null) delete meaning[symbol];
+    else meaning[symbol] = cell;
+  }
+  const touched = new Set<number>();
+  for (const key of Object.keys(edits.cells)) {
+    const [x = -1, y = -1] = key.split(",").map(Number);
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= grid.width || y >= grid.height) continue;
+    shown[y * grid.width + x] = edits.cells[key] ?? " ";
+    touched.add(y * grid.width + x);
+  }
+  shown.forEach((s, i) => {
+    if (hasOwn(edits.legend, s)) touched.add(i);
+  });
+  const terrain = [...grid.terrain];
+  const blocked = new Set(grid.blocked);
+  const items: Record<EntityId, number> = Object.fromEntries(Object.entries(grid.items ?? {}).filter(([, at]) => !touched.has(at)));
+  const zones: Record<string, number[]> = Object.fromEntries(Object.entries(grid.zones).map(([zone, cells]) => [zone, cells.filter((i) => !touched.has(i))]));
+  for (const i of [...touched].sort((a, b) => a - b)) {
+    const symbol = shown[i] ?? " ";
+    const c = drawnCell(hasOwn(meaning, symbol) ? meaning[symbol] : undefined);
+    terrain[i] = c.terrain;
+    if (c.blocked) blocked.add(i);
+    else blocked.delete(i);
+    if (c.zone !== undefined) (zones[c.zone] ??= []).push(i);
+    if (c.item !== undefined && !hasOwn(items, c.item)) items[c.item] = i;
+  }
+  for (const zone of Object.keys(zones)) {
+    const cells = zones[zone] ?? [];
+    if (cells.length === 0) delete zones[zone];
+    else zones[zone] = [...cells].sort((a, b) => a - b);
+  }
+  return { symbols: shown, legend: meaning, terrain, blocked, zones, items };
 }
 
 /** Each played world's maps with play's square changes laid over, by the changes' record: compiled once for each. */
@@ -153,6 +217,11 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapCon
   if (over) ({ map, grid } = over);
   let symbols: string[];
   let legend: Record<string, MapCellDef>;
+  let terrain = grid.terrain;
+  let blocked = new Set(grid.blocked);
+  let zones: Readonly<Record<string, readonly number[]>> = grid.zones;
+  let items: Readonly<Record<EntityId, number>> = grid.items ?? {};
+  const terrains = doorTerrainsOf(world);
   if (map?.layout) {
     legend = { ...DEFAULT_LEGEND, ...(map.legend ?? {}) };
     symbols = [];
@@ -161,13 +230,17 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapCon
       const row = [...(map.layout[y] ?? "")];
       for (let x = 0; x < grid.width; x++) symbols.push(row[x] ?? " ");
     }
-  } else ({ symbols, legend } = symbolsOfTerrain(grid));
+  } else {
+    ({ symbols, legend } = symbolsOfTerrain(grid, terrains));
+    const changes = play ? squareEditsOf(play, grid.id) : null;
+    if (changes) ({ symbols, legend, terrain, blocked, zones, items } = overlaid(grid, symbols, legend, changes));
+  }
   const doors = new Set<number>();
-  grid.terrain.forEach((t, i) => {
-    if (DOOR.test(t)) doors.add(i);
+  terrain.forEach((t, i) => {
+    if (isDoorTerrain(t, terrains)) doors.add(i);
   });
   const seeThrough = new Set<number>();
-  for (const i of grid.blocked) {
+  for (const i of blocked) {
     const s = symbols[i] ?? "";
     if (hasOwn(legend, s) && seesThrough(legend[s])) seeThrough.add(i);
   }
@@ -180,13 +253,13 @@ export function drawnOf(world: WorldDoc, scope: PlaceId, config: Readonly<MapCon
     width: grid.width,
     height: grid.height,
     symbols,
-    terrain: grid.terrain,
-    blocked: new Set(grid.blocked),
+    terrain,
+    blocked,
     seeThrough,
     doors,
-    zones: grid.zones,
+    zones,
     legend,
-    items: grid.items ?? {},
+    items,
     scale: step ? { ...scale, step } : scale,
   };
 }

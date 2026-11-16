@@ -17,7 +17,8 @@ import { migrateStore } from "../../../src/store/schema";
 import { openStore, type UserStore } from "../../../src/store/store";
 import { type EngineDeps, engineTools, Lines, mapView, mapWording, SHIPPED_GUIDANCE, shippedTexts, stateScan } from "../../../src/iface/index";
 import { PORTS } from "../rig";
-import { CELLAR, INN, registry, TOWN, worldWith } from "./fixtures";
+import { drawnOf } from "../../../src/packs/space/core/grid-model";
+import { CELLAR, INN, registry, TOWN, withAuthoredMarket, worldWith } from "./fixtures";
 
 const USER = "user-a";
 const CHAT = "chat-a";
@@ -478,5 +479,43 @@ describe("what the map tools never refuse", () => {
     expect(r.reports).toEqual(["map_lay: no legend names T, so it reads as floor, and what was drawn with it is recorded as assumed. Give it an entry in the legend to say what it is."]);
     expect(t.s.changes(t.first.id).map((c) => [c.op, c.standing, c.source])).toEqual([["engine.world", "assumed", "default"]]);
     wordsFromFiles(r);
+  });
+});
+
+describe("a grid authored without a map, as every starter world's is", () => {
+  test("prints its doors as + and each terrain by a symbol of its own; map_edit changes it, a hatch the world names a door shuts, and a stall lifted is a thing", async () => {
+    const t = await mapRig(withAuthoredMarket(worldWith(), ["door", "doorway", "gate", "hatch"]));
+    const shown = texts(await t.call("map_view", { at: "Market Square" }))[0] ?? "";
+    expect(shown).toContain("   1  # # + # # #\n   2  # a b b a #\n   3  # a a a a +\n   4  # # # # # #");
+    expect(shown).toContain("# wall   + door   a cobble   b stall");
+    // The doorway is walled up and a puddle drawn: kept as the chat's change over the grid.
+    const edited = await t.call("map_edit", { at: "Market Square", strokes: [{ symbol: "#", squares: [[3, 1]] }, { symbol: "~", squares: [[2, 3]] }], legend: { "~": { terrain: "puddle" } }, ...SRC });
+    expect(edited.error).toBeUndefined();
+    expect(t.s.changes(t.first.id).map((c) => c.op)).toEqual(["space.squares"]);
+    expect(texts(await t.call("map_view", { at: "Market Square" }))[0]).toContain("   1  # # # # # #\n   2  # a b b a #\n   3  # ~ a a a +");
+    // The world names a hatch a door, so it locks.
+    const locked = await t.call("map_door", { at: "Market Square", door: [6, 3], state: "locked", ...SRC });
+    expect(locked.error).toBeUndefined();
+    expect(opOf(locked).door).toEqual({ at: [6, 3], was: "open", now: "locked" });
+    // The stall is a thing of its own where it was drawn, as large as it was and blocking as it did; its squares are floor.
+    const lifted = await t.call("map_edit", { at: "Market Square", things: [{ square: [3, 2], name: "overturned stall" }, { square: [1, 1] }], ...SRC });
+    expect(lifted.error).toBeUndefined();
+    expect(texts(lifted)[0]).toMatch(/^overturned stall \[thing_overturned_stall_\w+\] was drawn on the map; it is a thing now, at \(3,2\), 2 by 1 squares, blocking the way, blocking the view, and the squares it was drawn on are floor\.$/);
+    expect(lifted.reports).toEqual(["map_edit: square (1,1) is not a fixture drawn on the map (terrain of a name, drawn with one symbol), so nothing was lifted there."]);
+    const view = texts(await t.call("map_view", { at: "Market Square" }))[0] ?? "";
+    expect(view).toContain("   2  # a . . a #");
+    expect(view).toMatch(/overturned stall \[thing_overturned_stall_\w+\] \(3,2\), 2 by 1 squares, blocking the way, blocking the view/);
+    wordsFromFiles(lifted);
+  });
+
+  test("a hatch is no door unless the world says so, and no terrain runs out of symbols", () => {
+    const world = withAuthoredMarket(worldWith());
+    expect([...(drawnOf(world, "market_square")?.doors ?? [])]).toEqual([2]);
+    const many = withAuthoredMarket(worldWith(), ["door", "hatch"]);
+    const grid = many.grids.market_square_grid;
+    if (!grid) throw new Error("no grid");
+    grid.terrain = grid.terrain.map((_, i) => `terrain ${i}`);
+    const symbols = drawnOf(many, "market_square")?.symbols ?? [];
+    expect([symbols.length, new Set(symbols).size]).toEqual([24, 24]);
   });
 });
