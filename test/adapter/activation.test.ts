@@ -29,7 +29,7 @@ describe("how an entry activated", () => {
       chat: async () => ({ id: "c", user: "u", character: null, name: "", metadata: { wi_state: { u: { stickyLeft: 1 } } }, updatedAt: 0 }),
       entries: async () => [entry({ id: "s", uid: "u", sticky: 3 }), entry({ id: "k", uid: "k" })],
       entry: async () => null,
-      book: async (id: string) => ({ id, name: "Harbor lore", description: "", metadata: {}, updatedAt: 0 }),
+      book: async (id: string) => ({ id, name: "Harbor lore", description: "", metadata: {}, createdAt: 0, updatedAt: 0 }),
     };
     const told = await new Activations(reads, () => {}).tell("c", [raw("s"), raw("k")]);
     expect(told.map((e) => [e.id, e.how, e.bookName, e.told])).toEqual([["s", "sticky", "Harbor lore", true], ["k", "keyword", "Harbor lore", true]]);

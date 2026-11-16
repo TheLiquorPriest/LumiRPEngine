@@ -65,6 +65,8 @@ export interface LvBook {
   name: string;
   description: string;
   metadata: JsonObject;
+  /** When Lumiverse made the book, in seconds. */
+  createdAt: number;
   updatedAt: number;
 }
 
@@ -243,7 +245,7 @@ export function messageFrom(row: Record<string, unknown>): LvMessage {
 
 /** A world book (`rowToBook`, `world-books.service.ts:271-282`). */
 export function bookFrom(row: Record<string, unknown>): LvBook {
-  return { id: id(row.id), name: str(row.name), description: str(row.description), metadata: object(parsed(row.metadata, "metadata")), updatedAt: num(row.updated_at) };
+  return { id: id(row.id), name: str(row.name), description: str(row.description), metadata: object(parsed(row.metadata, "metadata")), createdAt: num(row.created_at), updatedAt: num(row.updated_at) };
 }
 
 /** The keys Lumiverse moves out of an entry's extensions (`world-books.service.ts:219-236`). */

@@ -8,10 +8,13 @@ import type { LumiverseReads } from "./reads";
 
 /** One user's books, each method asked with the user it is for. */
 export interface UserBooks {
-  attached(user: string, chat: string): Promise<string[]>;
+  attached(user: string, chat: string, at?: BooksAt): Promise<string[]>;
   book(user: string, id: string): Promise<LvBook | null>;
   entries(user: string, book: string): Promise<LvEntry[]>;
-  entry(user: string, id: string): Promise<LvEntry | null>;
+  /** One entry; name its book where it is known (the tag's lore carries it), so no other book is read for it. */
+  entry(user: string, id: string, book?: string): Promise<LvEntry | null>;
+  /** Every book of the user's, as a picker lists it (`listBooks`); `chat` says which have the chat attached. */
+  list(user: string, chat: string | null): Promise<BookListing[]>;
 }
 
 /** Who a generation is for, when the caller knows: the character speaking and the persona in use. */
@@ -32,10 +35,12 @@ export async function attachedBooks(reads: LumiverseReads, chatId: string, at: B
   const push = (id: unknown): void => {
     if (typeof id === "string" && id !== "" && !out.includes(id)) out.push(id);
   };
-  for (const character of await bookCharacters(reads, chat, at.speaker ?? chat.character)) {
+  const speaker = at.speaker !== undefined && at.speaker !== null && at.speaker !== "" ? at.speaker : chat.character;
+  for (const character of await bookCharacters(reads, chat, speaker)) {
     for (const id of characterBooks((await reads.character(character))?.extensions)) push(id);
   }
-  push((await personaOf(reads, at.persona ?? null))?.book);
+  // A temporary chat is persona-less (`prompt-assembly.service.ts:1923-1925`): no persona's book.
+  if (chat.metadata.temporary !== true) push((await personaOf(reads, at.persona ?? null))?.book);
   const own = chat.metadata.chat_world_book_ids;
   if (Array.isArray(own)) for (const id of own) push(id);
   const global = (await reads.setting("globalWorldBooks"))?.value;
@@ -87,15 +92,53 @@ async function personaOf(reads: LumiverseReads, asked: string | null): Promise<L
   return await reads.defaultPersona();
 }
 
+/** The mark Lumiverse keeps on a book RPE made for itself (`metadata.lumi_rp_engine`): a list of books to pin from leaves them out. */
+export const ENGINE_BOOK_MARK = "lumi_rp_engine";
+
+/** One book as a picker lists it. */
+export interface BookListing {
+  id: string;
+  name: string;
+  /** Whether the chat asked about has it attached (its `metadata.chat_world_book_ids`); false where no chat was named. */
+  attached: boolean;
+  /** Whether a character brought it: a character's card lists it (`extensions.world_book_ids`, else `world_book_id`), or Lumiverse made it from a card (`metadata.source_character_id`). */
+  character: boolean;
+  /** When Lumiverse made it, in seconds; null where it records none. */
+  added: number | null;
+}
+
+/**
+ * Every book of the user's, as Build's pickers list them: the engine's own left out, the books the chat has first, then by name. Each
+ * says whether a character brought it and when it was added, which tells apart books that share a name (a character's card brings
+ * its own copy), and whether the chat has it.
+ */
+export async function listBooks(reads: LumiverseReads, chatId: string | null): Promise<BookListing[]> {
+  const [books, characters, chat] = await Promise.all([reads.books(), reads.characters(), chatId === null ? null : reads.chat(chatId)]);
+  const own = chat?.metadata.chat_world_book_ids;
+  const attached = new Set(Array.isArray(own) ? own.filter((id): id is string => typeof id === "string") : []);
+  const brought = new Set(characters.flatMap((c) => characterBooks(c.extensions)));
+  return books
+    .filter((b) => b.metadata[ENGINE_BOOK_MARK] !== true)
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      attached: attached.has(b.id),
+      character: brought.has(b.id) || (typeof b.metadata.source_character_id === "string" && b.metadata.source_character_id !== ""),
+      added: b.createdAt > 0 ? b.createdAt : null,
+    }))
+    .sort((a, b) => Number(b.attached) - Number(a.attached) || a.name.localeCompare(b.name));
+}
+
 /**
  * One user's books over their reads. Another user's books are none of RPE's business here: asking for
  * them reads nothing.
  */
 export function loreBooks(reads: LumiverseReads, user: string): UserBooks {
   return {
-    attached: async (asker, chat) => (asker === user ? await attachedBooks(reads, chat) : []),
+    attached: async (asker, chat, at) => (asker === user ? await attachedBooks(reads, chat, at) : []),
     book: async (asker, id) => (asker === user ? await reads.book(id) : null),
     entries: async (asker, book) => (asker === user ? await reads.entries(book) : []),
-    entry: async (asker, id) => (asker === user ? await reads.entry(id) : null),
+    entry: async (asker, id, book) => (asker === user ? await reads.entry(id, book) : null),
+    list: async (asker, chat) => (asker === user ? await listBooks(reads, chat) : []),
   };
 }

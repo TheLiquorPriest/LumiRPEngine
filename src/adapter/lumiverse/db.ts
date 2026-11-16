@@ -19,6 +19,7 @@ import { closeSync, openSync, readSync, statSync, type Stats } from "node:fs";
 import type { JsonValue } from "../../shared/json";
 import { SourceOff, type LumiverseReads, type LvStep, type Places } from "./reads";
 import { bookFrom, characterFrom, chatFrom, entryFrom, messageFrom, personaFrom, presetFrom, settingFrom, Unreadable, type LvMessage } from "./rows";
+import { KEEP, KEPT, Memo } from "./memo";
 import { textHash } from "./wire";
 
 /**
@@ -30,7 +31,7 @@ import { textHash } from "./wire";
 export const READ_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   chats: { id: "TEXT", user_id: "TEXT", character_id: "TEXT", name: "TEXT", metadata: "TEXT", updated_at: "INTEGER" },
   messages: { id: "TEXT", chat_id: "TEXT", index_in_chat: "INTEGER", is_user: "INTEGER", name: "TEXT", content: "TEXT", send_date: "INTEGER", swipe_id: "INTEGER", swipes: "TEXT", swipe_dates: "TEXT", extra: "TEXT", revision: "INTEGER" },
-  world_books: { id: "TEXT", user_id: "TEXT", name: "TEXT", description: "TEXT", metadata: "TEXT", updated_at: "INTEGER" },
+  world_books: { id: "TEXT", user_id: "TEXT", name: "TEXT", description: "TEXT", metadata: "TEXT", created_at: "INTEGER", updated_at: "INTEGER" },
   world_book_entries: {
     id: "TEXT",
     world_book_id: "TEXT",
@@ -121,15 +122,18 @@ const STEP = `m.id, m.chat_id, m.index_in_chat, m.is_user, m.swipe_id, m.revisio
     WHEN json_type(m.swipe_dates, '$[' || m.swipe_id || ']') IN ('integer', 'real') THEN json_extract(m.swipe_dates, '$[' || m.swipe_id || ']')
     END AS shown_date`;
 const ENTRY = "e.id, e.world_book_id, e.uid, e.key, e.keysecondary, e.content, e.comment, e.position, e.depth, e.role, e.order_value, e.constant, e.disabled, e.selective, e.vectorized, e.sticky, e.extensions, e.revision, e.updated_at";
+const CHARACTER = "id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at";
 const Q = {
   chat: "SELECT id, user_id, character_id, name, metadata, updated_at FROM chats WHERE id = ? AND user_id = ?",
   path: `SELECT ${STEP} ${OF_CHAT} ${ORDER}`,
   messages: `SELECT ${MESSAGE} ${OF_CHAT} ${ORDER} LIMIT ? OFFSET ?`,
   messagesById: `SELECT ${MESSAGE} ${OF_CHAT} AND m.id IN (SELECT value FROM json_each(?)) ${ORDER}`,
-  book: "SELECT id, name, description, metadata, updated_at FROM world_books WHERE id = ? AND user_id = ?",
+  book: "SELECT id, name, description, metadata, created_at, updated_at FROM world_books WHERE id = ? AND user_id = ?",
+  books: "SELECT id, name, description, metadata, created_at, updated_at FROM world_books WHERE user_id = ? ORDER BY created_at, rowid",
   entries: `SELECT ${ENTRY} FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.world_book_id = ? AND w.user_id = ? ORDER BY e.order_value, e.rowid`,
   entry: `SELECT ${ENTRY} FROM world_book_entries e JOIN world_books w ON w.id = e.world_book_id WHERE e.id = ? AND w.user_id = ?`,
-  character: "SELECT id, name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, tags, alternate_greetings, extensions, updated_at FROM characters WHERE id = ? AND user_id = ?",
+  character: `SELECT ${CHARACTER} FROM characters WHERE id = ? AND user_id = ?`,
+  characters: `SELECT ${CHARACTER} FROM characters WHERE user_id = ? ORDER BY rowid`,
   persona: "SELECT id, name, title, description, metadata, attached_world_book_id, is_default, is_narrator, updated_at FROM personas WHERE id = ? AND user_id = ?",
   // Lumiverse's own query for it (`services/personas.service.ts:184`).
   defaultPersona: "SELECT id, name, title, description, metadata, attached_world_book_id, is_default, is_narrator, updated_at FROM personas WHERE is_default = 1 AND user_id = ? LIMIT 1",
@@ -137,6 +141,11 @@ const Q = {
   setting: "SELECT key, value, updated_at FROM settings WHERE key = ? AND user_id = ?",
   // The breakdown of the chat's latest reply that has one: a swipe replaces its message's breakdown in place (`breakdown.service.ts:3-11`).
   breakdown: "SELECT b.data FROM message_breakdowns b JOIN messages m ON m.id = b.message_id WHERE b.chat_id = ? AND b.user_id = ? ORDER BY m.index_in_chat DESC, m.rowid DESC LIMIT 1",
+  // What says a book's entries are as they were read: Lumiverse's own signature of them (`world-books.service.ts:1083-1094`, which it makes its entity tags from) and the book's own `updated_at`; they move with any entry added, edited, reordered or removed.
+  bookStamp: "SELECT w.updated_at AS book, COUNT(e.id) AS count, COALESCE(MAX(e.updated_at), 0) AS latest, COALESCE(SUM(e.revision), 0) AS revisions FROM world_books w LEFT JOIN world_book_entries e ON e.world_book_id = w.id WHERE w.id = ? AND w.user_id = ?",
+  presetStamp: "SELECT updated_at, cache_revision FROM presets WHERE id = ? AND user_id = ?",
+  // Changes whenever another connection commits to the file, and for nothing else: a chat's rows read at one version are the chat's rows until it moves.
+  version: "PRAGMA data_version",
 } as const;
 
 /** How many times a statement is tried while Lumiverse holds the file locked, and the wait before the second try, doubled after. */
@@ -151,7 +160,7 @@ export interface DbReaderDeps {
   sleep(ms: number): Promise<void>;
   log(message: string): void;
   /** Its tries and first wait, read at each statement (the door's settings); `TRIES` and `RETRY_MS` when not given. */
-  settings?: () => { tries: number; retryMs: number };
+  settings?: () => { tries: number; retryMs: number; kept: number };
 }
 
 export interface DbState {
@@ -227,6 +236,8 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
   const release = (): void => {
     open?.db.close();
     open = null;
+    // A file opened again counts its versions from the start: nothing read before it is known to be as the file stands.
+    memo.clear();
   };
 
   const refuse = (why: string): SourceOff => {
@@ -305,6 +316,12 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
     }
   }
 
+  const memo = new Memo({ most: () => deps.settings?.().kept ?? KEPT, now: () => Date.now() });
+  /** Where Lumiverse's file stands: it moves whenever another connection commits, and for nothing else. */
+  const version = (): Promise<string> => step("the file's version", (db) => String(row(db.query(Q.version).get()).data_version));
+  /** What is read of a chat, held while the file stands as it did at the read. */
+  const ofChat = async <T>(chat: string, part: string, fill: () => Promise<T>): Promise<T> => memo.get(KEEP.chat(chat), await version(), Infinity, part, fill);
+
   const reader: DbReader = {
     kind: "database",
     async chat(chat) {
@@ -312,46 +329,67 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped(`chat ${chat}`, () => chatFrom(row(r)));
     },
     async path(chat) {
-      return step(`chat ${chat}'s messages`, (db) => {
-        // One read transaction: the chat and its messages as one moment of the file.
-        return db.transaction(() => {
-          if (db.query(Q.chat).get(chat, user) === null) return null;
-          return db.query(Q.path).all(chat, user).map((r): LvStep => {
-            const s = row(r);
-            return {
-              id: String(s.id),
-              chat: String(s.chat_id),
-              index: Number(s.index_in_chat),
-              role: s.is_user ? "user" : s.system ? "system" : "assistant",
-              swipe: Number(s.swipe_id),
-              swipes: Number(s.swipe_count),
-              hidden: s.hidden === 1,
-              revision: Number(s.revision),
-              shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null },
-            };
-          });
-        })();
-      });
+      const steps = await ofChat(chat, "path", () =>
+        step(`chat ${chat}'s messages`, (db) => {
+          // One read transaction: the chat and its messages as one moment of the file.
+          return db.transaction(() => {
+            if (db.query(Q.chat).get(chat, user) === null) return null;
+            return db.query(Q.path).all(chat, user).map((r): LvStep => {
+              const s = row(r);
+              return {
+                id: String(s.id),
+                chat: String(s.chat_id),
+                index: Number(s.index_in_chat),
+                role: s.is_user ? "user" : s.system ? "system" : "assistant",
+                swipe: Number(s.swipe_id),
+                swipes: Number(s.swipe_count),
+                hidden: s.hidden === 1,
+                revision: Number(s.revision),
+                shown: { hash: textHash(String(s.shown_text)), date: typeof s.shown_date === "number" ? s.shown_date : null },
+              };
+            });
+          })();
+        }),
+      );
+      return steps === null ? null : [...steps];
     },
     async messages(chat, places: Places) {
       const from = Math.max(0, Math.floor(places.from));
       const count = Math.max(0, Math.floor(places.to) - from);
       if (count === 0) return [];
-      const rows = await step(`chat ${chat}'s messages`, (db) => db.query(Q.messages).all(chat, user, count, from));
-      return rows.map((r): LvMessage => mapped(`a message of chat ${chat}`, () => messageFrom(row(r))));
+      const read = await ofChat(chat, `messages ${from} ${count}`, async () => {
+        const rows = await step(`chat ${chat}'s messages`, (db) => db.query(Q.messages).all(chat, user, count, from));
+        return rows.map((r): LvMessage => mapped(`a message of chat ${chat}`, () => messageFrom(row(r))));
+      });
+      return [...read];
     },
     async messagesById(chat, ids) {
       if (ids.length === 0) return [];
-      const rows = await step(`chat ${chat}'s messages`, (db) => db.query(Q.messagesById).all(chat, user, JSON.stringify(ids)));
-      return rows.map((r) => mapped(`a message of chat ${chat}`, () => messageFrom(row(r))));
+      const read = await ofChat(chat, `by id ${JSON.stringify(ids)}`, async () => {
+        const rows = await step(`chat ${chat}'s messages`, (db) => db.query(Q.messagesById).all(chat, user, JSON.stringify(ids)));
+        return rows.map((r) => mapped(`a message of chat ${chat}`, () => messageFrom(row(r))));
+      });
+      return [...read];
     },
     async book(book) {
       const r = await step(`world book ${book}`, (db) => db.query(Q.book).get(book, user));
       return r === null ? null : mapped(`world book ${book}`, () => bookFrom(row(r)));
     },
+    async books() {
+      const rows = await step("the user's world books", (db) => db.query(Q.books).all(user));
+      return rows.map((r) => mapped("a world book", () => bookFrom(row(r))));
+    },
     async entries(book) {
-      const rows = await step(`world book ${book}'s entries`, (db) => db.query(Q.entries).all(book, user));
-      return rows.map((r) => mapped(`an entry of world book ${book}`, () => entryFrom(row(r))));
+      // Held while Lumiverse's own signature of the book's entries and the book's `updated_at` are what they were at the read.
+      const stamp = await step(`world book ${book}'s entries`, (db) => {
+        const s = row(db.query(Q.bookStamp).get(book, user));
+        return s.book === null ? "none" : `${String(s.book)}.${String(s.count)}.${String(s.latest)}.${String(s.revisions)}`;
+      });
+      const read = await memo.get(KEEP.book(book), stamp, Infinity, "entries", async () => {
+        const rows = await step(`world book ${book}'s entries`, (db) => db.query(Q.entries).all(book, user));
+        return rows.map((r) => mapped(`an entry of world book ${book}`, () => entryFrom(row(r))));
+      });
+      return [...read];
     },
     async entry(entry) {
       const r = await step(`entry ${entry}`, (db) => db.query(Q.entry).get(entry, user));
@@ -360,6 +398,10 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
     async character(character) {
       const r = await step(`character ${character}`, (db) => db.query(Q.character).get(character, user));
       return r === null ? null : mapped(`character ${character}`, () => characterFrom(row(r)));
+    },
+    async characters() {
+      const rows = await step("the user's characters", (db) => db.query(Q.characters).all(user));
+      return rows.map((r) => mapped("a character", () => characterFrom(row(r))));
     },
     async persona(persona) {
       const r = await step(`persona ${persona}`, (db) => db.query(Q.persona).get(persona, user));
@@ -370,8 +412,15 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
       return r === null ? null : mapped("the default persona", () => personaFrom(row(r)));
     },
     async preset(preset) {
-      const r = await step(`preset ${preset}`, (db) => db.query(Q.preset).get(preset, user));
-      return r === null ? null : mapped(`preset ${preset}`, () => presetFrom(row(r)));
+      // Held while the preset's `updated_at` and `cache_revision` are what they were at the read.
+      const stamp = await step(`preset ${preset}`, (db) => {
+        const s = db.query(Q.presetStamp).get(preset, user);
+        return s === null ? "none" : `${String(row(s).updated_at)}.${String(row(s).cache_revision)}`;
+      });
+      return memo.get(KEEP.preset(preset), stamp, Infinity, "row", async () => {
+        const r = await step(`preset ${preset}`, (db) => db.query(Q.preset).get(preset, user));
+        return r === null ? null : mapped(`preset ${preset}`, () => presetFrom(row(r)));
+      });
     },
     async setting(key) {
       const r = await step(`setting ${key}`, (db) => db.query(Q.setting).get(key, user));
@@ -387,9 +436,13 @@ export function createDbReader(deps: DbReaderDeps): DbReader {
         return null;
       }
     },
+    dropChat: (chat) => memo.drop(KEEP.chat(chat)),
+    // The file says itself when its rows change (its version, a book's signature, a preset's stamp): no event is needed.
+    heard: () => undefined,
     state: () => ({ path: deps.path, off, checked }),
     close() {
       closed = true;
+      memo.clear();
       release();
     },
   };

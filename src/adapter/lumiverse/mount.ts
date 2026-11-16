@@ -14,7 +14,7 @@
 // missing) is logged once each time it changes, and kept for RPE's pages.
 
 import type { Clock, HistoryRange } from "rp-harness/contract";
-import { AuthRefused, bearerOf, LIVE_USER, rawRoute, route, type App, type Area } from "../../app";
+import { AuthRefused, bearerOf, LIVE_USER, rawRoute, route, RouteError, shape, type App, type Area } from "../../app";
 import type { LumiverseAccounts } from "../../app/accounts";
 import type { SettingsReader } from "../../app/config-read";
 import { PAGE_SETTINGS } from "../../app/page-settings";
@@ -29,6 +29,7 @@ import { followChanges, type ChatChange, type ChatChanges } from "./events";
 import { HeardGenerations } from "./heard";
 import { blocksHint } from "./hint";
 import { createHttpReads } from "./http-reads";
+import { CHAT_MESSAGES_PATH, readMessages } from "./messages";
 import { CONFIRM_PATH, EXTENSION_IDENTIFIER, EXTENSION_STATUS_PATH, LIVE_PATH, readCheckStopped, readConfirmAsk, readLiveAsk, START_PATH, STOPPED_PATH, USER_HEADER, type Confirmed, type ExtensionStatus, type Registration, type StartFacts } from "./pipe-wire";
 import { type EndpointCall, modelsEndpoint, type OwnerPass, providerEndpoint, type TurnPlayer } from "./provider";
 import { preferDatabase, type LumiverseReads } from "./reads";
@@ -36,7 +37,7 @@ import { Relay } from "./relay";
 import { LumiverseSession, type Fetch, type StoredSignIn } from "./session";
 import { LumiverseSocket, newFrontendSession, type OpenSocket } from "./socket";
 import { LUMIVERSE_DEFAULTS, type LumiverseSettings, lumiverseSettings } from "./settings";
-import { EXTENSION_KIND, extensionStatusReply } from "./shapes";
+import { chatMessagesReply, EXTENSION_KIND, extensionStatusReply } from "./shapes";
 import { QUESTION_PATH } from "./wire";
 
 /** What other lanes answer for the adapter. */
@@ -202,7 +203,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     const cfg = at.config.lumiverse;
     const session = new LumiverseSession({ base: url.replace(/\/+$/, ""), fetch: deps.fetch, signIn, save: (s) => at.secrets.write("lumiverse", s === null ? null : { ...s }), owner: () => user, clock: deps.clock, log, keepEveryMs: () => settings().sessionCheckMs });
     const http = createHttpReads(session, () => settings().reads);
-    const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => settings().database });
+    const database = cfg.database === null ? null : createDbReader({ path: cfg.database, user, sleep: deps.sleep, log, settings: () => ({ ...settings().database, kept: settings().reads.kept }) });
     const reads = database === null ? http : preferDatabase(database, http);
     activations = new Activations(reads, log);
     const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search });
@@ -319,6 +320,30 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
         }),
         rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames: rpeModels }) }),
         route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
+        route({
+          method: "GET",
+          path: CHAT_MESSAGES_PATH,
+          access: "page",
+          group: "chats",
+          does: "A chat's messages as Lumiverse holds them, by a list of ids or by a stretch of its places (`index_in_chat`, a gap where a message was deleted); only the signed-in user's own chats.",
+          query: {
+            ids: shape.optional(shape.text(), "The messages' ids, separated by commas."),
+            from: shape.optional(shape.whole({ least: 0 }), "The first place (`index_in_chat`) of a stretch."),
+            to: shape.optional(shape.whole({ least: 0 }), "The place a stretch ends before: the messages from `from` up to but not including it."),
+          },
+          reply: chatMessagesReply,
+          handle: async ({ user, params, query }) => {
+            if (handlers === null || parts === null) throw new RouteError(503, NOT_SET_UP);
+            if (user !== handlers.user) throw new RouteError(403, "This RPE belongs to another Lumiverse user.");
+            const stretch = query.from !== undefined || query.to !== undefined;
+            if ((query.ids !== undefined) === stretch) throw new RouteError(400, "Name the messages' ids, or a stretch of their places with from and to, and not both.");
+            if (stretch && (query.from === undefined || query.to === undefined)) throw new RouteError(400, "A stretch of places is named by from and to.");
+            const ask = query.ids !== undefined ? { ids: query.ids.split(",").filter((id) => id !== "") } : { from: query.from ?? 0, to: query.to ?? 0 };
+            const messages = await readMessages(parts.reads, params.chat, ask);
+            if (messages === null) throw new RouteError(404, "The signed-in user has no such chat.");
+            return { messages };
+          },
+        }),
         rawRoute({
           method: "POST",
           path: QUESTION_PATH,
@@ -420,14 +445,21 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           if (behind === mine) behind = null;
         });
       };
+      // Before anything else hears it: what an event says changed is let go of the reads, so nothing that acts on the event reads it stale.
+      const { reads } = parts;
+      const offReads = parts.events.onEvent((event, payload) => reads.heard(event, payload));
       offChanges = followChanges(parts.events, {
         changed: deliver,
         reopened: () => lanes.changes.reopened(),
       });
-      offLifecycle = parts.events.onEvent((event, payload) => {
+      const offSaid = parts.events.onEvent((event, payload) => {
         const said = lifecycleOf(event, payload);
         if (said !== null) log(said);
       });
+      offLifecycle = () => {
+        offReads();
+        offSaid();
+      };
       parts.relay.start();
       parts.session.keep();
       parts.events.start();

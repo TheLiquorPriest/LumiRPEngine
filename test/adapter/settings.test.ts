@@ -8,6 +8,7 @@ import { CHAT_SEARCH_DEFAULTS } from "../../src/adapter/lumiverse/chat";
 import { RETRY_MS, TRIES } from "../../src/adapter/lumiverse/db";
 import { DRY_RUN_MS } from "../../src/adapter/lumiverse/hint";
 import { BREAKDOWN_TRIES, REREADS } from "../../src/adapter/lumiverse/http-reads";
+import { HTTP_KEEP_MS, KEPT } from "../../src/adapter/lumiverse/memo";
 import { WHOLE_HOLD_MS } from "../../src/adapter/lumiverse/provider";
 import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
@@ -42,7 +43,7 @@ describe("the door's settings", () => {
       sessionCheckMs: KEEP_EVERY_MS,
       socket: SOCKET_DEFAULTS,
       database: { tries: TRIES, retryMs: RETRY_MS },
-      reads: { rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES },
+      reads: { rereads: REREADS, breakdownReplies: BREAKDOWN_TRIES, keepMs: HTTP_KEEP_MS, kept: KEPT },
       dryRunMs: DRY_RUN_MS,
       commentMs: COMMENT_MS,
       wholeHoldMs: WHOLE_HOLD_MS,

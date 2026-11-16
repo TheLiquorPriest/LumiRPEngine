@@ -1,8 +1,9 @@
 // The reads RPE makes of Lumiverse's own rows (STANDALONE-PLAN §4.2, "History, books, entries,
 // characters, personas, presets, settings"): one interface over two sources, the database file read
-// directly (`db.ts`) where RPE runs beside Lumiverse, and Lumiverse's HTTP routes as the signed-in user
-// (`http-reads.ts`) where the file cannot be read. Every read is of one user's rows: the user RPE
-// belongs to. Nothing is copied or kept: each read asks the source as it stands.
+// directly (`db.ts`) where RPE runs beside Lumiverse, and Lumiverse's HTTP routes as the signed-in
+// user (`http-reads.ts`) where the file cannot be read. Every read is of one user's rows: the user RPE
+// belongs to. Nothing is copied or written down: each read asks the source as it stands, or holds what
+// it read for a few seconds, and lets it go the moment the rows change (`memo.ts`).
 
 import type { JsonValue } from "../../shared/json";
 import type { LvBook, LvCharacter, LvChat, LvEntry, LvMessage, LvPersona, LvPreset, LvSetting } from "./rows";
@@ -27,10 +28,18 @@ export interface LumiverseReads {
   /** These messages of the chat, by id; an id that is not the chat's is left out. */
   messagesById(chat: string, ids: readonly string[]): Promise<LvMessage[]>;
   book(book: string): Promise<LvBook | null>;
+  /** Every book of the user's, in no order. */
+  books(): Promise<LvBook[]>;
   /** A book's entries in Lumiverse's order (by order, then id); none for a book that is not this user's. */
   entries(book: string): Promise<LvEntry[]>;
-  entry(entry: string): Promise<LvEntry | null>;
+  /**
+   * One entry. Lumiverse has no route for one entry, so over HTTP a caller that knows the entry's book names it (the tag's lore
+   * carries it) and only that book is read; with none named, the entry index says which book it is in.
+   */
+  entry(entry: string, book?: string): Promise<LvEntry | null>;
   character(character: string): Promise<LvCharacter | null>;
+  /** Every character of the user's. */
+  characters(): Promise<LvCharacter[]>;
   persona(persona: string): Promise<LvPersona | null>;
   /** The user's default persona, the one Lumiverse falls back on (`services/personas.service.ts:183-185`). */
   defaultPersona(): Promise<LvPersona | null>;
@@ -38,6 +47,10 @@ export interface LumiverseReads {
   setting(key: string): Promise<LvSetting | null>;
   /** The breakdown Lumiverse stored with the chat's latest reply that has one (`generate.service.ts:4448-4476`); null when none is stored. */
   breakdown(chat: string): Promise<JsonValue | null>;
+  /** Lets go of what was held of this chat's reads (its messages, its row): the next read of each reads Lumiverse again. Another chat's stay held. */
+  dropChat(chat: string): void;
+  /** An event Lumiverse sent: what was held of what it says changed is let go. */
+  heard(event: string, payload: unknown): void;
 }
 
 /** The database reader turned itself off: every read goes to the other source. Its message is the one sentence saying why. */
@@ -71,13 +84,23 @@ export function preferDatabase(database: LumiverseReads & { state(): { off: stri
     messages: (chat, places) => ask((s) => s.messages(chat, places)),
     messagesById: (chat, ids) => ask((s) => s.messagesById(chat, ids)),
     book: (book) => ask((s) => s.book(book)),
+    books: () => ask((s) => s.books()),
     entries: (book) => ask((s) => s.entries(book)),
-    entry: (entry) => ask((s) => s.entry(entry)),
+    entry: (entry, book) => ask((s) => s.entry(entry, book)),
     character: (character) => ask((s) => s.character(character)),
+    characters: () => ask((s) => s.characters()),
     persona: (persona) => ask((s) => s.persona(persona)),
     defaultPersona: () => ask((s) => s.defaultPersona()),
     preset: (preset) => ask((s) => s.preset(preset)),
     setting: (key) => ask((s) => s.setting(key)),
     breakdown: (chat) => ask((s) => s.breakdown(chat)),
+    dropChat: (chat) => {
+      database.dropChat(chat);
+      http.dropChat(chat);
+    },
+    heard: (event, payload) => {
+      database.heard(event, payload);
+      http.heard(event, payload);
+    },
   };
 }

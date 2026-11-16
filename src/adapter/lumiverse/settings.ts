@@ -13,7 +13,7 @@
 //       retry: 1                         seconds before opening again, doubled after each failure
 //       retryMax: 30                     the longest of those waits
 //     database: { tries: 4, wait: 0.025 }  tries of a statement while Lumiverse holds its file locked; seconds before the second, doubled
-//     reads: { rereads: 3, breakdownReplies: 10 }  a changing chat's rereads; newest replies asked for a stored breakdown
+//     reads: { rereads: 3, breakdownReplies: 10, keep: 15, kept: 32 }  a changing chat's rereads; newest replies asked for a stored breakdown; seconds a read over HTTP is held; chats, books and presets held at once
 //     dryRun: { wait: 10 }               seconds a dry run is waited for before the reply goes on without its names
 //     stream: { comment: 5 }             seconds a reply's stream may send nothing before a comment line keeps its connection
 //     reply: { hold: 540 }               seconds after a reply asked for whole arrives at which its turn stops with what it has
@@ -38,6 +38,7 @@ import { CHAT_SEARCH_DEFAULTS, type ChatSearchSettings } from "./chat";
 import { RETRY_MS, TRIES } from "./db";
 import { DRY_RUN_MS } from "./hint";
 import { BREAKDOWN_TRIES, REREADS } from "./http-reads";
+import { HTTP_KEEP_MS, KEPT } from "./memo";
 import { RELAY_DEFAULTS, type RelaySettings } from "./relay";
 import { KEEP_EVERY_MS } from "./session";
 import { SOCKET_DEFAULTS, type SocketSettings } from "./socket";
@@ -50,7 +51,7 @@ export interface LumiverseSettings {
   sessionCheckMs: number;
   socket: SocketSettings;
   database: { tries: number; retryMs: number };
-  reads: { rereads: number; breakdownReplies: number };
+  reads: { rereads: number; breakdownReplies: number; keepMs: number; kept: number };
   dryRunMs: number;
   commentMs: number;
   wholeHoldMs: number;
@@ -108,6 +109,8 @@ export const LUMIVERSE_SETTING_DEFS = {
   dbWait: setting("database.wait", RETRY_MS / S, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
   rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }, "Rereads of a changing chat", "Times a chat read over HTTP is read again when it changed while it was read."),
   breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1, most: PAGE_ROWS }, "Replies asked for a breakdown", "The newest replies asked when looking for the prompt breakdown Lumiverse stored."),
+  readKeep: setting("reads.keep", HTTP_KEEP_MS / S, { type: "number", least: 0 }, "Seconds a read over HTTP is held", "Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged."),
+  readKept: setting("reads.kept", KEPT, { type: "whole", least: 1 }, "Chats, books and presets held", "How many chats, books and presets have what RPE read of them held at once; the one left alone longest goes first."),
   dryRun: setting("dryRun.wait", DRY_RUN_MS / S, { type: "number", least: 0.1 }, "Dry run wait", "Seconds a dry run is waited for before the reply goes on without its blocks' names."),
   comment: setting("stream.comment", COMMENT_MS / S, { type: "number", least: 0.1, most: IDLE_S - 1 }, "Stream comment", "Seconds a reply's stream may send nothing before a comment line keeps its connection open."),
   flush: setting("relay.flush", RELAY_DEFAULTS.flushMs / S, { type: "number", least: 0.001 }, "Relay flush", "Seconds between the relay's frames to a page; a frame for every event floods Lumiverse's socket."),
@@ -151,7 +154,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     sessionCheckMs: v.sessionCheck * S,
     socket: { pingMs: v.ping * S, pongMs: v.pong * S, openMs: v.open * S, retryMs: v.retry * S, retryMaxMs: v.retryMax * S },
     database: { tries: v.dbTries, retryMs: v.dbWait * S },
-    reads: { rereads: v.rereads, breakdownReplies: v.breakdownReplies },
+    reads: { rereads: v.rereads, breakdownReplies: v.breakdownReplies, keepMs: v.readKeep * S, kept: v.readKept },
     dryRunMs: v.dryRun * S,
     commentMs: v.comment * S,
     wholeHoldMs: v.wholeHold * S,

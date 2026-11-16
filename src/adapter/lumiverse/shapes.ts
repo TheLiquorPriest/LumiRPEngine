@@ -3,6 +3,7 @@
 // how RPE's extension in Lumiverse stands.
 
 import { type Exactly, type Holds, type Infer, liveKind, shape } from "../../app";
+import type { MessageShown as MessageShownRow } from "./messages";
 import type { ExtensionStatus } from "./pipe-wire";
 
 const T = shape.text();
@@ -33,8 +34,29 @@ export const extensionStatusReply = shape.named(
   }),
 );
 
+const messageShown = shape.named(
+  "ChatMessageShown",
+  "A message of a chat as Lumiverse holds it: its place (`index_in_chat`, with a gap where one was deleted), who said it, the text the prompt is built from, the swipe it shows, whether it is hidden, and Lumiverse's revision of it.",
+  shape.object({
+    id: shape.field(T, "Lumiverse's id of the message."),
+    chat: shape.field(T, "Its chat's id."),
+    index: shape.field(shape.number(), "Lumiverse's `index_in_chat`: a gap where a message was deleted."),
+    role: shape.field(shape.oneOf("user", "assistant", "system"), "Who said it."),
+    name: shape.field(T, "The name it was said under."),
+    text: shape.field(T, "The text the prompt is built from."),
+    swipe: shape.field(shape.number(), "The swipe it shows."),
+    swipes: shape.field(shape.number(), "How many swipes it has."),
+    hidden: shape.field(shape.yesNo(), "Hidden from the prompt."),
+    sentAt: shape.field(shape.number(), "When it was sent, epoch milliseconds."),
+    revision: shape.field(shape.number(), "Lumiverse's revision of it: an edit raises it."),
+  }),
+);
+type MessageMirrored = Holds<Exactly<Infer<typeof messageShown>, MessageShownRow>>;
+
+export const chatMessagesReply = shape.named("ChatMessagesReply", "The messages of a chat asked for, in the chat's order.", shape.object({ messages: shape.list(messageShown) }));
+
 /** The door's own live kind: the extension's status changed, published to the user's own channel (`LIVE_USER`) at each change, as the status route answers it. */
 export const EXTENSION_KIND = liveKind("extension", { data: extensionStatusReply, does: "The extension's status changed: as GET /api/v1/status/extension answers it." });
 type StatusMirrored = Holds<Exactly<Infer<typeof extensionStatusReply>, ExtensionStatus>>;
 /** The check above holds, and is read by no one. */
-export type Mirrors = [StatusMirrored];
+export type Mirrors = [StatusMirrored, MessageMirrored];

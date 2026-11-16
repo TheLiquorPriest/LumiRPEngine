@@ -838,6 +838,64 @@ export interface LocatedSlices {
 /** How Lumiverse activated an entry: always on, by one of its keys, by meaning, or still in force from an earlier turn. */
 export type LoreActivation = "constant" | "keyword" | "vector" | "sticky";
 
+/** The indexing job the owner started. */
+export interface LoreIndexJob {
+  /** Its id in the jobs. */
+  job: string;
+  /** Its state as RPH keeps it. */
+  state: string;
+}
+
+/** An entry of a chat's lore with what the database holds of it and what the index says of it: the user's own lines where he wrote them, else the latest indexing run's, an earlier revision's marked stale. */
+export interface LoreIndexRow {
+  /** The id the lore map gives the entry: `e-` or `w-` and its number. */
+  id: string;
+  /** Its title. */
+  title: string;
+  /** Its book's name, or its world's. */
+  source: string;
+  /** Its book's id in Lumiverse; null for a world entry. */
+  book: string | null;
+  /** The keys that activate it. */
+  keys: string[];
+  /** Characters in its text. */
+  size: number;
+  /** How it comes into the prompt by itself; none for one that never does. */
+  activation: ("constant" | "keyword" | "vector")[];
+  /** Its revision: Lumiverse's for a book entry, a hash of its words for a world entry. */
+  revision: string;
+  /** What kind of thing it is, where a run or the user has said. */
+  kind: string | null;
+  /** One line saying what it is, where a run or the user has said. */
+  line: string | null;
+  /** What it defines. */
+  defines: { what: string; aspect: string }[];
+  /** Related entries, by id. */
+  related: string[];
+  /** The fields beside those that the indexer's file asks an index line to hold, by name. */
+  fields: { [key: string]: string | string[] };
+  /** Whether a run has written lines for the entry as it stands now. */
+  indexed: boolean;
+  /** Whether the lines shown were written for an earlier revision of it. */
+  stale: boolean;
+  /** Which of the lines are the user's own. */
+  edited: ("kind" | "line" | "defines" | "related")[];
+}
+
+/** Where a chat's lore indexing stands, and what it runs on: how many entries the chat's lore holds, how many no run has indexed as they stand now, and the model the indexer's definition runs on. */
+export interface LoreIndexStatus {
+  /** Entries in the chat's lore. */
+  entries: number;
+  /** Entries no run has written lines for as they stand now. */
+  unindexed: number;
+  /** The definition indexing runs as. */
+  agent: string;
+  /** The connection the definition runs on: the one it names, else his default; null where none is there. */
+  connection: { id: string; name: string } | null;
+  /** That connection's model; null where none resolves. */
+  model: string | null;
+}
+
 /** What the command line keeps of RPE's Lumiverse: its sign-in in the secrets file (null forgets it), and values of the config's `lumiverse` block. */
 export interface LumiverseSave {
   /** The sign-in to keep; null forgets the one kept; left out, it is not touched. */
@@ -1630,14 +1688,24 @@ export interface TreeDiffReply {
 /** What a file of the tree is: one the user writes, a note an agent keeps, or one RPE makes again. */
 export type TreeFileKind = "yours" | "notes" | "generated";
 
-/** One file of the tree, as text. */
+/** One file of the tree, as text: the whole of a short one, and of a long one the lines or bytes asked for (the page's setting `files.readLines` of its lines when none is asked), with its size and its count of lines. */
 export interface TreeFileReply {
   path: string;
   level: LayerLevel;
   kind: TreeFileKind;
+  /** The file's size in bytes. */
   bytes: number;
   editable: boolean;
+  /** The part read, whole lines or the bytes asked for. */
   text: string;
+  /** The file's lines in all. */
+  lines?: number;
+  /** The first line the text holds; with `offset`, the first byte. */
+  from?: number;
+  /** The last line the text holds; with `offset`, the byte after the last. */
+  to?: number;
+  /** Whether the file goes on past what was read. */
+  more?: boolean;
 }
 
 /** One file of the agents' tree as the Files page lists it: its path in the chat's view, its level and kind, its size, whether RPH takes it, and what stands beside it at other levels. */
@@ -1665,6 +1733,42 @@ export interface TreeFileRow {
   defaultChanged: number | null;
   /** For a file of the user's in place of a default an update has since taken away: when the update that removed it ran, if it did since this file was last written. */
   defaultRemoved?: number | null;
+  /** Whether it is a level's config file, which the Settings page edits too. */
+  isConfig?: boolean;
+  /** The levels where a file of its kind and name has a place that the user may write: "save as" offers only those. */
+  placeable?: LayerLevel[];
+  /** For a generated file, the page where what it shows is edited, if one is; null otherwise. */
+  editedOn?: string | null;
+  /** Why RPH leaves it out though it is the nearest of its name and not switched off: what its `needs:` names is not in force, or its header does not parse; null when nothing does. */
+  held?: "needs" | "broken" | null;
+  /** What RPH found wrong with it, in its own words, line by line. */
+  problems?: string[];
+  /** The agents whose stacks it joins: a file `instructions:` names or an agent reads. */
+  joins?: string[];
+}
+
+/** One entry of a folder, or of a search: a folder, or a file with its entry. */
+export interface TreeListed {
+  name: string;
+  /** Its path in the chat's view, as the file routes take it. */
+  path: string;
+  folder: boolean;
+  level: LayerLevel;
+  /** The file as the listing shows it; null for a folder. */
+  entry: TreeFileRow | null;
+}
+
+/** A page of a folder of the chat's view, folders first and each by name, or of a search across every level: its entries, where the next page starts, the levels the view has, and whether a search stopped before it had looked everywhere. */
+export interface TreeListedReply {
+  /** The folder listed, "" for the chat's own top (which holds the other levels' folders beside its files); empty for a search. */
+  folder: string;
+  items: TreeListed[];
+  /** Where the next page starts: send it as `after`; null at the end. */
+  next: string | null;
+  /** The levels the view has now: a chat's and its character's once the chat has its folders. */
+  levels: LayerLevel[];
+  /** A search that ran out of its time with the entries it had found, and did not look everywhere. */
+  stopped: "time" | null;
 }
 
 /** Every file of the chat's view of the tree; with no chat, of the shipped level and the user's own. */
@@ -1974,6 +2078,36 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: JobsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The lore index of a chat, a page at a time in the order of the lore map's catalog: each entry of its books and its world with its id, keys, size, how it activates and revision, and the lines the index holds of it (the user's own, else the latest run's, an earlier revision's marked stale) with whether they are current. */
+  "GET /api/v1/chats/:chat/lore/index": {
+    params: { chat: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: { items: LoreIndexRow[]; next: string | null };
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** Starts a lore indexing job for a chat: the indexer's definition as a job of the owner's own, tied to no turn, handed the entries no run has indexed as they stand now a batch at a time. Refused, with the fact, where jobs are off or a limit of the day is reached. */
+  "POST /api/v1/chats/:chat/lore/index/jobs": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: LoreIndexJob;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Where a chat's lore indexing stands: its entries and how many no run has indexed as they stand now, and the connection and model the indexer's definition runs on (its own, else his default). */
+  "GET /api/v1/chats/:chat/lore/index/status": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: LoreIndexStatus;
     paged: false;
     long: false;
     joined: false;
@@ -2308,6 +2442,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The chat's view of the tree read like a filesystem: one folder's files and folders a page at a time (the chat's own top, with the other levels' folders, when none is named), or a search by name and by text across every level, each file with whether RPH takes it and why not; with no chat, the shipped and global levels. */
+  "GET /api/v1/files-list": {
+    params: Record<string, never>;
+    query: { chat?: string; folder?: string; search?: string; limit?: number; after?: string };
+    body: undefined;
+    reply: TreeListedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Renames or moves a file or folder of the user's to a path nothing stands at; a file moved into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again. */
   "POST /api/v1/files-move": {
     params: Record<string, never>;
@@ -2348,10 +2492,10 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** One file of the tree, as text. */
+  /** One file of the tree, as text: a short file whole, a long one the lines (`line`, `lines`) or the bytes (`offset`, `length`) asked for, `files.readLines` lines when it asks for none; with the file's size and its count of lines, and whether it goes on. */
   "GET /api/v1/files/*": {
     params: { "*": string };
-    query: { chat?: string };
+    query: { chat?: string; line?: number; lines?: number; offset?: number; length?: number };
     body: undefined;
     reply: TreeFileReply;
     paged: false;
