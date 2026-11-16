@@ -7,7 +7,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { AgentRef, LocatedSlices, Log, PromptMap, PromptPort, RawLayout, Scope } from "rp-harness/contract";
-import type { ActivatedEntry, LoreTurns } from "../lore";
+import type { ActivatedEntry, LoreReceipt, LoreTurns } from "../lore";
 import { isRecord } from "../shared/json";
 import type { Writes } from "./kv";
 
@@ -239,6 +239,21 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
       async generation(user, chat, turn) {
         const row = db.query<{ speaker: string | null; persona: string | null }, [string, string, string]>("SELECT speaker, persona FROM turn_prompt WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, turn);
         return row === null ? null : { speaker: row.speaker, persona: row.persona };
+      },
+      // What the check of the lore on receipt did, as the receipt's cut kept it (`Cut.lore`): each entry it named, by Lumiverse's id.
+      async receipt(user, chat, turn) {
+        const row = db.query<{ cut: string }, [string, string, string]>("SELECT cut FROM turn_prompt WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, turn);
+        const cut: unknown = row === null ? null : JSON.parse(row.cut);
+        const lore = isRecord(cut) && isRecord(cut.lore) && cut.lore.checked === true ? cut.lore : null;
+        if (lore === null) return null;
+        const out = new Map<string, LoreReceipt>();
+        const named = (list: unknown, as: LoreReceipt): void => {
+          if (Array.isArray(list)) for (const e of list) if (isRecord(e) && typeof e.id === "string") out.set(e.id, as);
+        };
+        named(lore.notFound, "not-found");
+        named(lore.reworded, "reworded");
+        named(lore.removed, "kept-out");
+        return out;
       },
     },
   };

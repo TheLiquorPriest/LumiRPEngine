@@ -13,6 +13,7 @@ import { readPass } from "../engine/read-pass";
 import { definitionsLag } from "../engine/upgrade";
 import type { PackId, PanelId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
+import type { MapConfig } from "../shared/map-config";
 import { KNOWLEDGE_DEFAULTS } from "../shared/minds";
 import type { OffstageSettings } from "../shared/offstage";
 import { NARRATOR_DEFAULTS } from "../shared/settings";
@@ -40,6 +41,8 @@ export interface ChatViewInput {
   turning: boolean;
   /** The chat's out-of-play settings (`taps.tell.*`), which preset the controls' Tell switch. */
   offstage: OffstageSettings;
+  /** The chat's map settings (`map:` in its config), for the scale and time step a grid is drawn with. */
+  map: MapConfig;
 }
 
 /** The turn at the head of a chat's path; null before its first. */
@@ -67,8 +70,8 @@ export function chatView(input: ChatViewInput): StateView {
   return readPass((): StateView => {
     const ctx = registry.context(world, state);
     const panels: Record<PanelId, JsonValue> = {};
-    // No map display is kept for a chat in RPE: the map panel follows the world's.
-    const prefs = { mapDisplay: null };
+    // No map display is kept for a chat in RPE: the map panel follows the world's, drawn at the chat's own map settings.
+    const prefs = { mapDisplay: null, mapConfig: input.map };
     for (const view of registry.views) {
       try {
         panels[view.panel] = view.build(ctx, prefs);

@@ -114,12 +114,22 @@ export interface ActivatedEntry {
   how: string | null;
 }
 
+/** What the check of the lore on receipt did to one entry: kept it out of the prompt, worded it otherwise, or did not find its text there. */
+export const LORE_RECEIPTS = ["kept-out", "reworded", "not-found"] as const;
+export type LoreReceipt = (typeof LORE_RECEIPTS)[number];
+
 /** What activated for each turn's prompt. */
 export interface LoreTurns {
   /** The entries activated for the prompt of `turn`, in the tag's order; null when RPE holds no tag for that turn. */
   activated(user: string, chat: string, turn: string): Promise<readonly ActivatedEntry[] | null>;
   /** Who the turn's generation was for, from its tag; null where RPE holds no tag for it. Absent where the host keeps none: the books are then those the chat has. */
   generation?(user: string, chat: string, turn: string): Promise<LoreGeneration | null>;
+  /**
+   * What the check of the lore on receipt did to the entries Lumiverse activated for the prompt of `turn`, each by Lumiverse's id: kept out
+   * of the prompt, worded otherwise, or not found in it (so the verdict was not applied). Null where nothing was checked (the extension
+   * applied RPE's own verdict), or RPE holds no prompt for the turn. Absent where the host keeps none.
+   */
+  receipt?(user: string, chat: string, turn: string): Promise<ReadonlyMap<string, LoreReceipt> | null>;
 }
 
 /**

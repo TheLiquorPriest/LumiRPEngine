@@ -7,7 +7,7 @@
 import type { ConsentGrant, FindStopped, GapCheck, KeptMessage, LocatedSlices, PromptMapEdit, ShownSlice } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, limitHit, type Mutually, presetRef, promptNotice, replyError, ruleFiring, shape, traceRecord, usage } from "../app";
 import type { NodeView, ValuesShown } from "../store";
-import type { RequestRecord } from "./requests";
+import type { AskedLine } from "./requests";
 import type { NotGiven, RunKind, RunState, StoppedBy } from "./runs";
 
 const T = shape.text();
@@ -150,21 +150,27 @@ const panelAsk = shape.object({
   on: field(nullable(T), "What it was pressed on; null for nothing."),
 });
 const composerAsk = shape.object({ choice: field(T, "The choice made, as its choices file names it."), words: field(nullable(T), "Any words typed with it.") });
+const feedbackAsked = shape.object({
+  feedback: field(
+    shape.object({ text: T, at: N, settled: shape.oneOf("start", "confirmed", "corrected", "completed") }),
+    "The feedback he typed in Lumiverse's regenerate dialog (R-198), on a turn's asked lines only: its words, when they were kept, and where they stand: told apart from the prompt at the turn's start with no word of the breakdown on it yet (start), confirmed by the breakdown (confirmed), corrected by it where it disagreed (corrected), or completed from it where the start had no earlier prompt to compare with (completed).",
+  ),
+});
 export const requestShown = shape.named(
   "RequestShown",
-  "Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made.",
+  "Something he asked for beside his words: a panel's tap, or a composer control (depth, swipe), with what was asked as data, whether it was played now as a message of its own, the turn it is kept with (null while it waits) and when it was made. A turn's asked lines also give the feedback typed in Lumiverse's regenerate dialog, as kind `feedback`.",
   shape.object({
     id: T,
     chat: T,
-    kind: shape.oneOf("panel", "depth", "swipe"),
-    asked: shape.union(panelAsk, composerAsk),
+    kind: shape.oneOf("panel", "depth", "swipe", "feedback"),
+    asked: shape.union(panelAsk, composerAsk, feedbackAsked),
     played: field(shape.yesNo(), "Played now, as a message of its own, rather than with the next message."),
     message: field(nullable(T), "The message it was sent as, where it was played now."),
     turn: field(nullable(shape.turnId()), "The turn it is kept with; null while it waits."),
     at: N,
   }),
 );
-type RequestMirrored = Holds<Mutually<Infer<typeof requestShown>, RequestRecord>>;
+type RequestMirrored = Holds<Mutually<Infer<typeof requestShown>, AskedLine>>;
 export const requestsReply = shape.named("RequestsReply", "Requests, oldest first.", shape.object({ requests: shape.list(requestShown) }));
 export const requestAsk = shape.named(
   "RequestAsk",
@@ -332,6 +338,18 @@ export const turnReply = shape.named(
     found: field(shape.list(T), "The tools its agents reached through `tool_search` and `tool_use`, by name."),
     todos: field(shape.list(shape.object({ agent: T, open: shape.list(T) })), "Each agent's `todo` items still open as its list last stood."),
     changes: field(shape.list(shape.object({ lane: T, changes: shape.list(changeShown) })), "Its changes by lane, each lane's in order."),
+    unsettled: field(
+      shape.list(
+        shape.object({
+          change: changeShown,
+          lane: T,
+          turn: field(nullable(T), "The turn it is of; null for one of his own, or a job's, placed after the turn before the next."),
+          about: field(shape.list(T), "The things it is about, by tree ref."),
+          why: field(shape.list(shape.oneOf("reported", "not_applied", "unsourced", "unchecked")), "Why it is listed: it carries a report, did not apply, has no source, or is an invention with no gap check or consent."),
+        }),
+      ),
+      "The Unsettled list: each change of the turn, and each placed after it before the next turn, that carries a report, did not apply, has no source, or is an invention with no gap check or consent.",
+    ),
     told: toldShown,
     carried: field(nullable(shape.object({ message: T, swipe: N, record: shape.json() })), "For a turn a migration carried: its message and swipe, and the old engine's record of it as kept; null for any other."),
     card: field(T, "The route of the turn's review card, where each of its changes is reviewed and undone."),

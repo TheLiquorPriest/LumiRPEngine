@@ -47,6 +47,7 @@ import { OFFSTAGE_ORIGIN, ORIGIN_FIELD, playsOffstage } from "../shared/offstage
 import type { ErrorCode, ErrorMessage, FrontendToBackend, ResultBodies, ResultMessage } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
+import type { MapConfig } from "../shared/map-config";
 import { type ItemFix, parseItemFix } from "../shared/things";
 import { formatMoney, type ParamDef, type WorldDoc } from "../shared/world";
 import { type ChangeRow, factStore, JoinedTurnError, readPart, type Report, type Store } from "../store";
@@ -79,6 +80,8 @@ export interface PlaySettings {
   /** The most operations one edit of operations carries (`engine.editOps`). */
   editOps: number;
   taps: TapSettings;
+  /** The chat's map settings (`map:` in its config), which the map panel is drawn at. */
+  map: MapConfig;
 }
 
 export interface PlayDeps {
@@ -244,16 +247,16 @@ export class PlayService {
     this.runEnds = new RunEnds(deps.live);
   }
 
-  /** The chat's state view at its head, or at `turn`, one of its turns, its controls preset by the chat's out-of-play settings. */
+  /** The chat's state view at its head, or at `turn`, one of its turns, its controls preset by the chat's out-of-play settings and its map drawn at the chat's map settings. */
   async state(user: string, chat: string, turn: string | null): Promise<StateView> {
     const row = turn === null ? null : this.deps.store.user(user).turn(turn);
     if (turn !== null && row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     // A turn joined to another is answered as a fact, naming the turn it joined, whatever kind of chat this is.
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
-    const { taps } = await this.deps.settings(user, chat);
+    const { taps, map } = await this.deps.settings(user, chat);
     // From now on, a run of the chat that ends tells the page to read it again.
     this.runEnds.follow(chat);
-    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell });
+    return chatView({ store: this.deps.store, user, chat, turn, turning: this.deps.turning(user, chat), offstage: taps.tell, map });
   }
 
   /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */

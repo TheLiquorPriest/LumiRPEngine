@@ -33,11 +33,12 @@ import { liveRoutes } from "./live-routes";
 import { rulesRoutes } from "./rules-routes";
 import { promptRoutes } from "./prompt-routes";
 import { requestRoutes } from "./request-routes";
+import type { AskedLine, FeedbackSettled } from "./requests";
 import { reviewRoutes } from "./review";
 import { replyRoutes } from "./replies";
 import { stateRoutes } from "./state-routes";
 import { type ChangeView, chatsReply, fileReply, folderReply, requestReply, type RunView, settleReply, stopReply, type TurnFileEntry, turnReply, turnsReply, valuesShown, worldReply } from "./shapes";
-import { NO_SESSION } from "./turns";
+import { FEEDBACK_CONFIRMED, FEEDBACK_CORRECTED, FEEDBACK_TOLD, NO_SESSION } from "./turns";
 
 /** What the world's tree shows when the page names nothing: the world, one level in, each level with its own values. */
 export const WORLD_VIEW = { at: "world", depth: 1, values: "own" } as const satisfies { at: string; depth: number; values: ValuesShown };
@@ -264,6 +265,21 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     return row === null ? null : { message: row.message, swipe: row.swipe, record: JSON.parse(row.record) as JsonValue };
   };
 
+  /**
+   * The feedback a swipe or a regenerate was asked with (R-198), as the turn keeps it: the newest kept word, where it holds words, and where
+   * it stands by the breakdown's word on it. None where no feedback with words stands.
+   */
+  const feedbackAsked = (user: string, chat: string, turn: string): AskedLine[] => {
+    const told = toldOf(turns.store.db, user, turn);
+    const kept = told.findLast((t) => t.kind === FEEDBACK_TOLD);
+    const body = kept?.body;
+    if (kept === undefined || !isRecord(body) || body.found !== "separated" || typeof body.text !== "string") return [];
+    const corrected = told.findLast((t) => t.kind === FEEDBACK_CORRECTED);
+    const settled: FeedbackSettled =
+      corrected !== undefined ? (isRecord(corrected.body) && corrected.body.was === null ? "completed" : "corrected") : told.some((t) => t.kind === FEEDBACK_CONFIRMED) ? "confirmed" : "start";
+    return [{ id: `feedback-${turn}`, chat, kind: "feedback", asked: { feedback: { text: body.text, at: kept.at, settled } }, played: false, message: null, turn, at: kept.at }];
+  };
+
   /** One turn of the chat as its route gives it, read on from record `from` of the run `run` names. */
   const turnRead = async (user: string, chat: string, turn: string, run: string | undefined, from: number) => {
     const r = turnOf(user, chat, turn);
@@ -284,11 +300,12 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       lore: await keptLore(r),
       runs: await runsOf(r, runs, within),
       prompt: turns.prompts.located(user, r.turn),
-      asked: turns.requests.ofTurn(user, r.turn, turns.store.user(user).turn(r.turn)?.message ?? null),
+      asked: [...turns.requests.ofTurn(user, r.turn, turns.store.user(user).turn(r.turn)?.message ?? null), ...feedbackAsked(user, r.chat, r.turn)],
       record: turnRecordFields(turns.store, { user, chat: r.chat, session: r.session, turn: r.turn }),
       found: foundTools(records),
       todos: openTodos(records),
       changes: changesByLane(user, r.turn),
+      unsettled: turns.store.user(user).turn(r.turn) === null ? [] : turns.store.user(user).unsettledOf(r.chat, r.turn).map((u) => ({ change: changeOf(u.change), lane: u.change.lane, turn: u.turn, about: u.about, why: u.why })),
       told: toldTo(user, { turn: r.turn }),
       carried: carriedOf(user, r.turn),
       card: `/api/v1/chats/${encodeURIComponent(r.chat)}/turns/${encodeURIComponent(r.turn)}/card`,

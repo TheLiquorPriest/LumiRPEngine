@@ -175,8 +175,8 @@ export function turnArea(takes: TurnTakes): TurnArea {
           return {
             room: window === null ? null : window - (reply ?? settings.reserve),
             count: async (prompt) => models.count(scope, connection, promptOf(prompt as Parameters<typeof promptOf>[0], limits.pictures?.takes === true).messages),
-            covered: async (ids) => {
-              const held = covered(chat);
+            covered: async (ids, turn) => {
+              const held = covered(chat, turn);
               return ids.every((id) => held.has(id));
             },
           };

@@ -39,7 +39,8 @@ import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, t
 import { placeLinesAt } from "../places";
 import type { ActivatedRead } from "../lore/indexing";
 import { isRecord } from "../shared/json";
-import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathEntry, type PathReport, type Report, type ShownMessage, type Store, type TurnRow, type UserStore, worldState } from "../store";
+import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState } from "../store";
+import { aboutOf } from "../store/fold";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
@@ -89,6 +90,9 @@ export const ON_STAGE_VIEWS = "on_stage_views";
 
 /** What a turn keeps of the feedback typed in Lumiverse's regenerate dialog, in `turn_told`: a `Feedback`, the newest the word that stands. */
 export const FEEDBACK_TOLD = "feedback";
+/** The told kinds of the breakdown's word on a turn's feedback: it disagreed (`{ was, now }`), or agreed (the feedback). */
+export const FEEDBACK_CORRECTED = "feedback-corrected";
+export const FEEDBACK_CONFIRMED = "feedback-confirmed";
 
 /**
  * A text's tokens as the model layer counts a prompt (`ModelsApi.count`): at RPH's characters to a token for the chat
@@ -819,21 +823,24 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * The breakdown's word on the feedback typed in Lumiverse's regenerate dialog for a regeneration's generation (R-198): where it
    * disagrees with what the turn kept (told apart at its start, not told apart, or nothing kept), the turn keeps the breakdown's, which
-   * the attempts after it carry, and the correction is told on the turn (`feedback-corrected`) for the Turn page. A generation of no
-   * regeneration of RPE's is passed over.
+   * the attempts after it carry, and the correction is told on the turn (`feedback-corrected`) for the Turn page; where it agrees, the
+   * turn keeps that it was confirmed (`feedback-confirmed`). A generation of no regeneration of RPE's is passed over.
    */
   async #feedbackTold(user: string, generation: string, said: { position: "system" | "user"; text: string } | null): Promise<void> {
     const run = this.#d.runs.byGeneration(user, generation);
     if (run === null || (run.kind !== "swipe" && run.kind !== "regenerate")) return;
     const was = this.#feedbackOf(user, run.turn);
     const now: Feedback = said === null ? { found: "none" } : { found: "separated", position: said.position, text: said.text };
-    if (was !== null && JSON.stringify(was) === JSON.stringify(now)) return;
     // Nothing kept and none typed is no correction.
     if (was === null && now.found === "none") return;
     const at = this.#d.clock.now();
+    if (was !== null && JSON.stringify(was) === JSON.stringify(now)) {
+      await this.#d.writes.run((db) => db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, FEEDBACK_CONFIRMED, JSON.stringify(now), at]), "keeping the breakdown's word on a regeneration's feedback");
+      return;
+    }
     await this.#d.writes.run((db) => {
       db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, FEEDBACK_TOLD, JSON.stringify(now), at]);
-      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, "feedback-corrected", JSON.stringify({ was, now }), at]);
+      db.run("INSERT INTO turn_told (user, turn, kind, body, at) VALUES (?, ?, ?, ?, ?)", [user, run.turn, FEEDBACK_CORRECTED, JSON.stringify({ was, now }), at]);
     }, "keeping the breakdown's word on a regeneration's feedback");
   }
 
@@ -1307,8 +1314,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const shown: ShownMessage[] = steps
       .filter((s) => s.id !== writing)
       .map((s) => (s.id === replaced && before !== undefined ? { id: s.id, user: false, hash: before.hash, date: before.date, hidden: s.hidden } : { id: s.id, user: s.role !== "assistant", hash: s.shown.hash, date: s.shown.date, hidden: s.hidden }));
+    // A reply whose date ties one of its turns' while its text differs may be another swipe rather than an edit (§6.3 l.617): its swipes,
+    // each with its saved text's hash and date, are read now, before the write, for the comparison to ask (`sync`'s `swipesOf`).
+    const ties = shown.filter((s) => !s.user && store.swipes(chat, s.id).some((t) => t.date === s.date && t.hash !== s.hash));
+    const read = ties.length === 0 ? [] : ((await this.#d.reads()?.messagesById(chat, ties.map((s) => s.id))) ?? []);
+    const swipes = new Map(read.map((m) => [m.id, m.saves.map((save) => ({ hash: textHash(save.text), date: save.date }))]));
     const report = await this.#d.writes.run((db) => {
-      const compared = store.sync(chat, shown, heardUpTo);
+      const compared = store.sync(chat, shown, heardUpTo, (message) => swipes.get(message) ?? null);
       const path = store.path(chat);
       const head = path.findLast((e) => e.turn !== null)?.turn ?? null;
       const found = foundItems(compared, was, steps, this.#d.since.stoppedBefore(user, chat));
@@ -1654,22 +1666,29 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // Another swipe showing on the newest reply: its turn (none, for a swipe made without RPE) is the path now, with its own changes.
     for (const s of of("swiped")) add("swiped", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
     // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it, the stretch named by
-    // message numbers as an unplayed stretch is. What that flip stopped from applying, change by change: its operation, its value, the
-    // message of the turn it came from, and why, each report code in the notices part's words (its `keys`), while they fit
-    // `since.notAppliedBudget`; the rest counted (the world state lists them all).
+    // message numbers as an unplayed stretch is. What that flip stopped from applying, change by change: what it was about (the things it
+    // names, by their names at the chat's head), its operation, its value, the message of the turn it came from, and why, each report code
+    // in the notices part's words (its `keys`), while they fit `since.notAppliedBudget`; the rest counted (the world state lists them all).
     const keys = isRecord(notices?.header.keys) ? notices.header.keys : {};
+    let headView: TreeView | undefined;
+    const namesOf = (refs: readonly string[]): string => {
+      headView ??= store.view(chat);
+      const view = headView;
+      return refs.map((ref) => view.nameOf(ref) ?? ref).join(", ");
+    };
     for (const f of of("flipped")) {
       const from = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.from);
       const to = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.to);
-      const listed: { op: string; value: string; message: number | string; why: string }[] = [];
+      const listed: { about?: string; op: string; value: string; message: number | string; why: string }[] = [];
       let spent = 0;
       let left = 0;
       for (const s of f.stopped ?? []) {
         const change = store.changes(s.turn).find((c) => c.id === s.change);
         const tiedTo = store.turn(s.turn)?.message ?? null;
         const why = [...new Set(s.codes)].map((code) => (typeof keys[code] === "string" ? keys[code] : code)).join("; ");
-        const entry = { op: s.op, value: change === undefined ? "" : JSON.stringify(change.value), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
-        const cost = found.tokens(`${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
+        const about = change === undefined ? "" : namesOf(aboutOf(this.#d.store.env, change.op, change.value));
+        const entry = { ...(about !== "" ? { about } : {}), op: s.op, value: change === undefined ? "" : JSON.stringify(change.value), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
+        const cost = found.tokens(`${about} ${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
         if (spent + cost > notAppliedBudget) {
           left++;
           continue;
@@ -1698,13 +1717,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const m = now.get(message);
       return m === undefined ? {} : { new: shownText(m) };
     };
-    // Each reply edited after its turn, with what its turn was tied to: what Lumiverse saved, where that is not what was released, by
-    // the turn's latest run that wrote into the chat (a Settle now run writes nothing there). The newest are told in full while they fit
-    // the chat's bound (`since.editedBudget`); the rest, which a carried chat can hold by the hundred, in one line by their messages'
-    // numbers, which tells them as surely.
+    // Each reply edited after its turn, with what its turn was played on: a carried turn's text as the store keeps it, else what
+    // Lumiverse saved, where that is not what was released, by the turn's latest run that wrote into the chat (a Settle now run writes
+    // nothing there). The newest are told in full while they fit the chat's bound (`since.editedBudget`); the rest, which a carried chat
+    // can hold by the hundred, in one line by their messages' numbers, which tells them as surely.
     const editLines = edited.map((e) => {
       const run = hidden.has(e.message) ? null : this.#d.runs.reply(user, e.turn);
-      return { edit: e, line: notices?.line("edited", { message: e.message, ...(run !== null ? { old: run.saved ?? run.base + run.reply } : {}), ...textNow(e.message) }) };
+      const old = hidden.has(e.message) ? undefined : (e.text ?? (run !== null ? (run.saved ?? run.base + run.reply) : undefined));
+      return { edit: e, line: notices?.line("edited", { message: e.message, ...(old !== undefined ? { old } : {}), ...textNow(e.message) }) };
     });
     const inFull = new Set<(typeof editLines)[number]>();
     let spent = 0;
@@ -1730,12 +1750,14 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const answered = newest === undefined ? undefined : now.get(newest.id);
     if (answered !== undefined) await this.#d.writes.run((db) => this.#d.prompts.answered(db, user, turn.id, { message: answered.id, hash: answered.shown.hash, text: shownText(answered) }), "keeping the message the turn answered");
 
-    // Messages are numbered as `chat_read` numbers them, the chat's first message 0.
+    // Messages are numbered as `chat_read` numbers them, the chat's first message 0. A carried reply that stands with a reason kept for
+    // it (stopped, failed, restarted) is named with that reason, in the notices part's words (its `keys`, `unplayed_<why>`).
     for (const u of of("unplayed")) {
       const from = place.get(u.from);
       const to = place.get(u.to);
       if (from === undefined || to === undefined) continue;
-      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from}` : `${from}-${to}` }), { range: { from, to: to + 1 } });
+      const why = (u.why ?? []).map((w) => ({ message: place.get(w.message) ?? w.message, why: typeof keys[`unplayed_${w.why}`] === "string" ? keys[`unplayed_${w.why}`] : w.why }));
+      add("unplayed", notices?.line("unplayed", { range: from === to ? `${from}` : `${from}-${to}`, ...(why.length > 0 ? { why: { ".": why } } : {}) }), { range: { from, to: to + 1 } });
     }
     // The last turn's reply: cut short by a stop, or saved by Lumiverse otherwise than it was released (plan §6.3, §10.8).
     const tied = last === null ? null : store.turn(last.turn);

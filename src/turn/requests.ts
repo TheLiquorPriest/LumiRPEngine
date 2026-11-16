@@ -58,6 +58,24 @@ export interface RequestRecord {
   at: number;
 }
 
+/**
+ * Where the feedback typed in Lumiverse's regenerate dialog stands (R-198): told apart from the prompt at the turn's start, with no word of the
+ * breakdown on it yet; confirmed by the breakdown; corrected by it where it disagreed; or completed from it where the start had no earlier
+ * prompt to compare with.
+ */
+export type FeedbackSettled = "start" | "confirmed" | "corrected" | "completed";
+
+/** The feedback a swipe or a regenerate was asked with, as a turn's asked lines give it: its words, when they were kept, and where they stand. */
+export interface FeedbackAsked {
+  feedback: { text: string; at: number; settled: FeedbackSettled };
+}
+
+/** What a turn's route lists as asked beside his words: each request kept with it, and the feedback typed in Lumiverse's regenerate dialog. */
+export interface AskedLine extends Omit<RequestRecord, "kind" | "asked"> {
+  kind: RequestKind | "feedback";
+  asked: PanelAsk | ComposerAsk | FeedbackAsked;
+}
+
 interface RequestRow {
   id: string;
   chat: string;

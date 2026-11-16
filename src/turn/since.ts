@@ -10,7 +10,7 @@
 import type { Database } from "bun:sqlite";
 import type { LvStep } from "../adapter/lumiverse/reads";
 import { textHash } from "../adapter/lumiverse/wire";
-import type { PathEntry, PathReport } from "../store";
+import type { PathEntry, PathReport, StretchWhy } from "../store";
 
 /** How Lumiverse's text of a message with nothing written in it reads as a hash. */
 const NOTHING_WRITTEN = textHash("");
@@ -41,14 +41,14 @@ export type FoundItem =
    * changes this flip stopped from applying, none a flip before it had stopped.
    */
   | { kind: "flipped"; message: string; to: string | null; stretch: { from: string; to: string } | null; stopped: StoppedChange[] }
-  /** A reply edited after its turn was tied. */
-  | { kind: "edited"; message: string; turn: string }
+  /** A reply edited after its turn was tied; `text`, what a carried turn was played on, where the store keeps it (its old text whole). */
+  | { kind: "edited"; message: string; turn: string; text?: string }
   /** A player's message edited since RPE last read it: `had` is the hash it had then. */
   | { kind: "player_edited"; message: string; had: string }
   /** A message of the player's inserted before a played turn (the store's comparison reports it), with the first turn after it. */
   | { kind: "player_inserted"; message: string; before: string }
-  /** Replies no turn is tied to, from the first to the last, as one stretch of the chat. */
-  | { kind: "unplayed"; from: string; to: string };
+  /** Replies no turn is tied to, from the first to the last, as one stretch of the chat; `why`, each of them that stands with a reason kept for it (a carried reply stopped, failed, restarted). */
+  | { kind: "unplayed"; from: string; to: string; why?: { message: string; why: StretchWhy }[] };
 
 /** A found thing as kept: when it was found. */
 export interface KeptItem {
@@ -74,7 +74,7 @@ export function foundItems(report: PathReport, was: readonly PathEntry[], steps:
   const stopped = report.notApplied.filter((n) => !stoppedBefore.has(n.change)).map((n) => ({ change: n.change, turn: n.turn, op: n.op, codes: n.reports.map((r) => r.code) }));
   const stretch = report.rebased === null ? null : { from: report.rebased.from, to: report.rebased.to };
   for (const f of report.flipped) items.push({ kind: "flipped", message: f.message, to: f.to, stretch, stopped });
-  for (const e of report.edited) items.push({ kind: "edited", message: e.message, turn: e.turn });
+  for (const e of report.edited) items.push({ kind: "edited", message: e.message, turn: e.turn, ...(e.text !== undefined ? { text: e.text } : {}) });
   const heard = new Map(was.flatMap((e) => (e.user ? [[e.message, e.hash] as const] : [])));
   for (const s of steps) {
     const had = heard.get(s.id);
@@ -86,18 +86,24 @@ export function foundItems(report: PathReport, was: readonly PathEntry[], steps:
     const from = at.get(run.from);
     const to = at.get(run.to);
     if (from === undefined || to === undefined) continue;
-    let stretch: { from: string; to: string } | null = null;
+    const reason = new Map((run.why ?? []).map((w) => [w.message, w.why]));
+    let stretch: { from: string; to: string; why: { message: string; why: StretchWhy }[] } | null = null;
+    const close = (): void => {
+      if (stretch !== null) items.push({ kind: "unplayed", from: stretch.from, to: stretch.to, ...(stretch.why.length > 0 ? { why: stretch.why } : {}) });
+      stretch = null;
+    };
     for (const s of steps.slice(from, to + 1)) {
       if (s.role !== "assistant") continue;
       if (s.shown.hash !== NOTHING_WRITTEN && read.get(s.id) !== s.shown.hash) {
-        if (stretch === null) stretch = { from: s.id, to: s.id };
+        if (stretch === null) stretch = { from: s.id, to: s.id, why: [] };
         else stretch.to = s.id;
+        const why = reason.get(s.id);
+        if (why !== undefined) stretch.why.push({ message: s.id, why });
         continue;
       }
-      if (stretch !== null) items.push({ kind: "unplayed", ...stretch });
-      stretch = null;
+      close();
     }
-    if (stretch !== null) items.push({ kind: "unplayed", ...stretch });
+    close();
   }
   // A message of his the store reports inserted before a played turn is a change to his earlier messages (plan §10.10); an inserted
   // reply is a stretch written without RPE, which `unplayed` tells.
