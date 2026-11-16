@@ -20,7 +20,7 @@
 
 import type { ActivatedLore, LoreEntry, LoreHit, LoreKnowing, LoreQuery } from "rp-harness/contract";
 import { blankWorld } from "../engine/authoring";
-import { loreReadable, loreSearch, wordsOf } from "../engine/lore";
+import { loreReadable, loreSearch, SEARCH_LIMITS, type SearchLimits, wordsOf } from "../engine/lore";
 import { isGone, kindIs } from "../engine/scope";
 import { loreGateReader } from "../engine/visibility";
 import { initialState } from "../engine/world-state";
@@ -30,12 +30,13 @@ import { hasOwn } from "../shared/json";
 import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf } from "../shared/lore";
 import { publicText } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
+import type { LoreSettingsFor } from "./chat-settings";
 import { bookEntryId, type EntryNumbers, loreRefOf, worldEntryId } from "./ids";
-import { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
+import { foldName, type KeyMatching, keysFound, LUMIVERSE_KEY_MATCHING } from "./keys";
 import type { LoreMap, LoreMapLine } from "./map";
-import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBooks, LoreTurns, LoreWorlds, WorldAt } from "./sources";
+import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBookListing, LoreBooks, LoreTurns, LoreWorlds, WorldAt } from "./sources";
 
-/** The lore's settings. */
+/** The lore's settings: the numbers; the stop words and his choice of books are read for the chat (`LoreChatSettings`). */
 export interface LoreSettings {
   /** Hits a search gives when the query sets no limit of its own. */
   searchLimit: number;
@@ -43,9 +44,21 @@ export interface LoreSettings {
   snippetChars: number;
   /** Words of its text that title a book entry with no title of its own (today's, `backend/book-lore.ts:26`). */
   titleWords: number;
+  /** The shortest term or word a search matches (`engine/lore.ts`). */
+  minTerm: number;
+  /** The most a word repeated in an entry counts in a search's ranking. */
+  wordCap: number;
 }
 
-export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8 });
+export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8, minTerm: SEARCH_LIMITS.minTerm, wordCap: SEARCH_LIMITS.wordCap });
+
+/** What one call reads of the lore's settings for its chat. */
+interface Chosen {
+  lore: Readonly<LoreSettings>;
+  limits: Readonly<SearchLimits>;
+  /** His books: the ids the lore reads of the books the chat reads; null for `auto`, all of them. */
+  books: readonly string[] | null;
+}
 
 export interface LoreOptions {
   books: LoreBooks;
@@ -53,6 +66,8 @@ export interface LoreOptions {
   turns: LoreTurns;
   numbers: EntryNumbers;
   settings?: Partial<LoreSettings>;
+  /** What a chat's levels set of the lore's settings, read at each call; absent, only `settings` and every book. */
+  settingsFor?: LoreSettingsFor;
 }
 
 /** Whose lore, which chat, and where on its path: at a turn, with what it has staged, else at the head. */
@@ -83,6 +98,11 @@ export const HOWS = ["constant", "keyword", "vector", "sticky"] as const;
 /** A world entry an earlier build copied from a book entry: today's lore reads the book entry instead, as its book has it now (`backend/book-lore.ts:296-338`). */
 function isCopy(entry: LoreEntryDef): boolean {
   return loreSourceOf(entry.source).kind === "book";
+}
+
+/** A world entry's keys: the texts among them. */
+function keysOf(entry: LoreEntryDef): string[] {
+  return Array.isArray(entry.keys) ? entry.keys.filter((k): k is string => typeof k === "string") : [];
 }
 
 /** A world entry's title as today's views give it: its own, else its key. */
@@ -226,6 +246,7 @@ export class Lore {
   private readonly turns: LoreTurns;
   private readonly numbers: EntryNumbers;
   private readonly settings: Readonly<LoreSettings>;
+  private readonly settingsFor: LoreSettingsFor | undefined;
   private blank: WorldAt | null = null;
 
   constructor(options: LoreOptions) {
@@ -234,6 +255,16 @@ export class Lore {
     this.turns = options.turns;
     this.numbers = options.numbers;
     this.settings = Object.freeze({ ...LORE_DEFAULTS, ...options.settings });
+    this.settingsFor = options.settingsFor;
+  }
+
+  /**
+   * What the lore reads for this chat: its levels' settings over the global ones the lore was made with, as they stand now (a change
+   * applies at the chat's next call, no restart). Without a reader of levels, the settings it was made with, and every book.
+   */
+  private async settingsOf(at: LoreAt): Promise<Chosen> {
+    const chat = await this.settingsFor?.(at);
+    return { lore: { ...this.settings, ...chat?.lore }, limits: chat?.search ?? { minTerm: this.settings.minTerm, wordCap: this.settings.wordCap, stopWords: SEARCH_LIMITS.stopWords }, books: chat?.books ?? null };
   }
 
   /** Entries in full, in the order asked, as the lead and the GM read them: every entry, a world entry marked with who may know it. An id that names nothing is left out. */
@@ -288,7 +319,7 @@ export class Lore {
   async activated(at: LoreAt): Promise<ActivatedLore[]> {
     if (at.turn === undefined) return [];
     const entries = await this.turns.activated(at.user, at.chat, at.turn);
-    return entries === null ? [] : this.named(at.user, entries);
+    return entries === null ? [] : this.named(at.user, entries, (await this.settingsOf(at)).lore.titleWords);
   }
 
   /**
@@ -298,11 +329,13 @@ export class Lore {
    */
   async loreMap(ask: LoreMapAsk): Promise<LoreMap> {
     const activated = (await this.turns.activated(ask.user, ask.chat, ask.turn)) ?? [];
-    const inPrompt = (await this.named(ask.user, activated)).map(({ id, title, source, how }): LoreMapLine => ({ id, title, source, ...(how !== undefined ? { how } : {}) }));
+    const inPrompt = (await this.named(ask.user, activated, (await this.settingsOf(ask)).lore.titleWords)).map(({ id, title, source, how }): LoreMapLine => ({ id, title, source, ...(how !== undefined ? { how } : {}) }));
     const at = this.worlds.at(ask.user, ask.chat, ask.turn);
     if (at === null) return { inPrompt, world: [] };
-    const said = keysIn(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING);
-    const matched = Object.entries(at.world.lore).filter(([key, entry]) => hasOwn(at.world.lore, key) && !isCopy(entry) && Array.isArray(entry.keys) && entry.keys.some((k) => typeof k === "string" && said(k)));
+    // Every world key at once, over the messages once, as Lumiverse's matcher goes.
+    const candidates = Object.entries(at.world.lore).filter(([key, entry]) => hasOwn(at.world.lore, key) && !isCopy(entry));
+    const said = keysFound(ask.messages, ask.matching ?? LUMIVERSE_KEY_MATCHING, candidates.flatMap(([, entry]) => keysOf(entry)));
+    const matched = candidates.filter(([, entry]) => keysOf(entry).some((k) => said.has(k)));
     const numbers = await this.numbers.ofWorld(ask.user, at.world.id, matched.map(([key]) => key));
     const world = matched.flatMap(([key, entry]): LoreMapLine[] => {
       const n = numbers.get(key);
@@ -314,6 +347,11 @@ export class Lore {
   /** The chat's world where `at` stands, with the Author's horizon there; null for a chat with no world. */
   worldAt(at: LoreAt): WorldAt | null {
     return this.worlds.at(at.user, at.chat, at.turn);
+  }
+
+  /** Every book of the user's, as his choice of books (`lore.books`) lists them; none where the host lists none. */
+  async bookList(at: LoreAt): Promise<LoreBookListing[]> {
+    return (await this.books.list?.(at.user, at.chat)) ?? [];
   }
 
   /**
@@ -329,6 +367,7 @@ export class Lore {
   }
 
   private async entries(at: LoreAt, ids: readonly string[], plays?: string): Promise<LoreEntry[]> {
+    const s = await this.settingsOf(at);
     const refs = ids.map(loreRefOf);
     const world = plays !== undefined || refs.some((ref) => ref !== null) ? this.worlds.at(at.user, at.chat, at.turn) : null;
     const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
@@ -352,24 +391,25 @@ export class Lore {
       } else if (ref?.kind === "book" && as === undefined) {
         const id = this.numbers.entry(at.user, ref.n);
         const row = id === null ? null : await this.books.entry(at.user, id);
-        books ??= this.booksOf(at, world).then((read) => new Set(read.map((b) => b.id)));
+        books ??= this.booksOf(at, world, s.books).then((read) => new Set(read.map((b) => b.id)));
         if (row === null || !(await books).has(row.book)) continue;
         const book = await this.books.book(at.user, row.book);
-        if (book !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, this.settings.titleWords)));
+        if (book !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, s.lore.titleWords)));
       }
     }
     return out;
   }
 
   private async find(at: LoreAt, query: LoreQuery, plays?: string): Promise<LoreHit[]> {
-    const limit = Math.max(0, Math.floor(query.limit ?? this.settings.searchLimit));
+    const s = await this.settingsOf(at);
+    const limit = Math.max(0, Math.floor(query.limit ?? s.lore.searchLimit));
     const world = this.worlds.at(at.user, at.chat, at.turn);
     const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
     if (limit === 0 || (plays !== undefined && as === undefined)) return [];
     const asked = (source: string): boolean => query.sources === undefined || query.sources.includes(source);
     const lore: Record<string, LoreEntryDef> = {};
     const found = new Map<string, Found>();
-    for (const g of await this.gather(at, world, asked, as === undefined)) {
+    for (const g of await this.gather(at, world, asked, as === undefined, s)) {
       if (g.kind === "world") {
         lore[g.key] = g.text === g.entry.content ? g.entry : { ...g.entry, content: g.text };
         found.set(g.key, { kind: "world", key: g.key, source: g.source, title: g.title, text: g.text });
@@ -382,15 +422,15 @@ export class Lore {
     }
     const base = world ?? this.noWorld();
     // No snippet is cut by the search itself: none costs a token, as today's lore tools ask (`backend/agents/tools/lore.ts:361-362`).
-    const { hits } = loreSearch({ reg: base.registry, world: { ...base.world, lore }, state: base.state, tokens: () => 0 }, { query: query.text, purpose: as === undefined ? "gm" : AS_CHARACTER, ...(as === undefined ? {} : { as }), tokenBudget: 0, limit });
+    const { hits } = loreSearch({ reg: base.registry, world: { ...base.world, lore }, state: base.state, tokens: () => 0 }, { query: query.text, purpose: as === undefined ? "gm" : AS_CHARACTER, ...(as === undefined ? {} : { as }), tokenBudget: 0, limit, limits: s.limits });
     const hit = hits.flatMap((h) => found.get(h.id) ?? []);
     const numbers = await this.numbers.of(at.user, hit.flatMap((f) => (f.kind === "book" ? [f.entry] : [])));
     const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, hit.flatMap((f) => (f.kind === "world" ? [f.key] : [])));
-    const words = wordsOf(query.text);
+    const words = wordsOf(query.text, s.limits);
     return hit.flatMap((f): LoreHit[] => {
       const n = f.kind === "book" ? numbers.get(f.entry) : worldNumbers.get(f.key);
       const id = n === undefined ? null : f.kind === "book" ? bookEntryId(n) : worldEntryId(n);
-      return id === null ? [] : [{ id, source: f.source, title: f.title, snippet: snippetOf(f.text, words, this.settings.snippetChars) || f.title, how: "words" }];
+      return id === null ? [] : [{ id, source: f.source, title: f.title, snippet: snippetOf(f.text, words, s.lore.snippetChars) || f.title, how: "words" }];
     });
   }
 
@@ -401,7 +441,7 @@ export class Lore {
    */
   async catalog(at: LoreAt): Promise<LoreCatalogEntry[]> {
     const world = this.worlds.at(at.user, at.chat, at.turn);
-    const gathered = await this.gather(at, world, () => true, true);
+    const gathered = await this.gather(at, world, () => true, true, await this.settingsOf(at));
     const numbers = await this.numbers.of(at.user, gathered.flatMap((g) => (g.kind === "book" ? [g.row.id] : [])));
     const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, gathered.flatMap((g) => (g.kind === "world" ? [g.key] : [])));
     return gathered.flatMap((g): LoreCatalogEntry[] => {
@@ -428,7 +468,7 @@ export class Lore {
    * its own entry. Not the entries the engine itself wrote (an earlier build's own book of blank,
    * disabled entries, `shared/lore.ts` `engineWroteEntry`).
    */
-  private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, books: boolean): Promise<Gathered[]> {
+  private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, books: boolean, s: Chosen): Promise<Gathered[]> {
     const out: Gathered[] = [];
     if (world !== null && asked(world.world.name)) {
       for (const [key, entry] of Object.entries(world.world.lore)) {
@@ -437,12 +477,12 @@ export class Lore {
       }
     }
     if (!books) return out;
-    const read = (await this.booksOf(at, world)).filter((book) => asked(book.name));
+    const read = (await this.booksOf(at, world, s.books)).filter((book) => asked(book.name));
     const rows = await Promise.all(read.map((book) => this.books.entries(at.user, book.id)));
     for (const [i, book] of read.entries()) {
       for (const row of rows[i] ?? []) {
         if (engineWroteEntry(row.extensions)) continue;
-        out.push({ kind: "book", book, row, title: bookTitle(row, this.settings.titleWords), text: publicText(row.content) });
+        out.push({ kind: "book", book, row, title: bookTitle(row, s.lore.titleWords), text: publicText(row.content) });
       }
     }
     return out;
@@ -454,7 +494,7 @@ export class Lore {
    * those its world lists, those attached to the chat, then those an earlier build copied world entries
    * from, whose entries are read as their books have them now. A book the user has not is left out.
    */
-  private async booksOf(at: LoreAt, world: WorldAt | null): Promise<LoreBook[]> {
+  private async booksOf(at: LoreAt, world: WorldAt | null, only: readonly string[] | null): Promise<LoreBook[]> {
     const listed = world === null ? [] : loreBooksOf(world.world);
     const copied = world === null ? [] : Object.values(world.world.lore).flatMap((entry) => {
       const source = loreSourceOf(entry.source);
@@ -462,13 +502,14 @@ export class Lore {
     });
     // The books of the turn's own generation: the speaker's in a group chat and the generation's persona, as Lumiverse decides them for it.
     const generation = at.turn === undefined ? null : ((await this.turns.generation?.(at.user, at.chat, at.turn)) ?? null);
-    const ids = [...new Set([...listed, ...(await this.books.attached(at.user, at.chat, generation ?? undefined)), ...copied])];
+    // His choice of books (`lore.books`): `auto` reads every book the chat reads, a list only those of them it names (today's `loreBookIds`).
+    const ids = [...new Set([...listed, ...(await this.books.attached(at.user, at.chat, generation ?? undefined)), ...copied])].filter((id) => only === null || only.includes(id));
     const books = await Promise.all(ids.map((id) => this.books.book(at.user, id)));
     return books.filter((book): book is LoreBook => book !== null);
   }
 
   /** Activated entries by RPE's ids, titled as reading them titles them, with their books' names (none where the book cannot be read) and how each activated. */
-  private async named(user: string, entries: readonly ActivatedEntry[]): Promise<ActivatedLore[]> {
+  private async named(user: string, entries: readonly ActivatedEntry[], titleWords: number): Promise<ActivatedLore[]> {
     const numbers = await this.numbers.of(user, entries.map((e) => e.id));
     const bookIds = [...new Set(entries.flatMap((e) => (e.book === null ? [] : [e.book])))];
     const books = await Promise.all(bookIds.map((id) => this.books.book(user, id)));
@@ -480,7 +521,7 @@ export class Lore {
         let title = e.title.replace(/\s+/g, " ").trim();
         if (title === "") {
           const row = await this.books.entry(user, e.id);
-          if (row !== null) title = bookTitle(row, this.settings.titleWords);
+          if (row !== null) title = bookTitle(row, titleWords);
         }
         const how = HOWS.find((h) => h === e.how);
         return { id: bookEntryId(n), source: e.book === null ? "" : (names.get(e.book) ?? ""), title, ...(how === undefined ? {} : { how }) };

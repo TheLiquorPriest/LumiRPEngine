@@ -72,6 +72,8 @@ export interface LoreQuery {
    * audience says.
    */
   as?: EntityId;
+  /** What the search holds back (the shortest term, a repeated word's count, the stop words); absent, today's (`SEARCH_LIMITS`). */
+  limits?: Readonly<SearchLimits>;
 }
 
 export interface LoreHit {
@@ -101,9 +103,18 @@ const MIN_TERM = 3;
 const MIN_WORDS = 4;
 /** A word repeated in an entry counts at most this often: one long entry can't outrank every other on one word. */
 const WORD_CAP = 3;
-const STOP_WORDS: Record<string, true> = Object.fromEntries(
-  "the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ").map((w) => [w, true] as const),
-);
+const STOP_WORDS: readonly string[] =
+  "the and for with that this from into onto have has had was were are you your yours my mine our ours his her hers their theirs them they she him its not but all any can will would could should about then than there here what when where which who whom how why just very some more most other out over under again also like get got one two too off own same such only each both few nor yet".split(" ");
+
+/** What a search holds back, which a host may set (the lore's settings): the shortest term or word that matches, the most a word repeated counts, the words that count for nothing. */
+export interface SearchLimits {
+  minTerm: number;
+  wordCap: number;
+  stopWords: readonly string[];
+}
+
+/** Today's: the thresholds above and the stop words, where a host gives none. */
+export const SEARCH_LIMITS: Readonly<SearchLimits> = Object.freeze({ minTerm: MIN_TERM, wordCap: WORD_CAP, stopWords: STOP_WORDS });
 
 /** Text as lookups read it: lowercase letters and digits, anything else one space, padded so a match falls on whole words. */
 function plain(text: string): string {
@@ -112,11 +123,12 @@ function plain(text: string): string {
 }
 
 /** The words a query scores entries by: no stop words, no short ones, a plural's final `s` dropped. The story pack matches a puzzle's name by them too. */
-export function wordsOf(text: string): string[] {
+export function wordsOf(text: string, limits: Readonly<SearchLimits> = SEARCH_LIMITS): string[] {
+  const stop = new Set(limits.stopWords);
   return plain(text)
     .trim()
     .split(" ")
-    .filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w))
+    .filter((w) => w.length >= limits.minTerm && !stop.has(w))
     .map((w) => (w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
 }
 
@@ -256,13 +268,14 @@ function topicMembers(world: WorldDoc, topic: string): string[] {
 /** `lore.search`: the entries `q.purpose` may read that match the query, ranked, with snippets within the budget. */
 export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
   const { reg, world, state } = r;
+  const limits = q.limits ?? SEARCH_LIMITS;
   const open = loreGateReader(reg, world, state);
   const text = plain(q.query ?? "");
-  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= MIN_TERM));
+  const exact = new Set((q.terms ?? []).map(plain).filter((t) => t.trim().length >= limits.minTerm));
   const said = (name: unknown): string | null => {
     if (typeof name !== "string") return null;
     const p = plain(name);
-    return p.trim().length >= MIN_TERM && (exact.has(p) || (text !== "" && text.includes(p))) ? p.trim() : null;
+    return p.trim().length >= limits.minTerm && (exact.has(p) || (text !== "" && text.includes(p))) ? p.trim() : null;
   };
   // Table terms said, by the entries they lead to.
   const tableTerms = new Map<string, string[]>();
@@ -278,7 +291,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
   }
   const members = new Map([...topics].map((t) => [t, new Set(topicMembers(world, t))]));
   const links = new Set(q.exact ? [] : (q.links ?? []));
-  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? ""))];
+  const words = q.exact ? [] : [...new Set(wordsOf(q.query ?? "", limits))];
   const ranked: { id: string; entry: LoreEntryDef; key: number[]; why: string[] }[] = [];
   for (const [id, entry] of Object.entries(world.lore)) {
     if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as)) continue;
@@ -292,8 +305,8 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
     let tf = 0;
     if (words.length > 0) {
       const counts = new Map<string, number>();
-      for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" "))) counts.set(w, (counts.get(w) ?? 0) + 1);
-      for (const w of words) tf += Math.min(WORD_CAP, counts.get(w) ?? 0);
+      for (const w of wordsOf([entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), entry.content].join(" "), limits)) counts.set(w, (counts.get(w) ?? 0) + 1);
+      for (const w of words) tf += Math.min(limits.wordCap, counts.get(w) ?? 0);
     }
     if (q.exact ? terms.size === 0 : terms.size + linked.length + inTopics.length + tf === 0) continue;
     const priority = typeof entry.priority === "number" && Number.isFinite(entry.priority) ? entry.priority : 0;

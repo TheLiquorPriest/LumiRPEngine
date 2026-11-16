@@ -70,6 +70,74 @@ export function keysIn(messages: readonly string[], how: KeyMatching): (key: str
 }
 
 /**
+ * Which of `keys` come up in `messages`, all of them at once as Lumiverse's matcher goes: the messages are folded once and gone over
+ * once, message by message (a match never crosses one), however many keys there are. A key is found where `keysIn` finds it.
+ */
+export function keysFound(messages: readonly string[], how: KeyMatching, keys: readonly string[]): Set<string> {
+  const found = new Set<string>();
+  const raw = messages.join(BETWEEN);
+  const folded = how.caseSensitive ? null : fold(raw);
+  const hay = folded === null ? raw : folded.text;
+  // The needles, each with the keys that read as it, in one trie whose failure links let one pass over the text find them all.
+  const needles = new Map<string, string[]>();
+  for (const key of keys) {
+    if (key === "" || key.includes(BETWEEN)) continue;
+    const needle = how.caseSensitive ? key : fold(key).text;
+    needles.set(needle, [...(needles.get(needle) ?? []), key]);
+  }
+  if (needles.size === 0) return found;
+  const next: Map<number, number>[] = [new Map()];
+  const ends: string[][] = [[]];
+  for (const needle of needles.keys()) {
+    let node = 0;
+    for (let i = 0; i < needle.length; i++) {
+      const code = needle.charCodeAt(i);
+      let to = next[node]?.get(code);
+      if (to === undefined) {
+        to = next.length;
+        next.push(new Map());
+        ends.push([]);
+        next[node]?.set(code, to);
+      }
+      node = to;
+    }
+    ends[node]?.push(needle);
+  }
+  const fail: number[] = new Array<number>(next.length).fill(0);
+  const queue: number[] = [...(next[0]?.values() ?? [])];
+  for (let head = 0; head < queue.length; head++) {
+    const node = queue[head] ?? 0;
+    for (const [code, child] of next[node] ?? []) {
+      let back = fail[node] ?? 0;
+      while (back !== 0 && next[back]?.get(code) === undefined) back = fail[back] ?? 0;
+      const to = next[back]?.get(code);
+      fail[child] = to !== undefined && to !== child ? to : 0;
+      ends[child]?.push(...(ends[fail[child] ?? 0] ?? []));
+      queue.push(child);
+    }
+  }
+  const done = new Set<string>();
+  let node = 0;
+  for (let at = 0; at < hay.length; at++) {
+    const code = hay.charCodeAt(at);
+    while (node !== 0 && next[node]?.get(code) === undefined) node = fail[node] ?? 0;
+    node = next[node]?.get(code) ?? 0;
+    for (const needle of ends[node] ?? []) {
+      if (done.has(needle)) continue;
+      if (how.wholeWords) {
+        const from = at - needle.length + 1;
+        const first = folded === null ? from : (folded.start[from] ?? 0);
+        const last = folded === null ? at : (folded.end[at] ?? 0) - 1;
+        if (!atWordEdges(raw, first, last)) continue;
+      }
+      done.add(needle);
+      for (const key of needles.get(needle) ?? []) found.add(key);
+    }
+  }
+  return found;
+}
+
+/**
  * A name as the lore matches names it does not read as keys (a binding's record, an overlay's entry
  * given by its title): case folded, runs of white space made one space, trimmed.
  */

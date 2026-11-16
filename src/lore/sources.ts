@@ -46,6 +46,18 @@ export interface LoreGeneration {
   persona?: string | null;
 }
 
+/** One of the user's books as his choice of books lists it. */
+export interface LoreBookListing {
+  id: string;
+  name: string;
+  /** Whether the chat asked about has it attached. */
+  attached: boolean;
+  /** Whether a character brought it. */
+  character: boolean;
+  /** When Lumiverse made it, in seconds; null where it records none. */
+  added: number | null;
+}
+
 /** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */
 export interface LoreBooks {
   /**
@@ -61,6 +73,8 @@ export interface LoreBooks {
   entries(user: string, book: string): Promise<LoreBookEntry[]>;
   /** One entry of any of the user's books; null when the user has none by that id. */
   entry(user: string, id: string): Promise<LoreBookEntry | null>;
+  /** Every book of the user's, as a Settings page lists them for his choice of books (`lore.books`); `chat` says which have the chat attached. Absent where the host lists none. */
+  list?(user: string, chat: string | null): Promise<LoreBookListing[]>;
 }
 
 /** A chat's world where a point of its path stands. */

@@ -25,6 +25,7 @@ export const LORE_INDEX_STATUS_PATH = "/api/v1/chats/:chat/lore/index/status";
 export const LORE_INDEX_JOBS_PATH = "/api/v1/chats/:chat/lore/index/jobs";
 export const LORE_INDEX_ENTRY_PATH = "/api/v1/chats/:chat/lore/index/:entry";
 export const LORE_OVERLAYS_PATH = "/api/v1/chats/:chat/lore/overlays";
+export const LORE_BOOKS_PATH = "/api/v1/chats/:chat/lore/books";
 
 const binding = shape.object({ what: field(T, "The record it defines, by its id (`entity:sefa`, `place:harbor`), its name or as written."), aspect: field(T, "Which side of it the entry defines; empty where none was said.") });
 
@@ -94,6 +95,26 @@ const overlaysReply = shape.named(
     ),
   }),
 );
+
+const booksReply = shape.named(
+  "LoreBooks",
+  "The user's books as his choice of the books the lore reads lists them.",
+  shape.object({
+    books: field(
+      shape.list(
+        shape.object({
+          id: field(T, "The book's id in Lumiverse."),
+          name: field(T, "Its name."),
+          attached: field(shape.yesNo(), "Whether the chat has it attached."),
+          character: field(shape.yesNo(), "Whether a character brought it."),
+          added: field(shape.nullable(shape.number({ least: 0 })), "When Lumiverse made it, in seconds; null where it records none."),
+        }),
+      ),
+      "Every book of his, the engine's own left out.",
+    ),
+  }),
+);
+
 const editBody = shape.object({
   kind: shape.optional(shape.nullable(T), "What kind of thing it is; null takes his own off."),
   line: shape.optional(shape.nullable(T), "One line saying what it is; null takes his own off."),
@@ -141,7 +162,6 @@ function refusedWords(lines: Parameters<typeof loreLine>[0], refusal: JobRefusal
 }
 
 export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
-  const settings = deps.index.settings;
   return [
     route({
       method: "GET",
@@ -150,11 +170,12 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
       group: "lore",
       does: "The lore index of a chat, a page at a time in the order of the lore map's catalog: each entry of its books and its world with its id, keys, size, how it activates and revision, and the lines the index holds of it (the user's own, else the latest run's, an earlier revision's marked stale) with whether they are current.",
       reply: shape.page(indexRow),
-      paged: { sizes: () => ({ default: settings.page, most: settings.page * 10 }) },
+      // The page's size is the setting's (`lore.index.page`, the global level's); the most the caller may name is ten pages.
+      paged: { sizes: () => ({ default: deps.index.settings.page, most: deps.index.settings.page * 10 }) },
       handle: async ({ user, params, query }) => {
         const all = await deps.index.entries({ user, chat: params.chat });
         const from = query.after === undefined ? 0 : all.findIndex((e) => e.id === query.after) + 1;
-        const items = all.slice(from, from + (query.limit ?? settings.page)).map(rowOf);
+        const items = all.slice(from, from + query.limit).map(rowOf);
         return { items, next: from + items.length < all.length ? (items[items.length - 1]?.id ?? null) : null };
       },
     }),
@@ -196,6 +217,15 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
       does: "The overlays on a chat's path, in the path's order: each with its entry and the entry's title, the note, the turn that wrote it (its place on the path, from 1, and its id) and who wrote it. A turn that was swiped away or deleted has none on the path.",
       reply: overlaysReply,
       handle: async ({ user, params }) => ({ overlays: (await deps.index.overlays({ user, chat: params.chat })).map((o) => ({ id: o.id, entry: o.entry, title: o.title, note: o.note, turn: o.number, turnId: o.turn, by: o.by, agent: o.agent })) }),
+    }),
+    route({
+      method: "GET",
+      path: LORE_BOOKS_PATH,
+      access: "page",
+      group: "lore",
+      does: "Every book of the user's by its id and name, for the Settings page's choice of the books the lore reads (`lore.books`): whether the chat has it attached, whether a character brought it, and when Lumiverse made it.",
+      reply: booksReply,
+      handle: async ({ user, params }) => ({ books: (await deps.index.bookList({ user, chat: params.chat })).map((b) => ({ id: b.id, name: b.name, attached: b.attached, character: b.character, added: b.added })) }),
     }),
     route({
       method: "PUT",

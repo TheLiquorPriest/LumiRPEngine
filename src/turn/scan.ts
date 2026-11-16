@@ -2,8 +2,8 @@
 // (plan §9.2, "matched as Lumiverse matches a book entry's keys"): the user's World Info settings as
 // Lumiverse reads them (`normalizeWorldInfoSettings`, `services/world-info-activation.service.ts:66-90`),
 // and each message's text with the markup Lumiverse hides from its scan blanked out, carried unchanged
-// from Lumiverse's `utils/world-info-scan-exclusion.ts`. Which messages it scans: the chat's visible
-// ones, without the message being written, the latest `depth` of them (`:744-756`).
+// from Lumiverse's `utils/world-info-scan-exclusion.ts`. Which messages it scans: the chat's messages, hidden
+// ones included, without the message being written, the latest `depth` of them (`:744-756`).
 
 import type { LvStep } from "../adapter/lumiverse/reads";
 import type { KeyMatching } from "../lore";
@@ -28,10 +28,10 @@ export function scanSettingsOf(value: JsonValue | undefined): ScanSettings {
   };
 }
 
-/** The messages Lumiverse scans, by their places on the path: the visible ones but `writing`, the latest `depth` of them. */
+/** The messages Lumiverse scans, by their places on the path: all but `writing`, hidden ones included (its keyword scan reads them; only its vector search skips a hidden message), the latest `depth` of them. */
 export function scannedSteps(steps: readonly LvStep[], writing: ReadonlySet<string>, depth: number | null): LvStep[] {
-  const visible = steps.filter((s) => !s.hidden && !writing.has(s.id));
-  return depth === null || depth >= visible.length ? visible : visible.slice(-depth);
+  const kept = steps.filter((s) => !writing.has(s.id));
+  return depth === null || depth >= kept.length ? kept : kept.slice(-depth);
 }
 
 // ---------------------------------------------------------------- carried from Lumiverse

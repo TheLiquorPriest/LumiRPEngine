@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Lore } from "../../src/lore/index";
+import { Lore, LORE_DEFAULTS, LORE_INDEX_DEFAULTS, type LoreChatSettings } from "../../src/lore/index";
 import { ATLAS, CARD, CHAT, coastEntries, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER, W } from "./fixtures";
 
 const AT = { user: USER, chat: CHAT };
@@ -92,5 +92,16 @@ describe("one reader over the books and the world", () => {
     expect(cove?.snippet).toBe("Sefa runs brandy through the cove at the new moon.");
     const narrow = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, settings: { snippetChars: 10 } });
     expect((await narrow.search(AT, { text: "catch" }))[0]?.snippet).toBe("…of its catch at the…");
+  });
+
+  test("his choice of books narrows what the lore reads, and a chat's shortest word is its own setting", async () => {
+    const settings = (books: string[] | null, minTerm: number): LoreChatSettings => ({ indexEntry: null, lore: { ...LORE_DEFAULTS, minTerm }, search: { minTerm, wordCap: 3, stopWords: [] }, books, index: { ...LORE_INDEX_DEFAULTS } });
+    const only = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, settingsFor: async () => settings(["book-songs"], 3) });
+    // The atlas is a book the chat reads, but not one of his choice: only the songs are read.
+    expect((await only.search(AT, { text: "lamp" })).map((h) => h.title)).toEqual(["The Lamplighter's Shanty"]);
+    expect((await only.catalog(AT)).filter((e) => e.book !== null).map((e) => e.book)).toEqual(["book-songs"]);
+    const short = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, settingsFor: async () => settings(null, 2) });
+    expect((await short.search(AT, { text: "of" })).length).toBeGreaterThan(0);
+    expect(await lore.search(AT, { text: "of" })).toEqual([]);
   });
 });

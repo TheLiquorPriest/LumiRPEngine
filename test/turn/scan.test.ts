@@ -23,12 +23,12 @@ describe("what Lumiverse scans for lore", () => {
     expect(scanSettingsOf({ forceCaseSensitive: "yes" }).matching.caseSensitive).toBe(false);
   });
 
-  test("the messages scanned: visible ones but the one being written, the latest to the depth", () => {
+  test("the messages scanned: every one but the one being written, hidden ones included, the latest to the depth", () => {
     const step = (id: string, hidden = false) => ({ id, hidden }) as LvStep;
     const steps = [step("a"), step("b", true), step("c"), step("d"), step("e")];
-    expect(scannedSteps(steps, new Set(["e"]), null).map((s) => s.id)).toEqual(["a", "c", "d"]);
+    expect(scannedSteps(steps, new Set(["e"]), null).map((s) => s.id)).toEqual(["a", "b", "c", "d"]);
     expect(scannedSteps(steps, new Set(["e"]), 2).map((s) => s.id)).toEqual(["c", "d"]);
-    expect(scannedSteps(steps, new Set(), 10).map((s) => s.id)).toEqual(["a", "c", "d", "e"]);
+    expect(scannedSteps(steps, new Set(), 10).map((s) => s.id)).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   test("markup Lumiverse hides from its scan is blanked to the same length; text with none is left as it is", () => {
@@ -69,7 +69,7 @@ describe("what Lumiverse scans for lore", () => {
 
     expect(asks).toHaveLength(1);
     expect(asks[0]!.matching).toEqual({ caseSensitive: true, wholeWords: true });
-    // The latest two visible messages: the hidden one is not scanned, nor is the reply being written.
+    // The latest two messages, a hidden one scanned like any (it is older than the depth reaches here), not the reply being written.
     expect(asks[0]!.messages).toEqual(["Wren winds the clockwork.", `I ask about the ${" ".repeat("<wi-exclude>smuggler's</wi-exclude>".length)} lamp.`]);
   });
 });

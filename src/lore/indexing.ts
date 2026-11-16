@@ -29,7 +29,7 @@ import type { Lore, LoreAt, LoreCatalogEntry, LoreMapAsk } from "./lore";
 import { loreLine } from "./tools";
 import type { LoreMap, LoreMapLine } from "./map";
 import { type OverlayRow, overlayNoted, overlayRows } from "./overlays";
-import type { LorePath } from "./sources";
+import type { LoreBookListing, LorePath } from "./sources";
 
 /** Every fixed value of the index, each a setting with this default. */
 export const LORE_INDEX_DEFAULTS = Object.freeze({
@@ -244,6 +244,11 @@ export class LoreIndex {
     this.settings = Object.freeze({ ...LORE_INDEX_DEFAULTS, ...deps.settings });
   }
 
+  /** The index's numbers for this chat: its levels' settings over the global ones the index was made with, as they stand now. */
+  async settingsAt(at: LoreAt): Promise<Readonly<LoreIndexSettings>> {
+    return { ...this.settings, ...(await this.deps.settingsFor?.(at))?.index };
+  }
+
   /** The answers' lines in force for the chat (`.prompts/lore-answers.md`), by the one reader the readable index is worded with; undefined where the part is off or no file is set up. */
   async lines(at: LoreAt): Promise<LinesPart | undefined> {
     return this.deps.file?.lines(at);
@@ -282,6 +287,11 @@ export class LoreIndex {
     return rows.map((r) => ({ ...r, title: titles.get(r.entry) ?? null }));
   }
 
+  /** Every book of the user's, as the Settings page lists them for his choice of books. */
+  bookList(at: LoreAt): Promise<LoreBookListing[]> {
+    return this.deps.lore.bookList(at);
+  }
+
   /**
    * The lore map in full for a turn (`map.ts`), on the first form `Lore.loreMap` gives: each entry
    * with what the index says of it; the activated entries the overlays on the turn's path have
@@ -292,6 +302,7 @@ export class LoreIndex {
    */
   async loreMap(ask: LoreMapAsk): Promise<TurnLoreMap> {
     const [first, entries] = await Promise.all([this.deps.lore.loreMap(ask), this.entries(ask)]);
+    const set = await this.settingsAt(ask);
     await this.keepFile(ask, entries);
     const byId = new Map(entries.map((e) => [e.id, e]));
     const described = (l: LoreMapLine): LoreMapLine => {
@@ -325,7 +336,7 @@ export class LoreIndex {
     }
     // A map's insertion order is the order each entry was first bound: the player's character's first.
     const order = [...boundTo];
-    const bound4 = order.slice(0, this.settings.bound).flatMap(([id, to]) => {
+    const bound4 = order.slice(0, set.bound).flatMap(([id, to]) => {
       const e = byId.get(id);
       return e === undefined ? [] : [{ ...described({ id, title: e.title }), bound: to }];
     });
@@ -344,7 +355,7 @@ export class LoreIndex {
       const text = byId.get(id)?.text;
       return { id, title, source: source ?? "", ...(how !== undefined ? { how } : {}), ...(text !== undefined ? { text } : {}) };
     });
-    return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - this.settings.bound), notIndexed: entries.filter((e) => !e.indexed).length, activated };
+    return { inPrompt, world, changed, bound, leftOut: Math.max(0, order.length - set.bound), notIndexed: entries.filter((e) => !e.indexed).length, activated };
   }
 
   /** Every entry of the chat's lore, in the catalog's order, with its index lines and what it is bound to. */
@@ -396,7 +407,7 @@ export class LoreIndex {
    * next entries and none is indexed twice at once. `left` counts the entries still to be handed to a run; `held`, those another
    * job has now.
    */
-  async batch(at: LoreAt, size: number = this.settings.batch, job?: string): Promise<LoreBatch> {
+  async batch(at: LoreAt, size?: number, job?: string): Promise<LoreBatch> {
     const unindexed = (await this.entries(at)).filter((e) => !e.indexed);
     const going = new Map<string, boolean>();
     const free: IndexedEntry[] = [];
@@ -406,11 +417,11 @@ export class LoreIndex {
       if (by !== undefined && by !== job && (await this.going(at.user, by, going))) held += 1;
       else free.push(e);
     }
-    const room = (await this.deps.settingsFor?.(at))?.batchChars ?? this.settings.batchChars;
+    const set = await this.settingsAt(at);
     const entries: IndexedEntry[] = [];
     let chars = 0;
     for (const e of free) {
-      if (entries.length >= Math.max(0, Math.floor(size)) || (entries.length > 0 && chars + e.text.length > room)) break;
+      if (entries.length >= Math.max(0, Math.floor(size ?? set.batch)) || (entries.length > 0 && chars + e.text.length > set.batchChars)) break;
       entries.push(e);
       chars += e.text.length;
     }
