@@ -202,3 +202,5 @@ wants_date_rule: an object: {"type": "fixed", "month", "day"}, {"type": "nth_wee
 fuel_memo: Fuel for {{what}}
 service_memo: Service: {{what}}
 repair_memo: Repair: {{what}}
+no_effect: No effect the game master may run has {{search}} in its name. Call gm_effects with no search for all of them.
+unknown_effect: Operation {{n}} ({{op}}): {{effect}} is not an effect the game master may run. Near it: {{effects}}. gm_effects lists them all, with the arguments each reads.

@@ -55,6 +55,31 @@ function withIds(o: OpContext, change: JsonObject): JsonObject | Unread {
   return out;
 }
 
+/**
+ * One change to an organization as the call gives it, every name found and the op's findings reported: what could not be read, when it
+ * could not. A change that is so already changes nothing and the answer says so.
+ */
+export function orgChange(o: OpContext, raw: JsonValue | undefined): Unread | undefined {
+  if (!isRecord(raw)) return changeTakes(o, raw ?? null, null);
+  const change = withIds(o, raw as JsonObject);
+  if (isUnread(change)) return change;
+  const op = parseOrgOp(change);
+  if (op === null) return changeTakes(o, raw as JsonObject, change);
+  // What an op needs to read, said as the fields it takes: neither units nor a share, no way in or keys, no other party off a market.
+  const lacks = lacksOf(o, op);
+  if (lacks !== null) return lacks;
+  const ctx = o.draft.w.ctx;
+  const findings = orgOpFindings(ctx, op);
+  const from = o.draft.w.events.length;
+  const refused = editChange(o, { op: "org", change: op });
+  if (refused !== null) {
+    if (!isAlready(refused.code)) return notApplicable(o, refused.code);
+    o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, typeof change.who === "string" ? change.who : typeof change.org === "string" ? change.org : o.op) });
+  } else for (const f of findings) o.reply.report(f.code, { n: o.n, op: o.op, ...f.values });
+  o.draft.record(o.n, o.op, "engine", o.prov, from);
+  return undefined;
+}
+
 const org: WriteDef = {
   name: "gm_org",
   family: FAMILY,
@@ -62,27 +87,7 @@ const org: WriteDef = {
   properties: { change: { ...OBJECT, properties: { do: { type: "string", enum: [...ORG_OP_DOS] } }, required: ["do"] } },
   required: ["change"],
   example: { change: { do: "admit", org: "The Lamplighters", who: "tam", title: "Apprentice", why: "sworn in at the lamp-house" }, source: { from: "prose", message: "m-0401" } },
-  run(o) {
-    const raw = o.args.change;
-    if (!isRecord(raw)) return changeTakes(o, raw ?? null, null);
-    const change = withIds(o, raw as JsonObject);
-    if (isUnread(change)) return change;
-    const op = parseOrgOp(change);
-    if (op === null) return changeTakes(o, raw as JsonObject, change);
-    // What an op needs to read, said as the fields it takes: neither units nor a share, no way in or keys, no other party off a market.
-    const lacks = lacksOf(o, op);
-    if (lacks !== null) return lacks;
-    const ctx = o.draft.w.ctx;
-    const findings = orgOpFindings(ctx, op);
-    const from = o.draft.w.events.length;
-    const refused = editChange(o, { op: "org", change: op });
-    if (refused !== null) {
-      if (!isAlready(refused.code)) return notApplicable(o, refused.code);
-      o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, typeof change.who === "string" ? change.who : typeof change.org === "string" ? change.org : o.op) });
-    } else for (const f of findings) o.reply.report(f.code, { n: o.n, op: o.op, ...f.values });
-    o.draft.record(o.n, o.op, "engine", o.prov, from);
-    return undefined;
-  },
+  run: (o) => orgChange(o, o.args.change),
 };
 
 /** A change that cannot be read: what a change is (its `do` and the fields that op names), and which of those were not given. */
