@@ -6,19 +6,18 @@ import { useState } from "preact/hooks";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Section } from "../../atoms";
 import { useRead } from "../../reading";
-import { callWanted } from "../../wanted";
 import { errorWords, num } from "../../words";
 
 export function SwitchesSection(props: { reload: number; onChanged(): void; onSetting(key: string): void }) {
   const app = useApp();
-  const state = useRead(() => callWanted(app.client, "GET /api/v1/jobs/switches", {}), [props.reload]);
+  const state = useRead(() => app.client.call("GET /api/v1/jobs/switches", {}), [props.reload]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const press = (body: { off?: boolean; held?: boolean }): void => {
     if (busy) return;
     setBusy(true);
     setProblem(null);
-    callWanted(app.client, "POST /api/v1/jobs/switches", {}, { body }).then(
+    app.client.call("POST /api/v1/jobs/switches", {}, { body }).then(
       () => {
         setBusy(false);
         state.again();

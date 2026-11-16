@@ -4,7 +4,7 @@
 // Every refusal is shown in RPE's words. It is read again when RPE says a job changed.
 
 import { useState } from "preact/hooks";
-import type { JobLimits, JobView } from "../../../shared/api";
+import type { JobLimitsAsk, JobView } from "../../../shared/api";
 import { useApp, useNow } from "../../app";
 import { Badge, Banner, Button, Gated, Pre, Section } from "../../atoms";
 import { applyRecord, EMPTY_LIVE, type LiveModel } from "../../live-model";
@@ -12,7 +12,6 @@ import { useNoticeLines } from "../../notice-words";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
 import { AgentTree } from "../../trace-view";
-import { callWanted } from "../../wanted";
 import { counted, errorWords, num, tokenWords, when } from "../../words";
 import { type AgentWindow, CallsLine, WindowGauge } from "../usage";
 import { cancellable, JOB_STATE_WORDS } from "./words";
@@ -50,7 +49,7 @@ export function JobOpen(props: JobOpenProps) {
   const chat = typeof job.scope.chat === "string" ? job.scope.chat : "~jobs";
   const gate = useSelect(app.gate, (open) => open.has(chat));
   const notices = useNoticeLines(chat);
-  const run = useRead(gate ? () => callWanted(app.client, "GET /api/v1/jobs/:job", { job: job.id }) : null, [job.id, gate, props.stamp, job.state]);
+  const run = useRead(gate ? () => app.client.call("GET /api/v1/jobs/:job", { job: job.id }) : null, [job.id, gate, props.stamp, job.state]);
   const model: LiveModel | null = run.value === null ? null : run.value.trace.reduce<LiveModel>((held, record) => applyRecord(held, record), EMPTY_LIVE);
   const running = job.state === "running" || job.state === "asking";
   const now = useNow(running);
@@ -76,7 +75,7 @@ export function JobOpen(props: JobOpenProps) {
       },
     );
   };
-  const post = (key: "restart" | "hold" | "release" | "resume" | "pause"): Promise<JobView> => callWanted(app.client, `POST /api/v1/jobs/:job/${key}`, { job: job.id }).then((a) => a.job);
+  const post = (key: "restart" | "hold" | "release" | "resume" | "pause"): Promise<JobView> => app.client.call(`POST /api/v1/jobs/:job/${key}`, { job: job.id }).then((a) => a.job);
   const state = JOB_STATE_WORDS[job.state];
   const windows: AgentWindow[] = (run.value?.windows ?? []).map((w) => ({ agent: w.agent.id, definition: w.agent.definition, connection: "", model: "", held: w.gauge.used, window: w.gauge.window, reserve: w.gauge.reserve, calls: 0, running }));
   const callLimit = job.limits?.calls ?? null;
@@ -164,10 +163,10 @@ export function JobOpen(props: JobOpenProps) {
         ) : null}
         {can.answer ? (
           <>
-            <Button small busy={busy === "on"} onClick={() => press("on", () => callWanted(app.client, "POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "on" } }).then((a) => a.job), "It goes on.")}>
+            <Button small busy={busy === "on"} onClick={() => press("on", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "on" } }).then((a) => a.job), "It goes on.")}>
               Go on
             </Button>
-            <Button small kind="ghost" busy={busy === "end"} onClick={() => press("end", () => callWanted(app.client, "POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "end" } }).then((a) => a.job), "It ends with what it has.")}>
+            <Button small kind="ghost" busy={busy === "end"} onClick={() => press("end", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "end" } }).then((a) => a.job), "It ends with what it has.")}>
               End it
             </Button>
           </>
@@ -191,7 +190,7 @@ export function JobOpen(props: JobOpenProps) {
               onClick={() => {
                 const { limits, bad } = limitsOf(typed);
                 if (bad.length > 0) return setProblem(`A limit takes a whole number of at least one: ${bad.join(", ")}.`);
-                press("continue", () => callWanted(app.client, "POST /api/v1/jobs/:job/continue", { job: job.id }, { body: { limits: limits as JobLimits } }).then((a) => a.job), "It carries on with the limits you gave.");
+                press("continue", () => app.client.call("POST /api/v1/jobs/:job/continue", { job: job.id }, { body: { limits: limits as JobLimitsAsk } }).then((a) => a.job), "It carries on with the limits you gave.");
               }}
             >
               Carry it on
@@ -211,7 +210,7 @@ export function JobOpen(props: JobOpenProps) {
               busy={busy === "word"}
               disabled={word.trim() === ""}
               onClick={() =>
-                press("word", () => callWanted(app.client, "POST /api/v1/jobs/:job/word", { job: job.id }, { body: { text: word } }).then((a) => { setWord(""); return a.job; }), "Said; it gets it at its next call.")
+                press("word", () => app.client.call("POST /api/v1/jobs/:job/word", { job: job.id }, { body: { text: word } }).then((a) => { setWord(""); return a.job; }), "Said; it gets it at its next call.")
               }
             >
               Say it

@@ -7,7 +7,6 @@ import type { JobState } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Banner, Button } from "../../atoms";
 import { onChatChange } from "../../live-watch";
-import { callWanted } from "../../wanted";
 import { errorWords } from "../../words";
 
 /** The mapper's own definition, which "Map again" starts. */
@@ -37,7 +36,7 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
     if (busy) return;
     setBusy(true);
     setProblem(null);
-    callWanted(app.client, "POST /api/v1/chats/:chat/jobs", { chat }, { body: { definition: MAPPER, brief: "" } }).then(
+    app.client.call("POST /api/v1/chats/:chat/jobs", { chat }, { body: { definition: MAPPER, brief: "" } }).then(
       (answer) => {
         setBusy(false);
         setJob({ id: answer.job.id, state: answer.job.state });
@@ -53,9 +52,9 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
   useEffect(() => {
     if (!watching) return;
     const read = (): void => {
-      app.client.call("GET /api/v1/chats/:chat/jobs", { chat }).then(
+      app.client.call("GET /api/v1/jobs", {}, { query: { chat } }).then(
         (answer) => {
-          const found = answer.jobs.find((j) => j.id === job?.id);
+          const found = answer.items.find((j) => j.id === job?.id);
           if (found === undefined) return;
           setJob({ id: found.id, state: found.state });
           if (ENDED.includes(found.state)) props.onLearned();

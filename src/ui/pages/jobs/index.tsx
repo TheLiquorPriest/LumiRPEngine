@@ -5,9 +5,9 @@
 // when the page opens, when the live view says a run of the chat began or ended, and after a Cancel;
 // nothing polls.
 
-import type { JobsReply, JobView } from "../../../shared/api";
+import type { JobView } from "../../../shared/api";
 import { Badge, Banner, Button, Pre, Section } from "../../atoms";
-import type { RpeClient } from "../../client";
+import { type RpeClient, walk } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { errorWords, num, tokenWords, when } from "../../words";
 import { JobsPage } from "./page";
@@ -43,9 +43,8 @@ export function readJobs(client: Pick<RpeClient, "call">, chat: string | null, o
     onChange(shown);
   };
   const read = (): void => {
-    const asked: Promise<JobsReply> = chat === null ? client.call("GET /api/v1/jobs", {}) : client.call("GET /api/v1/chats/:chat/jobs", { chat });
-    asked.then(
-      (list) => show({ jobs: list.jobs, loading: false, problem: null }),
+    walk(client, "GET /api/v1/jobs", {}, { query: chat === null ? {} : { chat } }).then(
+      (jobs) => show({ jobs, loading: false, problem: null }),
       (error: unknown) => show({ loading: false, problem: errorWords(error) }),
     );
   };

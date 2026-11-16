@@ -7,7 +7,6 @@ import type { JobLimits, JobView } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Banner, Button, Section } from "../../atoms";
 import { useRead } from "../../reading";
-import { callWanted } from "../../wanted";
 import { errorWords } from "../../words";
 
 const LIMIT_FIELDS = [
@@ -59,7 +58,7 @@ export function StartSection(props: { chat: string | null; onStarted(job: JobVie
     setBusy(true);
     setProblem(null);
     const names = given.split(",").map((n) => n.trim()).filter((n) => n !== "");
-    callWanted(app.client, "POST /api/v1/chats/:chat/jobs", { chat }, { body: { definition, brief, ...(names.length === 0 ? {} : { given: names }), ...(Object.keys(limits).length === 0 ? {} : { limits }) } }).then(
+    app.client.call("POST /api/v1/chats/:chat/jobs", { chat }, { body: { definition, brief, ...(names.length === 0 ? {} : { given: names }), ...(Object.keys(limits).length === 0 ? {} : { limits }) } }).then(
       (answer) => {
         setBusy(false);
         setStarted(answer.job);

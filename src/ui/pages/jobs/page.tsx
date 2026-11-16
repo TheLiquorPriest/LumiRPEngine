@@ -6,6 +6,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { JobState, JobView } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Empty, PageHeader } from "../../atoms";
+import { walk } from "../../client";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, tokenWords, when } from "../../words";
@@ -56,7 +57,7 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
   const [state, setState] = useState<JobState | null>(null);
   const [pages, setPages] = useState(1);
   const [changed, setChanged] = useState<ReadonlyMap<string, JobView>>(new Map());
-  const jobs = useRead(() => app.client.call("GET /api/v1/jobs", {}), [stamp]);
+  const jobs = useRead(() => walk(app.client, "GET /api/v1/jobs", {}), [stamp]);
   // A job that changes, in any chat, is read again: nothing polls.
   useEffect(
     () =>
@@ -73,7 +74,7 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
     setChanged(new Map());
   }, [jobs.value]);
   useEffect(() => setPages(1), [everyChat, state, chat]);
-  const all = (jobs.value?.jobs ?? []).map((j) => changed.get(j.id) ?? j);
+  const all = (jobs.value ?? []).map((j) => changed.get(j.id) ?? j);
   const listed = listedJobs(all, everyChat ? null : chat, state);
   const shown = listed.slice(0, perPage * pages);
   const id = props.at?.[0] ?? null;
