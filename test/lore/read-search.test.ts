@@ -104,4 +104,22 @@ describe("one reader over the books and the world", () => {
     expect((await short.search(AT, { text: "of" })).length).toBeGreaterThan(0);
     expect(await lore.search(AT, { text: "of" })).toEqual([]);
   });
+
+  test("with no embedding connection set, every hit is by words; with one, an entry is found by meaning and marked so, and a character finds by meaning only what it may know", async () => {
+    const [lamp] = await lore.search(AT, { text: "beacon" });
+    await lore.catalog(AT);
+    const near = [lamp?.id ?? "", W.drowned_crown, W.tithe_law];
+    const asked: string[] = [];
+    const none = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, meaning: { find: async () => null } });
+    expect(await none.search(AT, { text: "darkness at sea" })).toEqual([]);
+    const meant = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers, meaning: { find: async (_at, text) => (asked.push(text), near) } });
+    // The words find nothing; the lead is given all three by meaning, the secret one included.
+    expect((await meant.search(AT, { text: "darkness at sea" })).map((h) => [h.id, h.how])).toEqual(near.map((id) => [id, "meaning"]));
+    // A hit the words found is not found twice, and the limit holds.
+    expect((await meant.search(AT, { text: "tithe" })).map((h) => [h.id, h.how])).toEqual([[W.tithe_law, "words"], [lamp?.id ?? "", "meaning"], [W.drowned_crown, "meaning"]]);
+    expect((await meant.search(AT, { text: "darkness at sea", limit: 2 })).length).toBe(2);
+    // Tobin may not know the drowned crown: it is left out of what is found by meaning, as of a read.
+    expect((await meant.searchAs(AT, "tobin", { text: "darkness at sea" })).map((h) => h.id)).toEqual([lamp?.id ?? "", W.tithe_law]);
+    expect(asked.length).toBeGreaterThan(0);
+  });
 });

@@ -80,6 +80,17 @@ export interface LoreOptions {
   lines?: (at: LoreScope) => Promise<LinesPart | undefined>;
   /** Runs the catalogue's deterministic step somewhere else (a worker thread) when a library is long; absent, it runs where it is asked. */
   away?: (input: CatalogueInput) => Promise<LoreCatalogEntry[]>;
+  /** The search by meaning, once the turn lane has one; absent, every hit is by words. */
+  meaning?: LoreMeaning;
+}
+
+/**
+ * The search by meaning as the lore asks it (plan §9.4, §10.5): the turn lane's index of one vector per entry by id and revision, searched on
+ * the user's embedding connection (RPH's one setting `embedding.connection`).
+ */
+export interface LoreMeaning {
+  /** The entries of the chat's lore nearest `text` in meaning, nearest first, by the ids the lore gives them (`e-12`, `w-3`), at most `limit`; null while no embedding connection is set, with nothing sent anywhere. */
+  find(at: LoreAt, text: string, limit: number): Promise<readonly string[] | null>;
 }
 
 /** Whose lore, which chat, and where on its path: at a turn, with what it has staged, else at the head. */
@@ -315,6 +326,7 @@ export class Lore {
   private readonly settingsFor: LoreSettingsFor | undefined;
   private readonly lines: LoreOptions["lines"];
   private readonly away: LoreOptions["away"];
+  private readonly meaning: LoreOptions["meaning"];
   private blank: WorldAt | null = null;
 
   constructor(options: LoreOptions) {
@@ -326,6 +338,7 @@ export class Lore {
     this.settingsFor = options.settingsFor;
     this.lines = options.lines;
     this.away = options.away;
+    this.meaning = options.meaning;
   }
 
   /**
@@ -529,11 +542,30 @@ export class Lore {
     const numbers = await this.numbers.of(at.user, hit.flatMap((f) => (f.kind === "book" ? [f.entry] : [])));
     const worldNumbers = world === null ? new Map<string, number>() : await this.numbers.ofWorld(at.user, world.world.id, hit.flatMap((f) => (f.kind === "world" ? [f.key] : [])));
     const words = wordsOf(query.text, s.limits);
-    return hit.flatMap((f): LoreHit[] => {
+    const byWords = hit.flatMap((f): LoreHit[] => {
       const n = f.kind === "book" ? numbers.get(f.entry) : worldNumbers.get(f.key);
       const id = n === undefined ? null : f.kind === "book" ? bookEntryId(n) : worldEntryId(n);
       return id === null ? [] : [{ id, source: f.source, title: f.title, snippet: snippetOf(f.text, words, s.lore.snippetChars) || f.title, how: "words" }];
     });
+    return [...byWords, ...(await this.byMeaning(at, query, plays, s, limit, byWords))];
+  }
+
+  /**
+   * The entries a search by meaning finds beyond those the words found, each marked `meaning`, within the search's limit (plan §9.4, §10.5): asked
+   * of `LoreOptions.meaning`, which answers nothing while no embedding connection is set, so with none every hit is by words and nothing calls out.
+   * What a character may not know is left out as in a read: each entry is read as that character reads it.
+   */
+  private async byMeaning(at: LoreAt, query: LoreQuery, plays: string | undefined, s: Chosen, limit: number, words: readonly LoreHit[]): Promise<LoreHit[]> {
+    const room = limit - words.length;
+    if (this.meaning === undefined || room <= 0) return [];
+    const near = await this.meaning.find(at, query.text, limit);
+    if (near === null) return [];
+    const taken = new Set(words.map((h) => h.id));
+    const read = await this.entries(at, near.filter((id) => !taken.has(id)), plays);
+    return read
+      .filter((e) => query.sources === undefined || query.sources.includes(e.source))
+      .slice(0, room)
+      .map((e): LoreHit => ({ id: e.id, source: e.source, title: e.title, snippet: snippetOf(e.text, [], s.lore.snippetChars) || e.title, how: "meaning" }));
   }
 
   /**
