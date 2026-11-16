@@ -237,7 +237,7 @@ function orgs(r: Read): SectionOut[] {
     const ended = page.ended === null ? null : page.ended.dissolved !== null ? `dissolved ${page.ended.dissolved}` : page.ended.winding !== null ? `winding up since ${page.ended.winding}` : null;
     const stand = [
       row(r, "Kind", page.badge),
-      row(r, "Standing", ended ?? "Standing", { note: page.ended?.mergedInto === null || page.ended?.mergedInto === undefined ? null : `merged into ${page.ended.mergedInto.name}` }),
+      row(r, "Standing", ended ?? "Running", { note: page.ended?.mergedInto === null || page.ended?.mergedInto === undefined ? null : `merged into ${page.ended.mergedInto.name}` }),
       ...(page.runBy.length === 0 ? [] : [row(r, "Run by", page.runBy.map((x) => x.name).join(", "))]),
       ...(page.dues === null ? [] : [row(r, "Dues", `${money(ctx, page.dues.cents)} ${page.dues.every}`)]),
       ...page.above.map((l) => row(r, "Held by", l.name, { note: [l.share === null ? null : `${l.share}%`, l.role, l.position?.title].filter((w) => w !== null && w !== undefined).join(", ") || null })),
