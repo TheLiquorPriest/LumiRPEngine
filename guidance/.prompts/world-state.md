@@ -55,6 +55,7 @@ lines:
   place_zone: '· zone — {{name}}, covering {{squares}} squares'
   place_entry: '· entry — {{audience}}{{#from}} (set by {{from}}){{/from}}'
   place_door: '· door — at {{at}}, {{state}}'
+  place_light: '· light — {{light}}'
   place_more: '· … {{n}} more of its {{part}}; {{ask}} reads the rest'
   place_none: '· {{part}} — nothing is recorded'
   place_base: '· base — {{text}}{{#world}} (the world''s own words){{/world}}{{#older}} (older than an entry bound to the place, which has changed since){{/older}}{{#by}} (written by {{by}}){{/by}}'
