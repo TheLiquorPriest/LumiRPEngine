@@ -20,6 +20,7 @@ import { usePaged, useRead } from "../../reading";
 import { useSelect } from "../../store";
 import type { PromptShown, PromptTurnShown } from "../../../shared/api";
 import { clock } from "../../words";
+import { MapAgain } from "./map-again";
 import { readPrompt, readPromptHistory } from "./read";
 import { ClippedNote, FrontLine, NoticeList, OldBlocks, SliceCard, type SliceSlots, Unclaimed } from "./slices";
 import { SliceTools } from "./tools";
@@ -194,7 +195,15 @@ export function PromptPage(props: { chat: string; actions?: ComponentChildren })
       onPickTurn={setTurn}
       onOpenTurn={(id) => app.go({ page: "turns", chat, at: [id] })}
       slots={slots}
-      actions={props.actions}
+      actions={props.actions ?? (
+        <MapAgain
+          chat={chat}
+          onLearned={() => {
+            read.again();
+            history.again();
+          }}
+        />
+      )}
     />
   );
 }
