@@ -35,6 +35,7 @@ import { feedEvent } from "./feed";
 import { wsDeleteEvent, wsPinEvent, wsReadersEvent, wsWriteEvent } from "./workspace";
 import { outLinesEvent, outSceneEvent } from "./outputs";
 import { draftEventDef } from "./world-draft";
+import { UNMATERIALIZED, unmaterializedEvent } from "./materialize";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -53,6 +54,8 @@ export const ENGINE_EVENTS = {
   revealed: "engine.revealed",
   /** A hint the player opened at a track's stage (DESIGN §10): the narrator is told the hints opened, never the rest. */
   hint: "engine.hint",
+  /** One hint the player opened at a track's stage closed again (the Undo of `engine.hint`). */
+  hintClosed: "engine.hint_closed",
   pause: "engine.pause",
   /** A check the `check` effect rolled, with its final values (the outcome's effects follow it). */
   check: "engine.check",
@@ -75,6 +78,8 @@ export const ENGINE_EVENTS = {
    * How far it had run stays recorded (`reached`), so nothing up to there runs again (L48).
    */
   rewind: "engine.rewind",
+  /** A materialization's detail taken off the record of what was sampled (the Undo of one, `engine/materialize`). */
+  unmaterialized: UNMATERIALIZED,
 } as const;
 
 /** An action's latest attempt at a check, as a retry rule reads it (DESIGN §11). */
@@ -311,6 +316,20 @@ const events: EventTypeDef<PackEvent>[] = [
       countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => (typeof n === "number" ? (open < n ? open + 1 : open) : open + 1));
     },
     describe: (e) => `hint opened on ${str(e, "track")}`,
+  },
+  {
+    // The Undo of a hint the player opened: one fewer of the stage's hints is open, never fewer than none.
+    type: ENGINE_EVENTS.hintClosed,
+    validate: (e, ctx) => {
+      const missing = need(e, "track", "stage");
+      if (missing) return missing;
+      const t = own(ctx.world.tracks, str(e, "track"));
+      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str(e, "stage")} of track ${str(e, "track")}` };
+    },
+    apply: (e, state) => {
+      countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => Math.max(0, open - 1));
+    },
+    describe: (e) => `hint closed on ${str(e, "track")}`,
   },
   {
     type: ENGINE_EVENTS.revealed,
@@ -563,6 +582,8 @@ export const enginePack: PackDef = {
     r.event(outSceneEvent);
     // This chat's own draft of its world (`world-draft.ts`): places, paths and maps made or changed in play.
     r.event(draftEventDef);
+    // The Undo of a materialization (`engine/materialize`).
+    r.event(unmaterializedEvent);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.proposal(lifeChannel);

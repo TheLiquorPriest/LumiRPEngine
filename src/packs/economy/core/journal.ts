@@ -222,12 +222,16 @@ function wordsOf(words: Readonly<Record<string, string>>, id: string): string {
 
 export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
+    // A worth the economy fixed for someone it keeps no accounts for. One with no band takes the fixed worth off (an Undo of the
+    // first one), so the worth is read from the person's band again.
     type: FINANCE_EVENTS.anchor,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && typeof e.data.typical === "number" && typeof e.data.base === "number" ? null : reject("bad_event", "anchor needs entity, typical and base")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && (str(e, "band") === "" || (typeof e.data.typical === "number" && typeof e.data.base === "number")) ? null : reject("bad_event", "anchor needs entity, typical and base")),
     apply: (e, state) => {
-      sliceRecord(state, "economy", "anchors")[str(e, "entity")] = { band: str(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
+      const anchors = sliceRecord(state, "economy", "anchors");
+      if (str(e, "band") === "") delete anchors[str(e, "entity")];
+      else anchors[str(e, "entity")] = { band: str(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
     },
-    describe: (e) => `${str(e, "entity")} is ${str(e, "band")}`,
+    describe: (e) => (str(e, "band") === "" ? `${str(e, "entity")}'s worth is no longer fixed` : `${str(e, "entity")} is ${str(e, "band")}`),
     // An anchor is an assignment: in a record only the last per entity matters.
     coarsen: { key: (e) => str(e, "entity"), merge: (_a, b) => b },
   },
@@ -441,22 +445,29 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     coarsen: { key: (e) => str(e, "card"), merge: (_a, b) => b },
   },
   {
-    // Accounts whose opening balances have posted. Each opens once.
+    // Accounts whose opening balances have posted. Each opens once. With `close`, opened accounts close again (an Undo of what
+    // opened them), so they open again when their opening balances next post.
     type: FINANCE_EVENTS.open,
     validate: (e, ctx) => {
       const list = Array.isArray(e.data.accounts) ? e.data.accounts : [];
       const opened = objOf(sliceOf(ctx.state, "economy").opened);
+      const closing = e.data.close === true;
       for (const a of list) {
         if (typeof a !== "string" || !own(ctx.state.entities, a)) return reject("bad_event", "only accounts open");
-        if (own(opened, a) === true) return reject("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
+        if (!closing && own(opened, a) === true) return reject("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
+        if (closing && own(opened, a) !== true) return reject("not_opened", `${own(ctx.state.entities, a)?.name ?? a} is not open`);
       }
       return list.length > 0 ? null : reject("bad_event", "nothing to open");
     },
     apply: (e, state) => {
       const opened = sliceRecord(state, "economy", "opened");
-      for (const a of Array.isArray(e.data.accounts) ? e.data.accounts : []) if (typeof a === "string") opened[a] = true;
+      for (const a of Array.isArray(e.data.accounts) ? e.data.accounts : []) {
+        if (typeof a !== "string") continue;
+        if (e.data.close === true) delete opened[a];
+        else opened[a] = true;
+      }
     },
-    describe: () => "Accounts opened",
+    describe: (e) => (e.data.close === true ? "Accounts closed again" : "Accounts opened"),
   },
   {
     type: FINANCE_EVENTS.status,

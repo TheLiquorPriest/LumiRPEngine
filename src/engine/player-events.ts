@@ -32,6 +32,7 @@ function bookkeeping(type: string): boolean {
     clock: true,
     timelapse: true,
     materialize: true,
+    [ENGINE_EVENTS.unmaterialized]: true,
     [ENGINE_EVENTS.fired]: true,
     [ENGINE_EVENTS.caught]: true,
     [ENGINE_EVENTS.cursor]: true,
@@ -39,6 +40,7 @@ function bookkeeping(type: string): boolean {
     [ENGINE_EVENTS.attempt]: true,
     // The receipt's chip for the player's own opening of a hint names it; the event is the count.
     [ENGINE_EVENTS.hint]: true,
+    [ENGINE_EVENTS.hintClosed]: true,
     [ENGINE_EVENTS.pause]: true,
     [ENGINE_EVENTS.beat]: true,
     [ENGINE_EVENTS.observed]: true,

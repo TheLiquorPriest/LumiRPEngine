@@ -74,14 +74,15 @@ describe("undo of one change", () => {
     expect(standing(s.headState("c").state, `entity:${POV}`).map((f) => f.value)).toEqual(["on edge"]);
   });
 
-  test("a part a later change wrote since is left alone, as is what the store keeps no reverse for, and each is said", () => {
+  test("a part a later change wrote since is left alone and said; a thing made is taken out by the engine's despawn", () => {
     const { s } = chat();
     const t1 = play(s, "c", "m1", "Wren goes down to the cellar and finds a lantern.", 1, engine(goTo(POV, "cellar"), make("lantern", "Lantern", POV)));
     const t2 = play(s, "c", "m2", "She goes out to the market.", 2, engine(goTo(POV, "market_square")));
     const [moved, made] = s.changes(t1.id);
     if (!moved || !made) throw new Error("missing changes");
     expect(s.undo(moved.id)).toEqual({ changes: [], left: [{ code: "changed_since", values: { change: moved.id, op: "set" } }] });
-    expect(s.undo(made.id)).toEqual({ changes: [], left: [{ code: "not_reversible", values: { change: made.id, op: "spawn" } }] });
+    expect(s.undo(made.id).left).toEqual([]);
+    expect(s.headState("c").state.world.entities.lantern?.fields.gone).toBe(true);
     expect(s.changes(t2.id)).toHaveLength(1);
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("market_square");
   });
@@ -91,7 +92,7 @@ describe("undo of one change", () => {
     const market = `${EXTERNAL_ACCOUNT_PREFIX}market`;
     const lodging = asUnit(posting([{ account: "acct_wren", amount: -250 }, { account: market, amount: 250 }], { memo: "Two nights", kind: "payment", category: "lodging" }));
     const fee = asUnit(posting([{ account: "acct_wren", amount: -35 }, { account: `${BANK_PREFIX}fees`, amount: 35 }], { memo: "Overdraft fee", kind: "fee", category: "fees" }));
-    // A journal line recorded without its posting: nothing says what it moved.
+    // A journal line recorded without its posting: its own lines are taken back.
     const alone = txn([{ account: "acct_wren", amount: -10 }], { memo: "Tip", kind: "payment" });
     const t1 = play(s, "c", "m1", "Wren pays for two nights, and the bank charges her.", 1, engine(...lodging, ...fee, alone));
     play(s, "c", "m2", "She settles in.", 2, engine(tick(30)));
@@ -109,6 +110,7 @@ describe("undo of one change", () => {
       { memo: "Two nights reversed", cents: 250, kind: "transfer", category: "lodging" },
       { memo: "Overdraft fee refunded", cents: 35, kind: "refund", category: "fees" },
     ]);
-    expect(s.undo(aloneLine.id)).toEqual({ changes: [], left: [{ code: "not_reversible", values: { change: aloneLine.id, op: "economy.txn" } }] });
+    expect(s.undo(aloneLine.id).left).toEqual([]);
+    expect(journal(s, "acct_wren").at(-1)).toEqual({ memo: "Tip reversed", cents: 10, kind: "transfer", category: null });
   });
 });

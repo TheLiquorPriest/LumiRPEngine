@@ -6,9 +6,9 @@
 
 import { hashJson, hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
-import type { LedgerEvent, MaterializeEvent } from "../shared/ledger";
+import type { LedgerEvent, MaterializeEvent, PackEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import type { ReadContext, Rejection } from "./registry";
+import type { EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { createRng } from "./rng";
 import type { WorldState } from "./state";
@@ -77,3 +77,21 @@ export function previewMaterialization(reg: Registry, world: WorldDoc, state: Re
   if (isMaterialized(state, entity, domain)) return [];
   return sample(reg, reg.context(world, state), entity, domain, runSeed)?.events ?? [];
 }
+
+/** The event an Undo records for a materialization whose detail it took back: the entity's detail in that domain counts as not sampled. */
+export const UNMATERIALIZED = "engine.unmaterialized";
+
+/** `engine.unmaterialized {entity, domain}`: the detail recorded for it is taken off the record of what was sampled, so it is sampled again when next needed. */
+export const unmaterializedEvent: EventTypeDef<PackEvent> = {
+  type: UNMATERIALIZED,
+  validate: (e, ctx) => {
+    const entity = e.data.entity;
+    const domain = e.data.domain;
+    if (typeof entity !== "string" || typeof domain !== "string") return { code: "bad_event", reason: `${UNMATERIALIZED} needs entity and domain` };
+    return Object.prototype.hasOwnProperty.call(ctx.state.materialized, `${entity}:${domain}`) ? null : { code: "not_materialized", reason: `no ${domain} detail is recorded for ${entity}` };
+  },
+  apply: (e, state) => {
+    if (typeof e.data.entity === "string" && typeof e.data.domain === "string") delete state.materialized[`${e.data.entity}:${e.data.domain}`];
+  },
+  describe: (e) => `${String(e.data.entity)} ${String(e.data.domain)} detail taken back`,
+};
