@@ -75,12 +75,13 @@ describe("the lore map in full", () => {
   test("lists what activated, what the story changed of it, the world's entries the chat names, and what is bound to the horizon", () => {
     expect(map).toEqual({
       inPrompt: [
-        { id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }] },
+        // Every part that shows an entry shows the notes on it, each with the turn it was written on (its place on the path, from 1).
+        { id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: [{ note: "The lamp was relit after the wreck.", turn: 1 }, { note: "Its glass cracked in the storm.", turn: 2 }] },
         // No run has indexed it: its keys stand in.
         { id: "e-3", title: GULL, source: "Reed Coast Atlas", how: "keyword", keys: ["gull"] },
       ],
-      // Only the overlays of the turns on the path, oldest first.
-      changed: [{ id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: ["The lamp was relit after the wreck.", "Its glass cracked in the storm."] }],
+      // Part 2: those of part 1 with notes, on the turns on the path, oldest first.
+      changed: [{ id: "e-2", title: "The lamp room", source: "Reed Coast Atlas", how: "keyword", kind: "place", line: "The lighthouse's lamp room.", defines: [{ what: "The Lighthouse", aspect: "layout" }], notes: [{ note: "The lamp was relit after the wreck.", turn: 1 }, { note: "Its glass cracked in the storm.", turn: 2 }] }],
       world: [{ id: W.tithe_law, title: "The harbor tithe", kind: "rule", line: "A tenth of every catch.", defines: [{ what: "Orrin Pell", aspect: "" }] }],
       // The player's character's first, then each character present, then the places; none that is in the parts above.
       // The tide bell, bound to the fishmarket, is past the limit; the ferry is bound to nobody on the horizon.
@@ -99,6 +100,11 @@ describe("the lore map in full", () => {
         { id: "e-3", title: GULL, source: "Reed Coast Atlas", how: "keyword", text: "Gulls nest on the harbor wall every spring and fight over the fish scraps." },
       ],
     });
+  });
+
+  test("lore_read carries the notes of the entry too, in the path's order", async () => {
+    const [read] = await index.read({ ...AT, turn: "turn-1" }, ["e-2"]);
+    expect(read?.text.split("\n\n").slice(1)).toEqual(["The lamp was relit after the wreck.", "Its glass cracked in the storm."]);
   });
 
   // The shipped layout and lines are being reworded for how each entry came in and what changed since it was indexed: hardening.

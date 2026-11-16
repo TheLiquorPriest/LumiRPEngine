@@ -24,6 +24,7 @@ export const LORE_INDEX_PATH = "/api/v1/chats/:chat/lore/index";
 export const LORE_INDEX_STATUS_PATH = "/api/v1/chats/:chat/lore/index/status";
 export const LORE_INDEX_JOBS_PATH = "/api/v1/chats/:chat/lore/index/jobs";
 export const LORE_INDEX_ENTRY_PATH = "/api/v1/chats/:chat/lore/index/:entry";
+export const LORE_OVERLAYS_PATH = "/api/v1/chats/:chat/lore/overlays";
 
 const binding = shape.object({ what: field(T, "The record it defines, by its id (`entity:sefa`, `place:harbor`), its name or as written."), aspect: field(T, "Which side of it the entry defines; empty where none was said.") });
 
@@ -72,6 +73,27 @@ const statusReply = shape.named(
 
 const startReply = shape.named("LoreIndexJob", "The indexing job the owner started.", shape.object({ job: field(T, "Its id in the jobs."), state: field(T, "Its state as RPH keeps it.") }));
 
+const overlaysReply = shape.named(
+  "LoreOverlays",
+  "The overlays on a chat's path: the Author's notes that the story has moved past part of an entry, each tied to the turn that wrote it.",
+  shape.object({
+    overlays: field(
+      shape.list(
+        shape.object({
+          id: field(shape.whole({ least: 1 }), "The overlay's id."),
+          entry: field(T, "The id the lore map gives the entry."),
+          title: field(shape.nullable(T), "The entry's title where the chat's lore holds it; null where it does not."),
+          note: field(T, "What the story has moved past in it."),
+          turn: field(shape.whole({ least: 1 }), "The turn that wrote it, by its place on the chat's path, counted from 1."),
+          turnId: field(T, "That turn's id."),
+          by: field(shape.nullable(T), "The definition of the agent that wrote it."),
+          agent: field(shape.nullable(T), "Its handle in its run."),
+        }),
+      ),
+      "In the path's order, and within a turn in the order they were written.",
+    ),
+  }),
+);
 const editBody = shape.object({
   kind: shape.optional(shape.nullable(T), "What kind of thing it is; null takes his own off."),
   line: shape.optional(shape.nullable(T), "One line saying what it is; null takes his own off."),
@@ -165,6 +187,15 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
         if ("refused" in started) throw new RouteError(409, refusedWords(await deps.index.lines(at), started));
         return { job: started.id, state: started.state };
       },
+    }),
+    route({
+      method: "GET",
+      path: LORE_OVERLAYS_PATH,
+      access: "page",
+      group: "lore",
+      does: "The overlays on a chat's path, in the path's order: each with its entry and the entry's title, the note, the turn that wrote it (its place on the path, from 1, and its id) and who wrote it. A turn that was swiped away or deleted has none on the path.",
+      reply: overlaysReply,
+      handle: async ({ user, params }) => ({ overlays: (await deps.index.overlays({ user, chat: params.chat })).map((o) => ({ id: o.id, entry: o.entry, title: o.title, note: o.note, turn: o.number, turnId: o.turn, by: o.by, agent: o.agent })) }),
     }),
     route({
       method: "PUT",

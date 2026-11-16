@@ -13,6 +13,7 @@
 import type { Fields, LinesPart } from "rp-harness";
 import type { ActivatedLore, JsonObject } from "rp-harness/contract";
 import type { LoreBinding, LoreNamedFields } from "./indexing";
+import type { OverlayNote } from "./overlays";
 import { listField, loreLine, namedFields } from "./tools";
 
 /** One entry of the map. */
@@ -33,8 +34,8 @@ export interface LoreMapLine {
   stale?: boolean;
   /** The fields beside kind, line and defines that the indexer's file asks an index line to hold, by name. */
   fields?: LoreNamedFields;
-  /** Changed by the story: the overlays' notes on it, oldest first. */
-  notes?: string[];
+  /** The overlays' notes on it, oldest first, each with the turn it was written on: on an entry the story has moved past, in whichever part it is shown. */
+  notes?: OverlayNote[];
   /** Bound to the horizon: the names of who and what on it the entry is bound to. */
   bound?: string[];
 }
@@ -82,7 +83,8 @@ function lineFields(lines: LinesPart | undefined, l: LoreMapLine): Fields {
     line: l.line,
     defines: listField((l.defines ?? []).map((b) => (lines === undefined ? undefined : loreLine(lines, "binding", { what: b.what, aspect: b.aspect })) ?? b.what)),
     keys: l.keys === undefined ? undefined : listField(l.keys),
-    notes: l.notes,
+    // Each note beside the turn it was written on: a line reads the note as `{{.}}` or `{{note}}` and the turn as `{{turn}}`.
+    notes: l.notes?.map((n) => ({ ".": n.note, note: n.note, turn: n.turn })),
     bound: listField(l.bound ?? []),
     // How an entry came into the prompt: the word, and a flag for each of the four, so a line can word each its own way.
     how: l.how,

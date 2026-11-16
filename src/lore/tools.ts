@@ -13,7 +13,7 @@
 
 import type { Fields, Guidance, LinesPart } from "rp-harness";
 import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, Log, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
-import type { Lane } from "../store";
+import { JoinedTurnError, type Lane } from "../store";
 import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput, LoreNamedFields } from "./indexing";
 import type { LoreAt } from "./lore";
 
@@ -338,6 +338,8 @@ export async function loreTools(deps: LoreToolDeps): Promise<HostTool[]> {
           // Never a bare failure: a reason the caller can act on is a refusal in the answers' words; anything else is a fault of RPE's own, logged, its error in the call's details.
           const refused = new Answer(lines);
           if (error instanceof LoreRefusal) return refused.data({ refused: error.line }).line(error.line, error.fields).fail().result();
+          // A turn that was joined to another (a continue's held turn) is never read for its state: said as the fact the store gives, in the answers' words.
+          if (error instanceof JoinedTurnError) return refused.data({ joined: { turn: error.turn, joined: error.joined } }).line("joined", { turn: error.turn, joined: error.joined }).fail().result();
           const said = error instanceof Error ? error.message : String(error);
           deps.log?.error("A lore tool failed.", { tool: spec.name, error: said });
           return { ...refused.data({ fault: spec.name }).line("fault", { tool: spec.name }).fail().result(), details: { fault: spec.name, error: said } };

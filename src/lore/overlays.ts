@@ -85,19 +85,56 @@ export function overlayWrite(worlds: LoreWorlds, now: () => number = Date.now): 
   };
 }
 
+/** An overlay on a chat's path, as written: its entry, its note, the turn that wrote it (by its place on the path, counted from 1: "turn 40") and who. */
+export interface OverlayRow {
+  id: number;
+  entry: string;
+  note: string;
+  /** The turn's id. */
+  turn: string;
+  /** The turn's place on the path, counted from 1. */
+  number: number;
+  /** The definition of the agent that wrote it, and its handle and job. */
+  by: string | null;
+  agent: string | null;
+  job: string | null;
+  created: number;
+}
+
+/** A note on an entry, with the turn it was written on (its place on the path, counted from 1). */
+export interface OverlayNote {
+  note: string;
+  turn: number;
+}
+
+/** The overlays the turns of a path wrote, in the path's order and in their places within a turn. */
+export function overlayRows(db: Database, user: string, turns: readonly string[]): OverlayRow[] {
+  if (turns.length === 0) return [];
+  const order = new Map(turns.map((t, i) => [t, i]));
+  return db
+    .query<{ id: number; turn: string; entry: string; note: string; by: string | null; agent: string | null; job: string | null; ord: number; created: number }, [string, string]>(
+      "SELECT id, turn, entry, note, by, agent, job, ord, created FROM lore_overlay WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2))",
+    )
+    .all(user, JSON.stringify(turns))
+    .sort((a, b) => (order.get(a.turn) ?? 0) - (order.get(b.turn) ?? 0) || a.ord - b.ord || a.id - b.id)
+    .map((r) => ({ id: r.id, entry: r.entry, note: r.note, turn: r.turn, number: (order.get(r.turn) ?? 0) + 1, by: r.by, agent: r.agent, job: r.job, created: r.created }));
+}
+
 /**
  * The overlays the turns of a path wrote, by entry (on `entries` only, or on every entry for null):
  * each entry's notes in the path's order, and in their places within a turn.
  */
 export function overlayNotes(db: Database, user: string, turns: readonly string[], entries: readonly string[] | null): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  if (turns.length === 0 || entries?.length === 0) return out;
-  const order = new Map(turns.map((t, i) => [t, i]));
+  for (const [entry, notes] of overlayNoted(db, user, turns, entries)) out.set(entry, notes.map((n) => n.note));
+  return out;
+}
+
+/** `overlayNotes`, each note with the turn it was written on. */
+export function overlayNoted(db: Database, user: string, turns: readonly string[], entries: readonly string[] | null): Map<string, OverlayNote[]> {
+  const out = new Map<string, OverlayNote[]>();
+  if (entries?.length === 0) return out;
   const wanted = entries === null ? null : new Set(entries);
-  const rows = db
-    .query<{ turn: string; entry: string; note: string; ord: number; id: number }, [string, string]>("SELECT turn, entry, note, ord, id FROM lore_overlay WHERE user = ?1 AND turn IN (SELECT value FROM json_each(?2))")
-    .all(user, JSON.stringify(turns));
-  const on = rows.filter((r) => wanted === null || wanted.has(r.entry)).sort((a, b) => (order.get(a.turn) ?? 0) - (order.get(b.turn) ?? 0) || a.ord - b.ord || a.id - b.id);
-  for (const r of on) out.set(r.entry, [...(out.get(r.entry) ?? []), r.note]);
+  for (const r of overlayRows(db, user, turns)) if (wanted === null || wanted.has(r.entry)) out.set(r.entry, [...(out.get(r.entry) ?? []), { note: r.note, turn: r.number }]);
   return out;
 }
