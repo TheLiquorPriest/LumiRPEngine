@@ -152,6 +152,11 @@ export interface WorldStateInput {
   /** Characters counted as one token, the model layer's own ratio (RPH's `tokens.charsPerToken`): the budget is counted at it. */
   charsPerToken: number;
   settings?: Partial<WorldStateSettings>;
+  /**
+   * Told the values the layout was rendered with (each section's text, by name), to keep as the part's last fields in the host's
+   * store by user, chat and part, where RPH keeps its own parts' and `parts.lastFields` reads them (the Prompts preview).
+   */
+  rendered?: (fields: JsonObject) => void;
 }
 
 export interface WorldStateBlock {
@@ -383,6 +388,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     if (s !== "horizon") used += (texts[s] ?? "").length;
   }
   const text = part.body.render(part.header, texts).trim();
+  input.rendered?.({ ...texts });
   return { text, sections, tokens: Math.ceil(used / input.charsPerToken), drawnShown };
 }
 
