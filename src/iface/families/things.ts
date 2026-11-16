@@ -17,7 +17,7 @@ import { own } from "../../engine/pack-kit";
 import { pieceProblem, saveFindings } from "../../packs/gear/core/sets";
 import { oneOf, TEXT, TEXTS, WHOLE, YES_NO } from "../kit";
 import { find, isUnread, itemOptions, named, notAs, notOneOf, type OpContext, textArg, type Unread } from "../ops";
-import { BENT_RULES, putThing } from "../ops-things";
+import { putThing } from "../ops-things";
 import { timeArg } from "../ops-time";
 import { editChange, isAlready, itemChange, notApplicable, optionalId, type WriteDef, writeTool } from "./run";
 
@@ -209,23 +209,10 @@ const home: WriteDef = {
     if (given[0] === "clear") rest = null;
     else if (given[0] === "owner") rest = "owner";
     else if (given[0] === "in") {
-      // Anyone or anything: one the world's rules say holds nothing is where the thing is kept all the same, and the answer says so.
+      // Anyone or anything: the item ops advise where the world's rules say the holder holds nothing, and the thing is kept there all the same.
       const found = find(o, "in", "entity");
       if (isUnread(found)) return found;
-      const holder = found.id;
-      return itemChange(o, { do: "home", item: item.id, home: { in: holder } }, "engine", item.id, {
-        bend: (code) => {
-          if (!BENT_RULES[code]) return null;
-          if (own(o.draft.w.state.entities, item.id)?.fields.home === holder) {
-            o.reply.line("already_so", { n: o.n, op: o.op, what: named(o.reading, item.id) });
-            return undefined;
-          }
-          const bad = o.draft.applyAll([{ type: "set", entity: item.id, field: "home", value: holder }]);
-          if (bad) return notApplicable(o, bad.code);
-          o.reply.report("rule_bent", { n: o.n, op: o.op, what: named(o.reading, item.id), where: named(o.reading, holder), code });
-          return undefined;
-        },
-      });
+      return itemChange(o, { do: "home", item: item.id, home: { in: found.id } }, "engine", item.id);
     } else {
       const place = find(o, "at", "place");
       if (isUnread(place)) return place;
@@ -380,9 +367,9 @@ const setSave: WriteDef = {
 function putOn(o: OpContext, piece: SetPiece, who: EntityId): Unread | undefined {
   const w = o.draft.w;
   const slot = piece.slot ?? slotOf(w.ctx, own(w.state.entities, piece.item)?.fields ?? {});
-  const out = applyItemOp(w, { do: "wear", item: piece.item, who, ...(slot !== null ? { slot } : {}) }, itemOptions(o));
+  const out = applyItemOp(w, { do: "wear", item: piece.item, who, ...(slot !== null ? { slot } : {}) }, { ...itemOptions(o), advise: true });
   if (!("code" in out) || isAlready(out.code)) return undefined;
-  if (!BENT_RULES[out.code] && out.code !== "bad_slot") return notApplicable(o, out.code);
+  if (out.code !== "bad_slot") return notApplicable(o, out.code);
   const failed = putThing(o, piece.item, { in: who }, "");
   if (failed) return failed;
   o.reply.report("not_wearable", { n: o.n, op: o.op, what: named(o.reading, piece.item), who: named(o.reading, who), code: out.code });
