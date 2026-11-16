@@ -115,10 +115,31 @@ describe("who may know a world entry", () => {
     ]);
   });
 
-  test("a character is given world entries only, until a book entry's secrecy is carried", async () => {
+  test("a character reads a public book entry, and a mark of it only once it holds it; a character given lore tools finds only what it may know", async () => {
     const [lamp] = await lore.search(AT, { text: "beacon" });
-    expect(lamp?.title).toBe("The lamp room");
-    expect(await lore.readAs(AT, "tobin", [lamp?.id ?? ""])).toEqual([]);
-    expect(await lore.searchAs(AT, "tobin", { text: "lamp" })).toEqual([]);
+    const [bell] = await lore.search(AT, { text: "bell" });
+    expect([lamp?.title, bell?.title]).toEqual(["The lamp room", "The tide bell"]);
+    const text = async (who: string, id: string | undefined): Promise<string | undefined> => (await lore.readAs(AT, who, [id ?? ""]))[0]?.text;
+    expect(await text("tobin", lamp?.id)).toBe("Green glass and whale oil, kept burning by the night watch.");
+    // The mark known to Orrin is his alone: where it stands it is left out for Tobin and read in place by Orrin.
+    expect(await text("tobin", bell?.id)).toBe("The bell rings at high water.\n");
+    expect(await text("orrin", bell?.id)).toBe("The bell rings at high water.\nOrrin cracked the bell with a hammer.");
+    expect(ids(await lore.searchAs(AT, "orrin", { text: "hammer" }))).toEqual([bell?.id ?? ""]);
+    expect(await lore.searchAs(AT, "tobin", { text: "hammer" })).toEqual([]);
+    expect(ids(await lore.searchAs(AT, "tobin", { text: "beacon" }))).toEqual([lamp?.id ?? ""]);
+    // A twin of an entry already read, and one switched off, are no one's lore.
+    expect((await lore.searchAs(AT, "tobin", { text: "rumor" })).length).toBe(0);
+  });
+
+  test("a holder made through perceive reads the world secret before its gate holds, once the holding counts", async () => {
+    const fact = { type: "minds.fact", data: { fact: { id: "lore:drowned_crown", kind: "lore", claim: "Orrin hid the old queen's crown under the lighthouse stair.", about: [], truth: "true" } } } as unknown as LedgerEvent;
+    const learn = (who: string, confidence: number): LedgerEvent => ({ type: "minds.learn", data: { who: [who], fact: "lore:drowned_crown", how: "told", by: "orrin", evidence: [], belief: "true", confidence, keptFrom: "everyone", msg: null, at: 1 } } as unknown as LedgerEvent);
+    // Not sure enough: a suspicion makes no one a holder. Sure enough, told by Orrin, Sefa reads it, the gate shut or open, and Tobin still does not.
+    play(fact, learn("tobin", 0.4));
+    expect(await lore.readAs(AT, "tobin", CROWN)).toEqual([]);
+    play(learn("sefa", 1));
+    expect(ids(await lore.readAs(AT, "sefa", CROWN))).toEqual(CROWN);
+    expect(ids(await lore.searchAs(AT, "sefa", { text: "crown" }))).toEqual(CROWN);
+    expect(await lore.readAs(AT, "tobin", CROWN)).toEqual([]);
   });
 });

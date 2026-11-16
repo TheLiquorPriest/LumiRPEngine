@@ -15,6 +15,7 @@ import type { Fields, Guidance, LinesPart } from "rp-harness";
 import type { AgentRef, HostTool, JsonObject, JsonSchema, JsonValue, Log, ToolContent, ToolCtx, ToolResult } from "rp-harness/contract";
 import { JoinedTurnError, type Lane } from "../store";
 import type { IndexedEntry, LoreBinding, LoreIndex, LoreIndexInput, LoreNamedFields } from "./indexing";
+import type { HeldSecret } from "./secrets/character";
 import type { LoreAt } from "./lore";
 
 /** The prompt part every lore answer, the batch, the readable index and the lore map's lines are worded by. */
@@ -145,22 +146,47 @@ export async function loreBatchBlock(index: LoreIndex, at: LoreAt, guidance: Gui
   }
 }
 
+/** Characters to a token, as the turn counts what it gives against a budget. */
+const CHARS_PER_TOKEN = 3.2;
+
+/**
+ * The secrets a character holds as the lines word them, a head line first: each by the answers' line `held_secret` (its words, how it came by
+ * it as one flag of `how_authored`, `how_witnessed`, `how_told`, `how_inferred` or `how_guessed`, and `by`, who told it), in the world's order,
+ * within the tokens the budget allows; a line that does not fit is left out and the next tried. Nothing where the part has no such line.
+ */
+function heldText(lines: LinesPart | undefined, held: { secrets: readonly HeldSecret[]; budget: number }): string {
+  let left = held.budget;
+  const rows: string[] = [];
+  for (const s of held.secrets) {
+    const line = loreLine(lines, "held_secret", { id: s.id, title: s.title, text: s.text, how: s.how, how_authored: s.how === "authored" ? true : undefined, how_witnessed: s.how === "witnessed" ? true : undefined, how_told: s.how === "told" ? true : undefined, how_inferred: s.how === "inferred" ? true : undefined, how_guessed: s.how === "guessed" ? true : undefined, by: s.by ?? undefined });
+    const cost = line === undefined ? 0 : Math.ceil(line.length / CHARS_PER_TOKEN);
+    if (line === undefined || cost > left) continue;
+    left -= cost;
+    rows.push(line);
+  }
+  return rows.length === 0 ? "" : [loreLine(lines, "held_head"), ...rows].filter((part) => part !== undefined).join("\n");
+}
+
 /**
  * The `index:known-to-self` block for an agent: the lore bound as known to the character it plays
- * (`LoreIndex.knownTo`), each entry's line and its text, worded by the lines in force; the part's line
- * that says there is none, when none is. Nothing for an agent that plays no one in the chat's world.
+ * (`LoreIndex.knownTo`), each entry's line and its text, worded by the lines in force, then the secrets
+ * it holds, within the budget (`LoreIndex.held`); the part's line that says there is none, when there
+ * is neither. Nothing for an agent that plays no one in the chat's world.
  */
 export async function loreKnownBlock(index: LoreIndex, at: LoreAt, agent: AgentRef, guidance: Guidance): Promise<string> {
   const known = agent.plays === undefined ? null : await index.knownTo(at, agent.plays);
-  if (known === null) return "";
+  const held = agent.plays === undefined || known === null ? null : await index.held(at, agent.plays);
+  if (known === null || held === null) return "";
   const lines = await loreLines(guidance);
-  if (known.length === 0) return loreLine(lines, "known_none") ?? "";
+  const secrets = heldText(lines, held);
+  if (known.length === 0 && secrets === "") return loreLine(lines, "known_none") ?? "";
   const out: string[] = [];
   for (const e of known) {
     const fields = { id: e.id, title: e.title, source: e.source, keys: listField(e.keys), text: e.text };
     const parts = ["known_entry", "known_text"].flatMap((name) => loreLine(lines, name, fields) ?? []);
     if (parts.length > 0) out.push(parts.join("\n"));
   }
+  if (secrets !== "") out.push(secrets);
   return out.join("\n\n");
 }
 

@@ -17,6 +17,7 @@ export const LORE_SETTING_DEFS = {
   titleWords: { key: "lore.titleWords", default: LORE_DEFAULTS.titleWords, takes: { type: "whole", least: 1 }, perConnection: false, name: "Words that title an entry", about: "Words of its text that title a lore entry with no title of its own.", effect: "use" },
   minTerm: { key: "lore.search.minTerm", default: LORE_DEFAULTS.minTerm, takes: { type: "whole", least: 1 }, perConnection: false, name: "Shortest word a lore search matches", about: "A name or word shorter than this matches nothing in a search of the lore; lower it to find a two-letter name.", effect: "use" },
   wordCap: { key: "lore.search.wordCap", default: LORE_DEFAULTS.wordCap, takes: { type: "whole", least: 1 }, perConnection: false, name: "Most a repeated word counts", about: "A word repeated in an entry counts at most this often in how a search ranks it, so one long entry cannot outrank the rest on one word.", effect: "use" },
+  heldBudget: { key: "lore.held.budget", default: LORE_DEFAULTS.heldBudget, takes: { type: "whole", least: 0 }, perConnection: false, name: "Tokens of held secrets a character is given", about: "The most tokens the secrets a character holds may take in the lore it is given as its own, with how it came by each; one that does not fit is left out and the next tried.", effect: "use" },
 } as const satisfies NumberSettings<keyof LoreSettings>;
 
 /** The words a search of the lore counts for nothing, as a list; today's, in the shipped config's default. */

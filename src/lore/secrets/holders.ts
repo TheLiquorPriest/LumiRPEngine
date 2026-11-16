@@ -3,9 +3,11 @@
 // threshold the state records). Read at the state the reader's point shows, in place: nothing is copied.
 
 import { isGone, kindIs } from "../../engine/scope";
+import { holdingsOf } from "../../packs/minds/core/knowledge";
+import { readSlice } from "../../packs/minds/core/state";
 import { bookLoreId, bookMarkLoreId } from "../../secrecy/book-lore";
 import type { EntityId } from "../../shared/ids";
-import { heldSecrets } from "../../shared/minds";
+import { type Holding, heldSecrets, liveLoreIdOfWiFact, parseFactId } from "../../shared/minds";
 import { resolveMarkNames, type SecretMark } from "../../shared/secret-marks";
 import type { WorldAt } from "../sources";
 
@@ -20,7 +22,7 @@ export function peopleOf(at: WorldAt): EntityId[] {
 /** Who holds what at one state of a chat: each person's counted holdings, read once. */
 export class HoldersAt {
   readonly #at: WorldAt;
-  readonly #held = new Map<EntityId, ReadonlySet<string>>();
+  readonly #held = new Map<EntityId, ReadonlyMap<string, Holding>>();
   #people: EntityId[] | null = null;
 
   constructor(at: WorldAt) {
@@ -35,7 +37,12 @@ export class HoldersAt {
   /** The people whose holding of the lore entry `loreId` counts (a world entry's key, or a book entry's or mark's live lore id), by name, in the world's order. */
   holding(loreId: string): string[] {
     this.#people ??= peopleOf(this.#at);
-    return this.#people.filter((who) => this.#heldBy(who).has(loreId)).map((who) => this.name(who));
+    return this.#people.filter((who) => this.counted(who).has(loreId)).map((who) => this.name(who));
+  }
+
+  /** Whether `who`'s holding of the lore entry `loreId` counts at this point. */
+  holds(who: EntityId, loreId: string): boolean {
+    return this.counted(who).has(loreId);
   }
 
   /**
@@ -48,10 +55,23 @@ export class HoldersAt {
     return [...new Set([...named, ...this.holding(n === null ? bookLoreId(book, entry) : bookMarkLoreId(book, entry, n))])];
   }
 
-  #heldBy(who: EntityId): ReadonlySet<string> {
+  /**
+   * What `who` holds that counts here (today's `heldSecrets`: believed true and sure enough, never an author's own seeding, only while the
+   * chat tracks knowledge, by the threshold the state records), each by its live lore id with the holding behind it: how they came by it.
+   */
+  counted(who: EntityId): ReadonlyMap<string, Holding> {
     let held = this.#held.get(who);
     if (held === undefined) {
-      held = new Set(heldSecrets(this.#at.state.packs.minds, who).lore);
+      const counts = new Set(heldSecrets(this.#at.state.packs.minds, who).lore);
+      const mine = new Map<string, Holding>();
+      if (counts.size > 0) {
+        for (const [fact, holding] of Object.entries(holdingsOf(readSlice(this.#at.state), who))) {
+          const ref = parseFactId(fact);
+          const id = ref?.kind === "lore" ? ref.lore : ref?.kind === "wi" ? (liveLoreIdOfWiFact(fact) ?? fact) : null;
+          if (id !== null && counts.has(id)) mine.set(id, holding);
+        }
+      }
+      held = mine;
       this.#held.set(who, held);
     }
     return held;

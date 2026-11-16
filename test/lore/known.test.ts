@@ -37,20 +37,24 @@ describe("the lore a character knows", () => {
     const world = coastWorld();
     const revision = hashJson(world);
     store = openStore({ db: ":memory:", registry: registry(), worlds: (r) => (r === revision ? world : undefined) });
-    for (const m of CAST_MIGRATIONS) if ("sql" in m) store.db.run(m.sql);
+    for (const m of CAST_MIGRATIONS) {
+      if ("sql" in m) store.db.run(m.sql);
+      else m.up(store.db, USER);
+    }
     store.user(USER).createChat({ id: CHAT, world: world.id, revision });
     // The cast knows the lighthouse keeper by his full name, under an id of its own; the host gives the lore the cast's names, as
     // the turn lane does.
     orrin = addCharacter(store.db, USER, CHAT, "Orrin Pell", 1).id;
     const worlds = storeWorlds(store, (user, chat, said) => findCharacter(store.db, user, chatLine(store.user(user), chat), said)?.name ?? null);
     lore = new Lore({ books: new Shelf(), worlds, turns: new Tags(), numbers: db.numbers });
-    index = new LoreIndex({ lore, db: db.db, writes: db.writes, path: { turns: () => [] } });
+    index = new LoreIndex({ lore, db: db.db, writes: db.writes, path: { overlays: () => [] } });
     // An indexing run binds the crown and the keeper's log to Orrin, by name and by tree ref; the cove route to him too, though he
     // does not know the cove; the tithe to Sefa.
     const read = await index.entries(AT);
     const revisionOf = (id: string): string => read.find((e) => e.id === id)?.revision ?? "";
     const bound = (id: string, what: string) => ({ id, revision: revisionOf(id), kind: "item", line: `${id}.`, defines: [{ what, aspect: "" }], related: [] });
-    await index.write(AT, [bound(W.drowned_crown, "Orrin Pell"), bound(W.keeper_log, "entity:orrin"), bound(W.cove_route, "orrin"), bound(W.tithe_law, "Sefa Moor")], "indexer");
+    const bell = read.find((e) => e.title === "The tide bell")?.id ?? "";
+    await index.write(AT, [bound(W.drowned_crown, "Orrin Pell"), bound(W.keeper_log, "entity:orrin"), bound(W.cove_route, "orrin"), bound(W.tithe_law, "Sefa Moor"), bound(bell, "Orrin Pell")], "indexer");
   });
   afterAll(async () => {
     store.close();
@@ -74,17 +78,28 @@ describe("the lore a character knows", () => {
     expect(await port.search(scope, { text: "crown" }, agent("The ghost of the cove"))).toEqual([]);
   });
 
-  test("index:known-to-self gives the entries bound to the character that it may read, worded by the lore's lines", async () => {
+  test("index:known-to-self gives the entries bound to the character, a book entry's marks only where it holds them, then the secrets it holds, worded by the lore's lines", async () => {
     const guidance = files.guidance(CHAT);
+    const bell = (await index.entries(AT)).find((e) => e.title === "The tide bell")?.id;
     const block = await loreKnownBlock(index, AT, agent(orrin), guidance);
     expect(block.split("\n\n")).toEqual([
       `### [${W.drowned_crown}] The drowned crown (from The Reed Coast)\nOrrin hid the old queen's crown under the lighthouse stair.`,
       `### [${W.keeper_log}] The lighthouse keeper's log (from The Reed Coast)\nForty winters of weather, written in a cramped hand.`,
+      `### [${bell}] The tide bell (from Reed Coast Atlas)\nThe bell rings at high water.\nOrrin cracked the bell with a hammer.`,
+      "The secrets you hold:\n- Orrin cracked the bell with a hammer. (yours from the start)\n- Orrin hid the old queen's crown under the lighthouse stair. (yours from the start)",
     ]);
     expect(await loreKnownBlock(index, AT, agent("orrin"), guidance)).toBe(block);
-    // Bound to nothing, the part's line says so; an agent that plays no one is given nothing.
+    // Bound to nothing and holding nothing, the part's line says so; an agent that plays no one is given nothing.
     expect(await loreKnownBlock(index, AT, agent("Tobin Reed"), guidance)).toBe("No lore is bound to you.");
     expect(await loreKnownBlock(index, AT, agent(), guidance)).toBe("");
     expect(await loreKnownBlock(index, AT, agent("The ghost of the cove"), guidance)).toBe("");
+  });
+
+  test("a character is given the secrets it holds and no other, within its budget", async () => {
+    const mine = await index.held(AT, "Orrin Pell");
+    expect(mine?.secrets.map((s) => [s.id, s.how])).toEqual([["book:book-atlas/entry-tide#1", "authored"], ["drowned_crown", "authored"]]);
+    expect(mine?.budget).toBe(1600);
+    expect((await index.held(AT, "Tobin Reed"))?.secrets).toEqual([]);
+    expect(await index.held(AT, "The ghost of the cove")).toBeNull();
   });
 });
