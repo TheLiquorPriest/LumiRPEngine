@@ -3534,10 +3534,112 @@ export interface WorldChanged {
   stored?: boolean;
 }
 
+/** The draft as the world's next revision. Where the world's errors block it, `revision` is null and `message` and `lint` say what blocks. */
+export interface WorldCommitted {
+  /** The new revision; null where it was not made. */
+  revision: string | null;
+  /** The lint of the committed world, or what blocks. */
+  lint: WorldLintIssue[];
+  /** Why it was not made; null where it was. */
+  message: string | null;
+}
+
+/** A new world as made, and its first revision. */
+export interface WorldCreated {
+  /** The world document. */
+  world: JsonValue;
+  /** Its first revision. */
+  revision: string;
+}
+
+/** A world's draft as it stands after the call, with its lint, the revision it began from, whether one is stored and its version. `moved` is true where the write named a version the draft was no longer at: nothing was written, and this is the draft as it now stands. */
+export interface WorldDraft {
+  /** The draft document. */
+  draft: JsonValue;
+  /** Its lint. */
+  lint: WorldLintIssue[];
+  /** The revision the draft began from. */
+  base: string | null;
+  /** Whether a draft is stored (else it is the head). */
+  stored: boolean;
+  /** The draft's version. */
+  version: number;
+  /** The draft had moved on: this is what is there now and nothing of the write was kept. */
+  moved: boolean;
+}
+
+/** A world file brought in as a new world, its first revision, and the macros in it to review before playing it. */
+export interface WorldImported {
+  /** The world document. */
+  world: JsonValue;
+  /** Its first revision. */
+  revision: string;
+  /** The macros to review, as warnings. */
+  lint: WorldLintIssue[];
+}
+
+/** One of his worlds: its id and name, its head revision and every revision, and where its working copy's count stands. */
+export interface WorldIndexRow {
+  /** The world's id. */
+  id: string;
+  /** Its name. */
+  name: string;
+  /** Its head revision. */
+  head: string;
+  /** The World Info book an earlier build kept for it; null for none. */
+  loreBookId: string | null;
+  /** Every revision, oldest first. */
+  revisions: string[];
+  /** The count of its working copy while no draft is stored. */
+  draftVersion?: number;
+}
+
+/** One thing the lint found in a world: its severity, where in the document, a code, the words, and a fix Problems offers in one press (its label and the draft patch that does it). */
+export interface WorldLintIssue {
+  /** How serious it is. */
+  severity: "error" | "warning" | "info";
+  /** Where in the document, e.g. `entities.npc_dev.fields.cash`. */
+  path: string;
+  /** What kind of finding it is. */
+  code: string;
+  /** The words. */
+  message: string;
+  /** A fix Problems offers in one press. */
+  fix?: { label: string; ops: JsonValue };
+}
+
+/** A world at a revision: its document, which revision that is, how each revision became head, and what the packs give the editors (the kinds and relations they bring and the formula functions). */
+export interface WorldRead {
+  /** The world document. */
+  world: JsonValue;
+  /** The revision it is. */
+  revision: string;
+  /** How each revision became head, oldest first. */
+  history: WorldRevisionNote[];
+  /** The kinds the packs bring, by id. */
+  packKinds: JsonValue;
+  /** The relation types the packs bring, by id. */
+  packRelations: JsonValue;
+  /** The formula functions. */
+  functions: string[];
+}
+
 /** The level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */
 export interface WorldReply {
   at: string;
   nodes: LevelNode[];
+}
+
+/** How a revision became the head: when, what made it (a new world, a commit from Build or from an outside agent, an import) and the note given with the commit. */
+export interface WorldRevisionNote {
+  /** The revision. */
+  revision: string;
+  /** When, in ms since 1970. */
+  at: number;
+  /** What made it head. */
+  source: "create" | "build" | "agent" | "import";
+  /** The commit's note. */
+  note?: string;
 }
 
 /** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, whether it pages, and whether it is long (answered at once with an id, its answer read from `ANSWERS_PATH`). */
@@ -5388,6 +5490,266 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: BuildsStatus;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** His worlds, by name. */
+  "GET /api/v1/worlds": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: { worlds: WorldIndexRow[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A new world, from a starter or blank. */
+  "POST /api/v1/worlds": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { name: string; template: string | null };
+    reply: WorldCreated;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A world at a revision (its head by default), with how each revision became head and what the packs give the editors. */
+  "GET /api/v1/worlds/:world": {
+    params: { world: string };
+    query: { revision?: string };
+    body: undefined;
+    reply: WorldRead;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A world gone, with every revision, its draft and its history; his worlds as they stand after. */
+  "DELETE /api/v1/worlds/:world": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: { worlds: WorldIndexRow[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A character as its own model, from the world's draft. */
+  "GET /api/v1/worlds/:world/characters/:entity": {
+    params: { world: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The draft as the world's next revision, with its note; one made on a draft that has moved on, or on a head that has, is refused. The source is the agent's where the command line or the MCP server made it, Build's where a page did. */
+  "POST /api/v1/worlds/:world/commit": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { base: string | null; note?: string; version?: number };
+    reply: WorldCommitted;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** A world's draft as it stands (the head while none is stored), with its lint, base and version. */
+  "GET /api/v1/worlds/:world/draft": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Discards the stored draft: the world goes back to its head. */
+  "POST /api/v1/worlds/:world/draft/discard": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Puts one item of a collection into the draft (a new one without its id takes its key); what a map draws is edited in its map. */
+  "PUT /api/v1/worlds/:world/draft/items/:collection/:id": {
+    params: { world: string; collection: string; id: string };
+    query: Record<string, never>;
+    body: { value: JsonValue; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Takes one item of a collection out of the draft. */
+  "DELETE /api/v1/worlds/:world/draft/items/:collection/:id": {
+    params: { world: string; collection: string; id: string };
+    query: { base?: string; version?: number };
+    body: undefined;
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Sets one part of the draft (the world's name and start, its calendar, its ruleset, its tiers, its minds, its lookup table…) whole, as its editor sends it. */
+  "PUT /api/v1/worlds/:world/draft/parts/:part": {
+    params: { world: string; part: string };
+    query: Record<string, never>;
+    body: { value: JsonValue; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.patchOps` operations bringing in at most `worlds.patchBytes`. */
+  "POST /api/v1/worlds/:world/draft/patch": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { ops: JsonValue; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Brings a ruleset profile into the draft in one write, each choice taking the author's own or the profile's. */
+  "POST /api/v1/worlds/:world/draft/profile": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { profile: string; choices: { [key: string]: "mine" | "profile" }; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Puts a copy of one of the world's revisions into the draft; committing it makes that content the head again. */
+  "POST /api/v1/worlds/:world/draft/restore": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { revision: string; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Takes the version this build ships of each named data table into the draft. */
+  "POST /api/v1/worlds/:world/draft/shipped": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { tables: string[]; base: string | null; version?: number };
+    reply: WorldDraft;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A world at a revision as an export file. */
+  "GET /api/v1/worlds/:world/export": {
+    params: { world: string };
+    query: { revision?: string };
+    body: undefined;
+    reply: { file: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The lint of a world at a revision (its head by default). */
+  "GET /api/v1/worlds/:world/lint": {
+    params: { world: string };
+    query: { revision?: string };
+    body: undefined;
+    reply: { lint: WorldLintIssue[] };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A person's things, in the Character page's groups. */
+  "GET /api/v1/worlds/:world/people/:entity/things": {
+    params: { world: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The Sheet Designer's live preview: the draft with an unsaved ruleset in place of its own, read on an entity (the point of view by default) as a new chat would start; nothing is saved. */
+  "POST /api/v1/worlds/:world/sheet": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: { ruleset: JsonValue; entity?: string };
+    reply: { sheet: JsonValue; skills: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Every thing of the draft as a chat would start from it, with its size, where it is and whose it is, and the same by owner. A draft whose calendar or start does not read is refused naming which. */
+  "GET /api/v1/worlds/:world/things": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One thing's page: where it is kept, who may use it and what it holds. */
+  "GET /api/v1/worlds/:world/things/:entity": {
+    params: { world: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The things and people whose names words name, or start with. */
+  "GET /api/v1/worlds/:world/things/find": {
+    params: { world: string };
+    query: { words: string };
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The catalog's types of thing with the sizes they give. */
+  "GET /api/v1/worlds/:world/things/types": {
+    params: { world: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The data tables this build ships newer than the world's copies, for its draft or one of its revisions. */
+  "GET /api/v1/worlds/:world/updates": {
+    params: { world: string };
+    query: { revision?: string };
+    body: undefined;
+    reply: { updates: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A world file brought in as a new world; the macros in its lore and templates come back as warnings to review before playing it. */
+  "POST /api/v1/worlds/import": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { file: JsonValue };
+    reply: WorldImported;
+    paged: false;
+    long: true;
+    joined: false;
+  };
+  /** The starter worlds a new world can be made from. */
+  "GET /api/v1/worlds/templates": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: { templates: { id: string; name: string; summary: string }[] };
     paged: false;
     long: false;
     joined: false;

@@ -2283,6 +2283,346 @@ Tunnel for the previous build's messages: Build's page sends one of today's mess
 | Body | [`FrontendToBackend`](#frontendtobackend) |
 | Reply | [`BuildTunnelReply`](#buildtunnelreply) |
 
+### `GET /api/v1/worlds`
+
+His worlds, by name.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | `{ worlds: WorldIndexRow[] }` |
+
+### `POST /api/v1/worlds`
+
+A new world, from a starter or blank.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | none |
+| Query | none |
+| Body | `{ name: string; template: string | null }` |
+| Reply | [`WorldCreated`](#worldcreated) |
+
+### `GET /api/v1/worlds/:world`
+
+A world at a revision (its head by default), with how each revision became head and what the packs give the editors.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `revision` (may be left out): `string`, A revision of the world; its head by default |
+| Body | none |
+| Reply | [`WorldRead`](#worldread) |
+
+### `DELETE /api/v1/worlds/:world`
+
+A world gone, with every revision, its draft and its history; his worlds as they stand after.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | none |
+| Body | none |
+| Reply | `{ worlds: WorldIndexRow[] }` |
+
+### `GET /api/v1/worlds/:world/characters/:entity`
+
+A character as its own model, from the world's draft.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `POST /api/v1/worlds/:world/commit`
+
+The draft as the world's next revision, with its note; one made on a draft that has moved on, or on a head that has, is refused. The source is the agent's where the command line or the MCP server made it, Build's where a page did.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `world` |
+| Query | none |
+| Body | `{ base: string | null; note?: string; version?: number }` |
+| Reply | [`WorldCommitted`](#worldcommitted) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `GET /api/v1/worlds/:world/draft`
+
+A world's draft as it stands (the head while none is stored), with its lint, base and version.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | none |
+| Body | none |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `POST /api/v1/worlds/:world/draft/discard`
+
+Discards the stored draft: the world goes back to its head.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `world` |
+| Query | none |
+| Body | `{ version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `PUT /api/v1/worlds/:world/draft/items/:collection/:id`
+
+Puts one item of a collection into the draft (a new one without its id takes its key); what a map draws is edited in its map.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | `world`, `collection`, `id` |
+| Query | none |
+| Body | `{ value: JsonValue; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `DELETE /api/v1/worlds/:world/draft/items/:collection/:id`
+
+Takes one item of a collection out of the draft.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world`, `collection`, `id` |
+| Query | `base` (may be left out): `string`, The revision the draft began from, as the writer read it<br>`version` (may be left out): `number`, The draft version the writer read |
+| Body | none |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `PUT /api/v1/worlds/:world/draft/parts/:part`
+
+Sets one part of the draft (the world's name and start, its calendar, its ruleset, its tiers, its minds, its lookup table…) whole, as its editor sends it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | `world`, `part` |
+| Query | none |
+| Body | `{ value: JsonValue; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `POST /api/v1/worlds/:world/draft/patch`
+
+Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.patchOps` operations bringing in at most `worlds.patchBytes`.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | `world` |
+| Query | none |
+| Body | `{ ops: JsonValue; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `POST /api/v1/worlds/:world/draft/profile`
+
+Brings a ruleset profile into the draft in one write, each choice taking the author's own or the profile's.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `world` |
+| Query | none |
+| Body | `{ profile: string; choices: { [key: string]: "mine" | "profile" }; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `POST /api/v1/worlds/:world/draft/restore`
+
+Puts a copy of one of the world's revisions into the draft; committing it makes that content the head again.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `world` |
+| Query | none |
+| Body | `{ revision: string; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `POST /api/v1/worlds/:world/draft/shipped`
+
+Takes the version this build ships of each named data table into the draft.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | `world` |
+| Query | none |
+| Body | `{ tables: string[]; base: string | null; version?: number }` |
+| Reply | [`WorldDraft`](#worlddraft) |
+
+### `GET /api/v1/worlds/:world/export`
+
+A world at a revision as an export file.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `revision` (may be left out): `string`, A revision of the world; its head by default |
+| Body | none |
+| Reply | `{ file: JsonValue }` |
+
+### `GET /api/v1/worlds/:world/lint`
+
+The lint of a world at a revision (its head by default).
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `revision` (may be left out): `string`, A revision of the world; its head by default |
+| Body | none |
+| Reply | `{ lint: WorldLintIssue[] }` |
+
+### `GET /api/v1/worlds/:world/people/:entity/things`
+
+A person's things, in the Character page's groups.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `POST /api/v1/worlds/:world/sheet`
+
+The Sheet Designer's live preview: the draft with an unsaved ruleset in place of its own, read on an entity (the point of view by default) as a new chat would start; nothing is saved.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | `world` |
+| Query | none |
+| Body | `{ ruleset: JsonValue; entity?: string }` |
+| Reply | `{ sheet: JsonValue; skills: JsonValue }` |
+
+### `GET /api/v1/worlds/:world/things`
+
+Every thing of the draft as a chat would start from it, with its size, where it is and whose it is, and the same by owner. A draft whose calendar or start does not read is refused naming which.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/worlds/:world/things/:entity`
+
+One thing's page: where it is kept, who may use it and what it holds.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world`, `entity` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/worlds/:world/things/find`
+
+The things and people whose names words name, or start with.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `words`: `string`, The words to find |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/worlds/:world/things/types`
+
+The catalog's types of thing with the sizes they give.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | none |
+| Body | none |
+| Reply | `JsonValue` |
+
+### `GET /api/v1/worlds/:world/updates`
+
+The data tables this build ships newer than the world's copies, for its draft or one of its revisions.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `revision` (may be left out): `string`, A revision of the world; its draft by default |
+| Body | none |
+| Reply | `{ updates: JsonValue }` |
+
+### `POST /api/v1/worlds/import`
+
+A world file brought in as a new world; the macros in its lore and templates come back as warnings to review before playing it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | at most 4 MiB |
+| Params | none |
+| Query | none |
+| Body | `{ file: JsonValue }` |
+| Reply | [`WorldImported`](#worldimported) |
+| Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
+
+### `GET /api/v1/worlds/templates`
+
+The starter worlds a new world can be made from.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | `{ templates: { id: string; name: string; summary: string }[] }` |
+
 ## Migration
 
 ### `GET /api/v1/chats/:chat/carried`
@@ -8102,6 +8442,131 @@ export interface WorldChanged {
 }
 ```
 
+### `WorldCommitted`
+
+The draft as the world's next revision. Where the world's errors block it, `revision` is null and `message` and `lint` say what blocks.
+
+```ts
+export interface WorldCommitted {
+  /** The new revision; null where it was not made. */
+  revision: string | null;
+  /** The lint of the committed world, or what blocks. */
+  lint: WorldLintIssue[];
+  /** Why it was not made; null where it was. */
+  message: string | null;
+}
+```
+
+### `WorldCreated`
+
+A new world as made, and its first revision.
+
+```ts
+export interface WorldCreated {
+  /** The world document. */
+  world: JsonValue;
+  /** Its first revision. */
+  revision: string;
+}
+```
+
+### `WorldDraft`
+
+A world's draft as it stands after the call, with its lint, the revision it began from, whether one is stored and its version. `moved` is true where the write named a version the draft was no longer at: nothing was written, and this is the draft as it now stands.
+
+```ts
+export interface WorldDraft {
+  /** The draft document. */
+  draft: JsonValue;
+  /** Its lint. */
+  lint: WorldLintIssue[];
+  /** The revision the draft began from. */
+  base: string | null;
+  /** Whether a draft is stored (else it is the head). */
+  stored: boolean;
+  /** The draft's version. */
+  version: number;
+  /** The draft had moved on: this is what is there now and nothing of the write was kept. */
+  moved: boolean;
+}
+```
+
+### `WorldImported`
+
+A world file brought in as a new world, its first revision, and the macros in it to review before playing it.
+
+```ts
+export interface WorldImported {
+  /** The world document. */
+  world: JsonValue;
+  /** Its first revision. */
+  revision: string;
+  /** The macros to review, as warnings. */
+  lint: WorldLintIssue[];
+}
+```
+
+### `WorldIndexRow`
+
+One of his worlds: its id and name, its head revision and every revision, and where its working copy's count stands.
+
+```ts
+export interface WorldIndexRow {
+  /** The world's id. */
+  id: string;
+  /** Its name. */
+  name: string;
+  /** Its head revision. */
+  head: string;
+  /** The World Info book an earlier build kept for it; null for none. */
+  loreBookId: string | null;
+  /** Every revision, oldest first. */
+  revisions: string[];
+  /** The count of its working copy while no draft is stored. */
+  draftVersion?: number;
+}
+```
+
+### `WorldLintIssue`
+
+One thing the lint found in a world: its severity, where in the document, a code, the words, and a fix Problems offers in one press (its label and the draft patch that does it).
+
+```ts
+export interface WorldLintIssue {
+  /** How serious it is. */
+  severity: "error" | "warning" | "info";
+  /** Where in the document, e.g. `entities.npc_dev.fields.cash`. */
+  path: string;
+  /** What kind of finding it is. */
+  code: string;
+  /** The words. */
+  message: string;
+  /** A fix Problems offers in one press. */
+  fix?: { label: string; ops: JsonValue };
+}
+```
+
+### `WorldRead`
+
+A world at a revision: its document, which revision that is, how each revision became head, and what the packs give the editors (the kinds and relations they bring and the formula functions).
+
+```ts
+export interface WorldRead {
+  /** The world document. */
+  world: JsonValue;
+  /** The revision it is. */
+  revision: string;
+  /** How each revision became head, oldest first. */
+  history: WorldRevisionNote[];
+  /** The kinds the packs bring, by id. */
+  packKinds: JsonValue;
+  /** The relation types the packs bring, by id. */
+  packRelations: JsonValue;
+  /** The formula functions. */
+  functions: string[];
+}
+```
+
 ### `WorldReply`
 
 The level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn.
@@ -8110,6 +8575,23 @@ The level asked for, then each level below it to the depth asked for, at the cha
 export interface WorldReply {
   at: string;
   nodes: LevelNode[];
+}
+```
+
+### `WorldRevisionNote`
+
+How a revision became the head: when, what made it (a new world, a commit from Build or from an outside agent, an import) and the note given with the commit.
+
+```ts
+export interface WorldRevisionNote {
+  /** The revision. */
+  revision: string;
+  /** When, in ms since 1970. */
+  at: number;
+  /** What made it head. */
+  source: "create" | "build" | "agent" | "import";
+  /** The commit's note. */
+  note?: string;
 }
 ```
 
