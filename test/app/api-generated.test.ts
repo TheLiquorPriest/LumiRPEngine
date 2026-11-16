@@ -111,7 +111,7 @@ describe("the generated types and the API reference", () => {
     }
     expect(doubled).toEqual([]);
     // Every file that reads the live socket is among them.
-    expect(takers).toEqual(expect.arrayContaining(["src/ui/client.ts", "src/ui/roads.ts", "src/ui/live-model.ts", "src/ui/live-watch.ts", "src/ui/pages/connections/index.tsx", "src/ui/pages/settings.tsx"]));
+    expect(takers).toEqual(expect.arrayContaining(["src/ui/client.ts", "src/ui/roads.ts", "src/ui/live-model.ts", "src/ui/live-watch.ts", "src/ui/pages/connections/index.tsx", "src/ui/pages/settings/index.tsx"]));
     // No page keeps a hand copy of a route's shape beside it.
     expect(existsSync(join(ROOT, "src/ui/api.ts"))).toBe(false);
   });
