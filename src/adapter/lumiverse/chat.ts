@@ -4,7 +4,9 @@
 // message found by its id. A message the user hid from the prompt in Lumiverse is listed and marked,
 // and its text is left out, of a read and of a search, unless the chat's setting lets agents read
 // hidden messages (§4.2, "Hidden messages"). A message Lumiverse's own memory stands in for with a
-// summary is marked as such (§4.2: "The turn's files mark a summary as a summary").
+// summary is marked as such (§4.2: "The turn's files mark a summary as a summary"). A message the chat's story choice (`story.from`,
+// R-176) leaves out of the story is marked `story: false`: with the replies alone as the story, his own messages; as Lumiverse has it,
+// the same while its Sovereign Hand is on, and none while it is off or unsaid.
 //
 // A message's place on the path counts from 0 at the chat's first message, in Lumiverse's order; it is
 // not Lumiverse's `index_in_chat`, which keeps a gap where a message was deleted.
@@ -15,10 +17,20 @@
 // embedding connection is set.
 
 import type { ChatHit, ChatInfo, ChatMessage, ChatPort, ChatQuery, ChatRole, HistoryRange, Scope } from "rp-harness/contract";
+import { isRecord } from "../../shared/json";
 import type { IndexFeed } from "./index-feed";
 import type { LumiverseReads } from "./reads";
 import type { LvMessage } from "./rows";
 import { matchAt, snippetOf, wordsOf } from "./words";
+
+/** A chat's setting `story.from` (R-176): whose messages are its story: as Lumiverse has it (its Sovereign Hand), everyone's, or the replies alone. */
+export type StoryFrom = "lumiverse" | "everyone" | "replies";
+
+/**
+ * A message or a hit as the chat port gives it, `story: false` where the chat's story choice leaves it out. The member is RPH's own
+ * (`ChatMessage.story`, `ChatHit.story`, signed by the lead) from the RPH that brings it; this type goes when RPE's pin holds it.
+ */
+type StoryMarked<T> = T & { story?: false };
 
 /** A message as the chat's path lists it, with no text: its place, and Lumiverse's own facts of it. */
 export interface ChatStep {
@@ -69,6 +81,8 @@ export interface ChatDeps {
   user: string;
   /** The chat's setting: agents may read the messages the user hid from the prompt (off unless the user turns it on). */
   hiddenReadable(chat: string): Promise<boolean>;
+  /** The chat's setting `story.from` (the turn lane's): whose messages are its story. */
+  storyFrom(chat: string): Promise<StoryFrom>;
   /**
    * The stretches the chat names, by name (the story record's: `scene`, the stretch since the scene opened, §5.4), read along the line of the turn the work belongs to (the scope's turn),
    * not at the chat's head, so a swipe or a branch is named by its own story; at the head where the work belongs to no turn (null).
@@ -98,7 +112,15 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     return scope.chat;
   };
 
-  const shown = (m: LvMessage, index: number, readable: boolean, summarized: ReadonlySet<string>): ChatMessage => ({
+  /** Whether the chat's story choice leaves his own messages out of the story: the replies alone, by the chat's setting or by Lumiverse's Sovereign Hand switched on (`sovereignHand.enabled`, the user's Lumiverse setting). */
+  async function playerOutside(chat: string): Promise<boolean> {
+    const from = await deps.storyFrom(chat);
+    if (from !== "lumiverse") return from === "replies";
+    const hand = (await deps.reads.setting("sovereignHand"))?.value;
+    return isRecord(hand) && hand.enabled === true;
+  }
+
+  const shown = (m: LvMessage, index: number, readable: boolean, summarized: ReadonlySet<string>, outside: boolean): StoryMarked<ChatMessage> => ({
     id: m.id,
     index,
     role: m.role,
@@ -106,6 +128,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     ...(!m.hidden || readable ? { text: m.text } : {}),
     ...(m.hidden ? { hidden: true as const } : {}),
     ...(summarized.has(m.id) ? { summarized: true as const } : {}),
+    ...(outside && m.role === "user" ? { story: false as const } : {}),
     at: m.sentAt,
   });
 
@@ -129,8 +152,8 @@ export function createChatReads(deps: ChatDeps): ChatReads {
       const chat = own(scope);
       const from = Math.max(0, Math.floor(range.from));
       if (range.to <= from) return [];
-      const [messages, readable, summarized] = await Promise.all([deps.reads.messages(chat, { from, to: range.to }), deps.hiddenReadable(chat), deps.summarized(chat)]);
-      return messages.map((m, i) => shown(m, from + i, readable, summarized));
+      const [messages, readable, summarized, outside] = await Promise.all([deps.reads.messages(chat, { from, to: range.to }), deps.hiddenReadable(chat), deps.summarized(chat), playerOutside(chat)]);
+      return messages.map((m, i) => shown(m, from + i, readable, summarized, outside));
     },
     async search(scope, query: ChatQuery): Promise<ChatHit[]> {
       const chat = own(scope);
@@ -166,10 +189,11 @@ export function createChatReads(deps: ChatDeps): ChatReads {
         })
         .slice(0, limit - word.length);
       const hits = [...word.map((h) => ({ ...h, how: "words" as const })), ...near.map((h) => ({ ...h, how: "meaning" as const }))];
-      const texts = new Map((await deps.reads.messagesById(chat, hits.map((h) => h.id))).map((m) => [m.id, m] as const));
-      return hits.flatMap(({ id, i, how }): ChatHit[] => {
+      const [read, outside] = await Promise.all([deps.reads.messagesById(chat, hits.map((h) => h.id)), playerOutside(chat)]);
+      const texts = new Map(read.map((m) => [m.id, m] as const));
+      return hits.flatMap(({ id, i, how }): StoryMarked<ChatHit>[] => {
         const m = texts.get(id);
-        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how }];
+        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how, ...(outside && m.role === "user" ? { story: false as const } : {}) }];
       });
     },
     async position(scope, id): Promise<number | undefined> {
@@ -186,10 +210,10 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     },
     async find(scope, id): Promise<ChatMessage | null> {
       const chat = own(scope);
-      const [path, found, readable, summarized] = await Promise.all([deps.reads.path(chat), deps.reads.messagesById(chat, [id]), deps.hiddenReadable(chat), deps.summarized(chat)]);
+      const [path, found, readable, summarized, outside] = await Promise.all([deps.reads.path(chat), deps.reads.messagesById(chat, [id]), deps.hiddenReadable(chat), deps.summarized(chat), playerOutside(chat)]);
       const message = found[0];
       const index = path?.findIndex((s) => s.id === id) ?? -1;
-      return message === undefined || index < 0 ? null : shown(message, index, readable, summarized);
+      return message === undefined || index < 0 ? null : shown(message, index, readable, summarized, outside);
     },
   };
 }

@@ -42,6 +42,8 @@ const UNFILLED: UnfilledLanes = {
   // No model known: nothing is trimmed past the window.
   room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
   hiddenReadable: async () => false,
+  // No chat setting known: the story is as Lumiverse has it, its Sovereign Hand read by the chat reads.
+  storyFrom: async () => "lumiverse",
   ranges: async () => ({}),
   summarized: async () => new Set(),
   models: {
@@ -78,6 +80,7 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
       return secrecy(ask, signal);
     },
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
+    storyFrom: (chat) => lane("storyFrom")(chat),
     ranges: (chat, turn) => lane("ranges")(chat, turn),
     summarized: (chat) => lane("summarized")(chat),
     models: { pass: (request, sink, signal) => lane("models").pass(request, sink, signal) },

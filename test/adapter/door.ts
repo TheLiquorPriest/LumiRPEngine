@@ -118,6 +118,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
         return { disabled: [], enabled: [], mutated: [] };
       },
       hiddenReadable: async () => false,
+      storyFrom: async () => "everyone",
       ranges: async () => ({}),
       summarized: async () => new Set(),
       models: {

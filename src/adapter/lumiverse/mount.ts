@@ -22,7 +22,7 @@ import { isRecord } from "../../shared/json";
 import { lumiverseAccounts } from "./accounts";
 import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
 import { promptReads, type ModelRooms } from "./receipt";
-import { createChatReads, type ChatReads, type MeaningNearest } from "./chat";
+import { createChatReads, type ChatReads, type MeaningNearest, type StoryFrom } from "./chat";
 import { createDbReader, type DbReader } from "./db";
 import { Activations } from "./activation";
 import { IndexFeed } from "./index-feed";
@@ -63,6 +63,8 @@ export interface AdapterLanes {
   secrecy: SecrecyRules;
   /** A chat's setting: agents may read the messages the user hid. */
   hiddenReadable(chat: string): Promise<boolean>;
+  /** The turn lane: a chat's setting `story.from`, whose messages are its story (R-176); the chat tools mark each message it leaves out. */
+  storyFrom(chat: string): Promise<StoryFrom>;
   /** The story lane: the stretches a chat names (`scene`, since the scene opened), read along the line of the turn the work belongs to; at the chat's head for null. */
   ranges(chat: string, turn: string | null): Promise<Record<string, HistoryRange>>;
   /** The turn lane: the messages Lumiverse's memory stands in for with a summary in the chat's prompt, from the tag's `summary` marks. */
@@ -240,7 +242,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     activations = new Activations(reads, log);
     feed = new IndexFeed({ index: at.index, reads, user, log });
     const fed = feed;
-    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search, feed: fed, meaning: lanes.meaning });
+    const chat = createChatReads({ reads, user, hiddenReadable: lanes.hiddenReadable, storyFrom: lanes.storyFrom, ranges: lanes.ranges, summarized: lanes.summarized, search: () => settings().search, feed: fed, meaning: lanes.meaning });
     const sockets = (): LumiverseSettings["socket"] => settings().socket;
     const events = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`event socket: ${m}`), settings: sockets });
     const relaySocket = new LumiverseSocket({ session, open: deps.open, clock: deps.clock, log: (m) => log(`relay socket: ${m}`), frontendSession: relaySession, settings: sockets });

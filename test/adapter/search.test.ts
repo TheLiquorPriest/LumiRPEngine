@@ -48,7 +48,7 @@ async function bed(): Promise<{ db: StandInDb; reads: LumiverseReads; texts: str
     reader.close();
     db.close();
   });
-  const chat = createChatReads({ reads, user: USER, hiddenReadable: async () => false, ranges: async () => ({}), summarized: async () => new Set(), feed: index.feed });
+  const chat = createChatReads({ reads, user: USER, hiddenReadable: async () => false, storyFrom: async () => "everyone", ranges: async () => ({}), summarized: async () => new Set(), feed: index.feed });
   return { db, reads, texts, index, chat };
 }
 
