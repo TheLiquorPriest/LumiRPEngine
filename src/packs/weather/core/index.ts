@@ -177,7 +177,7 @@ export function parseClimate(raw: JsonObject): Climate {
 /** Each authored climate as parsed, beside the world's own record of it: a world's records never change, so each is parsed once. */
 const parsedClimates = new WeakMap<JsonObject, Climate>();
 
-function climateOf(ctx: Pick<ReadContext, "world" | "state">, region: EntityId): Climate {
+export function climateOf(ctx: Pick<ReadContext, "world" | "state">, region: EntityId): Climate {
   const id = strOf(own(ctx.state.entities, region)?.fields.climate, "temperate");
   const custom = ctx.world.packs.weather?.config.climates;
   const authored = Array.isArray(custom) ? custom.map((c) => objOf(c)).find((c) => strOf(c.id, strOf(c.region)) === id) : undefined;
@@ -251,7 +251,7 @@ export function calmStateOf(ctx: Pick<ReadContext, "world" | "state">, region: E
 }
 
 /** The current climate state over a place: its own weather's, else the nearest place above it that has its own, else its region's, with its effects; null when there is none. */
-function stateAt(ctx: ReadContext, place: PlaceId | null): ClimateState | null {
+export function stateAt(ctx: ReadContext, place: PlaceId | null): ClimateState | null {
   return passMemo([ctx.state, ctx.state.entities, ctx.world], `weather.state\u0000${place ?? "\u0001"}`, () => {
     const region = regionOf(ctx, place);
     const placed = placeWeatherAt(ctx, place);
