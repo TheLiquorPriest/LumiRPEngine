@@ -339,6 +339,19 @@ export class UserWorlds {
     const moved = this.run(() => moveWorldFiles(this.db, "world_file", { user: this.user, now: this.now(), overwrite: false }));
     return { added: moved.revisionsAdded, held: moved.revisionsHeld, unreadable: moved.unreadable };
   }
+
+  /**
+   * Keeps a world's index, draft or history as the migration carried it, byte for byte (a draft's version from its own bytes, as
+   * `moveWorldFiles` takes it), in one write of the store's, and tells the change. A later run follows what the old engine changed
+   * where his copy is still what a run put; whether it is, and whether he removed the world, is the caller's to compare (`part`).
+   */
+  putCarried(world: WorldId, file: "index.json" | "draft.json" | "history.json", bytes: Uint8Array): void {
+    const version = file === "draft.json" ? carriedDraftVersion(bytes, this.part(world, "index.json")?.bytes ?? null) : 0;
+    this.run(() => this.keep(world, file, bytes, version));
+    if (file === "index.json") this.tell({ world, part: "index" });
+    else if (file === "history.json") this.tell({ world, part: "history" });
+    else this.tell({ world, part: "draft", version, stored: true });
+  }
 }
 
 // ------------------------------------------------------------------ moving the other tables' files in
@@ -397,6 +410,18 @@ function filesOf(db: Database, table: "world_file" | "build_file", user: string 
   return out;
 }
 
+/** A carried draft's version: its own, or, for one stored before drafts had versions, a new draft one write in past its index's count. */
+function carriedDraftVersion(bytes: Uint8Array, indexBytes: Uint8Array | null): number {
+  let n = 0;
+  try {
+    const raw: unknown = JSON.parse(decoder.decode(bytes));
+    n = isRecord(raw) && typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 0;
+  } catch {
+    n = 0;
+  }
+  return n > 0 ? n : draftCountOf(indexBytes) + 1;
+}
+
 /**
  * Moves the world files of the migration's table (`world_file`) or of Build's (`build_file`) into
  * `world_part`, byte for byte, and compares the checksum of what it keeps with the source's: any
@@ -424,19 +449,8 @@ export function moveWorldFiles(db: Database, table: "world_file" | "build_file",
     const sameId = revision !== null && already === null && (revisionHeld.get(f.user, f.file)?.n ?? 0) > 0;
     const readable = revision !== null && readWorldDoc(decoder.decode(f.bytes)) !== null;
     if (revision !== null && !readable) out.unreadable.push({ world: f.world, revision });
-    let version = 0;
-    if (f.file === "draft.json") {
-      // A draft carries its own version; one stored before drafts had versions is a new draft, one write in.
-      let n = 0;
-      try {
-        const raw: unknown = JSON.parse(decoder.decode(f.bytes));
-        n = isRecord(raw) && typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 0;
-      } catch {
-        n = 0;
-      }
-      const indexBytes = files.find((x) => x.user === f.user && x.world === f.world && x.file === "index.json")?.bytes ?? read.get(f.user, f.world, "index.json")?.bytes ?? null;
-      version = n > 0 ? n : draftCountOf(indexBytes) + 1;
-    }
+    const indexBytes = (): Uint8Array | null => files.find((x) => x.user === f.user && x.world === f.world && x.file === "index.json")?.bytes ?? read.get(f.user, f.world, "index.json")?.bytes ?? null;
+    const version = f.file === "draft.json" ? carriedDraftVersion(f.bytes, indexBytes()) : 0;
     if (already !== null) {
       const same = already.length === f.bytes.length && already.every((b, i) => b === f.bytes[i]);
       if (same) {
