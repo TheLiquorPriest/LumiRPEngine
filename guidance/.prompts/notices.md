@@ -1,6 +1,24 @@
 ---
-description: The wording of every notice an agent or the player can be shown - those an agent is given in its briefing, and those the Turn page and the live view show of a turn, among them the notices about the prompt's shape (the lines that begin notice_, for the prompt not mapped yet, a fixed part changed or gone, text that belongs to no part, a new order, and a new preset or revision). One notice per line, a name, a colon, then its text. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing.
+description: The wording of every notice an agent or the player can be shown - those an agent is given in its briefing, and those the Turn page and the live view show of a turn, among them the notices about the prompt's shape (the lines that begin notice_, for the prompt not mapped yet, a fixed part changed or gone, text that belongs to no part, a new order, and a new preset or revision). One notice per line, a name, a colon, then its text. Change the words freely. Delete a line and that notice is no longer shown. A notice states a fact; it asks for nothing. Under keys, each reason the store gives for a change that no longer applies after a deletion or a swipe is worded; a reason with no words here is shown as its code.
 format: lines
+keys:
+  changed_since: something before it changed what it was about
+  later_value: a later turn had already set that value
+  tied: it was tied to a change that did not apply
+  unknown_revision: the world it was made in is not there
+  no_handler: nothing in this world handles that kind of change
+  bad_marker: its marker could not be read
+  failed: it failed when applied again
+  missing_entity: someone or something it was about is no longer there
+  missing_place: a place it was about is no longer there
+  not_found: what it named is not there
+  not_owner: it was not theirs to change
+  bad_value: a value it carried does not fit
+  bad_amount: an amount it carried does not fit
+  bad_args: its arguments do not fit
+  no_change: it changed nothing
+  same_name: that name was already taken
+  already: it was already so
 ---
 file_changed: {{path}} was changed since this session opened. The copy in the opening block no longer stands. Its whole current text follows.
 file_off: {{path}} has been switched off since this session opened. The copy in the opening block no longer stands.
@@ -10,8 +28,8 @@ unplayed: Since your last turn, replies were written in this chat without a turn
 edited: Message {{message}} was edited after its turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
 edited_more: {{count}} replies were edited after their turns and are not given in full here: messages {{messages}}, counting the chat's first message as 0. chat_read reads any of them.
 player_edited: The player's message {{message}} was edited since your last turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
-deleted: {{count}} turn(s) were deleted since the last one.
-swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it. {{dropped}}
+deleted: {{count}} turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0.{{#turns}} Message {{message}}, "{{words}}…".{{/turns}}{{#more}} Also messages {{more}}.{{/more}}
+swipe_flipped: An earlier reply ({{message}}) was changed to another of its swipes. The turns after it were applied again on it{{#range}} (messages {{range}}){{/range}}.{{#stopped}} Not applied, {{op}} {{value}} from message {{message}}, because {{why}}.{{/stopped}}{{#more}} {{more}} more are not listed.{{/more}}
 swipe_shown: The newest reply ({{message}}) now shows another of its swipes.
 job_finished: A job finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} Its report: {{report}}{{/report}}{{#applied}} Of what it recorded, these took effect now: {{applied}}.{{/applied}}{{#not_applied}} These did not: {{not_applied}}.{{/not_applied}}
 job_failed: A job failed before it finished: {{job}} ({{agent}}). Its brief: {{brief}}{{#report}} What it had written: {{report}}{{/report}}{{#applied}} Of what it recorded, these took effect now: {{applied}}.{{/applied}}{{#not_applied}} These did not: {{not_applied}}.{{/not_applied}}

@@ -28,8 +28,8 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   edited: { message: 12, old: "Hello.", new: "Hello there." },
   edited_more: { count: 5, messages: "3, 4, 5, 6, 7" },
   player_edited: { message: 9, old: "I wave.", new: "I wave twice." },
-  deleted: { count: 2 },
-  swipe_flipped: { message: 8, dropped: "Two turns were dropped." },
+  deleted: { count: 2, turns: [{ message: 4, words: "Wren waved" }], more: "7, 9" },
+  swipe_flipped: { message: 8, range: "9-11", stopped: [{ op: "pay", value: "3", message: 9, why: "a later turn had already set that value" }], more: 2 },
   swipe_shown: { message: 8 },
   job_finished: { job: "j-1", agent: "mapper", brief: "Map the harbour.", report: "Two quays." },
   job_failed: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
@@ -297,6 +297,18 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const notices = await lines("notices");
     expect(notices.line("panel_request", { what: "Walk here", on: "the quay", from: "map", values: "square: 4,7", action: "walk" } as never)).toBe("From a panel (map): Walk here, on the quay, with square: 4,7 (action walk)");
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
+  });
+
+  test("notices.md tells the turns a deletion took with the first words of each reply, and a swipe flipped earlier with what did not apply again and why, the reasons worded under keys", async () => {
+    const part = await lines("notices");
+    expect(part.line("deleted", { count: 3, turns: [{ message: 4, words: "Wren waved" }, { message: 6, words: "The quay" }], more: "9" } as never)).toBe('3 turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0. Message 4, "Wren waved…". Message 6, "The quay…". Also messages 9.');
+    expect(part.line("deleted", { count: 1 } as never)).toBe("1 turn(s) were deleted since the last one. Messages are numbered as the chat stood before, counting its first message as 0.");
+    const flipped = part.line("swipe_flipped", { message: 8, range: "9-11", stopped: [{ op: "pay", value: "3", message: 9, why: "a later turn had already set that value" }], more: 2 } as never) ?? "";
+    expect(flipped).toBe("An earlier reply (8) was changed to another of its swipes. The turns after it were applied again on it (messages 9-11). Not applied, pay 3 from message 9, because a later turn had already set that value. 2 more are not listed.");
+    expect(part.line("swipe_flipped", { message: 8 } as never)).toBe("An earlier reply (8) was changed to another of its swipes. The turns after it were applied again on it.");
+    const keys = split(SHIPPED.get(".prompts/notices.md") ?? "").header?.["keys"] as Record<string, unknown>;
+    expect(Object.entries(keys).filter(([, said]) => typeof said !== "string" || said === "" || ASKS.test(said))).toEqual([]);
+    expect(typeof keys["changed_since"]).toBe("string");
   });
 
   test("secret-marks.md words a secret's mark in its five forms, each keeping the names RPE fills in", async () => {
