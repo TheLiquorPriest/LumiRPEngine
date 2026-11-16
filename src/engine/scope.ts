@@ -328,6 +328,13 @@ function sliceRecord(state: { packs: Record<string, JsonObject> }, key: string):
   return isRecord(v) ? (v as JsonObject) : {};
 }
 
+/** What a derived field's formula gives for an entity, whatever value of its own the field holds: the figure that stays readable beside a stated value. Undefined for a field with no formula. */
+export function formulaFigure(reg: ScopeInput["reg"], ctx: ScopeInput["ctx"], id: EntityId, field: string): Value | undefined {
+  const e = own(ctx.state.entities, id);
+  const def = e ? fieldDef(reg, ctx.world, e.kind, field) : undefined;
+  return def?.derived === undefined ? undefined : runProgram(compile(def.derived), scopeEnv({ reg, ctx, bindings: { self: id } }));
+}
+
 /** Builds the environment. One environment per evaluation context; it is cheap. */
 export function scopeEnv(input: ScopeInput): ExprEnv {
   const { reg, ctx } = input;
@@ -355,7 +362,8 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
     }
     const def = fieldDef(reg, world, e.kind, head);
     let raw: JsonValue | undefined = own(e.fields, head);
-    if (def?.derived !== undefined && tail.length === 0) {
+    // A field the ruleset works out reads the value it holds of its own, when it holds one; null returns it to its formula (`formulaFigure` still gives the formula's figure).
+    if (def?.derived !== undefined && tail.length === 0 && (raw === undefined || raw === null)) {
       if (derivedDepth > 8) return 0;
       derivedDepth++;
       try {

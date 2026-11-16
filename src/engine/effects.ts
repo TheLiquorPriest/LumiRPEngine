@@ -35,13 +35,13 @@ import type { EntityId, InterruptClass, KindId } from "../shared/ids";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import { APART_GROUP, apartOf, type LedgerEvent, type PostingLine } from "../shared/ledger";
-import { agentOf, spawnTierOf, tierOf } from "../shared/tiers";
+import { agentOf, spawnTierOf, tierOf, tiersInOrder } from "../shared/tiers";
 import type { EffectSpec, EntityDef, FieldDef, ProgressionDef, RelationInstance, WorldDoc } from "../shared/world";
 import { calendarOf, slotIndexAt } from "./calendar";
 import { checkOf, readyCheck, rollCheck, rollVars } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
 import type { EnvVars, Value } from "./expr";
-import type { ReadContext, Rejection } from "./registry";
+import type { Advice, ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
@@ -68,11 +68,45 @@ export interface EffectScope {
    * what was typed ("=1+1" stays text). Effects run for its level-ups (`onLevel`) are authored and evaluate as usual.
    */
   literal?: boolean;
+  /**
+   * Levels follow experience as sums and the world's level-up effects (`onLevel`) are not run: each level's come back as offered data
+   * (`EffectOutcome.offered`), so no die is rolled and no gain applied unasked, no sentence is written, and a level past its field's bounds is set and advised.
+   */
+  offers?: true;
+  /**
+   * A spawn's values stand as given: a level among its fields is kept and advised beside the experience, a tier that is none of the world's
+   * is refused with the world's tiers as choices, and a tier left out is the world's spawn tier, handed back as filled in (`EffectOutcome.filled`).
+   */
+  asGiven?: true;
+}
+
+/** A level the experience reached, with the effects the world writes for it, offered for an agent to apply or roll (`EffectScope.offers`). `from` is the level before the gain. */
+export interface LevelOffer {
+  entity: EntityId;
+  progression: string;
+  level: number;
+  from: number;
+  effects: readonly EffectSpec[];
 }
 
 export interface EffectOutcome {
   applied: LedgerEvent[];
   rejected: { effect: EffectSpec; rejection: Rejection }[];
+  /** The levels reached whose effects were offered, not run. */
+  offered?: LevelOffer[];
+  /** What was applied as given and does not add up (a level beside its experience, a level past its field's bounds). */
+  advice?: Advice[];
+  /** What the engine filled in from the world itself and applied apart from what was asked (a spawn's tier left out). */
+  filled?: LedgerEvent[];
+}
+
+/** Takes what a nested outcome gave into the outcome of the effect that ran it. */
+function join(out: EffectOutcome, more: EffectOutcome): void {
+  out.applied.push(...more.applied);
+  out.rejected.push(...more.rejected);
+  if (more.offered !== undefined) (out.offered ??= []).push(...more.offered);
+  if (more.advice !== undefined) (out.advice ??= []).push(...more.advice);
+  if (more.filled !== undefined) (out.filled ??= []).push(...more.filled);
 }
 
 /** Nesting cap for effects run by effects (a check's outcomes, `onLevel`), as for a rule cascade. */
@@ -159,7 +193,7 @@ function change(reg: Registry, w: Working, entity: EntityId, field: string, delt
   return stored === undefined && cur !== 0 ? [{ type: "set", entity, field, value: next }] : [{ type: "add", entity, field, delta: next - cur }];
 }
 
-function coreEffect(reg: Registry, w: Working, type: string, args: Record<string, JsonValue>, rng: Rng): LedgerEvent[] | Rejection | null {
+function coreEffect(reg: Registry, w: Working, type: string, args: Record<string, JsonValue>, rng: Rng, asGiven: boolean): LedgerEvent[] | Rejection | null {
   const state = w.state;
   const world = w.world;
   switch (type) {
@@ -246,10 +280,14 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const kind = text(args.kind);
       if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind))) return reject("missing_kind", `no kind ${kind}`);
       const id = text(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text(args.name)).slice(0, 10)}`;
-      const tier = tierOf(world, text(args.tier)) ? text(args.tier) : spawnTierOf(world);
+      // A tier that is none of the world's is the world's spawn tier; asked to take values as given, it is refused with the world's tiers instead, and a tier left out is the spawn tier, handed back as filled in.
+      const said = text(args.tier);
+      if (asGiven && said !== "" && !tierOf(world, said)) return { ...reject("bad_tier", `no tier ${said}`), said, choices: tiersInOrder(world).map(([tier]) => tier) };
+      const tier = tierOf(world, said) ? said : spawnTierOf(world);
+      const filledTier = asGiven && said === "";
       const fields: JsonObject = isRecord(args.fields) ? { ...(args.fields as JsonObject) } : {};
-      // A new entity starts at the level its XP reaches (`levelsFollowXp`): a spawn gives XP, never a level.
-      for (const field of Object.keys(fields)) {
+      // A new entity starts at the level its XP reaches (`levelsFollowXp`): a spawn gives XP, never a level, unless it is asked to take values as given.
+      for (const field of asGiven ? [] : Object.keys(fields)) {
         const follows = followsXp(reg, world, kind, field);
         if (follows) return follows;
       }
@@ -273,7 +311,7 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
         // A new agent starts caught up: it never replays slots from before it existed.
         out.push({ type: "engine.caught", data: { agent: id, slot: slotIndexAt(calendarOf(world), state.clock) } });
       }
-      return [{ type: "spawn", entity }, ...links, ...out];
+      return [{ type: "spawn", entity }, ...links, ...out, ...(filledTier ? [{ type: ENGINE_EVENTS.entity, data: { entity: id, tier } }] : [])];
     }
     case "stage":
       return [{ type: "stage", track: text(args.track), to: text(args.to) }];
@@ -310,7 +348,7 @@ export function resolveEffect(reg: Registry, w: Working, spec: EffectSpec, scope
   if (spec.type === "check") return reject("bad_effect", "a check applies its outcomes; run it through applyEffects");
   // Arguments get their own generator: rolls there never shift the draws the effect itself makes.
   const args = scope.literal ? { ...spec.args } : evalArgs(spec.args ?? {}, scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars, rng: scope.rng.fork("args") }), { self: w.world.pov, ...scope.bindings });
-  const core = coreEffect(reg, w, spec.type, args, scope.rng);
+  const core = coreEffect(reg, w, spec.type, args, scope.rng, scope.asGiven === true);
   if (core) return core;
   const def = reg.effects.get(spec.type);
   if (!def) return reject("unknown_effect", `unknown effect ${spec.type}`);
@@ -367,8 +405,7 @@ function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectSc
   out.applied.push(record);
   const outcomes = isRecord(a.outcomes) ? (a.outcomes as JsonObject) : {};
   const result = applyEffects(reg, w, effectList(own(outcomes, rolled.outcome)), { bindings: rolling, vars: { ...scope.vars, roll: rollVars(ready, rolled) }, params: scope.params, rng: scope.rng.fork("outcome"), depth: depth + 1 });
-  out.applied.push(...result.applied);
-  out.rejected.push(...result.rejected);
+  join(out, result);
   return out;
 }
 
@@ -388,14 +425,22 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
   const p = e ? progressOf(reg, w.ctx, entity, prog) : null;
   if (!e || !p) return out;
   const bounds = fieldBounds(reg, w.ctx, entity, fieldDef(reg, w.world, e.kind, prog.levelField));
-  const to = clampNumber(p.reached, bounds.min, bounds.max);
+  const offering = scope.offers === true;
+  // Offering, the level the experience reaches is the level, past the field's bounds or not: it is advised, never held to them.
+  const to = offering ? p.reached : clampNumber(p.reached, bounds.min, bounds.max);
   const from = p.level;
+  // A person made at a level stated (`asGiven`) keeps it; the difference from what their experience reaches is advised.
+  if (spawned && scope.asGiven === true && typeof own(e.fields, prog.levelField) === "number") {
+    if (from !== p.reached) out.advice = [{ code: "level_beside_xp", values: { who: e.name, field: prog.label, level: from, reached: p.reached, xp: p.xp } }];
+    return out;
+  }
   if (to === from) return out;
   const applied = (ev: LedgerEvent): boolean => {
     if (w.apply(ev)) return false;
     out.applied.push(ev);
     return true;
   };
+  if (offering && to !== clampNumber(to, bounds.min, bounds.max)) out.advice = [{ code: "level_past_bounds", values: { who: e.name, field: prog.label, level: to, bounds: [...(bounds.min !== undefined ? [`at least ${bounds.min}`] : []), ...(bounds.max !== undefined ? [`at most ${bounds.max}`] : [])].join(", ") } }];
   const who = entity === w.world.pov ? "You" : e.name;
   // The POV's level is the player's news; anyone else's is the author's and the GM's.
   const line = (text: string): LedgerEvent => ({ type: ENGINE_EVENTS.note, data: { text, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) } });
@@ -423,17 +468,24 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
       const max = fieldBounds(reg, w.ctx, entity, def).max;
       if (typeof value === "number" && max !== undefined && value > max) whole = landed({ type: "set", entity, field, value: max, atMost: true });
     }
-    if (whole && landed(line(`${who} dropped to ${prog.label} ${to} (from ${from}).`))) out.applied.push(...unit);
+    if (whole && (offering || landed(line(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))) out.applied.push(...unit);
     else w.restore(mark);
+    return out;
+  }
+  // Offering, the level is set as a sum and each level's `onLevel` effects come back as offered data: none runs, no die rolls, and no sentence is written.
+  if (offering) {
+    if (!applied({ type: "set", entity, field: prog.levelField, value: to })) return out;
+    if (prog.onLevel && prog.onLevel.length > 0) {
+      out.offered = [];
+      for (let level = from + 1; level <= to; level++) out.offered.push({ entity, progression: id, level, from, effects: prog.onLevel });
+    }
     return out;
   }
   const depth = scope.depth ?? 0;
   for (let level = from + 1; level <= to; level++) {
     if (!applied({ type: "set", entity, field: prog.levelField, value: level })) return out;
     if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
-    const r = applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 });
-    out.applied.push(...r.applied);
-    out.rejected.push(...r.rejected);
+    join(out, applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 }));
   }
   applied(line(`${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.`));
   return out;
@@ -458,8 +510,7 @@ export function levelsFollowXp(reg: Registry, w: Working, events: readonly Ledge
       if ((moved.field !== null && moved.field !== prog.xpField) || done.has(key)) continue;
       done.add(key);
       const step = followXp(reg, w, moved.entity, id, prog, scope, moved.field === null);
-      out.applied.push(...step.applied);
-      out.rejected.push(...step.rejected);
+      join(out, step);
     }
   }
   return out;
@@ -503,9 +554,11 @@ export function applyEffects(reg: Registry, w: Working, specs: readonly EffectSp
       }
     }
     out.applied.push(...events);
-    const ups = levelsFollowXp(reg, w, events, { ...scope, rng });
-    out.applied.push(...ups.applied);
-    out.rejected.push(...ups.rejected);
+    if (spec.type === "spawn" && scope.asGiven === true) {
+      const tier = events.filter((ev) => ev.type === ENGINE_EVENTS.entity);
+      if (tier.length > 0) (out.filled ??= []).push(...tier);
+    }
+    join(out, levelsFollowXp(reg, w, events, { ...scope, rng }));
   });
   return out;
 }
