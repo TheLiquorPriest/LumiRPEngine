@@ -140,7 +140,7 @@ describe("an organization with no account", () => {
     if (!("events" in out)) throw new Error(out.rejection.reason);
     w.applyAll(out.events);
     const opened = view(w, "lemonade").accounts;
-    expect(opened.map((a) => [a.name, a.class, a.cents])).toEqual([["Lemonade Stand checking", "business_checking", 0]]);
+    expect(opened.map((a) => [a.name, a.class, a.cents])).toEqual([["Business checking", "business_checking", 0]]);
     expect((orgAlerts(w.ctx, "lemonade", "you") ?? []).map((a) => a.kind)).not.toContain("no_account");
     // A player can't run it: it is the GM's.
     const played = resolveEdit(reg, w.world, w.state, openAccountOps("lemonade", "savings", "Rainy day"), { gm: false, runSeed: "open" });

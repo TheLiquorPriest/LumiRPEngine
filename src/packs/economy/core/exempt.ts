@@ -18,7 +18,7 @@ import { calendarOf, dateAt } from "../../../engine/calendar";
 import { orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, optionalService, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
-import { isGone } from "../../../engine/scope";
+import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { actAs, asParam, mayAs, moneyWords } from "./acting";
 import type { FinanceApi, FinanceRegistry } from "./module";
@@ -125,28 +125,63 @@ export const DONATION_EVENT: EventTypeDef<PackEvent> = {
   describe: (e, ctx, viewer) => (viewer ? "" : `Donation: ${labelOf(ctx, str(e, "donor"))} to ${labelOf(ctx, str(e, "org"))}`),
 };
 
+/** What a gift or a status change finds that does not add up, as data: a code and its values. The tool that records it reports each; nothing of it stops the record. */
+export interface ExemptFinding {
+  code: "not_an_organization" | "gives_to_itself" | "not_exempt";
+  values: Record<string, JsonValue>;
+}
+
+/** Whether a receiver is a person to be granted to (not gone). */
+function isGrant(ctx: ReadContext, to: EntityId): boolean {
+  const kind = own(ctx.state.entities, to)?.kind;
+  return kind !== undefined && kindIs(ctx.registry, ctx.world, kind, "person") && !isGone(ctx.state, to);
+}
+
 /**
- * `economy.donate`: `from` (a party, or an organization given for, `by` acting) gives `to`, an
- * organization, `cents`: paid as the giver pays (or by `method`), filed under `donations`, with its
- * `economy.donation`. Deductible when the giver is a person and the receiver's status says gifts are
- * (a private foundation's marked apart, `pf`, for its lower limit). An exempt organization may also
- * grant to a person (a foundation's grant, a charity's help), never deductible.
+ * What a gift finds that the world's rules would have refused: a grant to a person by someone who is not an exempt
+ * organization (a person giving to a person included), and a party giving to itself.
+ */
+export function donateFindings(ctx: ReadContext, a: Record<string, JsonValue>): ExemptFinding[] {
+  const to = strOf(a.to);
+  const from = strOf(a.from);
+  const out: ExemptFinding[] = [];
+  if (isGrant(ctx, to) && !isExempt(ctx, from)) out.push({ code: "not_an_organization", values: { to: labelOf(ctx, to), from: labelOf(ctx, from) } });
+  if (from === to) out.push({ code: "gives_to_itself", values: { who: labelOf(ctx, from) } });
+  return out;
+}
+
+/** What an exemption finds that the world's rules would have refused: a status on a household or a party, which cannot hold one. */
+export function taxFindings(ctx: ReadContext, a: Record<string, JsonValue>): ExemptFinding[] {
+  const org = strOf(a.org);
+  const type = isGone(ctx.state, org) ? null : orgTypeOf(ctx, org);
+  return strOf(a.status).trim() !== "" && (type === "household" || type === "party") ? [{ code: "not_exempt", values: { org: labelOf(ctx, org), type } }] : [];
+}
+
+/**
+ * `economy.donate`: `from` (a party, or an organization given for, `by` acting; the call names who, never the actor)
+ * gives `to` `cents`: paid as the giver pays (or by `method`) with the `memo` it is given, filed under `donations`,
+ * with its `economy.donation`. Deductible when the giver is a person and the receiver's status says gifts are
+ * (a private foundation's marked apart, `pf`, for its lower limit). Anyone may give to anyone: a grant to a person by
+ * one who is not an exempt organization, and a party's gift to itself (recorded with no money moved), are recorded all
+ * the same, never deductible (`donateFindings` says what did not add up).
  */
 function donateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const to = strOf(a.to);
   const by = strOf(a.by);
-  const from = strOf(a.from) || by || ctx.world.pov;
+  const from = strOf(a.from);
   const cents = Math.round(numOf(a.cents));
-  const grant = api.partyKind(ctx, to) === "person" && !isGone(ctx.state, to);
-  if (grant && !isExempt(ctx, from)) return { code: "not_an_organization", reason: `${labelOf(ctx, to)} is a person: only an exempt organization grants to someone, and ${labelOf(ctx, from)} isn't one` };
-  if (!grant && (orgTypeOf(ctx, to) === null || isGone(ctx.state, to))) return { code: "not_an_organization", reason: `${labelOf(ctx, to)} isn't an organization to give to` };
-  if (from === to) return { code: "bad_target", reason: "an organization doesn't give to itself" };
+  if (from === "") return { code: "needs_from", reason: "a gift names who gives it" };
+  if (api.partyKind(ctx, to) === null || isGone(ctx.state, to)) return { code: "not_a_party", reason: `${labelOf(ctx, to)} isn't someone or something to give to` };
   if (cents <= 0) return { code: "bad_amount", reason: "a gift is more than nothing" };
+  const grant = isGrant(ctx, to);
   const method = strOf(a.method);
+  // The memo is the caller's words (an agent's tool gives them from its files); a player's own gift keeps the engine's.
+  const memo = typeof a.memo === "string" ? a.memo : `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`;
   return actAs(ctx, { by, party: from, power: "money.spend", target: to, amount: cents, line: () => `${grant ? "Granted" : "Gave"} ${labelOf(ctx, to)} ${moneyWords(ctx, cents)}`, names: [to] }, () => {
-    const paid = api.pay(ctx, { from, to, cents, memo: `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`, kind: "payment", category: "donations", ...(method !== "" ? { method } : {}) });
+    const itself = from === to;
+    const paid = itself ? [] : api.pay(ctx, { from, to, cents, memo, kind: "payment", category: "donations", ...(method !== "" ? { method } : {}) });
     if (!Array.isArray(paid)) return paid;
-    const deductible = !grant && api.partyKind(ctx, from) === "person" && exemptStatusOf(ctx, to)?.deductible === true;
+    const deductible = !grant && !itself && api.partyKind(ctx, from) === "person" && exemptStatusOf(ctx, to)?.deductible === true;
     const pf = deductible && foundationTerms(ctx, to) !== null;
     return [...paid, { type: DONATION, data: { donor: from, org: to, cents, year: dateAt(calendarOf(ctx.world), ctx.state.clock).year, deductible, ...(pf ? { pf: true } : {}) } }];
   });
@@ -154,17 +189,17 @@ function donateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, Jso
 
 /**
  * `economy.tax_status`: an organization's exempt status set (a row of the exempt table) or taken off
- * (`status` empty), as the GM or an op sets it; a household and the party hold none. With `by`, its
- * History line is theirs.
+ * (`status` empty), as the GM or an op sets it; any organization may hold one, a household and the party
+ * included (`taxFindings` says so). A status the table does not hold is refused with the table's, since the
+ * field names a row of it. With `by`, its History line is theirs.
  */
 function taxStatusEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
   const status = strOf(a.status).trim();
   const type = isGone(ctx.state, org) ? null : orgTypeOf(ctx, org);
-  if (type === null) return { code: "missing_entity", reason: `no organization ${labelOf(ctx, org)}` };
-  if (status !== "" && (type === "household" || type === "party")) return { code: "not_exempt", reason: `${labelOf(ctx, org)} is a ${type}, which can't hold a tax exemption` };
+  if (type === null) return { code: "missing_entity", reason: `no organization ${labelOf(ctx, org)}`, said: org };
   const row = status === "" ? null : rowOf(ctx, EXEMPT_TABLE, status);
-  if (status !== "" && !row) return { code: "unknown_status", reason: `"${status}" isn't a status in this world's exempt table (${Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).join(", ") || "none"})` };
+  if (status !== "" && !row) return { code: "unknown_status", reason: `"${status}" isn't a status in this world's exempt table (${Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).join(", ") || "none"})`, choices: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}), said: status };
   if (strOf(own(ctx.state.entities, org)?.fields.tax_exempt).trim() === status) return { code: "no_change", reason: `${labelOf(ctx, org)} ${status === "" ? "isn't exempt" : `is exempt as ${strOf(row?.name, status)} already`}` };
   const by = strOf(a.by);
   const text = status === "" ? "No longer exempt from income tax" : `Exempt from income tax as ${strOf(row?.name, status)}${strOf(row?.code) !== "" ? ` (${strOf(row?.code)})` : ""}`;
@@ -176,7 +211,7 @@ function taxStatusEvents(ctx: EffectContext, a: Record<string, JsonValue>): Ledg
 export function registerExempt(r: FinanceRegistry): void {
   const { api, core } = r;
   core.event(DONATION_EVENT);
-  core.effect({ type: "economy.donate", args: ["to", "cents", "from?", "method?", "by?"], gm: true, resolve: (a, ctx) => donateEvents(api, ctx, a) });
+  core.effect({ type: "economy.donate", args: ["to", "cents", "from?", "method?", "memo?", "by?"], gm: true, resolve: (a, ctx) => donateEvents(api, ctx, a) });
   core.effect({ type: "economy.tax_status", args: ["org", "status?", "by?"], gm: true, resolve: (a, ctx) => taxStatusEvents(ctx, a) });
   core.action({
     id: FINANCE_ACTIONS.donate,

@@ -101,9 +101,12 @@ export function monthlyScore(ctx: ReadContext, person: EntityId, at: number): Le
 
 const TIER_KEYS: Record<CreditTier, string> = { super_prime: "super_prime_781_850", prime: "prime_661_780", nonprime: "nonprime_601_660", subprime: "subprime_501_600", deep_subprime: "deep_subprime_300_500" };
 
-/** The APR a class of credit gets at a score: the finance tables' rate for its credit tier, else its band spread over the five tiers. */
-export function aprFor(ctx: ReadContext, cls: AccountClass, score: number | null): number | null {
-  const tier = creditTierOf(score ?? 700);
+/** The score the finance tables are read at for someone with none recorded: the setting `engine.creditScoreAssumed`'s default; a caller that has the setting passes its value. */
+export const CREDIT_SCORE_ASSUMED = 700;
+
+/** The APR a class of credit gets at a score: the finance tables' rate for its credit tier, else its band spread over the five tiers. Someone with no score is read at `assumed`. */
+export function aprFor(ctx: ReadContext, cls: AccountClass, score: number | null, assumed: number = CREDIT_SCORE_ASSUMED): number | null {
+  const tier = creditTierOf(score ?? assumed);
   const rows = ctx.tables.get("economy.finance")?.rows ?? {};
   const loans = objOf(rows.loans?.values);
   const auto = objOf(objOf(loans.auto).apr_by_credit_tier_used_pct);
@@ -114,11 +117,11 @@ export function aprFor(ctx: ReadContext, cls: AccountClass, score: number | null
   return Math.round((band.min + (band.max - band.min) * step) * 100) / 100;
 }
 
-/** The limit a card, charge card or line of credit starts at for a score: the finance tables' starter, typical or good-credit limit. */
-function limitFor(ctx: ReadContext, cls: AccountClass, score: number | null): number | null {
+/** The limit a card, charge card or line of credit starts at for a score: the finance tables' starter, typical or good-credit limit. Someone with no score is read at `assumed`. */
+function limitFor(ctx: ReadContext, cls: AccountClass, score: number | null, assumed: number): number | null {
   if (!CLASS_TRAITS[cls].revolving) return null;
   const limits = objOf(objOf(ctx.tables.get("economy.finance")?.rows.credit_card?.values).credit_limit_cents);
-  const tier = creditTierOf(score ?? 700);
+  const tier = creditTierOf(score ?? assumed);
   return tier === "super_prime" ? numOf(limits.good_credit, 1_500_000) : tier === "prime" ? numOf(limits.typical, 1_000_000) : numOf(limits.starter, 50_000);
 }
 
@@ -127,11 +130,11 @@ function limitFor(ctx: ReadContext, cls: AccountClass, score: number | null): nu
  * vehicle's class's typical used price, `vehicles.values`), else the personal-loan range's top for a
  * prime score or better, its typical amount for a fair or poor one, its least below that.
  */
-function loanCeiling(ctx: ReadContext, score: number | null, securedBy?: EntityId): number {
+function loanCeiling(ctx: ReadContext, score: number | null, assumed: number, securedBy?: EntityId): number {
   const worth = numOf(own(ctx.state.entities, securedBy ?? "")?.fields.value) || (securedBy !== undefined ? (optionalQuery(ctx, "vehicles.values")?.(ctx).find((v) => v.vehicle === securedBy)?.cents ?? 0) : 0);
   if (worth > 0) return worth;
   const amounts = objOf(objOf(objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).personal).amount_cents));
-  const tier = creditTierOf(score ?? 700);
+  const tier = creditTierOf(score ?? assumed);
   return tier === "super_prime" || tier === "prime" ? numOf(amounts.max, 5_000_000) : tier === "deep_subprime" ? numOf(amounts.min, 100_000) : numOf(amounts.typical, 800_000);
 }
 
@@ -143,6 +146,8 @@ export interface Decision {
   limit: number | null;
   cls: AccountClass;
   label: string;
+  /** What the world's tables give this class at this score whatever the decision: the rate, and a card's or line's limit. */
+  tables: { apr: number | null; limit: number | null };
 }
 
 /**
@@ -150,30 +155,32 @@ export interface Decision {
  * unsecured product below a subprime score, or with a charge-off in the last two years, else at the
  * APR its tier gets. Anywhere, no more than a lender extends: a card's or line's limit for the
  * score, and a loan no larger than the most it lends (a product's own `limit` caps either), so
- * asking for more is declined.
+ * asking for more is declined. Someone with no score recorded is read at the table score `app.scoreAssumed` gives.
  */
-export function decide(ctx: ReadContext, person: EntityId, app: CreditApplication, reports: boolean): Decision | Rejection {
+export function decide(ctx: ReadContext, person: EntityId, app: CreditApplication & { scoreAssumed?: number }, reports: boolean): Decision | Rejection {
   const products = worldProducts(ctx.world);
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
   if (!cls || !isCredit(cls)) return reject("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
   const score = reports ? currentScore(ctx, person) : null;
+  const assumed = app.scoreAssumed ?? CREDIT_SCORE_ASSUMED;
   const entries = reports ? creditEntriesOf(ctx, person) : [];
   const chargedOff = entries.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
   const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
   const label = def?.label ?? CLASS_TRAITS[cls].label;
   const tier = creditTierOf(score ?? 650);
-  const declined = (reason: string): Decision => ({ approved: false, reason, apr: null, limit: null, cls, label });
-  if (reports && !secured && (tier === "deep_subprime" || chargedOff)) return declined(chargedOff ? "a recent charge-off on their report" : "their credit score is too low");
   const productLimit = typeof def?.limit === "number" ? def.limit : null;
-  const apr = reports ? (def?.apr_pct ?? aprFor(ctx, cls, score)) : null;
+  const apr = reports ? (def?.apr_pct ?? aprFor(ctx, cls, score, assumed)) : null;
+  const tables = { apr, limit: CLASS_TRAITS[cls].revolving ? (productLimit ?? limitFor(ctx, cls, score, assumed)) : null };
+  const declined = (reason: string): Decision => ({ approved: false, reason, apr: null, limit: null, cls, label, tables });
+  if (reports && !secured && (tier === "deep_subprime" || chargedOff)) return declined(chargedOff ? "a recent charge-off on their report" : "their credit score is too low");
   if (CLASS_TRAITS[cls].revolving) {
-    const most = productLimit ?? limitFor(ctx, cls, score) ?? 0;
-    return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most, most), cls, label };
+    const most = tables.limit ?? 0;
+    return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most, most), cls, label, tables };
   }
-  const most = productLimit ?? loanCeiling(ctx, score, secured ? app.secured_by : undefined);
+  const most = productLimit ?? loanCeiling(ctx, score, assumed, secured ? app.secured_by : undefined);
   if ((app.cents ?? 0) > most) return declined(`it's more than a lender would lend them (up to ${formatMoney(most, ctx.world.currency)})`);
-  return { approved: true, reason: "", apr, limit: null, cls, label };
+  return { approved: true, reason: "", apr, limit: null, cls, label, tables };
 }
 
 /** A person's credit report, for the dashboards. */
@@ -207,7 +214,7 @@ export function creditReport(ctx: ReadContext, person: EntityId): CreditReport {
   const products = { ...Object.fromEntries((["credit_card", "line_of_credit", "loan"] as const).map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
   const offers = Object.entries(products)
     .filter(([, p]) => isCredit(p.class) && p.class !== "mortgage")
-    .map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score) }));
+    .map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
   return {
     person,
     score,

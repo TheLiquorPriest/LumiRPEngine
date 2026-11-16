@@ -318,7 +318,7 @@ const lose: WriteDef = {
     // Taken by what is not a person is, for this tool, someone who does not exist: the answer gives the nearest people and the operations that record what was meant.
     const by = optionalId(o, "by", "person");
     if (isUnread(by)) return by.line === "unknown" ? { ...by, line: "unknown_by" } : by;
-    return itemChange(o, { do: "lose", item: item.id, ...(by !== undefined ? { by } : {}) }, "engine", item.id, { ...(by !== undefined ? { asked: by } : {}) });
+    return itemChange(o, { do: "lose", item: item.id, ...(by !== undefined ? { by } : {}) }, "engine", item.id);
   },
 };
 

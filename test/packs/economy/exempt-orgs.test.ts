@@ -195,7 +195,8 @@ describe("exempt organizations: the tax_status op", () => {
     expect(orgHistory(w.state, CLUB)[0]?.text).toBe("No longer exempt from income tax");
     expect(run({ do: "tax_status", org: CLUB, status: "charity" })).toBe("");
     expect(orgHistory(w.state, CLUB)[0]?.text).toBe("Exempt from income tax as Charity or nonprofit");
-    expect(run({ do: "tax_status", org: HOUSEHOLD, status: "charity" })).toContain("can't hold a tax exemption");
+    // A household is recorded as exempt all the same (the tool that sends it reports it).
+    expect(run({ do: "tax_status", org: HOUSEHOLD, status: "charity" })).toBe("");
     expect(run({ do: "tax_status", org: CLUB })).toBe("malformed");
     expect(parseOrgOp({ do: "consolidate", org: SHOP, elect: "yes" })).toBeNull();
   });
@@ -231,10 +232,10 @@ describe("a private foundation (§26.3)", () => {
     const may = PA.at(jan, "2027-05-13T08:00");
     PA.lapseTo(may, "2027-05-18T12:00");
     expect(posts(may, /^Foundation excise tax, 2026$/)[0]?.lines[1]).toEqual({ account: "economy.external:tax:federal", amount: Number(rec?.excise) });
-    // Grants in 2027, to the church and to a person, cover 2026's shortfall first; a person can't grant as a foundation does.
+    // Grants in 2027, to the church and to a person, cover 2026's shortfall first; a person's gift to a person is recorded all the same.
     expect(PA.gm(may, "economy.donate", { to: CHURCH, cents: 3_000_000, from: FOUNDATION })).toBe("");
     expect(PA.gm(may, "economy.donate", { to: MARCUS, cents: 100_000, from: FOUNDATION })).toBe("");
-    expect(PA.gm(may, "economy.donate", { to: MARCUS, cents: 1_000, from: JORDAN })).toContain("only an exempt organization grants to someone");
+    expect(PA.gm(may, "economy.donate", { to: MARCUS, cents: 1_000, from: JORDAN })).toBe("");
     const next = PA.closeYear(may, 2027);
     const later = closedYear(next.state, FOUNDATION, 2027);
     const left = Number(rec?.shortfall) - 3_100_000;

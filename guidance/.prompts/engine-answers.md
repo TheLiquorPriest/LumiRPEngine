@@ -83,7 +83,7 @@ no_condition: Operation {{n}} ({{op}}): {{what}} has no condition recorded and i
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
-against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).
+against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).{{#class}} It is a {{class}}{{#score}} and their score is {{score}}{{/score}}.{{/class}}{{#reason}} The rules' reason: {{reason}}.{{/reason}}
 past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.
 not_owner: Operation {{n}} ({{op}}): {{to}} is not among the owners of {{what}}, so it was handed over to hold and whose it is did not change.
@@ -136,3 +136,36 @@ odds_retry_once: A retry needs a new scene.
 odds_advantage: With advantage.
 odds_disadvantage: With disadvantage.
 odds_dc: DC {{dc}}.
+score_assumed: Operation {{n}} ({{op}}): {{what}} has no score recorded, so the finance tables were read at {{score}}.
+not_an_organization: Operation {{n}} ({{op}}): {{to}} is a person and {{from}} is not an exempt organization, which is who grants to a person; it was recorded all the same.
+gives_to_itself: Operation {{n}} ({{op}}): {{who}} gave to itself, so no money moved; the gift was recorded all the same.
+not_exempt: Operation {{n}} ({{op}}): {{org}} is a {{type}}, which the world's rules say cannot hold a tax exemption; it was recorded all the same.
+wants_day_of_month: a whole number from 1 to 31
+wants_term: a whole number of months above 0
+wants_apr: a yearly percent of 0 or more
+loan_paid_out: {{name}}: loan paid out
+credit_card_name: {{name}} card
+gift_memo: Donation to {{to}}
+grant_memo: Grant to {{to}}
+want_party: a person or an organization
+want_organization: an organization
+life_takes: Operation {{n}} ({{op}}): a life change needs a state (state), one of {{states}}, or someone to tell about it (tell), a list of people by name or id; or both.
+removed_life: Operation {{n}} ({{op}}): {{who}} is out of the world, and took the state all the same.
+pov_removed: Operation {{n}} ({{op}}): {{who}} is the player's character, and was removed all the same.
+pov_agent: Operation {{n}} ({{op}}): {{who}} is the player's character, and was made an agent all the same; whether they have a mind of their own stays the owner's setting.
+single_class: Operation {{n}} ({{op}}): {{problem}} They were recorded all the same.
+related_to_self: Operation {{n}} ({{op}}): {{who}} was related to themselves by {{relation}}; it was recorded all the same.
+relation_kind: Operation {{n}} ({{op}}): {{relation}} joins a {{takes}} at its {{end}} end and {{who}} is not one; it was recorded all the same.
+wants_class: an object of facet: list of values, such as {"trade": ["innkeeper"]}
+wants_levels: an object of domain: level, a whole number from 0 to 4, or null for the one their tier gives
+org_change_takes: Operation {{n}} ({{op}}): change cannot be read, you sent {{value}}.{{^do}} It is an object whose do is one of: {{dos}}, with the fields that change takes.{{/do}}{{#do}} A {{do}} names {{takes}}.{{#missing}} Not given: {{missing}}.{{/missing}}{{/do}}
+unknown_job: Operation {{n}} ({{op}}): there is no job called {{name}}.{{#jobs}} The jobs are: {{jobs}}.{{/jobs}}
+plan_full: Operation {{n}} ({{op}}): the plan already holds {{most}} open {{what}}, which is as many as this world's rules keep; it was kept all the same.
+not_voter: Operation {{n}} ({{op}}): {{who}} has no vote on it; the vote was kept beside the others and counts for nothing.
+closed: Operation {{n}} ({{op}}): that {{what}} was closed already{{#who}}, so {{who}}'s word was kept beside what was decided, which stands{{/who}}.
+not_its_place: Operation {{n}} ({{op}}): {{place}} is not one of {{org}}'s places; the change was kept all the same.
+not_there: Operation {{n}} ({{op}}): the record does not place {{who}} at {{place}}; it was kept all the same.
+dissolved: Operation {{n}} ({{op}}): {{org}} was dissolved on {{on}}; the change was recorded all the same.
+bad_delegation: Operation {{n}} ({{op}}): {{who}} was given the delegation by themselves; it was recorded all the same.
+delegation_ended: Operation {{n}} ({{op}}): the delegation ends {{until}}, which is before today; it was recorded with that end.
+not_listed: Operation {{n}} ({{op}}): {{org}} is on no market, so the stake changed hands between the parties named.

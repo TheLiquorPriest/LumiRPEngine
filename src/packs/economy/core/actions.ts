@@ -509,11 +509,16 @@ function newAccountId(ctx: ReadContext, spec: OpenAccount): EntityId {
   return id;
 }
 
-/** Opens an account from a product: the account (opened now), a loan's disbursement, a card in its holder's hands. */
+/**
+ * Opens an account from a product: the account (opened now), a loan's disbursement, a card in its holder's hands.
+ * An agent's tool (`plain`) gets what the call gives and nothing else: its due day, statement day and the account its
+ * minimum is paid from are set only when the spec gives them, and its name, a loan's payout memo and its card's name
+ * are the caller's words. The player's own opening keeps the engine's defaults for each.
+ */
 export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] | Rejection {
   const products = worldProducts(ctx.world);
   const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
-  if (!cls) return reject("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
+  if (!cls) return { code: "bad_product", reason: `there's no product ${spec.product.replace(/_/g, " ")}`, choices: Object.keys(products).sort(), said: spec.product };
   const holder = spec.owners[0]?.party;
   if (!holder || !own(ctx.state.entities, holder)) return reject("missing_entity", "an account needs an owner");
   const id = newAccountId(ctx, spec);
@@ -524,57 +529,81 @@ export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] 
   const fields: JsonObject = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...(o.share !== undefined ? { share: o.share } : {}) })), product: spec.product, opening: 0, opened, status: "open" };
   if (spec.apr_pct !== undefined) fields.apr_pct = spec.apr_pct;
   if (t.revolving && typeof spec.cents === "number") fields.limit = Math.round(spec.cents);
-  if (t.installment) {
-    if (spec.term_months !== undefined) {
-      fields.term_months = spec.term_months;
-      fields.months_left = spec.term_months;
-    }
-    fields.due_day = Math.min(28, d.day);
-    const from = depositAccount(ctx, holder);
-    if (from) {
-      fields.autopay = "minimum";
-      fields.autopay_from = from;
-    }
+  if (t.installment && spec.term_months !== undefined) {
+    fields.term_months = spec.term_months;
+    fields.months_left = spec.term_months;
+  }
+  if (spec.due_day !== undefined) fields.due_day = spec.due_day;
+  else if (spec.plain !== true && t.installment) fields.due_day = Math.min(28, d.day);
+  if (spec.statement_day !== undefined) fields.statement_day = spec.statement_day;
+  else if (spec.plain !== true && t.revolving) fields.statement_day = Math.min(28, d.day);
+  const autopay = spec.autopay_from ?? (spec.plain !== true && t.installment ? depositAccount(ctx, holder) : undefined);
+  if (autopay !== undefined && autopay !== null) {
+    fields.autopay = "minimum";
+    fields.autopay_from = autopay;
   }
   if (spec.secured_by) fields.secured_by = spec.secured_by;
-  if (t.revolving) fields.statement_day = Math.min(28, d.day);
   const out: LedgerEvent[] = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
   if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
     const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
-    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
+    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: spec.memo ?? `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
   }
   if (spec.card && (t.revolving || t.transactional)) {
     const cardId = `${id}_card`;
-    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
+    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: spec.card_name ?? (/\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`), tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
   }
   for (const o of spec.owners) if (o.role === "owner" || o.role === "joint") if (isParty(ctx, o.party) && t.liability) out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
   return out;
 }
 
-/** What a credit application brings, for a module (`api.applyCredit`) or the player's action. */
-export type CreditRequest = CreditApplication & { into?: string; id?: EntityId; name?: string };
+/**
+ * What a credit application brings, for a module (`api.applyCredit`), the player's action or an agent's tool. The tool gives
+ * the call's own rate (`apr_pct`) and limit, the score the tables are read at for someone with none (`scoreAssumed`), asks
+ * that it be opened `force`d whatever the lending rules say (their decline comes back in the decision), and has whatever the
+ * tables supplied come back `apart` (`filled`) from the call's own fields, to be recorded as filled in.
+ */
+export type CreditRequest = CreditApplication & { into?: string; id?: EntityId; name?: string; apr_pct?: number; limit?: number; scoreAssumed?: number; force?: true; apart?: true; memo?: string; card_name?: string };
+
+/** What a credit application came to: the lender's decision, the events that open it, and (asked `apart`) the events that set what the tables supplied. */
+export interface CreditMade {
+  decision: Decision;
+  events: LedgerEvent[];
+  filled: LedgerEvent[];
+}
 
 /**
  * Applying for credit: where credit reports run, a hard inquiry and the lender's decision at the
  * applicant's score; anywhere, no more than a lender extends. Approved, the account opens at the
  * decided APR and limit, with a loan's principal paid to `into` (an account the applicant may pay
- * into, or the outside); declined, the decision says why and only the inquiry is made.
+ * into, or the outside); declined, the decision says why and only the inquiry is made, unless it is
+ * asked `force`d: then the account opens as an approved one does, with the same fields and events.
  */
-export function creditApplication(ctx: ReadContext, who: EntityId, app: CreditRequest): { decision: Decision; events: LedgerEvent[] } | Rejection {
+export function creditApplication(ctx: ReadContext, who: EntityId, app: CreditRequest): CreditMade | Rejection {
   if (!isParty(ctx, who)) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
   const reports = featureFor(ctx, who, "credit");
   const decision = decide(ctx, who, app, reports);
   if ("code" in decision) return decision;
   const inquiry: LedgerEvent[] = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: app.product.replace(/_/g, " ") } }] : [];
-  if (!decision.approved) return { decision, events: inquiry };
+  if (!decision.approved && app.force !== true) return { decision, events: inquiry, filled: [] };
   if (app.into !== undefined && own(ctx.state.entities, app.into)) {
     const unusable = mayUse(ctx, who, app.into, "into");
     if (unusable) return unusable;
   }
-  const amount = decision.limit ?? app.cents;
-  const opened = openAccount(ctx, { ...(app.id ? { id: app.id } : {}), name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...(amount !== undefined ? { cents: amount } : {}), ...(app.into !== undefined ? { into: app.into } : {}), ...(app.term_months !== undefined ? { term_months: app.term_months } : {}), ...(decision.apr !== null ? { apr_pct: decision.apr } : {}), ...(app.secured_by ? { secured_by: app.secured_by } : {}), card: CLASS_TRAITS[decision.cls].revolving });
+  const revolving = CLASS_TRAITS[decision.cls].revolving;
+  const apr = app.apr_pct ?? decision.apr ?? decision.tables.apr;
+  // A card's or line's limit is the call's when it gave one (or asked for an amount the lender extended); else the lender's, from the tables.
+  const asked = app.limit ?? (revolving && app.cents !== undefined && (!decision.approved || decision.limit === app.cents) ? app.cents : undefined);
+  const limit = revolving ? (asked ?? decision.limit ?? decision.tables.limit ?? undefined) : undefined;
+  const amount = revolving ? (app.apart === true && asked === undefined ? undefined : limit) : app.cents;
+  const aprAside = app.apart === true && app.apr_pct === undefined && apr !== null;
+  const opened = openAccount(ctx, { ...(app.id ? { id: app.id } : {}), name: app.name ?? decision.label, product: app.product, owners: [{ party: who, role: "owner" }], ...(amount !== undefined ? { cents: amount } : {}), ...(app.into !== undefined ? { into: app.into } : {}), ...(app.term_months !== undefined ? { term_months: app.term_months } : {}), ...(apr !== null && !aprAside ? { apr_pct: apr } : {}), ...(app.secured_by ? { secured_by: app.secured_by } : {}), card: revolving, ...(app.apart === true ? { plain: true as const } : {}), ...(app.memo !== undefined ? { memo: app.memo } : {}), ...(app.card_name !== undefined ? { card_name: app.card_name } : {}) });
   if ("code" in opened) return opened;
-  return { decision, events: [...inquiry, ...opened] };
+  const spawned = opened.find((e) => e.type === "spawn");
+  const account = spawned !== undefined && "entity" in spawned ? spawned.entity.id : "";
+  const filled: LedgerEvent[] = [];
+  if (account !== "" && aprAside && apr !== null) filled.push({ type: "set", entity: account, field: "apr_pct", value: apr });
+  if (account !== "" && app.apart === true && revolving && asked === undefined && limit !== undefined) filled.push({ type: "set", entity: account, field: "limit", value: Math.round(limit) });
+  return { decision, events: [...inquiry, ...opened], filled };
 }
 
 /** The player's (or anyone's) application for credit, with the note that says how it went. */

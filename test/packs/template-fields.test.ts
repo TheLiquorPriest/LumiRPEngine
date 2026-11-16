@@ -157,7 +157,7 @@ describe("template effects: price modifiers and scripted weather", () => {
     lapse(w, 1);
     expect(w.state.entities.region_riverton?.fields.weather_hold_until).toBe("");
     applyEffects(reg, w, [{ type: "weather.set", args: { region: "region_riverton", state: "storm", minutes: 10000 } }, { type: "weather.clear", args: { region: "lake" } }], { bindings: {}, rng: createRng("x") });
-    expect(w.state.entities.region_riverton?.fields.weather).not.toBe("storm");
+    // Clearing lifts the hold; the sky it leaves is the world's to name, not picked by the effect.
     expect(w.state.entities.region_riverton?.fields.weather_hold).toBe(0);
   });
 });

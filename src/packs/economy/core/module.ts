@@ -147,6 +147,15 @@ export interface OpenAccount {
   secured_by?: EntityId;
   /** Issue a card (a debit card on checking, a credit card on a card account), with its gear item. */
   card?: boolean;
+  /** The day of the month a loan is due, a card's statement closes, and an account the minimum is paid from. */
+  due_day?: number;
+  statement_day?: number;
+  autopay_from?: EntityId;
+  /** The words of a loan's payout in the journal, and of its card's name: the caller's; none given, the engine's own. */
+  memo?: string;
+  card_name?: string;
+  /** An agent's tool opens it: only what is given is set (no due day, statement day or autopay of the engine's own). */
+  plain?: true;
 }
 
 /** What a read of the books needs: the world (its products and features) and the state. */

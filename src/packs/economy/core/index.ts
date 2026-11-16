@@ -22,7 +22,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import { CLASS_TRAITS, DEFAULT_ACCOUNT_PRODUCT, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, LEGACY_TYPE_CLASS, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, UNPAID, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
+import { CLASS_TRAITS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, isOwnerRole, LEGACY_TYPE_CLASS, ownersIn, heldBy, PARTY_KINDS, PRICES_SOURCE, UNPAID, worthShares, type FinanceFeature, type FinanceView, type MoneySummary, type PartyKind } from "../../../shared/finance";
 import { pointerOf } from "../../../shared/json-patch";
 import type { LintIssue } from "../../../shared/protocol";
 import type { OrgMember } from "../../../shared/org";
@@ -85,6 +85,7 @@ import {
   unpricedCap,
   type Price,
   type PriceRef,
+  worldProducts,
 } from "./model";
 import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
 import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
@@ -1130,7 +1131,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   });
   r.effect({ type: "economy.set_pay_prefs", args: ["tiers", "who?"], resolve: (a, ctx) => setPayPrefs(ctx, actor(ctx, a), a.tiers) });
   // The GM's controls that aren't fields (DESIGN §7): open or close an account, set its status, release a hold.
-  r.effect({ type: "economy.open_account", args: ["party", "product?", "name?"], gm: true, resolve: (a, ctx) => gmOpenAccount(ctx, strOf(a.party), strOf(a.product), strOf(a.name)) });
+  r.effect({ type: "economy.open_account", args: ["party", "product", "name?", "due_day?", "statement_day?", "autopay_from?"], gm: true, resolve: (a, ctx) => gmOpenAccount(ctx, a) });
   r.effect({ type: "economy.close_account", args: ["account"], gm: true, resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
   r.effect({ type: "economy.flow_edit", args: ["flow", "name?", "clear?"], gm: true, resolve: (a, ctx) => editFlow(ctx, strOf(a.flow), typeof a.name === "string" ? a.name : undefined, a.clear) });
   r.effect({ type: "economy.set_status", args: ["account", "status"], gm: true, resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
@@ -1138,15 +1139,23 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
 }
 
 /**
- * The GM's Open an account (6.15): an empty account the party owns, of the product given, else its
- * kind's (`DEFAULT_ACCOUNT_PRODUCT`), named as given, else after the party and its product.
+ * The GM's Open an account (6.15): an empty account the party owns, of the product given, named as given, else as the world's
+ * products name it. Its due day, statement day and the account its minimum is paid from are the call's, set only when given.
  */
-function gmOpenAccount(ctx: ReadContext, party: EntityId, product: string, name: string): LedgerEvent[] | Rejection {
-  const kind = partyKindOf(ctx, party);
-  if (!kind) return reject("missing_entity", `${labelOf(ctx, party)} can't hold money`);
-  const p = product.trim() || DEFAULT_ACCOUNT_PRODUCT[kind];
-  const words = p === "business_checking" ? "checking" : p === "trust" ? "trust account" : p.replace(/_/g, " ");
-  return openAccount(ctx, { name: name.trim() || `${labelOf(ctx, party)} ${words}`, product: p, owners: [{ party, role: "owner" }] });
+function gmOpenAccount(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
+  const party = strOf(a.party);
+  if (!partyKindOf(ctx, party)) return reject("missing_entity", `${labelOf(ctx, party)} can't hold money`);
+  const product = strOf(a.product).trim();
+  const def = own(worldProducts(ctx.world), product);
+  const cls = def?.class ?? (isAccountClass(product) ? product : null);
+  if (cls === null) return { code: "bad_product", reason: `there's no product ${product.replace(/_/g, " ")}`, choices: Object.keys(worldProducts(ctx.world)).sort(), said: product };
+  const day = (v: JsonValue | undefined): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
+  // A day the call gave that is no day of the month is refused, never dropped.
+  for (const field of ["due_day", "statement_day"]) if (a[field] !== undefined && a[field] !== null && day(a[field]) === undefined) return { code: "bad_day", reason: `${field.replace(/_/g, " ")} is a day of the month, 1 to 31` };
+  const due = day(a.due_day);
+  const statement = day(a.statement_day);
+  const from = strOf(a.autopay_from);
+  return openAccount(ctx, { name: strOf(a.name).trim() || (def?.label ?? CLASS_TRAITS[cls].label), product, owners: [{ party, role: "owner" }], plain: true, ...(due !== undefined ? { due_day: due } : {}), ...(statement !== undefined ? { statement_day: statement } : {}), ...(from !== "" ? { autopay_from: from } : {}) });
 }
 
 function registerActions(r: CoreRegistry): void {

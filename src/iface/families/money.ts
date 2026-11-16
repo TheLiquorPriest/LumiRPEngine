@@ -6,25 +6,27 @@
 // is applied all the same and reported.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { CLASS_TRAITS, FINANCE_EVENTS } from "../../shared/finance";
+import { CLASS_TRAITS, FINANCE_EVENTS, isAccountClass, isCredit } from "../../shared/finance";
 import type { LedgerEvent } from "../../shared/ledger";
 import { formatMoney } from "../../shared/world";
 import { labelOf, numOf, optionalService, own, rowOf, strOf } from "../../engine/pack-kit";
 import { calendarOf, dateAt } from "../../engine/calendar";
+import type { ReadContext } from "../../engine/registry";
 import { placeOfEntity } from "../../engine/scope";
-import { openAccount as openProductAccount } from "../../packs/economy/core/actions";
-import { aprFor, currentScore, decide } from "../../packs/economy/core/credit";
-import { DONATION, exemptStatusOf, foundationTerms } from "../../packs/economy/core/exempt";
+import { creditApplication } from "../../packs/economy/core/actions";
+import { currentScore } from "../../packs/economy/core/credit";
+import { DONATION, donateFindings, exemptStatuses, exemptStatusOf, foundationTerms, taxFindings } from "../../packs/economy/core/exempt";
 import { matchCatalog, placeTrade } from "../../packs/economy/core/index";
 import { isOpened } from "../../packs/economy/core/journal";
 import { balance, dayPriceOf, openerOf, priceOf, statusOf, worldProducts } from "../../packs/economy/core/model";
 import { cardsOn, featureFor, NO_WAY_TO_PAY } from "../../packs/economy/core/pay";
 import { openingEvent } from "../../packs/economy/core/process";
 import { NUMBER, TEXT, WHOLE } from "../kit";
-import { find, isUnread, minorUnits, missed, named, notAs, notOneOf, numberArg, textArg } from "../ops";
+import { find, isUnread, minorUnits, missed, named, notAs, numberArg, outsideList, textArg, type OpContext, type Unread } from "../ops";
 import { openAuthored, paidLines, payPastCover } from "../ops-values";
 import type { Reading } from "../reading";
-import { editChange, effectChange, effectTool, notApplicable, optionalId, readTool, type WriteDef, writeTool } from "./run";
+import { textOf } from "../texts";
+import { editChange, effectTool, notApplicable, optionalId, readTool, type WriteDef, writeTool } from "./run";
 
 const FAMILY = "money";
 
@@ -79,10 +81,16 @@ const openAccount = effectTool({
   lane: "engine",
   effect: "economy.open_account",
   opensMoney: true,
-  args: [{ field: "who", arg: "party", want: "entity" }, { field: "product" }, { field: "name" }],
-  properties: { who: TEXT, product: TEXT, name: TEXT },
-  required: ["who"],
+  args: [{ field: "who", arg: "party", want: "party" }, { field: "product" }, { field: "name" }, { field: "due_day" }, { field: "statement_day" }, { field: "autopay_from", want: "thing" }],
+  properties: { who: TEXT, product: TEXT, name: TEXT, due_day: WHOLE, statement_day: WHOLE, autopay_from: TEXT },
+  required: ["who", "product"],
   example: { who: "bram", product: "checking", name: "Bram's till account", source: { from: "prose", message: "m-0201" } },
+  // A day that is not a day of the month is answered naming it, never dropped.
+  bend(o, code) {
+    if (code !== "bad_day") return null;
+    const field = ["due_day", "statement_day"].find((f) => o.args[f] !== undefined && o.args[f] !== null && !(typeof o.args[f] === "number" && Number.isInteger(o.args[f]) && Number(o.args[f]) >= 1 && Number(o.args[f]) <= 31)) ?? "due_day";
+    return notAs(o, field, o.args[field] ?? null, "day_of_month");
+  },
 });
 
 const closeAccount = effectTool({
@@ -111,28 +119,54 @@ const closeAccount = effectTool({
   },
 });
 
+/** What a product is called as the world's products name it, else its class's own name. */
+function productLabel(ctx: ReadContext, product: string): string {
+  const def = own(worldProducts(ctx.world), product);
+  const cls = def?.class ?? (isAccountClass(product) ? product : null);
+  return def?.label ?? (cls !== null ? CLASS_TRAITS[cls].label : product);
+}
+
+/** Every product that is credit: the world's, and the kinds of credit themselves. */
+function creditProducts(ctx: ReadContext): string[] {
+  const world = Object.entries(worldProducts(ctx.world)).filter(([, def]) => isCredit(def.class)).map(([id]) => id);
+  const kinds = (Object.keys(CLASS_TRAITS) as (keyof typeof CLASS_TRAITS)[]).filter((k) => isCredit(k));
+  return [...new Set([...world, ...kinds])].sort();
+}
+
 /**
- * Credit asked for, as today's economy decides it (`economy.apply_credit`). Where its lending rules
- * turn the application down, the credit is opened all the same, as an approved one opens (the
- * inquiry, the account at the product's or the score's rate, a loan's principal paid out), and the
- * answer says that the world's rules would have refused it.
+ * Credit asked for, opened through the economy's own path (`creditApplication`) with what the call gives: its amount,
+ * term, rate (`apr`) and limit. Where the lending rules turn the application down, the credit is opened all the same,
+ * with the same fields and events as an approved one, and the answer says the rules would have refused it. What the
+ * call leaves out and the world's tables supply (the rate for the person's score, the product's limit) is recorded
+ * apart, as filled in; a person with no score is read at `engine.creditScoreAssumed`, and the answer says so.
  */
 const applyCredit: WriteDef = {
   name: "apply_credit",
   family: FAMILY,
   lane: "engine",
-  properties: { who: TEXT, product: TEXT, amount: NUMBER, term: WHOLE, secured_by: TEXT },
+  properties: { who: TEXT, product: TEXT, amount: NUMBER, term: WHOLE, secured_by: TEXT, apr: NUMBER, limit: NUMBER },
   required: ["who", "product"],
   example: { who: "wren", product: "loan", amount: 40, term: 12, source: { from: "prose", message: "m-0203" } },
   run(o) {
-    const who = find(o, "who", "entity");
+    const who = find(o, "who", "party");
     if (isUnread(who)) return who;
     const product = textArg(o.args, "product") ?? "";
-    const amount = o.args.amount;
-    if (amount !== undefined && amount !== null && numberArg(o.args, "amount") === undefined) return notAs(o, "amount", amount, "amount_any");
-    const given = numberArg(o.args, "amount");
-    const cents = given !== undefined && given > 0 ? minorUnits(o.reading, given) : undefined;
-    const term = typeof o.args.term === "number" && o.args.term > 0 ? Math.round(o.args.term) : undefined;
+    // An amount, a rate, a limit and a term that cannot be read are answered naming the field and what it takes; none is rounded or dropped.
+    const sum = (field: string, floor: "above" | "least"): number | undefined | Unread => {
+      const said = o.args[field];
+      if (said === undefined || said === null) return undefined;
+      const n = numberArg(o.args, field);
+      return n === undefined || (floor === "above" ? n <= 0 : n < 0) ? notAs(o, field, said, field === "apr" ? "apr" : "amount") : n;
+    };
+    const amount = sum("amount", "above");
+    if (isUnread(amount)) return amount;
+    const limit = sum("limit", "above");
+    if (isUnread(limit)) return limit;
+    const apr = sum("apr", "least");
+    if (isUnread(apr)) return apr;
+    const said = o.args.term;
+    if (said !== undefined && said !== null && !(typeof said === "number" && Number.isInteger(said) && said > 0)) return notAs(o, "term", said, "term");
+    const term = typeof said === "number" ? said : undefined;
     const secured = optionalId(o, "secured_by", "thing");
     if (isUnread(secured)) return secured;
     const w = o.draft.w;
@@ -140,22 +174,33 @@ const applyCredit: WriteDef = {
     const unopened = openAuthored(o, [who.id]);
     if (unopened) return unopened;
     const ctx = w.ctx;
-    const reports = featureFor(ctx, who.id, "credit");
-    const decision = decide(ctx, who.id, { product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(secured !== undefined ? { secured_by: secured } : {}) }, reports);
-    if ("code" in decision || decision.approved) {
-      const refused = effectChange(o, { type: "economy.apply_credit", args: { who: who.id, product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term } : {}), ...(secured !== undefined ? { secured_by: secured } : {}) } });
-      if (refused !== null) return notApplicable(o, refused.code);
-    } else {
-      const def = own(worldProducts(ctx.world), product);
-      const apr = reports ? (def?.apr_pct ?? aprFor(ctx, decision.cls, currentScore(ctx, who.id))) : null;
-      const limit = cents ?? (typeof def?.limit === "number" ? def.limit : undefined);
-      const opened = openProductAccount(ctx, { name: decision.label, product, owners: [{ party: who.id, role: "owner" }], ...(limit !== undefined ? { cents: limit } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(apr !== null ? { apr_pct: apr } : {}), ...(secured !== undefined ? { secured_by: secured } : {}), card: CLASS_TRAITS[decision.cls].revolving });
-      if ("code" in opened) return notApplicable(o, opened.code);
-      const inquiry: LedgerEvent[] = reports ? [{ type: FINANCE_EVENTS.credit, data: { person: who.id, kind: "inquiry", note: product.replace(/_/g, " ") } }] : [];
-      const bad = o.draft.applyAll([...inquiry, ...opened]);
-      if (bad) return notApplicable(o, bad.code);
-      o.reply.report("against_rules", { n: o.n, op: o.op, what: named(o.reading, who.id), code: "declined" });
+    const name = productLabel(ctx, product);
+    const assumed = o.call.settings.creditScoreAssumed;
+    const made = creditApplication(ctx, who.id, {
+      product,
+      ...(amount !== undefined ? { cents: minorUnits(o.reading, amount) } : {}),
+      ...(term !== undefined ? { term_months: term } : {}),
+      ...(secured !== undefined ? { secured_by: secured } : {}),
+      ...(apr !== undefined ? { apr_pct: apr } : {}),
+      ...(limit !== undefined ? { limit: minorUnits(o.reading, limit) } : {}),
+      scoreAssumed: assumed,
+      force: true,
+      apart: true,
+      memo: o.call.lines.line("loan_paid_out", { name }) ?? "",
+      card_name: o.call.lines.line("credit_card_name", { name }) ?? name,
+    });
+    if ("code" in made) {
+      if (made.code === "not_credit") return outsideList(o, "product", product, creditProducts(ctx));
+      return notApplicable(o, o.draft.note(made).code);
     }
+    const bad = o.draft.applyAll(made.events);
+    if (bad) return notApplicable(o, o.draft.note(bad).code);
+    const filled = o.draft.fillWith(made.filled);
+    if (filled) return notApplicable(o, o.draft.note(filled).code);
+    const d = made.decision;
+    const score = featureFor(ctx, who.id, "credit") ? currentScore(ctx, who.id) : null;
+    if (!d.approved) o.reply.report("against_rules", { n: o.n, op: o.op, what: named(o.reading, who.id), code: "declined", class: d.cls, ...(score !== null ? { score } : {}), reason: d.reason });
+    if (score === null && featureFor(ctx, who.id, "credit")) o.reply.report("score_assumed", { n: o.n, op: o.op, what: named(o.reading, who.id), score: assumed });
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;
   },
@@ -166,37 +211,64 @@ const taxStatus = effectTool({
   family: FAMILY,
   lane: "engine",
   effect: "economy.tax_status",
-  args: [{ field: "org", want: "entity" }, { field: "status" }],
+  args: [{ field: "org", want: "organization" }, { field: "status" }],
   properties: { org: TEXT, status: TEXT },
   required: ["org"],
   example: { org: "The Lamplighters", status: "charity", source: { from: "lore", lore: "lore-lamplighters" } },
+  // A status on one the world's rule says cannot hold it (a household, a party) is recorded and reported.
+  watch(o, args) {
+    const found = taxFindings(o.draft.w.ctx, args);
+    return () => {
+      for (const f of found) o.reply.report(f.code, { n: o.n, op: o.op, ...f.values });
+    };
+  },
+  // A status the world's table does not hold is answered with the table's, and names `fact`.
+  bend(o, code, args) {
+    return code === "unknown_status" ? outsideList(o, "status", args.status ?? null, exemptStatuses(o.draft.w.ctx).map((s) => s.id)) : null;
+  },
 });
 
+/**
+ * A gift between any two parties, from the one the call names, with the memo the call gives, else the answers file's line
+ * for a gift or a grant filled with the receiver's name. A grant to a person by one who is no exempt organization and a
+ * party's gift to itself are recorded all the same and reported.
+ */
 const donate = effectTool({
   name: "donate",
   family: FAMILY,
   lane: "engine",
   effect: "economy.donate",
   opensMoney: true,
-  args: [{ field: "to", want: "entity" }, { field: "amount", arg: "cents", money: true }, { field: "from", want: "entity" }, { field: "method" }],
-  properties: { to: TEXT, amount: NUMBER, from: TEXT, method: TEXT },
-  required: ["to", "amount"],
+  args: [{ field: "to", want: "party" }, { field: "amount", arg: "cents", money: true }, { field: "from", want: "party" }, { field: "method" }, { field: "memo" }],
+  properties: { to: TEXT, amount: NUMBER, from: TEXT, method: TEXT, memo: TEXT },
+  required: ["to", "amount", "from"],
   example: { to: "The Lamplighters", amount: 5, from: "wren", source: { from: "prose", message: "m-0204" } },
-  // Past what the giver has to hand, today's economy declines it: the gift (or an exempt group's
-  // grant to a person) is posted all the same from the giver's own money, as a payment past cover
+  watch(o, args) {
+    const ctx = o.draft.w.ctx;
+    const to = String(args.to);
+    // The memo is the call's; with none it is the answers file's line for a gift or a grant.
+    if (typeof args.memo !== "string" || args.memo.trim() === "") args.memo = o.call.lines.line(o.reading.isPerson(to) ? "grant_memo" : "gift_memo", { to: o.reading.nameOf(to) }) ?? "";
+    const found = donateFindings(ctx, args);
+    return () => {
+      for (const f of found) o.reply.report(f.code, { n: o.n, op: o.op, ...f.values });
+    };
+  },
+  // An amount not above 0 is answered naming `amount`. Past what the giver has to hand, today's economy declines it: the gift
+  // (or an exempt group's grant to a person) is posted all the same from the giver's own money, as a payment past cover
   // is (`payPastCover`), with today's record of it, and what did not add up is reported (`paidLines`).
   bend(o, code, args) {
+    if (code === "bad_amount") return notAs(o, "amount", o.args.amount ?? null, "amount");
     if (code !== "declined" && code !== NO_WAY_TO_PAY) return null;
     const ctx = o.draft.w.ctx;
     const to = String(args.to);
-    const from = typeof args.from === "string" ? args.from : ctx.world.pov;
+    const from = String(args.from);
     const cents = Number(args.cents);
     const grant = o.reading.isPerson(to);
     const deductible = !grant && o.reading.isPerson(from) && exemptStatusOf(ctx, to)?.deductible === true;
     const pf = deductible && foundationTerms(ctx, to) !== null;
     const record: LedgerEvent = { type: DONATION, data: { donor: from, org: to, cents, year: dateAt(calendarOf(ctx.world), ctx.state.clock).year, deductible, ...(pf ? { pf: true } : {}) } };
     const before = o.draft.w.events.length;
-    const failed = payPastCover(o, { payer: from, payee: to, cents, memo: `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`, kind: "payment", category: "donations", with: [record] });
+    const failed = payPastCover(o, { payer: from, payee: to, cents, memo: String(args.memo ?? ""), kind: "payment", category: "donations", with: [record] });
     if (failed) return failed;
     paidLines(o, from, cents, before);
     return undefined;
