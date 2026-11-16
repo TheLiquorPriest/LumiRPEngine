@@ -17,7 +17,7 @@ needs_one: Operation {{n}} ({{op}}) needs at least one of {{fields}}.
 one_name: Operation {{n}} ({{op}}): who names one person, or plot.
 no_message: Operation {{n}} ({{op}}): {{field}} names no message: you sent {{value}}, and the chat's messages are numbered 0 to {{last}}.
 no_clock: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but this chat keeps no story time, so it will not come up as due.
-unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM) or a span from now (two days, until dawn) can be counted.
+unreadable_time: Operation {{n}} ({{op}}): {{field}} is kept as you wrote it, {{value}}, but holds no date that can be counted from, so it will not come up as due. A date and time (YYYY-MM-DD HH:MM), a clock time (18:30) or a span from now (two days) can be counted.
 unknown_id: {{#n}}Operation {{n}} ({{op}}): {{/n}}the story record on this path holds no {{#part}}{{part}} {{/part}}{{id}}.
 no_current: Operation {{n}} ({{op}}): there is no {{part}} yet. Open one with new.
 current_closed: Operation {{n}} ({{op}}): the current {{part}}, {{id}}, is closed. Open a new one with new, or name {{id}} to write to it.
