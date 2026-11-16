@@ -393,7 +393,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     // Where the tidy-up's settings are found (R-201): a chat's switch (its own choice) and leave-alone list (its prefs), the world's switch, and a user-level `tidy` read as today's own reader reads it.
     const tidyChats = new Set<string>();
     for (const item of items) {
-      const pref = new RegExp(`^chats/([^/]+)/${LEDGER_NAMESPACE}/prefs/tidy$`).exec(item.path)?.[1];
+      const pref = item.where === "Lumiverse database" ? new RegExp(`^chats/([^/]+)/${LEDGER_NAMESPACE}/prefs/(tidy|tidyLeft)$`).exec(item.path)?.[1] : undefined;
       if (pref !== undefined) tidyChats.add(pref);
       const run = item.where === "user storage" ? /^runs\/([^/]+)\/prefs\.json$/.exec(item.path)?.[1] : undefined;
       if (run === undefined) continue;
