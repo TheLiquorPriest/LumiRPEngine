@@ -27,7 +27,7 @@ export interface SceneSession {
 /** The scene sessions read at `turn`: with what the turn and those before it on its path recorded. */
 export function sceneSession(store: Store, user: string, chat: string, turn: string): SceneSession {
   const u = store.user(user);
-  const record = StoryRecord.read(store.db, user, storyAt(u, chat, turn));
+  const record = StoryRecord.read(store, user, storyAt(u, chat, turn));
   const current = record.current("scene");
   const open = current !== null && current.closedBy === null ? current : null;
   const onPath = u.sessions(chat).filter((s) => record.at.order.has(s.openedBy));
