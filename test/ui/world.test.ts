@@ -9,15 +9,23 @@ import { act } from "preact/test-utils";
 import type { WorldReply } from "../../src/shared/api";
 import { AppContext, type UiApp } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
+import { createGate } from "../../src/ui/gate";
 import { readWorld, WORLD_START, WorldPage, type WorldQuery, type WorldResult, WorldView, type WorldViewProps } from "../../src/ui/pages/world";
 import { settle } from "./asking";
 import { openPage, type PageElement } from "./kept/dom";
 import { CHAT, EARLIER, worldAt } from "./recorded";
 import { elements, expand, press, textOf } from "./vnodes";
 
+/** A gate with this chat's spoilers shown. */
+function openGate() {
+  const gate = createGate();
+  gate.open(CHAT);
+  return gate;
+}
+
 function worldView(answer: WorldReply | null, over: Partial<WorldViewProps> = {}): { text: string; tree: unknown; asked: WorldQuery[] } {
   const asked: WorldQuery[] = [];
-  const props: WorldViewProps = { query: { ...WORLD_START, at: answer?.at ?? "world" }, answer, loading: false, problem: null, turns: EARLIER, onQuery: (next) => asked.push(next), ...over };
+  const props: WorldViewProps = { query: { ...WORLD_START, at: answer?.at ?? "world" }, answer, loading: false, problem: null, turns: EARLIER, gateOpen: true, onOpenGate: () => undefined, onCloseGate: () => undefined, onQuery: (next) => asked.push(next), ...over };
   const tree = expand(h(WorldView, props));
   return { text: textOf(tree), tree, asked };
 }
@@ -31,6 +39,20 @@ function partOf(tree: unknown, mark: string, value: string) {
 
 describe("the World page", () => {
   const point = worldAt("place:calder-point", 1);
+
+  test("nothing of the tree's values or counts shows until the gate is opened", () => {
+    const shut = worldView(point, { gateOpen: false });
+    expect(shut.text).toContain("Spoilers are hidden");
+    expect(shut.text).not.toContain("Calder Point");
+    expect(shut.text).not.toContain("2 people");
+    expect(elements(shut.tree).some((e) => typeof e.props["data-node"] === "string")).toBe(false);
+  });
+
+  test("the things browser mounts only with the gate open", () => {
+    const slots = { things: h("p", { "data-mark": "browser" }, "the things browser") };
+    expect(worldView(point, { gateOpen: false, slots }).text).not.toContain("the things browser");
+    expect(worldView(point, { slots }).text).toContain("the things browser");
+  });
 
   test("each value says where it comes from and what wrote it, and the facts under its key stand beside it, not in its place", () => {
     const { tree } = worldView(point);
@@ -131,11 +153,11 @@ describe("the World page as it reads the chat's turns", () => {
     try {
       for (const [turns, said] of [[{ turns: [], more: false }, true], [new Error("RPE did not answer: Failed to fetch"), false]] as const) {
         const client = {
-          call: ((key: string) => (key === "GET /api/v1/chats/:chat/turns" ? (turns instanceof Error ? Promise.reject(turns) : Promise.resolve(turns)) : Promise.resolve(worldAt("world", 1)))) as RpeClient["call"],
+          call: ((key: string) => (key === "GET /api/v1/chats/:chat/turns" ? (turns instanceof Error ? Promise.reject(turns) : Promise.resolve(turns)) : key === "GET /api/v1/chats/:chat/world" ? Promise.resolve(worldAt("world", 1)) : Promise.reject(new Error("not read here")))) as RpeClient["call"],
         };
         const root = page.document.createElement("div") as PageElement;
         await act(() => {
-          render(h(AppContext.Provider, { value: { client } as unknown as UiApp }, h(WorldPage, { chat: CHAT })), root as unknown as HTMLElement);
+          render(h(AppContext.Provider, { value: { client, gate: openGate() } as unknown as UiApp }, h(WorldPage, { chat: CHAT })), root as unknown as HTMLElement);
         });
         // The reads begin once the page is drawn; their answers are drawn once they are in.
         await act(() => settle());

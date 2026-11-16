@@ -209,13 +209,13 @@ describe("the direct road, against RPE's own server", () => {
       refused: (words) => began.reject(new Error(words)),
     });
     await began.promise;
-    app.live.publish("chat-ledger", { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin." } });
+    app.live.publish("chat-ledger", { kind: "handler_failed", data: { op: "pay", error: "The purse named holds no coin.", turn: "turn-harbor", change: 7 } });
     const event = await failed.promise;
     off();
-    // Its data is typed by its kind in the generated file: the operation, and the handler's error.
-    const typed: { op: string; error: string } = event.data;
-    expect(typed).toEqual({ op: "pay", error: "The purse named holds no coin." });
-    expect({ chat: event.chat, seq: event.seq, data: event.data }).toEqual({ chat: "chat-ledger", seq: 1, data: { op: "pay", error: "The purse named holds no coin." } });
+    // Its data is typed by its kind in the generated file: the operation, the handler's error, the turn and the change.
+    const typed: { op: string; error: string; turn: string; change: number | null } = event.data;
+    expect(typed).toEqual({ op: "pay", error: "The purse named holds no coin.", turn: "turn-harbor", change: 7 });
+    expect({ chat: event.chat, seq: event.seq, data: event.data }).toEqual({ chat: "chat-ledger", seq: 1, data: { op: "pay", error: "The purse named holds no coin.", turn: "turn-harbor", change: 7 } });
   });
 
   test("each of these routes answers, through the client on a running app, a reply its declaration takes", async () => {
