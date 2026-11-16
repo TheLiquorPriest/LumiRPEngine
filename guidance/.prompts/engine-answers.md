@@ -72,7 +72,6 @@ invented_unchecked: Operation {{n}} ({{op}}) is recorded as invented and names n
 invented_unconsented: Operation {{n}} ({{op}}) is recorded as invented and names no consent, so it is marked so.
 not_applied: Operation {{n}} ({{op}}) was recorded and did not apply ({{code}}).
 already_so: Operation {{n}} ({{op}}): {{what}} was already so; nothing changed.
-placed_instead: Operation {{n}} ({{op}}): {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: Operation {{n}} ({{op}}): {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
 above_carry: Operation {{n}} ({{op}}): {{what}} is {{size}}, above what a person carries, and it is in {{holder}}'s hands all the same.
 ends_before_now: Operation {{n}} ({{op}}): the end of {{what}} for {{who}}, {{until}}, is not after now; it is recorded with that end.
@@ -94,7 +93,6 @@ made_nowhere: Operation {{n}} ({{op}}): {{what}} was made at no place, since not
 said_where: Operation {{n}} ({{op}}): nothing goes by {{said}}, so those words are kept on {{what}} as where it was said to be.
 horizon_words: Operation {{n}} ({{op}}): kept on the horizon as words, naming no place, person or thing: {{words}}.
 against_rules: Operation {{n}} ({{op}}): {{#what}}{{what}}: {{/what}}applied although the world's rules would refuse it ({{code}}).{{#class}} It is a {{class}}{{#score}} and their score is {{score}}{{/score}}.{{/class}}{{#reason}} The rules' reason: {{reason}}.{{/reason}}
-past_until: Operation {{n}} ({{op}}): {{until}} is not after now, so the loan was recorded with no end.
 not_holding: Operation {{n}} ({{op}}): {{from}} did not hold {{what}}{{#holder}}; {{holder}} did{{/holder}}. It was given all the same.
 not_wearable: Operation {{n}} ({{op}}): {{what}} has no place to be worn ({{code}}), so {{who}} carries it.
 not_to_hand: Operation {{n}} ({{op}}): {{what}} was not to hand{{#brought}}, and was put on {{who}} all the same{{/brought}}{{^brought}} and is gone or lost, so {{who}} went without it{{/brought}}.
@@ -105,8 +103,10 @@ paid_past_held: Operation {{n}} ({{op}}): {{payer}} paid {{amount}} and could pa
 paid_from_outside: Operation {{n}} ({{op}}): the world keeps no accounts for {{payer}}, so it was paid from their money outside the world's accounts.
 money_untracked: Operation {{n}} ({{op}}): this world keeps no money for {{payer}}, so no money moved.
 closed_with_money: Operation {{n}} ({{op}}): {{what}} was closed with {{amount}} still on it.
-derived: Operation {{n}} ({{op}}): {{key}} is worked out from other values and is not set itself.
-follows_xp: Operation {{n}} ({{op}}): {{key}} follows {{xp}}; set {{xp}} instead.
+derived: Operation {{n}} ({{op}}): {{name}}'s {{key}} is worked out by the rules, which give {{figure}}; {{value}} was kept as given and stands over it.
+world_unlisted: Operation {{n}} ({{op}}): {{key}} is not a value the world's setup lists; {{value}} is recorded as the world's own, and every level below takes it unless it sets its own.
+system_keeps: Operation {{n}} ({{op}}): {{system}} keeps {{key}} itself, as {{kept}}; that stands in the tree and in the sums, and {{value}} is recorded at the world beside it.
+fact_lane_default: Operation {{n}} ({{op}}): no lane was named, so this fact is recorded in the {{lane}} lane.
 off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}).
 not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, so nothing was added to it and it stays as it was; the change is recorded as given.
 advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).

@@ -8,14 +8,15 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { formatMoney } from "../shared/world";
-import { fieldBounds, levelsFollowXp, applyEffects } from "../engine/effects";
+import { fieldBounds, type LevelOffer, levelsFollowXp, applyEffects } from "../engine/effects";
+import { levelProgression, progressOf } from "../engine/ruleset";
 import { valueProblem } from "../engine/edits";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { optionalService, own } from "../engine/pack-kit";
 import { baseWorld } from "../engine/places-in-play";
 import { createRng } from "../engine/rng";
-import { fieldDef, GONE_FIELD } from "../engine/scope";
+import { fieldDef, formulaFigure, GONE_FIELD } from "../engine/scope";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import { accountsOf, availableOf, balance, classOf, external, hasLedger, statusOf } from "../packs/economy/core/model";
 import { asUnit, cashAccount, NO_WAY_TO_PAY, overdraftRoom, payeeSide, posting } from "../packs/economy/core/pay";
@@ -23,7 +24,7 @@ import { axesOf } from "../packs/relationships/core/index";
 import { FACT_ABOUT, factStore } from "../store/facts";
 import { STORE_OPS } from "../store/types";
 import type { FactStore } from "./kit";
-import { find, findOptional, isUnread, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, textArg, type Unread } from "./ops";
+import { find, findOptional, isUnread, minorUnits, named, notAs, notOneOf, numberArg, type OpContext, type OpDef, outsideList, refusedAs, textArg, type Unread } from "./ops";
 import { textOf } from "./texts";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
@@ -197,17 +198,19 @@ function correctCash(o: OpContext, entity: string, change: { to: number } | { by
   return undefined;
 }
 
-/** Sets a field of someone or something: today's `set`, or `add` for a number, with a level following its experience as today's progressions have it. */
+/**
+ * Sets a field of someone or something as the story gives it: today's `set`, or `add` for a number. A field the rules work out takes
+ * the value and the answer gives the rules' own figure; a level that follows experience takes it and the answer says the two now
+ * disagree; experience brings its level as a sum and offers the level-up gains, never running them; a number added to a field that
+ * holds none is recorded and the field stays as it was.
+ */
 function setField(o: OpContext, entity: string, key: string, value: JsonValue | undefined, add: number | undefined): Unread | undefined {
   const reg = o.reading.registry;
   const w = o.draft.w;
   const e = own(w.state.entities, entity);
-  if (!e) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_entity" } };
+  if (!e) return refusedAs(o, { code: "missing_entity", reason: `no entity ${entity}` }, "at", "entity");
   if (!safeKey(key) || key === GONE_FIELD) return notAs(o, "key", key, "key");
   const def = fieldDef(reg, w.ctx.world, e.kind, key);
-  if (def?.derived !== undefined) return { line: "derived", fields: { n: o.n, op: o.op, key } };
-  const levelOf = Object.values(w.ctx.world.ruleset?.progression ?? {}).find((p) => p.levelField === key);
-  if (levelOf !== undefined) return { line: "follows_xp", fields: { n: o.n, op: o.op, key, xp: levelOf.xpField } };
   if (key === "cash") {
     // Cash is a sum, set to one or moved by one; a number sent as text is that number.
     const to = amountOf(value);
@@ -219,31 +222,76 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
   }
   const event: LedgerEvent = add !== undefined ? { type: "add", entity, field: key, delta: add } : { type: "set", entity, field: key, value: value ?? null };
   const bad = o.draft.applyAll([event]);
-  if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
-  const now = own(w.state.entities, entity)?.fields[key];
-  const off = now === undefined ? null : offSheet(o, entity, key, now);
-  if (off !== null) o.reply.report("off_the_sheet", off);
-  levelsFollowXp(reg, w, [event], { bindings: { self: entity }, rng: createRng(o.draft.seed(o.n)), literal: true });
+  if (bad) return refusedAs(o, bad, "at", "entity");
+  const name = named(o.reading, entity);
+  if (def?.derived !== undefined) {
+    // Kept as given over the formula; a value of null returns the field to it. The rules' own figure is said.
+    if (value !== null && value !== undefined) o.draft.adviseOp(o.n, { code: "derived", values: { name, key, value: JSON.stringify(value), figure: String(formulaFigure(reg, w.ctx, entity, key) ?? "") } });
+  } else {
+    const now = own(w.state.entities, entity)?.fields[key];
+    const off = now === undefined ? null : offSheet(o, entity, key, now);
+    if (off !== null) o.reply.report("off_the_sheet", off);
+  }
+  // A level that follows experience is kept as stated; where the two disagree it is said.
+  const following = levelProgression(reg, w.ctx.world, e.kind, key);
+  const reading = following === null ? null : progressOf(reg, w.ctx, entity, following);
+  if (following !== null && reading !== null && reading.level !== reading.reached) o.draft.adviseOp(o.n, { code: "level_beside_xp", values: { who: name, field: following.label, level: reading.level, reached: reading.reached, xp: reading.xp } });
+  // Experience brings its level as a sum, and the level-up gains come back offered: none is run, and nothing is thrown away.
+  const followed = levelsFollowXp(reg, w, [event], { bindings: { self: entity }, rng: createRng(o.draft.seed(o.n)), literal: true, offers: true });
+  for (const advice of followed.advice ?? []) o.draft.adviseOp(o.n, advice);
+  for (const refused of followed.rejected) o.reply.report("not_applied", { n: o.n, op: o.op, code: refused.rejection.code });
+  const offered = new Map<string, LevelOffer[]>();
+  for (const offer of followed.offered ?? []) offered.set(`${offer.entity}\u0000${offer.progression}`, [...(offered.get(`${offer.entity}\u0000${offer.progression}`) ?? []), offer]);
+  for (const offers of offered.values()) {
+    const [first] = offers;
+    const last = offers[offers.length - 1];
+    if (first === undefined || last === undefined) continue;
+    o.reply.report("level_offers", { n: o.n, op: o.op, who: named(o.reading, first.entity), field: own(w.ctx.world.ruleset?.progression ?? {}, first.progression)?.label ?? first.progression, level: last.level, from: first.from, levels: textOf(offers.map((x) => String(x.level))), effects: JSON.stringify(first.effects) });
+  }
   return undefined;
 }
 
-/** Sets a value on a place of this chat's own world (its own field, which the places inside it take unless they set theirs), as today's chat draft writes a place. */
+/**
+ * Sets a value on a place of this chat's own world (its own field, which the places inside it take unless they set theirs), as today's
+ * chat draft writes a place. A number added to a field that holds none is recorded and the field stays as it was.
+ */
 function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonValue | undefined, add: number | undefined): Unread | undefined {
   const w = o.draft.w;
   const played = w.ctx.world;
   const def = own(played.places, placeId);
-  if (!def) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "missing_place" } };
+  if (!def) return refusedAs(o, { code: "missing_place", reason: `no place ${placeId}` }, "at", "place");
   if (!safeKey(key)) return notAs(o, "key", key, "key");
   const fields: JsonObject = { ...def.fields };
   if (add !== undefined) {
     const cur = fields[key];
-    if (cur !== undefined && typeof cur !== "number") return { line: "not_applicable", fields: { n: o.n, op: o.op, code: "not_numeric" } };
-    fields[key] = (typeof cur === "number" ? cur : 0) + add;
+    if (cur !== undefined && typeof cur !== "number") o.draft.adviseOp(o.n, { code: "not_numeric", values: { entity: def.name, field: key } });
+    else fields[key] = (typeof cur === "number" ? cur : 0) + add;
   } else if (value === null || value === undefined) delete fields[key];
   else fields[key] = value;
   const event = draftEvent(baseWorld(played), chatDraftOf(w.state), { collection: "places", id: placeId, value: { ...(def as unknown as JsonObject), fields } });
   const bad = o.draft.applyAll([event]);
-  return bad ? { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } } : undefined;
+  return bad ? refusedAs(o, bad, "at", "place") : undefined;
+}
+
+/**
+ * Sets a value at the world's own level: any key, as the world's own value (`store.value`) with the call's provenance, said where the
+ * world's setup does not list it, and said where one of its systems keeps that value itself, which then stands in the tree and in the sums.
+ */
+function setWorldValue(o: OpContext, key: string, value: JsonValue | undefined, add: number | undefined): Unread | undefined {
+  if (!safeKey(key)) return notAs(o, "key", key, "key");
+  const values = o.reading.state.values ?? {};
+  const current = Object.hasOwn(values, key) ? values[key] : undefined;
+  let next: JsonValue;
+  if (add === undefined) next = value ?? null;
+  else if (current !== undefined && typeof current !== "number") {
+    next = current;
+    o.draft.adviseOp(o.n, { code: "not_numeric", values: { entity: "the world", field: key } });
+  } else next = (typeof current === "number" ? current : 0) + add;
+  const system = Object.hasOwn(values, key) ? undefined : o.reading.view().values("world").find((line) => line.key === key);
+  o.draft.adviseOp(o.n, { code: "world_unlisted", values: { key, value: JSON.stringify(next) } });
+  if (system !== undefined) o.draft.adviseOp(o.n, { code: "system_keeps", values: { key, system: system.from !== undefined && "system" in system.from && typeof system.from.system === "string" ? system.from.system : "the world's setup", kept: String(system.value), value: JSON.stringify(next) } });
+  o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, { op: STORE_OPS.value, value: { at: "world", key, value: next } });
+  return undefined;
 }
 
 /** The names the clock is set by. */
@@ -265,8 +313,8 @@ const set: OpDef = {
     if (isUnread(at)) return at;
     const from = o.draft.w.events.length;
     let failed: Unread | undefined;
+    if (at.ref === "world" && !CLOCK_KEYS[key]) return setWorldValue(o, key, value as JsonValue | undefined, add);
     if (at.ref === "world") {
-      if (!CLOCK_KEYS[key]) return notOneOf(o, "key", key, Object.keys(CLOCK_KEYS));
       const to = add !== undefined ? o.draft.w.state.clock + Math.round(add) : timeArg({ ...o, args: { ...o.args, value } }, "value");
       if (to === undefined || isUnread(to)) return to ?? { line: "needs", fields: { n: o.n, op: o.op, fields: ["value"] } };
       failed = setClock(o, to);
@@ -300,6 +348,8 @@ const fact: OpDef = {
     const value = textArg(o.args, "value");
     if (key === undefined || value === undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["key", "value"] } };
     const replaces = textArg(o.args, "replaces");
+    // The lane its writer names; with none named it is the engine's, and the answer says so.
+    if (o.args.lane === undefined || o.args.lane === null) o.reply.report("fact_lane_default", { n: o.n, op: o.op, lane: o.lane });
     o.draft.recordStoreOp(o.n, o.op, o.lane, o.prov, FACTS.change({ about: about.ref, key, value, ...(replaces !== undefined ? { replaces } : {}) }));
     o.after((state) => ({ facts: FACTS.of(state, about.ref) }));
     return undefined;
@@ -367,12 +417,13 @@ const relate: OpDef = {
     const w = o.draft.w;
     const axes = axesOf(w.ctx);
     const axis = textArg(o.args, "axis");
-    if (axis !== undefined && !axes.some((a) => a.id === axis)) return notOneOf(o, "axis", axis, axes.map((a) => a.id));
+    if (axis !== undefined && !axes.some((a) => a.id === axis)) return outsideList(o, "axis", axis, axes.map((a) => a.id));
     const from = w.events.length;
     const why = textArg(o.args, "why");
-    const out = applyEffects(o.reading.registry, w, [{ type: "relationships.adjust", args: { from: who.id, to: to.id, delta: change, ...(axis !== undefined ? { axis } : {}), ...(why !== undefined ? { why } : {}) } }], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
+    // As given: on the axis named (else every axis), at any realism level and toward oneself, never spread and never clamped; past its range the event reports it.
+    const out = applyEffects(o.reading.registry, w, [{ type: "relationships.adjust", args: { from: who.id, to: to.id, delta: change, asGiven: true, ...(axis !== undefined ? { axis } : {}), ...(why !== undefined ? { why } : {}) } }], { bindings: {}, rng: createRng(o.draft.seed(o.n)), literal: true });
     const failed = out.rejected[0];
-    if (failed) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: failed.rejection.code } };
+    if (failed) return refusedAs(o, failed.rejection, "who", "entity");
     o.draft.record(o.n, o.op, "story", o.prov, from);
     return undefined;
   },

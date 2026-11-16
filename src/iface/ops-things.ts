@@ -36,9 +36,6 @@ import { timeArg } from "./ops-time";
 /** How a thing passed from one person to another, as the skill says it, to today's handover bases. */
 export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hold", lent: "loan", returned: "return", given: "gift", sold: "sale", traded: "trade", stolen: "theft" };
 
-/** The refusals of today's things model that are about what a change means (its size rules, a part or a built-in, a cycle, an owner), never about whether it can be read: applied all the same, and reported. */
-export const BENT_RULES: Readonly<Record<string, true>> = { part: true, builtin: true, cant_hold: true, too_big: true, too_deep: true, no_room: true, cycle: true, not_owner: true, no_slot: true };
-
 /** Where a spot is, for an answer: a place's, a holder's or a support's name with its id. */
 function spotName(o: OpContext, spot: Spot | Support): string {
   return named(o.reading, "place" in spot ? spot.place : "in" in spot ? spot.in : spot.on);

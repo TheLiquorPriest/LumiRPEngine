@@ -230,6 +230,9 @@ export class Draft {
   recordStoreOp(n: number, opName: string, lane: Lane, prov: Provenance, change: Pick<ChangeInput, "op" | "value">): Recorded {
     const rec: Recorded = { n, op: opName, lane, prov, inputs: [], advice: [], reports: [] };
     this.push(rec, lane, prov, change);
+    // What the operation advised (a value past its scale, one the world's setup does not list) is kept with the change.
+    for (const advised of this.advised.get(n) ?? []) this.advise(rec, advised, rec.inputs.length - 1);
+    this.advised.delete(n);
     this.recorded.push(rec);
     return rec;
   }

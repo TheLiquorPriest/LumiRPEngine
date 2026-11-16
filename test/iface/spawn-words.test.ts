@@ -51,6 +51,7 @@ describe("spawn somewhere given in words", () => {
     const kitchen = String(entityNamed(t, "Ida Pell").fields.place);
     const shed = String(entityNamed(t, "Ada Lorne").fields.place);
     expect(r.reports).toEqual([
+      "Operation 4 (fact): no lane was named, so this fact is recorded in the engine lane.",
       `Operation 5 (spawn): nothing goes by peg by the stove, so Wet coat was made at Keeper's kitchen [${kitchen}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
       `Operation 6 (spawn): nothing goes by the hat box by the door, so Oilskin hat was made at Boat shed [${shed}], which is recorded as assumed, and those words are kept on it as where it was said to be.`,
     ]);

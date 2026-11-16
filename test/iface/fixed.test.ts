@@ -94,7 +94,7 @@ describe("world_apply", () => {
     const second = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "footwear", value: "barefoot now", replaces: written?.id as string, source: src }] });
     expect(second.error).toBeUndefined();
     expect((ops(second)[0]?.facts as JsonObject[]).map((f) => f.value)).toEqual(["barefoot now"]);
-    expect(second.reports ?? []).toEqual([]);
+    expect(second.reports ?? []).toEqual(["Operation 1 (fact): no lane was named, so this fact is recorded in the engine lane."]);
     const third = await t.call("world_apply", { operations: [{ op: "fact", about: "wren", key: "hat", value: "a wide straw hat", replaces: "f-000000000000", source: src }] });
     expect(third.error).toBeUndefined();
     expect(ops(third)[0]?.applied).toBe(true);

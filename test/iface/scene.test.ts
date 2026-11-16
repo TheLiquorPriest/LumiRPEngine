@@ -29,7 +29,7 @@ describe("the first turn of a chat with no world", () => {
       ],
     });
     expect(r.error).toBeUndefined();
-    expect(r.reports ?? []).toEqual([]);
+    expect(r.reports ?? []).toEqual(["Operation 7 (fact): no lane was named, so this fact is recorded in the engine lane."]);
     expect((dataOf(r).operations as JsonObject[]).map((o) => o.applied)).toEqual(Array(8).fill(true));
     const state = t.s.stateAt(t.turn.id).state;
     const doc = t.deps.env.worlds(state.world.revision);
