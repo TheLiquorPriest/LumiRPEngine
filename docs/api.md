@@ -209,6 +209,19 @@ Each turn's prompt notices and front, newest first, with its number on the chat'
 | Body | none |
 | Reply | `{ items: PromptTurnShown[]; next: string | null }`, a page at a time |
 
+### `GET /api/v1/chats/:chat/replies`
+
+The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `ids`: `string`, The messages' ids, comma-separated: the rows the page has mounted |
+| Body | none |
+| Reply | [`RepliesReply`](#repliesreply) |
+
 ### `POST /api/v1/chats/:chat/settle`
 
 Settle now: a run on the chat's newest turn that writes nothing into the chat; answers the turn and the run begun, or a refusal in the turn-errors part's words.
@@ -630,6 +643,19 @@ The catalog the player's + Add offers: the types of things and the vehicle class
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+
+### `GET /api/v1/chats/:chat/walk`
+
+What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `chat` |
+| Query | `x`: `number`<br>`y`: `number` |
+| Body | none |
+| Reply | `{ minutes: number; disabled?: string }` |
 
 ### `GET /api/v1/chats/:chat/world`
 

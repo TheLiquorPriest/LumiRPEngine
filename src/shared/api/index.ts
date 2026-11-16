@@ -1181,6 +1181,13 @@ export interface KeyMade {
   ends: number | null;
 }
 
+/** What a lane of a turn did: how many of its changes took effect, and the lines a person reads of them (the engine's worded as his character knows them; the story's, each beat the turn wrote). */
+export interface LaneShown {
+  lane: "story" | "engine";
+  count: number;
+  lines: string[];
+}
+
 /** A level of the agents' tree: what ships, the user's own, a character's, a chat's. */
 export type LayerLevel = "shipped" | "global" | "character" | "chat";
 
@@ -2047,6 +2054,24 @@ export interface Release {
   form: "tags" | "message" | "narrator" | "narrator-live" | "file";
   path?: string;
   length: number;
+}
+
+/** The line under each reply asked for that the chat's path holds; his own messages are left out. */
+export interface RepliesReply {
+  replies: ReplyLine[];
+}
+
+/** The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, and the turn's marks. */
+export interface ReplyLine {
+  message: string;
+  played: boolean;
+  engine: string | null;
+  turn: string | null;
+  joined: { turn: string; joined: string } | null;
+  time: string | null;
+  place: string | null;
+  lanes: LaneShown[];
+  marks: { kind: string }[];
 }
 
 /** What went to the chat: a piece of the reply's text at its offset in the reply (UTF-16 code units), or one progress line of the chat's thinking block, counted from 0. */
@@ -3903,6 +3928,66 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** A person's things: what they carry, wear and keep, and where each is; none for an id that is no person. */
+  "GET /api/v1/chats/:chat/people/:entity/things": {
+    params: { chat: string; entity: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The chat's places as it plays them, the world's own and those made in play, a page at a time, at the chat's newest turn or as it stood at one of its turns: each with the place it is in, what kind of place it is and whether it draws a grid of its own. */
+  "GET /api/v1/chats/:chat/places": {
+    params: { chat: string };
+    query: { turn?: TurnId; limit?: number; cursor?: string };
+    body: undefined;
+    reply: Places;
+    paged: true;
+    long: false;
+    joined: true;
+  };
+  /** One place of the chat in full, by its id or its name, at the chat's newest turn or as it stood at one of its turns, in its nine parts: its sources read live and its base, what the story changed there, its features, who and what is here, its ways, its access and state, its history and who knows of it. */
+  "GET /api/v1/chats/:chat/places/:place": {
+    params: { chat: string; place: string };
+    query: { turn?: TurnId };
+    body: undefined;
+    reply: PlaceRecord;
+    paged: false;
+    long: false;
+    joined: true;
+  };
+  /** Writes the owner's own words as a place's base, a change of his own with source player, placed after the chat's newest reply on its own line: swiping that reply keeps it and a turn that is running goes on from the state it started with. It is drawn against the entries bound to the place as they stand, so the base is no longer marked older than its sources; he undoes it from the review card. */
+  "PUT /api/v1/chats/:chat/places/:place/base": {
+    params: { chat: string; place: string };
+    query: Record<string, never>;
+    body: { text: string };
+    reply: PlaceBaseWritten;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line put in the chat as his message and a reply started, through Lumiverse's own routes as him, with nothing written into message or chat metadata; the turn that answers it is told what was pressed. */
+  "POST /api/v1/chats/:chat/plays": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: PlayAsk;
+    reply: PlayedReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined. */
+  "GET /api/v1/chats/:chat/replies": {
+    params: { chat: string };
+    query: { ids: string };
+    body: undefined;
+    reply: RepliesReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than requests.textMost is not kept, and the answer says so. */
   "POST /api/v1/chats/:chat/requests": {
     params: { chat: string };
@@ -4352,6 +4437,16 @@ export interface ApiRoutes {
     paged: false;
     long: false;
     joined: true;
+  };
+  /** What a step to a square of the grid the player's character stands on would take: its minutes, or the reason there is no way there. */
+  "GET /api/v1/chats/:chat/walk": {
+    params: { chat: string };
+    query: { x: number; y: number };
+    body: undefined;
+    reply: { minutes: number; disabled?: string };
+    paged: false;
+    long: false;
+    joined: false;
   };
   /** What the chat's history window is now, for its marker: whether it is on, the first history message it keeps on the chat's current path (with the step and the hold as the chat's settings set them), the message just above it, how many messages lie above, and how many of those the story does not cover yet; only the signed-in user's own chats. */
   "GET /api/v1/chats/:chat/window": {
