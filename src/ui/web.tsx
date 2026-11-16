@@ -270,7 +270,7 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
     gate,
     route,
     timers: deps.timers,
-    keptHost: webHost,
+    keptHost: () => webHost({ revokeMs: () => settings.values.get().downloadRevokeMs }),
     go(next) {
       const hash = hashOf(next);
       if (location.hash === hash) onHash();

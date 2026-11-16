@@ -4,4 +4,4 @@
 import { BuildPage } from "../kept/page";
 import type { PageEntry } from "../page-entry";
 
-export const entry: PageEntry = { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false, often: false, order: 80, render: () => <BuildPage /> };
+export const entry: PageEntry = { id: "build", title: "Build", icon: "hammer", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 80, render: (route) => <BuildPage chat={route.chat ?? null} /> };
