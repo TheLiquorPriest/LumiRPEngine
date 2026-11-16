@@ -42,6 +42,19 @@ Do nothing until position starts to matter: a fight, a chase, a search, a questi
 
 If the place is named in the lore and described there, follow the description.
 
+## A place the story makes
+
+A place the story needs and the world does not hold is made with `world_apply` and a `place` operation. `spawn` makes people and things, never places. Give its `name` and its `kind`, and `at` for the place it is inside.
+
+- `kind: "place"` is a place of this world's own, inside another or in none. `room`, `spot` and `venue` are made in play inside a place, so they need `at`.
+- Where lore describes it, name the entries it comes from in `sources`, each with the aspect of the place it defines (its layout, its history), and give its words as `base`. Lore stays the authority for what it defines: the base is marked older than an entry that changed after it was drawn.
+- A place of that name already inside the same place is told of in the answer, not taken for the new one.
+- `place_label` renames a place or gives it other names. `place_remove` takes one out once nobody and nothing is in it and no place is inside it. `world_path` lays a way between two places with its minutes and distance by each way of travel (walk, road, offroad, water, air); a way a map draws is changed on the map. Find all three with `tool_search`.
+
+## What the story changes at a place
+
+Record it as a `fact` about the place with a `part`: `since` for what the story changed there (a wall broken, a fire lit), `feature` for what the place has, `access` for who may enter and how it stands. Name the beat that caused it in `beat`. `world_query` at the place shows the newest few of each part, with the query that reads the rest whole (`part`).
+
 ## How a change is recorded
 
 - A move: `world_apply` with a `move` operation. Give the square, or "next to" someone, or a zone.

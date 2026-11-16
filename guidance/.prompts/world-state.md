@@ -48,6 +48,19 @@ lines:
   left_out_uncounted: '… and more, not counted, left out to keep the world state within its budget (world_query opens any level)'
   walk_stopped: 'The engine stopped following {{from}} at {{at}}: {{setting}} lets it go {{limit}} steps, so what lies past it is not counted.'
   place_chain_stopped: 'What {{place}} takes from the places above it stops at {{at}}: {{setting}} lets it reach {{limit}} places up.'
+  place_since: '· since — {{value}} ({{key}}; turn {{turn}}{{#time}}, {{time}}{{/time}}{{#beat}}; beat {{id}}{{#text}}: "{{text}}"{{/text}}{{#message}}, message {{message}}{{/message}}{{/beat}}{{#precision}}; {{precision}}{{/precision}}{{#standing}}; {{standing}}{{/standing}}{{#source}}; source {{source}}{{/source}}) [{{id}}]'
+  place_feature: '· feature — {{value}} ({{key}}; turn {{turn}}{{#time}}, {{time}}{{/time}}{{#beat}}; beat {{id}}{{#text}}: "{{text}}"{{/text}}{{#message}}, message {{message}}{{/message}}{{/beat}}{{#precision}}; {{precision}}{{/precision}}{{#standing}}; {{standing}}{{/standing}}{{#source}}; source {{source}}{{/source}}) [{{id}}]'
+  place_access: '· access — {{value}} ({{key}}; turn {{turn}}{{#time}}, {{time}}{{/time}}{{#beat}}; beat {{id}}{{#text}}: "{{text}}"{{/text}}{{#message}}, message {{message}}{{/message}}{{/beat}}{{#precision}}; {{precision}}{{/precision}}{{#standing}}; {{standing}}{{/standing}}{{#source}}; source {{source}}{{/source}}) [{{id}}]'
+  place_fixture: '· fixture — {{name}}, at {{at}}, {{size}} squares'
+  place_zone: '· zone — {{name}}, covering {{squares}} squares'
+  place_entry: '· entry — {{audience}}{{#from}} (set by {{from}}){{/from}}'
+  place_door: '· door — at {{at}}, {{state}}'
+  place_more: '· … {{n}} more of its {{part}}; {{ask}} reads the rest'
+  place_none: '· {{part}} — nothing is recorded'
+  place_base: '· base — {{text}}{{#world}} (the world''s own words){{/world}}{{#older}} (older than an entry bound to the place, which has changed since){{/older}}{{#by}} (written by {{by}}){{/by}}'
+  place_source: '· source — {{entry}} defines its {{aspect}}{{#title}}: {{title}}{{/title}}{{#gone}} (Lumiverse holds no such entry){{/gone}}{{#newer}} (changed since the base was drawn){{/newer}}'
+  place_way: '· way — {{to}} [{{id}}], direction {{dir}}{{#modes}}; by {{mode}}: {{minutes}} minutes{{#km}}, {{km}} km{{/km}}{{/modes}}{{#laid}}; laid in this chat{{/laid}}'
+  place_adjoining: '· adjoining — {{name}} [{{id}}] ({{how}})'
 keys:
   time_zone: time zone
 ---
