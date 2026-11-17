@@ -1177,6 +1177,10 @@ export class Dispatcher {
         const world = r.revision !== undefined ? (await store.get(r.worldId, userId, r.revision)).world : await store.working(r.worldId, userId);
         return { updates: tableUpdates(world, this.rt.registry.tables, this.rt.starterTables) };
       }
+      case "limits":
+      case "undo_upgrade":
+        // Build's patch sizes and an Upgrade's Undo are served on RPE's routes (`src/ui/kept/calls/worlds.ts`), never on this road.
+        throw new RequestError("unavailable", `lre.world ${r.op} is served on RPE's routes`);
     }
   }
 
