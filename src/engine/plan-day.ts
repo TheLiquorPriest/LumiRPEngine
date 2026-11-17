@@ -7,6 +7,7 @@
 
 import type { EntityId } from "../shared/ids";
 import type { Rng } from "./rng";
+import { say } from "./lines";
 
 export interface PlanOption {
   id: string;
@@ -128,7 +129,7 @@ export function planDay(input: PlanInput): DayPlan {
       const idleEnd = Math.min(gapEnd, t + IDLE_STEP, ...opens);
       const last = blocks[blocks.length - 1];
       if (last && last.option === IDLE_OPTION && last.end === t) last.end = idleEnd;
-      else blocks.push({ start: t, end: idleEnd, option: IDLE_OPTION, label: "Free time", activity: IDLE_OPTION, place: null, utility: 0, reasons: ["nothing better to do"], fixed: false });
+      else blocks.push({ start: t, end: idleEnd, option: IDLE_OPTION, label: "Free time", activity: IDLE_OPTION, place: null, utility: 0, reasons: [say("eng_nothing_better_to_do")], fixed: false });
       t = idleEnd;
       continue;
     }

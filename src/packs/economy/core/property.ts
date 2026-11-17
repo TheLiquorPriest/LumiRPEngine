@@ -710,7 +710,7 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
   // A buyer outside the world pays what the market does: no more than the property is worth.
   const value = propertyValue(ctx.state, x.property);
   if (x.buyer === undefined && price > value) return reject("declined", say("why_no_buyer_outside_the_world_pays_more", { currency: money(value), name: e.name }));
-  const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
+  const memo = say("org_log_sold_a_share_share_of_name_for", { share: Math.round(share), name: e.name, price: money(price), if_share: share < 100 });
   // The seller's own loans against it are settled from the proceeds.
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);

@@ -866,13 +866,13 @@ export function payrollProblem(ctx: ReadContext, api: FinanceApi, by: EntityId, 
   const shown = (id: EntityId): string => shownLabel(ctx, ctx.world.pov, id);
   if (api.interestsOf(ctx, by).has(worker)) {
     if (api.shareOf(ctx.state, business, by) > 0) return null;
-    const what = doing === "hire" ? `put ${worker === by ? "themselves" : shown(worker)} on its payroll` : `set ${worker === by ? "their own" : `${shown(worker)}'s`} pay`;
-    return `${shown(by)} runs ${shown(business)} for others, so can't ${what}`;
+    const what = doing === "hire" ? say("org_log_put_themselves_worker_on_its_payroll", { worker: shown(worker), if_worker: worker === by }) : say("org_log_set_their_own_worker_s_pay", { worker: shown(worker), if_worker: worker === by });
+    return say("org_log_shown_runs_business_for_others_so_cant", { shown: shown(by), business: shown(business), what: what });
   }
   const deposit = api.depositAccount(ctx, worker);
   const lands = [...(deposit ? [deposit] : []), ...splits.filter((s) => ownsAccount(api, ctx.state, worker, s.to)).map((s) => s.to)];
   const reached = lands.find((a) => api.landsInReach(ctx, by, a, business));
-  return reached === undefined ? null : `${shown(by)} runs ${shown(business)} for others, so can't pay ${shown(worker)} into ${shown(reached)}, which ${shown(by)} may spend`;
+  return reached === undefined ? null : say("org_log_shown_runs_business_for_others_so_cant_2", { shown: shown(by), business: shown(business), worker: shown(worker), reached: shown(reached) });
 }
 
 /** Whom an act on an employer's staff reaches: one of its people, and the position someone is hired or appointed into; or every job there. */
@@ -892,10 +892,10 @@ function staffRefusal(ctx: ReadContext, by: EntityId, employer: EntityId, power:
   const mine = may.grant.basis === "position" ? positions.find((p) => p.id === may.grant.id) : undefined;
   if (mine?.scope !== "below") return null;
   const name = labelOf(ctx, employer);
-  if (reach === "all") return `${mine.title} reaches only the positions below it at ${name}, not every job there`;
+  if (reach === "all") return say("org_log_title_reaches_only_the_positions_below_it", { title: mine.title, name: name });
   if (reach.position === undefined || positionsBelow(positions, mine.id).includes(reach.position)) return null;
   const into = positions.find((p) => p.id === reach.position)?.title;
-  return into ? `${into} isn't below ${mine.title} at ${name}` : `${mine.title} hires and appoints only into the positions below it at ${name}`;
+  return into ? say("org_log_into_isnt_below_title_at_name", { into: into, title: mine.title, name: name }) : say("org_log_title_hires_and_appoints_only_into_the", { title: mine.title, name: name });
 }
 
 /** What an act on an employer's staff records when someone acts for an organization other than themselves: its History line (`orgs.acted`); nothing otherwise. */
@@ -988,7 +988,7 @@ function endJob(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEven
   if (!job) return reject("missing_entity", say("why_no_job_job", { job: labelOf(ctx, strOf(args.job)) }));
   const by = strOf(args.by);
   if (by !== "" && by !== job.worker) {
-    const refusal = job.party === null ? `${labelOf(ctx, by)} can't end that job` : staffRefusal(ctx, by, job.party, "staff.fire", { worker: job.worker });
+    const refusal = job.party === null ? say("org_log_by_cant_end_that_job", { by: labelOf(ctx, by) }) : staffRefusal(ctx, by, job.party, "staff.fire", { worker: job.worker });
     if (refusal !== null) return reject("not_owner", refusal);
   }
   if (job.status === "ended") return reject("ended", say("why_that_job_has_already_ended"));
@@ -1068,7 +1068,7 @@ function setTitle(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEv
   const words = strOf(args.title).trim();
   const who = labelOf(ctx, job.worker);
   if (words === strOf(own(ctx.state.entities, job.id)?.fields.title)) return reject("unchanged", words !== "" ? say("why_who_already_goes_by_words", { who: who, words: words }) : say("why_who_s_job_has_no_title_of", { who: who }));
-  const line = words !== "" ? `${who} goes by ${words}` : `${who}'s job no longer has a title of its own`;
+  const line = words !== "" ? say("org_log_who_goes_by_words", { who: who, words: words }) : say("org_log_who_s_job_no_longer_has_a", { who: who });
   return [{ type: "set", entity: job.id, field: "title", value: words === "" ? null : words }, ...(theirOwn ? [] : acted(ctx, job.party, by, "members.appoint", line, [job.worker]))];
 }
 

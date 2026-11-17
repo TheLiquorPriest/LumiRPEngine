@@ -383,7 +383,7 @@ function debtsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, gather: 
   if (unemployment > 0) out.push({ label: "Unemployment tax", cents: unemployment });
   for (const what of ["suppliers", "sales_tax"] as const) {
     const p = settlePosting(ctx, api, business, what);
-    if (p && p.cents > 0) out.push({ label: what === "sales_tax" ? "Sales tax it collected" : "Its suppliers", cents: p.cents });
+    if (p && p.cents > 0) out.push({ label: what === "sales_tax" ? say("org_log_sales_tax_it_collected") : say("org_log_its_suppliers"), cents: p.cents });
   }
   for (const id of invoiceIds(ctx)) {
     const inv = readInvoice(ctx, id);
@@ -448,9 +448,9 @@ function assetsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: P
   const goes = recipient === null ? "to no one" : `to ${hiddenFrom(ctx, viewer, recipient) ? "one of its owners" : labelOf(ctx, recipient)}`;
   const shown = (id: EntityId, unseen: string): Pick<WindAsset, "id" | "label"> => (hiddenFrom(ctx, viewer, id) ? { id: opaqueId(id), label: unseen } : { id, label: labelOf(ctx, id) });
   return [
-    ...soleHoldings(api, ctx, business).map((h) => ({ ...shown(h, "A holding"), value: holdingValue(ctx, h), goes: "sold at the market" })),
-    ...properties.map((p) => ({ ...shown(p.id, "A property"), value: Math.round((propertyValue(ctx.state, p.id) * api.shareOf(ctx.state, p.id, business)) / 100), goes: p.sold ? "sold at its value" : "to its owners by share" })),
-    ...stakes.map((s) => ({ ...shown(s.id, "A stake in another company"), value: Math.round((orgValue(api, ctx, s.id) * api.shareOf(ctx.state, s.id, business)) / 100), goes: s.sold ? "sold at its value" : "to its owners by share" })),
+    ...soleHoldings(api, ctx, business).map((h) => ({ ...shown(h, say("org_log_a_holding")), value: holdingValue(ctx, h), goes: say("org_log_sold_at_the_market") })),
+    ...properties.map((p) => ({ ...shown(p.id, say("org_log_a_property")), value: Math.round((propertyValue(ctx.state, p.id) * api.shareOf(ctx.state, p.id, business)) / 100), goes: p.sold ? say("org_log_sold_at_its_value") : say("org_log_to_its_owners_by_share") })),
+    ...stakes.map((s) => ({ ...shown(s.id, say("org_log_a_stake_in_another_company")), value: Math.round((orgValue(api, ctx, s.id) * api.shareOf(ctx.state, s.id, business)) / 100), goes: s.sold ? say("org_log_sold_at_its_value") : say("org_log_to_its_owners_by_share") })),
     ...ownedThings(ctx, business).map((t) => ({ ...shown(t, "Something it owns"), value: null, goes })),
   ];
 }
@@ -497,7 +497,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       return a === gather || isDebt(api, w.ctx, a) || cents <= 0 ? [] : [{ account: a, amount: -cents }];
     });
     if (lines.length > 0) {
-      const failed = run(api.post(w.ctx, [...lines, { account: gather, amount: -lines.reduce((s, l) => s + l.amount, 0) }], { memo: `${bizName}: gathered for winding up`, kind: "transfer", category: "transfer" }));
+      const failed = run(api.post(w.ctx, [...lines, { account: gather, amount: -lines.reduce((s, l) => s + l.amount, 0) }], { memo: say("org_log_bizname_gathered_for_winding_up", { bizName: bizName }), kind: "transfer", category: "transfer" }));
       if (failed) return failed;
     }
   }
@@ -559,7 +559,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       owed.map((o): LedgerEvent => ({ type: "set", entity: o.id, field: "state", value: "void" })),
     );
     if (failed) return failed;
-    said.push({ text: `Wrote off ${owed.length === 1 ? "an invoice" : `${owed.length} invoices`} owed it (${money(owed.reduce((a, o) => a + o.line.cents, 0))})`, names: [] });
+    said.push({ text: say("org_log_wrote_off_an_invoice_owedcount_invoices_owed", { owedCount: owed.length, cents: money(owed.reduce((a, o) => a + o.line.cents, 0)), if_owed: owed.length === 1 }), names: [] });
   }
 
   // What it still holds, handed to its owners by share, each starting their basis at its value; things and vehicles to one of them.
@@ -578,7 +578,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     const routed: LedgerEvent[] = rent !== "" && accountsNaming(api, w.ctx, business).includes(rent) ? [{ type: "set", entity: p.id, field: "rent_to", value: null }] : [];
     const failed = handOut(p.id, next, (propertyValue(w.ctx.state, p.id) * share) / 100, [...routed, ...moveLeases(api, w.ctx, p.id, owners.map((o) => o.party), next)]);
     if (failed) return failed;
-    said.push({ text: `Handed its share of ${labelOf(w.ctx, p.id)} to its owners`, names: [] });
+    said.push({ text: say("org_log_handed_its_share_of_id_to_its", { id: labelOf(w.ctx, p.id) }), names: [] });
   }
   for (const s of stakes.filter((x) => !x.sold)) {
     const owners = api.ownersOf(w.ctx.state, s.id);
@@ -591,7 +591,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     } else next = rowsHandedOut(owners, business, holders);
     const failed = handOut(s.id, next, (orgValue(api, w.ctx, s.id) * share) / 100, []);
     if (failed) return failed;
-    said.push({ text: `Handed its stake in ${labelOf(w.ctx, s.id)} to its owners`, names: [] });
+    said.push({ text: say("org_log_handed_its_stake_in_id_to_its", { id: labelOf(w.ctx, s.id) }), names: [] });
   }
   const things = ownedThings(w.ctx, business);
   const recipient = thingsTo(api, w.ctx, business, plan.to);
@@ -601,7 +601,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       things.map((t): LedgerEvent => ({ type: "set", entity: t, field: "owner", value: recipient })),
     );
     if (failed) return failed;
-    said.push({ text: `Gave ${things.length === 1 ? labelOf(w.ctx, things[0] ?? "") : `${things.length} things`} to ${labelOf(w.ctx, recipient)}`, names: [recipient] });
+    said.push({ text: say("org_log_gave_things_thingscount_things_to_recipient", { things: labelOf(w.ctx, things[0] ?? ""), thingsCount: things.length, recipient: labelOf(w.ctx, recipient), if_things: things.length === 1 }), names: [recipient] });
   }
 
   // The leases it rents end today.
@@ -625,7 +625,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     if (part.cents > 0 && gather !== null) {
       const into = api.depositAccount(w.ctx, part.party);
       if (!into) return reject("no_account", say("why_party_has_no_account_their_share_of", { party: labelOf(w.ctx, part.party), bizName: bizName }));
-      const failed = run(api.pay(w.ctx, { from: gather, to: part.party, cents: part.cents, memo: `${bizName} wound up: a share of what was left`, deposit: into, kind: "purchase", category: "investment" }));
+      const failed = run(api.pay(w.ctx, { from: gather, to: part.party, cents: part.cents, memo: say("org_log_bizname_wound_up_a_share_of_what", { bizName: bizName }), deposit: into, kind: "purchase", category: "investment" }));
       if (failed) return failed;
     }
     const parent = (holders.find((h) => h.party === part.party)?.share ?? 0) + 1e-9 >= 80 && api.partyKind(w.ctx, part.party) === "business" && structureOf(w.ctx.state, part.party) === "c_corp";
@@ -633,7 +633,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     const failed = applied(w, [disposal(business, part.party, 100, proceeds, `${bizName} wound up`)]);
     if (failed) return failed;
   }
-  if (left > 0) for (const p of parts) said.push({ text: `Paid ${labelOf(w.ctx, p.party)} ${money(p.cents)} (${Math.round((holders.find((h) => h.party === p.party)?.share ?? 0) * 100) / 100}%) of what was left`, names: [p.party] });
+  if (left > 0) for (const p of parts) said.push({ text: say("org_log_paid_party_cents_share_of_what_was", { party: labelOf(w.ctx, p.party), cents: money(p.cents), share: Math.round((holders.find((h) => h.party === p.party)?.share ?? 0) * 100) / 100 }), names: [p.party] });
 
   // Its accounts closed (one it shares keeps going without it), its owners gone, and it dissolved.
   for (const a of accountsNaming(api, w.ctx, business)) {
@@ -727,7 +727,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
       if (cents <= 0) continue;
       const deposit = api.depositAccount(w.ctx, h.party);
       if (!deposit) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, h.party) }));
-      const posted = api.pay(w.ctx, { from, to: h.party, cents, memo: `For a share of ${name}`, deposit, kind: "purchase", category: "investment" });
+      const posted = api.pay(w.ctx, { from, to: h.party, cents, memo: say("org_log_for_a_share_of_name", { name: name }), deposit, kind: "purchase", category: "investment" });
       const failed = isRejection(posted) ? posted : applied(w, posted);
       if (failed) return failed;
     }
@@ -763,7 +763,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
     const failed = applied(w, [{ type: "set", entity: into, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue }]);
     if (failed) return failed;
   }
-  const deal = [issued > 0 ? `${Math.round(ratio * 10000) / 10000} of its units for each of theirs (${issued} in all)` : null, cash > 0 ? money(cash) : null].filter((x): x is string => x !== null).join(" and ");
+  const deal = [issued > 0 ? say("org_log_ratio_of_its_units_for_each_of", { ratio: Math.round(ratio * 10000) / 10000, issued: issued }) : null, cash > 0 ? money(cash) : null].filter((x): x is string => x !== null).join(" and ");
 
   if (terms.keep) {
     // Kept: the survivor holds all of it, its own stake and every holder's, at what it gave for them. A company can't hold an S corporation's shares.
@@ -773,7 +773,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
     for (const h of holders) next = moveUnits(next, h.party, into, unitsOf(next, h.party));
     const failed = applied(w, [{ type: "set", entity: business, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue }, acquisition(business, into, Math.round(issued * a.perUnit) + cash)]);
     if (failed) return failed;
-    said.push({ text: `Took over ${name} as its subsidiary${deal !== "" ? `: its holders got ${deal}` : ""}`, names: holders.map((h) => h.party) });
+    said.push({ text: say("org_log_took_over_name_as_its_subsidiary_its", { name: name, deal: deal, if_deal: deal !== "" }), names: holders.map((h) => h.party) });
     return { events: w.events, said };
   }
 
@@ -874,7 +874,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   const failed = applied(w, events);
   if (failed) return failed;
   said.push({ text: `Took in ${name}${deal !== "" ? `: its holders got ${deal}` : ""}`, names: holders.map((h) => h.party) });
-  if (staff.length > 0) said.push({ text: `${staff.length === 1 ? labelOf(ctx, staff[0] ?? "") : `${staff.length} staff`} came over from ${name}`, names: staff.length === 1 ? staff : [] });
+  if (staff.length > 0) said.push({ text: say("org_log_staff_staffcount_staff_came_over_from_name", { staff: labelOf(ctx, staff[0] ?? ""), staffCount: staff.length, name: name, if_staff: staff.length === 1 }), names: staff.length === 1 ? staff : [] });
   return { events: w.events, said };
 }
 

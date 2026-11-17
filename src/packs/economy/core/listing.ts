@@ -134,10 +134,10 @@ function assetIdFor(ctx: ReadContext, business: EntityId): string {
 /** Why `party` may not decide about `business`'s market (`doing` heading it): its money level, the power, its structure (listing only), then the votes. */
 function marketRefusal(ctx: ReadContext, party: EntityId, business: EntityId, doing: string, listing: boolean): string | null {
   const name = labelOf(ctx, business);
-  if (ctx.levelOf(business, "money") < 3) return `${name} goes on a market from Money 3`;
+  if (ctx.levelOf(business, "money") < 3) return say("org_log_name_goes_on_a_market_from_money", { name: name });
   const may = mayAct(ctx, party, business, "shares.manage");
   if (!may.ok) return may.reason;
-  if (listing && strOf(own(ctx.state.entities, business)?.fields.structure, "llc") !== "c_corp") return `Only a C corporation lists on a market: change ${name}'s structure first`;
+  if (listing && strOf(own(ctx.state.entities, business)?.fields.structure, "llc") !== "c_corp") return say("org_log_only_a_c_corporation_lists_on_a", { name: name });
   return decisionRefusal(ctx, business, party, doing);
 }
 
@@ -171,7 +171,7 @@ function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   if (strOf(fields.structure, "llc") !== "c_corp") return reject("structure", say("why_only_a_c_corporation_lists_on_a", { name: name }));
   const listing = listingIn(fields);
   // Short of the votes, an action that asks (`vote`) puts it to a vote instead (ORG-SPEC Phase 5): the motion's events.
-  const offered = `${listing ? `Offer ${units} more units of ${name}` : `List ${units} units of ${name}`} on the market${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : ""}`;
+  const offered = say("org_log_offer_units_more_units_of_name_list", { units: units, name: name, price: typeof a.price === "number" ? moneyWords(ctx, a.price) : undefined, if_listing: !!(listing), if_number: typeof a.price === "number" });
   const denied = decision(ctx, by, party, business, "shares.manage", "Listing", offered);
   if (denied) return denied;
   const counting = ownersIn(fields).some((o) => ROLE_RIGHTS[o.role].worth && o.units !== undefined);
@@ -199,10 +199,10 @@ function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
     if (isRejection(symbol)) return symbol;
     next = { asset: assetIdFor(ctx, business), symbol, float: units, since: ctx.state.clock, price: each, ...(cls !== "" && cls !== classes[0]?.id ? { class: cls } : {}) };
   }
-  const memo = `${units} new units of ${name} sold on the market at ${moneyWords(ctx, each)} a unit`;
+  const memo = say("org_log_units_new_units_of_name_sold_on", { units: units, name: name, each: moneyWords(ctx, each) });
   const posted = api.post(ctx, [{ account: marketOf(api, next.asset), amount: -cents }, { account: deposit, amount: cents }], { memo, kind: "sale", category: "investment", payer: "The market" });
   if (isRejection(posted)) return posted;
-  const words = listing ? `Offered ${units} more units on the market at ${moneyWords(ctx, each)} a unit (${moneyWords(ctx, cents)})` : `Listed ${units} units on the market as ${next.symbol} at ${moneyWords(ctx, each)} a unit (${moneyWords(ctx, cents)})`;
+  const words = listing ? say("org_log_offered_units_more_units_on_the_market", { units: units, each: moneyWords(ctx, each), cents: moneyWords(ctx, cents) }) : say("org_log_listed_units_units_on_the_market_as", { units: units, symbol: next.symbol, each: moneyWords(ctx, each), cents: moneyWords(ctx, cents) });
   return unit([
     ...(counting ? [] : [{ type: "set" as const, entity: business, field: "owners", value: ownersJson(owners) as unknown as JsonValue }]),
     { type: "set", entity: business, field: "listing", value: listingJson(next) },
@@ -227,7 +227,7 @@ function delist(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rej
   if (!listing) return reject("not_listed", say("why_name_isnt_on_a_market", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Delisting", `Take ${name} off the market${typeof a.price === "number" ? `, buying back its public units at ${moneyWords(ctx, a.price)} a unit` : ""}`);
+  const denied = decision(ctx, by, party, business, "shares.manage", say("org_log_delisting"), say("org_log_take_name_off_the_market_buying_back", { name: name, price: typeof a.price === "number" ? moneyWords(ctx, a.price) : undefined, if_number: typeof a.price === "number" }));
   if (denied) return denied;
   const market = Math.round(quoteOf(ctx, listing.asset) ?? listing.price);
   const given = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : null;
@@ -255,7 +255,7 @@ function delist(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rej
     const paid = payout(api, ctx, owners, proceeds, source, null, accountOfHolding(ctx.state, holding));
     if (paid.paid < proceeds) return reject("no_account", say("why_holding_has_no_account_to_be_paid", { holding: labelOf(ctx, owners[0]?.party ?? holding) }));
     for (const l of paid.lines) if (l.account !== source) add(l.account, l.amount);
-    lots.push(lotsChange(ctx.state, holding, -qty, proceeds, "sell", `${listing.symbol} bought out at ${moneyWords(ctx, each)} a unit`));
+    lots.push(lotsChange(ctx.state, holding, -qty, proceeds, "sell", say("org_log_symbol_bought_out_at_each_a_unit", { symbol: listing.symbol, each: moneyWords(ctx, each) })));
     names.push(...owners.filter((o) => ROLE_RIGHTS[o.role].worth).map((o) => o.party));
     total += proceeds;
     bought += qty;
@@ -264,14 +264,14 @@ function delist(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rej
   const rest = Math.round(outside * each);
   if (rest > 0) add(marketOf(api, listing.asset), rest);
   total += rest;
-  const memo = `${name} went off the market: bought back ${listing.float} public units at ${moneyWords(ctx, each)} a unit`;
+  const memo = say("org_log_name_went_off_the_market_bought_back", { name: name, float: listing.float, each: moneyWords(ctx, each) });
   const posted = total > 0 ? api.post(ctx, [{ account: source, amount: -total }, ...lines], { memo, kind: "purchase", category: "investment" }) : [];
   if (isRejection(posted)) return posted;
   return unit([
     ...stamped(posted, by, business),
     ...lots,
     { type: "set", entity: business, field: "listing", value: null },
-    ...decided(ctx, business, by, party, `Went off the market: bought back ${listing.float} public units at ${moneyWords(ctx, each)} a unit (${moneyWords(ctx, total)})`, names),
+    ...decided(ctx, business, by, party, say("org_log_went_off_the_market_bought_back_float", { float: listing.float, each: moneyWords(ctx, each), total: moneyWords(ctx, total) }), names),
   ]);
 }
 
@@ -300,7 +300,7 @@ function marketSale(api: FinanceApi, ctx: ReadContext, sale: MarketSale): Ledger
   if (!to) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, party) }));
   const unusable = api.mayUse(ctx, party, to, "into");
   if (unusable) return unusable;
-  const memo = `Sold ${units} units of ${name} on the market at ${moneyWords(ctx, Math.round(price))} a unit`;
+  const memo = say("org_log_sold_units_units_of_name_on_the", { units: units, name: name, price: moneyWords(ctx, Math.round(price)) });
   const posted = cents > 0 ? api.post(ctx, [{ account: marketOf(api, listing.asset), amount: -cents }, { account: to, amount: cents }], { memo, kind: "sale", category: "investment", payer: "The market" }) : [];
   if (isRejection(posted)) return posted;
   let left = units;
@@ -440,8 +440,8 @@ function marketView(api: FinanceApi, ctx: ReadContext, business: EntityId, viewe
     const mine = Math.min(unitsOf(owners, viewer), registered - 1);
     acts = {
       list: marketRefusal(ctx, viewer, business, "Listing", true),
-      delist: listing ? marketRefusal(ctx, viewer, business, "Delisting", false) : `${name} isn't on a market`,
-      offer: !listing ? `${name} isn't on a market` : unitsOf(owners, viewer) <= 0 ? `You hold no units of ${name} on its cap table` : mine <= 0 ? `${name} keeps an owner on its cap table: sell to someone in the world, or take it off the market` : api.feature(ctx, viewer, "investments") ? null : "Investments aren't followed at this money level",
+      delist: listing ? marketRefusal(ctx, viewer, business, say("org_log_delisting"), false) : say("org_log_name_isnt_on_a_market", { name: name }),
+      offer: !listing ? say("org_log_name_isnt_on_a_market", { name: name }) : unitsOf(owners, viewer) <= 0 ? say("org_log_you_hold_no_units_of_name_on", { name: name }) : mine <= 0 ? say("org_log_name_keeps_an_owner_on_its_cap", { name: name }) : api.feature(ctx, viewer, "investments") ? null : say("org_log_investments_arent_followed_at_this_money_level"),
       units: Math.max(0, mine),
       ...(shortOfVotes(ctx, viewer, business, "Listing", true) ? { voteList: true } : {}),
       ...(listing && shortOfVotes(ctx, viewer, business, "Delisting", false) ? { voteDelist: true } : {}),

@@ -18,6 +18,7 @@ import { createRng } from "./rng";
 import { evalExpr, placeWithin, scopeEnv, toValue, truthy } from "./scope";
 import { optionalQuery, own } from "./pack-kit";
 import type { Working } from "./working";
+import { say } from "./lines";
 
 export const CASCADE_CAP = 8;
 /** Firings per pass, whatever the depth: a runaway set of rules stops here with a note. */
@@ -166,7 +167,7 @@ function cascade(reg: Registry, w: Working, roots: Pending[], opts: RuleOptions)
     if (capped) break;
     queue = next;
   }
-  if (capped) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Rule cascade stopped at its cap of ${cap}.`, visibility: "secret" } });
+  if (capped) w.apply({ type: ENGINE_EVENTS.note, data: { text: say("eng_rule_cascade_stopped_at_its_cap_of", { cap: cap }), visibility: "secret" } });
   return firings;
 }
 

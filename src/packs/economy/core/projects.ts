@@ -1154,7 +1154,7 @@ export function registerProjects(r: FinanceRegistry): void {
       for (const s of p.def.steps) {
         const st = p.run.steps[s.id];
         if (doneAt(p, s) !== null) continue;
-        if (st?.wait) alerts.push({ tone: "warn", text: `${p.def.name}: ${s.name} is waiting for ${api.money(ctx, st.wait.cents)} to ${st.wait.side === "end" ? "finish" : "start"}`, ...(account ? { account } : {}) });
+        if (st?.wait) alerts.push({ tone: "warn", text: say("org_log_name_name2_is_waiting_for_cents_to", { name: p.def.name, name2: s.name, cents: api.money(ctx, st.wait.cents), if_end: st.wait.side === "end" }), ...(account ? { account } : {}) });
         else if (p.status === "active" && typeof st?.start === "number" && typeof st.end === "number") {
           const cents = costParts(s).end + (st.extra ?? 0);
           if (cents > 0) upcoming.push({ at: dayText(cal, st.end), clock: st.end, label: `${p.def.name}: ${s.name} (${COST_WHEN_WORDS[s.paid ?? "start"]})`, cents: -cents, flow: null, account });

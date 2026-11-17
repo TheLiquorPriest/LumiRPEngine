@@ -335,7 +335,7 @@ function unemploymentPosting(api: FinanceApi, ctx: ReadContext, employer: Entity
   if (cents <= 0 || !payer) return null;
   const year = dateAt(calendarOf(ctx.world), at).year;
   const returns = kind === "futa" && periods.length > 0 && periods.every((p) => p.year < year);
-  const memo = returns ? `FUTA return (Form 940) for ${periods.map((p) => p.year).join(", ")}` : kind === "futa" ? "FUTA deposit" : "State unemployment tax (SUTA)";
+  const memo = returns ? say("org_log_futa_return_form_940_for_periods", { periods: periods.map((p) => p.year).join(", ") }) : kind === "futa" ? say("org_log_futa_deposit") : say("org_log_state_unemployment_tax_suta");
   return { cents, lines: [{ account: payer, amount: -cents }, { account: api.outside(AUTHORITY[kind]), amount: cents }], memo, kind: "payment", category: "payroll", extra: [paidEvent(ctx, employer, kind, periods)] };
 }
 

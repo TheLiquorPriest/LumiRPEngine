@@ -245,7 +245,7 @@ function record(w: Working, events: readonly LedgerEvent[], seed: string): Ledge
 function leave(w: Working, rng: Rng, lines: FightLines): boolean {
   const enc = encounterOf(w.state);
   if (!enc || !povLeft(w.state, w.world, enc) || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "left", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
-  lines.push("You leave the fight.");
+  lines.push(say("fight_you_leave_the_fight"));
   return true;
 }
 
@@ -253,7 +253,7 @@ function leave(w: Working, rng: Rng, lines: FightLines): boolean {
 function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
   const enc = encounterOf(w.state);
   if (!enc || !stalledHolds(w.ctx, rules, enc) || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "stalemate", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
-  lines.push(`No one has attacked or been hurt in ${stalemateRounds(rules)} rounds: the fight peters out.`);
+  lines.push(say("fight_no_one_has_attacked_or_been_hurt", { rules: stalemateRounds(rules) }));
   return true;
 }
 
@@ -297,7 +297,7 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
   if (!endHolds(w.ctx, rules, now)) return stalled(w, rules, rng.fork("calm"), lines);
   const winner = winnerOf(w, now);
   record(w, [{ type: "combat.end", data: { encounter: now.id, reason: "over", winner, rounds: now.round } }], rng.seed);
-  lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
+  lines.push(say("fight_the_fight_is_over_your_side_won", { if_party: winner === "party", if_foes: winner === "foes" }));
   return encounterOf(w.state) === null;
 }
 
@@ -467,19 +467,19 @@ function startLine(ctx: ReadContext, e: LedgerEvent): string {
     const name = nameFor(ctx, f.id);
     return [`${name}${name !== "someone" && typeof f.init === "number" ? ` ${f.init}` : ""}`];
   });
-  return `A fight starts. Initiative: ${names.join(", ")}.`;
+  return say("fight_a_fight_starts_initiative_names", { names: names.join(", ") });
 }
 
 /** The closing lines: whose turn it is and what the POV has left, or that it's out of the fight. */
 function closing(ctx: ReadContext, rules: CombatDef, lines: FightLines): string[] {
   const enc = encounterOf(ctx.state);
   const me = enc ? fighterOf(enc, ctx.world.pov) : undefined;
-  if (enc && me && !standing(ctx, enc, me)) lines.push(`You are out of the fight; it goes on (round ${enc.round}).`, false);
+  if (enc && me && !standing(ctx, enc, me)) lines.push(say("fight_you_are_out_of_the_fight_it", { round: enc.round }), false);
   else if (enc && me && enc.order[enc.turn]?.id === me.id) {
     const left = Object.entries(rules.economy).flatMap(([budget, def]) => (isRecord(def) ? [`${me.left[budget] ?? 0} ${typeof def.label === "string" && def.label !== "" ? def.label : budget}`] : []));
-    lines.push(`Round ${enc.round}, your turn${left.length > 0 ? `: ${left.join(", ")} left` : ""}.`, false);
+    lines.push(say("fight_round_round_your_turn_left_left", { round: enc.round, left: left.join(", "), if_left: left.length > 0 }), false);
   }
-  if (lines.happened) lines.push("Narrate the fight in this order; add no other attacks, hits or damage.", false);
+  if (lines.happened) lines.push(say("fight_narrate_the_fight_in_this_order_add"), false);
   return lines.lines;
 }
 
@@ -513,7 +513,7 @@ export function openRound(w: Working, rng: Rng): FightRound | null {
     after(acted) {
       for (const e of w.events.slice(from)) {
         if (e.type === "combat.start") lines.push(startLine(w.ctx, e));
-        else if (e.type === "combat.end") lines.push("The fight is over.");
+        else if (e.type === "combat.end") lines.push(say("fight_the_fight_is_over"));
       }
       const res = acted?.resolution;
       const action = res?.ok ? findAction(w.reg, w.world, res.action) : undefined;

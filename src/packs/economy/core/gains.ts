@@ -453,7 +453,7 @@ function taxFlow(api: FinanceApi, ctx: ReadContext, party: EntityId, through: Re
 function taxPosting(api: FinanceApi, ctx: ReadContext, party: EntityId, at: number): FlowPosting | null {
   const year = yearAt(ctx.world, at) - 1;
   const tax = investmentTax(ctx, party, year);
-  const memo = `Tax on ${year} investment income`;
+  const memo = say("org_log_tax_on_year_investment_income", { year: year });
   if (tax.cents > 0) return { cents: tax.cents, memo, kind: "payment", category: "taxes" };
   const deposit = api.depositAccount(ctx, party);
   if (tax.cents === 0 || !deposit) return null;
@@ -463,7 +463,7 @@ function taxPosting(api: FinanceApi, ctx: ReadContext, party: EntityId, at: numb
       { account: api.outside("tax:federal"), amount: tax.cents },
       { account: deposit, amount: -tax.cents },
     ],
-    memo: `Refund of ${year} investment tax`,
+    memo: say("org_log_refund_of_year_investment_tax", { year: year }),
     kind: "refund",
     category: "taxes",
   };

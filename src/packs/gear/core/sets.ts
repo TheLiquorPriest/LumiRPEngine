@@ -59,8 +59,8 @@ export function pieceProblem(ctx: ReadContext, who: EntityId, item: EntityId): s
   if (e.fields.lost === true) return "is lost";
   const has = possessorOf(ctx, item);
   if (has !== null && has !== who) return `is with ${labelOf(ctx, has)}`;
-  if (accessFor(ctx, who, item).use === null) return "isn't yours to use";
-  return reachOf(ctx, who, item).reach === "away" ? "isn't with you or close by" : null;
+  if (accessFor(ctx, who, item).use === null) return say("why_isnt_yours_to_use");
+  return reachOf(ctx, who, item).reach === "away" ? say("why_isnt_with_you_or_close_by") : null;
 }
 
 /** Whether `who` is at home: where they are is within their home, in the same building or site. */

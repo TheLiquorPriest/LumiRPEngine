@@ -27,6 +27,7 @@ import { typeRowOf } from "../../../engine/thing-index";
 import type { Adding } from "../../../engine/thing-ops";
 import { nameMeets, namesThing } from "../../../engine/thing-resolve";
 import { contentsOf, holderOf, holdsOf, sizeOf } from "../../../engine/things";
+import { say } from "../../../engine/lines";
 
 /** Whether a person may carry a thing (ITEMS-SPEC §3.2): its size is the person ceiling's or smaller, or unknown; never a vehicle, a part or a fixture. */
 export function fitsOn(ctx: ReadContext, thing: EntityId): boolean {
@@ -93,10 +94,10 @@ export function loadOf(state: Readonly<WorldState>, container: EntityId): Load {
 
 /** Why `item` can't go into `container` (capacity, load, a cycle), or null when it fits. */
 export function fitProblem(state: Readonly<WorldState>, item: EntityId, container: EntityId): string | null {
-  if (item === container || isInside(state, container, item)) return "can't put something inside itself";
+  if (item === container || isInside(state, container, item)) return say("why_cant_put_something_inside_itself");
   const load = loadOf(state, container);
   if (load.capacityL !== null && load.usedL + volumeOf(state, item) > load.capacityL + 1e-9) return "doesn't fit";
-  if (load.maxKg !== null && load.usedKg + weightOf(state, item) / 1000 > load.maxKg + 1e-9) return "too heavy for it";
+  if (load.maxKg !== null && load.usedKg + weightOf(state, item) / 1000 > load.maxKg + 1e-9) return say("why_too_heavy_for_it");
   return null;
 }
 
@@ -112,8 +113,8 @@ export function roomProblem(ctx: ReadContext, holder: EntityId, adding: EntityId
   const volume = typeof adding === "string" ? volumeOf(ctx.state, adding) : adding.volumeL;
   const grams = typeof adding === "string" ? weightOf(ctx.state, adding) : adding.weightG;
   const round = (n: number): number => Math.max(0, Math.round(n * 10) / 10);
-  if (load.capacityL !== null && load.usedL + volume > load.capacityL + 1e-9) return `doesn't fit in ${name}: ${round(load.capacityL - load.usedL)} l of ${round(load.capacityL)} l free`;
-  if (load.maxKg !== null && load.usedKg + grams / 1000 > load.maxKg + 1e-9) return `is too heavy for ${name}, which takes ${round(load.maxKg)} kg`;
+  if (load.capacityL !== null && load.usedL + volume > load.capacityL + 1e-9) return say("why_doesnt_fit_in_name_usedl_l_of", { name: name, usedL: round(load.capacityL - load.usedL), capacityL: round(load.capacityL) });
+  if (load.maxKg !== null && load.usedKg + grams / 1000 > load.maxKg + 1e-9) return say("why_is_too_heavy_for_name_which_takes", { name: name, maxKg: round(load.maxKg) });
   return null;
 }
 
@@ -166,8 +167,8 @@ export function holdProblem(ctx: ReadContext, thing: EntityId, holder: EntityId)
   if (as === null) return `${h.name} can't hold anything`;
   const goes = goesIn(ctx, thing);
   const fixed = fixedOf(ctx, thing);
-  if (goes === "nowhere") return fixed === "part" ? `${e.name} is built into what holds it` : fixed === "fixed" ? `${e.name} is fixed in place` : `${e.name} isn't a thing that goes inside anything`;
-  if (goes === "vehicle" && as !== "vehicle") return fixed === "vehicle" ? `${e.name} is a vehicle: it can only be carried on another vehicle` : `${e.name} can only ride in a vehicle`;
+  if (goes === "nowhere") return fixed === "part" ? say("why_name_is_built_into_what_holds_it", { name: e.name }) : fixed === "fixed" ? say("why_name_is_fixed_in_place", { name: e.name }) : say("why_name_isnt_a_thing_that_goes_inside", { name: e.name });
+  if (goes === "vehicle" && as !== "vehicle") return fixed === "vehicle" ? say("why_name_is_a_vehicle_it_can_only", { name: e.name }) : say("why_name_can_only_ride_in_a_vehicle", { name: e.name });
   return null;
 }
 

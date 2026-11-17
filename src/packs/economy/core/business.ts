@@ -791,13 +791,13 @@ export function registerBusiness(r: FinanceRegistry): void {
       if (b === who) continue;
       const month = monthBook(ctx.state, b, monthOf(ctx.world, now));
       const books = businessBooks(api, ctx, b, monthStart(ctx, now), now + 1);
-      out.push(`${labelOf(ctx, b)}, which they own, has ${books.profit >= 0 ? "made" : "lost"} ${api.money(ctx, Math.abs(books.profit))} so far this month on ${api.money(ctx, books.revenue)} taken in${month.payroll > 0 ? `, ${api.money(ctx, month.payroll)} of it gone on wages` : ""}.`);
+      out.push(say("feed_b_which_they_own_has_madelost_profit", { b: labelOf(ctx, b), profit: api.money(ctx, Math.abs(books.profit)), revenue: api.money(ctx, books.revenue), payroll: api.money(ctx, month.payroll), if_profit: books.profit >= 0, if_payroll: month.payroll > 0 }));
       const acct = operatingAccount(api, ctx, b);
-      if (acct) out.push(`Its account holds ${api.money(ctx, api.balance(ctx.state, acct))}.`);
+      if (acct) out.push(say("feed_its_account_holds_acct", { acct: api.money(ctx, api.balance(ctx.state, acct)) }));
     }
     for (const inv of allInvoices(ctx)) {
       if (inv.left <= 0) continue;
-      if (inv.party === who) out.push(`They owe ${labelOf(ctx, inv.business)} ${api.money(ctx, inv.left)} for ${inv.memo}${inv.state === "late" ? ", and it is late" : `, due ${formatClock(calendarOf(ctx.world), inv.due)}`}.`);
+      if (inv.party === who) out.push(say("feed_they_owe_business_left_for_memo_and", { business: labelOf(ctx, inv.business), left: api.money(ctx, inv.left), memo: inv.memo, due: formatClock(calendarOf(ctx.world), inv.due), if_late: inv.state === "late" }));
     }
     return out;
   });

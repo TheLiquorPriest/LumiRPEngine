@@ -184,7 +184,7 @@ export function decisionMindLines(ctx: ReadContext, who: EntityId): string[] {
     for (const m of motionsOf(ctx.state, org)) {
       if (m.status !== "open" || m.electorate[who] === undefined || ctx.state.clock > m.closes) continue;
       const mine = m.votes[who];
-      out.push(`- A vote at ${labelOf(ctx, org)}${m.by !== "" ? `, put by ${refFor(ctx, who, m.by).name}` : ""}: ${m.text}. It closes ${formatStamp(cal, m.closes)}. You hold ${pctWords(m.electorate[who] ?? 0)} of the votes; ${mine ? `you vote ${VOTE_WORDS[mine.vote]}${mine.how === "rule" ? " (your standing vote)" : ""}` : "you haven't voted"}. So far ${standingWords(ctx, m, who)}. How you vote counts only when the story tells it.`);
+      out.push(say("feed_a_vote_at_org_put_by_name", { org: labelOf(ctx, org), name: refFor(ctx, who, m.by).name, text: m.text, closes: formatStamp(cal, m.closes), who: pctWords(m.electorate[who] ?? 0), vote: VOTE_WORDS[mine.vote], who2: standingWords(ctx, m, who), if_m: m.by !== "", if_mine: !!(mine), if_rule: mine.how === "rule" }));
     }
   }
   for (const org of orgsWithRequests(ctx.state)) {
@@ -192,7 +192,7 @@ export function decisionMindLines(ctx: ReadContext, who: EntityId): string[] {
     for (const r of requestsOf(ctx.state, org)) {
       if (requestState(ctx, r) !== "asked") continue;
       if (r.by === who) out.push(`- You asked approval for ${labelOf(ctx, org)}: ${r.text} (${r.why}). It waits on ${r.approvers.map((a) => refFor(ctx, who, a).name).join(" or ")}.`);
-      else if (approversOf(ctx, org, r).includes(who)) out.push(`- ${refFor(ctx, who, r.by).name} asks your approval for ${labelOf(ctx, org)}: ${r.text} (${r.why}). You may approve or deny it; it counts only when the story tells it.`);
+      else if (approversOf(ctx, org, r).includes(who)) out.push(say("feed_name_asks_your_approval_for_org_text", { name: refFor(ctx, who, r.by).name, org: labelOf(ctx, org), text: r.text, why: r.why }));
     }
   }
   return out;
@@ -250,7 +250,7 @@ export function decisionExtractLines(ctx: ReadContext, read: { votes: boolean; a
       if (requestState(ctx, r) !== "asked") continue;
       const approvers = approversOf(ctx, org, r);
       if (r.by !== pov && !approvers.includes(pov)) continue;
-      out.push(`- [${r.id}] ${labelOf(ctx, org)} (${org}), request for approval by ${name(r.by)}: ${r.text} (${r.why}); may approve: ${approvers.length > 0 ? approvers.map(name).join(", ") : "no one now"}`);
+      out.push(say("feed_id_org_org2_request_for_approval_by", { id: r.id, org: labelOf(ctx, org), org2: org, r: name(r.by), text: r.text, why: r.why, approvers: approvers.map(name).join(", "), if_approvers: approvers.length > 0 }));
     }
   }
   return out;

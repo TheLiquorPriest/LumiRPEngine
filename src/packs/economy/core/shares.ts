@@ -200,7 +200,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   if (to === "" || to === business || api.partyKind(ctx, to) === null) return reject("missing_entity", say("why_no_one_to_to_issue_shares_to", { to: labelOf(ctx, to) }));
   const units = wholeUnits(a.units);
   if (isRejection(units)) return units;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Issuing shares in", `Issue ${units} units of ${name} to ${labelOf(ctx, to)}${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : " at their value a unit"}`);
+  const denied = decision(ctx, by, party, business, "shares.manage", say("org_log_issuing_shares_in"), say("org_log_issue_units_units_of_name_to_to", { units: units, name: name, to: labelOf(ctx, to), price: typeof a.price === "number" ? moneyWords(ctx, a.price) : undefined, if_number: typeof a.price === "number" }));
   if (denied) return denied;
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const classes = classesIn(fields);
@@ -216,7 +216,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   const holders = [...new Set(next.filter((o) => ROLE_RIGHTS[o.role].worth && (o.units ?? 0) > 0).map((o) => o.party))];
   const scorp = optionalService(ctx, "economy.scorp_holders")?.(ctx, business, holders) ?? null;
   if (scorp) return scorp;
-  const memo = `${units} units of ${name} at ${moneyWords(ctx, price.each)} a unit`;
+  const memo = say("org_log_units_units_of_name_at_each_a", { units: units, name: name, each: moneyWords(ctx, price.each) });
   const events: LedgerEvent[] = [];
   if (price.cents > 0) {
     const deposit = operatingAccount(api, ctx, business);
@@ -234,7 +234,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
     ...events,
     { type: "set", entity: business, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue },
     acquisition(business, to, price.cents),
-    ...decided(ctx, business, by, party, `Issued ${units} units to ${labelOf(ctx, to)} at ${moneyWords(ctx, price.each)} a unit (${moneyWords(ctx, price.cents)})`, [to]),
+    ...decided(ctx, business, by, party, say("org_log_issued_units_units_to_to_at_each", { units: units, to: labelOf(ctx, to), each: moneyWords(ctx, price.each), cents: moneyWords(ctx, price.cents) }), [to]),
   ]);
 }
 
@@ -252,7 +252,7 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
   const holder = strOf(a.from);
   const units = wholeUnits(a.units);
   if (isRejection(units)) return units;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Buying back shares in", `Buy back ${units} units of ${name} from ${labelOf(ctx, holder)}${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : " at their value a unit"}`);
+  const denied = decision(ctx, by, party, business, "shares.manage", say("org_log_buying_back_shares_in"), say("org_log_buy_back_units_units_of_name_from", { units: units, name: name, holder: labelOf(ctx, holder), price: typeof a.price === "number" ? moneyWords(ctx, a.price) : undefined, if_number: typeof a.price === "number" }));
   if (denied) return denied;
   const owners = counted(api, ctx, business);
   const held = unitsOf(owners, holder);
@@ -260,7 +260,7 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
   if (units > held) return reject("declined", say("why_holder_holds_held_units_of_name_not", { holder: labelOf(ctx, holder), held: held, name: name, units: units }));
   const price = priced(api, ctx, business, owners, units, a.price);
   if (isRejection(price)) return price;
-  const memo = `${name} bought back ${units} units at ${moneyWords(ctx, price.each)} a unit`;
+  const memo = say("org_log_name_bought_back_units_units_at_each", { name: name, units: units, each: moneyWords(ctx, price.each) });
   const events: LedgerEvent[] = [];
   if (price.cents > 0) {
     const source = operatingAccount(api, ctx, business);
@@ -284,7 +284,7 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
     ...events,
     disposal(business, holder, (units / held) * 100, price.cents, memo),
     { type: "set", entity: business, field: "owners", value: ownersJson(withUnitShares(next)) as unknown as JsonValue },
-    ...decided(ctx, business, by, party, `Bought back ${units} of ${labelOf(ctx, holder)}'s units at ${moneyWords(ctx, price.each)} a unit (${moneyWords(ctx, price.cents)})`, [holder]),
+    ...decided(ctx, business, by, party, say("org_log_bought_back_units_of_holder_s_units", { units: units, holder: labelOf(ctx, holder), each: moneyWords(ctx, price.each), cents: moneyWords(ctx, price.cents) }), [holder]),
   ]);
 }
 
@@ -299,7 +299,7 @@ function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
-  const denied = decision(ctx, by, party, business, "shares.manage", "Changing the share classes of", `${a.remove === true ? "Remove" : "Set"} the share class ${strOf(a.label).trim() || strOf(a.class)} of ${name}${a.remove !== true && typeof a.votes === "number" ? ` (${a.votes} votes a unit)` : ""}${strOf(a.holder) !== "" ? `, with ${labelOf(ctx, strOf(a.holder))}'s units in it` : ""}`);
+  const denied = decision(ctx, by, party, business, "shares.manage", say("org_log_changing_the_share_classes_of"), say("org_log_removeset_the_share_class_class_of_name", { class: strOf(a.label).trim() || strOf(a.class), name: name, votes: a.votes, holder: labelOf(ctx, strOf(a.holder)), if_remove: a.remove === true, if_number: a.remove !== true && typeof a.votes === "number", if_holder: strOf(a.holder) !== "" }));
   if (denied) return denied;
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const before = classesIn(fields);
@@ -331,7 +331,7 @@ function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
     else moved.push({ ...o, ...(cls !== undefined ? { class: cls } : {}) });
   }
   const written = withUnitShares(moved).map((o) => (o.class === COMMON_CLASS.id && classes[0]?.id === COMMON_CLASS.id && classes.length === 1 ? (({ class: _c, ...rest }) => rest)(o) : o));
-  const words = a.remove === true ? `Removed the share class ${was?.label ?? id}` : `${was ? "Changed" : "Added"} the share class ${classes.find((c) => c.id === id)?.label ?? id} (${classes.find((c) => c.id === id)?.votes ?? 1} votes a unit)${holder !== "" ? `, with ${labelOf(ctx, holder)}'s units in it` : ""}`;
+  const words = a.remove === true ? say("org_log_removed_the_share_class_id", { id: was?.label ?? id }) : say("org_log_changedadded_the_share_class_id_votes_votes", { id: classes.find((c) => c.id === id)?.label ?? id, votes: classes.find((c) => c.id === id)?.votes ?? 1, holder: labelOf(ctx, holder), if_was: !!(was), if_holder: holder !== "" });
   return unit([
     { type: "set", entity: business, field: "share_classes", value: classes.map((c) => ({ id: c.id, label: c.label, votes: c.votes })) as unknown as JsonValue },
     { type: "set", entity: business, field: "owners", value: ownersJson(written) as unknown as JsonValue },
@@ -426,7 +426,7 @@ function childLinks(api: FinanceApi, ctx: ReadContext, parent: EntityId, viewer:
 
 /** Why `viewer` may not use `power` at `business` from Money 3, or null. */
 function refusalOf(ctx: ReadContext, viewer: EntityId, business: EntityId, power: OrgPower, level: number): string | null {
-  if (level < 3) return `${labelOf(ctx, business)} decides about its shares from Money 3`;
+  if (level < 3) return say("org_log_business_decides_about_its_shares_from_money", { business: labelOf(ctx, business) });
   const may = mayAct(ctx, viewer, business, power);
   return may.ok ? null : may.reason;
 }
@@ -486,11 +486,11 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
     viewer === null
       ? null
       : {
-          decide: refusalOf(ctx, viewer, business, "shares.manage", level) ?? decisionRefusal(ctx, business, viewer, "Deciding about the shares of"),
-          restructure: refusalOf(ctx, viewer, business, "org.govern", level) ?? decisionRefusal(ctx, business, viewer, "Changing the structure of"),
+          decide: refusalOf(ctx, viewer, business, "shares.manage", level) ?? decisionRefusal(ctx, business, viewer, say("org_log_deciding_about_the_shares_of")),
+          restructure: refusalOf(ctx, viewer, business, "org.govern", level) ?? decisionRefusal(ctx, business, viewer, say("org_log_changing_the_structure_of")),
           // Short of the votes alone, they may put it to a vote (ORG-SPEC Phase 5).
-          vote: refusalOf(ctx, viewer, business, "shares.manage", level) === null && decisionRefusal(ctx, business, viewer, "Deciding about the shares of") !== null,
-          voteRestructure: refusalOf(ctx, viewer, business, "org.govern", level) === null && decisionRefusal(ctx, business, viewer, "Changing the structure of") !== null,
+          vote: refusalOf(ctx, viewer, business, "shares.manage", level) === null && decisionRefusal(ctx, business, viewer, say("org_log_deciding_about_the_shares_of")) !== null,
+          voteRestructure: refusalOf(ctx, viewer, business, "org.govern", level) === null && decisionRefusal(ctx, business, viewer, say("org_log_changing_the_structure_of")) !== null,
           holdings: refusalOf(ctx, viewer, business, "shares.manage", level),
           found: refusalOf(ctx, viewer, business, "org.govern", level),
           sources: capitalSources(api, ctx, business),
@@ -498,7 +498,7 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
   // Winding up and merging (§3.13): the reader's own decision, or one through an organization holding it that they govern; short only of the votes, they may put it to a vote (ORG-SPEC Phase 5).
   const decides = (doing: string): { why: string | null; vote: boolean } => {
     if (viewer === null) return { why: null, vote: false };
-    if (level < 3) return { why: `${labelOf(ctx, business)} is wound up or merged from Money 3`, vote: false };
+    if (level < 3) return { why: say("org_log_business_is_wound_up_or_merged_from", { business: labelOf(ctx, business) }), vote: false };
     const d = deciderFor(ctx, viewer, business, "org.govern", doing);
     return "reason" in d ? { why: d.reason, vote: d.code === "votes" } : { why: null, vote: false };
   };

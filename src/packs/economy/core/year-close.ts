@@ -468,7 +468,7 @@ function consentEvents(api: FinanceApi, deps: YearCloseDeps, ctx: EffectContext,
     // A corporate holder deducts its part as any dividend from a company it holds a stake in.
     return { party: h.party, cents: part, ...(api.partyKind(ctx, h.party) === "business" ? { deductPct: deps.deductionPct(ctx, h.party, org) } : {}) };
   });
-  const text = `Declared a consent dividend of ${api.money(ctx, cents)} for ${year}: no money moves, and each holder takes their part as income`;
+  const text = say("org_log_declared_a_consent_dividend_of_cents_for", { cents: api.money(ctx, cents), year: year });
   const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text }) ?? []) : [];
   return [{ type: CONSENT_DIVIDEND, data: { org, year, cents, parts } }, ...line];
 }
@@ -516,9 +516,9 @@ export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void
     const alerts: AlertLine[] = [];
     const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
     const due = foundationTaxFor(ctx, party, year - 1);
-    if (due && due.cents > 0) alerts.push({ tone: "warn", text: `Foundation taxes for ${year - 1}, ${api.money(ctx, due.cents)}, fall due on 15 May: ${api.money(ctx, due.excise)} on its investment income${due.tax > 0 ? ` and ${api.money(ctx, due.tax)} on ${api.money(ctx, due.undistributed)} of ${year - 2}'s payout it never granted` : ""}.`, flow: `foundation_tax:${party}` });
+    if (due && due.cents > 0) alerts.push({ tone: "warn", text: say("org_log_foundation_taxes_for_year_cents_fall_due", { year: year - 1, cents: api.money(ctx, due.cents), excise: api.money(ctx, due.excise), tax: api.money(ctx, due.tax), undistributed: api.money(ctx, due.undistributed), year2: year - 2, if_tax: due.tax > 0 }), flow: `foundation_tax:${party}` });
     const progress = foundationProgress(api, ctx, party);
-    if (progress && progress.leftOfLast > 0) alerts.push({ tone: "warn", text: `Grant ${api.money(ctx, progress.leftOfLast)} more by 31 Dec ${year} to meet ${year - 1}'s payout, or 30% of what's left is due with the next return.` });
+    if (progress && progress.leftOfLast > 0) alerts.push({ tone: "warn", text: say("org_log_grant_leftoflast_more_by_31_dec_year", { leftOfLast: api.money(ctx, progress.leftOfLast), year: year, year2: year - 1 }) });
     return alerts.length > 0 ? { alerts } : {};
   });
   core.effect({ type: "economy.consent_dividend", args: ["org", "cents", "year?", "by?"], gm: true, resolve: (a, ctx) => consentEvents(api, deps, ctx, a) });

@@ -16,6 +16,7 @@ import { accountsOf, availableOf, balance, classOf, openerOf, rightsOf, statusOf
 import { featureFor, overdraftRoom } from "./pay";
 import { wealthOf } from "./worth";
 import { createRng } from "../../../engine/rng";
+import { say } from "../../../engine/lines";
 
 const DAY = 1440;
 
@@ -34,7 +35,7 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
   const cash = mine.filter((id) => classOf(ctx, id) === "cash" && rightsOf(ctx.state, id, who)?.spend).reduce((a, id) => a + shown(id), 0);
   const bank = mine.filter((id) => traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.cash && rightsOf(ctx.state, id, who)?.spend && !traitsOf(ctx, id)?.locked);
   const inBank = bank.reduce((a, id) => a + shown(id), 0);
-  lines.push(`You have ${money(cash)} in cash and ${money(inBank)} in the bank.`);
+  lines.push(say("feed_you_have_cash_in_cash_and_inbank", { cash: money(cash), inBank: money(inBank) }));
   let spendable = cash + bank.reduce((a, id) => a + Math.max(0, availableOf(ctx, id) + overdraftRoom(ctx, id)), 0);
   const pressing: MoneySummary["pressing"] = [];
   const now = ctx.state.clock;
@@ -72,7 +73,7 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
     for (const s of soon.slice(0, 5)) lines.push(`${s.text}.`);
     for (const s of soon.filter((x) => x.out && x.cents > 0 && x.at - now <= 7 * DAY).slice(0, 3)) pressing.push({ label: s.label, cents: s.cents, at: day(s.at) });
     const out7 = soon.filter((x) => x.out && x.at - now <= 7 * DAY).reduce((a, x) => a + x.cents, 0);
-    if (out7 > cash + inBank) lines.push(`What's due this week is more than you have in cash and the bank.`);
+    if (out7 > cash + inBank) lines.push(say("feed_whats_due_this_week_is_more_than"));
   }
   for (const source of hooks.summaries) lines.push(...source(ctx, who));
   return { lines, band, spendable: Math.round(spendable), pressing };

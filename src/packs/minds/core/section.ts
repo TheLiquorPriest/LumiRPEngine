@@ -20,6 +20,7 @@ import { together } from "../../../engine/presence";
 import { isGone, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { readSlice } from "./state";
+import { say } from "../../../engine/lines";
 
 /** One line of the Minds section, and whose mind it tells: their id, and their name as the line gives it (by name, or "Someone"); `kept` when Smart persistence kept their last thoughts this turn, which the narrator is told are unchanged. */
 export interface MindLine {
@@ -63,17 +64,17 @@ export function mindLines(ctx: ReadContext): MindLine[] {
     // Someone reaching the POV from elsewhere is named only when the POV knows them.
     const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";
     if (secrecy === "full") {
-      const parts = [`${name}'s mind: ${clause(m.monologue)}.`];
+      const parts = [say("feed_name_s_mind_monologue", { name: name, monologue: clause(m.monologue) })];
       if (m.intent !== "") parts.push(`Intends: ${clause(m.intent)}.`);
       if (m.reactions.length > 0) parts.push(`Reactions: ${m.reactions.map(clause).join("; ")}.`);
       if (m.mood) parts.push(`Mood: ${clause(m.mood)}.`);
       if (m.depiction !== "") parts.push(`Shows: ${clause(m.depiction)}.`);
-      if (m.interrupt) parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
+      if (m.interrupt) parts.push(say("feed_interrupts_the_skip_interrupt", { interrupt: clause(m.interrupt) }));
       out.push({ entity: id, name, line: parts.join(" "), ...(m.reason === "kept" ? { kept: true as const } : {}) });
       continue;
     }
     if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction)) continue;
-    const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
+    const interrupt = m.interrupt && safe(m.interrupt) ? say("feed_interrupts_the_skip_interrupt_2", { interrupt: clause(m.interrupt) }) : "";
     out.push({ entity: id, name, line: `${name}: ${clause(m.depiction)}.${interrupt}`, ...(m.reason === "kept" ? { kept: true as const } : {}) });
   }
   return out;

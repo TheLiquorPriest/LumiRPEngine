@@ -203,7 +203,7 @@ function taxStatusEvents(ctx: EffectContext, a: Record<string, JsonValue>): Ledg
   if (status !== "" && !row) return { code: "unknown_status", reason: say("why_status_isnt_a_status_in_this_worlds", { status: status, rows: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).join(", ") }), choices: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}), said: status };
   if (strOf(own(ctx.state.entities, org)?.fields.tax_exempt).trim() === status) return { code: "no_change", reason: say("why_org_isnt_exemptis_exempt_as_status_already", { org: labelOf(ctx, org), status: strOf(row?.name, status), status2: status === "" }) };
   const by = strOf(a.by);
-  const text = status === "" ? "No longer exempt from income tax" : `Exempt from income tax as ${strOf(row?.name, status)}${strOf(row?.code) !== "" ? ` (${strOf(row?.code)})` : ""}`;
+  const text = status === "" ? say("org_log_no_longer_exempt_from_income_tax") : say("org_log_exempt_from_income_tax_as_status_code", { status: strOf(row?.name, status), code: strOf(row?.code), if_code: strOf(row?.code) !== "" });
   const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text }) ?? []) : [];
   return [{ type: "set", entity: org, field: "tax_exempt", value: status }, ...line];
 }

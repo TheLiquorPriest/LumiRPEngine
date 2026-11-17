@@ -93,7 +93,7 @@ function alertsFor(api: FinanceApi, ctx: ReadContext, party: EntityId): AlertLin
     const a = assetOf(ctx, strOf(own(ctx.state.entities, id)?.fields.asset));
     if (!a) continue;
     const qty = qtyOf(lotsOf(ctx, id));
-    if (a.option && a.option.expiry > ctx.state.clock && a.option.expiry - ctx.state.clock <= 7 * day) out.push({ tone: "warn", text: `${unitsWord(qty, "contract")} of ${a.label} expire ${dateText(ctx.world, a.option.expiry)}.` });
+    if (a.option && a.option.expiry > ctx.state.clock && a.option.expiry - ctx.state.clock <= 7 * day) out.push({ tone: "warn", text: say("feed_contract_of_label_expire_expiry", { contract: unitsWord(qty, "contract"), label: a.label, expiry: dateText(ctx.world, a.option.expiry) }) });
     if (a.bond && a.bond.maturity > ctx.state.clock && a.bond.maturity - ctx.state.clock <= 31 * day) out.push({ tone: "info", text: `${a.label} matures ${dateText(ctx.world, a.bond.maturity)}.` });
   }
   return out;
@@ -107,22 +107,22 @@ function unitsWord(qty: number, word: string): string {
 function summaryLines(api: FinanceApi, ctx: ReadContext, who: EntityId): string[] {
   const out: string[] = [];
   const invested = holdingsWorth(api, ctx, who).assets;
-  if (invested > 0) out.push(`Has about ${about(ctx, invested)} invested.`);
+  if (invested > 0) out.push(say("feed_has_about_invested_invested", { invested: about(ctx, invested) }));
   for (const id of propertyIds(ctx.state)) {
     const share = api.shareOf(ctx.state, id, who);
     if (share <= 0) continue;
     const owed = securedLoans(api, ctx.state, id).reduce((a, l) => a + l.owed, 0);
     const part = share < 100 ? `a ${Math.round(share)}% share of ` : "";
-    out.push(`Owns ${part}${labelOf(ctx, id)} (worth ${about(ctx, propertyValue(ctx.state, id))}${owed > 0 ? `; ${about(ctx, owed)} left on the mortgage` : ""}).`);
+    out.push(say("feed_owns_part_id_worth_id2_owed_left", { part: part, id: labelOf(ctx, id), id2: about(ctx, propertyValue(ctx.state, id)), owed: about(ctx, owed), if_owed: owed > 0 }));
   }
   const rent = monthlyRent(api, ctx, who);
-  if (rent > 0) out.push(`Collects about ${about(ctx, rent)} a month in rent.`);
+  if (rent > 0) out.push(say("feed_collects_about_rent_a_month_in_rent", { rent: about(ctx, rent) }));
   for (const id of businessIds(api, ctx)) {
     const share = api.shareOf(ctx.state, id, who);
     if (share <= 0 || id === who) continue;
     // What the shares are worth, never below nothing (limited liability): one whose net worth is below zero says so.
     const value = valuationOf(api, ctx, id);
-    out.push(`Owns ${share < 100 ? `${Math.round(share)}% of ` : ""}${labelOf(ctx, id)} (${value.floored ? "the shares worth nothing: its net worth is below zero" : `the shares worth about ${about(ctx, Math.round((value.value * share) / 100))}`}).`);
+    out.push(say("feed_owns_share_of_id_the_shares_worth", { share: Math.round(share), id: labelOf(ctx, id), share2: about(ctx, Math.round((value.value * share) / 100)), if_share: share < 100, if_floored: !!(value.floored) }));
   }
   return out;
 }

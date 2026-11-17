@@ -104,6 +104,7 @@ keys:
   feed_*: the narrator's own sections (what a person is doing and how they regard the player's character, a project, a plan and the orders given, a vote waiting, a quest's stage, what is owed and what is on a person, a thing carried or lent, the date and time, the weather, the conditions someone is under, how an organization names a person and what they may do there, the usual routines of the people here), each a phrase or a sentence filled with what it names; feed_org_type_*, feed_role_*, feed_worn_*, feed_mood_* are the single words those fill in
   org_log_*: what an organization's own History says it did (admitting, removing, appointing, delegating, renaming, a vote or a request and its end, founding, restructuring, winding up, merging, entry and keys, hiring, pay, a party's changes) and the phrases those fill in, and what an act for an organization records beside its effects (a payment, a sale, a loan, a project's step, a property's let or sale); each is filled with what it names
   eng_*: what the engine says of what it did or could not do, apart from a refused change (the turn's beats, a formula or dice that does not read, a selector or a field value that does not fit, a ruleset or a world draft that is wrong, what a thing's provenance reads, a thing tidied, what someone may not do for an organization) - each is filled with what it names
+  fight_*: what a fight's own narrator lines and notes say (a fight starts, a round and whose turn, you are out of it, it peters out or is over) and what the narrator is told to do with it; each is filled with what it names
   feedset_*: a section's settings in this chat as one sentence (the feedset line, with its parts feedset_scope_*, feedset_cut, feedset_uncapped, feedset_sources); feed_marked_scene and feed_marked_gm mark a fact beyond the player character's knowledge
 ---
 credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
@@ -2426,3 +2427,131 @@ why_youve_swiped_away_from_the_timeline_this_2: You've swiped away from the time
 why_not_the_head: not the head
 why_not_a_stopped_head_continue: not a stopped head Continue
 why_the_chat_was_paused: the chat was paused
+fight_you_leave_the_fight: You leave the fight.
+fight_no_one_has_attacked_or_been_hurt: No one has attacked or been hurt in {{rules}} rounds: the fight peters out.
+fight_the_fight_is_over_your_side_won: The fight is over{{#if_party}}: your side won{{/if_party}}{{^if_party}}{{#if_foes}}: your side lost{{/if_foes}}{{/if_party}}.
+fight_a_fight_starts_initiative_names: A fight starts. Initiative: {{names}}.
+fight_you_are_out_of_the_fight_it: You are out of the fight; it goes on (round {{round}}).
+fight_round_round_your_turn_left_left: Round {{round}}, your turn{{#if_left}}: {{left}} left{{/if_left}}.
+fight_narrate_the_fight_in_this_order_add: Narrate the fight in this order; add no other attacks, hits or damage.
+fight_the_fight_is_over: The fight is over.
+feed_offered_in_the_story: Offered in the story
+feed_asked_of_you_by_giver_for_orgname: Asked of you by {{giver}} for {{orgName}} ({{o}}): {{text}}
+feed_it_serves_the_goal_text: It serves the goal: {{text}}.
+feed_carry_it_out_as_part_of_your: Carry it out as part of your place there; if you won't, say so in the scene.
+feed_add_to_the_plan_name_offer: Add to the plan? {{name}}: {{offer}}
+feed_id_orgname_order_for_o_text_status: - [{{id}}] {{orgName}}, order for {{o}}: {{text}} ({{status}})
+feed_a_vote_at_org_put_by_name: - A vote at {{org}}{{#if_m}}, put by {{name}}{{/if_m}}: {{text}}. It closes {{closes}}. You hold {{who}} of the votes; {{#if_mine}}you vote {{vote}}{{#if_rule}} (your standing vote){{/if_rule}}{{/if_mine}}{{^if_mine}}you haven't voted{{/if_mine}}. So far {{who2}}. How you vote counts only when the story tells it.
+feed_name_asks_your_approval_for_org_text: - {{name}} asks your approval for {{org}}: {{text}} ({{why}}). You may approve or deny it; it counts only when the story tells it.
+feed_id_org_org2_request_for_approval_by: - [{{id}}] {{org}} ({{org2}}), request for approval by {{r}}: {{text}} ({{why}}); may approve: {{#if_approvers}}{{approvers}}{{/if_approvers}}{{^if_approvers}}no one now{{/if_approvers}}
+feed_you_have_cash_in_cash_and_inbank: You have {{cash}} in cash and {{inBank}} in the bank.
+feed_whats_due_this_week_is_more_than: What's due this week is more than you have in cash and the bank.
+feed_contract_of_label_expire_expiry: {{contract}} of {{label}} expire {{expiry}}.
+feed_has_about_invested_invested: Has about {{invested}} invested.
+feed_owns_part_id_worth_id2_owed_left: Owns {{part}}{{id}} (worth {{id2}}{{#if_owed}}; {{owed}} left on the mortgage{{/if_owed}}).
+feed_collects_about_rent_a_month_in_rent: Collects about {{rent}} a month in rent.
+feed_owns_share_of_id_the_shares_worth: Owns {{#if_share}}{{share}}% of {{/if_share}}{{id}} ({{#if_floored}}the shares worth nothing: its net worth is below zero{{/if_floored}}{{^if_floored}}the shares worth about {{share2}}{{/if_floored}}).
+feed_b_which_they_own_has_madelost_profit: {{b}}, which they own, has {{#if_profit}}made{{/if_profit}}{{^if_profit}}lost{{/if_profit}} {{profit}} so far this month on {{revenue}} taken in{{#if_payroll}}, {{payroll}} of it gone on wages{{/if_payroll}}.
+feed_its_account_holds_acct: Its account holds {{acct}}.
+feed_they_owe_business_left_for_memo_and: They owe {{business}} {{left}} for {{memo}}{{#if_late}}, and it is late{{/if_late}}{{^if_late}}, due {{due}}{{/if_late}}.
+feed_who_is_words_toward_you: {{who}} is {{words}} toward you.
+feed_name_s_mind_monologue: {{name}}'s mind: {{monologue}}.
+feed_interrupts_the_skip_interrupt: Interrupts the skip: {{interrupt}}.
+feed_interrupts_the_skip_interrupt_2:  Interrupts the skip: {{interrupt}}.
+org_log_issuing_shares_in: Issuing shares in
+org_log_issue_units_units_of_name_to_to: Issue {{units}} units of {{name}} to {{to}}{{#if_number}} at {{price}} a unit{{/if_number}}{{^if_number}} at their value a unit{{/if_number}}
+org_log_units_units_of_name_at_each_a: {{units}} units of {{name}} at {{each}} a unit
+org_log_issued_units_units_to_to_at_each: Issued {{units}} units to {{to}} at {{each}} a unit ({{cents}})
+org_log_buying_back_shares_in: Buying back shares in
+org_log_buy_back_units_units_of_name_from: Buy back {{units}} units of {{name}} from {{holder}}{{#if_number}} at {{price}} a unit{{/if_number}}{{^if_number}} at their value a unit{{/if_number}}
+org_log_name_bought_back_units_units_at_each: {{name}} bought back {{units}} units at {{each}} a unit
+org_log_bought_back_units_of_holder_s_units: Bought back {{units}} of {{holder}}'s units at {{each}} a unit ({{cents}})
+org_log_changing_the_share_classes_of: Changing the share classes of
+org_log_removeset_the_share_class_class_of_name: {{#if_remove}}Remove{{/if_remove}}{{^if_remove}}Set{{/if_remove}} the share class {{class}} of {{name}}{{#if_number}} ({{votes}} votes a unit){{/if_number}}{{#if_holder}}, with {{holder}}'s units in it{{/if_holder}}
+org_log_removed_the_share_class_id: Removed the share class {{id}}
+org_log_changedadded_the_share_class_id_votes_votes: {{#if_was}}Changed{{/if_was}}{{^if_was}}Added{{/if_was}} the share class {{id}} ({{votes}} votes a unit){{#if_holder}}, with {{holder}}'s units in it{{/if_holder}}
+org_log_business_decides_about_its_shares_from_money: {{business}} decides about its shares from Money 3
+org_log_deciding_about_the_shares_of: Deciding about the shares of
+org_log_business_is_wound_up_or_merged_from: {{business}} is wound up or merged from Money 3
+org_log_name_goes_on_a_market_from_money: {{name}} goes on a market from Money 3
+org_log_only_a_c_corporation_lists_on_a: Only a C corporation lists on a market: change {{name}}'s structure first
+org_log_offer_units_more_units_of_name_list: {{#if_listing}}Offer {{units}} more units of {{name}}{{/if_listing}}{{^if_listing}}List {{units}} units of {{name}}{{/if_listing}} on the market{{#if_number}} at {{price}} a unit{{/if_number}}
+org_log_units_new_units_of_name_sold_on: {{units}} new units of {{name}} sold on the market at {{each}} a unit
+org_log_offered_units_more_units_on_the_market: Offered {{units}} more units on the market at {{each}} a unit ({{cents}})
+org_log_listed_units_units_on_the_market_as: Listed {{units}} units on the market as {{symbol}} at {{each}} a unit ({{cents}})
+org_log_delisting: Delisting
+org_log_take_name_off_the_market_buying_back: Take {{name}} off the market{{#if_number}}, buying back its public units at {{price}} a unit{{/if_number}}
+org_log_symbol_bought_out_at_each_a_unit: {{symbol}} bought out at {{each}} a unit
+org_log_name_went_off_the_market_bought_back: {{name}} went off the market: bought back {{float}} public units at {{each}} a unit
+org_log_went_off_the_market_bought_back_float: Went off the market: bought back {{float}} public units at {{each}} a unit ({{total}})
+org_log_sold_units_units_of_name_on_the: Sold {{units}} units of {{name}} on the market at {{price}} a unit
+org_log_name_isnt_on_a_market: {{name}} isn't on a market
+org_log_you_hold_no_units_of_name_on: You hold no units of {{name}} on its cap table
+org_log_name_keeps_an_owner_on_its_cap: {{name}} keeps an owner on its cap table: sell to someone in the world, or take it off the market
+org_log_investments_arent_followed_at_this_money_level: Investments aren't followed at this money level
+org_log_sales_tax_it_collected: Sales tax it collected
+org_log_its_suppliers: Its suppliers
+org_log_a_holding: A holding
+org_log_sold_at_the_market: sold at the market
+org_log_a_property: A property
+org_log_sold_at_its_value: sold at its value
+org_log_to_its_owners_by_share: to its owners by share
+org_log_a_stake_in_another_company: A stake in another company
+org_log_bizname_gathered_for_winding_up: {{bizName}}: gathered for winding up
+org_log_wrote_off_an_invoice_owedcount_invoices_owed: Wrote off {{#if_owed}}an invoice{{/if_owed}}{{^if_owed}}{{owedCount}} invoices{{/if_owed}} owed it ({{cents}})
+org_log_handed_its_share_of_id_to_its: Handed its share of {{id}} to its owners
+org_log_handed_its_stake_in_id_to_its: Handed its stake in {{id}} to its owners
+org_log_gave_things_thingscount_things_to_recipient: Gave {{#if_things}}{{things}}{{/if_things}}{{^if_things}}{{thingsCount}} things{{/if_things}} to {{recipient}}
+org_log_bizname_wound_up_a_share_of_what: {{bizName}} wound up: a share of what was left
+org_log_paid_party_cents_share_of_what_was: Paid {{party}} {{cents}} ({{share}}%) of what was left
+org_log_for_a_share_of_name: For a share of {{name}}
+org_log_ratio_of_its_units_for_each_of: {{ratio}} of its units for each of theirs ({{issued}} in all)
+org_log_took_over_name_as_its_subsidiary_its: Took over {{name}} as its subsidiary{{#if_deal}}: its holders got {{deal}}{{/if_deal}}
+org_log_staff_staffcount_staff_came_over_from_name: {{#if_staff}}{{staff}}{{/if_staff}}{{^if_staff}}{{staffCount}} staff{{/if_staff}} came over from {{name}}
+org_log_a_company: a company
+org_log_a_trust_that_isnt_a_grantor_trust: a trust that isn't a grantor trust and has beneficiaries other than people
+org_log_an_organization_whose_status_cant_hold_one: an organization whose status can't hold one
+org_log_h_is_what_and_an_s_corporations: {{h}} is {{what}}, and an S corporation's shareholders are people, eligible trusts and charities (501(c)(3) organizations)
+org_log_it_would_have_allcount_shareholders_and_an: it would have {{allCount}} shareholders, and an S corporation has at most {{max}}
+org_log_only_a_c_corporation_paying_business_taxes: Only a C corporation paying business taxes files a consolidated return
+org_log_one_of_its_holders_cant_hold_an: One of its holders can't hold an S corporation's shares
+org_log_elected_to_file_one_consolidated_return_with: Elected to file one consolidated return{{#if_members}} with {{members}}{{/if_members}}
+org_log_corporate_income_tax_consolidated_return: Corporate income tax, consolidated return
+org_log_corporate_income_tax: Corporate income tax
+org_log_estimated_tax: Estimated tax
+org_log_tax_saved_by_year_donations: Tax saved by {{year}} donations
+org_log_futa_return_form_940_for_periods: FUTA return (Form 940) for {{periods}}
+org_log_futa_deposit: FUTA deposit
+org_log_state_unemployment_tax_suta: State unemployment tax (SUTA)
+org_log_declared_a_consent_dividend_of_cents_for: Declared a consent dividend of {{cents}} for {{year}}: no money moves, and each holder takes their part as income
+org_log_foundation_taxes_for_year_cents_fall_due: Foundation taxes for {{year}}, {{cents}}, fall due on 15 May: {{excise}} on its investment income{{#if_tax}} and {{tax}} on {{undistributed}} of {{year2}}'s payout it never granted{{/if_tax}}.
+org_log_grant_leftoflast_more_by_31_dec_year: Grant {{leftOfLast}} more by 31 Dec {{year}} to meet {{year2}}'s payout, or 30% of what's left is due with the next return.
+org_log_tax_on_year_investment_income: Tax on {{year}} investment income
+org_log_refund_of_year_investment_tax: Refund of {{year}} investment tax
+org_log_exempt_from_income_tax_as_status_code: Exempt from income tax as {{status}}{{#if_code}} ({{code}}){{/if_code}}
+org_log_put_themselves_worker_on_its_payroll: put {{#if_worker}}themselves{{/if_worker}}{{^if_worker}}{{worker}}{{/if_worker}} on its payroll
+org_log_set_their_own_worker_s_pay: set {{#if_worker}}their own{{/if_worker}}{{^if_worker}}{{worker}}'s{{/if_worker}} pay
+org_log_shown_runs_business_for_others_so_cant: {{shown}} runs {{business}} for others, so can't {{what}}
+org_log_shown_runs_business_for_others_so_cant_2: {{shown}} runs {{business}} for others, so can't pay {{worker}} into {{reached}}, which {{shown}} may spend
+org_log_title_reaches_only_the_positions_below_it: {{title}} reaches only the positions below it at {{name}}, not every job there
+org_log_into_isnt_below_title_at_name: {{into}} isn't below {{title}} at {{name}}
+org_log_title_hires_and_appoints_only_into_the: {{title}} hires and appoints only into the positions below it at {{name}}
+org_log_by_cant_end_that_job: {{by}} can't end that job
+org_log_who_s_job_no_longer_has_a: {{who}}'s job no longer has a title of its own
+org_log_sold_a_share_share_of_name_for: Sold {{#if_share}}a {{share}}% share of {{/if_share}}{{name}} for {{price}}
+org_log_name_name2_is_waiting_for_cents_to: {{name}}: {{name2}} is waiting for {{cents}} to {{#if_end}}finish{{/if_end}}{{^if_end}}start{{/if_end}}
+why_to_isnt_here_to_take_it: {{to}} isn't here to take it.
+why_has_has_it_and_isnt_here: {{has}} has it, and isn't here.
+why_item_isnt_here: {{item}} isn't here.
+why_too_heavy_for_it: too heavy for it
+why_doesnt_fit_in_name_usedl_l_of: doesn't fit in {{name}}: {{usedL}} l of {{capacityL}} l free
+why_is_too_heavy_for_name_which_takes: is too heavy for {{name}}, which takes {{maxKg}} kg
+why_name_is_fixed_in_place: {{name}} is fixed in place
+why_name_isnt_a_thing_that_goes_inside: {{name}} isn't a thing that goes inside anything
+why_name_is_a_vehicle_it_can_only: {{name}} is a vehicle: it can only be carried on another vehicle
+why_name_can_only_ride_in_a_vehicle: {{name}} can only ride in a vehicle
+why_isnt_yours_to_use: isn't yours to use
+why_isnt_with_you_or_close_by: isn't with you or close by
+eng_rule_cascade_stopped_at_its_cap_of: Rule cascade stopped at its cap of {{cap}}.
+eng_nothing_better_to_do: nothing better to do
+why_a_spawns_class_is_facet_values: a spawn's class is facet → values

@@ -299,7 +299,7 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const entity: EntityDef = { id, kind, name: text(args.name) || id, tier, fields, relations };
       if (args.class !== undefined) {
         const classes = classOf(args.class);
-        const problem = classes ? classProblems(world, classes, entity.name)[0] : { code: "bad_args", message: "a spawn's class is facet → values" };
+        const problem = classes ? classProblems(world, classes, entity.name)[0] : { code: "bad_args", message: say("why_a_spawns_class_is_facet_values") };
         if (problem) return reject(problem.code, problem.message);
         if (classes && Object.keys(classes).length > 0) entity.class = classes;
       }

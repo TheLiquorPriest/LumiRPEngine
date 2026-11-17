@@ -343,7 +343,7 @@ export function orderEvents(ctx: ReadContext, a: Args): LedgerEvent[] | Rejectio
     ...(was?.by ?? by ? { by: was?.by ?? by } : {}),
     source: was?.source ?? sourceOf(a),
     at: was?.at ?? ctx.state.clock,
-    ...(was?.last ? { last: was.last } : strOf(a.said).trim() !== "" ? { last: { note: "Offered in the story", at: ctx.state.clock, source: sourceOf(a), said: strOf(a.said).trim().slice(0, PLAN_LIMITS.text) } } : {}),
+    ...(was?.last ? { last: was.last } : strOf(a.said).trim() !== "" ? { last: { note: say("feed_offered_in_the_story"), at: ctx.state.clock, source: sourceOf(a), said: strOf(a.said).trim().slice(0, PLAN_LIMITS.text) } } : {}),
     ...(was?.lived !== undefined && !relaid ? { lived: was.lived } : {}),
   };
   return [{ type: ORGS_ORDER, data: { org, order: order as unknown as JsonValue, visibility: "secret" } }];
@@ -524,13 +524,13 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
       const team = teamWords(ctx, null, o, who);
       const goal = o.goal === undefined ? undefined : goals.find((g) => g.id === o.goal);
       const parts = [
-        `Asked of you by ${giver} for ${orgName} (${formatClock(cal, o.at)}): ${o.text}`,
+        say("feed_asked_of_you_by_giver_for_orgname", { giver: giver, orgName: orgName, o: formatClock(cal, o.at), text: o.text }),
         team !== "" ? `(${team})` : "",
         o.where !== undefined ? `at ${labelOf(ctx, o.where)}` : "",
         o.when !== undefined ? `by ${formatClock(cal, o.when)}` : "standing",
         `— ${PLAN_STATUS_WORDS[o.status].toLowerCase()}${lateOf(ctx, o) ? ", and late" : ""}.`,
-        goal ? `It serves the goal: ${goal.text}.` : "",
-        tier ? TIER_FRAMES[tier] : "Carry it out as part of your place there; if you won't, say so in the scene.",
+        goal ? say("feed_it_serves_the_goal_text", { text: goal.text }) : "",
+        tier ? TIER_FRAMES[tier] : say("feed_carry_it_out_as_part_of_your"),
       ];
       out.push(`- ${parts.filter((p) => p !== "").join(" ")}`);
     }
@@ -745,7 +745,7 @@ export function agendaLabel(view: Pick<ReadContext, "registry" | "world" | "stat
     const who = strOf(p.who).trim();
     const e = own(state.entities, who);
     const name = e ? (who === world.pov || canSeeEntity(registry, world, state, world.pov, who) ? e.name : "Someone") : who || "Someone";
-    return `Add to the plan? ${name}: ${strOf(p.offer).trim()}`;
+    return say("feed_add_to_the_plan_name_offer", { name: name, offer: strOf(p.offer).trim() });
   }
   const id = strOf(p.id);
   const org = itemOrg(state, strOf(p.org), id);
@@ -768,7 +768,7 @@ export function planExtractLines(ctx: ReadContext): string[] {
     const plan = planOf(ctx.state, org);
     const orgName = `${orgTypeOf(ctx, org) === null ? "your party" : (own(ctx.state.entities, org)?.name ?? org)} (${org})`;
     for (const g of plan.goals.filter((x) => isPlanStatusLive(x.status))) out.push(`- [${g.id}] ${orgName}, goal: ${g.text} (${PLAN_STATUS_WORDS[g.status].toLowerCase()})`);
-    for (const o of plan.orders.filter((x) => isPlanStatusLive(x.status))) out.push(`- [${o.id}] ${orgName}, order for ${o.to.map(name).join(", ")}: ${o.text} (${PLAN_STATUS_WORDS[o.status].toLowerCase()})`);
+    for (const o of plan.orders.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_order_for_o_text_status", { id: o.id, orgName: orgName, o: o.to.map(name).join(", "), text: o.text, status: PLAN_STATUS_WORDS[o.status].toLowerCase() }));
   }
   return out;
 }

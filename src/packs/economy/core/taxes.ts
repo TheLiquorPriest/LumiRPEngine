@@ -851,11 +851,11 @@ export function sCorpProblem(api: FinanceApi, ctx: ReadContext, business: Entity
   for (const h of all) {
     const kind = api.partyKind(ctx, h);
     if (kind === "person" || (kind === "trust" && eligibleTrust(api, ctx, h)) || holdsSCorpShares(ctx, h)) continue;
-    const what = kind === "business" ? "a company" : kind === "trust" ? "a trust that isn't a grantor trust and has beneficiaries other than people" : "an organization whose status can't hold one";
-    return `${labelOf(ctx, h)} is ${what}, and an S corporation's shareholders are people, eligible trusts and charities (501(c)(3) organizations)`;
+    const what = kind === "business" ? say("org_log_a_company") : kind === "trust" ? say("org_log_a_trust_that_isnt_a_grantor_trust") : say("org_log_an_organization_whose_status_cant_hold_one");
+    return say("org_log_h_is_what_and_an_s_corporations", { h: labelOf(ctx, h), what: what });
   }
   const max = sCorpMax(ctx);
-  return all.length > max ? `it would have ${all.length} shareholders, and an S corporation has at most ${max}` : null;
+  return all.length > max ? say("org_log_it_would_have_allcount_shareholders_and_an", { allCount: all.length, max: max }) : null;
 }
 
 /** An S corporation's check of its holders after a change, as a refusal (`economy.scorp_holders`); null when it may have them, or isn't an S corporation. */
@@ -1206,7 +1206,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
   // The statuses the GM may give it: none for a household or the party, which hold none.
   const type = viewer === null ? orgTypeOf(ctx, org) : null;
   const statusable = type !== null && type !== "household" && type !== "party";
-  const consolidate = !corporate || !values ? "Only a C corporation paying business taxes files a consolidated return" : filer !== undefined ? `${named(filer, "Its parent")}'s consolidated return files its income tax` : may !== null && !may.ok ? may.reason : null;
+  const consolidate = !corporate || !values ? say("org_log_only_a_c_corporation_paying_business_taxes") : filer !== undefined ? `${named(filer, "Its parent")}'s consolidated return files its income tax` : may !== null && !may.ok ? may.reason : null;
   return {
     income: exempt ? "exempt" : company ? (corporate ? "corporate" : "owners") : null,
     years,
@@ -1260,7 +1260,7 @@ function taxesExtra(api: FinanceApi, ctx: ReadContext, org: EntityId, corporate:
           }
         : null,
     // A hidden holder's eligibility names them only to the GM.
-    scorp: holders ? { holders: holders.length, max: sCorpMax(ctx), problem: problem !== null && viewer !== null && holders.some((h) => hiddenFrom(ctx, viewer, h)) ? "One of its holders can't hold an S corporation's shares" : problem } : null,
+    scorp: holders ? { holders: holders.length, max: sCorpMax(ctx), problem: problem !== null && viewer !== null && holders.some((h) => hiddenFrom(ctx, viewer, h)) ? say("org_log_one_of_its_holders_cant_hold_an") : problem } : null,
   };
 }
 
@@ -1278,7 +1278,7 @@ function consolidateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string
   if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: say("why_only_a_c_corporation_that_pays_income", { org: labelOf(ctx, org), org2: STRUCTURE_WORDS[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org), org3: !!(isExempt(ctx, org)) }) };
   if ((own(ctx.state.entities, org)?.fields.consolidated_return === true) === elect) return { code: "no_change", reason: say("why_org_already_filesdoesnt_file_a_consolidated_return", { org: labelOf(ctx, org), elect: !!(elect) }) };
   const members = affiliatedGroup(ctx, api, org, ctx.state.clock).map((m) => m.id);
-  const text = elect ? `Elected to file one consolidated return${members.length > 0 ? ` with ${members.map((m) => labelOf(ctx, m)).join(", ")}` : ""}` : "Stopped filing a consolidated return";
+  const text = elect ? say("org_log_elected_to_file_one_consolidated_return_with", { members: members.map((m) => labelOf(ctx, m)).join(", "), if_members: members.length > 0 }) : say("org_log_stopped_filing_a_consolidated_return");
   const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text, names: members }) ?? []) : [];
   return [{ type: "set", entity: org, field: "consolidated_return", value: elect }, ...line];
 }
@@ -1328,7 +1328,7 @@ export function registerTaxes(r: FinanceRegistry): void {
     // A parent's consolidated return files its members' periods too: each marked paid at nothing, so their own payments leave them alone (Phase 5).
     const members = [...new Set(periods.flatMap((p) => p.members))].sort();
     const filed: LedgerEvent[] = members.map((m) => ({ type: "economy.estimated_tax", data: { party: m, periods: periods.filter((p) => p.members.includes(m)).map((p) => ({ key: p.key, cents: 0 })), business: true } }));
-    const memo = business ? (members.length > 0 ? "Corporate income tax, consolidated return" : "Corporate income tax") : "Estimated tax";
+    const memo = business ? (members.length > 0 ? say("org_log_corporate_income_tax_consolidated_return") : say("org_log_corporate_income_tax")) : say("org_log_estimated_tax");
     return { cents, ...(lines ? { lines } : {}), memo, kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods: periods.map((p) => ({ key: p.key, cents: p.cents })), ...(business ? { business: true } : {}) } }, ...filed] };
   });
   core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
@@ -1355,7 +1355,7 @@ export function registerTaxes(r: FinanceRegistry): void {
     const saved = charitableSaving(api, ctx, person, year);
     const deposit = api.depositAccount(ctx, person);
     if (saved <= 0 || !deposit) return null;
-    return { cents: saved, lines: [{ account: api.outside("tax:federal"), amount: -saved }, { account: deposit, amount: saved }], memo: `Tax saved by ${year} donations`, kind: "refund", category: "taxes" };
+    return { cents: saved, lines: [{ account: api.outside("tax:federal"), amount: -saved }, { account: deposit, amount: saved }], memo: say("org_log_tax_saved_by_year_donations", { year: year }), kind: "refund", category: "taxes" };
   });
   // A consolidated return (Phase 5): elected or ended by whoever governs the parent, as a turn; a GM effect too.
   core.effect({ type: "economy.consolidate", args: ["org", "elect?", "by?"], gm: true, resolve: (a, ctx) => consolidateEvents(api, ctx, a) });

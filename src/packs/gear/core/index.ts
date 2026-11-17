@@ -516,14 +516,14 @@ function handoverRefusal(ctx: ReadContext, action: string, params: JsonObject, a
   const away = (id: EntityId): boolean => here === null || placeOfEntity(ctx.state, id) !== here;
   if (action === "give" || action === "hand_over" || action === "lend") {
     const to = strOf(params.to);
-    return to !== "" && own(ctx.state.entities, to) && away(to) ? `${labelOf(ctx, to)} isn't here to take it.` : null;
+    return to !== "" && own(ctx.state.entities, to) && away(to) ? say("why_to_isnt_here_to_take_it", { to: labelOf(ctx, to) }) : null;
   }
   if (action !== "reclaim") return null;
   const item = strOf(params.item);
   if (!own(ctx.state.entities, item)) return null;
   const has = possessorOf(ctx, item);
-  if (has !== null) return has !== actor && away(has) ? `${labelOf(ctx, has)} has it, and isn't here.` : null;
-  return away(item) ? `${labelOf(ctx, item)} isn't here.` : null;
+  if (has !== null) return has !== actor && away(has) ? say("why_has_has_it_and_isnt_here", { has: labelOf(ctx, has) }) : null;
+  return away(item) ? say("why_item_isnt_here", { item: labelOf(ctx, item) }) : null;
 }
 
 /**

@@ -308,7 +308,7 @@ function reject(code: string, reason: string): Rejection {
 export function voiceLine(ctx: ReadContext, who: EntityId): string | null {
   const words = regardWords(ctx, who, ctx.world.pov);
   if (words === null) return null;
-  return `${own(ctx.state.entities, who)?.name ?? who} is ${words} toward you.`;
+  return say("feed_who_is_words_toward_you", { who: own(ctx.state.entities, who)?.name ?? who, words: words });
 }
 
 /**
