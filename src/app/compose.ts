@@ -27,6 +27,7 @@ import { buildArea } from "../build/area";
 import { worldsArea } from "../worlds/area";
 import type { WorldService } from "../worlds/service";
 import { castArea } from "../cast/area";
+import { HISTORY_PART, installHistoryLines } from "../iface";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
 import { EntryNumbers, type LoreBooks, loreLines, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
@@ -190,6 +191,8 @@ export function compose(options: ComposeOptions = {}): Composition {
   const scope = (user: string, chat: string) => ({ user, chat, session: NO_SESSION });
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
   const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat), made().env.log);
+  // The engine's history lines (`.prompts/history-lines.md`) as his shared levels hold them, which every chat's history and notices are said in.
+  const installLines = (): Promise<void> => installHistoryLines(files(app().config.lumiverse.user ?? "", NO_CHAT));
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
   // What a file written through the Files routes names that runs a command or calls out is listed as waiting at once.
   const listing = switchesListing({ external: () => made().harness.external, owner: () => app().config.lumiverse.user, scope: (user, chat) => scope(user, chat ?? NO_CHAT), log: () => app().log });
@@ -331,9 +334,14 @@ export function compose(options: ComposeOptions = {}): Composition {
           problems: () => made().harness.problems(at),
         };
       },
-      written: (saved) => listing.written(saved),
+      written: async (saved) => {
+        await listing.written(saved);
+        if (saved.path.endsWith(`${HISTORY_PART}.md`)) await installLines();
+      },
     })),
     turn.area,
+    // The engine's history lines in force from the start, once the turn lane can read the files.
+    { name: "history-lines", mounted: () => installLines() },
     // The Agents page: his definitions with what each runs on, and the tools an agent's requests declare, as the harness gives them.
     agentsArea(() => ({ definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat ?? NO_CHAT) })),
     bootstrapArea({
