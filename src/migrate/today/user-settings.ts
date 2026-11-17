@@ -22,9 +22,8 @@ import { ITEM_CHANGES } from "../../shared/things";
 import type { OffstageSettings } from "../../shared/offstage";
 import type { ReasoningChoice, SamplingParams } from "../../shared/host";
 import type { BuiltLoreIndex, LoreEntryRef } from "../../shared/lore-views";
-import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorKnowledge, type NarratorSecrets, type NarratorView, narratorViewOf } from "../../shared/narrator-view";
+import { NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorKnowledge, type NarratorSecrets, type NarratorView } from "../../shared/narrator-view";
 import type { LorePolicy } from "../../shared/state-view";
-import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../../shared/time-reach";
 
 export const REASONING_CHOICES: readonly ReasoningChoice[] = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 
