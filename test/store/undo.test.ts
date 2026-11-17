@@ -87,6 +87,17 @@ describe("undo of one change", () => {
     expect(s.headState("c").state.world.entities[POV]?.fields.place).toBe("market_square");
   });
 
+  test("a later change of his own to the same part is changed since, though it wrote the same value; one to another part is not", () => {
+    const { s } = chat();
+    play(s, "c", "m1", "Wren goes down to the cellar.", 1, engine(goTo(POV, "cellar")));
+    const owner = (events: ReturnType<typeof goTo>[]) => s.record(s.writeTarget({ chat: "c" }), events.map((e) => ({ lane: "engine" as const, op: e.type, value: e as unknown as JsonValue, by: "player", source: "player" as const }))).changes;
+    const [first] = owner([goTo(POV, "market_square")]);
+    const [again] = owner([goTo(POV, "market_square")]);
+    if (!first || !again) throw new Error("missing changes");
+    expect(s.undo(first.id)).toEqual({ changes: [], left: [{ code: "changed_since", values: { change: first.id, op: "set" } }] });
+    expect(s.undo(again.id).left).toEqual([]);
+  });
+
   test("a journal line is taken back as the economy takes one back: its posting's lines the other way, named reversed, or refunded where the bank was paid", () => {
     const { s } = chat();
     const market = `${EXTERNAL_ACCOUNT_PREFIX}market`;

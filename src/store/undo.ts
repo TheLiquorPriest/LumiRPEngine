@@ -213,17 +213,29 @@ function reverseFact(c: ChangeRow, now: StoreState): ChangeInput[] | Report {
   return inputs;
 }
 
-/** Whether a later turn than the change's own wrote one of the parts it wrote, by the marks: then it is changed since, whatever its value now. */
-function writtenSince(c: ChangeRow, parts: readonly { ref: string; part: string }[], now: StoreState): boolean {
-  return parts.some(({ ref, part }) => {
-    const mark = now.marks[ref]?.[part];
-    return mark !== undefined && mark.turn !== c.turn;
-  });
+type Parts = readonly { ref: string; part: string }[];
+
+/** The parts a change writes: the fields and relations its event touches, or the parts its area names; none for a store operation. */
+function partsOf(c: Pick<ChangeRow, "op" | "value">, env: Pick<FoldEnv, "registry" | "areas">): Parts {
+  const found = env.areas?.of(c.op) ?? null;
+  if (found !== null) return found.def.touches?.(c.value) ?? [];
+  if (c.op === STORE_OPS.value) return isRecord(c.value) && typeof c.value.key === "string" ? [{ ref: "world", part: c.value.key }] : [];
+  const ev = eventOf(c.op, c.value);
+  return (ev ? (env.registry.get(ev.type)?.touches?.(ev) ?? []) : []).flatMap((t) => ("field" in t ? [{ ref: `entity:${t.entity}`, part: t.field }] : "rel" in t ? [{ ref: `entity:${t.entity}`, part: t.rel }] : []));
 }
 
-/** Undoing an area's change: the reverse its area gives, read against its slice just before it and now; left when its parts were written since. */
+/**
+ * Whether a later change than this one wrote one of the parts it wrote: then it is changed since, whatever its value now. A later turn than the
+ * change's own is one, by the marks; a later change of his own (`later`, those of his that came after its unit) is one too, which the marks
+ * cannot tell, since his changes have no turn.
+ */
+function writtenSince(c: ChangeRow, parts: Parts, now: StoreState, later: readonly ChangeRow[], env: Pick<FoldEnv, "registry" | "areas">): boolean {
+  if (parts.some(({ ref, part }) => (now.marks[ref]?.[part]?.turn ?? c.turn) !== c.turn)) return true;
+  return later.some((l) => l.applied && partsOf(l, env).some((p) => parts.some((q) => q.ref === p.ref && q.part === p.part)));
+}
+
+/** Undoing an area's change: the reverse its area gives, read against its slice just before it and now. */
 function reverseArea(c: ChangeRow, area: { id: string; name: string; def: AreaOp; initial: JsonObject }, before: StoreState, now: StoreState): ChangeInput[] | Report {
-  if (writtenSince(c, area.def.touches?.(c.value) ?? [], now)) return leftOf("changed_since", c);
   const inputs = area.def.undo?.(c.value, before.areas?.[area.id] ?? area.initial, now.areas?.[area.id] ?? area.initial) ?? null;
   if (inputs === "changed_since") return leftOf("changed_since", c);
   if (inputs === null) return leftOf("not_reversible", c);
@@ -233,26 +245,24 @@ function reverseArea(c: ChangeRow, area: { id: string; name: string; def: AreaOp
 /**
  * What undoing `unit` (a change with the rest of its unit, in order) records: each change that
  * applied, reversed, the last first, as one unit of its own. `before` is the state just before the
- * unit, `now` the chat's state at its newest reply. A field or relation an event wrote, or an area's
- * part, that a later turn wrote since is changed since, by the marks (a sum such as a balance is not).
+ * unit, `now` the chat's state at its newest reply, `later` his own changes that came after the unit
+ * where it is one of his. A field or relation an event wrote, or an area's part, that a later turn or
+ * a later change of his wrote since is changed since (a sum such as a balance is not).
  */
-export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState, env: Pick<FoldEnv, "registry" | "areas">): UndoPlan {
+export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState, env: Pick<FoldEnv, "registry" | "areas">, later: readonly ChangeRow[] = []): UndoPlan {
   const group = `undo:${unit[0]?.id ?? 0}`;
   const out: UndoPlan = { inputs: [], left: [] };
   const unlinked = new Set<string>();
   for (const c of [...unit].reverse()) {
     if (!c.applied) continue;
     const found = env.areas?.of(c.op) ?? null;
-    const ev = found === null ? eventOf(c.op, c.value) : null;
-    const parts = (ev ? (env.registry.get(ev.type)?.touches?.(ev) ?? []) : []).flatMap((t) => ("field" in t ? [{ ref: `entity:${t.entity}`, part: t.field }] : "rel" in t ? [{ ref: `entity:${t.entity}`, part: t.rel }] : []));
-    const r =
-      found !== null
+    const r = writtenSince(c, partsOf(c, env), now, later, env)
+      ? leftOf("changed_since", c)
+      : found !== null
         ? reverseArea(c, { id: found.area.id, name: found.name, def: found.def, initial: found.area.initial?.() ?? {} }, before, now)
-        : writtenSince(c, parts, now)
-          ? leftOf("changed_since", c)
-          : c.op === STORE_OPS.fact
-            ? reverseFact(c, now)
-            : reverseOne(c, unit, before, now, group, unlinked);
+        : c.op === STORE_OPS.fact
+          ? reverseFact(c, now)
+          : reverseOne(c, unit, before, now, group, unlinked);
     if (Array.isArray(r)) out.inputs.push(...r);
     else out.left.push(r);
   }

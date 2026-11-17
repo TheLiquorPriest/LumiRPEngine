@@ -2699,7 +2699,9 @@ export class UserStore {
     if (turn === null) {
       const chat = c.chat ?? "";
       const before = this.ownerBefore(chat, first.id);
-      return before === null ? offPath : { plan: reversal(unit, before, this.headState(chat).state, this.store.env), chat };
+      // His own changes that came after the unit: one of them that wrote a part of it is changed since.
+      const last = Math.max(...unit.map((x) => x.id));
+      return before === null ? offPath : { plan: reversal(unit, before, this.headState(chat).state, this.store.env, own.filter((x) => x.id > last && !unit.includes(x))), chat };
     }
     const chat = this.chatOrThrow(turn.chat);
     if (!pathOf(chat.path).some((e) => e.turn === turn.id)) return offPath;
