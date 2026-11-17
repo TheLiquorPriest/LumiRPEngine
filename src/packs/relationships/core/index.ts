@@ -19,6 +19,7 @@
 //   3  multiple axes plus appraisal rules
 //   4  history, group regard
 
+import { say } from "../../../engine/lines";
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -260,10 +261,10 @@ const regardEvent: EventTypeDef<PackEvent> = {
     // changed: warmth rose by 5 and trust fell by 2".
     const parts = Object.entries(objOf(e.data.deltas))
       .filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] !== 0)
-      .map(([axis, d]) => ({ axis: (axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase(), moved: `${d > 0 ? "rose" : "fell"} by ${Math.round(Math.abs(d) * 10) / 10}` }));
+      .map(([axis, d]) => ({ axis: (axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase(), moved: say(d > 0 ? "regard_rose" : "regard_fell", { by: Math.round(Math.abs(d) * 10) / 10 }) }));
     const [only] = parts;
-    if (parts.length === 1 && only) return `${possessive(from)} ${only.axis} toward ${to} ${only.moved}`;
-    return parts.length > 0 ? `${possessive(from)} regard for ${to} changed: ${listWords(parts.map((p) => `${p.axis} ${p.moved}`))}` : `${possessive(from)} regard for ${to} settles`;
+    if (parts.length === 1 && only) return say("regard_axis", { whose: possessive(from), axis: only.axis, to, moved: only.moved });
+    return parts.length > 0 ? say("regard_changed", { whose: possessive(from), to, parts: listWords(parts.map((p) => `${p.axis} ${p.moved}`)) }) : say("regard_settles", { whose: possessive(from), to });
   },
 };
 

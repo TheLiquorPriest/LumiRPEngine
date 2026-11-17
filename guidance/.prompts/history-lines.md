@@ -407,3 +407,18 @@ need_rose: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} rose
 castlife_decided: decided {{choice}}
 castlife_skip: skip planned for {{plans}}{{#note}} ({{note}}){{/note}}
 story_flag: flag {{name}}
+regard_rose: rose by {{by}}
+regard_fell: fell by {{by}}
+regard_axis: {{whose}} {{axis}} toward {{to}} {{moved}}
+regard_changed: {{whose}} regard for {{to}} changed: {{parts}}
+regard_settles: {{whose}} regard for {{to}} settles
+draft_taken_out: taken out
+draft_made: made
+draft_changed: changed
+draft_map_settings: In this chat's world: the map settings {{how}}
+draft_path: the path from {{from}} to {{to}}
+draft_map: the map {{map}}
+draft_place: the place {{place}}
+draft_change: In this chat's world: {{what}} {{how}}
+asset_closed: {{asset}} closed {{on}} at {{price}}
+asset_month_end: {{asset}}'s month-end closes

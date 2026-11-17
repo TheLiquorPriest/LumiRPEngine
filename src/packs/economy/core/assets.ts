@@ -613,7 +613,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       if (viewer) return "";
       const label = assetDefOf(ctx, str(e, "asset"))?.label || str(e, "asset");
       const last = Array.isArray(e.data.closes) ? e.data.closes.at(-1) : undefined;
-      return Array.isArray(last) && typeof last[1] === "number" ? `${label} closed ${String(last[0])} at ${formatMoney(Math.round(last[1]), ctx.world.currency)}` : `${label}'s month-end closes`;
+      return Array.isArray(last) && typeof last[1] === "number" ? say("asset_closed", { asset: label, on: String(last[0]), price: formatMoney(Math.round(last[1]), ctx.world.currency) }) : say("asset_month_end", { asset: label });
     },
     // The closes are an assignment of the whole list: in one timelapse record only an asset's last one matters.
     coarsen: { key: (e) => str(e, "asset"), merge: (_a, b) => b },

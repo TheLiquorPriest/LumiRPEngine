@@ -19,6 +19,7 @@
 // Only what the engine reads as it plays is carried here, never what a chat's state starts from or
 // folds by: the world's places, paths and maps, and how the maps work. Pure.
 
+import { say } from "./lines";
 import { SIGHT_MAX } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { PlaceVisibility } from "../shared/ids";
@@ -407,15 +408,15 @@ export const draftEventDef: EventTypeDef<PackEvent> = {
   describe(e, ctx, viewer) {
     const change = viewer === undefined ? changeOf(e.data) : null;
     if (!change) return "";
-    const how = "gone" in change ? "taken out" : change.over === null ? "made" : "changed";
-    if ("part" in change) return `In this chat's world: the map settings ${how}`;
+    const how = say("gone" in change ? "draft_taken_out" : change.over === null ? "draft_made" : "draft_changed");
+    if ("part" in change) return say("draft_map_settings", { how });
     const v = "value" in change ? change.value : (heldIn(ctx.world, change.collection, change.id) as JsonObject | undefined);
     const what =
       change.collection === "routes"
-        ? `the path from ${labelOf(ctx, typeof v?.from === "string" ? v.from : "")} to ${labelOf(ctx, typeof v?.to === "string" ? v.to : "")}`
+        ? say("draft_path", { from: labelOf(ctx, typeof v?.from === "string" ? v.from : ""), to: labelOf(ctx, typeof v?.to === "string" ? v.to : "") })
         : change.collection === "maps"
-          ? `the map ${typeof v?.title === "string" ? v.title : change.id}`
-          : `the place ${typeof v?.name === "string" ? v.name : labelOf(ctx, change.id)}`;
-    return `In this chat's world: ${what} ${how}`;
+          ? say("draft_map", { map: typeof v?.title === "string" ? v.title : change.id })
+          : say("draft_place", { place: typeof v?.name === "string" ? v.name : labelOf(ctx, change.id) });
+    return say("draft_change", { what, how });
   },
 };
