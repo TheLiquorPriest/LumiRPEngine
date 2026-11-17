@@ -3,7 +3,7 @@
 // since when, and the line to run on the server.
 
 import type { SwitchEntry } from "../../../shared/api";
-import { Badge, Section } from "../../atoms";
+import { Badge, Section } from "../../../frontend/components";
 import { when } from "../../words";
 
 const STATE_WORDS: Readonly<Record<SwitchEntry["state"], string>> = { waiting: "waiting for you", on: "on", off: "off" };

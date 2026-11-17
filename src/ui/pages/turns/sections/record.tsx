@@ -1,4 +1,4 @@
-import { Badge } from "../../../atoms";
+import { Badge } from "../../../../frontend/components";
 import { valueWords } from "../changes";
 import { askedWords } from "../parts";
 import type { TurnSection } from "../types";

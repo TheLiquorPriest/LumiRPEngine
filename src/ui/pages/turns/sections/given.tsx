@@ -1,5 +1,5 @@
 import type { RunShown, TurnReply } from "../../../../shared/api";
-import { Button } from "../../../atoms";
+import { Button } from "../../../../frontend/components";
 import type { RunNode } from "../../../live-model";
 import { EachRun } from "../parts";
 import { Folder } from "../folder";
@@ -27,7 +27,7 @@ function FirstCalls(props: { view: RunShown | undefined; onOpenRequest(name: str
       <span class="rpe-caption">What each agent was sent first</span>
       <div class="rpe-files">
         {[...first.values()].map((r) => (
-          <Button key={r.agent} small kind="ghost" onClick={() => props.onOpenRequest(r.file, props.view?.held ?? null)}>
+          <Button key={r.agent} size="sm" variant="ghost" onClick={() => props.onOpenRequest(r.file, props.view?.held ?? null)}>
             {`${r.definition} (${r.agent}), call ${r.call}`}
           </Button>
         ))}
@@ -63,7 +63,7 @@ function NamedParts(props: { folder: TurnParts["folder"]; onOpenFile(name: strin
       <span class="rpe-caption">Named parts</span>
       <div class="rpe-files">
         {files.map((f) => (
-          <Button key={f.name} small kind="ghost" current={props.folder.open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
+          <Button key={f.name} size="sm" variant="ghost" current={props.folder.open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
             {NAMED_PARTS[f.name]}
           </Button>
         ))}

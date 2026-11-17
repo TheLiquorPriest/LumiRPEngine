@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { DueReply, LevelNode, TurnRow, WorldReply } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Gated, PageHeader } from "../../atoms";
+import { Badge, Banner, Button, Gated, PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
@@ -108,7 +108,7 @@ export function WorldView(props: WorldViewProps) {
   const parent = root?.parent ?? null;
   return (
     <div class="lre-stack rpe-page" data-page="world">
-      <PageHeader title="World" sub="This chat's world as one tree: any level, to any depth." />
+      <PageHeader title="World" subtitle="This chat's world as one tree: any level, to any depth." />
       <Gated open={props.gateOpen} onOpen={props.onOpenGate} onClose={props.onCloseGate} why={GATE_WHY}>
         <NotApplied read={props.notApplied ?? null} />
         <div class="lre-stack rpe-controls">
@@ -130,21 +130,21 @@ export function WorldView(props: WorldViewProps) {
           </form>
           <div class="lre-inline rpe-wrap">
             {parent === null ? null : (
-              <Button small onClick={() => props.onQuery({ ...query, at: parent })}>
+              <Button size="sm" onClick={() => props.onQuery({ ...query, at: parent })}>
                 Up a level
               </Button>
             )}
             {query.at === "world" ? null : (
-              <Button small kind="ghost" onClick={() => props.onQuery({ ...query, at: "world" })}>
+              <Button size="sm" variant="ghost" onClick={() => props.onQuery({ ...query, at: "world" })}>
                 The whole world
               </Button>
             )}
             <span class="lre-inline" aria-label="Depth">
-              <Button small kind="ghost" disabled={query.depth === 0} onClick={() => props.onQuery({ ...query, depth: query.depth - 1 })}>
+              <Button size="sm" variant="ghost" disabled={query.depth === 0} onClick={() => props.onQuery({ ...query, depth: query.depth - 1 })}>
                 Fewer levels
               </Button>
               <span class="lre-num rpe-meta">{counted(query.depth, "level")} down</span>
-              <Button small kind="ghost" onClick={() => props.onQuery({ ...query, depth: query.depth + 1 })}>
+              <Button size="sm" variant="ghost" onClick={() => props.onQuery({ ...query, depth: query.depth + 1 })}>
                 More levels
               </Button>
             </span>
@@ -174,7 +174,7 @@ export function WorldView(props: WorldViewProps) {
             </label>
           )}
           {props.moreTurns?.more === true ? (
-            <Button small kind="ghost" onClick={props.moreTurns.onMore}>
+            <Button size="sm" variant="ghost" onClick={props.moreTurns.onMore}>
               Older turns
             </Button>
           ) : null}

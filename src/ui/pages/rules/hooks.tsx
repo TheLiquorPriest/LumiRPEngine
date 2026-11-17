@@ -5,7 +5,7 @@
 import { useState } from "preact/hooks";
 import type { HookEvent, LayerLevel, TreeFileRow, TreeHook } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Pre, Section, type Tone } from "../../atoms";
+import { Badge, Banner, Button, Pre, Section, type Tone } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
@@ -256,23 +256,23 @@ export function HookOpen(props: { chat: string | null; row: HookRow; onChanged()
       <div class="lre-inline rpe-wrap" data-switches>
         {hook.off ? (
           onAt.map((at) => (
-            <Button key={at} small busy={busy === "switch"} onClick={() => switchTo(false, at)}>
+            <Button key={at} size="sm" busy={busy === "switch"} onClick={() => switchTo(false, at)}>
               {at === "global" ? "Switch on for every chat" : "Switch on for this chat"}
             </Button>
           ))
         ) : hook.replacedBy !== null ? null : (
           <>
             {chat === null ? null : (
-              <Button small busy={busy === "switch"} onClick={() => switchTo(true, "chat")}>
+              <Button size="sm" busy={busy === "switch"} onClick={() => switchTo(true, "chat")}>
                 Switch off for this chat
               </Button>
             )}
-            <Button small kind="ghost" busy={busy === "switch"} onClick={() => switchTo(true, "global")}>
+            <Button size="sm" variant="ghost" busy={busy === "switch"} onClick={() => switchTo(true, "global")}>
               Switch off for every chat
             </Button>
           </>
         )}
-        <Button small kind="ghost" onClick={() => props.onFile(file.path)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onFile(file.path)}>
           Open its file on Files
         </Button>
       </div>

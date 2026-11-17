@@ -5,7 +5,7 @@
 
 import { useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Banner, Button } from "../../atoms";
+import { Banner, Button } from "../../../frontend/components";
 import type { PromptEditAsk, PromptShown, PromptSliceShown, SliceKind, TurnId } from "../../../shared/api";
 import { errorWords } from "../../words";
 import { editPrompt } from "./read";
@@ -48,16 +48,16 @@ export function SliceTools(props: { chat: string; turn: TurnId | null; slice: Pr
   return (
     <div class="lre-stack" data-tools={slice.marker}>
       <div class="lre-inline rpe-wrap">
-        <Button small kind="ghost" current={panel === "rename"} onClick={() => open("rename", slice.marker)}>
+        <Button size="sm" variant="ghost" current={panel === "rename"} onClick={() => open("rename", slice.marker)}>
           Rename
         </Button>
-        <Button small kind="ghost" current={panel === "line"} onClick={() => open("line", slice.line ?? "")}>
+        <Button size="sm" variant="ghost" current={panel === "line"} onClick={() => open("line", slice.line ?? "")}>
           Correct its line
         </Button>
-        <Button small kind="ghost" current={panel === "merge"} disabled={others.length === 0} onClick={() => open("merge", slice.marker)}>
+        <Button size="sm" variant="ghost" current={panel === "merge"} disabled={others.length === 0} onClick={() => open("merge", slice.marker)}>
           Merge with another
         </Button>
-        <Button small kind="ghost" current={panel === "split"} onClick={() => open("split", "")}>
+        <Button size="sm" variant="ghost" current={panel === "split"} onClick={() => open("split", "")}>
           Split
         </Button>
         <label class="lre-inline">
@@ -123,7 +123,7 @@ export function SliceTools(props: { chat: string; turn: TurnId | null; slice: Pr
           ) : null}
           <div class="lre-inline">
             <Button
-              kind="primary"
+              variant="primary"
               busy={busy}
               disabled={text.trim() === "" || (panel === "merge" && other === "") || (panel === "split" && other.trim() === "")}
               onClick={() => {
@@ -135,7 +135,7 @@ export function SliceTools(props: { chat: string; turn: TurnId | null; slice: Pr
             >
               Keep this edit
             </Button>
-            <Button kind="ghost" onClick={() => setPanel(null)}>
+            <Button variant="ghost" onClick={() => setPanel(null)}>
               Cancel
             </Button>
           </div>

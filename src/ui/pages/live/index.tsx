@@ -12,7 +12,7 @@ import type { ComponentChildren, RefObject } from "preact";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf } from "../../client";
-import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../atoms";
+import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../../frontend/components";
 import { type Follow, useFollowNewest } from "../../live-follow";
 import { type RunNode, shownRuns, stopOf } from "../../live-model";
 import { type FailureShown, type LetGo, NOTHING_WATCHED, watchChat, type Watched } from "../../live-watch";
@@ -74,15 +74,15 @@ function RunBlock(props: { chat: string; run: RunNode; now: number; stops: reado
       <Section
         id={`run-${run.run}`}
         title={running ? "Running now" : "Ended"}
-        actions={
+        aside={
           <span class="lre-inline">
             {running && stopOf(run) !== null ? (
-              <Button kind="danger" small busy={stopping} onClick={() => props.onStop(run)}>
+              <Button variant="danger" size="sm" busy={stopping} onClick={() => props.onStop(run)}>
                 {stopping ? "Stopping…" : "Stop"}
               </Button>
             ) : null}
             {turn === null ? null : (
-              <Button small kind="ghost" onClick={() => props.onOpenTurn(turn)}>
+              <Button size="sm" variant="ghost" onClick={() => props.onOpenTurn(turn)}>
                 Its page
               </Button>
             )}
@@ -116,7 +116,7 @@ function LetGoList(props: { letGo: readonly LetGo[]; onOpenTurn(turn: string): v
               {runTitle(gone)}
               {gone.status === null ? "" : `: ${STATUS_WORDS[gone.status].words.toLowerCase()}`}{" "}
               {turn === null ? null : (
-                <Button small kind="ghost" onClick={() => props.onOpenTurn(turn)}>
+                <Button size="sm" variant="ghost" onClick={() => props.onOpenTurn(turn)}>
                   Its page
                 </Button>
               )}
@@ -135,7 +135,7 @@ export function LiveView(props: LiveViewProps) {
   const follow = props.follow;
   return (
     <div class="lre-stack rpe-page" data-page="live" ref={props.root} tabIndex={-1}>
-      <PageHeader title="Live" sub="Watch what runs in this chat as it runs." />
+      <PageHeader title="Live" subtitle="Watch what runs in this chat as it runs." />
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Part of this chat could not be read">
           <span>{props.problem}</span>
@@ -174,7 +174,7 @@ export function LiveView(props: LiveViewProps) {
             {follow === undefined || !going || !follow.scrollable || follow.atBottom ? null : (
               <div class="lre-spread">
                 <span class="rpe-meta">New records are below.</span>
-                <Button small onClick={follow.toNewest}>
+                <Button size="sm" onClick={follow.toNewest}>
                   Follow the newest
                 </Button>
               </div>
@@ -194,7 +194,7 @@ export function LiveView(props: LiveViewProps) {
             ))}
             {follow === undefined || !follow.scrollable ? null : (
               <div>
-                <Button small kind="ghost" onClick={() => follow.toFirst("details.rpe-agent")}>
+                <Button size="sm" variant="ghost" onClick={() => follow.toFirst("details.rpe-agent")}>
                   Back to top
                 </Button>
               </div>

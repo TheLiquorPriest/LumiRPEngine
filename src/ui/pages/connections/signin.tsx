@@ -5,7 +5,7 @@
 
 import type { SignInStart, SignInState } from "../../../shared/api";
 import type { RpeClient } from "../../client";
-import { Banner, Button } from "../../atoms";
+import { Banner, Button } from "../../../frontend/components";
 import { errorWords, when } from "../../words";
 
 /** What the page knows of one connection's sign-in: where it stands, the flow it opened, and what it is doing or why it could not. */
@@ -138,7 +138,7 @@ function FlowForm(props: { flow: SignInStart; provider: SignInState["provider"];
         <Button busy={props.busy} disabled={props.code.trim() === ""} onClick={() => props.onFinish(props.code.trim())}>
           Finish signing in
         </Button>
-        <Button kind="ghost" onClick={props.onCancel}>
+        <Button variant="ghost" onClick={props.onCancel}>
           Cancel
         </Button>
       </div>
@@ -163,11 +163,11 @@ export function SignInPanel(props: SignInPanelProps) {
       {shown.flow === null ? null : <FlowForm flow={shown.flow} provider={props.provider} busy={shown.busy} code={shown.code} onCode={props.onCode} onFinish={props.onFinish} onCancel={props.onCancel} />}
       {shown.flow !== null ? null : (
         <div class="lre-inline rpe-wrap">
-          <Button small busy={shown.busy} onClick={props.onStart}>
+          <Button size="sm" busy={shown.busy} onClick={props.onStart}>
             {signedIn ? "Sign in again" : "Sign in to the provider"}
           </Button>
           {signedIn ? (
-            <Button small kind="ghost" busy={shown.busy} onClick={props.onOut}>
+            <Button size="sm" variant="ghost" busy={shown.busy} onClick={props.onOut}>
               Sign out
             </Button>
           ) : null}

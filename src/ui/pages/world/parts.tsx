@@ -4,7 +4,7 @@
 
 import type { ComponentChildren } from "preact";
 import type { LevelFact, LevelKind, LevelMark, LevelNode, LevelValue } from "../../../shared/api";
-import { Badge, Button, Row } from "../../atoms";
+import { Badge, Button, Row } from "../../../frontend/components";
 import { marksWords } from "../../marks";
 import type { WorldQuery } from "./read";
 import { counted } from "../../words";
@@ -52,7 +52,7 @@ function ValueRow(props: { node: LevelNode; line: LevelValue; facts: readonly Le
   const { node, line, slots } = props;
   return (
     <div class="rpe-value" data-key={line.key}>
-      <Row label={line.key} value={line.value ?? "none"} sub={sourceWords(line)} />
+      <Row k={line.key} v={line.value ?? "none"} sub={sourceWords(line)} />
       {slots.value?.(node, line)}
       {props.facts.map((fact) => (
         <FactLine key={fact.id} fact={fact} below={slots.fact?.(node, fact)} />
@@ -93,7 +93,7 @@ function NodeBox(props: { node: LevelNode; root: boolean; hidden: number; slots:
         <span class="lre-inline">
           <Badge>{node.what ?? KIND_WORDS[node.kind]}</Badge>
           {props.root ? null : (
-            <Button small kind="ghost" onClick={props.onOpen}>
+            <Button size="sm" variant="ghost" onClick={props.onOpen}>
               Open
             </Button>
           )}
@@ -118,7 +118,7 @@ function NodeBox(props: { node: LevelNode; root: boolean; hidden: number; slots:
           </div>
         )}
         {props.hidden === 0 ? null : (
-          <Button small onClick={props.onBelow}>
+          <Button size="sm" onClick={props.onBelow}>
             {`${counted(props.hidden, "level")} below`}
           </Button>
         )}

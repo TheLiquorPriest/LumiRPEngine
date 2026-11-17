@@ -8,7 +8,7 @@ import type { ReleaseForm, ReplyError, RunStatus } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
 import { markdown } from "./markdown";
 import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
-import { Badge, Fold, Pre, type Tone } from "./atoms";
+import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { counted, duration, json, num, tokenWords } from "./words";
@@ -227,16 +227,16 @@ function CallView(props: { step: CallStep; open: boolean; now: number }) {
       </div>
       {answer?.error === undefined ? null : <p class="lre-neg rpe-line">{answer.error}</p>}
       {thinking === "" ? null : (
-        <Fold summary="Thinking">
+        <Disclosure summary="Thinking">
           <Pre text={thinking} mono={false} live={answer === null} />
-        </Fold>
+        </Disclosure>
       )}
       {answer === null ? (
         step.streamed.text === "" ? null : <Pre text={step.streamed.text} mono={false} live />
       ) : answer.text === "" ? null : (
-        <Fold summary="What it wrote" open={props.open}>
+        <Disclosure summary="What it wrote" defaultOpen={props.open}>
           {markdown(answer.text, "lre-md rpe-written")}
-        </Fold>
+        </Disclosure>
       )}
       {answer === null || answer.toolCalls.length === 0 ? null : <p class="rpe-meta">Asked for: {answer.toolCalls.map((c) => c.name).join(", ")}</p>}
     </div>
@@ -263,13 +263,13 @@ function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: num
         {ended?.endedRun === true ? <Badge>ended the run</Badge> : null}
         <span class="rpe-meta lre-num">{ended === null ? `for ${duration(props.now - step.at)}` : duration(ended.ms)}</span>
       </div>
-      <Fold summary="Arguments">
+      <Disclosure summary="Arguments">
         <Pre text={json(step.started.args)} />
-      </Fold>
+      </Disclosure>
       {step.updates.map((update, i) => (
-        <Fold key={i} summary={`While it ran (${i + 1})`}>
+        <Disclosure key={i} summary={`While it ran (${i + 1})`}>
           <Pre text={resultText(update)} />
-        </Fold>
+        </Disclosure>
       ))}
       {step.agents.length === 0 ? null : (
         <div class="rpe-children">
@@ -299,9 +299,9 @@ function ToolView(props: { step: ToolStep; run: RunNode; now: number; depth: num
             </span>
           )}
           {result.details === undefined ? null : (
-            <Fold summary="Details">
+            <Disclosure summary="Details">
               <Pre text={json(result.details)} />
-            </Fold>
+            </Disclosure>
           )}
         </div>
       )}
@@ -384,9 +384,9 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
             </p>
           )}
           {f.dropped === undefined ? null : (
-            <Fold summary="What it cut before it was shown">
+            <Disclosure summary="What it cut before it was shown">
               <Pre text={f.dropped} mono={false} />
-            </Fold>
+            </Disclosure>
           )}
         </div>
       );

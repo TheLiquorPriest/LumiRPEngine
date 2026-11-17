@@ -1,5 +1,5 @@
 import type { CardChange, CardQuestion, ReviewCardReply } from "../../../../shared/api";
-import { Badge, Banner, Button, Pre } from "../../../atoms";
+import { Badge, Banner, Button, Pre } from "../../../../frontend/components";
 import { when } from "../../../words";
 import { valueWords } from "../changes";
 import type { ReviewShown } from "../review";
@@ -41,7 +41,7 @@ function CardChangeLine(props: { change: CardChange; busy: string | null; onUndo
       )}
       {undone || !change.applied ? null : (
         <div class="lre-inline rpe-wrap">
-          <Button small kind="ghost" busy={props.busy === change.id} disabled={change.undo.ops.length === 0} onClick={() => props.onUndo(change.id)}>
+          <Button size="sm" variant="ghost" busy={props.busy === change.id} disabled={change.undo.ops.length === 0} onClick={() => props.onUndo(change.id)}>
             Undo it
           </Button>
           <span class="rpe-meta" data-undo>
@@ -64,10 +64,10 @@ function QuestionLine(props: { question: CardQuestion; busy: string | null; onAn
       <Pre text={valueWords(q.args)} />
       {q.state !== "waiting" ? null : (
         <div class="lre-inline rpe-wrap">
-          <Button small busy={props.busy === q.id} onClick={() => props.onAnswer(q.id, true)}>
+          <Button size="sm" busy={props.busy === q.id} onClick={() => props.onAnswer(q.id, true)}>
             Let it go ahead
           </Button>
-          <Button small kind="ghost" busy={props.busy === q.id} onClick={() => props.onAnswer(q.id, false)}>
+          <Button size="sm" variant="ghost" busy={props.busy === q.id} onClick={() => props.onAnswer(q.id, false)}>
             Do not
           </Button>
         </div>

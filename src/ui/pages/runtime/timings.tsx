@@ -3,7 +3,7 @@
 // it was seen in, its middle time, the slowest and the latest. Time is reported here and gates nothing.
 
 import type { ServiceTimings } from "../../../shared/api";
-import { Banner, Button, Section } from "../../atoms";
+import { Banner, Button, Section } from "../../../frontend/components";
 import { counted, duration } from "../../words";
 
 export interface TimingsViewProps {
@@ -23,13 +23,13 @@ export function TimingsView(props: TimingsViewProps) {
     <Section
       id="timings"
       title="Where the time goes"
-      actions={
+      aside={
         props.chat === null ? undefined : (
           <div class="lre-inline">
-            <Button small kind="ghost" current={!props.ofChat} onClick={() => props.onScope(false)}>
+            <Button size="sm" variant="ghost" current={!props.ofChat} onClick={() => props.onScope(false)}>
               Every chat
             </Button>
-            <Button small kind="ghost" current={props.ofChat} onClick={() => props.onScope(true)}>
+            <Button size="sm" variant="ghost" current={props.ofChat} onClick={() => props.onScope(true)}>
               This chat
             </Button>
           </div>

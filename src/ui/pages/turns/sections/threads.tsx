@@ -1,4 +1,4 @@
-import { Badge } from "../../../atoms";
+import { Badge } from "../../../../frontend/components";
 import type { TurnSection } from "../types";
 
 /** The threads the turn opened or wrote anything of that stay open, with their words, their state and their stakes as the story record holds them at the turn. */

@@ -6,7 +6,7 @@ import type { RuleTest } from "rp-harness/contract";
 import { useState } from "preact/hooks";
 import type { TurnRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { replyOf } from "../../client";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
@@ -93,7 +93,7 @@ function Tester(props: { chat: string; rule: RuleView; onTurn(turn: string): voi
           Run it on that turn
         </Button>
         {picked === "" ? null : (
-          <Button small kind="ghost" onClick={() => props.onTurn(picked)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onTurn(picked)}>
             Open that turn
           </Button>
         )}
@@ -193,7 +193,7 @@ export function RuleOpen(props: RuleOpenProps) {
         {agents === null
           ? "every agent."
           : agents.map((a) => (
-              <Button key={a} small kind="ghost" onClick={() => props.onAgent(a)}>
+              <Button key={a} size="sm" variant="ghost" onClick={() => props.onAgent(a)}>
                 {a}
               </Button>
             ))}
@@ -224,16 +224,16 @@ export function RuleOpen(props: RuleOpenProps) {
         {rule.inForce || rule.why === "off" ? (
           <>
             {chat === null ? null : (
-              <Button small busy={busy === "switch"} onClick={() => switchTo(!rule.inForce, "chat")}>
+              <Button size="sm" busy={busy === "switch"} onClick={() => switchTo(!rule.inForce, "chat")}>
                 {rule.inForce ? "Switch off for this chat" : "Switch on for this chat"}
               </Button>
             )}
-            <Button small kind="ghost" busy={busy === "switch"} onClick={() => switchTo(!rule.inForce, "global")}>
+            <Button size="sm" variant="ghost" busy={busy === "switch"} onClick={() => switchTo(!rule.inForce, "global")}>
               {rule.inForce ? "Switch off for every chat" : "Switch on for every chat"}
             </Button>
           </>
         ) : null}
-        <Button small kind="ghost" onClick={() => props.onFile(rule.path)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onFile(rule.path)}>
           Open its file on Files
         </Button>
       </div>
@@ -266,11 +266,11 @@ export function RuleOpen(props: RuleOpenProps) {
         <div class="lre-inline rpe-wrap">
           {isExample ? (
             <>
-              <Button small busy={busy === "copy"} onClick={() => copy(`@global/rules/${rule.name}.md`)}>
+              <Button size="sm" busy={busy === "copy"} onClick={() => copy(`@global/rules/${rule.name}.md`)}>
                 Copy it into force for every chat
               </Button>
               {chat === null ? null : (
-                <Button small kind="ghost" busy={busy === "copy"} onClick={() => copy(`rules/${rule.name}.md`)}>
+                <Button size="sm" variant="ghost" busy={busy === "copy"} onClick={() => copy(`rules/${rule.name}.md`)}>
                   Copy it into force for this chat
                 </Button>
               )}
@@ -281,16 +281,16 @@ export function RuleOpen(props: RuleOpenProps) {
               <Banner tone="warn" icon="alert" title={replacesShipped ? "Reset to the shipped rule?" : "Delete your rule?"}>
                 <span>{replacesShipped ? "Your file goes, and the shipped rule is in force in its place." : "Your file goes, and nothing replaces it."}</span>
                 <div class="lre-inline">
-                  <Button kind="danger" busy={busy === "reset"} onClick={reset}>
+                  <Button variant="danger" busy={busy === "reset"} onClick={reset}>
                     Yes
                   </Button>
-                  <Button kind="ghost" onClick={() => setAsking(false)}>
+                  <Button variant="ghost" onClick={() => setAsking(false)}>
                     No
                   </Button>
                 </div>
               </Banner>
             ) : (
-              <Button small kind="ghost" onClick={() => setAsking(true)}>
+              <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>
                 {replacesShipped ? "Reset to the shipped rule" : "Delete my rule"}
               </Button>
             )

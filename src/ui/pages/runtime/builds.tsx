@@ -9,7 +9,7 @@
 // nothing the player acts on, and the drawer does not show it.
 
 import type { BuildsReply, BuildsStatus, RestartState, UpdateStage } from "../../../shared/api";
-import { Badge, Banner, Button, Row, Section, type Tone } from "../../atoms";
+import { Badge, Banner, Button, Row, Section, type Tone } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import type { Timers } from "../../roads";
 import { errorWords, when } from "../../words";
@@ -139,7 +139,7 @@ export function UpdateStages(props: { builds: BuildsStatus }) {
         const waits = s.stage === "restart" && s.state === "going" ? RESTART_WORDS[restart] : null;
         return (
           <div key={s.stage} data-stage={s.stage} data-state={s.state}>
-            <Row label={STAGE_WORDS[s.stage]} value={<Badge tone={STATE_TONE[s.state]}>{waits ?? STATE_WORDS[s.state]}</Badge>} sub={s.why === null ? `since ${when(s.at)}` : `${when(s.at)}: ${s.why}`} />
+            <Row k={STAGE_WORDS[s.stage]} v={<Badge tone={STATE_TONE[s.state]}>{waits ?? STATE_WORDS[s.state]}</Badge>} sub={s.why === null ? `since ${when(s.at)}` : `${when(s.at)}: ${s.why}`} />
           </div>
         );
       })}
@@ -159,8 +159,8 @@ export function BuildsView(props: { shown: BuildsShown; onUpdate(): void }) {
     <Section
       id="builds"
       title="Builds"
-      actions={
-        <Button small busy={shown.updating} onClick={props.onUpdate}>
+      aside={
+        <Button size="sm" busy={shown.updating} onClick={props.onUpdate}>
           Update now
         </Button>
       }
@@ -187,9 +187,9 @@ export function BuildsView(props: { shown: BuildsShown; onUpdate(): void }) {
       ) : (
         <>
           {shown.updated === null ? <p class="rpe-line">{builds.words}</p> : null}
-          <Row label="RPE runs" value={<code>{builds.running}</code>} sub={`since ${when(shown.reply.started)}`} />
-          <Row label="Its app file on disk" value={builds.disk === null ? (builds.broken ?? "gives no build") : <code>{builds.disk}</code>} />
-          <Row label="The extension in Lumiverse" value={builds.extension === null ? "has not said yet" : <code>{builds.extension}</code>} />
+          <Row k="RPE runs" v={<code>{builds.running}</code>} sub={`since ${when(shown.reply.started)}`} />
+          <Row k="Its app file on disk" v={builds.disk === null ? (builds.broken ?? "gives no build") : <code>{builds.disk}</code>} />
+          <Row k="The extension in Lumiverse" v={builds.extension === null ? "has not said yet" : <code>{builds.extension}</code>} />
           <UpdateStages builds={builds} />
         </>
       )}

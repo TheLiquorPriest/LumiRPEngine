@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ConnectionAuth, ConnectionShown, ConnectionsShown, ConnectionTested, Effort, ModelLimit, ModelLimits, ModelLimitsEntry, ProviderOffer, SaveConnection } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, PageHeader } from "../../atoms";
+import { Badge, Banner, Button, Empty, PageHeader } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { duration, errorWords, num } from "../../words";
@@ -227,7 +227,7 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
           <button type="submit" class="lre-btn primary" disabled={props.saving} aria-busy={props.saving ? "true" : undefined}>
             Save
           </button>
-          <Button kind="ghost" onClick={props.onCancel}>
+          <Button variant="ghost" onClick={props.onCancel}>
             Cancel
           </Button>
         </div>
@@ -308,7 +308,7 @@ function TestShown(props: { test: ConnectionTestShown; view: ConnectionShown; on
       {other ? (
         <div class="lre-inline rpe-wrap" data-offer="limits">
           <span class="rpe-meta">{`The provider answered as ${tested.model}, not ${view.model}, so RPH does not use these figures for this connection unless you take them as its own.`}</span>
-          <Button small onClick={() => props.onTake(fill)}>
+          <Button size="sm" onClick={() => props.onTake(fill)}>
             Take these limits
           </Button>
         </div>
@@ -359,27 +359,27 @@ function ConnectionRow(props: { view: ConnectionShown; action: ConnectionsAction
         {action.kind === "remove" && action.id === view.id ? (
           <div class="lre-inline rpe-wrap">
             <span>Remove {view.name}?</span>
-            <Button small kind="danger" onClick={() => props.onRemove(view.id)}>
+            <Button size="sm" variant="danger" onClick={() => props.onRemove(view.id)}>
               Remove it
             </Button>
-            <Button small kind="ghost" onClick={() => props.onAction({ kind: "none" })}>
+            <Button size="sm" variant="ghost" onClick={() => props.onAction({ kind: "none" })}>
               Keep it
             </Button>
           </div>
         ) : (
           <div class="lre-inline rpe-wrap">
             {view.default ? null : (
-              <Button small onClick={() => props.onDefault(view.id)}>
+              <Button size="sm" onClick={() => props.onDefault(view.id)}>
                 Make it the default
               </Button>
             )}
-            <Button small kind="ghost" onClick={() => props.onAction({ kind: "form", id: view.id })}>
+            <Button size="sm" variant="ghost" onClick={() => props.onAction({ kind: "form", id: view.id })}>
               Change
             </Button>
-            <Button small kind="ghost" onClick={() => props.onAction({ kind: "remove", id: view.id })}>
+            <Button size="sm" variant="ghost" onClick={() => props.onAction({ kind: "remove", id: view.id })}>
               Remove
             </Button>
-            <Button small kind="ghost" busy={props.test?.busy === true} onClick={() => props.onTest(view.id)}>
+            <Button size="sm" variant="ghost" busy={props.test?.busy === true} onClick={() => props.onTest(view.id)}>
               Test it
             </Button>
           </div>
@@ -399,10 +399,10 @@ export function ConnectionsView(props: ConnectionsViewProps) {
     <div class="lre-stack rpe-page" data-page="connections">
       <PageHeader
         title="Connections"
-        sub="The models RPE's agents call, and how each signs its calls."
+        subtitle="The models RPE's agents call, and how each signs its calls."
         actions={
           editing === null && list !== null ? (
-            <Button small onClick={() => props.onAction({ kind: "form", id: null })}>
+            <Button size="sm" onClick={() => props.onAction({ kind: "form", id: null })}>
               Add a connection
             </Button>
           ) : undefined

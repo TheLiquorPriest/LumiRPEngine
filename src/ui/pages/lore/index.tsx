@@ -7,7 +7,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { LoreIndexRow, LoreIndexStatus, LoreOverlays } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, Fold, PageHeader, Row, Section } from "../../atoms";
+import { Badge, Banner, Button, Disclosure, Empty, PageHeader, Row, Section } from "../../../frontend/components";
 import { EntryBindings } from "../../bindings";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
@@ -32,7 +32,7 @@ function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) =
   const how = row.activation.length === 0 ? "never by itself" : row.activation.map((a) => ACTIVATION_WORDS[a] ?? a).join(", ");
   return (
     <li class="lre-stack rpe-entry" data-entry={row.id}>
-      <Row label={row.title} value={row.source} sub={`${row.id} · ${counted(row.size, "character")} · ${how}`} />
+      <Row k={row.title} v={row.source} sub={`${row.id} · ${counted(row.size, "character")} · ${how}`} />
       {row.indexed ? (
         <p class="rpe-line" data-line>
           {row.kind === null ? null : <Badge>{row.kind}</Badge>} {row.line ?? ""}
@@ -56,9 +56,9 @@ function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) =
         </p>
       )}
       {props.bindings === undefined ? null : (
-        <Fold summary="Change what it is bound to" class="rpe-open">
+        <Disclosure summary="Change what it is bound to" class="rpe-open">
           {props.bindings(row)}
-        </Fold>
+        </Disclosure>
       )}
     </li>
   );
@@ -96,7 +96,7 @@ export function LoreView(props: LoreViewProps) {
   const rows = index.items.filter((row) => loreMatches(row, props.query));
   return (
     <div class="lre-stack rpe-page" data-page="lore">
-      <PageHeader title="Lore" sub="His books and the world's own lore, as RPE understands them." />
+      <PageHeader title="Lore" subtitle="His books and the world's own lore, as RPE understands them." />
       {props.top}
       <Section title="Indexing" id="indexing">
         {props.statusProblem === null ? null : (
@@ -165,9 +165,9 @@ export function LoreView(props: LoreViewProps) {
           <ul class="rpe-plain lre-stack" data-overlays>
             {props.overlays.overlays.map((o) => (
               <li key={o.id} class="lre-stack rpe-entry" data-overlay={o.id}>
-                <Row label={o.title ?? o.entry} value={`turn ${o.turn}`} sub={o.by === null ? undefined : `by ${o.by}${o.agent === null ? "" : `, the agent ${o.agent}`}`} />
+                <Row k={o.title ?? o.entry} v={`turn ${o.turn}`} sub={o.by === null ? undefined : `by ${o.by}${o.agent === null ? "" : `, the agent ${o.agent}`}`} />
                 <p class="rpe-line">{o.note}</p>
-                <Button small kind="ghost" onClick={() => props.onTurn(o.turnId)}>
+                <Button size="sm" variant="ghost" onClick={() => props.onTurn(o.turnId)}>
                   Open turn {o.turn}
                 </Button>
               </li>

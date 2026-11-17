@@ -5,7 +5,7 @@
 import { useState } from "preact/hooks";
 import type { JobLimits, JobView } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Banner, Button, Section } from "../../atoms";
+import { Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
 

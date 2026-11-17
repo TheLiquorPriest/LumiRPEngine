@@ -8,7 +8,7 @@ import type { ListedDefinition, RegisteredTool } from "rp-harness/contract";
 import { useState } from "preact/hooks";
 import type { ConnectionShown, StackReply } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Fold, Section } from "../../atoms";
+import { Badge, Banner, Button, Disclosure, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, LEVEL_WORDS, num } from "../../words";
@@ -64,7 +64,7 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
         <p class="rpe-line" data-no-connection>No connection resolves for it: add one on Connections, or name one of yours in its header.</p>
       ) : (
         <p class="rpe-line" data-runs-on>
-          <Button small kind="ghost" onClick={() => props.onConnection(connection.id)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onConnection(connection.id)}>
             {connection.name}
           </Button>{" "}
           {run.model === null ? "(no model named)" : <code>{run.model}</code>}
@@ -250,7 +250,7 @@ function ChangeSection(props: AgentOpenProps) {
               ))}
             </select>
           </label>
-          <Fold summary={`Tools (${picked.length})`}>
+          <Disclosure summary={`Tools (${picked.length})`}>
             <ul class="rpe-plain lre-stack" data-tool-picks>
               {offered.map((name) => (
                 <li key={name}>
@@ -261,7 +261,7 @@ function ChangeSection(props: AgentOpenProps) {
                 </li>
               ))}
             </ul>
-          </Fold>
+          </Disclosure>
           <label class="lre-field">
             <span class="label">Instruction files it reads, separated by commas</span>
             <input class="lre-input" value={reads} spellcheck={false} onInput={(e) => setReads((e.currentTarget as HTMLInputElement).value)} />
@@ -303,11 +303,11 @@ function ChangeSection(props: AgentOpenProps) {
       )}
       <div class="lre-inline rpe-wrap">
         {chat === null ? null : (
-          <Button small kind="ghost" busy={busy === "apply"} onClick={apply}>
+          <Button size="sm" variant="ghost" busy={busy === "apply"} onClick={apply}>
             Apply now
           </Button>
         )}
-        <Button small kind="ghost" onClick={() => props.onFile(agent.path)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onFile(agent.path)}>
           Open its file on Files
         </Button>
         {mine ? (
@@ -315,16 +315,16 @@ function ChangeSection(props: AgentOpenProps) {
             <Banner tone="warn" icon="alert" title={agent.replaces.some((r) => r.level === "shipped") ? "Reset to the shipped definition?" : "Delete your definition?"}>
               <span>Your file goes{agent.replaces.some((r) => r.level === "shipped") ? ", and the shipped definition is in force in its place" : ", and nothing replaces it"}.</span>
               <div class="lre-inline">
-                <Button kind="danger" busy={busy === "reset"} onClick={reset}>
+                <Button variant="danger" busy={busy === "reset"} onClick={reset}>
                   Yes
                 </Button>
-                <Button kind="ghost" onClick={() => setAsking(false)}>
+                <Button variant="ghost" onClick={() => setAsking(false)}>
                   No
                 </Button>
               </div>
             </Banner>
           ) : (
-            <Button small kind="ghost" onClick={() => setAsking(true)}>
+            <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>
               {agent.replaces.some((r) => r.level === "shipped") ? "Reset to the shipped definition" : "Delete my definition"}
             </Button>
           )
@@ -335,7 +335,7 @@ function ChangeSection(props: AgentOpenProps) {
           <span class="label">A new agent as a copy of this one, named</span>
           <input class="lre-input" value={copyAs} spellcheck={false} onInput={(e) => setCopyAs((e.currentTarget as HTMLInputElement).value)} />
         </label>
-        <Button small busy={busy === "copy"} onClick={copy}>
+        <Button size="sm" busy={busy === "copy"} onClick={copy}>
           Make a copy
         </Button>
       </div>

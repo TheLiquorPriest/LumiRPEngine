@@ -6,7 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { QuestRecordRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Button, Empty, Gated, PageHeader, Section } from "../../atoms";
+import { Badge, Button, Empty, Gated, PageHeader, Section } from "../../../frontend/components";
 import { replyOf } from "../../client";
 import { onChatChange } from "../../live-watch";
 import type { PageEntry } from "../../page-entry";
@@ -57,7 +57,7 @@ export function QuestsPage(props: { chat: string; at: readonly string[] | undefi
   const go = (to: string | null): void => app.go({ page: "quests", chat, at: to === null ? [] : [to] });
   return (
     <div class="lre-stack rpe-page" data-page="quests">
-      <PageHeader title="Quests" sub="The quests as the Author keeps them, and what he sees of them in his journal." {...(id === null ? {} : { back: { label: "All quests", go: () => go(null) } })} />
+      <PageHeader title="Quests" subtitle="The quests as the Author keeps them, and what he sees of them in his journal." {...(id === null ? {} : { onBack: () => go(null), backLabel: "all quests" })} />
       {id !== null && gate ? null : <JournalView journal={journal.value} loading={journal.loading} problem={journal.problem} />}
       <Gated open={gate} onOpen={() => app.gate.open(chat)} onClose={() => app.gate.close(chat)} why={GATE_WHY}>
         <div class="rpe-files-split" data-open={id === null ? "no" : "yes"}>

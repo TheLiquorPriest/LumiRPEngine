@@ -2,7 +2,7 @@
 // change; accepted at a level (shown before the press) as proposed or edited, or dismissed.
 
 import type { SuggestionShown } from "../../../shared/api";
-import { Banner, Button, Section } from "../../atoms";
+import { Banner, Button, Section } from "../../../frontend/components";
 import { when } from "../../words";
 import type { FilesShown, WriteLevel } from "./model";
 import { SUGGESTION_LEVELS, suggestedLevel } from "./model";
@@ -58,24 +58,24 @@ function SuggestionItem(props: SuggestionActions & { chat: string | null; shown:
       <div class="lre-inline rpe-wrap">
         {editing === null ? (
           <>
-            <Button small kind="primary" busy={shown.busy} onClick={() => props.onAccept(s.id)}>
+            <Button size="sm" variant="primary" busy={shown.busy} onClick={() => props.onAccept(s.id)}>
               Accept
             </Button>
-            <Button small onClick={() => props.onEdit(s.id)}>
+            <Button size="sm" onClick={() => props.onEdit(s.id)}>
               Edit, then accept
             </Button>
           </>
         ) : (
           <>
-            <Button small kind="primary" busy={shown.busy} onClick={() => props.onAccept(s.id)}>
+            <Button size="sm" variant="primary" busy={shown.busy} onClick={() => props.onAccept(s.id)}>
               Accept as edited
             </Button>
-            <Button small kind="ghost" onClick={() => props.onEdit(null)}>
+            <Button size="sm" variant="ghost" onClick={() => props.onEdit(null)}>
               Cancel
             </Button>
           </>
         )}
-        <Button small kind="ghost" busy={shown.busy} onClick={() => props.onDismiss(s.id)}>
+        <Button size="sm" variant="ghost" busy={shown.busy} onClick={() => props.onDismiss(s.id)}>
           Dismiss
         </Button>
       </div>

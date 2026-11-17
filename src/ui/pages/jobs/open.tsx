@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { JobLimitsAsk, JobView } from "../../../shared/api";
 import { useApp, useNow } from "../../app";
-import { Badge, Banner, Button, Gated, Pre, Section } from "../../atoms";
+import { Badge, Banner, Button, Gated, Pre, Section } from "../../../frontend/components";
 import { applyRecord, EMPTY_LIVE, type LiveModel } from "../../live-model";
 import { useNoticeLines } from "../../notice-words";
 import { useRead } from "../../reading";
@@ -86,7 +86,7 @@ export function JobOpen(props: JobOpenProps) {
     <div class="lre-stack" data-job-open={job.id}>
       <p class="rpe-line">
         <Badge tone={state.tone}>{state.words}</Badge>{" "}
-        <Button small kind="ghost" onClick={() => props.onAgent(job.agent)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onAgent(job.agent)}>
           {job.agent}
         </Button>{" "}
         <span class="rpe-meta">{chat === "~jobs" ? "no chat" : `chat ${chat}`}</span>
@@ -136,41 +136,41 @@ export function JobOpen(props: JobOpenProps) {
       {can.answer && bootstrap && typeof job.scope.chat === "string" ? <BootstrapAsk chat={job.scope.chat} job={job} stamp={props.stamp} onChanged={props.onChanged} /> : null}
       <div class="lre-inline rpe-wrap" data-controls>
         {can.cancel ? (
-          <Button small kind="danger" busy={busy === "cancel"} onClick={() => press("cancel", () => app.client.call("POST /api/v1/jobs/:job/cancel", { job: job.id }).then((a) => a.job), "Cancelled.")}>
+          <Button size="sm" variant="danger" busy={busy === "cancel"} onClick={() => press("cancel", () => app.client.call("POST /api/v1/jobs/:job/cancel", { job: job.id }).then((a) => a.job), "Cancelled.")}>
             Cancel
           </Button>
         ) : null}
         {can.restart ? (
-          <Button small busy={busy === "restart"} onClick={() => press("restart", () => post("restart"), "Started again with the same task.")}>
+          <Button size="sm" busy={busy === "restart"} onClick={() => press("restart", () => post("restart"), "Started again with the same task.")}>
             Start again
           </Button>
         ) : null}
         {can.resume ? (
-          <Button small busy={busy === "resume"} onClick={() => press("resume", () => post("resume"), "Resumed from its own session.")}>
+          <Button size="sm" busy={busy === "resume"} onClick={() => press("resume", () => post("resume"), "Resumed from its own session.")}>
             Resume
           </Button>
         ) : null}
         {can.hold ? (
-          <Button small kind="ghost" busy={busy === "hold"} onClick={() => press("hold", () => post("hold"), "Held: it waits until you let it go.")}>
+          <Button size="sm" variant="ghost" busy={busy === "hold"} onClick={() => press("hold", () => post("hold"), "Held: it waits until you let it go.")}>
             Hold
           </Button>
         ) : null}
         {can.release ? (
-          <Button small busy={busy === "release"} onClick={() => press("release", () => post("release"), "Let go.")}>
+          <Button size="sm" busy={busy === "release"} onClick={() => press("release", () => post("release"), "Let go.")}>
             Let it go
           </Button>
         ) : null}
         {can.pause ? (
-          <Button small kind="ghost" busy={busy === "pause"} onClick={() => press("pause", () => post("pause"), "Paused at its next call.")}>
+          <Button size="sm" variant="ghost" busy={busy === "pause"} onClick={() => press("pause", () => post("pause"), "Paused at its next call.")}>
             Pause
           </Button>
         ) : null}
         {can.answer && !bootstrap ? (
           <>
-            <Button small busy={busy === "on"} onClick={() => press("on", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "on" } }).then((a) => a.job), "It goes on.")}>
+            <Button size="sm" busy={busy === "on"} onClick={() => press("on", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "on" } }).then((a) => a.job), "It goes on.")}>
               Go on
             </Button>
-            <Button small kind="ghost" busy={busy === "end"} onClick={() => press("end", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "end" } }).then((a) => a.job), "It ends with what it has.")}>
+            <Button size="sm" variant="ghost" busy={busy === "end"} onClick={() => press("end", () => app.client.call("POST /api/v1/jobs/:job/answer", { job: job.id }, { body: { go: "end" } }).then((a) => a.job), "It ends with what it has.")}>
               End it
             </Button>
           </>
@@ -189,7 +189,7 @@ export function JobOpen(props: JobOpenProps) {
           </div>
           <div class="lre-inline">
             <Button
-              small
+              size="sm"
               busy={busy === "continue"}
               onClick={() => {
                 const { limits, bad } = limitsOf(typed);
@@ -210,7 +210,7 @@ export function JobOpen(props: JobOpenProps) {
           </label>
           <div class="lre-inline">
             <Button
-              small
+              size="sm"
               busy={busy === "word"}
               disabled={word.trim() === ""}
               onClick={() =>

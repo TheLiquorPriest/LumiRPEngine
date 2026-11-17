@@ -6,7 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PlaceRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Button, Empty, Gated, PageHeader, Section } from "../../atoms";
+import { Badge, Button, Empty, Gated, PageHeader, Section } from "../../../frontend/components";
 import { replyOf } from "../../client";
 import { onChatChange } from "../../live-watch";
 import type { PageEntry } from "../../page-entry";
@@ -67,7 +67,7 @@ export function PlacesPage(props: { chat: string; at: readonly string[] | undefi
   const rows = list.items.filter((row) => placeMatches(row, query));
   return (
     <div class="lre-stack rpe-page" data-page="places">
-      <PageHeader title="Places" sub="Every place of this chat, its record and its map." {...(id === null ? {} : { back: { label: "All places", go: () => go(null) } })} />
+      <PageHeader title="Places" subtitle="Every place of this chat, its record and its map." {...(id === null ? {} : { onBack: () => go(null), backLabel: "all places" })} />
       <Gated open={gate} onOpen={() => app.gate.open(chat)} onClose={() => app.gate.close(chat)} why={GATE_WHY}>
         <div class="rpe-files-split" data-open={id === null ? "no" : "yes"}>
           <div class="rpe-files-browser lre-stack">

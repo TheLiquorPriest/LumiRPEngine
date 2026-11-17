@@ -9,7 +9,7 @@ import { type ComponentChildren, Fragment } from "preact";
 import { useState } from "preact/hooks";
 import type { FoldDifference, MigrationChatShown, MigrationItemShown, MigrationReply, MigrationRowShown, MigrationSummaryShown, WaitingOnUser } from "../../shared/api";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Fold, PageHeader, Pre, Row, Section } from "../atoms";
+import { Badge, Banner, Button, Disclosure, PageHeader, Pre, Row, Section } from "../../frontend/components";
 import type { RpeClient } from "../client";
 import type { PageEntry } from "../page-entry";
 import { type PagedReading, usePaged, useRead } from "../reading";
@@ -65,7 +65,7 @@ function Press(props: { label: string; kind?: "primary" | "danger" | "ghost"; ru
   const [said, setSaid] = useState<string | null>(null);
   return (
     <>
-      <Button small kind={props.kind ?? "ghost"} busy={busy} onClick={() => {
+      <Button size="sm" variant={props.kind ?? "ghost"} busy={busy} onClick={() => {
         setBusy(true);
         setSaid(null);
         props.run().then(
@@ -203,7 +203,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   } else if (w.kind === "staged")
     press = (
       <>
-        <Button small kind="ghost" current={open} onClick={() => setOpen(!open)}>
+        <Button size="sm" variant="ghost" current={open} onClick={() => setOpen(!open)}>
           {open ? "Hide" : "Show"} what waits
         </Button>
         {open ? <StagedRequests chat={w.chat} onDone={props.onDone} /> : null}
@@ -211,7 +211,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
     );
   else if (w.kind === "chat")
     press = (
-      <Button small kind="ghost" onClick={() => app.go({ page: "turns", chat: w.chat })}>
+      <Button size="sm" variant="ghost" onClick={() => app.go({ page: "turns", chat: w.chat })}>
         Open its turns
       </Button>
     );
@@ -231,7 +231,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   else if (w.kind === "pin" || w.kind === "text") {
     const file = w.kind === "pin" ? w.file : w.path;
     press = (
-      <Button small kind="ghost" onClick={() => app.go({ page: "files", at: [file.startsWith("@") ? file : `@global/${file}`] })}>
+      <Button size="sm" variant="ghost" onClick={() => app.go({ page: "files", at: [file.startsWith("@") ? file : `@global/${file}`] })}>
         Open it on the Files page
       </Button>
     );
@@ -249,8 +249,8 @@ function SummaryView(props: { summary: MigrationSummaryShown; onSave(): void; sa
   const s = props.summary;
   return (
     <div class="lre-stack">
-      <Row label="Read at" value={s.at} />
-      <Row label={s.mode === "real run" ? "What did not balance" : "The real run"} value={s.refusals.length === 0 ? (s.mode === "real run" ? "every row balances" : "may start") : counted(s.refusals.length, "reason it won't start", "reasons it won't start")} />
+      <Row k="Read at" v={s.at} />
+      <Row k={s.mode === "real run" ? "What did not balance" : "The real run"} v={s.refusals.length === 0 ? (s.mode === "real run" ? "every row balances" : "may start") : counted(s.refusals.length, "reason it won't start", "reasons it won't start")} />
       {s.refusals.length === 0 ? null : (
         <ul class="rpe-reports">
           {s.refusals.map((r, i) => (
@@ -258,11 +258,11 @@ function SummaryView(props: { summary: MigrationSummaryShown; onSave(): void; sa
           ))}
         </ul>
       )}
-      <Row label="Found" value={`${counted(s.counts.items, "thing")} in ${counted(s.counts.rows, "row")}, ${counted(s.counts.chats, "chat")}`} sub={`${s.counts.notClassified} found, not classified; ${s.counts.unreadable} could not be read; ${s.counts.differences} difference(s) from today's fold; ${s.counts.offRpe} chat(s) still off RPE`} />
-      <Row label="Disk" value={`${bytesWords(s.disk.total)} in all`} sub={`the backup ${bytesWords(s.disk.backup)}, the import ${bytesWords(s.disk.import)}${s.disk.free === null ? "" : `; ${bytesWords(s.disk.free)} free`}`} />
-      {s.backup === null ? null : <Row label="Backup" value={s.backup.path} sub={<code class="rpe-hash">{s.backup.sha256}</code>} />}
+      <Row k="Found" v={`${counted(s.counts.items, "thing")} in ${counted(s.counts.rows, "row")}, ${counted(s.counts.chats, "chat")}`} sub={`${s.counts.notClassified} found, not classified; ${s.counts.unreadable} could not be read; ${s.counts.differences} difference(s) from today's fold; ${s.counts.offRpe} chat(s) still off RPE`} />
+      <Row k="Disk" v={`${bytesWords(s.disk.total)} in all`} sub={`the backup ${bytesWords(s.disk.backup)}, the import ${bytesWords(s.disk.import)}${s.disk.free === null ? "" : `; ${bytesWords(s.disk.free)} free`}`} />
+      {s.backup === null ? null : <Row k="Backup" v={s.backup.path} sub={<code class="rpe-hash">{s.backup.sha256}</code>} />}
       <div class="lre-inline">
-        <Button small kind="ghost" busy={props.saving} onClick={props.onSave}>
+        <Button size="sm" variant="ghost" busy={props.saving} onClick={props.onSave}>
           Save the report as a file
         </Button>
       </div>
@@ -289,7 +289,7 @@ function PagedList<T>(props: { read: PagedReading<T>; empty: string; item(item: 
       )}
       {read.items.length === 0 && !read.loading ? <p class="lre-muted rpe-line">{props.empty}</p> : <ul class="lre-stack rpe-plain">{read.items.map((item) => props.item(item))}</ul>}
       {read.more ? (
-        <Button small busy={read.loading} onClick={read.older}>
+        <Button size="sm" busy={read.loading} onClick={read.older}>
           More {props.label}
         </Button>
       ) : null}
@@ -353,7 +353,7 @@ function ChatLine(props: { chat: MigrationChatShown; of: Of }) {
       {c.offRpe ? <p class="rpe-line">Still off RPE: in Lumiverse, choose one of RPE's connections for this chat, and it is on RPE. RPE changes nothing in it.</p> : null}
       {c.check !== null && c.check.differences > 0 ? (
         <>
-          <Button small kind="ghost" current={open} onClick={() => setOpen(!open)}>
+          <Button size="sm" variant="ghost" current={open} onClick={() => setOpen(!open)}>
             {open ? "Hide" : "Show"} {counted(c.check.differences, "difference")}
           </Button>
           {open ? <Differences of={props.of} chat={c.chat} /> : null}
@@ -399,7 +399,7 @@ function Items(props: { of: Of }) {
   return (
     <div class="lre-stack">
       <input class="lre-input" type="search" value={q} placeholder="a path, a row, a note" onInput={(event) => setQ((event.currentTarget as HTMLInputElement).value)} />
-      <Button small kind="ghost" current={only} onClick={() => setOnly(!only)}>
+      <Button size="sm" variant="ghost" current={only} onClick={() => setOnly(!only)}>
         Only what was found, not classified
       </Button>
       <PagedList read={read} label="things" empty="Nothing found here." item={(i) => <ItemLine key={`${i.where}: ${i.path}`} item={i} />} />
@@ -432,9 +432,9 @@ function ReportLists(props: { of: Of }) {
       <Section title="What was found" id="items">
         <Items of={props.of} />
       </Section>
-      <Fold summary="The report, as printed">
+      <Disclosure summary="The report, as printed">
         <PrintedText of={props.of} />
-      </Fold>
+      </Disclosure>
     </>
   );
 }
@@ -465,7 +465,7 @@ export function MigrationView(props: {
   const both = shown.run !== null && rehearsal.state === "ready";
   return (
     <div class="lre-stack rpe-page" data-page="migration">
-      <PageHeader title="Migration" sub="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
+      <PageHeader title="Migration" subtitle="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
       {shown.offRpe.length === 0 ? null : (
         <Section title={`Chats still off RPE (${shown.offRpe.filter((c) => !c.done).length})`} id="off-rpe">
           <p class="rpe-meta">Each was on today and is on none of RPE's connections. In Lumiverse, choose one of RPE's connections for it, and it is on RPE. RPE changes nothing in your chats.</p>
@@ -501,10 +501,10 @@ export function MigrationView(props: {
       </Section>
       {both ? (
         <div class="lre-inline" data-of={props.of}>
-          <Button small kind="ghost" current={props.of === "run"} onClick={() => props.onOf("run")}>
+          <Button size="sm" variant="ghost" current={props.of === "run"} onClick={() => props.onOf("run")}>
             Read the last real run
           </Button>
-          <Button small kind="ghost" current={props.of === "rehearsal"} onClick={() => props.onOf("rehearsal")}>
+          <Button size="sm" variant="ghost" current={props.of === "rehearsal"} onClick={() => props.onOf("rehearsal")}>
             Read the rehearsal
           </Button>
         </div>
@@ -515,10 +515,10 @@ export function MigrationView(props: {
           <p class="lre-muted rpe-line">No real run has taken a backup yet.</p>
         ) : (
           <>
-            <Row label="Where" value={shown.backup.path} />
-            <Row label="Size" value={bytesWords(shown.backup.bytes)} />
-            <Row label="SHA-256" value={<code class="rpe-hash">{shown.backup.sha256}</code>} />
-            <Row label="Still there, at that size" value={shown.backup.present ? "yes" : "no"} />
+            <Row k="Where" v={shown.backup.path} />
+            <Row k="Size" v={bytesWords(shown.backup.bytes)} />
+            <Row k="SHA-256" v={<code class="rpe-hash">{shown.backup.sha256}</code>} />
+            <Row k="Still there, at that size" v={shown.backup.present ? "yes" : "no"} />
           </>
         )}
       </Section>
@@ -586,7 +586,7 @@ export function MigrationPage() {
   if (shown === null) {
     return (
       <div class="lre-stack rpe-page" data-page="migration">
-        <PageHeader title="Migration" sub="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
+        <PageHeader title="Migration" subtitle="A rehearsal over today's data, the last real run, what waits on you, the swap and going back." />
         {summary.problem === null ? (
           <p class="lre-muted rpe-line">Reading the migration's summary…</p>
         ) : (

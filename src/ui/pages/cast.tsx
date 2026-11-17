@@ -21,7 +21,7 @@ import { useSelect } from "../store";
 import type { CharacterReply, CharacterListName, EntryRow, EntryCounts, EntryItems, CastReply, CastMemberRow, CastStrikeReply, CastRole, MemoryBand, PerceptionRecordReply } from "../../shared/api";
 import { isRecord } from "../../shared/json";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Empty, Fold, Gated, PageHeader, Pre, Row, Section } from "../atoms";
+import { Badge, Banner, Button, Disclosure, Empty, Gated, PageHeader, Pre, Row, Section } from "../../frontend/components";
 import { isJoined, replyOf, type RpeClient } from "../client";
 import { onChatChange } from "../live-watch";
 import { EntryCard, type EntryCardProps, type StrikeAsk, writeWords } from "../records";
@@ -330,12 +330,12 @@ function Pager(props: { id: CharacterListName; items: { total: number; before: n
       </p>
       <div class="lre-inline rpe-wrap">
         {props.items.before === 0 ? null : (
-          <Button small kind="ghost" onClick={() => props.onMore(props.id, props.skip + props.size)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onMore(props.id, props.skip + props.size)}>
             Earlier ones
           </Button>
         )}
         {props.skip === 0 ? null : (
-          <Button small kind="ghost" onClick={() => props.onMore(props.id, Math.max(0, props.skip - props.size))}>
+          <Button size="sm" variant="ghost" onClick={() => props.onMore(props.id, Math.max(0, props.skip - props.size))}>
             Later ones
           </Button>
         )}
@@ -400,13 +400,13 @@ function GameSide(props: { game: Record<string, unknown> }) {
   const where = isRecord(game.where) && Array.isArray(game.where["."]) ? game.where["."].map(plain).join(" › ") : null;
   return (
     <div class="lre-stack" data-game>
-      {where === null ? null : <Row label="Where it is" value={where} />}
-      {items("holds").length === 0 ? null : <Row label="Has on it" value={items("holds").map((h) => plain(h.name)).join(", ")} />}
+      {where === null ? null : <Row k="Where it is" v={where} />}
+      {items("holds").length === 0 ? null : <Row k="Has on it" v={items("holds").map((h) => plain(h.name)).join(", ")} />}
       {items("owns").map((o, i) => (
-        <Row key={i} label="Owns, kept elsewhere" value={plain(o.name)} sub={isRecord(o.where) ? plain(o.where) : undefined} />
+        <Row key={i} k="Owns, kept elsewhere" v={plain(o.name)} sub={isRecord(o.where) ? plain(o.where) : undefined} />
       ))}
       {items("values").map((v, i) => (
-        <Row key={i} label={plain(v.key)} value={plain(v.value)} />
+        <Row key={i} k={plain(v.key)} v={plain(v.value)} />
       ))}
     </div>
   );
@@ -420,17 +420,17 @@ function MindsNotes(props: { notes: Record<string, unknown> }) {
   const mind = isRecord(notes.mind) ? notes.mind : null;
   return (
     <div class="lre-stack" data-minds>
-      {typeof notes.summary === "string" ? <Row label="Summary" value={notes.summary} /> : null}
+      {typeof notes.summary === "string" ? <Row k="Summary" v={notes.summary} /> : null}
       {rows("notes").map((n, i) => (
-        <Row key={`n${i}`} label={`Note, mattered ${plain(n.salience)} of 5`} value={plain(n.text)} sub={when(n)} />
+        <Row key={`n${i}`} k={`Note, mattered ${plain(n.salience)} of 5`} v={plain(n.text)} sub={when(n)} />
       ))}
       {rows("commitments").map((c, i) => (
-        <Row key={`c${i}`} label={`Commitment, ${plain(c.kind)}, ${plain(c.status)}`} value={plain(c.text)} sub={[c.with === "" ? undefined : `with ${plain(c.with)}`, typeof c.due === "string" ? `due ${c.due}` : undefined, when(c)].filter((s) => s !== undefined).join(" · ")} />
+        <Row key={`c${i}`} k={`Commitment, ${plain(c.kind)}, ${plain(c.status)}`} v={plain(c.text)} sub={[c.with === "" ? undefined : `with ${plain(c.with)}`, typeof c.due === "string" ? `due ${c.due}` : undefined, when(c)].filter((s) => s !== undefined).join(" · ")} />
       ))}
       {rows("witness").map((w, i) => (
-        <Row key={`w${i}`} label={w.how === "told" ? "Told" : "Saw"} value={plain(w.what)} sub={[typeof w.by === "string" ? `from ${w.by}` : undefined, typeof w.place === "string" ? `at ${w.place}` : undefined, when(w)].filter((s) => s !== undefined).join(" · ")} />
+        <Row key={`w${i}`} k={w.how === "told" ? "Told" : "Saw"} v={plain(w.what)} sub={[typeof w.by === "string" ? `from ${w.by}` : undefined, typeof w.place === "string" ? `at ${w.place}` : undefined, when(w)].filter((s) => s !== undefined).join(" · ")} />
       ))}
-      {mind === null ? null : <Row label={`Their last mind, ${plain(mind.level)}`} value={plain(mind.monologue)} sub={[typeof mind.intent === "string" && mind.intent !== "" ? `meant to ${mind.intent}` : undefined, typeof mind.depiction === "string" && mind.depiction !== "" ? `seemed ${mind.depiction}` : undefined, typeof mind.place === "string" ? `at ${mind.place}` : undefined, when(mind)].filter((s) => s !== undefined).join(" · ")} />}
+      {mind === null ? null : <Row k={`Their last mind, ${plain(mind.level)}`} v={plain(mind.monologue)} sub={[typeof mind.intent === "string" && mind.intent !== "" ? `meant to ${mind.intent}` : undefined, typeof mind.depiction === "string" && mind.depiction !== "" ? `seemed ${mind.depiction}` : undefined, typeof mind.place === "string" ? `at ${mind.place}` : undefined, when(mind)].filter((s) => s !== undefined).join(" · ")} />}
     </div>
   );
 }
@@ -494,7 +494,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
       </div>
       {c.character.casting?.line == null ? null : <p class="rpe-line">{c.character.casting.line}</p>}
       {shown.joined === null ? null : (
-        <Banner tone="info" icon="alert" title="Turn joined to another" actions={<Button small onClick={props.onNewest}>Back to the newest</Button>}>
+        <Banner tone="info" icon="alert" title="Turn joined to another" actions={<Button size="sm" onClick={props.onNewest}>Back to the newest</Button>}>
           <span data-joined>
             Turn {shown.joined.turn} was joined to turn {shown.joined.joined}, so the record is shown at turn {shown.joined.joined}.
           </span>
@@ -551,7 +551,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
           </div>
         )}
         {older.length === 0 ? null : (
-          <Fold summary={`Earlier versions (${older.length})`}>
+          <Disclosure summary={`Earlier versions (${older.length})`}>
             {older.map((b) => (
               <div key={`${b.part}-${b.version}`} class="lre-stack">
                 <span class="rpe-caption">
@@ -560,7 +560,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
                 <Pre text={b.text} mono={false} />
               </div>
             ))}
-          </Fold>
+          </Disclosure>
         )}
         <BaseEditor key={standing.map((b) => `${b.part}${b.version}`).join()} {...form} now={c.now} />
       </Section>
@@ -578,7 +578,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
       </Section>
       {c.away === null ? null : (
         <Section id="away" title="Away">
-          {AWAY_WORDS.flatMap(([key, label]) => (c.away?.fields[key] === undefined ? [] : [<Row key={key} label={label} value={plain(c.away.fields[key])} />]))}
+          {AWAY_WORDS.flatMap(([key, label]) => (c.away?.fields[key] === undefined ? [] : [<Row key={key} k={label} v={plain(c.away.fields[key])} />]))}
         </Section>
       )}
       {c.game === null ? null : (
@@ -648,14 +648,14 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
             <span class="rpe-caption">Turns it was on stage in and has no perception of</span>
             {gaps.map((t) => (
               <div key={t.turn} class="lre-stack">
-                <Fold summary={`${t.message === null ? `Turn ${t.turn}` : `Message ${t.message}`}, the stage read from ${t.read === "scene" ? "the open scene" : t.read === "owner" ? "where your character stands" : "no record"}`}>
+                <Disclosure summary={`${t.message === null ? `Turn ${t.turn}` : `Message ${t.message}`}, the stage read from ${t.read === "scene" ? "the open scene" : t.read === "owner" ? "where your character stands" : "no record"}`}>
                   <PerceptionWriter {...form} turn={t.turn} message={t.message} />
                   {shown.at === t.turn ? null : (
-                    <Button small kind="ghost" onClick={() => props.onOpen(c.character.id, t.turn)}>
+                    <Button size="sm" variant="ghost" onClick={() => props.onOpen(c.character.id, t.turn)}>
                       See it as it stood then
                     </Button>
                   )}
-                </Fold>
+                </Disclosure>
               </div>
             ))}
           </div>
@@ -699,7 +699,7 @@ export function CastView(props: CastViewProps) {
   if (shown.open !== null) {
     return (
       <div class="lre-stack rpe-page" data-page="cast" data-character={shown.open}>
-        <PageHeader title={opened?.name ?? shown.open} sub="Everything on its record, struck entries included." back={{ label: "Back to the cast", go: props.onClose }} />
+        <PageHeader title={opened?.name ?? shown.open} subtitle="Everything on its record, struck entries included." onBack={props.onClose} backLabel="the cast" />
         {problem}
         {shown.strikeProblem === null ? null : (
           <Banner tone="neg" icon="alert" title="Not done">
@@ -719,7 +719,7 @@ export function CastView(props: CastViewProps) {
   const characters = shown.list?.characters ?? [];
   return (
     <div class="lre-stack rpe-page" data-page="cast">
-      <PageHeader title="Cast" sub="Every character this chat knows, with its casting and what its record holds." />
+      <PageHeader title="Cast" subtitle="Every character this chat knows, with its casting and what its record holds." />
       {problem}
       {shown.list === null || characters.length === 0 ? null : gate(null)}
       {shown.list === null ? (

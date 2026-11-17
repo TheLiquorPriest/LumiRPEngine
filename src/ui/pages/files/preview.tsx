@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Badge, Pre, Section } from "../../atoms";
+import { Badge, Pre, Section } from "../../../frontend/components";
 import { useUiSetting } from "../../ui-settings";
 import type { PartPreviewReply } from "../../../shared/api";
 import { errorWords } from "../../words";

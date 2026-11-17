@@ -11,12 +11,11 @@
 
 import { render } from "preact";
 import { AppContext as TodayContext, useApp as useToday } from "../../../frontend/app";
-import { Toasts } from "../../../frontend/components";
+import { Banner, Toasts } from "../../../frontend/components";
 import { setCurrency } from "../../../frontend/format";
 import { Hud } from "../../../frontend/hud";
 import { Play } from "../../../frontend/play/play";
 import { createStore, type Readable, useSelect } from "../../store";
-import { Banner as PageBanner } from "../../atoms";
 import type { RpeClient } from "../../client";
 import type { Timers } from "../../roads";
 import { keptApp, type ToastSettings } from "../app";
@@ -47,9 +46,9 @@ function PlayBody(props: { said: Readable<readonly string[]> }) {
   return (
     <div class="rpe-play-body">
       {failed === null ? null : (
-        <PageBanner tone="neg" icon="alert" title="The chat's state could not be read">
+        <Banner tone="neg" icon="alert" title="The chat's state could not be read">
           <span>{failed}</span>
-        </PageBanner>
+        </Banner>
       )}
       <Said said={props.said} />
       {view === null ? (

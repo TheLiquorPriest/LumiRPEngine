@@ -3,7 +3,7 @@
 // lanes, what is still open and the unsettled list.
 
 import type { TurnChange } from "../../../shared/api";
-import { Badge } from "../../atoms";
+import { Badge } from "../../../frontend/components";
 import { marksWords } from "../../marks";
 import type { TurnReply } from "../../../shared/api";
 

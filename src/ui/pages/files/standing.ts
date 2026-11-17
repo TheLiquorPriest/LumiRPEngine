@@ -4,7 +4,7 @@
 // that edits what it shows; or kept and read by no agent. Nothing here is worked out from a file's name.
 
 import type { TreeFileRow, TreeListed } from "../../../shared/api";
-import type { Tone } from "../../atoms";
+import type { Tone } from "../../../frontend/components";
 
 /**
  * The files of a folder no agent reads, by path: guidance RPH loads by no name (the listing's `item` is null) other than

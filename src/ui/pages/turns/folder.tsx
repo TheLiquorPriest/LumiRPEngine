@@ -1,7 +1,7 @@
 // A turn's folder on the Turn page: its files as RPE lists them, each opened on demand, and a model call's request rebuilt exactly as it was sent.
 
 import type { RequestReply, TurnReply } from "../../../shared/api";
-import { Badge, Banner, Button, Pre } from "../../atoms";
+import { Badge, Banner, Button, Pre } from "../../../frontend/components";
 import { replyOf, type RpeClient } from "../../client";
 import { bytesWords, errorWords } from "../../words";
 import { type FolderShown, NO_FOLDER, type OpenShown, type RequestShown } from "./types";
@@ -109,7 +109,7 @@ export function OpenFile(props: { open: OpenShown | null; onClose(): void }) {
     <div class="lre-stack" data-file={open.name}>
       <div class="lre-spread">
         <code class="lre-id">{open.name}</code>
-        <Button small kind="ghost" onClick={props.onClose}>
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
           Close
         </Button>
       </div>
@@ -147,7 +147,7 @@ export function Folder(props: { folder: FolderShown; onOpenFile(name: string): v
         <ul class="rpe-files">
           {shown.map((f) => (
             <li key={f.name}>
-              <Button small kind="ghost" current={open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
+              <Button size="sm" variant="ghost" current={open?.name === f.name} onClick={() => props.onOpenFile(f.name)}>
                 {f.name}
               </Button>
               <span class="rpe-meta lre-num">{bytesWords(f.bytes)}</span>

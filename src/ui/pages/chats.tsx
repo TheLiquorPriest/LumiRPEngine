@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ChatRow } from "../../shared/api";
 import { useApp } from "../app";
-import { Badge, Banner, Button, Empty, PageHeader } from "../atoms";
+import { Badge, Banner, Button, Empty, PageHeader } from "../../frontend/components";
 import { errorWords, when } from "../words";
 import { type JobsReader, type JobsShown, JobsView, NO_JOBS, readJobs } from "./jobs";
 import type { PageEntry } from "../page-entry";
@@ -24,7 +24,7 @@ export interface ChatsViewProps {
 export function ChatsView(props: ChatsViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="chats">
-      <PageHeader title="Chats" sub="The chats RPE plays. Pick one to watch its turns." />
+      <PageHeader title="Chats" subtitle="The chats RPE plays. Pick one to watch its turns." />
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The chats could not be read" actions={<Button onClick={props.onRead}>Try again</Button>}>
           <span>{props.problem}</span>
@@ -52,7 +52,7 @@ export function ChatsView(props: ChatsViewProps) {
                 </button>
                 {chat.world === false ? null : (
                   <div class="lre-inline">
-                    <Button small kind="ghost" title={`Play ${chat.name}`} onClick={() => props.onPlay(chat.id)}>
+                    <Button size="sm" variant="ghost" title={`Play ${chat.name}`} onClick={() => props.onPlay(chat.id)}>
                       Play
                     </Button>
                   </div>

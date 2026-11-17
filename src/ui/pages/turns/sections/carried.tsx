@@ -1,5 +1,5 @@
 import type { CarriedTurnReply } from "../../../../shared/api";
-import { Badge, Pre, Row } from "../../../atoms";
+import { Badge, Pre, Row } from "../../../../frontend/components";
 import { valueWords } from "../changes";
 import type { TurnSection } from "../types";
 
@@ -10,8 +10,8 @@ export function CarriedRecord(props: { carried: CarriedTurnReply }) {
   const c = props.carried;
   return (
     <div class="lre-stack" data-carried={c.turn}>
-      <Row label="Played by" value={c.engine === null ? <span class="lre-muted">the engine was not read</span> : <Badge>{ENGINE_WORDS[c.engine]}</Badge>} />
-      {c.unplayed === null ? null : <Row label="Why no turn was played" value={c.unplayed} />}
+      <Row k="Played by" v={c.engine === null ? <span class="lre-muted">the engine was not read</span> : <Badge>{ENGINE_WORDS[c.engine]}</Badge>} />
+      {c.unplayed === null ? null : <Row k="Why no turn was played" v={c.unplayed} />}
       {c.departures.length === 0 ? null : (
         <div class="lre-stack" data-departures>
           <span class="rpe-caption">Where the reply says something against its turn</span>

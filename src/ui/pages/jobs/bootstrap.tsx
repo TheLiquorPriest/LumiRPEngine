@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { JobView } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Section } from "../../atoms";
+import { Section } from "../../../frontend/components";
 import { onChatChange } from "../../live-watch";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";

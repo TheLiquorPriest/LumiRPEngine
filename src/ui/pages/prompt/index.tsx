@@ -12,7 +12,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { TurnId } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Banner, Button, Empty, Gated, PageHeader, Section } from "../../atoms";
+import { Banner, Button, Empty, Gated, PageHeader, Section } from "../../../frontend/components";
 import { onChatChange } from "../../live-watch";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
 import type { PageEntry } from "../../page-entry";
@@ -55,10 +55,10 @@ function HistoryLine(props: { entry: PromptTurnShown; lines: NoticeLines; curren
           {entry.n === null ? "A turn no longer on the path" : `Turn ${entry.n}`} · {clock(entry.at)}
         </span>
         <span class="lre-inline">
-          <Button small kind="ghost" current={props.current} onClick={props.onPick}>
+          <Button size="sm" variant="ghost" current={props.current} onClick={props.onPick}>
             Its parts
           </Button>
-          <Button small kind="ghost" onClick={props.onOpenTurn}>
+          <Button size="sm" variant="ghost" onClick={props.onOpenTurn}>
             Its page
           </Button>
         </span>
@@ -74,7 +74,7 @@ export function PromptView(props: PromptViewProps) {
   const slots = props.slots ?? {};
   return (
     <div class="lre-stack rpe-page" data-page="prompt">
-      <PageHeader title="Prompt" sub="How this chat's preset is cut into named parts." actions={props.actions} />
+      <PageHeader title="Prompt" subtitle="How this chat's preset is cut into named parts." actions={props.actions} />
       <Gated open={props.gateOpen} onOpen={props.onOpenGate} onClose={props.onCloseGate} why={GATE_WHY}>
         {null}
       </Gated>

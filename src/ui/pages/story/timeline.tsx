@@ -6,7 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ChatMessageShown, StoryItemRow, StoryTimelineRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Banner, Button, Section } from "../../atoms";
+import { Banner, Button, Section } from "../../../frontend/components";
 import { usePaged } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords } from "../../words";

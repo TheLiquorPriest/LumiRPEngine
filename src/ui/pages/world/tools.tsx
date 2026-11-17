@@ -5,7 +5,7 @@
 import { useState } from "preact/hooks";
 import type { DueShown, EditOpAsk, FactPrecision, LevelNode, TapReply, TurnId } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Row } from "../../atoms";
+import { Badge, Banner, Button, Row } from "../../../frontend/components";
 import { marksWords, PRECISIONS } from "../../marks";
 import { usePaged, useRead } from "../../reading";
 import type { ValueChangeShown } from "../../../shared/api";
@@ -45,7 +45,7 @@ export function History(props: { chat: string; at: string; part: string; turn: T
     <div class="rpe-open lre-stack" data-history={props.part}>
       <div class="lre-spread">
         <span class="rpe-caption">{`History of ${props.part}, turn by turn`}</span>
-        <Button small kind="ghost" onClick={props.onClose}>
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
           Close
         </Button>
       </div>
@@ -62,7 +62,7 @@ export function History(props: { chat: string; at: string; part: string; turn: T
         </ul>
       )}
       {list.more ? (
-        <Button small busy={list.loading} onClick={list.older}>
+        <Button size="sm" busy={list.loading} onClick={list.older}>
           Older changes
         </Button>
       ) : null}
@@ -184,10 +184,10 @@ function EditForm(props: { chat: string; level: string; as: "value" | "fact"; pa
       )}
       {done === null ? null : <EditResult done={done} busy={busy} onUndo={undo} />}
       <div class="lre-inline">
-        <Button busy={busy} kind={removing ? "danger" : "primary"} onClick={send} disabled={key.trim() === "" || (!removing && value.trim() === "")}>
+        <Button busy={busy} variant={removing ? "danger" : "primary"} onClick={send} disabled={key.trim() === "" || (!removing && value.trim() === "")}>
           {removing ? "Remove it" : "Save as your change"}
         </Button>
-        <Button kind="ghost" onClick={props.onClose}>
+        <Button variant="ghost" onClick={props.onClose}>
           {done === null ? "Cancel" : "Close"}
         </Button>
       </div>
@@ -202,16 +202,16 @@ export function RowTools(props: { chat: string; level: string; part: string; as:
   return (
     <div class="lre-stack">
       <div class="lre-inline rpe-wrap">
-        <Button small kind="ghost" current={panel === "history"} onClick={() => toggle("history")}>
+        <Button size="sm" variant="ghost" current={panel === "history"} onClick={() => toggle("history")}>
           History
         </Button>
         {props.turn !== null ? null : (
           <>
-            <Button small kind="ghost" current={panel === "change"} onClick={() => toggle("change")}>
+            <Button size="sm" variant="ghost" current={panel === "change"} onClick={() => toggle("change")}>
               Change
             </Button>
             {props.as === "fact" ? null : (
-              <Button small kind="ghost" current={panel === "remove"} onClick={() => toggle("remove")}>
+              <Button size="sm" variant="ghost" current={panel === "remove"} onClick={() => toggle("remove")}>
                 Remove
               </Button>
             )}
@@ -233,7 +233,7 @@ function Systems(props: { chat: string; level: string; turn: TurnId | null; onCl
     <div class="rpe-open lre-stack" data-systems={props.level}>
       <div class="lre-spread">
         <span class="rpe-caption">The game systems at this level</span>
-        <Button small kind="ghost" onClick={props.onClose}>
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
           Close
         </Button>
       </div>
@@ -253,7 +253,7 @@ function Systems(props: { chat: string; level: string; turn: TurnId | null; onCl
             <div key={section.title}>
               <span class="rpe-caption">{section.title}</span>
               {section.rows.map((row, i) => (
-                <Row key={`${row.label}${i}`} label={row.label} value={row.value} sub={[row.secret ? "the player could not see this" : null, row.note, row.precision === null && row.standing === null ? null : [row.precision, row.standing].filter((w) => w !== null).join(", ")].filter((w) => w !== null).join(" · ") || undefined} />
+                <Row key={`${row.label}${i}`} k={row.label} v={row.value} sub={[row.secret ? "the player could not see this" : null, row.note, row.precision === null && row.standing === null ? null : [row.precision, row.standing].filter((w) => w !== null).join(", ")].filter((w) => w !== null).join(" · ") || undefined} />
               ))}
             </div>
           ))}
@@ -291,11 +291,11 @@ export function NodeTools(props: { chat: string; node: LevelNode; turn: TurnId |
     <div class="lre-stack">
       <DueLines items={props.due} />
       <div class="lre-inline rpe-wrap">
-        <Button small kind="ghost" current={panel === "systems"} onClick={() => toggle("systems")}>
+        <Button size="sm" variant="ghost" current={panel === "systems"} onClick={() => toggle("systems")}>
           Systems
         </Button>
         {props.turn !== null ? null : (
-          <Button small kind="ghost" current={panel === "add"} onClick={() => toggle("add")}>
+          <Button size="sm" variant="ghost" current={panel === "add"} onClick={() => toggle("add")}>
             Add a value or fact
           </Button>
         )}

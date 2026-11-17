@@ -4,7 +4,7 @@
 
 import { useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords, num } from "../../words";
 
@@ -39,10 +39,10 @@ export function SwitchesSection(props: { reload: number; onChanged(): void; onSe
             <Badge tone={now.off ? "warn" : "pos"}>{now.off ? "switched off" : "switched on"}</Badge> <Badge tone={now.held ? "warn" : undefined}>{now.held ? "held" : "not held"}</Badge>
           </p>
           <div class="lre-inline rpe-wrap">
-            <Button small busy={busy} onClick={() => press({ off: !now.off })}>
+            <Button size="sm" busy={busy} onClick={() => press({ off: !now.off })}>
               {now.off ? "Switch jobs on" : "Switch jobs off"}
             </Button>
-            <Button small kind="ghost" busy={busy} onClick={() => press({ held: !now.held })}>
+            <Button size="sm" variant="ghost" busy={busy} onClick={() => press({ held: !now.held })}>
               {now.held ? "Let jobs go" : "Hold jobs"}
             </Button>
           </div>
@@ -50,7 +50,7 @@ export function SwitchesSection(props: { reload: number; onChanged(): void; onSe
           <ul class="rpe-plain lre-stack" data-limits>
             {now.limits.map((l) => (
               <li key={l.key} class="rpe-line">
-                <Button small kind="ghost" onClick={() => props.onSetting(l.key)}>
+                <Button size="sm" variant="ghost" onClick={() => props.onSetting(l.key)}>
                   {l.key}
                 </Button>{" "}
                 {typeof l.value === "number" || typeof l.value === "string" ? String(l.value) : JSON.stringify(l.value)}

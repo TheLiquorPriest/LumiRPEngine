@@ -12,7 +12,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Fold, PageHeader } from "../../atoms";
+import { Disclosure, PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
 import { Browser } from "./browse";
@@ -47,7 +47,7 @@ export function FilesView(props: FilesViewProps) {
   const unread = unreadIn(shown.browse.items);
   return (
     <div class="lre-stack rpe-page" data-page="files" data-chat={props.chat ?? undefined}>
-      <PageHeader title="Files" sub={props.chat === null ? "The agents' files: shipped, and yours." : "The agents' files by level: shipped, yours, and this chat's."} />
+      <PageHeader title="Files" subtitle={props.chat === null ? "The agents' files: shipped, and yours." : "The agents' files by level: shipped, yours, and this chat's."} />
       {open !== null ? null : (
         <>
           <SuggestionsSection {...props} />
@@ -65,9 +65,9 @@ export function FilesView(props: FilesViewProps) {
         )}
       </div>
       {open !== null ? null : (
-        <Fold summary="New file or folder">
+        <Disclosure summary="New file or folder">
           <NewFile {...props} folder={shown.browse.folder} />
-        </Fold>
+        </Disclosure>
       )}
     </div>
   );

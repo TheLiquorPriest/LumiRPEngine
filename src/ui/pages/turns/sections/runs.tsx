@@ -1,5 +1,5 @@
 import type { RunShown } from "../../../../shared/api";
-import { Badge, Pre } from "../../../atoms";
+import { Badge, Pre } from "../../../../frontend/components";
 import type { RunNode } from "../../../live-model";
 import { RunHead, runTitle, statusWords, TURN_KIND_WORDS } from "../../../trace-view";
 import { RunCaption } from "../parts";

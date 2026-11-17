@@ -3,7 +3,7 @@
 // session's opening block afresh so a change holds now.
 
 import type { StackLeft } from "rp-harness/contract";
-import { Banner, Button, Fold, Pre, Section } from "../../atoms";
+import { Banner, Button, Disclosure, Pre, Section } from "../../../frontend/components";
 import { LEVEL_WORDS } from "../../words";
 import type { ApplyShown, FilesShown } from "./model";
 
@@ -35,8 +35,8 @@ export function StackSection(props: { chat: string | null; shown: FilesShown; on
     <Section
       title="An agent's stack"
       id="stack"
-      actions={
-        <Button small busy={props.shown.apply.busy} title="Starts the opening block of this chat's open session afresh from the files as they stand, so a changed tool list or what an agent is given holds now." onClick={props.onApply}>
+      aside={
+        <Button size="sm" busy={props.shown.apply.busy} title="Starts the opening block of this chat's open session afresh from the files as they stand, so a changed tool list or what an agent is given holds now." onClick={props.onApply}>
           Apply now
         </Button>
       }
@@ -76,9 +76,9 @@ export function StackSection(props: { chat: string | null; shown: FilesShown; on
               {p.left === undefined ? null : ` · left out: ${LEFT_WORDS[p.left]}`}
               {p.situations === undefined || p.situations.length === 0 ? null : ` · added by: ${p.situations.join(", ")}`}
               {p.text === undefined ? null : (
-                <Fold summary="Its text" class="rpe-open">
+                <Disclosure summary="Its text" class="rpe-open">
                   <Pre text={p.text} mono={false} />
-                </Fold>
+                </Disclosure>
               )}
             </li>
           ))}

@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { LoreProposal, LoreWrite } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { usePaged } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, when } from "../../words";
@@ -78,7 +78,7 @@ function ProposalCard(props: { p: LoreProposal; onDecided(done: ProposalDecided)
         {p.decided === null ? "" : ` · decided ${when(p.decided)}`}
         {p.turn === null ? "" : " · from "}
         {p.turn === null ? null : (
-          <Button small kind="ghost" onClick={() => props.onTurn(p.turn as string)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onTurn(p.turn as string)}>
             its turn
           </Button>
         )}
@@ -121,7 +121,7 @@ function ProposalCard(props: { p: LoreProposal; onDecided(done: ProposalDecided)
             <Button busy={busy === "approve"} onClick={() => decide("approve")}>
               {changed ? "Approve with my edits" : "Approve"}
             </Button>
-            <Button kind="ghost" busy={busy === "reject"} onClick={() => decide("reject")}>
+            <Button variant="ghost" busy={busy === "reject"} onClick={() => decide("reject")}>
               Reject
             </Button>
           </div>
@@ -159,22 +159,22 @@ export function ProposalsSection(props: { chat: string; onTurn(turn: string): vo
     <Section
       id="proposals"
       title="Proposals waiting on you"
-      actions={
+      aside={
         <div class="lre-inline">
-          <Button small kind="ghost" current={!all} onClick={() => setAll(false)}>
+          <Button size="sm" variant="ghost" current={!all} onClick={() => setAll(false)}>
             This chat's
           </Button>
-          <Button small kind="ghost" current={all} onClick={() => setAll(true)}>
+          <Button size="sm" variant="ghost" current={all} onClick={() => setAll(true)}>
             Every chat's
           </Button>
         </div>
       }
     >
       <div class="lre-inline">
-        <Button small kind="ghost" current={!decided} onClick={() => setDecided(false)}>
+        <Button size="sm" variant="ghost" current={!decided} onClick={() => setDecided(false)}>
           Waiting
         </Button>
-        <Button small kind="ghost" current={decided} onClick={() => setDecided(true)}>
+        <Button size="sm" variant="ghost" current={decided} onClick={() => setDecided(true)}>
           Approved
         </Button>
       </div>
@@ -267,16 +267,16 @@ function WriteCard(props: { w: LoreWrite; onPutBack(done: { write: LoreWrite; of
             {w.kind === "create" ? "The entry RPE made is taken away." : `The entry goes back to what it was before this write${w.world === null ? "" : ", as the world's next revision"}.`} It is refused if the entry changed since.
           </span>
           <div class="lre-inline">
-            <Button kind="danger" busy={busy} onClick={putBack}>
+            <Button variant="danger" busy={busy} onClick={putBack}>
               Yes, put it back
             </Button>
-            <Button kind="ghost" onClick={() => setAsking(false)}>
+            <Button variant="ghost" onClick={() => setAsking(false)}>
               No
             </Button>
           </div>
         </Banner>
       ) : (
-        <Button small kind="ghost" onClick={() => setAsking(true)}>
+        <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>
           Put it back
         </Button>
       )}

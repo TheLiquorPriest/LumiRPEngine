@@ -4,7 +4,7 @@
 // to copy. Everything is in the route's words; nothing here decides whether RPE may restart.
 
 import type { BuildsStatus, RestartState, ServiceHow } from "../../../shared/api";
-import { Badge, Banner, Button, Row, Section } from "../../atoms";
+import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
 import { when } from "../../words";
 
 export interface RestartShown {
@@ -47,7 +47,7 @@ export interface ServiceViewProps {
 export function ServiceView(props: ServiceViewProps) {
   const { how, restart } = props;
   return (
-    <Section id="service" title="How RPE runs" actions={how !== null && canRestart(how) ? <Button small busy={restart.busy} onClick={props.onRestart}>Restart</Button> : undefined}>
+    <Section id="service" title="How RPE runs" aside={how !== null && canRestart(how) ? <Button size="sm" busy={restart.busy} onClick={props.onRestart}>Restart</Button> : undefined}>
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="How RPE runs could not be read">
           <span>{props.problem}</span>
@@ -73,12 +73,12 @@ export function ServiceView(props: ServiceViewProps) {
             </Banner>
           )}
           <Row
-            label="RPE runs"
-            value={how.runs === "service" ? <span>as a service <code>{how.unit}</code></span> : <Badge tone="warn">started by hand</Badge>}
+            k="RPE runs"
+            v={how.runs === "service" ? <span>as a service <code>{how.unit}</code></span> : <Badge tone="warn">started by hand</Badge>}
             sub={`since ${when(how.since)}`}
           />
-          <Row label="Its build" value={<code>{how.build}</code>} />
-          <Row label="It listens on" value={<span data-listens>{how.listens.map((a) => <code key={a} class="lre-id"> {a}</code>)}</span>} />
+          <Row k="Its build" v={<code>{how.build}</code>} />
+          <Row k="It listens on" v={<span data-listens>{how.listens.map((a) => <code key={a} class="lre-id"> {a}</code>)}</span>} />
           <p class="rpe-line" data-restart-state>
             {RESTART_WORDS[how.restart]}
             {how.runs === "by hand" ? " Restart is not offered: nothing starts RPE again once it stops." : ""}

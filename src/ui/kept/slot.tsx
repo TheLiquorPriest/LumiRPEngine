@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useApp } from "../app";
-import { Banner } from "../atoms";
+import { Banner } from "../../frontend/components";
 import { errorWords } from "../words";
 import type { KeptChunk } from "./chunk-api";
 

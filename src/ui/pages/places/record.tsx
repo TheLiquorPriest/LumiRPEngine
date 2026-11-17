@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { PlaceBase, PlaceFactRow, PlaceRecord } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { RecordBindings } from "../../bindings";
 import { replyOf } from "../../client";
 import { useRead } from "../../reading";
@@ -50,7 +50,7 @@ function Facts(props: { items: readonly PlaceFactRow[]; onTurn(turn: string): vo
                 {f.beat.message === null ? "" : ` (message ${f.beat.message})`}
               </>
             )}{" "}
-            <Button small kind="ghost" onClick={() => props.onTurn(f.turn)}>
+            <Button size="sm" variant="ghost" onClick={() => props.onTurn(f.turn)}>
               Open turn {f.n}
             </Button>
           </p>
@@ -160,7 +160,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
         {r.parent === null ? null : (
           <>
             {" in "}
-            <Button small kind="ghost" onClick={() => props.onOpenPlace(r.parent?.id ?? "")}>
+            <Button size="sm" variant="ghost" onClick={() => props.onOpenPlace(r.parent?.id ?? "")}>
               {r.parent.name}
             </Button>
           </>
@@ -194,7 +194,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
         />
         {r.sources.some((s) => s.newer) ? <p class="rpe-meta" data-newer>{r.sources.filter((s) => s.newer).map((s) => s.title ?? s.entry).join(", ")} changed, went or was bound after the base was drawn.</p> : null}
         <p class="rpe-meta">
-          <Button small kind="ghost" onClick={props.onLore}>
+          <Button size="sm" variant="ghost" onClick={props.onLore}>
             Open the Lore page
           </Button>
         </p>
@@ -238,7 +238,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
             <li key={w.route} class="rpe-entry" data-way={w.route}>
               <p class="rpe-line">
                 {w.dir === "in" ? "From " : "To "}
-                <Button small kind="ghost" onClick={() => props.onOpenPlace(w.to.id)}>
+                <Button size="sm" variant="ghost" onClick={() => props.onOpenPlace(w.to.id)}>
                   {w.to.name}
                 </Button>
                 {w.dir === "both" ? " both ways" : w.dir === "out" ? ", out of it only" : ", into it only"}
@@ -249,7 +249,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
                 {w.turn === null ? null : (
                   <>
                     {" "}
-                    <Button small kind="ghost" onClick={() => props.onOpenTurn(w.turn ?? "")}>
+                    <Button size="sm" variant="ghost" onClick={() => props.onOpenTurn(w.turn ?? "")}>
                       Open its turn
                     </Button>
                   </>
@@ -262,7 +262,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
           <p class="rpe-meta" data-adjoining>
             Adjoining:{" "}
             {r.ways.adjoining.map((a) => (
-              <Button key={a.id} small kind="ghost" onClick={() => props.onOpenPlace(a.id)}>
+              <Button key={a.id} size="sm" variant="ghost" onClick={() => props.onOpenPlace(a.id)}>
                 {a.name} ({a.how})
               </Button>
             ))}
@@ -285,7 +285,7 @@ export function PlaceOpen(props: PlaceOpenProps) {
               <p class="rpe-line">{h.text ?? h.beat}</p>
               <p class="rpe-meta">
                 {h.message === null ? "not on the chat's path" : `message ${h.message}`}{" "}
-                <Button small kind="ghost" onClick={() => props.onOpenTurn(h.turn)}>
+                <Button size="sm" variant="ghost" onClick={() => props.onOpenTurn(h.turn)}>
                   Open its turn
                 </Button>
               </p>

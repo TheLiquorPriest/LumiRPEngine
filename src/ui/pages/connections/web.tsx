@@ -3,7 +3,7 @@
 
 import { useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
 
@@ -65,7 +65,7 @@ export function WebSearchSection() {
           Save
         </Button>
         {now?.address === null || now === null ? null : (
-          <Button kind="ghost" busy={busy} onClick={() => save(null)}>
+          <Button variant="ghost" busy={busy} onClick={() => save(null)}>
             Switch web search off
           </Button>
         )}

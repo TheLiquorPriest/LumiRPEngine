@@ -7,7 +7,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { BuildsStatus } from "../../../shared/api";
 import { type Route, useApp } from "../../app";
-import { PageHeader } from "../../atoms";
+import { PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
@@ -34,7 +34,7 @@ export interface RuntimeViewProps {
 export function RuntimeView(props: RuntimeViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="runtime">
-      <PageHeader title="Runtime" sub="How RPE runs, and which build." />
+      <PageHeader title="Runtime" subtitle="How RPE runs, and which build." />
       {props.service}
       <SessionLine ends={props.sessionEnds} />
       <BuildsView shown={props.builds} onUpdate={props.onUpdate} />

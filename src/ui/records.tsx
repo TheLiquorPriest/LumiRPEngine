@@ -5,7 +5,7 @@
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { Badge, Banner, Button, Fold, Pre } from "./atoms";
+import { Badge, Banner, Button, Disclosure, Pre } from "../frontend/components";
 import { errorWords, json } from "./words";
 
 /** One write of an entry, as both records keep it. */
@@ -80,7 +80,7 @@ export function EntryCard(props: EntryCardProps) {
           {props.marks}
           {props.struck ? <Badge tone="neg">struck</Badge> : null}
         </span>
-        <Button small kind="ghost" busy={props.busy} onClick={() => props.onStrike({ id: props.id, struck: !props.struck })}>
+        <Button size="sm" variant="ghost" busy={props.busy} onClick={() => props.onStrike({ id: props.id, struck: !props.struck })}>
           {props.struck ? "Take back the strike" : "Strike"}
         </Button>
       </div>
@@ -91,7 +91,7 @@ export function EntryCard(props: EntryCardProps) {
       {props.more}
       <p class="rpe-meta">First written at {writeWords(props.first)}</p>
       {props.writes.length < 2 ? null : (
-        <Fold summary={`Its ${props.writes.length} writes`}>
+        <Disclosure summary={`Its ${props.writes.length} writes`}>
           <ol class="lre-stack rpe-plain">
             {props.writes.map((w, i) => (
               <li key={i} class="lre-stack">
@@ -100,7 +100,7 @@ export function EntryCard(props: EntryCardProps) {
               </li>
             ))}
           </ol>
-        </Fold>
+        </Disclosure>
       )}
     </li>
   );
@@ -184,7 +184,7 @@ export function Correction(props: { id: string; fields: JsonObject; onCorrect(as
     <div class="lre-stack" data-correction={props.id}>
       {open ? null : (
         <div class="lre-inline">
-          <Button small kind="ghost" onClick={() => setOpen(true)}>
+          <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
             Correct it
           </Button>
         </div>
@@ -223,7 +223,7 @@ export function Correction(props: { id: string; fields: JsonObject; onCorrect(as
             <Button busy={busy} onClick={save}>
               Save as my correction
             </Button>
-            <Button kind="ghost" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
           </div>

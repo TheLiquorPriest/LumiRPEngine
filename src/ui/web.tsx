@@ -11,7 +11,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { createStore, useSelect } from "./store";
 import { AppContext, chatOf, type Route, type UiApp, useApp } from "./app";
-import { Banner, Button, PageHeader } from "./atoms";
+import { Banner, Button, PageHeader } from "../frontend/components";
 import { createClient, type TokenStore, webConnector } from "./client";
 import { Frame, PagesBar, routeFor } from "./frame";
 import type { PageEntry } from "./page-entry";
@@ -121,17 +121,17 @@ function SignIn(props: { error: string | null; onToken: (token: string) => Promi
         if (ready && !busy) void submit();
       }}
     >
-      <PageHeader title="Sign in to RPE" sub={way === "token" ? "With the token RPE printed." : "With your Lumiverse account."} />
+      <PageHeader title="Sign in to RPE" subtitle={way === "token" ? "With the token RPE printed." : "With your Lumiverse account."} />
       {shown === null ? null : (
         <Banner tone="neg" icon="alert" title={way === "token" ? "RPE did not take that token" : "RPE did not take that sign-in"}>
           <span>{shown}</span>
         </Banner>
       )}
       <div class="lre-row">
-        <Button small kind={way === "token" ? "primary" : "ghost"} onClick={() => setWay("token")}>
+        <Button size="sm" variant={way === "token" ? "primary" : "ghost"} onClick={() => setWay("token")}>
           Token
         </Button>
-        <Button small kind={way === "account" ? "primary" : "ghost"} onClick={() => setWay("account")}>
+        <Button size="sm" variant={way === "account" ? "primary" : "ghost"} onClick={() => setWay("account")}>
           Lumiverse account
         </Button>
       </div>
@@ -206,8 +206,8 @@ function WebShell(props: { sessions: Sessions }) {
         <span class="rpe-web-chat">{name ?? ""}</span>
         {signedIn ? (
           <Button
-            small
-            kind="ghost"
+            size="sm"
+            variant="ghost"
             onClick={() => {
               void props.sessions.signOut().finally(() => app.client.reconnect());
             }}

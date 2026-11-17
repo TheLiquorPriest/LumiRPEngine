@@ -8,7 +8,7 @@
 import { useState } from "preact/hooks";
 import type { EngineBookRemoved, EngineBookShown, JsonValue } from "../../shared/api";
 import { useApp } from "../app";
-import { Banner, Button } from "../atoms";
+import { Banner, Button } from "../../frontend/components";
 import { useRead } from "../reading";
 import { counted, errorWords } from "../words";
 
@@ -69,16 +69,16 @@ function BookLine(props: { book: EngineBookShown; done: EngineBookRemoved | null
             {b.chats.length === 0 ? "" : `, and takes it out of ${b.chats.map((c) => c.name).join(", ")}`}. Nothing else of any chat changes, and it cannot be undone.
           </p>
           <div class="lre-row">
-            <Button kind="danger" small busy={busy} onClick={remove}>
+            <Button variant="danger" size="sm" busy={busy} onClick={remove}>
               Remove it
             </Button>
-            <Button kind="ghost" small disabled={busy} onClick={() => setAsking(false)}>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking(false)}>
               Keep it
             </Button>
           </div>
         </div>
       ) : (
-        <Button kind="ghost" small onClick={() => setAsking(true)}>
+        <Button variant="ghost" size="sm" onClick={() => setAsking(true)}>
           Remove this book…
         </Button>
       )}
@@ -155,16 +155,16 @@ export function GoingBack() {
         <div class="lre-stack" data-confirm="true">
           <p class="rpe-line">Once you say it, this page offers to remove the books today's build made for its worlds, one book per press. Going back's steps still hold, but a book you remove is gone, and the previous build would play without it. Say you will not go back?</p>
           <div class="lre-row">
-            <Button kind="danger" small busy={busy} onClick={say}>
+            <Button variant="danger" size="sm" busy={busy} onClick={say}>
               I will not go back
             </Button>
-            <Button kind="ghost" small disabled={busy} onClick={() => setAsking(false)}>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking(false)}>
               Not now
             </Button>
           </div>
         </div>
       ) : (
-        <Button kind="ghost" small onClick={() => setAsking(true)}>
+        <Button variant="ghost" size="sm" onClick={() => setAsking(true)}>
           I will not go back…
         </Button>
       )}

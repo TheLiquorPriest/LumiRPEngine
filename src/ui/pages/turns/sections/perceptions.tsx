@@ -1,5 +1,5 @@
 import type { StageReading, StageTurn } from "../../../../shared/api";
-import { Badge } from "../../../atoms";
+import { Badge } from "../../../../frontend/components";
 import { counted } from "../../../words";
 import type { TurnSection } from "../types";
 

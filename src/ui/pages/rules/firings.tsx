@@ -3,7 +3,7 @@
 // spoiler gate; the rule, the moment and what happened do not.
 
 import type { RuleFiring } from "../../../shared/api";
-import { Badge } from "../../atoms";
+import { Badge } from "../../../frontend/components";
 import { when } from "../../words";
 import type { FiringShown } from "../../../shared/api";
 

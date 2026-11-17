@@ -4,7 +4,7 @@
 
 import type { QuestRecord, QuestRecordRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Row, Section } from "../../atoms";
+import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { KIND_WORDS, StageList } from "./journal";
 
@@ -21,7 +21,7 @@ export function shownWords(shown: QuestRecordRow["shown"], visibility: QuestReco
 
 function Refs(props: { label: string; refs: readonly string[] }) {
   if (props.refs.length === 0) return null;
-  return <Row label={props.label} value={<span class="rpe-meta">{props.refs.join(", ")}</span>} />;
+  return <Row k={props.label} v={<span class="rpe-meta">{props.refs.join(", ")}</span>} />;
 }
 
 export function QuestRecordView(props: { record: QuestRecord; onTurn?: (turn: string) => void }) {
@@ -39,11 +39,11 @@ export function QuestRecordView(props: { record: QuestRecord; onTurn?: (turn: st
         </p>
       )}
       <div class="lre-stack">
-        {quest.objective === null ? null : <Row label="What it is" value={quest.objective} />}
-        {quest.why === null ? null : <Row label="Why it matters" value={quest.why} />}
-        {quest.stakes === null ? null : <Row label="What is at stake" value={quest.stakes} />}
-        {quest.rewards === null ? null : <Row label="What it may give" value={quest.rewards} />}
-        {quest.thread === null ? null : <Row label="Its thread" value={quest.thread} />}
+        {quest.objective === null ? null : <Row k="What it is" v={quest.objective} />}
+        {quest.why === null ? null : <Row k="Why it matters" v={quest.why} />}
+        {quest.stakes === null ? null : <Row k="What is at stake" v={quest.stakes} />}
+        {quest.rewards === null ? null : <Row k="What it may give" v={quest.rewards} />}
+        {quest.thread === null ? null : <Row k="Its thread" v={quest.thread} />}
         <Refs label="Who it involves" refs={quest.who} />
         <Refs label="Where" refs={quest.where} />
         <Refs label="What it involves" refs={quest.things} />
@@ -64,7 +64,7 @@ export function QuestRecordView(props: { record: QuestRecord; onTurn?: (turn: st
                   {entry.turn !== null && props.onTurn !== undefined ? (
                     <>
                       {" · "}
-                      <Button small kind="ghost" onClick={() => props.onTurn?.(entry.turn as string)}>
+                      <Button size="sm" variant="ghost" onClick={() => props.onTurn?.(entry.turn as string)}>
                         its turn
                       </Button>
                     </>

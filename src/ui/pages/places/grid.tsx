@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { JsonValue, MapGridReply, MapKept, MapPieceShown, MapWrote } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button } from "../../atoms";
+import { Badge, Banner, Button } from "../../../frontend/components";
 import { replyOf } from "../../client";
 import { useRead } from "../../reading";
 import { counted, errorWords } from "../../words";
@@ -107,7 +107,7 @@ function PieceLine(props: { piece: MapPieceShown; picked: boolean; movable: bool
         <strong>{piece.name}</strong> <span class="rpe-meta">{piece.kind}, at ({piece.square.join(", ")}){piece.size === undefined ? "" : `, covering ${piece.size.join(" by ")}`}{piece.on === undefined ? "" : `, ${piece.within === true ? "in" : "on"} ${piece.on}`}{piece.state === undefined ? "" : `, ${piece.state}`}{piece.blocks?.way === true ? ", blocks the way" : ""}{piece.blocks?.view === true ? ", blocks the view" : ""}</span>
       </span>
       {props.movable && piece.on === undefined ? (
-        <Button small kind={props.picked ? "primary" : "ghost"} onClick={props.onPick}>
+        <Button size="sm" variant={props.picked ? "primary" : "ghost"} onClick={props.onPick}>
           {props.picked ? "Tap a square to move it there" : "Move it"}
         </Button>
       ) : null}
@@ -188,7 +188,7 @@ export function GridPane(props: { chat: string; place: string; turn: string | nu
         <Banner tone="info" icon="check" title="Done">
           <span data-said>{wrote.words}</span>
           {wrote.undo === null ? null : (
-            <Button small kind="ghost" busy={busy === "undo"} onClick={undo}>
+            <Button size="sm" variant="ghost" busy={busy === "undo"} onClick={undo}>
               Undo it
             </Button>
           )}
@@ -204,7 +204,7 @@ export function GridPane(props: { chat: string; place: string; turn: string | nu
               <strong>{p.name}</strong> <span class="rpe-meta">{p.kind}, at the place with no square of its own{p.zone === undefined ? "" : `, in ${p.zone}`}{p.words === undefined ? "" : `: ${p.words}`}</span>
             </span>
             {edit ? (
-              <Button small kind={picked === p.id ? "primary" : "ghost"} onClick={() => setPicked(picked === p.id ? null : p.id)}>
+              <Button size="sm" variant={picked === p.id ? "primary" : "ghost"} onClick={() => setPicked(picked === p.id ? null : p.id)}>
                 {picked === p.id ? "Tap a square to put it there" : "Put it on a square"}
               </Button>
             ) : null}
@@ -219,7 +219,7 @@ export function GridPane(props: { chat: string; place: string; turn: string | nu
       )}
       {g.from !== "world" && edit ? (
         <div class="lre-stack" data-keep>
-          <Button small busy={busy === "keep"} onClick={keep}>
+          <Button size="sm" busy={busy === "keep"} onClick={keep}>
             Keep in the world
           </Button>
           <p class="rpe-meta">Copies this grid, with the squares the chat drew on it, into the world's draft, the working copy Build edits. The chat keeps its own changes until the world takes them in.</p>

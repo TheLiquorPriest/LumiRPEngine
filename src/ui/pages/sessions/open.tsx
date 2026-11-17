@@ -6,7 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { CarryMode, CompactionShown, ConnectionShown, SessionShown, SessionTurnRow } from "../../../shared/api";
 import { useApp, useNow } from "../../app";
-import { Badge, Banner, Button, Gated, Section } from "../../atoms";
+import { Badge, Banner, Button, Gated, Section } from "../../../frontend/components";
 import { replyOf, type RpeClient } from "../../client";
 import { applyRead, EMPTY_LIVE, type LiveModel, runsOf } from "../../live-model";
 import { useNoticeLines } from "../../notice-words";
@@ -46,7 +46,7 @@ function CompactionLine(props: { c: CompactionShown; asking: boolean; busy: bool
       <p class="rpe-line">
         <Badge tone={c.stands ? "pos" : undefined}>{c.undone === true ? "undone" : c.stands ? "stands" : "replaced"}</Badge>{" "}
         {c.of === "turns" ? `Stands for ${counted(c.turns.length, "turn")}` : "Stands for the run's older calls"} · written in{" "}
-        <Button small kind="ghost" onClick={() => props.onTurn(c.turn)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onTurn(c.turn)}>
           its turn
         </Button>
       </p>
@@ -71,16 +71,16 @@ function CompactionLine(props: { c: CompactionShown; asking: boolean; busy: bool
               {grew === null ? "" : `: about ${num(grew)} tokens more in every turn's prompt`}. The file keeps both.
             </span>
             <div class="lre-inline">
-              <Button kind="danger" busy={props.busy} onClick={() => props.onUndo(c.id)}>
+              <Button variant="danger" busy={props.busy} onClick={() => props.onUndo(c.id)}>
                 Yes, undo it
               </Button>
-              <Button kind="ghost" onClick={() => props.onAsk(null)}>
+              <Button variant="ghost" onClick={() => props.onAsk(null)}>
                 No
               </Button>
             </div>
           </Banner>
         ) : (
-          <Button small kind="ghost" onClick={() => props.onAsk(c.id)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onAsk(c.id)}>
             Undo the summary
           </Button>
         )
@@ -100,7 +100,7 @@ function TurnOfSession(props: { chat: string; session: string; turn: string; n: 
   return (
     <li class="rpe-entry" data-turn={props.turn}>
       <p class="rpe-line">
-        <Button small kind="ghost" onClick={() => props.onTurn(props.turn)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onTurn(props.turn)}>
           {props.n === null ? "A turn off the path" : `Reply ${props.n}`}
         </Button>
         <span class="rpe-meta"> · {when(props.at)} · {counted(props.runs.length, "run")}</span>
@@ -242,7 +242,7 @@ export function SessionOpen(props: SessionOpenProps) {
       <Section id="carries" title="What its next turn carries">
         <div class="lre-inline rpe-wrap">
           {CARRY_MODES.map((m) => (
-            <Button key={m} small kind="ghost" current={m === shownMode} onClick={() => setMode(m)}>
+            <Button key={m} size="sm" variant="ghost" current={m === shownMode} onClick={() => setMode(m)}>
               {CARRY_WORDS[m].name}
               {m === inForce ? " (in force)" : ""}
             </Button>
@@ -263,7 +263,7 @@ export function SessionOpen(props: SessionOpenProps) {
         )}
         {shownMode === inForce ? null : (
           <div class="lre-inline">
-            <Button small busy={busy === "default"} onClick={makeDefault}>
+            <Button size="sm" busy={busy === "default"} onClick={makeDefault}>
               Make {CARRY_WORDS[shownMode].name} the default
             </Button>
           </div>

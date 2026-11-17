@@ -5,7 +5,7 @@
 
 import { useState } from "preact/hooks";
 import type { TreeFileRow } from "../../../shared/api";
-import { Banner, Button, Section } from "../../atoms";
+import { Banner, Button, Section } from "../../../frontend/components";
 import { type FileKind, importedTarget, KINDS, shippedPathFor, viewPathAt } from "./kinds";
 import type { FilesShown, WriteLevel } from "./model";
 import { WRITE_WORDS } from "./open";
@@ -99,7 +99,7 @@ export function NewFile(props: MakeActions & { chat: string | null; shown: Files
         <label class="lre-check">
           <input type="checkbox" checked={fromShipped} onChange={(event) => setFromShipped(event.currentTarget.checked)} /> <span>Start from the shipped file of its name, where there is one</span>
         </label>
-        <Button kind="primary" busy={props.shown.busy} disabled={!ready} onClick={() => at !== "" && props.onMake(viewPathAt(at, below), at, fromShipped ? shippedPathFor(below) : null)}>
+        <Button variant="primary" busy={props.shown.busy} disabled={!ready} onClick={() => at !== "" && props.onMake(viewPathAt(at, below), at, fromShipped ? shippedPathFor(below) : null)}>
           Make the file
         </Button>
       </form>
@@ -131,10 +131,10 @@ export function MovePanel(props: MakeActions & { entry: TreeFileRow; shown: File
       {target === null || !mine ? null : (
         <div class="lre-inline rpe-wrap" data-imported>
           <span class="rpe-meta">Kept under imported/, where no agent reads it.</span>
-          <Button small onClick={() => props.onMove(entry.path, target)}>
+          <Button size="sm" onClick={() => props.onMove(entry.path, target)}>
             Move it to where its kind is read from
           </Button>
-          <Button small kind="ghost" onClick={() => props.onCopy(entry.path, target)}>
+          <Button size="sm" variant="ghost" onClick={() => props.onCopy(entry.path, target)}>
             Copy it to where its kind is read from
           </Button>
         </div>

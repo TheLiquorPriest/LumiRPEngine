@@ -3,7 +3,7 @@
 // which starts the check as a job. RPH's refusal of the job (jobs off, no model, the part missing) is worded here, not hidden.
 
 import type { ConnectionShown, TagCheck, TagCheckStarted } from "../../../shared/api";
-import { Badge, Button } from "../../atoms";
+import { Badge, Button } from "../../../frontend/components";
 import { when } from "../../words";
 import { refusalWords } from "../jobs/words";
 
@@ -47,13 +47,13 @@ export function TagCheckShown(props: { view: ConnectionShown; state: TagCheckSta
         {check === null ? <Badge>not checked</Badge> : <Badge tone={check.form === "tags" ? "pos" : "warn"}>{FORM_WORDS[check.form]}</Badge>} {tagCheckWords(check)}
       </p>
       <div class="lre-inline rpe-wrap">
-        <Button small kind="ghost" busy={state.busy} onClick={() => props.onCheck(view.id)}>
+        <Button size="sm" variant="ghost" busy={state.busy} onClick={() => props.onCheck(view.id)}>
           Check the tags
         </Button>
-        <Button small kind="ghost" onClick={() => props.onForm(view.id, "tags")}>
+        <Button size="sm" variant="ghost" onClick={() => props.onForm(view.id, "tags")}>
           Use tags
         </Button>
-        <Button small kind="ghost" onClick={() => props.onForm(view.id, "two-step")}>
+        <Button size="sm" variant="ghost" onClick={() => props.onForm(view.id, "two-step")}>
           Use two steps
         </Button>
       </div>

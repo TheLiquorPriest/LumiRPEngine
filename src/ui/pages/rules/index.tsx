@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { SwitchEntry } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, PageHeader, Section } from "../../atoms";
+import { Badge, Banner, Button, Empty, PageHeader, Section } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useSelect } from "../../store";
@@ -87,7 +87,7 @@ function FactsView(props: { facts: readonly FactShown[] | null; problem: string 
               <p class="rpe-meta">
                 Named by:{" "}
                 {f.rules.map((r) => (
-                  <Button key={r} small kind="ghost" onClick={() => props.onRule(r)}>
+                  <Button key={r} size="sm" variant="ghost" onClick={() => props.onRule(r)}>
                     {r}
                   </Button>
                 ))}
@@ -163,15 +163,15 @@ export function RulesPage(props: { chat: string | null; at: readonly string[] | 
     <div class="lre-stack rpe-page" data-page="rules">
       <PageHeader
         title="Rules"
-        sub={chat === null ? "The rules every new chat takes: the shipped level and yours." : "Every rule and hook of this chat, and whether it holds."}
-        {...(detail ? { back: { label: "All rules", go: () => go([]) } } : {})}
+        subtitle={chat === null ? "The rules every new chat takes: the shipped level and yours." : "Every rule and hook of this chat, and whether it holds."}
+        {...(detail ? { onBack: () => go([]), backLabel: "all rules" } : {})}
         actions={
           <div class="lre-inline">
-            <Button small kind="ghost" current={view === FACTS} onClick={() => go([FACTS])}>
+            <Button size="sm" variant="ghost" current={view === FACTS} onClick={() => go([FACTS])}>
               Facts
             </Button>
             {chat === null ? null : (
-              <Button small kind="ghost" current={view === LOG} onClick={() => go([LOG])}>
+              <Button size="sm" variant="ghost" current={view === LOG} onClick={() => go([LOG])}>
                 What fired
               </Button>
             )}

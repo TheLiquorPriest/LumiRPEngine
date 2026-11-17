@@ -5,7 +5,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JobState } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Banner, Button } from "../../atoms";
+import { Banner, Button } from "../../../frontend/components";
 import { onChatChange } from "../../live-watch";
 import { errorWords } from "../../words";
 
@@ -67,7 +67,7 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
   }, [chat, watching, job?.id]);
   return (
     <div class="lre-stack" data-map-again>
-      <Button small busy={busy || watching} onClick={start}>
+      <Button size="sm" busy={busy || watching} onClick={start}>
         Map again
       </Button>
       {problem === null ? null : (
@@ -78,7 +78,7 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
       {job === null ? null : (
         <p class="rpe-line" data-map-job>
           His own job {job.id} {STATE_WORDS[job.state]}.{" "}
-          <Button small kind="ghost" onClick={() => app.go({ page: "live", chat })}>
+          <Button size="sm" variant="ghost" onClick={() => app.go({ page: "live", chat })}>
             Watch its run on Live
           </Button>
         </p>

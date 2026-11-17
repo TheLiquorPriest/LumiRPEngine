@@ -7,7 +7,7 @@
 import { useState } from "preact/hooks";
 import type { LoreIndexRow } from "../shared/api";
 import { useApp } from "./app";
-import { Badge, Banner, Button } from "./atoms";
+import { Badge, Banner, Button } from "../frontend/components";
 import { replyOf, type RpeClient } from "./client";
 import { useRead } from "./reading";
 import { useUiSetting } from "./ui-settings";
@@ -168,19 +168,19 @@ export function RecordBindings(props: RecordBindingsProps) {
                 <span class="rpe-line">
                   {row.title} <span class="rpe-meta">{row.id} · {row.source}</span>
                 </span>
-                <Button small busy={doing.busy === `bind ${row.id}`} onClick={() => bind(row)}>
+                <Button size="sm" busy={doing.busy === `bind ${row.id}`} onClick={() => bind(row)}>
                   Bind it
                 </Button>
               </li>
             ))}
           </ul>
           {matches.length > limit ? <p class="rpe-meta">{counted(matches.length - limit, "more entry", "more entries")} match: narrow the search.</p> : null}
-          <Button small kind="ghost" onClick={() => setAdding(false)}>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
             Done binding
           </Button>
         </div>
       ) : (
-        <Button small kind="ghost" onClick={() => setAdding(true)}>
+        <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
           Bind an entry to it
         </Button>
       )}
@@ -203,10 +203,10 @@ function BoundLine(props: { bound: BoundEntry; busy: string | null; onAspect(to:
             <span class="label">Defines its</span>
             <input class="lre-input" value={aspect} placeholder="an aspect, or none" onInput={(e) => setAspect((e.currentTarget as HTMLInputElement).value)} />
           </label>
-          <Button small busy={props.busy === `change ${b.entry}`} disabled={aspect === b.aspect} onClick={() => props.onAspect(aspect)}>
+          <Button size="sm" busy={props.busy === `change ${b.entry}`} disabled={aspect === b.aspect} onClick={() => props.onAspect(aspect)}>
             Change the aspect
           </Button>
-          <Button small kind="ghost" busy={props.busy === `change ${b.entry}`} onClick={props.onTake}>
+          <Button size="sm" variant="ghost" busy={props.busy === `change ${b.entry}`} onClick={props.onTake}>
             Take the binding off
           </Button>
         </div>
@@ -247,7 +247,7 @@ export function EntryBindings(props: EntryBindingsProps) {
               {l.aspect === "" ? "" : `, ${l.aspect}`} <Badge>{BOUND_BY_WORDS[l.by] ?? l.by}</Badge>
             </span>
             {CHANGEABLE.includes(l.by) ? (
-              <Button small kind="ghost" busy={doing.busy === `take ${l.record}`} onClick={() => apply(`take ${l.record}`, (now) => now.filter((d) => !(namesRecord(d.what, { ref: l.record }) && d.aspect === l.aspect)), `${l.record} is no longer bound to ${row.title}.`)}>
+              <Button size="sm" variant="ghost" busy={doing.busy === `take ${l.record}`} onClick={() => apply(`take ${l.record}`, (now) => now.filter((d) => !(namesRecord(d.what, { ref: l.record }) && d.aspect === l.aspect)), `${l.record} is no longer bound to ${row.title}.`)}>
                 Take it off
               </Button>
             ) : (
@@ -265,7 +265,7 @@ export function EntryBindings(props: EntryBindingsProps) {
           <span class="label">It defines its</span>
           <input class="lre-input" value={aspect} placeholder="an aspect, or none" onInput={(e) => setAspect((e.currentTarget as HTMLInputElement).value)} />
         </label>
-        <Button small busy={doing.busy === "bind"} disabled={record.trim() === ""} onClick={() => apply("bind", (now) => [...now, { what: record.trim(), aspect: aspect.trim() }], `${row.title} is bound to ${record.trim()}; it is yours and a run that indexes the entry again leaves it.`)}>
+        <Button size="sm" busy={doing.busy === "bind"} disabled={record.trim() === ""} onClick={() => apply("bind", (now) => [...now, { what: record.trim(), aspect: aspect.trim() }], `${row.title} is bound to ${record.trim()}; it is yours and a run that indexes the entry again leaves it.`)}>
           Bind
         </Button>
       </div>

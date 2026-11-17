@@ -4,7 +4,7 @@
 // and the old engines' blocks the preset still holds.
 
 import type { ComponentChildren } from "preact";
-import { Badge, Banner, Fold, Pre } from "../../atoms";
+import { Badge, Banner, Disclosure, Pre } from "../../../frontend/components";
 import type { NoticeLines } from "../../notice-words";
 import { clippedWords, promptNoticeWords } from "../../notice-words";
 import type { PromptClipped, PromptShown, PromptSliceShown } from "../../../shared/api";
@@ -46,9 +46,9 @@ export function SliceCard(props: { slice: PromptSliceShown; all: readonly Prompt
           {slice.at.length === 0 ? "" : ` In ${slice.at.map((at) => `message ${at.message}, ${at.start} to ${at.end}`).join("; ")}.`}
         </p>
         {slice.found === undefined ? null : props.gateOpen ? (
-          <Fold summary="Its text" class="rpe-open">
+          <Disclosure summary="Its text" class="rpe-open">
             <Pre text={slice.text} mono={false} />
-          </Fold>
+          </Disclosure>
         ) : (
           <p class="rpe-meta">Open the spoiler gate to read its text.</p>
         )}

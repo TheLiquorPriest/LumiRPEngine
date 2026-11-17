@@ -10,7 +10,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { StoryItemRow, StoryItems, StoryPartName, StoryReply, StoryStrikeReply } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Banner, Gated, PageHeader, Row, Section } from "../../atoms";
+import { Banner, Gated, PageHeader, Row, Section } from "../../../frontend/components";
 import { replyOf, type RpeClient } from "../../client";
 import { onChatChange } from "../../live-watch";
 import type { PageEntry } from "../../page-entry";
@@ -211,7 +211,7 @@ export function StoryView(props: StoryViewProps) {
   const { answer, lists } = shown;
   return (
     <div class="lre-stack rpe-page" data-page="story">
-      <PageHeader title="Story" sub={answer?.now == null ? "The story record of this chat, as the Author keeps it." : `Story time now: ${answer.now}`} />
+      <PageHeader title="Story" subtitle={answer?.now == null ? "The story record of this chat, as the Author keeps it." : `Story time now: ${answer.now}`} />
       {shown.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The story record could not be read">
           <span>{shown.problem}</span>
@@ -251,7 +251,7 @@ export function StoryView(props: StoryViewProps) {
               {answer.horizon.length === 0 ? (
                 <p class="lre-muted rpe-line">Nothing is on the horizon.</p>
               ) : (
-                answer.horizon.map((h, i) => <Row key={i} label={h.at} value={h.name ?? "names no place or thing in the world now"} sub={h.depth === "full" ? "shown in full" : `shown ${h.depth} ${h.depth === 1 ? "level" : "levels"} deep`} />)
+                answer.horizon.map((h, i) => <Row key={i} k={h.at} v={h.name ?? "names no place or thing in the world now"} sub={h.depth === "full" ? "shown in full" : `shown ${h.depth} ${h.depth === 1 ? "level" : "levels"} deep`} />)
               )}
             </Section>
             <ListSection {...props} part="future" id="futures" title="Futures" none="None drafted." />

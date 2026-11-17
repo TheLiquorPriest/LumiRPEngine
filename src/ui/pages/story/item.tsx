@@ -2,7 +2,7 @@
 // way to strike it or take the strike back, and the way to correct it as his own change.
 
 import type { StoryItemRow, StoryPartName } from "../../../shared/api";
-import { Badge } from "../../atoms";
+import { Badge } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import { type CorrectAsk, EntryCard, type StrikeAsk } from "../../records";
 

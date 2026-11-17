@@ -8,7 +8,7 @@ import { Icon, type IconName } from "./icons";
 import { useSelect } from "./store";
 import { LIVE_USER, type ExtensionStatusReply, type MissingPermissionShown } from "../shared/api";
 import { type Route, useApp } from "./app";
-import { Badge, Banner, Button, Empty, Fold } from "./atoms";
+import { Badge, Banner, Button, Disclosure, Empty } from "../frontend/components";
 import type { ClientState, RpeClient } from "./client";
 import type { PageEntry } from "./page-entry";
 import { PAGES } from "./page-list";
@@ -169,9 +169,9 @@ export function RoadLine(props: { state: ClientState; onRetry: () => void }) {
     case "relay":
       return (
         <div class="rpe-road" data-road="relay">
-          <Fold summary={<span class="lre-inline"><Badge tone="warn">Through Lumiverse</Badge><span>RPE is reached by way of its extension</span></span>}>
+          <Disclosure summary={<span class="lre-inline"><Badge tone="warn">Through Lumiverse</Badge><span>RPE is reached by way of its extension</span></span>}>
             <span class="rpe-line">{state.why}</span>
-          </Fold>
+          </Disclosure>
         </div>
       );
     case "failed":

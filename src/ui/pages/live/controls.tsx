@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Banner, Button } from "../../atoms";
+import { Banner, Button } from "../../../frontend/components";
 import { replyOf } from "../../client";
 import { type RunNode, pausedIn } from "../../live-model";
 import { useRead } from "../../reading";
@@ -83,11 +83,11 @@ export function RunExtras(props: { chat: string; run: RunNode; gateOpen: boolean
     <div class="lre-stack" data-run-extras={run.run}>
       <div class="lre-inline rpe-wrap">
         {paused ? (
-          <Button small busy={busy === "resume"} onClick={() => act("resume", () => app.client.call("POST /api/v1/chats/:chat/turns/:turn/resume", { chat, turn }).then(replyOf), () => setHeld(false))}>
+          <Button size="sm" busy={busy === "resume"} onClick={() => act("resume", () => app.client.call("POST /api/v1/chats/:chat/turns/:turn/resume", { chat, turn }).then(replyOf), () => setHeld(false))}>
             Resume
           </Button>
         ) : (
-          <Button small kind="ghost" busy={busy === "pause"} onClick={() => act("pause", () => app.client.call("POST /api/v1/chats/:chat/turns/:turn/pause", { chat, turn }).then(replyOf), () => setHeld(true))}>
+          <Button size="sm" variant="ghost" busy={busy === "pause"} onClick={() => act("pause", () => app.client.call("POST /api/v1/chats/:chat/turns/:turn/pause", { chat, turn }).then(replyOf), () => setHeld(true))}>
             Pause
           </Button>
         )}
@@ -99,7 +99,7 @@ export function RunExtras(props: { chat: string; run: RunNode; gateOpen: boolean
       </label>
       <div class="lre-inline rpe-wrap">
         <Button
-          small
+          size="sm"
           busy={busy === "say"}
           disabled={text.trim() === ""}
           onClick={() =>
@@ -124,7 +124,7 @@ export function RunExtras(props: { chat: string; run: RunNode; gateOpen: boolean
           {sessions.length === 0 ? null : (
             <div class="lre-inline rpe-wrap" data-sessions>
               {sessions.map((s) => (
-                <Button key={s.session} small kind="ghost" onClick={() => app.go({ page: "sessions", chat, at: [s.session] })}>
+                <Button key={s.session} size="sm" variant="ghost" onClick={() => app.go({ page: "sessions", chat, at: [s.session] })}>
                   {s.agent}'s session
                 </Button>
               ))}

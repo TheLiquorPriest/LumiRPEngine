@@ -3,7 +3,7 @@
 // outside the spoiler gate, because the route gives only what he may see; the stage's condition is left to the record behind the gate.
 
 import type { Journal, JournalQuestRow, QuestStageRow } from "../../../shared/api";
-import { Badge, Banner, Row, Section } from "../../atoms";
+import { Badge, Banner, Row, Section } from "../../../frontend/components";
 import { counted } from "../../words";
 
 export const KIND_WORDS: Readonly<Record<JournalQuestRow["kind"], string>> = { quest: "quest", secret: "secret", puzzle: "puzzle", agenda: "agenda" };
@@ -46,10 +46,10 @@ function JournalQuest(props: { quest: JournalQuestRow }) {
       )}
       {quest.whole ? (
         <div class="lre-stack">
-          {quest.objective === null ? null : <Row label="What it is" value={quest.objective} />}
-          {quest.why === null ? null : <Row label="Why it matters" value={quest.why} />}
-          {quest.stakes === null ? null : <Row label="What is at stake" value={quest.stakes} />}
-          {quest.rewards === null ? null : <Row label="What it may give" value={quest.rewards} />}
+          {quest.objective === null ? null : <Row k="What it is" v={quest.objective} />}
+          {quest.why === null ? null : <Row k="Why it matters" v={quest.why} />}
+          {quest.stakes === null ? null : <Row k="What is at stake" v={quest.stakes} />}
+          {quest.rewards === null ? null : <Row k="What it may give" v={quest.rewards} />}
         </div>
       ) : (
         <p class="lre-muted rpe-meta" data-stages-only>Only its name and the stages named are shown to him.</p>

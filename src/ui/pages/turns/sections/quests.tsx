@@ -1,5 +1,5 @@
 import type { TurnReply } from "../../../../shared/api";
-import { Badge, Button } from "../../../atoms";
+import { Badge, Button } from "../../../../frontend/components";
 import type { TurnSection } from "../types";
 
 /** The open quests the turn touched, each opening on the Quests page. */
@@ -10,7 +10,7 @@ export function TouchedQuests(props: { quests: TurnReply["quests"]; onOpen?: (id
         <li key={q.id} class="rpe-line" data-quest={q.id}>
           <span class="rpe-strong">{q.name}</span> <Badge>{q.kind}</Badge>{" "}
           {props.onOpen === undefined ? null : (
-            <Button small kind="ghost" onClick={() => props.onOpen?.(q.id)}>
+            <Button size="sm" variant="ghost" onClick={() => props.onOpen?.(q.id)}>
               Open it
             </Button>
           )}

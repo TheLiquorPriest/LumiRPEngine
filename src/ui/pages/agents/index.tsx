@@ -5,7 +5,7 @@
 import type { ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
 import { useApp } from "../../app";
-import { Badge, Banner, Empty, PageHeader } from "../../atoms";
+import { Badge, Banner, Empty, PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { LEVEL_WORDS } from "../../words";
@@ -61,7 +61,7 @@ export function AgentsPage(props: { chat: string | null; at: readonly string[] |
   const go = (to: string | null): void => app.go({ page: "agents", chat, at: to === null ? [] : [to] });
   return (
     <div class="lre-stack rpe-page" data-page="agents">
-      <PageHeader title="Agents" sub={chat === null ? "The definitions every new chat takes: the shipped level and yours." : "Each definition as it will run in this chat, and changed here."} {...(name === null ? {} : { back: { label: "All agents", go: () => go(null) } })} />
+      <PageHeader title="Agents" subtitle={chat === null ? "The definitions every new chat takes: the shipped level and yours." : "Each definition as it will run in this chat, and changed here."} {...(name === null ? {} : { onBack: () => go(null), backLabel: "all agents" })} />
       {agents.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The agents could not be read">
           <span>{agents.problem}</span>

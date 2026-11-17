@@ -1,4 +1,4 @@
-import { Pre } from "../../../atoms";
+import { Pre } from "../../../../frontend/components";
 import type { TurnSection } from "../types";
 
 

@@ -7,7 +7,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { SessionShown, StoryItemRow } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Empty, PageHeader } from "../../atoms";
+import { Badge, Empty, PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
@@ -92,8 +92,8 @@ export function SessionsView(props: SessionsViewProps) {
     <div class="lre-stack rpe-page" data-page="sessions">
       <PageHeader
         title="Sessions"
-        sub="What the Author remembers between turns, scene by scene."
-        {...(props.openId === null ? {} : { back: { label: "All sessions", go: () => props.onOpen(null) } })}
+        subtitle="What the Author remembers between turns, scene by scene."
+        {...(props.openId === null ? {} : { onBack: () => props.onOpen(null), backLabel: "all sessions" })}
       />
       {props.problem === null ? null : <p class="rpe-line" data-sessions-problem>{props.problem}</p>}
       <div class="rpe-files-split" data-open={props.openId === null ? "no" : "yes"}>
@@ -174,7 +174,7 @@ export function SessionsPage(props: { chat: string | null; at: readonly string[]
   if (props.chat !== null) return <ChatSessions chat={props.chat} at={props.at} />;
   return (
     <div class="lre-stack rpe-page" data-page="sessions">
-      <PageHeader title="Sessions" sub="Open a chat to see its sessions. The session measurement needs none." />
+      <PageHeader title="Sessions" subtitle="Open a chat to see its sessions. The session measurement needs none." />
       <MeasurementSection chat={null} />
     </div>
   );

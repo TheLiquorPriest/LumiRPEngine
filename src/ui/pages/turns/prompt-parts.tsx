@@ -4,7 +4,7 @@
 // turn's folder.
 
 import type { LocatedSlices, TurnLoreRow, TurnReply } from "../../../shared/api";
-import { Badge, Fold, Pre } from "../../atoms";
+import { Badge, Disclosure, Pre } from "../../../frontend/components";
 import { counted } from "../../words";
 import type { RequestShown } from "./types";
 
@@ -52,9 +52,9 @@ export function PromptBySlice(props: { prompt: TurnReply["prompt"]; lead: Reques
               </span>
             </span>
             {slice.at.length === 0 ? null : (
-              <Fold summary="Its text" class="rpe-open">
+              <Disclosure summary="Its text" class="rpe-open">
                 {text === null ? <p class="rpe-meta">The request this was found in was not kept, or cannot be rebuilt as it was sent.</p> : <Pre text={text} mono={false} />}
-              </Fold>
+              </Disclosure>
             )}
           </div>
         );
@@ -65,9 +65,9 @@ export function PromptBySlice(props: { prompt: TurnReply["prompt"]; lead: Reques
           {prompt.unclaimed.map((span) => {
             const text = spanText(messages, span);
             return (
-              <Fold key={`${span.message}-${span.start}`} summary={`Message ${span.message}, characters ${span.start} to ${span.end}`} class="rpe-open">
+              <Disclosure key={`${span.message}-${span.start}`} summary={`Message ${span.message}, characters ${span.start} to ${span.end}`} class="rpe-open">
                 {text === null ? <p class="rpe-meta">Its text is not shown: the request was not kept.</p> : <Pre text={text} mono={false} />}
-              </Fold>
+              </Disclosure>
             );
           })}
         </div>

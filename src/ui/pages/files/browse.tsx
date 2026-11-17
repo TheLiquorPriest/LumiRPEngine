@@ -2,7 +2,7 @@
 // by name and by text, and the folder's entries a page at a time, each file with whether RPH takes it.
 
 import type { TreeListed } from "../../../shared/api";
-import { Badge, Banner, Button, Empty } from "../../atoms";
+import { Badge, Banner, Button, Empty } from "../../../frontend/components";
 import { bytesWords, LEVEL_WORDS } from "../../words";
 import type { BrowseShown } from "./model";
 import { KIND_WORDS } from "./open";
@@ -21,11 +21,11 @@ function Trail(props: { folder: string; onFolder(path: string): void }) {
   const parts = props.folder === "" ? [] : props.folder.split("/");
   return (
     <nav class="lre-inline rpe-wrap" aria-label="Folders" data-trail>
-      <Button small kind="ghost" current={parts.length === 0} onClick={() => props.onFolder("")}>
+      <Button size="sm" variant="ghost" current={parts.length === 0} onClick={() => props.onFolder("")}>
         This chat's top
       </Button>
       {parts.map((segment, i) => (
-        <Button key={`${i}:${segment}`} small kind="ghost" current={i === parts.length - 1} onClick={() => props.onFolder(parts.slice(0, i + 1).join("/"))}>
+        <Button key={`${i}:${segment}`} size="sm" variant="ghost" current={i === parts.length - 1} onClick={() => props.onFolder(parts.slice(0, i + 1).join("/"))}>
           {crumbWords(segment)}
         </Button>
       ))}
@@ -38,7 +38,7 @@ function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFold
   if (item.folder) {
     return (
       <li class="rpe-file" data-folder={item.path}>
-        <Button small kind="ghost" onClick={() => props.onFolder(item.path)}>
+        <Button size="sm" variant="ghost" onClick={() => props.onFolder(item.path)}>
           {`${item.name}/`}
         </Button>
         <Badge>{LEVEL_WORDS[item.level]}</Badge>
@@ -50,7 +50,7 @@ function Entry(props: { item: TreeListed; open: boolean; unread: boolean; onFold
   return (
     <li class="rpe-file" data-file={item.path}>
       <div class="lre-inline rpe-wrap">
-        <Button small kind="ghost" current={props.open} onClick={() => props.onOpen(item.path)}>
+        <Button size="sm" variant="ghost" current={props.open} onClick={() => props.onOpen(item.path)}>
           {item.name}
         </Button>
         {entry === null ? null : <Badge>{KIND_WORDS[entry.kind]}</Badge>}
@@ -97,7 +97,7 @@ export function Browser(props: BrowserProps) {
       ) : (
         <div class="lre-inline rpe-wrap">
           <span class="rpe-meta" data-searching>{`Found by "${browse.search}"`}</span>
-          <Button small kind="ghost" onClick={() => props.onSearch("")}>
+          <Button size="sm" variant="ghost" onClick={() => props.onSearch("")}>
             Back to the folder
           </Button>
         </div>

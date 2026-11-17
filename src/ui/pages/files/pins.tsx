@@ -3,7 +3,7 @@
 // config, or of the chat's with one open; RPE refuses a path its view does not hold in its words.
 
 import type { LayerLevel, TreeFileRow } from "../../../shared/api";
-import { Button } from "../../atoms";
+import { Button } from "../../../frontend/components";
 import { LEVEL_WORDS } from "../../words";
 import type { FilesShown } from "./model";
 
@@ -52,7 +52,7 @@ function PinForm(props: PinActions & { path: string; chat: string | null; agents
           </select>
         </label>
       )}
-      <Button small busy={props.busy} disabled={pinning.agent.trim() === ""} onClick={() => props.onPin(props.path, level, pinning.agent.trim(), true)}>
+      <Button size="sm" busy={props.busy} disabled={pinning.agent.trim() === ""} onClick={() => props.onPin(props.path, level, pinning.agent.trim(), true)}>
         Pin
       </Button>
     </div>
@@ -72,7 +72,7 @@ export function PinPanel(props: PinActions & { entry: TreeFileRow; chat: string 
             <li key={`${pin.level}:${pin.agent}`} class="lre-inline rpe-wrap" data-pinned-for={pin.agent}>
               <span class="rpe-line">{`Pinned for ${pin.agent}, in the config of ${pinLevelWords(pin.level)}`}</span>
               {pin.level === "global" || pin.level === "chat" ? (
-                <Button small kind="ghost" busy={props.busy} onClick={() => props.onPin(props.entry.path, pin.level as PinLevel, pin.agent, false)}>
+                <Button size="sm" variant="ghost" busy={props.busy} onClick={() => props.onPin(props.entry.path, pin.level as PinLevel, pin.agent, false)}>
                   Unpin
                 </Button>
               ) : null}

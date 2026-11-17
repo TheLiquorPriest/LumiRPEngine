@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { StoryCoverage } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Pre, Section } from "../../atoms";
+import { Badge, Banner, Button, Pre, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, num } from "../../words";

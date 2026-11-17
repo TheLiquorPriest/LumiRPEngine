@@ -1,4 +1,4 @@
-import { Row } from "../../../atoms";
+import { Row } from "../../../../frontend/components";
 import { agentUsage, type RunNode } from "../../../live-model";
 import { counted, tokenWords } from "../../../words";
 import { EachRun } from "../parts";
@@ -11,7 +11,7 @@ function TokensByAgent(props: { run: RunNode }) {
     <div>
       {agents.map((agent) => {
         const usage = agentUsage(agent);
-        return <Row key={agent.ref.id} label={agent.ref.plays === undefined ? agent.ref.definition : `${agent.ref.definition}, playing ${agent.ref.plays}`} value={<span class="lre-num">{counted(usage.calls, "call")}</span>} sub={tokenWords(usage)} />;
+        return <Row key={agent.ref.id} k={agent.ref.plays === undefined ? agent.ref.definition : `${agent.ref.definition}, playing ${agent.ref.plays}`} v={<span class="lre-num">{counted(usage.calls, "call")}</span>} sub={tokenWords(usage)} />;
       })}
     </div>
   );

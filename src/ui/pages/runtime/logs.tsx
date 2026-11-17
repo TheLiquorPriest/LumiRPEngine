@@ -3,7 +3,7 @@
 // address (`runtime/log/job/<id>/area/bootstrap`), so the Jobs page and the Turn page link to the log of one job or turn.
 
 import type { ServiceLog } from "../../../shared/api";
-import { Badge, Banner, Button, Fold, Section } from "../../atoms";
+import { Badge, Banner, Button, Disclosure, Section } from "../../../frontend/components";
 import { clock, counted, when } from "../../words";
 
 export type LogLevel = ServiceLog["lines"][number]["level"];
@@ -54,7 +54,7 @@ function Line(props: { line: LogLine; onTurn(chat: string, turn: string): void; 
   const fields = typeof line.fields === "object" && line.fields !== null && !Array.isArray(line.fields) ? Object.entries(line.fields) : [];
   return (
     <li class="rpe-entry" data-log-line data-level={line.level}>
-      <Fold
+      <Disclosure
         summary={
           <span class="rpe-log-head">
             <Badge tone={LEVEL_TONE[line.level]}>{line.level}</Badge> <span class="rpe-meta">{clock(line.at)}</span>
@@ -81,23 +81,23 @@ function Line(props: { line: LogLine; onTurn(chat: string, turn: string): void; 
           )}
           <div class="lre-inline rpe-wrap">
             {line.chat !== null && line.turn !== null ? (
-              <Button small kind="ghost" onClick={() => props.onTurn(line.chat as string, line.turn as string)}>
+              <Button size="sm" variant="ghost" onClick={() => props.onTurn(line.chat as string, line.turn as string)}>
                 Open its turn
               </Button>
             ) : null}
             {line.job !== null ? (
-              <Button small kind="ghost" onClick={() => props.onFilter({ job: line.job as string })}>
+              <Button size="sm" variant="ghost" onClick={() => props.onFilter({ job: line.job as string })}>
                 Lines of this job
               </Button>
             ) : null}
             {line.turn !== null ? (
-              <Button small kind="ghost" onClick={() => props.onFilter({ turn: line.turn as string })}>
+              <Button size="sm" variant="ghost" onClick={() => props.onFilter({ turn: line.turn as string })}>
                 Lines of this turn
               </Button>
             ) : null}
           </div>
         </div>
-      </Fold>
+      </Disclosure>
     </li>
   );
 }
@@ -126,7 +126,7 @@ export function LogView(props: LogViewProps) {
   const { filter, log } = props;
   const narrowed = Object.keys(filter).length > 0;
   return (
-    <Section id="log" title="RPE's log" actions={narrowed ? <Button small kind="ghost" onClick={() => props.onFilter({})}>Show every line</Button> : undefined}>
+    <Section id="log" title="RPE's log" aside={narrowed ? <Button size="sm" variant="ghost" onClick={() => props.onFilter({})}>Show every line</Button> : undefined}>
       <form
         class="lre-stack"
         data-log-filter

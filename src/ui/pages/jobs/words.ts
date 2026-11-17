@@ -1,7 +1,7 @@
 // How a job stands, in words, and what Cancel can do about it.
 
 import type { JobRefusal, JobState, JobView } from "../../../shared/api";
-import type { Tone } from "../../atoms";
+import type { Tone } from "../../../frontend/components";
 
 /** How a job stands, as a badge says it. */
 export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: Tone }>> = {

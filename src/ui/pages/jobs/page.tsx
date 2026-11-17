@@ -5,7 +5,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JobState, JobView } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, PageHeader } from "../../atoms";
+import { Badge, Banner, Button, Empty, PageHeader } from "../../../frontend/components";
 import { walk } from "../../client";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
@@ -88,7 +88,7 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
   const go = (to: string | null): void => app.go({ page: "jobs", chat, at: to === null ? [] : [to] });
   return (
     <div class="lre-stack rpe-page" data-page="jobs">
-      <PageHeader title="Jobs" sub="Every job, with its work and what it spent." {...(id === null ? {} : { back: { label: "All jobs", go: () => go(null) } })} />
+      <PageHeader title="Jobs" subtitle="Every job, with its work and what it spent." {...(id === null ? {} : { onBack: () => go(null), backLabel: "all jobs" })} />
       <div class="rpe-files-split" data-open={open === null ? "no" : "yes"}>
         <div class="rpe-files-browser lre-stack">
           <StartSection chat={chat} onStarted={(job) => (setChanged((held) => new Map(held).set(job.id, job)), setStamp((n) => n + 1), go(job.id))} />
@@ -97,10 +97,10 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
           <div class="lre-inline rpe-wrap">
             {chat === null ? null : (
               <>
-                <Button small kind="ghost" current={!everyChat} onClick={() => setEveryChat(false)}>
+                <Button size="sm" variant="ghost" current={!everyChat} onClick={() => setEveryChat(false)}>
                   This chat's
                 </Button>
-                <Button small kind="ghost" current={everyChat} onClick={() => setEveryChat(true)}>
+                <Button size="sm" variant="ghost" current={everyChat} onClick={() => setEveryChat(true)}>
                   Every chat's
                 </Button>
               </>

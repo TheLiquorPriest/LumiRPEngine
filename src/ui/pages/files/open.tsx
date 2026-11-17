@@ -4,7 +4,7 @@
 // and with every change an update made to it.
 
 import type { DiffRow, LayerLevel, TreeFileRow } from "../../../shared/api";
-import { Badge, Banner, Button, Pre } from "../../atoms";
+import { Badge, Banner, Button, Pre } from "../../../frontend/components";
 import { bytesWords, counted, LEVEL_WORDS, when } from "../../words";
 import type { FilesShown, OpenFile, WriteLevel } from "./model";
 import { writeLevels } from "./model";
@@ -82,7 +82,7 @@ function SwitchButtons(props: { entry: TreeFileRow; chat: string | null; busy: b
   return (
     <>
       {levels.map((level) => (
-        <Button key={level} small busy={props.busy} onClick={() => props.onSwitch(entry.path, level, !entry.off)}>
+        <Button key={level} size="sm" busy={props.busy} onClick={() => props.onSwitch(entry.path, level, !entry.off)}>
           {props.chat === null ? verb : level === "global" ? `${verb} for every chat` : `${verb} in this chat`}
         </Button>
       ))}
@@ -130,7 +130,7 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
     <div class="lre-stack rpe-open" data-open={open.path}>
       <div class="lre-spread">
         <code class="lre-id">{open.path}</code>
-        <Button small kind="ghost" onClick={props.onClose}>
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
           Back to the folder
         </Button>
       </div>
@@ -197,10 +197,10 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
             </select>
           </label>
           <div class="lre-inline rpe-wrap">
-            <Button kind="primary" busy={shown.busy} onClick={props.onSave}>
+            <Button variant="primary" busy={shown.busy} onClick={props.onSave}>
               Save
             </Button>
-            <Button kind="ghost" onClick={() => props.onMode("read")}>
+            <Button variant="ghost" onClick={() => props.onMode("read")}>
               Cancel
             </Button>
           </div>
@@ -214,7 +214,7 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
           </p>
           <Pre text={file.text} />
           {file.more === true ? (
-            <Button small busy={open.piece} onClick={props.onPiece}>
+            <Button size="sm" busy={open.piece} onClick={props.onPiece}>
               Read on
             </Button>
           ) : null}
@@ -223,28 +223,28 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
       {open.mode === "delete" && entry !== undefined ? (
         <div class="lre-inline rpe-wrap">
           <span>{entry.shipped === null ? `Delete ${entry.path}?` : `Delete ${entry.path}? It takes the place of the shipped ${entry.shipped}, so deleting it is the reset to the default.`}</span>
-          <Button small kind="danger" busy={shown.busy} onClick={props.onRemove}>
+          <Button size="sm" variant="danger" busy={shown.busy} onClick={props.onRemove}>
             Delete it
           </Button>
-          <Button small kind="ghost" onClick={() => props.onMode("read")}>
+          <Button size="sm" variant="ghost" onClick={() => props.onMode("read")}>
             Keep it
           </Button>
         </div>
       ) : open.mode === "read" ? (
         <div class="lre-inline rpe-wrap">
           {editable && file !== null ? (
-            <Button small onClick={() => props.onMode("edit")}>
+            <Button size="sm" onClick={() => props.onMode("edit")}>
               {entry?.level === "shipped" ? "Edit as yours" : "Edit"}
             </Button>
           ) : null}
           {entry?.editable === true ? (
-            <Button small kind="ghost" onClick={() => props.onMode("delete")}>
+            <Button size="sm" variant="ghost" onClick={() => props.onMode("delete")}>
               {entry.shipped === null ? "Delete" : "Reset to the default"}
             </Button>
           ) : null}
           {switchable && entry !== undefined ? <SwitchButtons entry={entry} chat={props.chat} busy={shown.busy} onSwitch={props.onSwitch} /> : null}
           {entry !== undefined && entry.shipped !== null ? (
-            <Button small kind="ghost" onClick={props.onDiff}>
+            <Button size="sm" variant="ghost" onClick={props.onDiff}>
               Compare with the default
             </Button>
           ) : null}

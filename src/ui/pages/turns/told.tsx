@@ -3,7 +3,7 @@
 // fired on, what it added and what the agent did next, the attachments it was given, and what was dropped.
 
 import type { ConsentGrant, GapCheck, RuleFiring, TurnReply } from "../../../shared/api";
-import { Badge } from "../../atoms";
+import { Badge } from "../../../frontend/components";
 import { valueWords } from "./changes";
 
 type Told = TurnReply["told"];

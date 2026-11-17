@@ -8,7 +8,7 @@
 import { useState } from "preact/hooks";
 import type { CarryMode, MeasureDecision, MeasureFigures, MeasureMode, MeasurementReport } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Empty, Fold, Pre, Row, Section } from "../../atoms";
+import { Badge, Banner, Button, Disclosure, Empty, Pre, Row, Section } from "../../../frontend/components";
 import { usePaged, useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, duration, errorWords, LEVEL_WORDS, num, when } from "../../words";
@@ -32,7 +32,7 @@ export function honouredOf(decisions: readonly MeasureDecision[]): number {
 function DecisionLine(props: { decision: MeasureDecision }) {
   const { decision } = props;
   return (
-    <Fold
+    <Disclosure
       summary={
         <>
           {decision.name} <Badge tone={decision.honoured ? "pos" : "neg"}>{decision.honoured ? "honoured" : "not honoured"}</Badge>
@@ -43,11 +43,11 @@ function DecisionLine(props: { decision: MeasureDecision }) {
         <p class="rpe-meta">
           Planted in turn {decision.planted}, tested in turn {decision.tested}.
         </p>
-        <Row label="The check" value={decision.check} />
-        <Row label="The judge's answer" value={decision.answer} />
+        <Row k="The check" v={decision.check} />
+        <Row k="The judge's answer" v={decision.answer} />
         <Pre text={decision.evidence} mono={false} />
       </div>
-    </Fold>
+    </Disclosure>
   );
 }
 
@@ -64,7 +64,7 @@ export function ModeBlock(props: { mode: MeasureMode; inForce: boolean }) {
       <p class="rpe-meta">{words.about}.</p>
       <div class="lre-stack" data-measure-figures>
         {FIGURES.map((f) => (
-          <Row key={f.key} label={f.name} value={<span class="lre-num">{f.show(mode.totals[f.key])}</span>} sub={<span class="lre-num">median per turn {f.show(mode.medians[f.key])}</span>} />
+          <Row key={f.key} k={f.name} v={<span class="lre-num">{f.show(mode.totals[f.key])}</span>} sub={<span class="lre-num">median per turn {f.show(mode.medians[f.key])}</span>} />
         ))}
       </div>
       <p class="rpe-line" data-measure-decisions>
@@ -85,7 +85,7 @@ export function ModeBlock(props: { mode: MeasureMode; inForce: boolean }) {
           ))}
         </ul>
       )}
-      <Fold summary={`Turn by turn, ${counted(mode.turns.length, "turn")}`}>
+      <Disclosure summary={`Turn by turn, ${counted(mode.turns.length, "turn")}`}>
         <div class="rpe-measure-turns">
           <table class="rpe-measure-table">
             <thead>
@@ -112,7 +112,7 @@ export function ModeBlock(props: { mode: MeasureMode; inForce: boolean }) {
             </tbody>
           </table>
         </div>
-      </Fold>
+      </Disclosure>
     </div>
   );
 }
@@ -212,16 +212,16 @@ export function MeasurementSection(props: { chat: string | null }) {
           <>
             <div class="lre-inline rpe-wrap" data-measure-default>
               <span class="rpe-meta">Make a mode the default for</span>
-              <Button small kind="ghost" current={atLevel === "global"} onClick={() => setLevel("global")}>
+              <Button size="sm" variant="ghost" current={atLevel === "global"} onClick={() => setLevel("global")}>
                 Every chat
               </Button>
               {chat === null ? null : (
-                <Button small kind="ghost" current={atLevel === "chat"} onClick={() => setLevel("chat")}>
+                <Button size="sm" variant="ghost" current={atLevel === "chat"} onClick={() => setLevel("chat")}>
                   This chat
                 </Button>
               )}
               {CARRY_MODES.map((m) => (
-                <Button key={m} small busy={busy === m} disabled={m === inForce && carry?.from === atLevel} onClick={() => makeDefault(m)}>
+                <Button key={m} size="sm" busy={busy === m} disabled={m === inForce && carry?.from === atLevel} onClick={() => makeDefault(m)}>
                   {CARRY_WORDS[m].name}
                 </Button>
               ))}
@@ -230,7 +230,7 @@ export function MeasurementSection(props: { chat: string | null }) {
           </>
         )}
         {list.items.length > 1 ? (
-          <Fold summary={`Earlier reports, ${list.items.length - 1}${list.more ? " so far" : ""}`}>
+          <Disclosure summary={`Earlier reports, ${list.items.length - 1}${list.more ? " so far" : ""}`}>
             <ul class="lre-list" data-earlier-reports>
               {list.items.map((r) => (
                 <li key={r.id} class="lre-listrow">
@@ -249,11 +249,11 @@ export function MeasurementSection(props: { chat: string | null }) {
               ))}
             </ul>
             {list.more ? (
-              <Button small kind="ghost" busy={list.loading} onClick={list.older}>
+              <Button size="sm" variant="ghost" busy={list.loading} onClick={list.older}>
                 Older reports
               </Button>
             ) : null}
-          </Fold>
+          </Disclosure>
         ) : null}
       </div>
     </Section>

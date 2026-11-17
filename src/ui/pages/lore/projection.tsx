@@ -6,7 +6,7 @@
 import { useState } from "preact/hooks";
 import type { LoreProjectionRefreshed } from "../../../shared/api";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Section } from "../../atoms";
+import { Badge, Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
 
@@ -65,7 +65,7 @@ export function ProjectionSection(props: { chat: string }) {
         <Button busy={busy === "switch"} onClick={turn} disabled={state.value === null}>
           {on ? "Turn it off for this chat" : "Turn it on for this chat"}
         </Button>
-        <Button kind="ghost" busy={busy === "apply"} onClick={apply} disabled={state.value === null}>
+        <Button variant="ghost" busy={busy === "apply"} onClick={apply} disabled={state.value === null}>
           Apply now
         </Button>
       </div>

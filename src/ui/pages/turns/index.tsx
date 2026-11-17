@@ -12,7 +12,7 @@ import type { CarriedTurnsReply, SettleReply, StageTurn, TurnLoreRow, TurnReply,
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf, type RpeClient, RpeError } from "../../client";
-import { Badge, Banner, Button, Empty, Gated, PageHeader, Section } from "../../atoms";
+import { Badge, Banner, Button, Empty, Gated, PageHeader, Section } from "../../../frontend/components";
 import { type RunNode, runsOf } from "../../live-model";
 import { NOTHING_WATCHED, onChatChange, watchTurn, type WatchLimits, type Watched } from "../../live-watch";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
@@ -141,7 +141,7 @@ export async function newestOnPath(client: Pick<RpeClient, "call">, chat: string
 /** Settle now: the button, disabled while a run of the chat goes on, and what came of the last press. */
 export function SettleControl(props: { shown: SettleShown; running: boolean; onSettle(): void }) {
   return (
-    <Button small busy={props.shown.busy} disabled={props.running} title={props.running ? "A run of this chat is going on." : "The Author settles the newest turn's edit now; nothing is written to the chat."} onClick={props.onSettle}>
+    <Button size="sm" busy={props.shown.busy} disabled={props.running} title={props.running ? "A run of this chat is going on." : "The Author settles the newest turn's edit now; nothing is written to the chat."} onClick={props.onSettle}>
       Settle now
     </Button>
   );
@@ -196,7 +196,7 @@ export function TurnsView(props: TurnsViewProps) {
   const unlisted = props.more || props.chat === undefined ? [] : (props.carriedTurns ?? []).filter((row) => !listed.has(row.turn));
   return (
     <div class="lre-stack rpe-page" data-page="turns">
-      <PageHeader title="Turns" sub="Every turn RPE has played in this chat, newest first." actions={settle === undefined || (props.turns.length === 0 && carried === null) ? undefined : <SettleControl shown={settle.shown} running={running} onSettle={settle.onSettle} />} />
+      <PageHeader title="Turns" subtitle="Every turn RPE has played in this chat, newest first." actions={settle === undefined || (props.turns.length === 0 && carried === null) ? undefined : <SettleControl shown={settle.shown} running={running} onSettle={settle.onSettle} />} />
       {settle === undefined ? null : <SettleNotice shown={settle.shown} onOpen={props.onOpen} />}
       {props.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The turns could not be read">
@@ -426,23 +426,24 @@ export function TurnView(props: TurnViewProps) {
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
         title={`${TURN_KIND_WORDS[turn.kind]}, ${when(turn.timings.received)}`}
-        sub={
+        subtitle={
           <span class="lre-inline">
             <span class={`lre-badge ${status.tone}`}>{status.words}</span>
             {turn.onPath ? null : <span class="lre-badge">off the path</span>}
             {turn.message !== null ? <span class="lre-id">message {turn.message}</span> : turn.status === "running" || turn.timings.released !== null ? <span>not tied to a message yet</span> : <span>no message</span>}
           </span>
         }
-        back={{ label: "Back to the turns", go: props.onBack }}
+        onBack={props.onBack}
+        backLabel="the turns"
         actions={
           <>
             {settle === undefined ? null : <SettleControl shown={settle.shown} running={settle.running} onSettle={settle.onSettle} />}
             {turn.status === "running" ? (
-              <Button small onClick={props.onLive}>
+              <Button size="sm" onClick={props.onLive}>
                 Watch it live
               </Button>
             ) : (
-              <Button small kind="ghost" onClick={props.onRead}>
+              <Button size="sm" variant="ghost" onClick={props.onRead}>
                 Read again
               </Button>
             )}
@@ -541,7 +542,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
   if (detail === null) {
     return (
       <div class="lre-stack rpe-page" data-page="turn">
-        <PageHeader title="Turn" back={{ label: "Back to the turns", go: back }} />
+        <PageHeader title="Turn" onBack={back} backLabel="the turns" />
         {watched.problem === null ? (
           <p class="lre-muted rpe-line">Reading the turn…</p>
         ) : (

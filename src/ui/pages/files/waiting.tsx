@@ -3,7 +3,7 @@
 // switches one: only `rpe allow` and `rpe deny` on the server do (plan §16, R-46).
 
 import type { SwitchEntry } from "../../../shared/api";
-import { Badge, Banner } from "../../atoms";
+import { Badge, Banner } from "../../../frontend/components";
 import { useApp } from "../../app";
 import { replyOf } from "../../client";
 import { useRead } from "../../reading";

@@ -3,7 +3,7 @@
 // words, and a link to that turn's page. It shows whether a run goes on or not, and stays until it is
 // dismissed.
 
-import { Banner, Button } from "../../atoms";
+import { Banner, Button } from "../../../frontend/components";
 import type { FailureShown } from "../../live-watch";
 import { clock } from "../../words";
 
@@ -19,10 +19,10 @@ export function FailureLines(props: { failures: readonly FailureShown[]; onOpenT
           title={`A handler failed at ${clock(failure.at)}`}
           actions={
             <span class="lre-inline">
-              <Button small onClick={() => props.onOpenTurn(failure.turn)}>
+              <Button size="sm" onClick={() => props.onOpenTurn(failure.turn)}>
                 Its turn's page
               </Button>
-              <Button small kind="ghost" onClick={() => props.onDismiss(failure.seq)}>
+              <Button size="sm" variant="ghost" onClick={() => props.onDismiss(failure.seq)}>
                 Dismiss
               </Button>
             </span>

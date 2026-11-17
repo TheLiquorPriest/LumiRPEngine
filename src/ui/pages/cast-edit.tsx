@@ -3,7 +3,7 @@
 // edit is the page's too. Every edit is his own change, which the Author is told of in the next briefing.
 
 import type { BaseAsk, BaseDocument, BaseNow, CastingAsk, CastMemberRow, CastRole, PerceptionAsk, PersonAsk, SourceAsk, SourceBindingKind, SourceBindingRow } from "../../shared/api";
-import { Badge, Button, Fold } from "../atoms";
+import { Badge, Button, Disclosure } from "../../frontend/components";
 
 /** One edit the page sends: by the route that makes it. */
 export type CastEdit =
@@ -45,7 +45,7 @@ export function CastingEditor(props: FormProps & { member: CastMemberRow }) {
   const pin = typeof pinned === "boolean" ? pinned : (casting?.pinned ?? false);
   const line = text(props.drafts, "casting.line", casting?.line ?? "");
   return (
-    <Fold summary="Set its casting">
+    <Disclosure summary="Set its casting">
       <div class="lre-stack" data-edit="casting">
         <label class="lre-field">
           <span class="label">How large a part it plays</span>
@@ -69,13 +69,13 @@ export function CastingEditor(props: FormProps & { member: CastMemberRow }) {
             Set casting
           </Button>
           {casting?.pinned === true ? (
-            <Button kind="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "casting", body: { as: null, pin: false } })}>
+            <Button variant="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "casting", body: { as: null, pin: false } })}>
               Take the pin away
             </Button>
           ) : null}
         </div>
       </div>
-    </Fold>
+    </Disclosure>
   );
 }
 
@@ -85,7 +85,7 @@ export function BaseEditor(props: FormProps & { now: BaseNow }) {
   const standing = props.now.parts.find((p) => p.part === part)?.text ?? "";
   const shown = text(props.drafts, `base.text.${part}`, standing);
   return (
-    <Fold summary="Redraw the base">
+    <Disclosure summary="Redraw the base">
       <div class="lre-stack" data-edit="base">
         <label class="lre-field">
           <span class="label">Document</span>
@@ -107,7 +107,7 @@ export function BaseEditor(props: FormProps & { now: BaseNow }) {
           </Button>
         </div>
       </div>
-    </Fold>
+    </Disclosure>
   );
 }
 
@@ -126,7 +126,7 @@ export function SourceLine(props: FormProps & { source: SourceBindingRow }) {
           <Badge>{SOURCE_WORDS[s.kind]}</Badge>
           <Badge tone={s.state === "current" ? "pos" : "warn"}>{FRESHNESS_WORDS[s.state]}</Badge>
         </span>
-        <Button small kind="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "sources", body: { kind: s.kind, ref: s.ref, drop: true } })}>
+        <Button size="sm" variant="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "sources", body: { kind: s.kind, ref: s.ref, drop: true } })}>
           Take it away
         </Button>
       </div>
@@ -136,7 +136,7 @@ export function SourceLine(props: FormProps & { source: SourceBindingRow }) {
           <span class="label">The side of it that it defines</span>
           <input class="lre-input" value={side} spellcheck={false} onInput={(e) => props.onDraft(name, typed(e))} />
         </label>
-        <Button small busy={props.busy} disabled={side === (s.defines ?? "")} onClick={() => props.onEdit({ what: "sources", body: { kind: s.kind, ref: s.ref, defines: side.trim() === "" ? null : side.trim() } })}>
+        <Button size="sm" busy={props.busy} disabled={side === (s.defines ?? "")} onClick={() => props.onEdit({ what: "sources", body: { kind: s.kind, ref: s.ref, defines: side.trim() === "" ? null : side.trim() } })}>
           Say it
         </Button>
       </div>
@@ -150,7 +150,7 @@ export function SourceBinder(props: FormProps) {
   const ref = text(props.drafts, "source.ref", "");
   const defines = text(props.drafts, "source.defines", "");
   return (
-    <Fold summary="Bind a source">
+    <Disclosure summary="Bind a source">
       <div class="lre-stack" data-edit="source">
         <label class="lre-field">
           <span class="label">What it is</span>
@@ -176,7 +176,7 @@ export function SourceBinder(props: FormProps) {
           </Button>
         </div>
       </div>
-    </Fold>
+    </Disclosure>
   );
 }
 
@@ -190,11 +190,11 @@ export function PersonEditor(props: FormProps & { member: CastMemberRow }) {
         <input class="lre-input" value={shown} spellcheck={false} onInput={(e) => props.onDraft("person", typed(e))} />
       </label>
       <div class="lre-inline rpe-wrap">
-        <Button small busy={props.busy} disabled={shown.trim() === "" || shown.trim() === (props.member.person ?? "")} onClick={() => props.onEdit({ what: "person", body: { person: shown.trim() } })}>
+        <Button size="sm" busy={props.busy} disabled={shown.trim() === "" || shown.trim() === (props.member.person ?? "")} onClick={() => props.onEdit({ what: "person", body: { person: shown.trim() } })}>
           Say who
         </Button>
         {props.member.person === null ? null : (
-          <Button small kind="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "person", body: { person: null } })}>
+          <Button size="sm" variant="ghost" busy={props.busy} onClick={() => props.onEdit({ what: "person", body: { person: null } })}>
             Take it away
           </Button>
         )}
@@ -213,7 +213,7 @@ export function PerceptionWriter(props: FormProps & { turn: string; message: num
         <textarea class="lre-input rpe-editor" value={content} spellcheck={false} onInput={(e) => props.onDraft(`perception.${props.turn}`, typed(e))} />
       </label>
       <div class="lre-inline rpe-wrap">
-        <Button small busy={props.busy} disabled={content.trim() === ""} onClick={() => props.onEdit({ what: "perception", body: { turn: props.turn, content: content.trim() } })}>
+        <Button size="sm" busy={props.busy} disabled={content.trim() === ""} onClick={() => props.onEdit({ what: "perception", body: { turn: props.turn, content: content.trim() } })}>
           Write it
         </Button>
       </div>

@@ -2,7 +2,7 @@
 // brief, which is the skill's whole text, folded under the skill's name instead of printed.
 
 import type { JobView } from "../../../shared/api";
-import { Badge, Fold, Pre } from "../../atoms";
+import { Badge, Disclosure, Pre } from "../../../frontend/components";
 import { num } from "../../words";
 
 /** The attachment a bootstrap job is given by name, which marks it as one. */
@@ -28,8 +28,8 @@ export function BootstrapMark(props: { job: JobView }) {
 export function BootstrapBrief(props: { job: JobView }) {
   const { brief } = props.job;
   return (
-    <Fold summary="The bootstrap skill's text, its brief" class="rpe-open">
+    <Disclosure summary="The bootstrap skill's text, its brief" class="rpe-open">
       {brief === "" ? <p class="lre-muted rpe-line">The skill is switched off: the job was given no brief.</p> : <Pre text={brief} mono={false} />}
-    </Fold>
+    </Disclosure>
   );
 }

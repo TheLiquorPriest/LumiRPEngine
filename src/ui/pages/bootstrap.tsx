@@ -15,7 +15,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { BootstrapBatchReply, BootstrapChatReply, BootstrapJobShown, BootstrapQuestion, BootstrapStartShown, CarriedBootstrap, DoneEnoughShown, FactNotKnown, JobView, MessageStretch } from "../../shared/api";
 import { type UiApp, useApp } from "../app";
-import { Badge, Banner, Button, Pre, Row, Section } from "../atoms";
+import { Badge, Banner, Button, Pre, Row, Section } from "../../frontend/components";
 import type { RpeClient } from "../client";
 import { counted, errorWords, num, tokenWords, when } from "../words";
 import { JOB_STATE_WORDS } from "./jobs";
@@ -206,7 +206,7 @@ export function FactsView(props: { facts: DoneEnoughShown; onLog?(): void }) {
     <div class="lre-stack" data-facts="true">
       {factLines(props.facts).map(({ id, title, fact, lines }) => (
         <div key={id} class="lre-stack" data-fact={id}>
-          <Row label={title} value={fact.known ? null : <Badge>not known</Badge>} />
+          <Row k={title} v={fact.known ? null : <Badge>not known</Badge>} />
           {fact.known ? (
             lines().map((line, i) => (
               <p key={i} class="rpe-fact">
@@ -217,7 +217,7 @@ export function FactsView(props: { facts: DoneEnoughShown; onLog?(): void }) {
             <p class="rpe-fact">
               {NOT_KNOWN_WORDS[fact.why]}
               {onLog === undefined ? null : (
-                <Button small kind="ghost" onClick={onLog}>
+                <Button size="sm" variant="ghost" onClick={onLog}>
                   Open the log
                 </Button>
               )}
@@ -295,12 +295,12 @@ export function StartForm(props: { start: BootstrapStartShown; underWay: readonl
       <span class="rpe-caption">{props.label}</span>
       {start.skill ? null : <p class="rpe-meta">The bootstrap skill is switched off: a job started now is given nothing of it, and has no stated end.</p>}
       <Row
-        label="Asks you before going past"
-        value={`${num(start.tokenLimit)} tokens`}
+        k="Asks you before going past"
+        v={`${num(start.tokenLimit)} tokens`}
         sub={`Tokens sent and written by every agent of the job, a token read again from a cache counting as ${start.cachedWeight} of one; it then waits for your word to go on or end.`}
       />
       {start.caps.map((cap) => (
-        <Row key={cap.key} label={CAP_WORDS[cap.key] ?? cap.key} value={cap.value === null ? "no cap" : num(cap.value)} sub="Ends its run when reached." />
+        <Row key={cap.key} k={CAP_WORDS[cap.key] ?? cap.key} v={cap.value === null ? "no cap" : num(cap.value)} sub="Ends its run when reached." />
       ))}
       <label class="lre-stack">
         <span class="rpe-caption">Its own token limit (left empty: the setting's)</span>
@@ -315,7 +315,7 @@ export function StartForm(props: { start: BootstrapStartShown; underWay: readonl
       {asked === undefined ? (
         <div class="lre-inline rpe-wrap">
           {choices.map((word) => (
-            <Button key={word ?? ""} small kind={word === null ? "ghost" : undefined} busy={props.busy} disabled={props.busy || limit === undefined} onClick={() => go(word)}>
+            <Button key={word ?? ""} size="sm" variant={word === null ? "ghost" : undefined} busy={props.busy} disabled={props.busy || limit === undefined} onClick={() => go(word)}>
               {word === null ? (start.relive.length === 0 ? "Start" : "as the skill decides") : word}
             </Button>
           ))}
@@ -323,10 +323,10 @@ export function StartForm(props: { start: BootstrapStartShown; underWay: readonl
       ) : (
         <div class="lre-inline rpe-wrap" data-confirm="true">
           <span class="rpe-meta">Start a second bootstrap job beside the one under way?</span>
-          <Button small busy={props.busy} disabled={props.busy} onClick={() => go(asked)}>
+          <Button size="sm" busy={props.busy} disabled={props.busy} onClick={() => go(asked)}>
             Start a second
           </Button>
-          <Button small kind="ghost" onClick={() => setAsked(undefined)}>
+          <Button size="sm" variant="ghost" onClick={() => setAsked(undefined)}>
             Not now
           </Button>
         </div>
@@ -355,10 +355,10 @@ export function QuestionView(props: { question: BootstrapQuestion; chat: string;
         <input class="lre-input" inputMode="numeric" value={typed} onInput={(e) => setTyped((e.currentTarget as HTMLInputElement).value)} />
       </label>
       <div class="lre-inline rpe-wrap">
-        <Button small busy={props.busy} disabled={props.busy || more === undefined} onClick={() => more !== undefined && props.onAnswer({ go: "on", more })}>
+        <Button size="sm" busy={props.busy} disabled={props.busy || more === undefined} onClick={() => more !== undefined && props.onAnswer({ go: "on", more })}>
           Go on
         </Button>
-        <Button small kind="ghost" busy={props.busy} disabled={props.busy} onClick={() => props.onAnswer({ go: "end" })}>
+        <Button size="sm" variant="ghost" busy={props.busy} disabled={props.busy} onClick={() => props.onAnswer({ go: "end" })}>
           End with what it has
         </Button>
       </div>
@@ -420,7 +420,7 @@ export function BootstrapView(props: BootstrapViewProps) {
             </ul>
           )}
           {shown.next === null ? null : (
-            <Button small kind="ghost" onClick={props.onOlder}>
+            <Button size="sm" variant="ghost" onClick={props.onOlder}>
               Older jobs
             </Button>
           )}
@@ -457,7 +457,7 @@ function CarriedChat(props: { item: CarriedBootstrap; busy: boolean; onStart(cho
       {open ? (
         <StartForm start={item.start} underWay={underWay} busy={props.busy} label={`Start a bootstrap job for ${item.chat}`} onStart={props.onStart} />
       ) : (
-        <Button small kind="ghost" onClick={() => setOpen(true)}>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
           Start one for this chat
         </Button>
       )}
@@ -558,7 +558,7 @@ export function OfferView(props: { shown: OfferShown; onMore(): void; onStartOne
           ))}
         </ul>
         {shown.next === null ? null : (
-          <Button small kind="ghost" onClick={props.onMore}>
+          <Button size="sm" variant="ghost" onClick={props.onMore}>
             More carried chats
           </Button>
         )}
@@ -578,11 +578,11 @@ export function OfferView(props: { shown: OfferShown; onMore(): void; onStartOne
         <div class="lre-stack" data-batch="true">
           <span class="rpe-caption">Started ({shown.batch.started.length})</span>
           {shown.batch.started.map((s) => (
-            <Row key={s.chat} label={s.chat} value={`job ${s.job.id}, ${JOB_STATE_WORDS[s.job.state].words}`} />
+            <Row key={s.chat} k={s.chat} v={`job ${s.job.id}, ${JOB_STATE_WORDS[s.job.state].words}`} />
           ))}
           <span class="rpe-caption">Refused ({shown.batch.refused.length})</span>
           {shown.batch.refused.map((r) => (
-            <Row key={r.chat} label={r.chat} value={r.why} />
+            <Row key={r.chat} k={r.chat} v={r.why} />
           ))}
         </div>
       )}
