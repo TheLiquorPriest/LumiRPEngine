@@ -21,7 +21,8 @@ export function bootstrapArea(takes: BootstrapTakes): Area {
   return {
     name: "bootstrap",
     settings: BOOTSTRAP_SETTINGS,
-    fills: { views: (scope, agent, ref) => jobs.view(scope, agent, ref) },
+    // A bootstrap job's views are a chat's: a job of no chat is given none of them.
+    fills: { views: (scope, agent, ref) => (scope.chat === undefined ? Promise.resolve(null) : jobs.view(scope, agent, ref)) },
     mounted: (at) =>
       at.routes.add(
         "bootstrap",

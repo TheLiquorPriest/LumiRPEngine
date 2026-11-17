@@ -5,11 +5,14 @@
 // edits it. The app gathers every area's here when it opens, and the area that owns a hook reads it
 // from the app when it is asked.
 
-import type { AgentRef, Scope } from "rp-harness/contract";
+import type { AgentRef, HostTool, RunScope, UserSessionScope } from "rp-harness/contract";
 import type { Setting } from "./setting-list";
 
-/** A view an agent is given by name, beyond the turn's own: its text; null for a name that is none of the area's own. */
-export type ViewHook = (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
+/** A view an agent is given by name, beyond the turn's own: its text; null for a name that is none of the area's own. A job of no chat asks it too. */
+export type ViewHook = (scope: RunScope, agent: AgentRef, ref: string) => Promise<string | null>;
+
+/** The host's tools for a job of no chat (C-23: Build's model jobs). */
+export type JobToolsHook = (scope: UserSessionScope) => Promise<HostTool[]>;
 
 /**
  * The lanes of the door to Lumiverse that an area fills. The door's own file names each lane, by adding
@@ -23,6 +26,8 @@ export interface DoorFills {}
 export interface Fills {
   /** A view given to an agent by name, which the turn lane's `views` hook asks of every area in turn. */
   readonly views?: ViewHook;
+  /** Tools a job of no chat is given, which the turn lane gathers from every area. */
+  readonly jobTools?: JobToolsHook;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -31,6 +36,8 @@ export interface Fills {
 export interface Hooks {
   /** Asks each area's view in the order of the areas; the first text is the answer, null where none of them has the name. */
   readonly views: ViewHook;
+  /** Every area's tools for a job of no chat, in the order of the areas. */
+  readonly jobTools: JobToolsHook;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -45,10 +52,12 @@ interface Giving {
 /** Every area's fills as one set of hooks; a lane of the door that two areas fill is an error that names both. */
 export function gatherHooks(areas: readonly Giving[]): Hooks {
   const views: ViewHook[] = [];
+  const tools: JobToolsHook[] = [];
   const door: Record<string, unknown> = {};
   const filledBy = new Map<string, string>();
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
+    if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
       const first = filledBy.get(lane);
@@ -65,6 +74,7 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
       }
       return null;
     },
+    jobTools: async (scope) => (await Promise.all(tools.map((t) => t(scope)))).flat(),
     door: door as DoorFills,
   };
 }

@@ -146,6 +146,8 @@ export function compose(options: ComposeOptions = {}): Composition {
     store: made().store,
     worlds: worlds.service(),
     guidance: RPE_GUIDANCE,
+    // RPH's jobs and files, for Build's model jobs run as jobs of no chat (C-23).
+    rph: { jobs: made().harness.jobs, files: made().files },
     // His books for Build's lore: read as the lore reads them, an entry's fields written through the lore's one recorded writer, and a chat's messages as Lumiverse holds them.
     lore: {
       books,

@@ -21,7 +21,7 @@
 import { join } from "node:path";
 import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
-import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope } from "rp-harness/contract";
+import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
@@ -200,8 +200,10 @@ export interface TurnsOptions {
   proposals: () => Pick<LoreProposals, "suggested">;
   /** What RPE writes to his books for the projection book (`lore.projection`), through the door's writes. */
   projectionBooks: ProjectionBooks;
-  /** A view of the host's that an agent is given by name, beyond the turn's own: its text; null for a name that is none of its own. */
-  views?: (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
+  /** A view of the host's that an agent is given by name, beyond the turn's own (a job of no chat's too): its text; null for a name that is none of its own. */
+  views?: (scope: RunScope, agent: AgentRef, ref: string) => Promise<string | null>;
+  /** The host's tools for a job of no chat (C-23: Build's model jobs); none where absent. */
+  jobTools?: (scope: UserSessionScope) => Promise<HostTool[]>;
   /** In tests: the models agents run on, in place of the model layer's, and RPH's ids. */
   harness?: Pick<CreateHarnessOptions, "models" | "ids">;
   clock?: Clock;
@@ -501,7 +503,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     // `web_search` over the provider he sets on the Connections page; off until he sets one.
     web: webSearcher({ secrets: app.secrets, config: () => globalConfig(app.paths.files, app.log) }),
     // RPE's tools are a chat's: a job of no chat is given none of them.
-    tools: { all: async (scope) => (scope.chat === undefined ? [] : (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) }))) },
+    tools: { all: async (scope) => (scope.chat === undefined ? ((await options.jobTools?.(scope)) ?? []) : (await hostTools(joined(scope))).map((tool) => ({ ...tool, run: (args, ctx) => tool.run(args, { ...ctx, scope: joined(ctx.scope) }) }))) },
     // `gap_check`'s places beside the chat and the lore: the folded state and the story record, at the check's turn as it is joined.
     searchers: [stateSearcher, storySearcher].map((make) => {
       const searcher = make({ store, meaning, personPlayed: (at, plays) => lore.personPlayed(at, plays), snippet: async (scope) => (await turnSettings(files, scope, app.log)).gapSnippet });

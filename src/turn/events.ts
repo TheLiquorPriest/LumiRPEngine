@@ -71,8 +71,8 @@ export interface EventsDeps {
   jobTold(job: JobView): void;
   /** What time brings due, for what is due an agent is given by name (`world:due`). */
   due: DueSource;
-  /** A view the host adds by name: its text; null for a name that is none of its own. Asked after the turn's own views, before the cast's. */
-  views?: (scope: Scope, agent: AgentRef, ref: string) => Promise<string | null>;
+  /** A view the host adds by name: its text; null for a name that is none of its own. Asked after the turn's own views, before the cast's; for a job of no chat, alone. */
+  views?: (scope: RunScope, agent: AgentRef, ref: string) => Promise<string | null>;
   log: Log;
 }
 
@@ -392,8 +392,20 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
     },
     async attachments(at, agent, refs, moment) {
       await tell(at, "attachments", { agent, refs, moment });
-      // RPE's views are a chat's: a job of no chat is given none of them, and RPH says each could not be found.
-      if (at.chat === undefined) return [];
+      // RPE's own views are a chat's: a job of no chat is given only what a host's view gives by name (Build's, for its model jobs).
+      if (at.chat === undefined) {
+        const given: { name: string; text: string }[] = [];
+        for (const { ref, own } of refs) {
+          if (own) continue;
+          try {
+            const text = (await deps.views?.(at, agent, ref)) ?? null;
+            if (text !== null) given.push({ name: ref, text });
+          } catch (error) {
+            deps.log.warn("What a job of no chat was to be given by name could not be read.", { agent: agent.id, ref, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        return given;
+      }
       // A view RPE gives is given even with nothing in it, in its file's words for that. Every name none of RPE's spaces gives is left
       // out, and RPH says so. What cannot be read leaves out its name alone.
       const given = await givenViews(deps, at, agent, refs.flatMap(({ ref, own }) => (own ? [] : [ref])), moment);

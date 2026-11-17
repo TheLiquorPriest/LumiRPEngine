@@ -198,6 +198,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
         migrated: takes.migrated(at, store),
         clock,
         views: at.hooks.views,
+        jobTools: at.hooks.jobTools,
         proposals: takes.proposals,
         projectionBooks: takes.projectionBooks,
         ...(takes.harness !== undefined ? { harness: takes.harness } : {}),
