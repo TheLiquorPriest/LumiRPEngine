@@ -41,3 +41,9 @@ export function withLines<T>(source: LineSource | null, work: () => T): T {
 export function say(name: string, fields?: LineFields): string {
   return (current ?? installed)?.line(name, fields) ?? "";
 }
+
+/** Words joined as a list is read ("a", "a and b", "a, b and c"): the one connecting word is the line `list_and`'s, the commas are the code's. */
+export function listOf(words: readonly string[]): string {
+  const last = words[words.length - 1] ?? "";
+  return words.length <= 1 ? last : say("list_and", { head: words.slice(0, -1).join(", "), last });
+}

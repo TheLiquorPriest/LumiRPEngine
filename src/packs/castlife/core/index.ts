@@ -40,7 +40,6 @@ import { clockPaused, fightHoldsClock, speedThrough } from "../../../engine/time
 import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineAwareness, RoutineEditOp, RoutineMode, RoutineRole, RoutineSociability, SkipBlock, SkipLife } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
-import { listWords } from "../../../shared/words";
 import { partyTierIn, TIER_MARKS } from "../../../shared/party";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
 import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
@@ -49,7 +48,7 @@ import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 import { noteOf, signalOf } from "../../../engine/notices";
 import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";
@@ -1173,30 +1172,23 @@ function isScheduleChange(v: JsonValue | undefined): boolean {
 }
 
 /**
- * A chat's routine change for the GM, in a sentence with where it came from ("Danny Okafor's
- * “Morning swim” is off in this chat (set by the GM)"): a player's line never tells of one
- * (DESIGN §8, §24.9). `what` is the sentence for the person's name.
+ * A chat's routine change for the GM, in a sentence with where it came from (the line `castlife_in_chat`): a
+ * player's line never tells of one (DESIGN §8, §24.9). `what` is the sentence for the person's name.
  */
 function changeLine(ctx: ReadContext, e: PackEvent, viewer: EntityId | undefined, what: (name: string) => string): string {
   if (viewer !== undefined) return "";
   const name = own(ctx.state.entities, strOf(e.data.entity))?.name ?? strOf(e.data.entity);
-  return `${what(name)} in this chat (${objOf(e.data.source).type === "story" ? "from the story" : "set by the GM"})`;
+  const said = what(name);
+  return said === "" ? "" : say("castlife_in_chat", { what: said, ...(objOf(e.data.source).type === "story" ? { story: true } : {}) });
 }
 
-/** How someone follows their routine in a chat, each part the chat sets as what it does (null parts are the world's and go unsaid). */
-const FOLLOW_WORDS = {
-  mode: { follows: "follows their routine", no_invitations: "follows their routine but makes and accepts no invitations", off: "has no routine" },
-  awareness: { story_first: "puts the story before their routine", balanced: "weighs the story and their routine alike", routine_first: "puts their routine before the story" },
-  role: { informative: "takes their routine as context only", enforced: "lives their routine as written", off: "ignores their routine" },
-  skips: { stay: "stays put in a time skip", routine: "follows their routine in a time skip", model: "lives a time skip as the model plans it" },
-} satisfies { mode: Record<RoutineMode, string>; awareness: Record<RoutineAwareness, string>; role: Record<RoutineRole, string>; skips: Record<SkipLife, string> };
-
+/** How someone follows their routine in a chat, each part the chat sets as what it does (the lines `follow_mode_*`, `follow_awareness_*`, `follow_role_*`, `follow_skips_*`; null parts are the world's and go unsaid). */
 function followWords(follow: JsonObject): string[] {
   const mode = ROUTINE_MODES.find((m) => m === follow.mode);
   const awareness = ROUTINE_AWARENESS.find((a) => a === follow.awareness);
   const role = ROUTINE_ROLES.find((r) => r === follow.role);
   const skips = SKIP_LIVES.find((s) => s === follow.skips);
-  return [mode ? FOLLOW_WORDS.mode[mode] : null, awareness ? FOLLOW_WORDS.awareness[awareness] : null, role ? FOLLOW_WORDS.role[role] : null, skips ? FOLLOW_WORDS.skips[skips] : null].filter((w) => w !== null);
+  return [mode ? say(`follow_mode_${mode}`) : "", awareness ? say(`follow_awareness_${awareness}`) : "", role ? say(`follow_role_${role}`) : "", skips ? say(`follow_skips_${skips}`) : ""].filter((w) => w !== "");
 }
 
 /** A routine block by its label: the chat's own value's, else the world's block of that id, else a basic need's. */
@@ -1279,7 +1271,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) =>
       changeLine(ctx, e, viewer, (name) => {
         const words = e.data.follow === null ? [] : followWords(objOf(e.data.follow));
-        return words.length === 0 ? `${name} follows their routine as the world sets it again` : `${name} ${listWords(words)}`;
+        return words.length === 0 ? say("castlife_follow_world", { name }) : say("castlife_follow", { name, parts: listOf(words) });
       }),
   },
   {
@@ -1323,7 +1315,8 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       if (Object.keys(mine).length === 0) delete routines[who];
       else routines[who] = mine;
     },
-    describe: (e, ctx, viewer) => changeLine(ctx, e, viewer, (name) => `${name}'s “${blockLabel(ctx, strOf(e.data.block), e.data.value)}” ${e.data.value === null ? "is back to the world's" : objOf(e.data.value).off === true ? "is off" : "changed"}`),
+    describe: (e, ctx, viewer) =>
+      changeLine(ctx, e, viewer, (name) => say(e.data.value === null ? "castlife_block_back" : objOf(e.data.value).off === true ? "castlife_block_off" : "castlife_block_changed", { name, block: blockLabel(ctx, strOf(e.data.block), e.data.value) })),
   },
   {
     // One of someone's schedules in this chat (`schedule_override`, or the story's): off, their own slots, or null to drop the chat's change.
@@ -1346,9 +1339,9 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       changeLine(ctx, e, viewer, (name) => {
         // A schedule has no name of its own: its id, and what it sets ("where they are").
         const target = allSchedules(ctx.registry, ctx.world).find((s) => s.id === strOf(e.data.schedule))?.target;
-        const sets = target === "place" ? "where they are" : target === "activity" ? "what they're doing" : target ? `their ${target.replace(/_/g, " ")}` : null;
-        const label = `“${strOf(e.data.schedule).replace(/_/g, " ")}” schedule${sets ? ` (it sets ${sets})` : ""}`;
-        return e.data.value === null ? `${name} keeps the world's ${label} again` : objOf(e.data.value).off === true ? `${name} is off their ${label}` : `${name} has their own ${label}`;
+        const sets = target === "place" ? say("schedule_sets_place") : target === "activity" ? say("schedule_sets_activity") : target ? say("schedule_sets_field", { field: target.replace(/_/g, " ") }) : "";
+        const label = say("castlife_schedule_label", { schedule: strOf(e.data.schedule).replace(/_/g, " "), ...(sets !== "" ? { sets } : {}) });
+        return say(e.data.value === null ? "castlife_schedule_world" : objOf(e.data.value).off === true ? "castlife_schedule_off" : "castlife_schedule_own", { name, label });
       }),
   },
 ];
