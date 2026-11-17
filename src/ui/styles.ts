@@ -57,6 +57,11 @@ const OWN_CSS = `
 .rpe-file .lre-btn{max-width:100%;overflow-wrap:anywhere;text-align:left;height:auto}
 .rpe-open{padding:var(--lre-s2) 0 var(--lre-s2) var(--lre-s3);border-left:2px solid var(--lre-accent-soft);min-width:0}
 .rpe-editor{min-height:min(50vh,420px)}
+.rpe-draft{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s3);min-width:0}
+.rpe-draft>*{min-width:0}
+@media (min-width:1000px){
+.rpe-draft[data-beside=yes]{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+}
 .rpe-diff-added{color:var(--lre-pos)}
 .rpe-diff-removed{color:var(--lre-neg)}
 .rpe-strong{font-weight:600}

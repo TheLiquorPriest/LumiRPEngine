@@ -178,11 +178,13 @@ export function OpenPanel(props: OpenActions & { chat: string | null; shown: Fil
       ) : open.mode === "edit" ? (
         <div class="lre-stack">
           {file.more === true ? <p class="rpe-meta">Only the part read is here: saving writes the file as the part you see, so read it whole before editing.</p> : null}
-          <label class="lre-field">
-            <span class="label">{open.path}</span>
-            <textarea class="lre-input rpe-editor" spellcheck={false} value={open.draft.text} onInput={(event) => props.onDraft({ ...open.draft, text: event.currentTarget.value })} />
-          </label>
-          {isPart(open.path) ? <PartPreview chat={props.chat} path={open.path} text={open.draft.text} /> : null}
+          <div class="rpe-draft" data-beside={isPart(open.path) ? "yes" : "no"}>
+            <label class="lre-field">
+              <span class="label">{open.path}</span>
+              <textarea class="lre-input rpe-editor" spellcheck={false} value={open.draft.text} onInput={(event) => props.onDraft({ ...open.draft, text: event.currentTarget.value })} />
+            </label>
+            {isPart(open.path) ? <PartPreview chat={props.chat} path={open.path} text={open.draft.text} /> : null}
+          </div>
           <label class="lre-field">
             <span class="label">Save it as</span>
             {/* A select's starting choice is its option marked selected: Preact gives a select no defaultValue. */}
