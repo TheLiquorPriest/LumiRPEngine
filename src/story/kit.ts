@@ -44,10 +44,11 @@ export const STORY_ANSWERS = "story-answers";
 
 /**
  * The lore lane's (plan §9.3): whether the lore entry an overlay is a note on is one the lore lane knows in the chat, asked inside
- * the story's queued write, on the same database, before anything of the call is recorded. Null when it is known; else the entry it
- * does not know and any near it. The overlay itself is a change of the story's area, written with the call's other writes.
+ * the story's queued write, on the same database, before anything of the call is recorded. Null when it is known as named; `as`
+ * when it is known and is shown by another id (the overlay is kept under that one); else the entry it does not know and any near it.
+ * The overlay itself is a change of the story's area, written with the call's other writes.
  */
-export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | null;
+export type LoreOverlay = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | { as: string } | null;
 
 /** What the story tools are given by the host (the turn lane). */
 export interface StoryDeps {

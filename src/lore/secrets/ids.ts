@@ -11,9 +11,9 @@ import type { LoreBooks } from "../sources";
 /** A shown id's parts: the entry's RPE id and, for a mark in a book entry's text, its place from 1. */
 const SHOWN = /^([ew])-(\d+)(?:#(\d+))?$/;
 
-/** What the resolver reads: RPE's numbers of entries, and the user's books for the book an entry is in. */
+/** What the resolver reads: RPE's numbers of entries and the ids of today's lore index it carries, and the user's books for the book an entry is in. */
 export interface SecretIdsDeps {
-  numbers: Pick<EntryNumbers, "entry" | "of" | "worldEntry" | "worldNumberOf">;
+  numbers: Pick<EntryNumbers, "entry" | "of" | "oldRef" | "worldEntry" | "worldNumberOf">;
   books: Pick<LoreBooks, "entry">;
 }
 
@@ -33,6 +33,14 @@ export function secretIds(deps: SecretIdsDeps): SecretIds {
       const said = shown.trim();
       const m = SHOWN.exec(said);
       if (m === null) {
+        // An id of today's own lore index (`lre0001`, `lr0101`), alone or with its mark from 1 (`lre0001#2`): the book entry it was given to.
+        const whole = deps.numbers.oldRef(user, said);
+        const marked = whole === null ? /^(.+)#(\d+)$/.exec(said) : null;
+        const old = whole ?? (marked === null ? null : deps.numbers.oldRef(user, marked[1] ?? ""));
+        if (old !== null) {
+          const place = marked === null ? null : Number(marked[2]);
+          return place !== null && place < 1 ? null : factId({ kind: "wi", book: old.book, entry: old.entry, mark: place === null ? null : place - 1 });
+        }
         // Today's forms: a fact id of lore or of World Info, or the live id of a book entry or mark.
         const kind = parseFactId(said)?.kind;
         return kind === "lore" || kind === "wi" ? said : wiFactIdOfLiveLore(said);

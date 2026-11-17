@@ -34,7 +34,7 @@ import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSour
 import { hasSecretMarks, publicText, unreadableMarks } from "../shared/secret-marks";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import type { LoreScope, LoreSettingsFor } from "./chat-settings";
-import { bookEntryId, type EntryNumbers, loreRefOf, worldEntryId } from "./ids";
+import { bookEntryId, type EntryNumbers, worldEntryId } from "./ids";
 import { foldName, type KeyMatching, keysFound, LUMIVERSE_KEY_MATCHING } from "./keys";
 import type { LoreMap, LoreMapLine } from "./map";
 import { AS_CHARACTER, CharacterReads, type HeldSecret, worldWithBooks } from "./secrets/character";
@@ -446,7 +446,7 @@ export class Lore {
    * such entry, or one with no text. Used for his own lore index entry, whose text heads `LORE-INDEX.md`.
    */
   async bookText(at: LoreAt, id: string): Promise<string | null> {
-    const ref = loreRefOf(id);
+    const ref = await this.numbers.refOf(at.user, id);
     const lumiverse = ref === null ? id : ref.kind === "book" ? this.numbers.entry(at.user, ref.n) : null;
     const row = lumiverse === null ? null : await this.books.entry(at.user, lumiverse);
     const text = row === null ? "" : publicText(row.content).trim();
@@ -455,7 +455,7 @@ export class Lore {
 
   private async entries(at: LoreAt, ids: readonly string[], plays?: string): Promise<LoreEntry[]> {
     const s = await this.settingsOf(at);
-    const refs = ids.map(loreRefOf);
+    const refs = await Promise.all(ids.map((id) => this.numbers.refOf(at.user, id)));
     const world = plays !== undefined || refs.some((ref) => ref !== null) ? this.worlds.at(at.user, at.chat, at.turn) : null;
     const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
     if (plays !== undefined && as === undefined) return [];

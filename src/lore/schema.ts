@@ -3,6 +3,8 @@
 //
 //   lore_entry_number  the short number of each book entry an agent has seen (`ids.ts`)
 //   lore_world_number  the short number of each world entry, by its user, world and key (`ids.ts`)
+//   lore_old_id        the ids of today's own lore index that a carried note or mind file may still name, each
+//                      with the Lumiverse book and entry it was given to (`ids.ts`, carried by the migration)
 //   lore_index         what an indexing run wrote of each entry, by entry and the revision the run read
 //                      (two chats on different revisions each keep their own), fields beside the four
 //                      the lore knows included (`indexing.ts`)
@@ -254,6 +256,20 @@ ALTER TABLE lore_proposal ADD COLUMN stamp TEXT;
 ALTER TABLE lore_write RENAME TO lore_write_log;
 ALTER TABLE lore_write_log ADD COLUMN world TEXT;
 ALTER TABLE lore_write_log ADD COLUMN stamp TEXT`,
+  },
+  {
+    version: 14,
+    name: "today's lore ids",
+    // Every id today's lore index ever gave (`lre0001`, a tag like `lr0101`) with the book entry it names, so a carried note that
+    // wrote one still names that entry; the migration writes them (`putCarriedLoreIds`), and an id once given is never given again.
+    sql: `CREATE TABLE lore_old_id (
+  user TEXT NOT NULL,
+  id TEXT NOT NULL,
+  book TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  PRIMARY KEY (user, id)
+);
+CREATE INDEX lore_old_id_entry ON lore_old_id (user, entry)`,
   },
 ];
 

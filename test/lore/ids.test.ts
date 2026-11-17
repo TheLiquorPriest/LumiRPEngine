@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase, WriteQueue } from "../../src/app/database";
 import { migrate, type Migration, Migrations } from "../../src/app/migrations";
-import { EntryNumbers, Lore, LORE_MIGRATIONS } from "../../src/lore/index";
+import { EntryNumbers, Lore, LORE_MIGRATIONS, putCarriedLoreIds } from "../../src/lore/index";
 import { STORE_MIGRATIONS } from "../../src/store";
 import { ATLAS, CHAT, COAST_LORE, coastWorld, dbFile, loreDb, OTHER_USER, SONGS, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 
@@ -82,6 +82,19 @@ describe("lore ids", () => {
     expect(mine.map((h) => [h.id, h.title])).toEqual([["e-1", "The lamp room"]]);
     expect((await lore.read(AT, ["e-1"])).map((e) => e.text)).toEqual(["Green glass and whale oil, kept burning by the night watch."]);
     expect((await lore.read({ user: OTHER_USER, chat: CHAT }, ["e-1"])).map((e) => e.text)).toEqual(["Another user's lamp, which no other user ever reads."]);
+    await db.close();
+  });
+
+  test("an id of today's lore index that the migration carried names its entry, under the id RPE shows, and is never given to another", async () => {
+    const { file, backups } = dbFile(dir);
+    const db = loreDb(file, backups);
+    const lore = new Lore({ books: new Shelf(), worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers });
+    expect(await db.writes.run((d) => putCarriedLoreIds(d, USER, [{ id: "lre0007", book: ATLAS.id, entry: "entry-lamp" }]))).toBe(1);
+    expect(await db.writes.run((d) => putCarriedLoreIds(d, USER, [{ id: "lre0007", book: ATLAS.id, entry: "entry-gull" }]))).toBe(0);
+    const [read] = await lore.read(AT, ["lre0007"]);
+    expect([read?.title, read?.id]).toEqual(["The lamp room", expect.stringMatching(/^e-[1-9][0-9]*$/)]);
+    expect((await lore.read(AT, [read?.id ?? ""])).map((e) => e.title)).toEqual(["The lamp room"]);
+    expect(await lore.read({ user: OTHER_USER, chat: CHAT }, ["lre0007"])).toEqual([]);
     await db.close();
   });
 

@@ -13,7 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 import type { AgentRef, JsonObject, Scope, Suggestion } from "rp-harness/contract";
-import { type EntryNumbers, loreRefOf, type LoreWrites } from "./ids";
+import { bookEntryId, type EntryNumbers, loreRefOf, type LoreWrites } from "./ids";
 import type { LoreBookEntry, LoreBooks } from "./sources";
 
 /**
@@ -227,8 +227,10 @@ export class LoreProposals {
   async suggested(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<LoreProposalView | null> {
     const { target } = suggestion;
     if ("file" in target) return null;
-    const named = "lore" in target ? target.lore : null;
-    const ref = named === null ? null : loreRefOf(named);
+    const asked = "lore" in target ? target.lore : null;
+    const ref = asked === null ? null : await this.deps.numbers.refOf(scope.user, asked);
+    // An id of today's lore index names its book entry; it is kept as the id RPE shows for that entry.
+    const named = asked !== null && ref?.kind === "book" && loreRefOf(asked) === null ? bookEntryId(ref.n) : asked;
     // A book entry RPE has numbered is one of the user's books; a world entry by its number is one of his world's own. Anything else is kept as asked, under the id the agent used, and refused at approval.
     const entry = ref?.kind === "book" ? this.deps.numbers.entry(scope.user, ref.n) : null;
     const current = entry === null ? null : await this.deps.books.entry(scope.user, entry);

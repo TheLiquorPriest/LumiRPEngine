@@ -1,4 +1,4 @@
-export { bookEntryId, EntryNumbers, type LoreRef, loreRefOf, type LoreWrites, worldEntryId } from "./ids";
+export { bookEntryId, type CarriedLoreId, EntryNumbers, type LoreRef, loreRefOf, type LoreWrites, putCarriedLoreIds, worldEntryId } from "./ids";
 export { LORE_MIGRATIONS } from "./schema";
 export { foldName, type KeyMatching, keysIn, LUMIVERSE_KEY_MATCHING } from "./keys";
 export { Lore, type LoreActivation, type LoreAt, type LoreCatalogEntry, LORE_DEFAULTS, type LoreMapAsk, type LoreMeaning, type LoreOptions, type LoreSettings } from "./lore";

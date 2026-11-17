@@ -14,12 +14,15 @@ import type { Database } from "bun:sqlite";
 import { hasOwn } from "../shared/json";
 import { storySliceOf } from "../story/fold";
 import { refuseJoined, type Store } from "../store";
-import { giveWorldNumbers, loreRefOf, worldEntryId } from "./ids";
+import { bookEntryId, giveWorldNumbers, loreRefIn, loreRefOf, worldEntryId } from "./ids";
 import { foldName } from "./keys";
 import type { LoreWorlds } from "./sources";
 
-/** The lore's word on an overlay's entry: null when it knows the entry in the chat; else the entry it does not know and any near it. The shape of the story's `LoreOverlay`. */
-export type OverlayCheck = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | null;
+/**
+ * The lore's word on an overlay's entry: null when it knows the entry in the chat as it was named; `as` when it knows it and the id shown for it is another (an id of
+ * today's lore index, named for the same entry as `e-12`); else the entry it does not know and any near it. The shape of the story's `LoreOverlay`.
+ */
+export type OverlayCheck = (db: Database, input: { user: string; chat: string; turn: string | null; entry: string }) => { unknown: string; near?: string[] } | { as: string } | null;
 
 /**
  * The lore's word on an overlay's entry, for the story's `overlay` operation, asked inside the call's queued write before anything
@@ -31,7 +34,8 @@ export type OverlayCheck = (db: Database, input: { user: string; chat: string; t
 export function overlayCheck(worlds: LoreWorlds): OverlayCheck {
   return (db: Database, input) => {
     if (input.turn !== null) refuseJoined(db, input.user, input.turn);
-    const ref = loreRefOf(input.entry);
+    const shown = loreRefOf(input.entry);
+    const ref = shown ?? loreRefIn(db, input.user, input.entry);
     const world = ref?.kind === "book" ? null : worlds.at(input.user, input.chat, input.turn ?? undefined);
     // A world entry is known when it is numbered and is an entry of the chat's own world.
     const numbered = ref?.kind === "world" ? db.query<{ world: string; key: string }, [string, number]>("SELECT world, key FROM lore_world_number WHERE user = ? AND n = ?").get(input.user, ref.n) : null;
@@ -39,7 +43,7 @@ export function overlayCheck(worlds: LoreWorlds): OverlayCheck {
       ref?.kind === "book"
         ? db.query<{ n: number }, [string, number]>("SELECT n FROM lore_entry_number WHERE user = ? AND n = ?").get(input.user, ref.n) !== null
         : ref?.kind === "world" && world !== null && numbered !== null && numbered.world === world.world.id && hasOwn(world.world.lore, numbered.key);
-    if (known) return null;
+    if (known) return shown === null && ref?.kind === "book" ? { as: bookEntryId(ref.n) } : null;
     const asked = foldName(input.entry);
     const matches =
       world === null

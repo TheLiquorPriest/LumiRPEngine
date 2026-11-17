@@ -437,12 +437,13 @@ async function recordOperations(args: JsonObject, call: StoryCall): Promise<Repl
   let recorded: StoryRecorded[];
   try {
     recorded = await writes.run((db) => {
-      // The lore lane's word on every overlay's entry comes first: one it does not know refuses the call whole, and nothing is recorded.
+      // The lore lane's word on every overlay's entry comes first: one it does not know refuses the call whole, and nothing is recorded; one it knows by another id is kept under that id.
       for (const r of read) {
         if (r.op !== OVERLAY) continue;
         const o = r as PlannedOverlay;
         const out = overlay(db, { user: call.scope.user, chat: call.scope.chat, turn, entry: o.entry });
-        if (out !== null) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
+        if (out !== null && "unknown" in out) throw new OverlayRefused(o.n, out.unknown, out.near ?? []);
+        if (out !== null) o.entry = out.as;
       }
       // A new item's stand-in id, as later operations of the call named it, becomes the id its first write is given.
       const made = new Set<string>();
