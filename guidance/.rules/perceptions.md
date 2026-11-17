@@ -25,10 +25,10 @@ You write what reached them. You do not write what they make of it. Their own ag
 ## When
 
 - A character acting in a sandbox needs its perception before it acts. Write it then.
-- On a turn you settle yourself, write them in the same call as the reply, right after it.
+- On a turn no character acts in a sandbox, write them in the same message as the reply, right after it, with the calls that settle the turn.
 - If the reply as it went out differs from what the sandbox produced, correct the perceptions before anyone forms memories from them.
 - For a principal who acted, keep its agent past the reply (`delegate` with `keep`) and have it take in its perceptions right after the reply, in the session it acted in. For one who was only present, memory work runs when the scene ends or when it next acts, whichever comes first: at the scene's end, as a job; if it acts first, its perceptions are given to it in full at the start of that run.
-- When a principal sleeps, or days pass for it, ask its agent to let the time settle.
+- When a principal sleeps, or days pass for it, ask its agent to dream (`dream`), so that what it lived goes into its long-term memory.
 
 ## Long input
 

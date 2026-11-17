@@ -114,7 +114,7 @@ keys:
 {{/changed}}
 {{#unsettled}}
 
-### Unsettled
+### Not yet sure, sourced or applied
 
 {{unsettled}}
 {{/unsettled}}

@@ -16,7 +16,7 @@ import { WORLD_STATE_DEFAULTS, worldState, type DueSource, type MapText } from "
 import { engine, hand, hashOf, inventedWorld, make, pay, play, POV, registry, shown, SHIPPED_LAYOUT, SHIPPED_PART, testStore, tick, USER } from "./fixtures";
 import { bigWorld } from "./measure";
 
-const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest of the world, in outline", "### Due", "### Open business here", "### Changed last turn", "### Unsettled"];
+const HEADINGS = ["### At hand", "### Above it", "### Around it", "### The rest of the world, in outline", "### Due", "### Open business here", "### Changed last turn", "### Not yet sure, sourced or applied"];
 
 /** The grid lane's map, as a test gives it: a map for the common room only. */
 const MAP: MapText = { text: ({ place }) => (place === "common_room" ? { grid: "grid_inn", drawn: "d1", text: "+---+\n|W.B|\n+---+" } : null) };
