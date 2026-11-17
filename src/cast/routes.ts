@@ -35,12 +35,13 @@ import { nearestOf } from "../iface/reading";
 import { type Fields, type GuidanceFiles, textOf } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
-import { fileName, IMPORTED_KIND, importedText, isFiled } from "./imported";
+import { IMPORTED_KIND } from "./carried";
+import { fileName, importedText, isFiled } from "./imported";
 import type { OnStage, StageRead } from "./facts";
 import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
 import { castAt } from "./path";
-import { perceivedTurn, perceiveAsPlayer } from "./perceive";
+import { perceivedTurn, perceiveAsPlayer, struckWith } from "./perceive";
 import {
   awayItemId,
   baseHistory,
@@ -70,6 +71,8 @@ import {
   writeCast,
 } from "./record";
 import { forgetsOf, holdingChanges, personNamed, secretsHeldAgain, secretsLetGo, worldAt } from "./secrets";
+import { isRecord } from "../shared/json";
+import { mindsShown } from "./views";
 import {
   type CastCharacter,
   type CastCounts,
@@ -241,22 +244,6 @@ interface StrikeDone {
 /** A strike as the page sends it, in the form the cast takes it in: the entry without the space around it, and why only where there is some. */
 function strikeOf(body: CastStrike): StrikeAsked {
   return { id: body.id.trim(), struck: body.struck, why: typeof body.why === "string" && body.why.trim() !== "" ? body.why.trim() : null };
-}
-
-/**
- * Of the knowledge a perception gave that is struck, what the perception's strike struck with it, written after it by the same write
- * (that write's turn, writer and moment, as `perceive`'s strike and this page write them), and what was struck apart from it.
- */
-function struckWith(perception: CastItem, gave: readonly CastItem[]): { with: CastItem[]; apart: CastItem[] } {
-  const strikeRow = (item: CastItem): CastRow | undefined => item.rows.findLast((row) => row.value.drop === true);
-  const its = strikeRow(perception);
-  const out: { with: CastItem[]; apart: CastItem[] } = { with: [], apart: [] };
-  for (const k of gave.filter((g) => g.dropped)) {
-    const row = strikeRow(k);
-    const same = its !== undefined && row !== undefined && row.s > its.s && row.turn === its.turn && row.by === its.by && row.agent === its.agent && row.when === its.when;
-    (same ? out.with : out.apart).push(k);
-  }
-  return out;
 }
 
 /**
@@ -448,6 +435,9 @@ async function characterShown(deps: CastRoutesDeps, r: Reading, character: Chara
   const [member] = membersOf(r, [character]);
   const base = [...baseOf(db, r.user, character.id, chat).values()].sort((a, b) => BASE_PARTS.indexOf(a.part) - BASE_PARTS.indexOf(b.part));
   const away = r.record.items.get(awayItemId(character.id));
+  // The older minds pack's notes of a character are one of its carried files, shown with the names and dates the world gives them at the reading's point.
+  const carried = all("mind").filter((i) => i.fields.kind === IMPORTED_KIND);
+  const ctx = carried.some((i) => isRecord(i.fields.minds)) ? worldAt(r.store, r.user, r.record.at.turn, null, chat) : null;
   return {
     listed: ask.size,
     character: member as CastMemberShown,
@@ -483,8 +473,8 @@ async function characterShown(deps: CastRoutesDeps, r: Reading, character: Chara
     }),
     files: list(
       "files",
-      all("mind").filter((i) => i.fields.kind === IMPORTED_KIND),
-      (i) => ({ ...entryShown(r, i), file: fileName(i), text: importedText(r.store.db, r.user, i), filed: isFiled(i) }),
+      carried,
+      (i) => ({ ...entryShown(r, i), ...(isRecord(i.fields.minds) ? { fields: { ...i.fields, minds: mindsShown(i.fields.minds as JsonObject, ctx, r.clock) } } : {}), file: fileName(i), text: importedText(r.store.db, r.user, i), filed: isFiled(i) }),
     ),
   };
 }
@@ -607,7 +597,7 @@ export function castRoutes(deps: CastRoutesDeps) {
             letGo: done.letGo,
             alsoStood: ask.struck ? [] : done.also,
             heldAgain: done.held,
-            notes: [...done.left.flatMap((l) => lines.line("page_still_struck", { ...l }) ?? []), ...done.unread.flatMap((u) => lines.line(u.line, u.fields) ?? [])],
+            notes: [...done.left.flatMap((l) => lines.line("still_struck", { ...l }) ?? []), ...done.unread.flatMap((u) => lines.line(u.line, u.fields) ?? [])],
           };
         }),
     }),

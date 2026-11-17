@@ -16,7 +16,7 @@ arguments:
   perceptions.sure: "With secrets: how sure they are, from 0 to 1. Left out: the setting cast.secretConfidence."
   perceptions.told_by: "Who told them, by name. Leave it out when it reached them first hand."
   perceptions.reliability: "How reliable the telling is."
-  perceptions.drop: "true to strike the perception named by id; say why. What it added to their knowledge is struck with it, and the secrets it made theirs are theirs no longer, unless other knowledge of theirs still gives them."
+  perceptions.drop: "true to strike the perception named by id; say why. What it added to their knowledge is struck with it, and the secrets it made theirs are theirs no longer, unless other knowledge of theirs still gives them. false to take the strike back: the knowledge it struck with it stands again and the secrets that knowledge gives are theirs again, unless they hold them now; knowledge struck apart from it stays struck, and is said."
   perceptions.why: "With drop: why it goes."
   perceptions.source: "Where the perception comes from, which is not who told it (told_by): its kind alone (prose, lore, author, gm, character, player, default or invented), or an object with the kind in from. lore, message and roll cite an entry, message or roll by id; an invention cites its gap_check and consent."
   perceptions.precision: "How exact what you write is: exact, approximate, vague or unknown."

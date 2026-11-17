@@ -26,9 +26,9 @@ import type { LedgerEvent } from "../shared/ledger";
 import { type FactId, HOLDING_BELIEFS, HOLDING_HOWS, type HoldingBelief, type HoldingHow } from "../shared/minds";
 import { isRecord } from "../shared/json";
 import { type CastCall, type CastReading, type CastToolSpec, nearIds, readingOr, whoView } from "./kit";
-import { type CastItem, type CastWrite, type CastWriter, writeCast } from "./record";
+import { type CastItem, type CastRow, type CastWrite, type CastWriter, writeCast } from "./record";
 import { LORE_STAMP, PROVENANCE_READS, readSource, sourceLines, stampOn } from "./source";
-import { forgetsOf, type HoldingGiven, holdingChanges, secretResolver, secretsHeld, secretsLetGo, SecretWorld, worldAt } from "./secrets";
+import { forgetsOf, type HoldingGiven, holdingChanges, secretResolver, secretsHeld, secretsHeldAgain, secretsLetGo, SecretWorld, worldAt } from "./secrets";
 import { CAST_LANE, characterNamed, ignoredOf, isUnread, type ItemRead, type Kind, leftOut, makeFresh, needed, readArg, type Reads, refused, type Unread } from "./update";
 
 /** How much of a moment reached a character (§7.3): all of it, part of it, told of it by someone, or nothing. */
@@ -81,6 +81,9 @@ interface Planned {
   /** The knowledge it gave that goes (all of it, for a perception it strikes), and each secret's holding taken back. */
   struck: string[];
   forgets: { fact: FactId; events: LedgerEvent[] }[];
+  /** For a strike taken back (`drop: false`): the knowledge it struck with it that stands again, and each secret's holding given back (none for a holding they have now). */
+  stands: string[];
+  holdsAgain: { fact: FactId; events: LedgerEvent[] }[];
   /** Where it comes from, as the call gave it; none for the player's own, whose source is his. */
   prov?: Provenance;
 }
@@ -93,6 +96,22 @@ interface PerceptionRead extends ItemRead {
 /** The turn a perception is of: the `of` it was written with. */
 export function perceivedTurn(item: CastItem): string {
   return typeof item.fields.of === "string" ? item.fields.of : item.opened;
+}
+
+/**
+ * Of the knowledge a perception gave that is struck, what the perception's strike struck with it, written after it by the same write
+ * (that write's turn, writer and moment, as `perceive`'s strike and the Cast page write them), and what was struck apart from it.
+ */
+export function struckWith(perception: CastItem, gave: readonly CastItem[]): { with: CastItem[]; apart: CastItem[] } {
+  const strikeRow = (item: CastItem): CastRow | undefined => item.rows.findLast((row) => row.value.drop === true);
+  const its = strikeRow(perception);
+  const out: { with: CastItem[]; apart: CastItem[] } = { with: [], apart: [] };
+  for (const k of gave.filter((g) => g.dropped)) {
+    const row = strikeRow(k);
+    const same = its !== undefined && row !== undefined && row.s > its.s && row.turn === its.turn && row.by === its.by && row.agent === its.agent && row.when === its.when;
+    (same ? out.with : out.apart).push(k);
+  }
+  return out;
 }
 
 /** A perception as answers and views show it: its fields, with the reply it is of by its number on the path (null: this turn's, not saved yet) in place of the turn's id. */
@@ -161,6 +180,24 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
         : []
       : gave.filter((k) => (knows !== undefined && typeof k.fields.text === "string" && !(knows as string[]).includes(k.fields.text)) || (holds.size > 0 && typeof k.fields.secret === "string" && !holds.has(k.fields.secret)) || (cleared && !(typeof k.fields.secret === "string" && holds.has(k.fields.secret))));
   const forgets = forgetsOf(world.ctx, n, OP, character, secretsLetGo(cast.record, character.id, struck), out.unread);
+  // A strike taken back (`drop: false`) stands the knowledge it struck with it and gives back each secret that knowledge holds; knowledge struck apart from it stays struck, and is said.
+  const back = fields.drop === false && item !== null && item.dropped ? struckWith(item, cast.record.of(character.id, "knowledge", true).filter((k) => k.fields.from === item.id)) : null;
+  const stands = back?.with ?? [];
+  const secretOf = (k: CastItem): string | null => (typeof k.fields.secret === "string" ? k.fields.secret : null);
+  const asked = new Set<string>();
+  const holdsAgain = stands.flatMap((k) => {
+    const fact = secretOf(k);
+    if (fact === null || asked.has(fact)) return [];
+    asked.add(fact);
+    return secretsHeldAgain(world.ctx, { n, op: OP, field: "secrets" }, character, k.fields.told_by, call.deps.store.user(call.scope.user).turn(k.opened), [fact], call.settings.secretConfidence, out.unread);
+  });
+  if (back !== null && back.apart.length > 0) {
+    const given = new Set([...cast.record.of(character.id, "knowledge"), ...stands].flatMap((k) => secretOf(k) ?? []));
+    for (const k of back.apart) {
+      const secret = secretOf(k);
+      out.unread.push({ line: "still_struck", fields: { n, op: OP, id: k.id, from: item?.id ?? "", ...(typeof k.fields.text === "string" ? { text: k.fields.text } : {}), ...(secret !== null && !given.has(secret) ? { secret } : {}) }, kept: true });
+    }
+  }
   // What the knowledge it keeps already gives is not written again.
   const kept = gave.filter((k) => !struck.includes(k));
   const keptTexts = new Set(kept.flatMap((k) => (typeof k.fields.text === "string" ? [k.fields.text] : [])));
@@ -179,6 +216,8 @@ async function readPerception(call: CastCall, cast: CastReading, world: SecretWo
     newSecrets: held.flatMap((s) => (keptSecrets.has(s.fact) ? [] : [s.fact])),
     struck: struck.map((k) => k.id),
     forgets,
+    stands: stands.map((k) => k.id),
+    holdsAgain,
   };
   return out;
 }
@@ -241,12 +280,14 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
       ];
       out.push({ character, perception, knowledge: writeCast(call.deps.store, writer, knowledge).map((k) => k.item) });
       writeCast(call.deps.store, writer, p.struck.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: true, ...(typeof p.value.why === "string" ? { why: p.value.why } : {}) }, ...stampOn(p.prov) })));
+      // A strike taken back stands again the knowledge it struck with it.
+      writeCast(call.deps.store, writer, p.stands.map((k): CastWrite => ({ character, part: "knowledge", item: k, value: { drop: false }, ...stampOn(p.prov) })));
     }
     // A secret's fact is recorded before anyone holds it (the lore's own); each perception's holdings, then what its strike lets go (the perception's).
     const by = player ? "player" : call.agent.id;
     const changes = [
       ...holdingChanges(world.facts, CAST_LANE, by, job).map((c) => ({ ...c, ...LORE_STAMP })),
-      ...planned.flatMap((p) => holdingChanges([...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events)], CAST_LANE, by, job).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) }))),
+      ...planned.flatMap((p) => holdingChanges([...p.secrets.flatMap((s) => s.events), ...p.forgets.flatMap((f) => f.events), ...p.holdsAgain.flatMap((h) => h.events)], CAST_LANE, by, job).map((c) => ({ ...c, ...(stampOn(p.prov).stamp ?? {}) }))),
     ].map((c) => (player ? { ...c, source: "player" as const } : c));
     if (changes.length > 0) {
       const u = call.deps.store.user(user);
@@ -273,7 +314,9 @@ async function perceiveAs(args: JsonObject, call: CastCall, player: boolean): Pr
         knowledge: done?.knowledge ?? [],
         ...(p.secrets.length > 0 ? { holds: p.secrets.map((s) => s.fact) } : {}),
         ...(p.struck.length > 0 ? { struck: p.struck } : {}),
+        ...(p.stands.length > 0 ? { stands: p.stands } : {}),
         ...(p.forgets.some((f) => f.events.length > 0) ? { lets_go: p.forgets.flatMap((f) => (f.events.length > 0 ? [f.fact] : [])) } : {}),
+        ...(p.holdsAgain.some((h) => h.events.length > 0) ? { holds_again: p.holdsAgain.flatMap((h) => (h.events.length > 0 ? [h.fact] : [])) } : {}),
       };
     }),
   });

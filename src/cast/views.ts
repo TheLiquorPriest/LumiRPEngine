@@ -9,6 +9,8 @@
 // is on stage, which the caller says. Code ranks nothing and writes no word around the record's.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
+import type { ReadContext } from "../engine/registry";
+import { isRecord } from "../shared/json";
 import type { Store } from "../store";
 import { beatsAt } from "./beats";
 import { CAST_DEFAULTS, type CastClock, castClock, type CastSettings, datedAt } from "./kit";
@@ -96,6 +98,31 @@ type ViewFields = Record<string, JsonValue | undefined>;
 function listed(items: JsonObject[]): Listed | undefined {
   if (items.length === 0) return undefined;
   return { items: items.map((item) => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, Array.isArray(value) ? { ".": value } : value]))) };
+}
+
+/**
+ * The older minds pack's notes of a character (`carried.ts`) as the layout shows them: each note, commitment, witnessed thing and
+ * the latest mind with its date in story time where the clock shows one, and the people and places they name by what the world calls
+ * them now (the id where it holds none). Every word is the pack's own; none is added.
+ */
+export function mindsShown(notes: JsonObject, ctx: ReadContext | null, clock: CastClock | null): JsonObject {
+  const named = (id: unknown): string | undefined => (typeof id === "string" ? (ctx !== null && Object.hasOwn(ctx.state.entities, id) ? ctx.state.entities[id]?.name : undefined) ?? id : undefined);
+  const placed = (id: unknown): string | undefined => (typeof id === "string" ? (ctx !== null && Object.hasOwn(ctx.world.places, id) ? ctx.world.places[id]?.name : undefined) ?? id : undefined);
+  const dated = (at: unknown): { date: string } | Record<string, never> => (typeof at === "number" ? datedAt(clock, at) : {});
+  const rows = (part: JsonValue | undefined): JsonObject[] => (Array.isArray(part) ? part.filter((x): x is JsonObject => isRecord(x)) : []);
+  const out: JsonObject = {};
+  if (typeof notes.summary === "string") out.summary = notes.summary;
+  const kept = rows(notes.notes).map((n) => ({ text: n.text ?? "", salience: n.salience ?? null, ...dated(n.at) }));
+  if (kept.length > 0) out.notes = kept;
+  const owed = rows(notes.commitments).map((c) => ({ text: c.text ?? "", kind: c.kind ?? "", status: c.status ?? "", with: (Array.isArray(c.with) ? c.with : []).flatMap((w) => named(w) ?? []).join(", "), ...(typeof c.due === "number" ? { due: datedAt(clock, c.due).date ?? null } : {}), ...dated(c.made) }));
+  if (owed.length > 0) out.commitments = owed;
+  const seen = rows(notes.witness).map((w) => ({ what: w.what ?? "", how: w.how ?? "", ...(named(w.by) !== undefined ? { by: named(w.by) as string } : {}), ...(placed(w.place) !== undefined ? { place: placed(w.place) as string } : {}), ...dated(w.at) }));
+  if (seen.length > 0) out.witness = seen;
+  if (isRecord(notes.mind)) {
+    const m = notes.mind;
+    out.mind = { level: m.level ?? "", monologue: m.monologue ?? "", depiction: m.depiction ?? "", intent: m.intent ?? "", reactions: Array.isArray(m.reactions) ? m.reactions : [], ...(typeof m.mood === "string" ? { mood: m.mood } : {}), ...(placed(m.place) !== undefined ? { place: placed(m.place) as string } : {}), ...dated(m.at) };
+  }
+  return out;
 }
 
 /**
@@ -205,9 +232,13 @@ export async function castViews(names: readonly string[], input: CastViewInput):
       const perceptions = listed(untakenPerceptions(record, character.id).map((p) => ({ ...perceptionView({ record }, p), ...datedAt(clock, p.at) })));
       if (perceptions !== undefined) fields = { ...head, perceptions };
     } else if (name === "imported") {
-      // Whole, word for word, each under its name, outside every budget, until it is marked filed.
-      const files = listed(importedFiles(record, character.id).flatMap((f) => (isFiled(f) ? [] : [{ file: fileName(f), text: importedText(db, input.user, f) ?? "" }])));
-      if (files !== undefined) fields = { ...head, files };
+      // Whole, word for word, each under its name, outside every budget, until it is marked filed. The older minds pack's notes of the
+      // character are one more such file: laid out under their own heading, with the names and dates the world gives them now.
+      const waiting = importedFiles(record, character.id).filter((f) => !isFiled(f));
+      const files = listed(waiting.flatMap((f) => (isRecord(f.fields.minds) ? [] : [{ file: fileName(f), text: importedText(db, input.user, f) ?? "" }])));
+      const minds = waiting.find((f) => isRecord(f.fields.minds));
+      const notes = minds === undefined ? undefined : mindsShown(minds.fields.minds as JsonObject, worldAt(input.store, input.user, input.turn, input.job ?? null, input.chat), clock);
+      if (files !== undefined || notes !== undefined) fields = { ...head, ...(files !== undefined ? { files } : {}), ...(notes !== undefined ? { minds: notes } : {}) };
     } else if (name === "relationships:present") {
       const here = new Set(input.present.map(nameKey));
       here.delete(nameKey(character.name));

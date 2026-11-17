@@ -99,6 +99,27 @@ describe("perceive", () => {
     expect(heldSecrets(minds(b), "odile").lore).toEqual([SECRET_LIVE]);
   });
 
+  test("drop false stands the perception's knowledge and holdings again", async () => {
+    const b = await openBench();
+    await cast(b);
+    const first = await b.t.begin();
+    await b.call("perceive", { perceptions: [{ who: "Odile", moment: "In the cellar", reach: "told", content: "Bram whispers that the reeve forged the seal.", told_by: "Bram", knows: ["The reeve is a forger."], secrets: [SECRET_LIVE] }] }, first.id);
+    await b.t.tie(first);
+    const [given] = await perceptions(b, "Odile");
+    const id = String(given?.id);
+    const second = await b.t.begin();
+    expect((await b.call("perceive", { perceptions: [{ who: "Odile", id, drop: true }] }, second.id)).error).toBeUndefined();
+    await b.t.tie(second);
+    expect(heldSecrets(minds(b), "odile").lore).toEqual([]);
+    expect(await knowledge(b, "Odile")).toEqual([]);
+    const third = await b.t.begin();
+    const r = await b.call("perceive", { perceptions: [{ who: "Odile", id, drop: false }] }, third.id);
+    expect(r.error).toBeUndefined();
+    await b.t.tie(third);
+    expect(heldSecrets(minds(b), "odile").lore).toEqual([SECRET_LIVE]);
+    expect((await knowledge(b, "Odile")).map((k) => k.text ?? k.secret)).toEqual(["The reeve is a forger.", SECRET]);
+  });
+
   test("the player's character, cast, can be made a secret's holder: the secret is no longer kept from the player", async () => {
     const b = await openBench();
     await cast(b);

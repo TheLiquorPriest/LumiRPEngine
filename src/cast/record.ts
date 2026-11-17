@@ -20,6 +20,7 @@ import type { Database } from "bun:sqlite";
 import type { JsonObject } from "rp-harness/contract";
 import type { Stamp } from "../iface/source";
 import type { ChangeInput, Source, Store, UserStore } from "../store";
+import { IMPORTED_KIND, MINDS_FILE, type MindsNotes, mindsEntities, mindsNotesOf } from "./carried";
 import { CAST_WRITE, type CastSlice, fieldsOf, type RowPart, ROW_PARTS, type RowState, sliceOf, type WriteValue } from "./fold";
 import type { CastAt } from "./path";
 
@@ -379,16 +380,36 @@ function itemOf(character: string, id: string, part: RowPart, rows: readonly Row
   return { part, id, character, fields, opened: (rows[0] as RowState).turn, touched: last.turn, at: (rows[0] as RowState).at, dropped, rows: shown };
 }
 
+/**
+ * The older minds pack's own memory of each of the chat line's characters that the state keeps one of at a reading's point
+ * (`carried.ts`): by the world's person the character is, else by the entity that goes by its name.
+ */
+function mindsOf(db: Database, user: string, chats: readonly string[], world: { packs: Readonly<Record<string, unknown>>; entities: Readonly<Record<string, { name: string }>> }): Map<string, MindsNotes> {
+  const slice = world.packs.minds;
+  const entities = mindsEntities(slice);
+  const out = new Map<string, MindsNotes>();
+  if (entities.length === 0) return out;
+  for (const c of charactersOf(db, user, chats)) {
+    const entity = c.person !== null && entities.includes(c.person) ? c.person : entities.find((id) => nameKey(world.entities[id]?.name ?? "") === nameKey(c.name));
+    const notes = entity === undefined ? null : mindsNotesOf(slice, entity);
+    if (notes !== null) out.set(c.id, notes);
+  }
+  return out;
+}
+
 /** The writes of the cast as one reading sees them. */
 export class CastRecord {
   readonly #slice: CastSlice;
+  readonly #minds: ReadonlyMap<string, MindsNotes>;
   #items: Map<string, CastItem> | undefined;
 
   constructor(
     readonly at: CastAt,
     slice: CastSlice,
+    minds: ReadonlyMap<string, MindsNotes> = new Map(),
   ) {
     this.#slice = slice;
+    this.#minds = minds;
   }
 
   /**
@@ -398,16 +419,26 @@ export class CastRecord {
   static read(store: Store, user: string, at: CastAt, job: string | null = null): CastRecord {
     const u = store.user(user);
     const folded = at.turn === null ? u.headFor(at.chat, job) : job === null ? u.stateAt(at.turn) : u.stateFor(at.turn, job);
-    return new CastRecord(at, sliceOf(folded.state.areas));
+    return new CastRecord(at, sliceOf(folded.state.areas), mindsOf(store.db, user, chatLine(u, at.chat), folded.state.world));
   }
 
-  /** Every item, in the order it was first written: those of one character together, the characters in the order they were first written. */
+  /**
+   * Every item, in the order it was first written: those of one character together, the characters in the order they were first
+   * written. A carried character's minds notes are one more of its carried files (`carried.ts`): an item with no writes of its own until
+   * it is marked filed, whose fields hold the notes as the state keeps them at this point.
+   */
   get items(): ReadonlyMap<string, CastItem> {
     if (this.#items === undefined) {
       const all: CastItem[] = [];
       for (const [character, items] of Object.entries(this.#slice.items)) for (const [id, state] of Object.entries(items)) if (state.rows.length > 0) all.push(itemOf(character, id, state.part, state.rows));
       all.sort((a, b) => (a.rows[0] as CastRow).s - (b.rows[0] as CastRow).s);
-      this.#items = new Map(all.map((i) => [i.id, i]));
+      const items = new Map(all.map((i) => [i.id, i]));
+      for (const [character, minds] of this.#minds) {
+        const id = importedItemId(character, MINDS_FILE);
+        const marked = items.get(id);
+        items.set(id, marked === undefined ? { part: "mind", id, character, fields: { kind: IMPORTED_KIND, file: MINDS_FILE, filed: false, minds }, opened: "", touched: "", at: null, dropped: false, rows: [] } : { ...marked, fields: { kind: IMPORTED_KIND, file: MINDS_FILE, ...marked.fields, minds } });
+      }
+      this.#items = items;
     }
     return this.#items;
   }

@@ -61,4 +61,4 @@ no_relationships_sent: relationships cannot be read: send a list of the people y
 page_no_entry: {{who}} has no entry {{id}} on this chat's record.
 page_pin_needs_casting: A pin holds a casting: say how large a part {{who}} plays to pin it.
 page_nothing_to_edit: Nothing was sent to change in {{who}}'s record.
-page_still_struck: {{id}}{{#text}} ({{text}}){{/text}} stays struck: it was struck apart from {{from}}, so taking that strike back leaves it as it is.{{#secret}} The secret it gave, {{secret}}, is not held again.{{/secret}}
+still_struck: {{id}}{{#text}} ({{text}}){{/text}} stays struck: it was struck apart from {{from}}, so taking that strike back leaves it as it is.{{#secret}} The secret it gave, {{secret}}, is not held again.{{/secret}}

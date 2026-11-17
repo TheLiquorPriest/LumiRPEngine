@@ -87,7 +87,7 @@ const ARGS: Readonly<Record<Op, Readonly<Record<string, Kind>>>> = {
   relationship: { with: "name", text: "text", ...DIMENSIONS, ...DROP },
   away: { whereabouts: "text", place: "name", names: "texts", intention: "text", until: "text", ...DROP },
   knowledge: { id: "name", text: "text", secret: "name", told_by: "name", learned: HOLDING_HOWS, belief: HOLDING_BELIEFS, sure: { min: 0, max: 1 }, about: "texts", how: "text", ...DROP },
-  filed: { files: "texts" },
+  filed: { files: "texts", drop: "flag" },
 };
 
 /** The arguments an operation may carry, in the order the tool's file lists them. */
@@ -578,7 +578,7 @@ async function readOp(r: Reading, n: number, raw: JsonValue): Promise<OpRead> {
       const said = unknown.map((file): Unread => ({ line: "no_file", fields: { n, op, field: "files", who: character.name, file, files }, ...(named.length > 0 ? { kept: true } : {}) }));
       (named.length === 0 ? out.fatal : out.unread).push(...said);
       planned.files = named.map((f) => f.id);
-      planned.value = { files: named.map(fileName) };
+      planned.value = { files: named.map(fileName), ...(value.drop === true ? { drop: true } : {}) };
       return out;
     }
   }
@@ -651,7 +651,7 @@ async function update(args: JsonObject, call: CastCall): Promise<Reply> {
         writeCast(
           store,
           writer,
-          p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: true }, ...stampOn(p.prov) })),
+          p.files.map((item) => ({ character: id, part: "mind", item, value: { filed: p.value.drop !== true }, ...stampOn(p.prov) })),
         );
       } else if (p.part !== undefined) {
         const item = p.part === "casting" ? castingItemId(id) : p.part === "relationship" ? relationshipItemId(id, p.toward ?? (p.value.with as string)) : p.part === "away" ? awayItemId(id) : (p.item ?? null);

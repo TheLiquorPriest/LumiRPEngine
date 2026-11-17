@@ -5,7 +5,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { TemplatePart } from "../../src/app/guidance";
-import type { JsonObject } from "rp-harness/contract";
+import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { charactersOf, type CastWrite } from "../../src/cast/record";
 import { type CastViewInput, type CastViewName, castViews } from "../../src/cast/views";
 import { type Bench, CHAT, dataOf, openBench, shippedLayouts, texts, tokensOf, USER, wordsFromFiles } from "./rig";
@@ -94,9 +94,9 @@ describe("a migrated character's old mind files", () => {
     expect(wordsFromFiles(r)).toBe(true);
     expect(texts(r)).toEqual([
       "Operation 1 (filed): Bram has no old mind file diary.md on this path. Theirs are: core.md, now.md.",
-      "filed reads who, files, and needs who, files.",
+      "filed reads who, files, drop, and needs who, files.",
       "Operation 2 (filed) needs files.",
-      "filed reads who, files, and needs who, files.",
+      "filed reads who, files, drop, and needs who, files.",
       "Nothing was written. Send the call again with that put right.",
     ]);
     expect((await castViews(["imported"], input(b, third.id)))[0]?.text).toBe(BOTH);
@@ -113,5 +113,45 @@ describe("a migrated character's old mind files", () => {
     expect((await castViews(["imported"], input(b)))[0]?.text).toBe(BOTH);
     await b.t.showSwipe(filed);
     expect((await castViews(["imported"], input(b)))[0]?.text).toBe("");
+  });
+
+  test("the older minds pack's notes of the character are given with them until filed, as that turn's state kept them; filing and taking it back works through cast_update", async () => {
+    const { b } = await carriedOver();
+    const memory = (summary: string): { lane: "engine"; op: string; value: JsonValue } => ({ lane: "engine", op: "minds.memory", value: { type: "minds.memory", data: { entity: "bram", at: 0, notes: [{ id: "n1", text: "The reeve counts twice.", salience: 4, at: 0 }], commitments: [], resolved: [], plans: [], told: [], summary } } as unknown as JsonValue });
+    const third = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(third.id, [memory("Keeps the Gilded Hart.")]));
+    await b.t.tie(third);
+    const fourth = await b.t.begin();
+    await b.t.writes.run(() => b.t.s.addChanges(fourth.id, [memory("Sold the Gilded Hart.")]));
+    await b.t.tie(fourth);
+    const text = async (turn: string | null) => (await castViews(["imported"], input(b, turn)))[0]?.text ?? "";
+    expect(await text(third.id)).toContain("Summary: Keeps the Gilded Hart.");
+    expect(await text(third.id)).toContain("Note (mattered 4 of 5");
+    expect(await text(null)).toContain("Summary: Sold the Gilded Hart.");
+    expect(await text(null)).toContain(BOTH);
+
+    // Marked filed on a turn, it is no longer given; named again with drop, it is.
+    const fifth = await b.t.begin();
+    expect((await b.play("cast_update", { operations: [{ op: "filed", who: "Bram", files: ["minds"] }] }, fifth.id)).error).toBeUndefined();
+    expect(await text(fifth.id)).toBe(BOTH);
+    const back = await b.play("cast_update", { operations: [{ op: "filed", who: "Bram", files: ["minds"], drop: true }] }, fifth.id);
+    expect(back.error).toBeUndefined();
+    expect(await text(fifth.id)).toContain("Summary: Sold the Gilded Hart.");
+  });
+
+  test("a file marked filed by mistake is unfiled through cast_update", async () => {
+    const { b } = await carriedOver();
+    const third = await b.t.begin();
+    expect((await b.play("cast_update", { operations: [{ op: "filed", who: "Bram", files: ["core.md", "now.md"] }] }, third.id)).error).toBeUndefined();
+    expect((await castViews(["imported"], input(b, third.id)))[0]?.text).toBe("");
+    const r = await b.play("cast_update", { operations: [{ op: "filed", who: "Bram", files: ["core.md"], drop: true }] }, third.id);
+    expect(r.error).toBeUndefined();
+    expect(((dataOf(r).operations as JsonObject[])[0] as JsonObject).now).toEqual({
+      files: [
+        { file: "core.md", filed: false },
+        { file: "now.md", filed: true },
+      ],
+    });
+    expect((await castViews(["imported"], input(b, third.id)))[0]?.text).toBe(["### Bram's old mind files, as they were written", "", "#### core.md", "", CORE].join("\n"));
   });
 });

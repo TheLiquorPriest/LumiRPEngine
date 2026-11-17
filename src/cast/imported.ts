@@ -5,16 +5,15 @@
 // version, entity, filed: false }`, a file a turn removed dropped), so a swipe shows the version its
 // turn held. Until a file is marked filed, the character's agent is given it whole (the `imported`
 // view); marking it filed is a write of the turn that does it, so a swipe of that turn gives the
-// file again. The original stays attached.
+// file again. The original stays attached. The older minds pack's notes of the character are one
+// more such file, `minds` (`carried.ts`), read from the state at the reading's point.
 
 import type { Database } from "bun:sqlite";
 import { isRecord } from "../shared/json";
 import type { UserStore } from "../store";
+import { IMPORTED_KIND } from "./carried";
 import { CAST_WRITE } from "./fold";
 import { type CastItem, type CastRecord, fileText } from "./record";
-
-/** The kind the migration marks a carried mind file's writes with. */
-export const IMPORTED_KIND = "imported";
 
 /** A character's old mind files on a reading's path, filed or not, in the order they were first carried; a file a turn removed is not among them. */
 export function importedFiles(record: CastRecord, character: string): CastItem[] {

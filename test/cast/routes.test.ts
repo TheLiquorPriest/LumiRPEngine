@@ -385,7 +385,7 @@ describe("striking from the page", () => {
 
     const back = await page.strike("Wren", { id: perception, struck: false });
     expect(back).toMatchObject({ changed: true, alsoStruck: [], letGo: [], alsoStood: [seal, secret], heldAgain: [SECRET] });
-    expect(back.notes).toEqual([words("page_still_struck", { id: wax, from: perception, text: "The wax is still soft." })]);
+    expect(back.notes).toEqual([words("still_struck", { id: wax, from: perception, text: "The wax is still soft." })]);
     expect(knowersOf(minds(b.t), SECRET)).toEqual(["wren"]);
     expect((await page.one("Wren")).knowledge.map((k) => [k.id, k.struck])).toEqual([
       [seal, false],

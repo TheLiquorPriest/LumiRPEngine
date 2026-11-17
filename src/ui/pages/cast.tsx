@@ -412,6 +412,29 @@ function GameSide(props: { game: Record<string, unknown> }) {
   );
 }
 
+/** The older minds pack's notes of a character, as the pack wrote them, with the names and dates the world gives them now. */
+function MindsNotes(props: { notes: Record<string, unknown> }) {
+  const { notes } = props;
+  const rows = (key: string): Record<string, unknown>[] => (Array.isArray(notes[key]) ? (notes[key] as unknown[]).filter(isRecord) : []);
+  const when = (row: Record<string, unknown>): string | undefined => (typeof row.date === "string" ? row.date : undefined);
+  const mind = isRecord(notes.mind) ? notes.mind : null;
+  return (
+    <div class="lre-stack" data-minds>
+      {typeof notes.summary === "string" ? <Row label="Summary" value={notes.summary} /> : null}
+      {rows("notes").map((n, i) => (
+        <Row key={`n${i}`} label={`Note, mattered ${plain(n.salience)} of 5`} value={plain(n.text)} sub={when(n)} />
+      ))}
+      {rows("commitments").map((c, i) => (
+        <Row key={`c${i}`} label={`Commitment, ${plain(c.kind)}, ${plain(c.status)}`} value={plain(c.text)} sub={[c.with === "" ? undefined : `with ${plain(c.with)}`, typeof c.due === "string" ? `due ${c.due}` : undefined, when(c)].filter((s) => s !== undefined).join(" · ")} />
+      ))}
+      {rows("witness").map((w, i) => (
+        <Row key={`w${i}`} label={w.how === "told" ? "Told" : "Saw"} value={plain(w.what)} sub={[typeof w.by === "string" ? `from ${w.by}` : undefined, typeof w.place === "string" ? `at ${w.place}` : undefined, when(w)].filter((s) => s !== undefined).join(" · ")} />
+      ))}
+      {mind === null ? null : <Row label={`Their last mind, ${plain(mind.level)}`} value={plain(mind.monologue)} sub={[typeof mind.intent === "string" && mind.intent !== "" ? `meant to ${mind.intent}` : undefined, typeof mind.depiction === "string" && mind.depiction !== "" ? `seemed ${mind.depiction}` : undefined, typeof mind.place === "string" ? `at ${mind.place}` : undefined, when(mind)].filter((s) => s !== undefined).join(" · ")} />}
+    </div>
+  );
+}
+
 /** One character's whole record. */
 function CharacterView(props: CastViewProps & { character: CharacterReply }) {
   const { character: c, shown } = props;
@@ -645,10 +668,10 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
           <ul class="lre-stack rpe-plain">
             {c.files.items.map((f) =>
               card(f, f.file, {
-                // Its text is shown whole below, word for word.
-                fields: Object.fromEntries(Object.entries(f.fields).filter(([name]) => name !== "text")),
+                // Its text is shown whole below, word for word; the minds pack's notes, laid out as the pack kept them.
+                fields: Object.fromEntries(Object.entries(f.fields).filter(([name]) => name !== "text" && name !== "minds")),
                 marks: f.filed ? <Badge tone="pos">filed</Badge> : <Badge tone="warn">not filed yet</Badge>,
-                more: f.text === null ? <p class="lre-muted rpe-line">Its row holds no text.</p> : <Pre text={f.text} mono={false} />,
+                more: isRecord(f.fields.minds) ? <MindsNotes notes={f.fields.minds} /> : f.text === null ? <p class="lre-muted rpe-line">Its row holds no text.</p> : <Pre text={f.text} mono={false} />,
               }),
             )}
           </ul>
