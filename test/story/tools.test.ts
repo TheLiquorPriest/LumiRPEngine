@@ -340,7 +340,7 @@ describe("story_record", () => {
     expect(one("record")).toMatchObject({ id: `rec:${turn.id}`, decided: "Bram stalls.", next: "Open the letter.", message: null });
   });
 
-  test("a call that belongs to no turn records as its own change, and has no record of a turn to write", async () => {
+  test("a call that belongs to no turn records as its own change, and writes the record of the chat's newest turn unless it names another", async () => {
     const b = await bench();
     const first = await b.t.play([{ part: "beat", item: null, value: { text: "Wren arrives." } }]);
     const r = await b.call("story_record", { operations: [{ op: "beat", text: "Late.", message: 1 }] });
@@ -349,13 +349,13 @@ describe("story_record", () => {
       expect.objectContaining({ text: "Wren arrives.", message: 1, touched: 1 }),
       expect.objectContaining({ text: "Late.", message: 1 }),
     ]);
-    const refused = await b.call("story_record", { operations: [{ op: "record", decided: "Bram stalls." }] });
-    expect(refused.error).toBe(true);
-    expect(texts(refused)[0]).toBe("Operation 1 (record) is your record of a turn, and this call belongs to no turn, so it was not made.");
-    // Naming the turn it is the record of, a job's call writes it as its own change.
-    const named = await b.call("story_record", { operations: [{ op: "record", turn: first.id, decided: "Bram stalls." }] });
-    expect(named.error).toBeFalsy();
+    // Naming no turn, a job's call writes the record of the newest turn; naming one, that turn's.
+    const unnamed = await b.call("story_record", { operations: [{ op: "record", decided: "Bram stalls." }] });
+    expect(unnamed.error).toBeFalsy();
     expect(dataOf(await b.call("story_query", { part: "record" })).record).toEqual([expect.objectContaining({ id: `rec:${first.id}`, decided: "Bram stalls." })]);
+    const named = await b.call("story_record", { operations: [{ op: "record", turn: first.id, decided: "Bram hesitates." }] });
+    expect(named.error).toBeFalsy();
+    expect(dataOf(await b.call("story_query", { part: "record" })).record).toEqual([expect.objectContaining({ id: `rec:${first.id}`, decided: "Bram hesitates." })]);
   });
 });
 

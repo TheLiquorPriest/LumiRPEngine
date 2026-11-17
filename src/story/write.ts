@@ -250,14 +250,15 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
     case "premise":
     case "record": {
       // The turn whose record it is: the one a call names (a job of his own writes the record of a turn it was told of), by the turn's
-      // id or by its record's id as answers print it (`rec:<turn>`), in `turn` or `id`; else the call's own.
+      // id or by its record's id as answers print it (`rec:<turn>`), in `turn` or `id`; else the call's own, and for a call with none (a job of his)
+      // the chat's newest turn, which the answer names by its record's id.
       const said = def.finds === "record" ? (value.turn ?? (typeof named === "string" ? named : undefined)) : undefined;
       if (def.finds === "record") delete value.turn;
       if (Object.keys(value).length === 0) return { line: "needs_one", fields: { n, op: def.name, fields: Object.keys(def.args).filter((f) => f !== "turn") } };
       if (def.finds === "premise") return { item: keyedItemId("premise", ""), fresh: false };
       const words = typeof said === "string" ? said.trim() : "";
-      const turn = words === "" ? r.turn : words.startsWith(RECORD_ID) ? words.slice(RECORD_ID.length) : words;
-      // A call that belongs to no turn and names none has no record to write.
+      const turn = words === "" ? (r.turn ?? r.record.at.turns.at(-1) ?? null) : words.startsWith(RECORD_ID) ? words.slice(RECORD_ID.length) : words;
+      // A chat with no turn has no turn to record.
       if (turn === null) return { line: "turn_needed", fields: { n, op: def.name } };
       if (!r.record.at.turns.includes(turn)) return { line: "no_turn", fields: { id: turn } };
       return { item: keyedItemId("record", turn), fresh: false };
