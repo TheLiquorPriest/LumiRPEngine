@@ -11,11 +11,16 @@
 // form and the proof) is `src/shared/page-proof.ts`, which the page uses too.
 
 import type { Database } from "bun:sqlite";
+import { isRecord } from "../shared/json";
 import { KEY_ID_LENGTH, NONCE_PATTERN, PROOF_PATH, proofOf } from "../shared/page-proof";
 import { AccountRefused, type AccountSignedIn, type LumiverseAccounts } from "./accounts";
 import type { App } from "./app";
 import { type Auth, CLIENTS, type Client, secretHash } from "./auth";
 import { route, RouteError, shape } from "./routes";
+import type { SecretsFile } from "./secrets";
+
+/** The secrets file's part that holds, by session (its token's hash), the Lumiverse session a sign-in by password made with it. */
+const HELD_PART = "lumiverse-sessions";
 
 /** Trades the printed token (or renews a session) for a session. */
 export const SIGNIN_SESSION_PATH = "/api/v1/signin/session";
@@ -32,6 +37,8 @@ export interface SigninDeps {
   readonly auth: Auth;
   /** What RPE asks of Lumiverse; null where it reaches none. */
   readonly accounts: LumiverseAccounts | null;
+  /** RPE's secrets file: where the Lumiverse sessions its sign-ins by password made are held until each session signs out. */
+  readonly secrets: Pick<SecretsFile, "read" | "write">;
   /** How long a nonce is remembered, in milliseconds (`auth.nonceSeconds`). */
   readonly nonceMs: number;
   /** The wrong Lumiverse passwords RPE sends before it pauses, and how long it pauses, in milliseconds (`auth.signInTries`, `auth.signInPauseMinutes`). */
@@ -42,7 +49,7 @@ export interface SigninDeps {
 /** The sign-in routes' deps over an app that is mounted. */
 export function signinDeps(at: App, accounts: LumiverseAccounts | null): SigninDeps {
   const { nonceSeconds, signInTries, signInPauseMinutes } = at.config.auth;
-  return { db: at.db, owner: at.auth.owner, now: at.now, auth: at.auth, accounts, nonceMs: nonceSeconds * 1000, tries: signInTries, pauseMs: signInPauseMinutes * 60_000 };
+  return { db: at.db, owner: at.auth.owner, now: at.now, auth: at.auth, accounts, secrets: at.secrets, nonceMs: nonceSeconds * 1000, tries: signInTries, pauseMs: signInPauseMinutes * 60_000 };
 }
 
 const KEY_ID = new RegExp(`^[0-9a-f]{${KEY_ID_LENGTH}}$`);
@@ -93,9 +100,25 @@ export function signinRoutes(deps: SigninDeps) {
   let pausedUntil = 0;
   /**
    * By session (its token's hash): the Lumiverse session a sign-in by password made with it, which that session's sign-out ends through the
-   * door, carried to the session a renewal trades it for. Held in memory: one an RPE restart lets go of ends at Lumiverse's own time.
+   * door, carried to the session a renewal trades it for. Kept in the secrets file beside RPE's own Lumiverse sign-in, so a sign-out after
+   * RPE starts again still ends it; one whose session has ended or run out is let go at the next change, and ends at Lumiverse's own time.
+   * Changed one change at a time: `change` is given what is held and answers what the caller needs of it.
    */
-  const lumiverseOf = new Map<string, string>();
+  let changing: Promise<unknown> = Promise.resolve();
+  const held = <T>(change: (held: Map<string, string>) => T): Promise<T> => {
+    const next = changing.then(async () => {
+      const part = await deps.secrets.read(HELD_PART);
+      const was = isRecord(part) ? Object.entries(part).flatMap(([hash, token]) => (typeof token === "string" ? [[hash, token] as const] : [])) : [];
+      const now = new Map(was);
+      const answer = change(now);
+      const live = new Set(deps.db.query<{ hash: string }, [string, number]>("SELECT hash FROM page_token WHERE user = ? AND kind = 'page' AND expires > ?").all(deps.owner, deps.now()).map((r) => r.hash));
+      for (const hash of now.keys()) if (!live.has(hash)) now.delete(hash);
+      if (JSON.stringify([...now]) !== JSON.stringify(was)) await deps.secrets.write(HELD_PART, now.size === 0 ? null : Object.fromEntries(now));
+      return answer;
+    });
+    changing = next.catch(() => undefined);
+    return next;
+  };
 
   /** Keeps wrong passwords from reaching Lumiverse's lockout: past `tries` of them RPE sends none until `pauseMs` has passed. */
   const mayTry = (): void => {
@@ -142,10 +165,13 @@ export function signinRoutes(deps: SigninDeps) {
         const renewing = credential?.kind === "page" ? sessionOf(credential.madeBy) : null;
         if (credential?.kind !== "web" && renewing === null) throw new RouteError(403, "Only the web app's printed token, or a session, is traded for a session.");
         const made = await deps.auth.mintSession(body.client ?? renewing ?? "web shell");
-        const held = credential?.kind === "page" ? lumiverseOf.get(credential.hash) : undefined;
-        if (held !== undefined && credential?.kind === "page") {
-          lumiverseOf.delete(credential.hash);
-          lumiverseOf.set(secretHash(made.token), held);
+        // A Lumiverse session held for the session renewed goes with the new one.
+        if (credential?.kind === "page") {
+          await held((h) => {
+            const token = h.get(credential.hash);
+            h.delete(credential.hash);
+            if (token !== undefined) h.set(secretHash(made.token), token);
+          });
         }
         return { session: made.token, ends: made.expires, user: made.user };
       },
@@ -195,7 +221,7 @@ export function signinRoutes(deps: SigninDeps) {
         }
         const made = await deps.auth.mintSession(client);
         // A sign-in by password made a Lumiverse session: handed back, and ended through the door when this session signs out.
-        if (byPassword) lumiverseOf.set(secretHash(made.token), signed.token);
+        if (byPassword) await held((h) => h.set(secretHash(made.token), signed.token));
         return { session: made.token, ends: made.expires, user: made.user, ...(byPassword ? { lumiverse: { token: signed.token, username: signed.username } } : {}) };
       },
     }),
@@ -209,10 +235,13 @@ export function signinRoutes(deps: SigninDeps) {
       reply: shape.nothing(),
       handle: async ({ body, auth }) => {
         const credential = auth.credential;
-        const held = credential?.kind === "page" ? lumiverseOf.get(credential.hash) : undefined;
-        if (credential?.kind === "page") lumiverseOf.delete(credential.hash);
+        const kept = credential?.kind === "page" ? await held((h) => {
+          const token = h.get(credential.hash);
+          h.delete(credential.hash);
+          return token;
+        }) : undefined;
         if (credential?.kind === "page" && sessionOf(credential.madeBy) !== null) await deps.auth.endSession(credential.hash);
-        if (deps.accounts !== null) for (const token of new Set([held, body.lumiverse])) if (token !== undefined) await deps.accounts.signOut(token).catch(() => undefined);
+        if (deps.accounts !== null) for (const token of new Set([kept, body.lumiverse])) if (token !== undefined) await deps.accounts.signOut(token).catch(() => undefined);
       },
     }),
   ] as const;
