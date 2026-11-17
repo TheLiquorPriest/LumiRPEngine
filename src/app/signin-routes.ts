@@ -14,7 +14,7 @@ import type { Database } from "bun:sqlite";
 import { KEY_ID_LENGTH, NONCE_PATTERN, PROOF_PATH, proofOf } from "../shared/page-proof";
 import { AccountRefused, type AccountSignedIn, type LumiverseAccounts } from "./accounts";
 import type { App } from "./app";
-import { type Auth, CLIENTS, type Client } from "./auth";
+import { type Auth, CLIENTS, type Client, secretHash } from "./auth";
 import { route, RouteError, shape } from "./routes";
 
 /** Trades the printed token (or renews a session) for a session. */
@@ -52,12 +52,12 @@ const MOST_NONCES = 10_000;
 const CLIENT = shape.oneOf(...CLIENTS);
 const sessionReply = shape.named(
   "Session",
-  "A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own.",
+  "A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password, the Lumiverse session token too: a client that keeps one (the command line) keeps it as its own; RPE ends it through the door when this session signs out.",
   shape.object({
     session: shape.field(shape.text(), "The session's token: given as the bearer of every call, and traded again for a new one before it ends."),
     ends: shape.field(shape.number(), "When it ends, epoch milliseconds."),
     user: shape.field(shape.text(), "The Lumiverse user it is of."),
-    lumiverse: shape.optional(shape.object({ token: shape.field(shape.text(), "Lumiverse's session token."), username: shape.field(shape.text(), "The Lumiverse username.") }), "Lumiverse's own session, handed back for a client that keeps one (the command line); never for the web shell."),
+    lumiverse: shape.optional(shape.object({ token: shape.field(shape.text(), "Lumiverse's session token."), username: shape.field(shape.text(), "The Lumiverse username.") }), "Lumiverse's own session, made by a sign-in by password, handed back; a page need not keep it, since its sign-out ends it."),
   }),
 );
 
@@ -91,6 +91,11 @@ export function signinRoutes(deps: SigninDeps) {
   const nonces = new Map<string, number>();
   let wrong = 0;
   let pausedUntil = 0;
+  /**
+   * By session (its token's hash): the Lumiverse session a sign-in by password made with it, which that session's sign-out ends through the
+   * door, carried to the session a renewal trades it for. Held in memory: one an RPE restart lets go of ends at Lumiverse's own time.
+   */
+  const lumiverseOf = new Map<string, string>();
 
   /** Keeps wrong passwords from reaching Lumiverse's lockout: past `tries` of them RPE sends none until `pauseMs` has passed. */
   const mayTry = (): void => {
@@ -137,6 +142,11 @@ export function signinRoutes(deps: SigninDeps) {
         const renewing = credential?.kind === "page" ? sessionOf(credential.madeBy) : null;
         if (credential?.kind !== "web" && renewing === null) throw new RouteError(403, "Only the web app's printed token, or a session, is traded for a session.");
         const made = await deps.auth.mintSession(body.client ?? renewing ?? "web shell");
+        const held = credential?.kind === "page" ? lumiverseOf.get(credential.hash) : undefined;
+        if (held !== undefined && credential?.kind === "page") {
+          lumiverseOf.delete(credential.hash);
+          lumiverseOf.set(secretHash(made.token), held);
+        }
         return { session: made.token, ends: made.expires, user: made.user };
       },
     }),
@@ -179,11 +189,14 @@ export function signinRoutes(deps: SigninDeps) {
           }
         }
         // A sign-in as another user than the one this RPE belongs to is refused; the Lumiverse session it made is not kept.
-        const keeps = byPassword && client !== "web shell";
-        if (signed.user !== deps.owner || (byPassword && !keeps)) await accounts.signOut(signed.token).catch(() => undefined);
-        if (signed.user !== deps.owner) throw new RouteError(403, "This RPE belongs to another Lumiverse user: only that user signs in to its web app.");
+        if (signed.user !== deps.owner) {
+          await accounts.signOut(signed.token).catch(() => undefined);
+          throw new RouteError(403, "This RPE belongs to another Lumiverse user: only that user signs in to its web app.");
+        }
         const made = await deps.auth.mintSession(client);
-        return { session: made.token, ends: made.expires, user: made.user, ...(keeps ? { lumiverse: { token: signed.token, username: signed.username } } : {}) };
+        // A sign-in by password made a Lumiverse session: handed back, and ended through the door when this session signs out.
+        if (byPassword) lumiverseOf.set(secretHash(made.token), signed.token);
+        return { session: made.token, ends: made.expires, user: made.user, ...(byPassword ? { lumiverse: { token: signed.token, username: signed.username } } : {}) };
       },
     }),
     route({
@@ -191,13 +204,15 @@ export function signinRoutes(deps: SigninDeps) {
       path: SIGNOUT_PATH,
       access: "page",
       group: "service",
-      does: "Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session the caller names, through the door to Lumiverse.",
+      does: "Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session its sign-in by password made, or the one the caller names, through the door to Lumiverse.",
       body: shape.object({ lumiverse: shape.optional(shape.text(), "A Lumiverse session token to end in Lumiverse too.") }),
       reply: shape.nothing(),
       handle: async ({ body, auth }) => {
         const credential = auth.credential;
+        const held = credential?.kind === "page" ? lumiverseOf.get(credential.hash) : undefined;
+        if (credential?.kind === "page") lumiverseOf.delete(credential.hash);
         if (credential?.kind === "page" && sessionOf(credential.madeBy) !== null) await deps.auth.endSession(credential.hash);
-        if (body.lumiverse !== undefined && deps.accounts !== null) await deps.accounts.signOut(body.lumiverse).catch(() => undefined);
+        if (deps.accounts !== null) for (const token of new Set([held, body.lumiverse])) if (token !== undefined) await deps.accounts.signOut(token).catch(() => undefined);
       },
     }),
   ] as const;

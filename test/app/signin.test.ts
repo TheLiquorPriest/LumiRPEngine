@@ -114,11 +114,13 @@ describe("signing in to the web app", () => {
     expect(ok.status).toBe(200);
     const opened = await ok.json();
     expect(opened.user).toBe(OWNER);
-    expect(opened.lumiverse).toBeUndefined();
+    // A sign-in by password hands back the Lumiverse session it made, which lives until this session signs out.
+    expect(opened.lumiverse.token).toMatch(/^owner:/);
     expect(await who(opened.session)).toBe("web shell");
-    // The web app's own Lumiverse session is ended as soon as it has been checked: none is kept.
-    expect(accounts.live.size).toBe(0);
+    expect(accounts.live.has(opened.lumiverse.token)).toBe(true);
     expect(JSON.stringify([...app.db.query("SELECT * FROM page_token").all()])).not.toContain("invented owner password");
+    expect((await post(SIGNOUT_PATH, {}, opened.session)).status).toBe(204);
+    expect(accounts.live.has(opened.lumiverse.token)).toBe(false);
 
     // The command line keeps a Lumiverse session of its own, which RPE hands back; a session it holds already is checked as it is.
     const cli = await (await post(LUMIVERSE_SIGNIN_PATH, { client: "command line", username: "owner", password: "invented owner password" })).json();
