@@ -242,6 +242,8 @@ export function compose(options: ComposeOptions = {}): Composition {
         return {
           levels: settingLevels,
           connections: async () => (await made().harness.models.list(owner)).connections.map((c) => ({ id: c.id, name: c.name })),
+          // The definitions in force for a chat (none: as a new chat takes them), whose names the settings set per agent are listed under.
+          definitions: async (user: string, chat: string | null) => (await made().harness.definitions.list(scope(user, chat ?? NO_CHAT))).map((d) => d.name),
         };
       },
       // The web app's sign-in with a Lumiverse account asks Lumiverse through the door.
