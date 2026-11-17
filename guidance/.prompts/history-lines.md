@@ -2400,3 +2400,29 @@ feedset_sources: from {{#one}}the 1 source{{/one}}{{^one}}the {{n}} sources{{/on
 feedset: In this chat, the {{label}} section {{parts}}
 feed_marked_scene: {{text}} [unknown to you; known to {{#who}}{{who}}{{/who}}{{^who}}others here{{/who}}]
 feed_marked_gm: {{text}} [unknown to you; GM only]
+why_this_reply_was_written_while_an_earlier: This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.
+why_cause_re_run_it_to_play_the: {{cause}} Re-run it to play the turn again.
+why_cause_it_cant_be_undone_or_read: {{cause}} It can't be undone or read again.
+why_the_next_turn_is_already_under_way: the next turn is already under way
+why_the_sessions_part_isnt_a_stored_blobs: the session's {{part}} isn't a stored blob's hash
+why_the_transcripts_length_isnt_a_count_of: the transcript's length isn't a count of its characters
+why_the_transcripts_time_isnt_a_moment_in: the transcript's time isn't a moment in milliseconds
+why_the_turns_reply_is_no_longer_the: the turn's reply is no longer the latest
+why_the_reply_has_no_turn_record: the reply has no turn record
+why_the_replys_record_was_discarded: the reply's record was discarded
+why_the_reply_holds_no_text: the reply holds no text
+why_the_reply_holds_a_turns_record: the reply holds a turn's record
+why_no_assistant_message: no assistant message
+why_invalid_marker: invalid marker
+why_unknown_revision: unknown revision
+why_no_message: no message
+why_no_record: no record
+why_not_the_active_swipe: not the active swipe
+why_nothing_to_undo: nothing to undo
+why_youve_swiped_away_from_the_timeline_this: You've swiped away from the timeline this reply was made on. Switch back to undo it.
+why_later_events_depend_on_it: later events depend on it
+why_nothing_to_read: nothing to read
+why_youve_swiped_away_from_the_timeline_this_2: You've swiped away from the timeline this reply was made on. Switch back to read it.
+why_not_the_head: not the head
+why_not_a_stopped_head_continue: not a stopped head Continue
+why_the_chat_was_paused: the chat was paused

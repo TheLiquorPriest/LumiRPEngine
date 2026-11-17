@@ -40,6 +40,7 @@ import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain
 import type { FoldKeys, LedgerFold } from "./fold";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
+import { say } from "../lines";
 
 /** What the core needs to plan a turn and read a reply. Supplied by the engine (and by test packs). */
 export interface TurnModel {
@@ -101,12 +102,12 @@ const REFUSED_KEPT = 8;
 const GONE_SWIPE = -1;
 
 /** Why a Re-run committed under a pause didn't carry a fix of the swipe it was made from (P3, L43). */
-const PAUSED_DROP = "the chat was paused";
+const pausedDrop = (): string => say("why_the_chat_was_paused");
 
 /** Why a read-elsewhere record refuses Undo and reads. Only the latest reply can be Re-run, so only it is offered one. */
 function readElsewhereRefusal(latest: boolean): string {
-  const cause = "This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.";
-  return latest ? `${cause} Re-run it to play the turn again.` : `${cause} It can't be undone or read again.`;
+  const cause = say("why_this_reply_was_written_while_an_earlier");
+  return latest ? say("why_cause_re_run_it_to_play_the", { cause: cause }) : say("why_cause_it_cant_be_undone_or_read", { cause: cause });
 }
 
 /**
@@ -1422,30 +1423,30 @@ export class LedgerCore {
    * written, else why it wasn't.
    */
   recordSession(messageId: MessageId, swipeId: number, session: RecSession, observed: readonly ChainMessage[]): string | null {
-    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return "the next turn is already under way";
+    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return say("why_the_next_turn_is_already_under_way");
     const parts: RecSession = {};
     for (const part of REC_SESSION_PARTS) {
       const hash = session[part];
       if (hash === undefined) continue;
-      if (!isBlobHash(hash)) return `the session's ${part} isn't a stored blob's hash`;
+      if (!isBlobHash(hash)) return say("why_the_sessions_part_isnt_a_stored_blobs", { part: part });
       parts[part] = hash;
     }
     if (session.transcriptChars !== undefined) {
-      if (parts.transcript === undefined || !Number.isInteger(session.transcriptChars) || session.transcriptChars < 0) return "the transcript's length isn't a count of its characters";
+      if (parts.transcript === undefined || !Number.isInteger(session.transcriptChars) || session.transcriptChars < 0) return say("why_the_transcripts_length_isnt_a_count_of");
       parts.transcriptChars = session.transcriptChars;
     }
     if (session.transcriptAt !== undefined) {
-      if (parts.transcript === undefined || !Number.isSafeInteger(session.transcriptAt) || session.transcriptAt < 0) return "the transcript's time isn't a moment in milliseconds";
+      if (parts.transcript === undefined || !Number.isSafeInteger(session.transcriptAt) || session.transcriptAt < 0) return say("why_the_transcripts_time_isnt_a_moment_in");
       parts.transcriptAt = session.transcriptAt;
     }
     const chain = this.chain(observed);
     const index = chain.findLastIndex((m) => !m.isUser);
     const head = chain[index];
-    if (!head || head.id !== messageId) return "the turn's reply is no longer the latest";
+    if (!head || head.id !== messageId) return say("why_the_turns_reply_is_no_longer_the");
     const stored = head.ledger?.swipes[String(swipeId)];
-    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply has no turn record";
+    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return say("why_the_reply_has_no_turn_record");
     const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
-    if (!rec) return "the reply has no turn record";
+    if (!rec) return say("why_the_reply_has_no_turn_record");
     rec.session = { ...rec.session, ...parts };
     return null;
   }
@@ -1458,15 +1459,15 @@ export class LedgerCore {
    * is no longer the latest. Null once written, else why not.
    */
   recordAgents(messageId: MessageId, swipeId: number, agents: readonly RecAgent[], observed: readonly ChainMessage[]): string | null {
-    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return "the next turn is already under way";
+    if (this.inFlight || Object.keys(this.journal.pending).length > 0) return say("why_the_next_turn_is_already_under_way");
     const chain = this.chain(observed);
     const index = chain.findLastIndex((m) => !m.isUser);
     const head = chain[index];
-    if (!head || head.id !== messageId) return "the turn's reply is no longer the latest";
+    if (!head || head.id !== messageId) return say("why_the_turns_reply_is_no_longer_the");
     const stored = head.ledger?.swipes[String(swipeId)];
-    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply has no turn record";
+    if (!stored || stored.path === "" || isTombstoned(this.journal.tombstones, messageId, stored)) return say("why_the_reply_has_no_turn_record");
     const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
-    if (!rec) return "the reply has no turn record";
+    if (!rec) return say("why_the_reply_has_no_turn_record");
     const kept = agents.filter((a) => Number.isInteger(a.from) && Number.isInteger(a.to) && a.from >= 0 && a.from < a.to && a.to <= (a.seq === undefined ? rec.events.length : (rec.post.find((p) => p.seq === a.seq)?.events.length ?? 0))).map((a) => ({ role: a.role, key: a.key, from: a.from, to: a.to, ...(a.seq !== undefined ? { seq: a.seq } : {}) }));
     if (kept.length > 0) rec.agents = kept;
     else delete rec.agents;
@@ -1483,10 +1484,10 @@ export class LedgerCore {
   recordHarness(messageId: MessageId, swipeId: number, harness: RecHarness, observed: readonly ChainMessage[]): string | null {
     const index = observed.findIndex((m) => m.id === messageId);
     const stored = this.chain(observed)[index]?.ledger?.swipes[String(swipeId)];
-    if (!stored) return "the reply has no turn record";
-    if (isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply's record was discarded";
+    if (!stored) return say("why_the_reply_has_no_turn_record");
+    if (isTombstoned(this.journal.tombstones, messageId, stored)) return say("why_the_replys_record_was_discarded");
     const rec = this.ledgerFor(messageId, observed[index]).swipes[String(swipeId)];
-    if (!rec) return "the reply has no turn record";
+    if (!rec) return say("why_the_reply_has_no_turn_record");
     rec.harness = structuredClone(harness);
     return null;
   }
@@ -1503,9 +1504,9 @@ export class LedgerCore {
     const index = observed.findIndex((m) => m.id === messageId);
     const m = observed[index];
     const text = m && !m.isUser ? (m.swipes[swipeId] ?? "") : "";
-    if (!m || text === "") return "the reply holds no text";
+    if (!m || text === "") return say("why_the_reply_holds_no_text");
     const stored = this.chain(observed)[index]?.ledger?.swipes[String(swipeId)];
-    if (stored && isTombstoned(this.journal.tombstones, messageId, stored)) return "the reply's record was discarded";
+    if (stored && isTombstoned(this.journal.tombstones, messageId, stored)) return say("why_the_replys_record_was_discarded");
     if (!stored && story === null) return null;
     const ledger = this.ledgerFor(messageId, m);
     const rec = ledger.swipes[String(swipeId)] ?? this.bareRecord(contentId(text), undefined);
@@ -1527,13 +1528,13 @@ export class LedgerCore {
   recordUnplayed(messageId: MessageId, swipeId: number, why: string, observed: readonly ChainMessage[], added = false): string | null {
     const m = observed.find((o) => o.id === messageId);
     const text = m && !m.isUser ? (m.swipes[swipeId] ?? "") : "";
-    if (!m || text === "") return "the reply holds no text";
+    if (!m || text === "") return say("why_the_reply_holds_no_text");
     const ledger = this.ledgerFor(messageId, m);
     const held = ledger.swipes[String(swipeId)];
     if (held && held.path !== "") {
-      if (!added) return "the reply holds a turn's record";
+      if (!added) return say("why_the_reply_holds_a_turns_record");
       // A discarded record's tombstone names it as it stood, as for any write of this part (`recordHarness`).
-      if (isTombstoned(this.journal.tombstones, messageId, held)) return "the reply's record was discarded";
+      if (isTombstoned(this.journal.tombstones, messageId, held)) return say("why_the_replys_record_was_discarded");
       held.harness = { ...(held.harness ?? { turns: [] }), unplayed: why };
       return null;
     }
@@ -1593,15 +1594,15 @@ export class LedgerCore {
     switch (w.kind) {
       case "post":
       case "marker": {
-        if (headIndex < 0) return "no assistant message";
+        if (headIndex < 0) return say("why_no_assistant_message");
         const head = chain[headIndex];
-        if (!head) return "no assistant message";
+        if (!head) return say("why_no_assistant_message");
         const parent = out.messages[headIndex]?.parentPath ?? ROOT_PATH;
         const ledger = this.ledgerFor(head.id, observed[headIndex]);
         if (w.kind === "marker") {
           // Only a checked, clamped body is journaled (the request path checks too).
           const body = validMarkerBody(w.body);
-          if (!body) return "invalid marker";
+          if (!body) return say("why_invalid_marker");
           ledger.markers.push({ ...body, seq: ++j.seq, at: parent });
           return undefined;
         }
@@ -1610,7 +1611,7 @@ export class LedgerCore {
         // reply opened) leaves it, and the rest is checked and journaled without it.
         const state = structuredClone(out.state);
         const world = this.env.worlds(state.revision);
-        if (!world) return "unknown revision";
+        if (!world) return say("why_unknown_revision");
         // A GM edit or ✎ fix held through a reply is resolved again from what it asked for, against
         // what the reply left, so it lands over whatever the reply changed and passes over what the
         // reply already did (DESIGN §7); only one that can't be made at all is refused. One the reply
@@ -1655,10 +1656,10 @@ export class LedgerCore {
         if (w.convert.length > 0) {
           const index = chain.findIndex((m) => m.id === w.messageId);
           const m = chain[index];
-          if (!m) return "no message";
+          if (!m) return say("why_no_message");
           const ledger = this.ledgerFor(m.id, observed[index]);
           const rec = ledger.swipes[String(m.swipeId)];
-          if (!rec) return "no record";
+          if (!rec) return say("why_no_record");
           rec.keep ??= {};
           const overlay = (rec.keep[w.parentPath] ??= { convert: [] });
           overlay.convert.push(...w.convert);
@@ -1667,7 +1668,7 @@ export class LedgerCore {
       }
       case "discard": {
         const from = chain.findIndex((m) => m.id === w.after);
-        if (from < 0) return "no message";
+        if (from < 0) return say("why_no_message");
         for (const [offset, m] of chain.slice(from + 1).entries()) {
           const rec = activeRecord(m, j.tombstones);
           if (m.isUser || !rec) continue;
@@ -1681,20 +1682,20 @@ export class LedgerCore {
       case "undo": {
         const index = chain.findIndex((m) => m.id === w.messageId);
         const m = chain[index];
-        if (!m || m.swipeId !== w.swipeId) return "not the active swipe";
+        if (!m || m.swipeId !== w.swipeId) return say("why_not_the_active_swipe");
         const rec = this.ledgerFor(m.id, observed[index]).swipes[String(w.swipeId)];
-        if (!rec) return "nothing to undo";
+        if (!rec) return say("why_nothing_to_undo");
         // Undo changes the record, so like a read it runs only where the record folds as stored (L2),
         // which one read elsewhere never does.
         if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
-        if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
+        if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return say("why_youve_swiped_away_from_the_timeline_this");
         // An Undo that names its entry (a ✎ fix's or GM edit's, a confirmed change's) takes back every
         // event the entry holds now, under the journal's lock, whatever a write journaled since the tap
         // made of them (an earlier held Undo or a Re-read working its request out again); one that holds
         // none (its request already so here) by its first ref, so its request goes too and is never
         // worked out again.
         const named = w.entry === undefined ? undefined : rec.post.find((p) => p.seq === w.entry);
-        if (w.entry !== undefined && !named) return "nothing to undo";
+        if (w.entry !== undefined && !named) return say("why_nothing_to_undo");
         const whole: EventRef[] = named ? Array.from({ length: Math.max(1, named.events.length) }, (_, index): EventRef => ({ in: "post", seq: named.seq, index })) : [];
         const before = { undone: [...rec.undone], post: rec.post, dropped: rec.dropped };
         const added: EventRef[] = [];
@@ -1719,7 +1720,7 @@ export class LedgerCore {
           rec.post = before.post;
           if (before.dropped) rec.dropped = before.dropped;
           else delete rec.dropped;
-          return "later events depend on it";
+          return say("why_later_events_depend_on_it");
         }
         return undefined;
       }
@@ -1730,7 +1731,7 @@ export class LedgerCore {
         const index = chain.findIndex((m) => m.id === w.messageId);
         const m = chain[index];
         const rec = m ? this.ledgerFor(m.id, observed[index]).swipes[String(w.swipeId)] : undefined;
-        if (!m || !rec) return "nothing to read";
+        if (!m || !rec) return say("why_nothing_to_read");
         const parent = out.messages[index]?.parentPath ?? ROOT_PATH;
         const text = activeText(m);
         if (rec.path === "" && (w.kind === "reread" ? rec.accepted !== undefined : rec.status === "stopped")) rec.path = parent;
@@ -1739,7 +1740,7 @@ export class LedgerCore {
           // after it included, and replaces what was read meanwhile: the Continue's suffix read and the
           // proposals confirmed from that read's chips (like a Re-read).
           const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
-          if (!prefix) return "unknown revision";
+          if (!prefix) return say("why_unknown_revision");
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
           keepPlannedAgents(rec);
@@ -1755,12 +1756,12 @@ export class LedgerCore {
         if (w.kind === "retry_read") {
           const head = this.fold(observed.slice(0, index + 1));
           const world = this.env.worlds(head.state.revision);
-          if (!world) return "unknown revision";
+          if (!world) return say("why_unknown_revision");
           const events = this.read(structuredClone(head.state), world, contSeed(rec.seed, j.seq + 1), text.slice(rec.swipeHash.len));
           if (events.length > 0) rec.post.push({ seq: ++j.seq, at: out.messages[index]?.parentPath ?? ROOT_PATH, kind: "cont", events });
         } else {
           const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
-          if (!prefix) return "unknown revision";
+          if (!prefix) return say("why_unknown_revision");
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, readSeed(rec.seed), text)];
           // A Re-read replaces the whole read: its read events, the Continue suffix reads (the text it
           // reads now holds them) and the proposals confirmed from its chips. Fixes and materialized
@@ -1814,20 +1815,20 @@ export class LedgerCore {
     const headIndex = chain.map((m) => !m.isUser).lastIndexOf(true);
     const index = chain.findIndex((m) => m.id === w.messageId);
     const m = chain[index];
-    if (!m || m.swipeId !== w.swipeId) return "not the active swipe";
+    if (!m || m.swipeId !== w.swipeId) return say("why_not_the_active_swipe");
     const rec = this.journal.messages[m.id]?.ledger.swipes[String(w.swipeId)] ?? m.ledger?.swipes[String(w.swipeId)];
-    if (!rec) return "nothing to read";
+    if (!rec) return say("why_nothing_to_read");
     // A read writes path-bound events, so it runs only where the record folds as stored: on its
     // path (never, for one read elsewhere), or on a bare record, which the read anchors here (it
     // becomes this turn's record).
     if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
     const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
-    if (rec.path !== "" && rec.path !== parent) return "You've swiped away from the timeline this reply was made on. Switch back to read it.";
-    if (w.kind === "retry_read" && rec.status === "stopped") return index === headIndex ? null : "not the head";
-    if (!rec.accepted) return "nothing to read";
+    if (rec.path !== "" && rec.path !== parent) return say("why_youve_swiped_away_from_the_timeline_this_2");
+    if (w.kind === "retry_read" && rec.status === "stopped") return index === headIndex ? null : say("why_not_the_head");
+    if (!rec.accepted) return say("why_nothing_to_read");
     if (w.kind === "retry_read") {
       const text = activeText(m);
-      if (index !== headIndex || text.length < rec.swipeHash.len || contentId(text.slice(0, rec.swipeHash.len)).hash !== rec.swipeHash.hash) return "not a stopped head Continue";
+      if (index !== headIndex || text.length < rec.swipeHash.len || contentId(text.slice(0, rec.swipeHash.len)).hash !== rec.swipeHash.hash) return say("why_not_a_stopped_head_continue");
     }
     return null;
   }
@@ -1858,7 +1859,7 @@ function keepPlannedAgents(rec: Rec): void {
 function pausedDrops(entries: readonly PostEntry[], undone: readonly EventRef[]): CarryDrop[] {
   const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
   const carries = (e: PostEntry): boolean => (e.events.length === 0 ? e.edit !== undefined && !undone.some((u) => u.in === "post" && u.seq === e.seq) : !e.events.every((_, i) => off(e.seq, i)));
-  return entries.filter(carries).map((e) => ({ seq: e.seq, kind: e.kind, reason: PAUSED_DROP }));
+  return entries.filter(carries).map((e) => ({ seq: e.seq, kind: e.kind, reason: pausedDrop() }));
 }
 
 /**
