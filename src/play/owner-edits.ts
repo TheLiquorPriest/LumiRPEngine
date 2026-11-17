@@ -118,7 +118,8 @@ export async function recordOwnerEdit(deps: OwnerEditDeps, user: string, chat: s
     const group = events.length > 1 && events.every((e) => e.group === undefined) ? `tap:${edit}` : undefined;
     const cite = { tap: edit, request, ...(tell !== null ? { tell } : {}), ...(advised.length > 0 ? { advised } : {}) } as unknown as JsonValue;
     s.record(s.writeTarget({ chat }), [
-      ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, ...DEFAULTS, cite: { tap: edit } })),
+      // What the world gave, opened: the owner set it in his world, so it stands established, from him (as the tools' `AUTHORED`, plan §6.6).
+      ...opened.map((e): ChangeInput => ({ lane: "engine", op: e.type, value: e as unknown as JsonValue, by: PLAYER, source: PLAYER, standing: "established", precision: null, cite: { tap: edit } })),
       ...events.map((e, i): ChangeInput => ({ lane: "engine", op: e.type, value: (group === undefined ? e : { ...e, group }) as unknown as JsonValue, by: PLAYER, ...(bookkeeping(events, i) ? { ...DEFAULTS, cite: { tap: edit } } : { source: PLAYER, cite }) })),
       ...store.map((c): ChangeInput => ({ lane: "engine", op: c.op, value: c.value, by: PLAYER, source: PLAYER, cite, precision: c.precision ?? null, standing: c.standing ?? null })),
     ]);

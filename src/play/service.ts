@@ -545,6 +545,8 @@ export class PlayService {
   private edit({ registry, world, state, seed }: Head, asked: readonly EditOpAsk[]): Resolved {
     const w = new Working(registry, world, state);
     const store: NonNullable<Resolved["store"]> = [];
+    // Cash set on someone is measured from what the world gave them, which opens first as the world's own, not inside his edit.
+    const opened: LedgerEvent[] = [];
     for (const op of asked) {
       if (op.as === "fact") {
         if (op.op === "remove") throw new Refused("validation", { line: "fact_remove", fields: { key: op.key } });
@@ -557,6 +559,7 @@ export class PlayService {
       let events: LedgerEvent[];
       if (op.at === "world" && (op.key === "time" || op.key === "clock") && typeof value === "string") events = clockSet(registry, world, w.state, value, seed);
       else if (op.at.startsWith("entity:") && canSeeEntity(registry, world, w.state, world.pov, op.at.slice(7))) {
+        if (op.key === "cash") opened.push(...openGiven(registry, w, [op.at.slice(7)], seed));
         const edit = resolveEdit(registry, world, w.state, [{ op: "set", entity: op.at.slice(7), field: op.key, value }], { gm: false, runSeed: seed, opened: true });
         if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
         events = edit.events;
@@ -572,15 +575,19 @@ export class PlayService {
       const bad = events.map((e) => w.apply(e)).find((r) => r !== null);
       if (bad) throw new Refused("validation", { words: bad.reason });
     }
-    return { opened: [], events: w.events, store };
+    return { opened, events: w.events.filter((e) => !opened.includes(e)), store };
   }
 
   /** An edit of operations, as the economy's "Make this a property" sends it: all or none, locked fields writable, as many as `engine.editOps` allows. */
   private ops({ registry, world, state, seed }: Head, ops: readonly JsonValue[], settings: PlaySettings): Resolved {
     if (ops.length === 0 || ops.length > settings.editOps) throw new Refused("bad_request", { line: "edit_ops_count", fields: { most: settings.editOps } });
-    const edit = resolveEdit(registry, world, state, ops as unknown as FixOp[], { gm: true, runSeed: seed, opened: true });
+    // Each holder whose cash an op sets has what the world gave them opened first, as the world's own, so the sum starts from it.
+    const w = new Working(registry, world, state);
+    const holders = ops.flatMap((o) => (isRecord(o) && o.op === "set" && o.field === "cash" && typeof o.entity === "string" ? [o.entity] : []));
+    const opened = openGiven(registry, w, holders, seed);
+    const edit = resolveEdit(registry, world, w.state, ops as unknown as FixOp[], { gm: true, runSeed: seed, opened: true });
     if ("rejection" in edit) throw new Refused("validation", { words: edit.rejection.reason });
-    return played(edit.events);
+    return { opened, events: edit.events };
   }
 
   /**
