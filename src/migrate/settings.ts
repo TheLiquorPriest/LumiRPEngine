@@ -15,7 +15,7 @@
 
 import { SETTINGS as HARNESS_SETTINGS } from "rp-harness/helpers";
 import { hashJson } from "../shared/hash";
-import { tidySettingsOf } from "../shared/settings";
+import { tidySettingsOf } from "./today/user-settings";
 import { isRecord, type JsonValue } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";

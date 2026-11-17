@@ -19,7 +19,7 @@ import { chatKnowledgePrefsOf } from "./today/chat-knowledge-prefs";
 import type { ChatId, UserId, WorldId } from "../shared/ids";
 import { isRecord, type JsonObject } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { tidySettingsOf } from "../shared/settings";
+import { tidySettingsOf } from "./today/user-settings";
 import { backupSize, backupSources, makeBackup, type BackupChat, type BackupResult } from "./backup";
 import { classifyRuntime, classifyStorage, EXTENSION_WIDE, type Classified, type ClassifyContext } from "./classify";
 import { namedFiles, readBytes, sha256 } from "./files";

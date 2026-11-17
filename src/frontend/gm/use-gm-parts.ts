@@ -7,10 +7,9 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { GmReadPart } from "../../shared/gm-parts";
-import { GM_PAGE_DEFAULTS } from "../../shared/settings";
 import type { ChatStatus, GmView, StateView } from "../../shared/state-view";
 import type { App } from "../app";
-import { GmParts, gmReload, type GmNeed, type GmWant } from "./parts";
+import { GmParts, gmReload, type GmDuringTurn, type GmNeed, type GmWant } from "./parts";
 
 /**
  * What the GM view is loaded again on when the chat has no GM key (`StateView.gmKey`): the chat
@@ -42,7 +41,8 @@ export interface GmPartsPage {
  */
 export function useGmParts(app: App, chatId: string, revealed: boolean, parts: readonly GmReadPart[], gmKey: string, status: ChatStatus): GmPartsPage {
   const [, rerender] = useState(0);
-  const hold = GM_PAGE_DEFAULTS.duringTurn;
+  // Held while a turn runs, so the parts aren't built again on every change of it.
+  const hold: GmDuringTurn = "hold";
   const cache = useRef<GmParts | null>(null);
   // The GM key the parts were last loaded at (null: not yet), and whether a move since is held.
   const seen = useRef<string | null>(null);

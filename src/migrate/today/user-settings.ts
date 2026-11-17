@@ -2,30 +2,29 @@
 // Realism and time settings seed new chats only, filling in what a world's own defaults leave out
 // (or replacing them, when the user asks); a running chat changes through markers. Every
 // conservative default is one tap to change (D31).
+//
+// Today's settings registry, carried for the migration (PlanSwap-13 item 3), which reads today's
+// settings file with it (`settings-store.ts`); nothing kept reads it.
 
-import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
-import type { ClaimsPolicy } from "./claims";
-import type { InferredChecks } from "./inferred";
-import type { AdjudicationDef, StepPurpose } from "./world";
-import type { Limit, MindsSettings } from "./minds";
-import { isMindPurpose, limitIn } from "./minds";
-import { isRecord, safeKey } from "./json";
+import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "../../shared/ids";
+import type { ClaimsPolicy } from "../../shared/claims";
+import type { InferredChecks } from "../../shared/inferred";
+import type { AdjudicationDef, StepPurpose } from "../../shared/world";
+import type { Limit, MindsSettings } from "../../shared/minds";
+import { isMindPurpose, limitIn } from "../../shared/minds";
+import { isRecord, safeKey } from "../../shared/json";
 import type { TimeoutSettings } from "./timeouts";
 import type { AgentSettings } from "./agent-settings";
-import type { PromptSettings, SwipeTexts } from "./prompts";
+import type { PromptSettings, SwipeTexts } from "./prompt-texts";
 import type { DiagnosticsSettings } from "./diagnostics";
-import type { RetentionSettings } from "./stores";
-import { ITEM_CHANGES } from "./things";
-import type { OffstageSettings } from "./offstage";
-import type { ReasoningChoice, SamplingParams } from "./host";
-import type { BuiltLoreIndex, LoreEntryRef } from "./lore-views";
-import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorKnowledge, type NarratorSecrets, type NarratorView, narratorViewOf } from "./narrator-view";
-import type { LorePolicy } from "./state-view";
-import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "./time-reach";
-
-// Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this registry.
-export { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, narratorViewOf, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES };
-export type { BuiltLoreIndex, LoreEntryRef, LorePolicy, NarratorKnowledge, NarratorSecrets, NarratorView, ReasoningChoice, SamplingParams };
+import type { RetentionSettings } from "../../shared/stores";
+import { ITEM_CHANGES } from "../../shared/things";
+import type { OffstageSettings } from "../../shared/offstage";
+import type { ReasoningChoice, SamplingParams } from "../../shared/host";
+import type { BuiltLoreIndex, LoreEntryRef } from "../../shared/lore-views";
+import { NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, type NarratorKnowledge, type NarratorSecrets, type NarratorView, narratorViewOf } from "../../shared/narrator-view";
+import type { LorePolicy } from "../../shared/state-view";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES } from "../../shared/time-reach";
 
 export const REASONING_CHOICES: readonly ReasoningChoice[] = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
 

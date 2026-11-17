@@ -5,7 +5,7 @@
 
 import type { ActionId, BoundMode, ChatId } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
-import type { ChangeType, UserSettings } from "../../shared/settings";
+import type { ChangeType, UserSettings } from "./user-settings";
 import type { GenerateAs } from "../../shared/state-view";
 
 /** The version today's build stamped on every message of its link. */

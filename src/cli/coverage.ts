@@ -150,11 +150,6 @@ export const COVERAGE: Coverage = {
     restore: { excluded: "Puts the user's World Info book back exactly as it stood before its move: the user's own press on Build's secrecy page, never an agent's call." },
   },
   "lre.cancel": { excluded: "Cancel on the activity line, the player's own stop for a turn in flight in the chat they watch; a tool's turn is the player's chat too, so the page that shows it stops it." },
-  "lre.acceptance": {
-    get: { excluded: "Settings → Agents and the drawer's counter read the acceptance run; an agent learns of a refused call from the call itself." },
-    open: { excluded: "Opening an acceptance run is the user's own GM action in Settings → Agents, refused to outside clients, so no agent arms a connection the runs guard." },
-    close: { excluded: "Closing an acceptance run is the user's own GM action in Settings → Agents, refused to outside clients, as opening one is." },
-  },
   "lre.assistant": {
     get: { excluded: "GM → Assistant's thread with the extension's own GM agent, behind the GM gate; an outside agent is an agent already, reading the chat itself with lre_gm and lre_chat_state." },
     send: { excluded: "Asks the extension's GM agent, on the user's own connection and budgets, from GM → Assistant; an outside agent answers the user itself, through lre_gm and lre_edit." },
@@ -181,28 +176,4 @@ export const COVERAGE: Coverage = {
   "lre.prompts": {
     test: { excluded: "Settings → Agents → Prompts' Test of a role's text, the user's own press that runs the role once on the chat; an outside agent edits no prompt texts." },
   },
-  "lre.live": {
-    get: { excluded: "GM → Live, the page's live view of the chat's agent turn as its agents work it, pushed to that page; an outside agent reads what a turn left with lre_chat_state and lre_gm, and its transcript once the MCP server's tools reach the workspace (Increment 3)." },
-    leave: { excluded: "GM → Live's page closing its live view, so the engine stops pushing the turn to it; nothing an outside agent watches." },
-  },
-  "lre.story": {
-    cast: { excluded: "The Harness tab's Cast, the page's view of who the author cast and why, behind the curtain; an outside agent reads the story through the harness's own tools, which the MCP server doesn't offer." },
-    pin: { excluded: "The player's own pin on someone's standing, pressed on the Harness tab's Cast; an outside agent casts no one." },
-    reached: { excluded: "What last reached someone, shown on the Harness tab's Cast behind the curtain; an outside agent reads no character's feed." },
-    record: { excluded: "A reply's beats and the drafts kept for later, the Harness tab's Record behind the curtain; an outside agent reads what a turn left with lre_chat_state and lre_gm." },
-    budget: { excluded: "How much of the story budget the treatments around now use, shown on Settings → Story → Budget; an outside agent opens no treatment." },
-  },
-  "lre.prepare": {
-    get: { excluded: "The prepared start as Play → Now shows it, the player's own page; an outside agent prepares no story." },
-    start: { excluded: "The player's press that starts preparing the story, a job of the author's that spends their tokens; never an outside agent's." },
-    approve: { excluded: "The player's word on the author's plan, pressed on Play → Now; never an outside agent's." },
-    steer: { excluded: "What the player tells the author about its plan, in their own words on Play → Now; an outside agent steers no preparation." },
-    cap: { excluded: "The most the player lets the preparation spend, set on Play → Now; never an outside agent's." },
-    pause: { excluded: "The player holding the preparation, pressed on Play → Now; an outside agent holds no job." },
-    resume: { excluded: "The player carrying the preparation on, pressed on Play → Now; an outside agent resumes no job." },
-    cancel: { excluded: "The player stopping the preparation, pressed on Play → Now; an outside agent cancels no job." },
-    restart: { excluded: "The player's Start over on Play → Now: the preparation planned afresh, a job of the author's that spends their tokens; never an outside agent's." },
-    depth: { excluded: "How deep the player has the story prepared, chosen on Play → Now with each depth's cost; a deeper one starts the author's job again, spending their tokens; never an outside agent's." },
-  },
-  "lre.prepareLive": { excluded: "The preparation as it runs, the live view in Play → Now's card that the page asks for every few seconds while a run of it works; an outside agent watches no preparation." },
 };

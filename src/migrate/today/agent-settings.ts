@@ -9,7 +9,7 @@
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import type { Limit } from "../../shared/minds";
 import { limitIn } from "../../shared/minds";
-import { HELPER_MAX_TOKENS } from "../../shared/settings";
+import { HELPER_MAX_TOKENS } from "./user-settings";
 import { TIMELAPSE_REACH_MINUTES } from "../../shared/time-reach";
 import { KEPT_FOLDS_DEFAULT } from "../../engine/ledger/fold";
 import { type ContextSettings, contextSettingsOf, defaultContextSettings } from "./agent-context";

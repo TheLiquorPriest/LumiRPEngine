@@ -21,7 +21,7 @@ import { LEDGER_NAMESPACE } from "../../shared/ledger";
 import { PROTOCOL_VERSION, type GeneratePush } from "./wire";
 import type { GenerateAs } from "../../shared/state-view";
 import type { Limit } from "../../shared/minds";
-import { HOST_LIMITS, hostBound } from "../../shared/timeouts";
+import { HOST_LIMITS, hostBound } from "./timeouts";
 import { validMarkerBody } from "../../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv, type WriteResult } from "../../engine/ledger/journal";

@@ -10,7 +10,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ChatId, UserId } from "../../shared/ids";
-import type { UserSettings } from "../../shared/settings";
+import type { UserSettings } from "./user-settings";
 import type { ChatKnowledgePrefs } from "./chat-knowledge-prefs";
 
 export interface TurnFrame {

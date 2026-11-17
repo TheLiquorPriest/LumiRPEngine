@@ -8,7 +8,6 @@ import { hasOwn, isRecord } from "../shared/json";
 import { jsonEqual, mergeAdjusted } from "../shared/json-patch";
 import type { ResultBodies } from "../shared/protocol";
 import { TIMELAPSE_REACH_MINUTES } from "../shared/time-reach";
-import type { DiagRecord } from "../shared/diagnostics";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, ToolError } from "./args";
 import { LreError } from "./connection";
@@ -147,8 +146,9 @@ async function presetCard(live: Live, op: "get" | "add"): Promise<ResultBodies["
 
 const BLOCK_STATES = "Each guidance block is missing (the preset has no such block), empty (it has the block with only notes), read (switched off but written: LumiRPEngine gives its text to that helper) or enabled (switched on, so it also goes into the main prompt; it should be off).";
 
-function diagRecord(record: DiagRecord): JsonObject {
-  return JSON.parse(JSON.stringify({ ...record, start: new Date(record.start).toISOString(), end: undefined })) as JsonObject;
+function diagRecord(record: JsonObject): JsonObject {
+  const { end: _end, ...rest } = record;
+  return typeof rest.start === "number" ? { ...rest, start: new Date(rest.start).toISOString() } : rest;
 }
 
 async function diagRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
@@ -160,7 +160,7 @@ async function diagRead(args: Args, ctx: ToolContext): Promise<ToolResult> {
   const body = await ctx.live().conn.request("lre.diag", { chatId, op: "get" });
   const records = failures ? body.records.filter((r) => r.status === "failed" || r.level === "error" || r.level === "warn") : body.records;
   const byStatus: Record<string, number> = {};
-  for (const r of body.records) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+  for (const r of body.records) byStatus[String(r.status)] = (byStatus[String(r.status)] ?? 0) + 1;
   const summary = { chatId, activity: body.activity, records: body.records.length, byStatus };
   // Records are GM-level (a step's reason or a failure can name someone the player hasn't met): only behind the spoiler gate.
   if (!spoilers) return { text: json({ ...summary, note: "The records are GM-level: a step's reason or a failure may name what the player hasn't found. Pass spoilers: true to read them. The activity line is player-safe." }) };

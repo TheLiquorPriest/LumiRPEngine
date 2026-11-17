@@ -4,7 +4,7 @@
 // opened that engine's Diagnostics.
 
 import { useEffect, useState } from "preact/hooks";
-import type { Activity } from "../../shared/diagnostics";
+import type { Activity } from "../../shared/turn-activity";
 import { Icon } from "../../ui/icons";
 import { useSelect } from "../../ui/store";
 import { useUiSetting } from "../../ui/ui-settings";

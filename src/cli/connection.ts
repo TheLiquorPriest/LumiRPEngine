@@ -43,7 +43,7 @@ export interface Socket {
 /** Opens the event socket; main.ts supplies Node's WebSocket. Events arrive later, never during the call itself. */
 export type OpenSocket = (url: string, events: SocketEvents) => Socket;
 
-export type LiveProblem = "login" | "locked" | "unreachable" | "forbidden" | "insecure" | "not_installed" | "not_running" | "too_old" | "timeout" | "closed" | "too_large" | "protocol";
+export type LiveProblem = "login" | "locked" | "unreachable" | "forbidden" | "insecure" | "not_installed" | "not_running" | "too_old" | "timeout" | "closed" | "too_large" | "protocol" | "later_build";
 
 /**
  * The brands the errors below carry. The core and each agent kit are bundles of their own, each with
@@ -428,26 +428,11 @@ export class HostConnection implements Connection {
     // Read now, not when the connection was made: a reconnect after `lumirpengine login` uses the new token.
     const { token } = this.signedIn();
     this.openedToken = token;
-    const extension = await this.findExtension(token);
-    // A ticket lives 30 s and works once; one refused on the way gets one more try with a new ticket.
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await this.connect(await this.ticket(token));
-        break;
-      } catch (error) {
-        if (!(error instanceof LiveError && error.problem === "protocol" && attempt === 1)) throw error;
-      }
-    }
-    // `opened` gates `request`, so the hello goes through `send` directly.
-    this.opened = { extension, agentApi: null };
-    try {
-      await this.greet();
-    } catch (error) {
-      this.close();
-      if (error instanceof LiveError && error.problem === "timeout") throw new LiveError("timeout", `LumiRPEngine on ${this.options.base} didn't answer within ${formatMs(this.timeoutMs ?? 0)}. Check that it's running (lumirpengine status), and restart it in Lumiverse's Extensions tab if it is. ${RAISE}`);
-      throw error;
-    }
-    return this.opened;
+    await this.findExtension(token);
+    // This build's extension no longer answers the previous build's messages (the old backend is gone), so
+    // no socket is opened: the command line and MCP server reach worlds and chats on RPE's own routes with
+    // a later build (PlanOps-11 to -17), which also says what of this link stays.
+    throw new LiveError("later_build", `This command returns with a later build of LumiRPEngine: until then the command line and MCP server can't read or change the worlds and chats on ${this.options.base}. Use RPE's own pages for now.`);
   }
 
   /** The hello: names this client (an MCP server checks in with it) and takes the agent API level from the answer. */

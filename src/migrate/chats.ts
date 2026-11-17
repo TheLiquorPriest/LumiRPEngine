@@ -28,7 +28,7 @@ import { ALL_PACKS, STARTER_TABLES } from "../packs/index";
 import type { ChatId, RevisionId, UserId } from "../shared/ids";
 import type { ChatRun, HeldWrite, Journal, MessageLedger } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
-import type { UserSettings } from "../shared/settings";
+import type { UserSettings } from "./today/user-settings";
 import type { Unreadable } from "./inside";
 
 /** The engine a chat is played with today, as its own choice holds it (absent: classic). */

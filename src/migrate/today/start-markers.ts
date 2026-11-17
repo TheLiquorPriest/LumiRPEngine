@@ -14,7 +14,7 @@ import type { Level } from "../../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../shared/ids";
 import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import type { MarkerBody } from "../../shared/ledger";
-import type { TimeSettings, UserSettings } from "../../shared/settings";
+import type { TimeSettings, UserSettings } from "./user-settings";
 import type { WorldDoc } from "../../shared/world";
 import { presetOf } from "../../engine/realism";
 import { rulesetFloor } from "../../engine/registry-impl";

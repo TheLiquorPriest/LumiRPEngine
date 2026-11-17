@@ -4,7 +4,7 @@
 // it starts, name the agent at work and the newest progress line, say Paused while the run is held, and
 // say a failed run failed. Nothing is read on a timer.
 
-import type { Activity } from "../../../shared/diagnostics";
+import type { Activity } from "../../../shared/turn-activity";
 import type { LiveEvent } from "../../../shared/api";
 
 /** What the page knows of the chat's run: the line shown (null when none runs and none failed), and whether the run's call is held. */

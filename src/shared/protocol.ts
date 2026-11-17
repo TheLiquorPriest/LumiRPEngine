@@ -7,7 +7,6 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
-import type { AcceptanceState } from "./agent-settings";
 import type { ClaimsPolicy } from "./claims";
 import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields } from "./lore";
@@ -21,10 +20,8 @@ import type { UpgradePreview } from "./upgrade";
 import type { GmThingExtras, GmThingsList, KeepResult, MadeInPlay, TidyRun } from "./thing-gm";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, PlaceId, RevisionId, SlotId, TableId, WorldId } from "./ids";
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradePicks } from "./ledger";
-import type { ChangeType, UserSettings } from "./settings";
 import type { BuiltLoreIndex, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LorePinsView, SecrecyBookPlan, SecrecyBookView } from "./lore-views";
-import type { Activity, DiagRecord } from "./diagnostics";
-import type { LiveChange, LiveView } from "./live";
+import type { Activity } from "./turn-activity";
 import type { GenerateAs, GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, EditorAnswer, EditorRequest, FeedScope, KindDef, LorePin, MapDisplay, RelationTypeDef, RevisionNote, StepPurpose, WorldDoc, WorldIndex } from "./world";
 import type { EditOp } from "./edit-ops";
@@ -33,8 +30,6 @@ import type { LintIssue } from "./lint";
 import type { NarratorView } from "./narrator-view";
 import type { TableUpdate } from "./tables";
 import type { GM_OUTLINE, GmPartReply, GmReadPart, QueuedOn } from "./gm-parts";
-import type { PrepareLiveView } from "./prepare-live";
-import type { PrepareAsk, PrepareView, StoryAnswer, StoryAsk } from "./story-pages";
 
 // Moved to homes of their own (PlanSwap-13): today's files take them from here until PlanSwap-10 removes this protocol.
 export type { EditOp } from "./edit-ops";
@@ -346,7 +341,7 @@ export interface SettingsGetRequest extends Request<"lre.settings.get"> {}
 export interface SettingsCaveatsRequest extends Request<"lre.settings.caveats"> {}
 
 /**
- * An RFC 7386 merge patch over UserSettings: `null` deletes (unpin a type with
+ * An RFC 7386 merge patch over the user's settings: `null` deletes (unpin a type with
  * `{extraction: {purchase: null}}`) and arrays replace. A `realism.preset` or `modelUse.preset`
  * other than `custom` is expanded by the backend into levels and band caps, or steps and budgets;
  * any manual change sends `preset: "custom"`.
@@ -561,14 +556,6 @@ export interface PresetCard {
  */
 export type AgentsRequest = Request<"lre.agents"> & ({ op: "get" | "kit" | "dismiss" } | { op: "update" | "reconnect" | "forget"; client: string });
 
-/**
- * Acceptance runs (AGENT-LOOP-PLAN §12; Settings → Agents → Acceptance runs): `get` reads the open
- * run and the last one closed; `open` starts a run under `label`, so the connections it guards may
- * be called, each within its ceilings; `close` ends it and keeps its spend as the last run. Your
- * action alone: an outside client is refused, so no agent of yours arms a guarded connection.
- */
-export type AcceptanceRequest = Request<"lre.acceptance"> & ({ op: "get" | "close" } | { op: "open"; label: string });
-
 // ---------------------------------------------------------------- the GM assistant and the workspace (INC1-SPEC C8)
 
 /**
@@ -755,35 +742,6 @@ export interface WorkspaceFileView {
   provenance: { role?: string; key?: string; turn: number | null };
 }
 
-// ---------------------------------------------------------------- GM → Live (DESIGN §4.6)
-
-/**
- * GM → Live: the chat's latest agent run as its agents work it (`shared/live.ts`). `get` answers the
- * chat's live view (the run under way, or the last one since the engine started; null when there is
- * none) and from then on pushes what the run does to this page as `lre.live.update`, until `leave`
- * or the page closes. GM data, behind the gate as `lre.gm` is.
- */
-export type LiveRequest = Request<"lre.live"> & { chatId: ChatId; op: "get" | "leave" };
-
-/** What a chat's agent run did since this page last heard (`lre.live`): a new run's view, or the entries its run added and how it stands. Sent to the pages that asked about that chat's live view. */
-export type LiveUpdate = Envelope<"lre.live.update"> & { chatId: ChatId } & LiveChange;
-
-// ---------------------------------------------------------------- the story engine's pages (DEPTH2-PLAN §1, `shared/story-pages.ts`)
-
-/**
- * The Harness tab's Cast and Record, and the use Settings → Story → Budget shows: `cast` (everyone
- * the story names, with their minds), `pin` (the player's pin on someone's standing, or lifting it),
- * `reached` (what last reached someone), `record` (a reply's beats and the drafts on the path) and
- * `budget` (the treatments counted around now). GM data, behind the gate as `lre.gm` is.
- */
-export type StoryRequest = Request<"lre.story"> & { chatId: ChatId } & StoryAsk;
-
-/** The prepared start on Play → Now (`backend/story/prepare.ts`): read it, start it, give the plan the player's word, steer it, cap it, hold it, carry it on, cancel it. */
-export type PrepareRequest = Request<"lre.prepare"> & { chatId: ChatId } & PrepareAsk;
-
-/** The prepared start as it runs, for the live view in Play → Now's card (`backend/story/prepare-live.ts`): a read only, from the preparation's file, the jobs and the list of the chat's files, never the chat itself; asked again every few seconds while a run of it is under way. */
-export type PrepareLiveRequest = Request<"lre.prepareLive"> & { chatId: ChatId };
-
 // ---------------------------------------------------------------- an agent turn's review card (INC2-SPEC C13)
 
 /**
@@ -859,17 +817,12 @@ export type FrontendToBackend =
   | CharacterRequest
   | ThingsRequest
   | AgentsRequest
-  | AcceptanceRequest
   | CancelTurnRequest
   | ChatKnowledgeRequest
   | AssistantRequest
   | WorkspaceRequest
   | ReviewRequest
-  | PromptsRequest
-  | LiveRequest
-  | StoryRequest
-  | PrepareRequest
-  | PrepareLiveRequest;
+  | PromptsRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -883,10 +836,10 @@ export interface ExtractionModeView {
   rejected: number;
 }
 
-/** Settings plus a derived view: effective modes, the reply's extraction types then the agents' change types. */
+/** Settings plus a derived view: effective modes, the reply's extraction types then the agents' change types. The previous build's registry shaped the settings; RPE carries them as JSON. */
 export interface SettingsResult {
-  settings: UserSettings;
-  extraction: Record<ChangeType, ExtractionModeView>;
+  settings: JsonObject;
+  extraction: Record<string, ExtractionModeView>;
 }
 
 /** Results per request type. */
@@ -951,7 +904,7 @@ export interface ResultBodies {
   "lre.secrecy": { books?: SecrecyBookView[]; book?: SecrecyBookPlan };
   "lre.preset": { card: PresetCard };
   /** `get`: the chat's records, oldest first, and its activity line now; `text`: the agent call's text, null when it is gone. */
-  "lre.diag": { records: DiagRecord[]; activity: Activity | null; text?: string | null };
+  "lre.diag": { records: JsonObject[]; activity: Activity | null; text?: string | null };
   /** The run started, cancelled or asked about; null when the chat has had none since the extension started. */
   "lre.minds": { run: MindsRunView | null };
   /** Whether a run or read was under way to stop. */
@@ -966,8 +919,6 @@ export interface ResultBodies {
   "lre.things": { list?: ThingsList; here?: GmThingsList; thing?: ThingPage; gm?: GmThingExtras; person?: PersonThings; pick?: ThingPicks; found?: EntityId[]; types?: ThingType[]; tidy?: TidyRun; made?: MadeInPlay; kept?: KeepResult; classes?: VehicleClassChoice[]; cap?: number };
   /** `kit`: this build, where its kit is, and whether the asking session checked in since the extension started; every other op answers the `view`. */
   "lre.agents": { view?: AgentsView; build?: string; kit?: KitReport | null; known?: boolean };
-  /** The open acceptance run and the last one closed, after the op. */
-  "lre.acceptance": AcceptanceState;
   /** Every op: the chat's thread, the answer under way and the proposals, after the op. */
   "lre.assistant": AssistantView;
   /**
@@ -980,14 +931,6 @@ export interface ResultBodies {
   /** Every op: the chat's review cards after it; `apply` and `reject` at a gate, how to start the turn it resumes (`start`; null when nothing waits on a reply). */
   "lre.review": { cards: ReviewCardView[]; start?: GenerateAs | null };
   "lre.prompts": { test: PromptTestView };
-  /** `get`: the chat's live view now (null when it has had no agent run since the engine started); `leave`: none. */
-  "lre.live": { live: LiveView | null };
-  /** `cast` and `pin`: the cast after it; `reached`, `record` and `budget` answer theirs. */
-  "lre.story": StoryAnswer;
-  /** Every op: the prepared start as it stands after it. */
-  "lre.prepare": PrepareView;
-  /** The preparation as it runs (`prep` null: none to show), and whether the page asks again. */
-  "lre.prepareLive": PrepareLiveView;
 }
 
 export type ResultMessage = {
@@ -1062,11 +1005,6 @@ export interface AgentsChanged extends Envelope<"lre.agents.changed"> {
   view: AgentsView;
 }
 
-/** An acceptance run opened, closed or spent (`lre.acceptance`): sent to every session of the user, so its counter stays current. */
-export interface AcceptanceChanged extends Envelope<"lre.acceptance.changed"> {
-  state: AcceptanceState;
-}
-
 /**
  * The GM assistant's thread in a chat changed (`lre.assistant`): a message, a proposal, or the answer
  * under way. Sent to the sessions that asked about that chat's assistant: GM data, shown only behind
@@ -1097,4 +1035,4 @@ export interface KitReconnect extends Envelope<"lre.kit.reconnect"> {
   client: string;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AcceptanceChanged | AssistantUpdate | ReviewUpdate | LiveUpdate | KitReload | KitReconnect;
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush | MindsRunUpdate | GeneratePush | AgentsChanged | AssistantUpdate | ReviewUpdate | KitReload | KitReconnect;
