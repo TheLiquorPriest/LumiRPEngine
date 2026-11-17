@@ -4,13 +4,15 @@
 // Build's own writers of a carried thing. A run writes nothing to today's data: a `jobs.json` or an undo copy that does not read is listed
 // among what could not be read, kept whole in the backup and counted archived, and nothing is made from it. A later run puts a job or a copy
 // again only where RPE's is still what a run put: one he reviewed, applied, restored or dismissed in RPE since stands. Today's lore index ids
-// (`lore-ids.json`) are archived by their rule (`classify.ts`): RPE numbers lore entries its own way.
+// (`lore-ids.json`: every id the index ever gave, by the book entry it names) go to the lore's table of them, so an id one of his notes or a
+// mind file names still reaches its entry; an id once given is never given again, so a later run only adds those today's side gave since.
 
 import type { Database } from "bun:sqlite";
 import { writeCarriedJob } from "../build/jobs/carried";
 import { writeCarriedSecrecy } from "../build/lore/carried";
+import { type CarriedLoreId, putCarriedLoreIds } from "../lore";
 import { hashJson } from "../shared/hash";
-import { hasOwn, isRecord, type JsonObject } from "../shared/json";
+import { hasOwn, isRecord, type JsonObject, safeKey } from "../shared/json";
 import type { JobKind, JobProposal, JobResult, JobSummary } from "../shared/jobs";
 import type { LintIssue } from "../shared/lint";
 import { WORLD_COLLECTIONS } from "../worlds/worlds";
@@ -26,6 +28,11 @@ export interface BuildCarried {
   interrupted: number;
   /** Undo copies written as their books'. */
   secrecy: number;
+  /** Ids of today's lore index kept for the entries they name, new to RPE's table of them this run. */
+  loreIds: number;
+  /** Of the ids today's file holds, the ones already kept by an earlier run, and those that are no id or name no entry as a book and an entry (left out, in the backup). */
+  loreIdsKnown: number;
+  loreIdsLeftOut: number;
   /** Jobs and undo copies he changed or removed in RPE since a run put them: left as RPE has them. */
   keptInRpe: number;
   /** Files that do not read, listed among what could not be read and counted archived. */
@@ -33,11 +40,30 @@ export interface BuildCarried {
 }
 
 const JOBS_FILE = "jobs.json";
+const LORE_IDS_FILE = "lore-ids.json";
+/** What a short id is made of (`isShortId`, today's lore index): letters, digits, `_`, `.` and `-`. */
+const SHORT_ID = /^[\p{L}\p{N}_.-]+$/u;
 const SECRECY_FILE = /^secrecy\/[0-9a-f]{32}\.json$/;
 
 const KINDS: Readonly<Record<JobKind, true>> = { import_lore: true, refine: true, describe_map: true, propose_routines: true, playtest: true, check_world: true, index_text: true };
 const STATUSES: Readonly<Record<JobSummary["status"], true>> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Readonly<Record<LintIssue["severity"], true>> = { error: true, warning: true, info: true };
+
+/** The ids of today's lore index file as its reader takes them: a pair whose id can be a short id and whose entry is a book and an entry; null for a file that is not the index's. */
+function loreIdsOf(raw: unknown): { ids: CarriedLoreId[]; left: number } | null {
+  if (!isRecord(raw) || raw.v !== 1 || !isRecord(raw.ids) || !isRecord(raw.own)) return null;
+  const ids: CarriedLoreId[] = [];
+  let left = 0;
+  for (const [id, key] of Object.entries(raw.ids)) {
+    const slash = typeof key === "string" ? key.indexOf("/") : -1;
+    if (typeof key !== "string" || !safeKey(id) || !SHORT_ID.test(id) || !safeKey(key) || slash < 1 || slash === key.length - 1) {
+      left++;
+      continue;
+    }
+    ids.push({ id, book: key.slice(0, slash), entry: key.slice(slash + 1) });
+  }
+  return { ids, left };
+}
 
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
 
@@ -109,7 +135,7 @@ function secrecyPrint(db: Database, user: string, book: string): string | null {
  */
 export async function carryBuildThings(input: { today: Today; report: MigrationReport; db: Database; user: string; earlier: PutPrints }): Promise<{ carried: BuildCarried; put: Map<string, string> }> {
   const { today, report, db, user, earlier } = input;
-  const out: BuildCarried = { jobs: 0, interrupted: 0, secrecy: 0, keptInRpe: 0, unreadable: 0 };
+  const out: BuildCarried = { jobs: 0, interrupted: 0, secrecy: 0, loreIds: 0, loreIdsKnown: 0, loreIdsLeftOut: 0, keptInRpe: 0, unreadable: 0 };
   const put = new Map<string, string>();
   const items = report.items.filter((i) => i.where === "user storage" && i.row === "build-jobs" && i.fate === "carried");
   /** Puts one thing whose print is read by `print`, where RPE's is none a run did not put or still the run's. */
@@ -145,6 +171,16 @@ export async function carryBuildThings(input: { today: Today; report: MigrationR
         out.jobs++;
         if (job.status === "running") out.interrupted++;
       }
+    } else if (item.path === LORE_IDS_FILE) {
+      const read = loreIdsOf(parsed(text));
+      if (read === null) {
+        damaged(item, "today's lore index ids file does not read as today's id map; no id is carried from it, and it is kept whole in the backup");
+        continue;
+      }
+      const fresh = db.transaction(() => putCarriedLoreIds(db, user, read.ids))();
+      out.loreIds += fresh;
+      out.loreIdsKnown += read.ids.length - fresh;
+      out.loreIdsLeftOut += read.left;
     } else if (SECRECY_FILE.test(item.path)) {
       const raw = parsed(text);
       const book = isRecord(raw) && typeof raw.bookId === "string" && raw.bookId !== "" ? raw.bookId : null;
