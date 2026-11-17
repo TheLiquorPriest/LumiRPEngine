@@ -4,7 +4,7 @@
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
-import { Chip } from "../build/form-kit";
+import { Chip } from "../form-sheet";
 import { Button } from "../components";
 import { withText } from "./places";
 

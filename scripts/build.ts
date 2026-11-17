@@ -12,8 +12,14 @@
 //   Lumiverse's install scan refuses (`install-scan.ts`): a backend the host would refuse to load
 //   fails the build here, with what was found and where. The frontend is the extension's loader
 //   around the UI's extension shell, put together here because neither may import the other
-//   (test/standalone-boundaries.test.ts).
-// - dist/ui/: the web app RPE serves at /ui/ (§14), the UI's web shell.
+//   (test/standalone-boundaries.test.ts), and holds none of the kept views (Build, Play, the things
+//   browser, the chat's sheets, the previous build's packs and engine code): a build whose frontend holds
+//   one fails here (`LIGHT_REFUSES`).
+// - dist/widget.js: the kept views, the extension's second file (`entry_frontend_widget` in spindle.json,
+//   which Lumiverse serves beside the first); the page fetches it when one of them is first shown
+//   (src/ui/kept/host-file.ts), and Lumiverse itself calls its `setupWidget` in a desktop pop-out.
+// - dist/ui/: the web app RPE serves at /ui/ (§14), the UI's web shell, with the kept views as a chunk of
+//   its own that it fetches when one is first shown.
 // - dist/rpe.files.json: the build's statement of itself (READINGS R-12): the hash of the app file and of
 //   every file of the folders it reads beside it. The hash of the statement is stamped into the backend
 //   (`process.env.RPE_STATED_HASH`), for the extension to state when it tells RPE a new app file has
@@ -55,10 +61,12 @@ const UI_SHELLS = {
   extension: "src/ui/extension.tsx",
   /** The web shell's page: Bun emits it with the script it loads. */
   web: "src/ui/index.html",
+  /** The kept views (Build, Play, the things browser, the chat's sheets): the extension's second file, and the chunk the web app splits off its script (`src/ui/kept/chunk.ts`). */
+  kept: "src/ui/kept/chunk.ts",
 } as const;
 
 /** What a build makes, by name in dist/. spindle.json names the extension's two. */
-export const OUT = { app: "rpe.js", backend: "backend.js", frontend: "frontend.js", ui: "ui", kit: "agent-kit.js", core: "lumirpengine.js", statement: STATEMENT_FILE } as const;
+export const OUT = { app: "rpe.js", backend: "backend.js", frontend: "frontend.js", widget: "widget.js", ui: "ui", kit: "agent-kit.js", core: "lumirpengine.js", statement: STATEMENT_FILE } as const;
 
 const ENTRIES = { app: "src/app/main.ts", backend: "src/ext/backend.ts", loader: "src/ext/loader.ts", kit: "src/cli/agent-kit.ts", core: "src/cli/main.ts" } as const;
 
@@ -92,6 +100,9 @@ const LEFT_OUT: readonly string[] = ["supports-color"];
 
 /** What the extension's backend may not hold, by its path from the repository's root: the server's own areas, any package (pi, the SDKs), and the harness. */
 const APPLICATION = /^(?:src\/(?:app|store|turn|tree|iface|cast|story|lore|migrate|ui|cli)\/|node_modules\/|\.\.\/)/;
+
+/** What the extension's first file may not hold, by its path from the repository's root: the previous build's packs and engine code, Build's own, and the kept views the second file carries (`src/ui/kept/chunk.ts`). */
+const LIGHT_REFUSES = /^src\/(?:packs\/|engine\/|frontend\/(?:build|gm|things)\/|frontend\/play\/(?!activity\.)|frontend\/(?:packs|palette|overlays)\.|ui\/kept\/(?:build|catalog|chunk|things)\.|ui\/kept\/play\/mount\.)/;
 
 /** Builds everything but the pages. */
 const NO_PAGES = "--no-pages";
@@ -253,8 +264,14 @@ async function main(argv: readonly string[]): Promise<number> {
       const from = (path: string): string => relative(dirname(FRONTEND_ENTRY), join(ROOT, path));
       const entry = [`import { loader } from ${JSON.stringify(from(ENTRIES.loader))};`, `import { mount } from ${JSON.stringify(from(UI_SHELLS.extension))};`, "export const setup = loader(mount);", ""].join("\n");
       // Both UI bundles are minified: the page loads the extension's frontend on every visit to Lumiverse, and the web app on every visit to RPE.
-      await oneFile("the extension's frontend", FRONTEND_ENTRY, OUT.frontend, "browser", stamp, roots, { files: { [FRONTEND_ENTRY]: entry }, minify: true });
-      const web = await bundle("the web app", { entrypoints: [join(ROOT, UI_SHELLS.web)], outdir: join(STAGE, OUT.ui), target: "browser", define: stamp, minify: true }, roots);
+      const first = await oneFile("the extension's frontend", FRONTEND_ENTRY, OUT.frontend, "browser", stamp, roots, { files: { [FRONTEND_ENTRY]: entry }, minify: true });
+      // The first file is what Lumiverse loads on every visit: none of the previous build's packs or engine code, none of Build's own and none of the kept views is in it.
+      const heavy = first.filter((input) => LIGHT_REFUSES.test(input));
+      if (heavy.length > 0) fail(`the extension's first file holds what belongs to the kept chunk: ${heavy.slice(0, 8).join(", ")}${heavy.length > 8 ? ` and ${heavy.length - 8} more` : ""}`);
+      // The kept views are the extension's second file: Lumiverse serves `entry_frontend_widget` beside the first and loads the first as one blob, so what the page loads later has to be a file of its own (src/ui/kept/host-file.ts).
+      await oneFile("the extension's second file", join(ROOT, UI_SHELLS.kept), OUT.widget, "browser", stamp, roots, { minify: true });
+      // The web app is minified and split: the kept chunk is a file of its own, fetched when a kept view is first shown.
+      const web = await bundle("the web app", { entrypoints: [join(ROOT, UI_SHELLS.web)], outdir: join(STAGE, OUT.ui), target: "browser", define: stamp, minify: true, splitting: true }, roots);
       if (!web.outputs.some((path) => path === join(STAGE, OUT.ui, "index.html"))) fail(`the web app came out without ${OUT.ui}/index.html, which RPE serves at /ui/`);
     }
 
@@ -295,6 +312,7 @@ async function main(argv: readonly string[]): Promise<number> {
     add(OUT.backend, "the extension's backend");
     if (pages) {
       add(OUT.frontend, "the extension's frontend");
+      add(OUT.widget, "the extension's second file: the kept views, loaded when one is first shown");
       for (const file of filesUnder(join(DIST, OUT.ui))) rows.push([`dist/${relative(DIST, file.path)}`, sizeWords(file.size), "the web app"]);
     }
     add(OUT.kit, "the agent kit");
@@ -302,7 +320,7 @@ async function main(argv: readonly string[]): Promise<number> {
     const width = Math.max(...rows.map(([path]) => path.length));
     console.log(`build ${id}${linked === null ? "" : `, with rp-harness ${linked.sha}${linked.changed ? " and its uncommitted changes" : ""}`}`);
     for (const [path, size, what] of rows) console.log(`  ${path.padEnd(width)}  ${size.padStart(10)}  ${what}`);
-    if (!pages) console.log(`Without the pages (${NO_PAGES}): this build has no dist/${OUT.frontend} and no dist/${OUT.ui}/.`);
+    if (!pages) console.log(`Without the pages (${NO_PAGES}): this build has no dist/${OUT.frontend}, no dist/${OUT.widget} and no dist/${OUT.ui}/.`);
     return 0;
   } catch (error) {
     rmSync(STAGE, { recursive: true, force: true });

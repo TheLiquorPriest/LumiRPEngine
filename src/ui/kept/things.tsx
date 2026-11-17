@@ -3,11 +3,11 @@
 // in the world), over a kept App of its own for the chat (`app.ts`) whose call files read RPE's typed routes. The GM view's parts it
 // reads load as GM mode loaded them (`useGmParts`), again when the chat moves on. Every change is his own edit through the taps
 // route, sent in edits of at most `engine.editOps` operations each, with one Undo for all of them; after one applies, a notice says
-// what it did with that Undo. The bounds its controls hold to are RPE's settings, read when it mounts. The World page draws it only
-// with its gate open (`things-slot.ts`), and it is set there when this module loads.
+// what it did with that Undo. The bounds its controls hold to are RPE's settings, read when it mounts. The World page shows it only
+// with its gate open (`things-page.tsx`), which loads the kept chunk (`chunk.ts`) that mounts it here.
 
 import { render } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { AppContext as TodayContext, useApp as useToday } from "../../frontend/app";
 import { chunks } from "../../frontend/batch";
 import { Empty, Toasts, useBusy } from "../../frontend/components";
@@ -20,13 +20,12 @@ import { gmReloadKey, useGmParts } from "../../frontend/gm/use-gm-parts";
 import { editRequest } from "../../frontend/requests";
 import type { EditOp } from "../../shared/edit-ops";
 import { DEFAULT_CURRENCY } from "../../shared/world";
-import { useApp } from "../app";
 import type { RpeClient } from "../client";
-import { createStore, useSelect } from "../store";
-import { setThingsBrowser } from "../things-slot";
-import { useUiSettings } from "../ui-settings";
+import { useSelect, createStore } from "../store";
 import { keptApp } from "./app";
+import { CATALOG } from "./catalog";
 import { PLAY_CSS } from "./play/styles";
+import type { PlayMount } from "./play/mount";
 
 type Limits = BulkEditor["limits"];
 
@@ -99,56 +98,47 @@ function Browser(props: { chat: string; limits: Limits }) {
   );
 }
 
-/** The things browser for `chat`, as World's slot draws it: a kept App of its own while it shows, taken away with all it started. */
-export function KeptThings(props: { chat: string }) {
-  const app = useApp();
-  const settings = useUiSettings();
-  const root = useRef<HTMLDivElement>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  useEffect(() => {
-    const at = root.current;
-    if (at === null) return undefined;
-    let live = true;
-    let stop: (() => void) | null = null;
-    void limitsOf(app.client, props.chat).then(
-      (limits) => {
-        if (!live) return;
-        const host = app.keptHost();
-        const removeStyle = host.addStyle(PLAY_CSS);
-        const kept = keptApp({ client: app.client, chat: createStore<string | null>(props.chat), mode: "play", host, timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go });
-        const offCurrency = kept.app.sync.subscribe((held) => setCurrency(held.view?.currency ?? null));
-        render(
-          <TodayContext.Provider value={kept.app}>
-            <div class="lre">
-              <Browser chat={props.chat} limits={limits} />
-              <Toasts surface="drawer" />
-            </div>
-          </TodayContext.Provider>,
-          at,
-        );
-        stop = () => {
-          render(null, at);
-          kept.stop();
-          offCurrency();
-          host.dispose();
-          removeStyle();
-        };
-      },
-      (error: unknown) => {
-        if (live) setProblem(error instanceof Error ? error.message : String(error));
-      },
-    );
-    return () => {
-      live = false;
-      stop?.();
-    };
-  }, [props.chat]);
-  return (
-    <div class="rpe-play rpe-kept-things">
-      {problem === null ? null : <p class="lre-muted rpe-line">{`The things could not be read: ${problem}`}</p>}
-      <div ref={root} />
-    </div>
-  );
-}
+/** What the things browser is given to mount: what the Play view is. */
+export type ThingsMount = PlayMount;
 
-setThingsBrowser(KeptThings);
+/**
+ * The things browser for `mount.chat` in `root`: a kept App of its own while it shows, taken away with all it started. It reads the
+ * bounds first; if they cannot be read it says so where the browser would be.
+ */
+export function mountThings(root: HTMLElement, mount: ThingsMount): () => void {
+  let live = true;
+  let stop: (() => void) | null = null;
+  void limitsOf(mount.client, mount.chat).then(
+    (limits) => {
+      if (!live) return;
+      const removeStyle = mount.host.addStyle(PLAY_CSS);
+      const kept = keptApp({ ...mount, chat: createStore<string | null>(mount.chat), mode: "play", catalog: CATALOG });
+      const offCurrency = kept.app.sync.subscribe((held) => setCurrency(held.view?.currency ?? null));
+      render(
+        <TodayContext.Provider value={kept.app}>
+          <div class="lre">
+            <Browser chat={mount.chat} limits={limits} />
+            <Toasts surface="drawer" />
+          </div>
+        </TodayContext.Provider>,
+        root,
+      );
+      stop = () => {
+        render(null, root);
+        kept.stop();
+        offCurrency();
+        mount.host.dispose();
+        removeStyle();
+      };
+    },
+    (error: unknown) => {
+      if (!live) return;
+      render(<p class="lre-muted rpe-line">{`The things could not be read: ${error instanceof Error ? error.message : String(error)}`}</p>, root);
+      stop = () => render(null, root);
+    },
+  );
+  return () => {
+    live = false;
+    stop?.();
+  };
+}

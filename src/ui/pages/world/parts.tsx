@@ -31,7 +31,7 @@ export interface WorldSlots {
   value?(node: LevelNode, line: LevelValue): ComponentChildren;
   /** Under a fact's line: its history, and its edit. */
   fact?(node: LevelNode, fact: LevelFact): ComponentChildren;
-  /** Below the tree: the things browser the chat's own UI mounts (things-slot.ts). */
+  /** Below the tree: the things browser (`kept/things-page.tsx`). */
   things?: ComponentChildren;
 }
 

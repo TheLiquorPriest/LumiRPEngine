@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useId, useMemo, useState } from "preact/hooks";
 import type { PlaceRef } from "../../shared/character";
 import type { PlaceId } from "../../shared/ids";
-import { FormSheet } from "../build/form-kit";
+import { FormSheet } from "../form-sheet";
 import { Badge, Button, Empty, IconButton, List, ListRow, Section } from "../components";
 import { Icon } from "../../ui/icons";
 import { browseStart, pathLabel, placeIndex, SEARCH_LIMIT, searchPlaces, trailTo, type PlaceIndex } from "./places";

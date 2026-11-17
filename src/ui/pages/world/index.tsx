@@ -17,7 +17,7 @@ import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { useSelect } from "../../store";
 import { TURN_KIND_WORDS } from "../../trace-view";
-import { thingsBrowser } from "../../things-slot";
+import { KeptThings } from "../../kept/things-page";
 import { useUiSetting } from "../../ui-settings";
 import type { NotAppliedReply } from "../../../shared/api";
 import { counted, when } from "../../words";
@@ -234,9 +234,8 @@ export function WorldPage(props: { chat: string; at?: readonly string[] }) {
   const due = useRead(gateOpen ? () => readDue(app.client, chat, rest.turn) : null, [chat, gateOpen, rest.turn, changes]);
   const dueAt = (ref: string) => (due.value?.items ?? []).filter((item) => item.at === ref);
   const onChanged = (): void => setChanges((n) => n + 1);
-  const Things = thingsBrowser();
   const slots: WorldSlots = {
-    things: Things === null ? undefined : <Things chat={chat} />,
+    things: <KeptThings chat={chat} />,
     node: (node: LevelNode) => <NodeTools key={node.ref} chat={chat} node={node} turn={rest.turn} due={dueAt(node.ref)} onChanged={onChanged} />,
     value: (node, line) => <RowTools key={line.key} chat={chat} level={node.ref} part={line.key} as="value" current={line.value} turn={rest.turn} startOpen={node.ref === level && line.key === focus} onChanged={onChanged} />,
     fact: (node, fact) => <RowTools key={fact.id} chat={chat} level={node.ref} part={fact.key} as="fact" current={fact.value} turn={rest.turn} startOpen={false} onChanged={onChanged} />,

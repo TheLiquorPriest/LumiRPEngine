@@ -5,6 +5,7 @@
 // here is one the loader can register as it is.
 
 import type { LumiverseHost } from "../../frontend/host";
+import type { KeptLoader } from "../kept/chunk-api";
 import type { Route } from "../app";
 import type { RpeClient } from "../client";
 import type { Readable } from "../store";
@@ -80,6 +81,8 @@ export interface FrameEnv {
   timers: Timers;
   /** The bridge to Lumiverse the chat's surfaces share (its float widgets, its size, its drawer), made once for the frame. */
   host: LumiverseHost;
+  /** Loads the kept chunk when a surface first needs one of its views (the sheets); the shell's, which loads it once. */
+  kept: KeptLoader;
 }
 
 /** One surface file of `surfaces/`: the placements it registers, for the chat open now (asked again each time the chat changes). */

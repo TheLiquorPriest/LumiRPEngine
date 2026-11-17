@@ -7,6 +7,7 @@ import { useContext, useEffect, useState } from "preact/hooks";
 import { type Readable, useSelect } from "./store";
 import type { RpeClient } from "./client";
 import type { Gate } from "./gate";
+import type { KeptChunk } from "./kept/chunk-api";
 import type { KeptHost } from "./kept/host";
 import type { Timers } from "./roads";
 import { useUiSetting, useUiSettings } from "./ui-settings";
@@ -34,6 +35,8 @@ export interface UiApp {
   readonly timers: Timers;
   /** What today's Build mode is given of the page it runs in, made fresh for each visit to Build (kept/host.ts): Lumiverse's own in the drawer, the page's own in the web shell. */
   keptHost(): KeptHost;
+  /** Loads the kept views (Build, Play, the things browser, the chat's sheets) when one is first shown, and hands them over (kept/chunk-api.ts): the web shell splits them off its script, the drawer fetches the extension's second file. */
+  kept(): Promise<KeptChunk>;
   go(route: Route): void;
 }
 

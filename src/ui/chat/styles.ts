@@ -1,6 +1,14 @@
 // The chat surfaces' stylesheet (put in the page by the extension shell's mount): the rules for what RPE
 // draws inside Lumiverse's chat, all under `rpe-chat-` and drawn on the `.lre` tokens, which follow
-// Lumiverse's theme. A surface's root carries `lre`, so the tokens reach it.
+// Lumiverse's theme. A surface's root carries `lre`, so the tokens reach it. The HUD, the status line, the
+// toasts, the reply lines and the fixes the HUD opens draw with today's chat, select, form and character
+// areas besides (`CHAT_FRAME_CSS`); the sheets add the rest of today's Play areas when the kept chunk
+// opens one (`kept/chunk.ts`).
+
+import { CHARACTER_CSS } from "../../frontend/styles/character";
+import { CHAT_CSS } from "../../frontend/styles/chat";
+import { FORMS_CSS } from "../../frontend/styles/forms";
+import { SELECT_CSS } from "../../frontend/styles/select";
 
 export const CHAT_SURFACES_CSS = `
 .rpe-chat-controls{display:inline-flex;align-items:center;gap:var(--lre-s1);min-width:0;max-width:100%}
@@ -33,3 +41,6 @@ export const CHAT_SURFACES_CSS = `
 .rpe-chat-lane{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start}
 .rpe-chat-lane-list{margin:var(--lre-s1) 0 0;padding-left:1.2em;color:var(--lre-fg);font-size:var(--lre-fs-sm);overflow-wrap:anywhere}
 `;
+
+/** What the extension puts in the page for the chat's surfaces: today's areas they draw with, then their own. */
+export const CHAT_FRAME_CSS = [CHAT_CSS, SELECT_CSS, FORMS_CSS, CHARACTER_CSS, CHAT_SURFACES_CSS].join("\n");

@@ -14,11 +14,9 @@
 
 import type { AgentsView } from "../../shared/agents";
 import { type App, type Draft, initialUi, type Overlays, playAt, type Toast, type UiState } from "../../frontend/app";
-import { UI_PACKS } from "../../frontend/packs";
-import { trackDraft } from "../../frontend/build/draft";
 import { ProtocolClient } from "../../frontend/protocol-client";
 import type { Send } from "../../frontend/registry";
-import { buildCatalog } from "../../frontend/ui-registry";
+import { buildCatalog, type UiCatalog } from "../../frontend/ui-registry";
 import type { ChatId } from "../../shared/ids";
 import type { ErrorMessage, ResultMessage } from "../../shared/protocol";
 import { SHOW_IDS_KEY } from "../../frontend/app";
@@ -62,6 +60,9 @@ export const NO_OVERLAYS: Overlays = {
   closeWorld: () => undefined,
 };
 
+/** The catalog of an App that draws no pack's panel: every list empty. */
+const NO_PACKS: UiCatalog = buildCatalog([]);
+
 export interface KeptDeps {
   client: Pick<RpeClient, "call" | "follow">;
   /** The chat the App is for: Play's chat, or the chat Lumiverse has open (the page sets it as the chat changes); null for none. */
@@ -80,6 +81,10 @@ export interface KeptDeps {
   overlays?: Overlays;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
+  /** The packs' panels, sheets and editors the views draw from; none where the App is for surfaces that draw no pack's (the chat's HUD and its reply lines): the kept chunk (`chunk.ts`) gives the whole catalog to the views it mounts. */
+  catalog?: UiCatalog;
+  /** What keeps Build's draft current as pushes move it (`frontend/build/draft.ts`); the Build view gives it, no other has a draft. */
+  draft?: (app: App, clock: { set(run: () => void, ms: number): unknown; clear(handle: unknown): void }) => () => void;
 }
 
 export interface Kept {
@@ -253,7 +258,7 @@ export function keptApp(deps: KeptDeps): Kept {
     client,
     send,
     sync: state,
-    catalog: buildCatalog(UI_PACKS),
+    catalog: deps.catalog ?? NO_PACKS,
     ui,
     toasts,
     host: deps.host,
@@ -267,7 +272,7 @@ export function keptApp(deps: KeptDeps): Kept {
   };
   // A push that the draft moved past the one Build holds has it read again (DESIGN §23).
   if (deps.mode === "build") {
-    stops.push(trackDraft(app, clock));
+    if (deps.draft !== undefined) stops.push(deps.draft(app, clock));
     // What concerns the user and no one chat (a world's draft moved) is told on the user's own channel, which Build hears whether or not a chat is open.
     stops.push(
       deps.client.follow(USER_CHANNEL, {

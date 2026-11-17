@@ -28,7 +28,6 @@ import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
 import { toastQueued } from "./queued";
 import { followReview, ReviewCard, reviewHandlers, ReviewUnread } from "./review-card";
-import { go } from "./build/chrome";
 
 const CHIP_ICON: Record<ChipKind, IconName> = {
   change: "check",
@@ -250,10 +249,7 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
         // A harness turn's change to the world's document: Open in Build opens the chat's world there, and sends nothing.
         if (chip.kind === "world_made" && choice === "build") {
           const worldId = view?.worldId ?? null;
-          if (worldId !== null) {
-            app.ui.update((ui) => ({ ...ui, mode: "build" }));
-            go(app, { view: "world", worldId });
-          }
+          if (worldId !== null) app.open?.({ page: "build", chat: chatId, at: [worldId] });
           return;
         }
         await sendChipChoice(app, chip, choice, chatId, payload);

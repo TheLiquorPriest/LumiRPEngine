@@ -14,5 +14,6 @@
     "ui_panels"
   ],
   "entry_backend": "dist/backend.js",
-  "entry_frontend": "dist/frontend.js"
+  "entry_frontend": "dist/frontend.js",
+  "entry_frontend_widget": "dist/widget.js"
 }

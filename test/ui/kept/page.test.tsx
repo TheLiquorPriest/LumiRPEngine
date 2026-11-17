@@ -13,7 +13,7 @@ import type { RpeClient } from "../../../src/ui/client";
 import { PageFor } from "../../../src/ui/frame";
 import { createGate } from "../../../src/ui/gate";
 import { webHost } from "../../../src/ui/kept/host";
-import { mountBuild } from "../../../src/ui/kept/page";
+import { mountBuild } from "../../../src/ui/kept/build";
 import { createStore as storeOf } from "../../../src/ui/store";
 import { counted, handTimers, type HandTimers, type RouteClient, routeClient } from "./bed";
 import { openPage, type Page, PageElement, PageEvent } from "./dom";
@@ -64,7 +64,7 @@ function webApp(rpe: RouteClient, timers: HandTimers): UiApp {
   const route = createStore<Route>({ page: "build" });
   // The page asks `call` of the client, the road to RPE's Build route, and follows the user's own channel, which says nothing here.
   const client = { ...rpe.client, follow: () => () => undefined } as unknown as RpeClient;
-  return { shell: "web", client, gate: createGate(), route, timers, keptHost: () => webHost({ revokeMs: () => 1000 }), go: (next) => route.set(next) };
+  return { shell: "web", client, gate: createGate(), route, timers, keptHost: () => webHost({ revokeMs: () => 1000 }), kept: () => import("../../../src/ui/kept/chunk"), go: (next) => route.set(next) };
 }
 
 describe("the Build page", () => {

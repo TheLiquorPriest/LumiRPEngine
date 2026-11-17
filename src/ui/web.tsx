@@ -16,6 +16,7 @@ import { createClient, type TokenStore, webConnector } from "./client";
 import { Frame, PagesBar, routeFor } from "./frame";
 import type { PageEntry } from "./page-entry";
 import { PAGES } from "./page-list";
+import { once } from "./kept/host-file";
 import { webHost } from "./kept/host";
 import { createGate } from "./gate";
 import { browserDeps, type RoadDeps } from "./roads";
@@ -276,6 +277,8 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
         connections: async () => (await client.call("GET /api/v1/connections", {})).connections.map((c) => ({ id: c.id, name: c.name, model: c.model ?? null })),
         worldBooks: async () => ((await client.call("GET /api/v1/build/lore/books", {})).books as unknown as { id: string; name: string }[]).map((b) => ({ id: b.id, name: b.name })),
       }),
+    // The kept views are split off this page's script by the build and fetched when one is first shown.
+    kept: once(() => import("./kept/chunk")),
     go(next) {
       const hash = hashOf(next);
       if (location.hash === hash) onHash();
