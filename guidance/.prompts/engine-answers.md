@@ -145,7 +145,7 @@ carried_none: Turn {{turn}} carries no record of an earlier build: nothing was m
 carried_removed: {{part}} of turn {{turn}}'s old record was removed by the earlier build's clean-up before it was carried, so its words are gone.
 carried_unknown: Turn {{turn}}'s old record has no part {{part}}.{{#near}} Near: {{near}}.{{/near}} Its parts: {{parts}}.
 carried_cut: {{part}} goes on past {{to}} of {{of}} characters: send from {{to}} to read on.
-worlds_none: {{tool}} works on his worlds, and none can be reached from this run, so nothing was read or written.
+worlds_none: {{tool}} works on the player's worlds, and none can be reached from this run, so nothing was read or written.
 world_not_named: No world is named, and this chat plays none: name one with world.
 world_not_found: {{why}}
 world_conflict: {{why}} The draft is as it now stands in the answer's data; write again on it.

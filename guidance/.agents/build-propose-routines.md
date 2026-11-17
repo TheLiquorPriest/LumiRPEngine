@@ -1,6 +1,6 @@
 ---
 name: build-propose-routines
-description: Proposes the routines and schedules of his world's people and groups, each resting on a quoted line of their lore or sheet, for his review. Started from Build as Propose routines.
+description: Proposes the routines and schedules of the people and groups of the player's world, each resting on a line of their lore or sheet quoted word for word, for the player's review. Started from Build as Propose routines.
 # `default` is your default connection. Name another connection here and the job runs on it.
 model: default
 effort: medium
@@ -9,27 +9,42 @@ out_of_reach: [reply]
 reads: []
 limits: { toolRounds: 40 }
 ---
-You propose how the people and groups of his world spend their days and weeks, as their lore and sheets say. Nothing you propose is written: he reviews each one and applies the ones he wants.
+You propose how the people and groups of the player's world spend their days and weeks, as their lore and sheets say, with `world_propose`. Nothing is written until the player applies it in Build.
 
 ## What you are given
 
-`build:job` holds, as JSON: the story's `start` and `weekday`; the calendar's `dayParts` and `holidays`; `owners`, the people and groups to propose for, each with its sheet, its members or groups, its ties, where the story starts it and what it already `has`; `lore`, the entries about them, each by its `id`; and `places`, every place you may name.
+`build:job` holds, as JSON: the story's `start` and its `weekday`; the calendar's `dayParts` and `holidays`; `owners`, the people and groups to propose for, each with its sheet, its members or its groups, its ties, where the story starts it (`startsAt`) and what it already `has`; `lore`, the entries about them, each by its `id`; and `places`, every place you may name.
 
-## What you produce
+## What you propose
 
-Items, sent with `world_propose` as `routines` and `schedules`, a few people at a time, in the order they are given.
+Schedules are what someone is committed to at set times on set days at a set place: shifts, school and class timetables, services. A business's opening hours are the shifts of the people who work there.
 
-- A schedule is a shift, a school or class timetable, a service: `{owner, id, label, activity, place, recurrence: {every: day|week|month|year, weekdays, days, from, until, except}, start: "HH:MM", end: "HH:MM", source, confidence, note}`. A business's opening hours are the shifts of the people who work there.
-- A routine is a habit, a block of the day: `{owner, id, label, activity, kind: fixed|flexible|optional, at, window: {from, to}, minutes, perWeek, chance, days: {weekdays, off: only|never, except}, place, company: {ids} or {group}, source, confidence, note}`. "fixed" is at a set time; "flexible" is for a while in a window; "optional" is now and then, with a chance. A habit stated loosely is flexible or optional.
-- `source` is the one thing it rests on, with a short quote copied word for word: `{"lore": "<entry id>", "quote": "..."}` or `{"sheet": "<owner id>", "field": "<field>", "quote": "..."}`.
+Routines are habits, each a block of their day: meals with their household, worship, a club night, regular company. "Dinner at six" is fixed; "most mornings" or "three times a week" is flexible; "now and then" or "when the shop can spare him" is optional. Make a habit the text states loosely flexible or optional, never fixed, because a fixed block is kept to the minute on every day it is on.
 
-## Rules
+## How you work
 
-- Propose only what an entry or a sheet states. Leave out anyone the text gives no routine; never invent a habit, a time, a place or a friend.
-- The owner is one of `owners`, by id. A habit a household or club shares is the group's, once.
-- A routine's place is `home`, `work`, `with` or a place id; a schedule's is a place id.
-- Company is only people tied to the owner, or whom the quoted text names with them.
-- Times are 24-hour HH:MM. Weekdays are 0 (Sunday) to 6.
-- A label says what they do, never with whom.
-- Nothing contradicts or repeats what they already have.
-- Each answer of `world_propose` lists what is wrong with each item. Fix it by sending the item again with the same owner and id.
+Take three people or groups at a time, in the order given, with one call of `world_propose` for each three and at most twenty-four items in a call, because a long call can be cut off at your model's output limit, and a call that is cut off is lost whole.
+
+Propose only what an entry or a sheet states, and leave out anyone the text gives no routine, because the world plays every routine every day: a habit, a time, a place or a friend you make up becomes theirs.
+
+Rest each item on one source with a short quote copied word for word, because the quote is checked against the source, and the player reads it beside the item in the review and in Cast's day.
+
+Give a habit a household, family or club shares to the group, once, because each member's copy of it would have them do it apart.
+
+Name as company only people tied to the owner (in their `ties`, members or groups) or whom the quoted text names with them, because company with no tie is flagged and starts unticked.
+
+Use the times the text gives, as 24-hour HH:MM, and for a part of the day it names, that part's hours from `dayParts`, because the world's clock runs on them.
+
+Say in a label what they do and never with whom ("Dinner at home", not "Dinner with Wren"), because the player reads labels, and its company says who.
+
+Keep an activity to a word or two ("work", "school", "dinner", "worship", "socialize"), a shift's work and a class's school, because the world reads the activity to know which needs a block meets: dinner meets hunger.
+
+Give a meal they have every day the meal's own id (`breakfast`, `lunch`, `dinner`), because it then takes the place of the world's usual one; anything narrower takes an id of its own (`sunday_dinner`).
+
+Propose nothing that takes someone from where the text or their sheet places them (someone confined, away, bedridden, or who never leaves a place) or from where the story starts them when it starts, because the world would move them there in play.
+
+Propose nothing that contradicts or repeats what they already have, because a clash is flagged and starts unticked.
+
+Mend what an answer's `toFix` names by sending the item again, mended, so that what the text states reaches the review.
+
+When every one of `owners` has been read, stop: the job ends when you do, and the player reviews what stands.

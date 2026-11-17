@@ -76,6 +76,8 @@ const READ_BY_CODE: Record<string, true> = { description: true, format: true, ar
 
 /** The definitions' names, in the order E.4 lists them. */
 const AGENTS = ["author", "gm", "character", "narrator", "keeper", "historian", "indexer", "mapper", "assistant"];
+/** Build's five model jobs' definitions (R-171), beyond App. C's nine. */
+const BUILD_JOBS = ["build-import-lore", "build-index-text", "build-refine", "build-describe-map", "build-propose-routines"];
 
 /** Whether a template in a file's text puts in or tests a field by this name. */
 function names(text: string, field: string): boolean {
@@ -283,8 +285,8 @@ describe("each check fails on a scratch copy of the set that breaks it", () => {
   });
 });
 
-test("the shipped definitions are the nine of E.2 and E.4, and no other: RPH ships none", () => {
-  expect([...SHIPPED.keys()].filter((path) => path.startsWith(".agents/")).map((path) => basename(path, ".md")).sort()).toEqual([...AGENTS].sort());
+test("the shipped definitions are App. C's nine and Build's five, and no other: RPH ships none", () => {
+  expect([...SHIPPED.keys()].filter((path) => path.startsWith(".agents/")).map((path) => basename(path, ".md")).sort()).toEqual([...AGENTS, ...BUILD_JOBS].sort());
 });
 
 test.skip("the Author's fixed tools, as RPH's loader reads them, are §6.8's thirty, name for name", async () => {
