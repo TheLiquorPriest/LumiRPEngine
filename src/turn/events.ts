@@ -31,7 +31,7 @@ import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, loadGuidance, type TemplatePart } from "../app/guidance";
 import type { AgentRef, AttachMoment, ConsentGrant, ContextBlock, FilesPort, GapCheck, JobView, Log, RuleFiring, RunScope, Scope, TurnEvents } from "rp-harness/contract";
 import { castViews, type MemorySearch, type SourceReader } from "../cast";
-import { mapView, mapWording, rulesetData } from "../iface";
+import { mapView, mapWording, noMapWords, rulesetData } from "../iface";
 import { LORE_BATCH, LORE_KNOWN, type LoreIndex, type LoreProposals, loreBatchBlock, loreKnownBlock, loreLines } from "../lore";
 import { type DueSource, type Lane, type Part, readPart, type Store, type ViewLine, wordLine, worldState, type WorldStateBlock } from "../store";
 import { storyBrief } from "../story";
@@ -151,11 +151,13 @@ function rulesetView(deps: EventsDeps, scope: Scope): string | null {
 
 /**
  * The drawn layer of the map the player's character stands on (`map:drawn`), at the scope's turn or the chat's head: what the Author's
- * opening block gives once a session (plan §10.2). Null where the chat has no world, or no map is drawn where he stands.
+ * opening block gives once a session (plan §10.2). Where the chat has no world, or no map is drawn where he stands, the map layout's
+ * words for that; null only where the layout has none.
  */
 async function drawnMap(deps: EventsDeps, scope: Scope): Promise<string | null> {
   const settings = await turnSettings(deps.files, scope, deps.log);
-  return drawnLayer(deps.store, scope, mapView(await mapWording(guidanceTexts(deps.files, scope, deps.log)), settings.map))?.text ?? null;
+  const wording = await mapWording(guidanceTexts(deps.files, scope, deps.log));
+  return drawnLayer(deps.store, scope, mapView(wording, settings.map))?.text ?? noMapWords(wording) ?? null;
 }
 
 /** A turn's reply as saved, by its latest run that wrote into the chat; null before it has gone out. */

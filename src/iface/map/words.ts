@@ -165,6 +165,11 @@ export async function mapWording(files: GuidanceFiles): Promise<MapWording> {
 /** No wording: a map prints nothing, and a tool answers with no words. */
 export const NO_WORDING: MapWording = Object.freeze({ lines: Lines.none(), layout: NO_LAYOUT });
 
+/** What the layout says where a map an agent is given by name has nothing drawn for the chat (no world, or no map where the player's character stands): its `map_none` line; undefined where it has none. */
+export function noMapWords(wording: MapWording): string | undefined {
+  return layoutLine(wording.layout, "map_none");
+}
+
 /** A legend entry in words, by what its symbol stands for: the layout's line of its kind, filled. */
 function legendWords(layout: MapLayout, world: WorldDoc, state: Readonly<WorldState>, entry: LegendEntry): string {
   const what: MapCellDef = entry.what;
