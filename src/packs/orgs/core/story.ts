@@ -151,14 +151,14 @@ function membership(ctx: ReadContext, p: Proposal): MembershipPlan | Rejection {
       if (said !== "" && position === null) return refuse("bad_position", say("why_employer_has_no_position_position", { employer: name(org), position: said }));
       const title = plainWords(strOf(p.title));
       const ops = compileOrgOp(ctx, { do: "admit", org, who, ...(title !== "" ? { title } : {}), ...(position !== null ? { position } : {}), why });
-      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.admit", `admitted ${name(who)} to ${name(org)}`)] } : ops;
+      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.admit", say("org_log_admitted_who_to_org", { who: name(who), org: name(org) }))] } : ops;
     }
     case "leave": {
       if (!member) return refuse("already", say("why_who_isnt_a_member_of_org", { who: name(who), org: name(org) }));
       // Anyone may leave; someone else putting them out is a removal.
       if (by === undefined || by === who) return { effects: [{ type: "orgs.leave", args: { org, who, why } }] };
       const ops = compileOrgOp(ctx, { do: "remove", org, who, why });
-      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.remove", `removed ${name(who)} from ${name(org)}`)] } : ops;
+      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.remove", say("org_log_removed_who_from_org", { who: name(who), org: name(org) }))] } : ops;
     }
     case "appoint": {
       const said = strOf(p.position);
@@ -170,14 +170,14 @@ function membership(ctx: ReadContext, p: Proposal): MembershipPlan | Rejection {
       const title = positionsOf(ctx, org).find((x) => x.id === position)?.title ?? position;
       if (held === position) return refuse("already", say("why_who_already_holds_title", { who: name(who), title: title }));
       const ops = compileOrgOp(ctx, { do: "appoint", org, who, position, why });
-      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", `appointed ${name(who)} ${title}`)] } : ops;
+      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", say("org_log_appointed_who_title_2", { who: name(who), title: title }))] } : ops;
     }
     case "title": {
       const title = plainWords(strOf(p.title));
       if (title === "") return refuse("bad_title", say("why_a_title_is_the_words_they_go"));
       if (!member) return refuse("not_member", say("why_who_isnt_a_member_of_org", { who: name(who), org: name(org) }));
       const ops = compileOrgOp(ctx, { do: "title", org, who, title });
-      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", `gave ${name(who)} the title ${title}`)] } : ops;
+      return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", say("org_log_gave_who_the_title_title", { who: name(who), title: title }))] } : ops;
     }
     default:
       return refuse("bad_proposal", say("why_a_membership_change_is_one_of_join", { join: MEMBERSHIP_CHANGES.join(", ") }));
@@ -248,8 +248,8 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
     const basis = strOf(p.basis);
     const hire: EffectSpec = { type: "economy.hire", args: { business: org, worker: who, ...(title !== "" ? { title } : {}), ...(position !== null ? { position } : {}), ...(basis !== "" ? { basis } : {}), ...(rate !== undefined ? { rate } : {}), ...(hours !== undefined ? { hours_per_week: hours } : {}) } };
     const as = title !== "" ? title : position !== null ? (positionsOf(ctx, org).find((x) => x.id === position)?.title ?? "") : "";
-    const text = `Hired ${name(who)}${as !== "" ? ` as ${as}` : ""}`;
-    return { effects: [hire, ...line(orgTypeOf(ctx, org) !== null ? org : null, text), ...flag(org, "staff.hire", `hired ${name(who)}`)] };
+    const text = say("org_log_hired_who_as_title", { who: name(who), title: as, if_title: as !== "" });
+    return { effects: [hire, ...line(orgTypeOf(ctx, org) !== null ? org : null, text), ...flag(org, "staff.hire", say("org_log_hired_who", { who: name(who) }))] };
   }
   const job = jobNamed(ctx, who, p);
   if (typeof job !== "string") return job;
@@ -258,23 +258,23 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
   const fields = held?.fields ?? {};
   switch (change) {
     case "let_go":
-      return { effects: [{ type: "economy.job_end", args: { job } }, ...line(org, `Let ${name(who)} go`), ...flag(org, "staff.fire", `let ${name(who)} go`)] };
+      return { effects: [{ type: "economy.job_end", args: { job } }, ...line(org, say("org_log_let_worker_go", { worker: name(who) })), ...flag(org, "staff.fire", say("org_log_let_who_go", { who: name(who) }))] };
     case "quit":
-      return { effects: [{ type: "economy.job_end", args: { job } }, ...line(org, `${name(who)} quit`)] };
+      return { effects: [{ type: "economy.job_end", args: { job } }, ...line(org, say("org_log_who_quit", { who: name(who) }))] };
     case "raise": {
       const rate = typeof p.rate === "number" && Number.isFinite(p.rate) && p.rate > 0 ? Math.round(p.rate) : undefined;
       const pct = typeof p.pct === "number" && Number.isFinite(p.pct) && p.pct > -100 && p.pct !== 0 ? p.pct : undefined;
       if (rate === undefined && pct === undefined) return refuse("bad_amount", say("why_a_raise_gives_the_new_rate_or"));
       const was = typeof fields.rate === "number" ? fields.rate : 0;
       const now = rate ?? Math.round(was * (1 + (pct ?? 0) / 100));
-      const pay = now > 0 ? `Set ${name(who)}'s pay to ${formatMoney(now, ctx.world.currency)}` : `Changed ${name(who)}'s pay`;
-      return { effects: [{ type: "economy.job_raise", args: { job, ...(rate !== undefined ? { rate } : { pct: pct ?? 0 }) } }, ...line(org, pay), ...flag(org, "staff.pay", `changed ${name(who)}'s pay`)] };
+      const pay = now > 0 ? say("org_log_set_worker_s_pay_to_rate", { worker: name(who), rate: formatMoney(now, ctx.world.currency) }) : say("org_log_changed_who_s_pay", { who: name(who) });
+      return { effects: [{ type: "economy.job_raise", args: { job, ...(rate !== undefined ? { rate } : { pct: pct ?? 0 }) } }, ...line(org, pay), ...flag(org, "staff.pay", say("org_log_changed_who_s_pay_2", { who: name(who) }))] };
     }
     case "leave":
     case "back": {
       const leave = change === "leave";
       if (leave !== (strOf(fields.status) !== "leave")) return refuse("already", leave ? say("why_who_is_already_on_leave", { who: name(who) }) : say("why_who_isnt_on_leave", { who: name(who) }));
-      return { effects: [{ type: "economy.job_leave", args: { job, leave } }, ...line(org, leave ? `Put ${name(who)} on leave` : `${name(who)} came back from leave`), ...flag(org, "staff.pay", leave ? `put ${name(who)} on leave` : `brought ${name(who)} back from leave`)] };
+      return { effects: [{ type: "economy.job_leave", args: { job, leave } }, ...line(org, leave ? say("org_log_put_who_on_leave", { who: name(who) }) : say("org_log_who_came_back_from_leave", { who: name(who) })), ...flag(org, "staff.pay", leave ? say("org_log_put_who_on_leave_2", { who: name(who) }) : say("org_log_brought_who_back_from_leave", { who: name(who) }))] };
     }
     default:
       return refuse("bad_proposal", say("why_an_employment_change_is_one_of_join", { join: EMPLOYMENT_CHANGES.join(", ") }));

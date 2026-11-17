@@ -120,9 +120,9 @@ function lendNow(api: FinanceApi, ctx: ReadContext, a: Record<string, JsonValue>
     ...posting([{ account: loan, amount: -cents }, { account: into, amount: cents }], { memo: `Borrowed ${money} from ${lenderName}`, kind: "deposit", category: "loan", counterparty: borrower, payer: lender }),
   ];
   // Whoever acts for an organization borrowing must hold its `money.borrow`; its History tells it.
-  const borrowed = borrows ? actAs(ctx, { by, party: borrower, power: "money.borrow", line: () => `Borrowed ${money} from ${lenderName}`, names: [lender] }, () => []) : [];
+  const borrowed = borrows ? actAs(ctx, { by, party: borrower, power: "money.borrow", line: () => say("org_log_borrowed_money_from_lendername", { money: money, lenderName: lenderName }), names: [lender] }, () => []) : [];
   if (!Array.isArray(borrowed)) return borrowed;
-  const lent = actAs(ctx, { by, party: lender, power: "money.spend", target: borrower, amount: cents, account: source, line: () => `Lent ${money} to ${borrowerName}`, names: [borrower] }, () => asUnit(events));
+  const lent = actAs(ctx, { by, party: lender, power: "money.spend", target: borrower, amount: cents, account: source, line: () => say("org_log_lent_money_to_borrowername", { money: money, borrowerName: borrowerName }), names: [borrower] }, () => asUnit(events));
   return Array.isArray(lent) ? [...lent, ...borrowed] : lent;
 }
 

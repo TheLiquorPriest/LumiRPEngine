@@ -680,7 +680,7 @@ function startEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
   if (spawn && run.emit([spawn]).length === 0) return { code: "bad_project", reason: say("why_name_cant_be_set_up", { name: def.name }) };
   if (run.emit([{ type: PROJECT_EVENTS.begin, data: { project: id, at } }]).length === 0) return { code: "bad_project", reason: say("why_name_cant_start", { name: def.name }) };
   advance(api, run, [id], at, null);
-  return [...run.out, ...acted(ctx, def.org, by, `Started ${def.name}`)];
+  return [...run.out, ...acted(ctx, def.org, by, say("org_log_started_name", { name: def.name }))];
 }
 
 /**
@@ -714,7 +714,7 @@ function pauseEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
     if (typeof r?.start === "number" && typeof r.end === "number" && doneAt(p, s) === null && !r.wait) left[s.id] = workBetween(cal, at, r.end, s.business_days !== undefined);
   }
   if (run.emit([{ type: PROJECT_EVENTS.pause, data: { project: p.def.id, at, left } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_be_paused", { name: p.def.name }) };
-  return [...run.out, ...acted(ctx, p.def.org, by, `Paused ${p.def.name}`)];
+  return [...run.out, ...acted(ctx, p.def.org, by, say("org_log_paused_name", { name: p.def.name }))];
 }
 
 /** `economy.project_resume`: a paused project going again now, each step under way ending its work left after now. */
@@ -735,7 +735,7 @@ function resumeEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEv
   const run = new Run(ctx);
   if (run.emit([{ type: PROJECT_EVENTS.resume, data: { project: p.def.id, at, ends } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_resume", { name: p.def.name }) };
   advance(api, run, [p.def.id], at, null);
-  return [...run.out, ...acted(ctx, p.def.org, by, `Resumed ${p.def.name}`)];
+  return [...run.out, ...acted(ctx, p.def.org, by, say("org_log_resumed_name", { name: p.def.name }))];
 }
 
 /** `economy.project_drop`: a project ended now, unfinished; what it paid stays paid, and what it made stays made; what it capitalized that nothing it made took is written off. */
@@ -749,7 +749,7 @@ function dropEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEven
   if (no) return no;
   const why = strOf(args.text).trim();
   if (run.emit([{ type: PROJECT_EVENTS.drop, data: { project: p.def.id, at: ctx.state.clock } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_be_dropped", { name: p.def.name }) };
-  return [...run.out, ...acted(ctx, p.def.org, by, `Dropped ${p.def.name}${why !== "" ? `: ${why}` : ""}`)];
+  return [...run.out, ...acted(ctx, p.def.org, by, say("org_log_dropped_name_why", { name: p.def.name, why: why, if_why: why !== "" }))];
 }
 
 /**

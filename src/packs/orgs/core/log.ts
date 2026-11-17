@@ -78,10 +78,11 @@ function str(e: PackEvent, key: string): string {
 
 export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
   {
-    // A History line, kept with its organization: the last 40.
+    // A History line, kept with its organization: the last 40. One the history lines have no words for (the line was deleted) is made with no text, and is no line.
     type: ORGS_LOG,
-    validate: (e) => (str(e, "org") !== "" && str(e, "text") !== "" ? null : { code: "bad_event", reason: say("why_a_history_line_needs_an_organization_and") }),
+    validate: (e) => (str(e, "org") !== "" ? null : { code: "bad_event", reason: say("why_a_history_line_needs_an_organization_and") }),
     apply: (e, state) => {
+      if (str(e, "text") === "") return;
       const log = sliceRecord(state, "orgs", "log");
       const org = str(e, "org");
       const line: JsonObject = { at: typeof e.data.at === "number" ? e.data.at : state.clock, text: str(e, "text") };

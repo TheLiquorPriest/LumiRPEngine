@@ -148,7 +148,7 @@ export function registerAssets(r: FinanceRegistry): void {
       const from = strOf(a.holding) || strOf(a.property) || strOf(a.business);
       const where = to === "" ? "back to its owners" : to === "reinvest" ? "to be reinvested" : `to ${labelOf(ctx, to)}`;
       const what = strOf(a.property) !== "" ? "rent" : strOf(a.business) !== "" ? "profits" : "dividends";
-      return actAs(ctx, { by: strOf(a.by), party, power: strOf(a.property) !== "" ? "property.manage" : "money.manage", line: () => `Sent ${labelOf(ctx, from)}'s ${what} ${where}` }, () => {
+      return actAs(ctx, { by: strOf(a.by), party, power: strOf(a.property) !== "" ? "property.manage" : "money.manage", line: () => say("org_log_sent_from_s_what_where", { from: labelOf(ctx, from), what: what, where: where }) }, () => {
         if (strOf(a.holding) !== "") return setRoute(r.api, ctx, party, strOf(a.holding), to);
         if (strOf(a.property) !== "") return setRentRoute(r.api, ctx, party, strOf(a.property), to);
         if (strOf(a.business) !== "") return setStakeRoute(r.api, ctx, party, strOf(a.business), to);

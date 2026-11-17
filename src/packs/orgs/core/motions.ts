@@ -175,7 +175,7 @@ export function ruleVotes(m: Pick<Motion, "electorate" | "votes">, standing: rea
 
 /** A name the player character's lines may use: theirs as "you", one they can see, else "someone". */
 function nameFor(ctx: ReadContext, viewer: EntityId | undefined, id: EntityId): string {
-  if (id === "") return "the GM";
+  if (id === "") return say("org_log_the_gm");
   if (viewer !== undefined && id === viewer) return "you";
   if (viewer !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id)) return "someone";
   return labelOf(ctx, id);
@@ -198,7 +198,7 @@ function carryOut(ctx: ReadContext, rng: Rng, org: EntityId, id: string, what: C
 
 /** A motion's end, and its History line. */
 function ended(ctx: ReadContext, org: EntityId, m: Motion, status: Exclude<MotionStatus, "open">, why: string, tally: Tally, by?: EntityId): LedgerEvent[] {
-  const text = status === "passed" ? `Carried by vote (${why.replace(/^carried: /, "")}): ${m.text}` : status === "withdrawn" ? `Withdrew the motion: ${m.text}` : `The motion failed (${why}): ${m.text}`;
+  const text = status === "passed" ? say("org_log_carried_by_vote_why_text", { why: why.replace(/^carried: /, ""), text: m.text }) : status === "withdrawn" ? say("org_log_withdrew_the_motion_text", { text: m.text }) : say("org_log_the_motion_failed_why_text", { why: why, text: m.text });
   return [
     { type: ORGS_MOTION_END, data: { org, id: m.id, status, why, result: tally as unknown as JsonObject, at: ctx.state.clock, ...(by !== undefined && by !== "" ? { by } : {}), visibility: povIn(ctx, m) ? "public" : "secret" } },
     orgLog(ctx, org, text, { ...(by !== undefined && by !== "" ? { by } : {}), names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") }),
@@ -215,7 +215,7 @@ function settle(ctx: ReadContext, rng: Rng, org: EntityId, m: Motion, final: boo
   if (!s) return [];
   if (s.outcome === "failed") return ended(ctx, org, m, "failed", s.why, s.tally);
   const carried = carryOut(ctx, rng, org, m.id, m.what);
-  if (!Array.isArray(carried)) return ended(ctx, org, m, "failed", `couldn't be carried out: ${carried.reason}`, s.tally);
+  if (!Array.isArray(carried)) return ended(ctx, org, m, "failed", say("org_log_couldnt_be_carried_out_reason", { reason: carried.reason }), s.tally);
   return [...ended(ctx, org, m, "passed", s.why, s.tally), ...carried];
 }
 
@@ -256,10 +256,10 @@ export function openMotion(ctx: ReadContext, rng: Rng, o: { org: EntityId; by: E
   const votes: Record<EntityId, MotionVote> = voter === null ? {} : { [voter]: { vote: "for", how: o.by === "" ? "gm" : "own", at, ...(o.by !== "" && o.by !== voter ? { by: o.by } : {}) } };
   const m: Motion = { id, text: o.text, what: { type: o.what.type, args: { ...o.what.args } }, by: o.by, ...(o.party !== "" && o.party !== o.by ? { party: o.party } : {}), at, closes: at + rules.days * DAY, basis: rules.basis, quorum: rules.quorum, pass: rules.pass, electorate: weights, public: pub, votes, status: "open" };
   Object.assign(m.votes, ruleVotes(m, rules.standing, at, true));
-  const who = o.party !== "" && o.party !== o.by ? `${labelOf(ctx, o.by)} for ${labelOf(ctx, o.party)}` : o.by === "" ? "The GM" : labelOf(ctx, o.by);
+  const who = o.party !== "" && o.party !== o.by ? say("org_log_o_for_party", { o: labelOf(ctx, o.by), party: labelOf(ctx, o.party) }) : o.by === "" ? say("org_log_the_gm_2") : labelOf(ctx, o.by);
   return [
     { type: ORGS_MOTION, data: { org, motion: JSON.parse(JSON.stringify(m)) as JsonObject, visibility: povIn(ctx, m) ? "public" : "secret" } },
-    orgLog(ctx, org, `${who} put to a vote: ${o.text} (it closes ${when(ctx, m.closes)})`, { ...(o.by !== "" ? { by: o.by } : {}), names: [o.by, o.party, ...actNames(ctx, o.what)].filter((x) => x !== "") }),
+    orgLog(ctx, org, say("org_log_who_put_to_a_vote_text_it", { who: who, text: o.text, closes: when(ctx, m.closes) }), { ...(o.by !== "" ? { by: o.by } : {}), names: [o.by, o.party, ...actNames(ctx, o.what)].filter((x) => x !== "") }),
     ...settle(ctx, rng.fork("settle"), org, m, false),
   ];
 }
@@ -378,14 +378,14 @@ export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Reject
   if (basis !== undefined && basis !== "") {
     if (basis !== null && basis !== "default" && !isVoteBasis(basis)) return refuse("bad_args", say("why_votes_are_counted_by_shares_by_members"));
     if (basis === "trustees" && orgTypeOf(ctx, org) !== "trust") return refuse("bad_args", say("why_only_a_trust_counts_its_trustees_votes", { org: labelOf(ctx, org) }));
-    put(DECISION_FIELDS.basis, isVoteBasis(basis) ? basis : null, isVoteBasis(basis) ? `votes counted by ${basis}` : "votes counted as its type counts them");
+    put(DECISION_FIELDS.basis, isVoteBasis(basis) ? basis : null, isVoteBasis(basis) ? say("org_log_votes_counted_by_basis", { basis: basis }) : say("org_log_votes_counted_as_its_type_counts_them"));
   }
   // Each number: its argument, its field, its range, its words set, and its words put back to the default.
   const numbers: [string, string, readonly [number, number], (n: number) => string, string][] = [
-    ["quorum", DECISION_FIELDS.quorum, DECISION_RANGES.quorum, (n) => `a quorum of ${pctWords(n)}`, "the default quorum"],
-    ["pass", DECISION_FIELDS.pass, DECISION_RANGES.pass, (n) => `passing with more than ${pctWords(n)}`, "the default pass mark"],
-    ["days", DECISION_FIELDS.days, DECISION_RANGES.days, (n) => `motions open ${n} days`, "motions open the default time"],
-    ["approval_days", DECISION_FIELDS.approvalDays, DECISION_RANGES.days, (n) => `requests waiting ${n} days`, "requests waiting the default time"],
+    ["quorum", DECISION_FIELDS.quorum, DECISION_RANGES.quorum, (n) => say("org_log_a_quorum_of_n", { n: pctWords(n) }), say("org_log_the_default_quorum")],
+    ["pass", DECISION_FIELDS.pass, DECISION_RANGES.pass, (n) => say("org_log_passing_with_more_than_n", { n: pctWords(n) }), say("org_log_the_default_pass_mark")],
+    ["days", DECISION_FIELDS.days, DECISION_RANGES.days, (n) => say("org_log_motions_open_n_days", { n: n }), say("org_log_motions_open_the_default_time")],
+    ["approval_days", DECISION_FIELDS.approvalDays, DECISION_RANGES.days, (n) => say("org_log_requests_waiting_n_days", { n: n }), say("org_log_requests_waiting_the_default_time")],
   ];
   for (const [arg, field, range, said, back] of numbers) {
     const v = pctArg(a[arg], range);
@@ -395,7 +395,7 @@ export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Reject
     put(field, n, n === null ? back : said(n));
   }
   if (out.length === 0) return refuse("no_change", say("why_nothing_to_change"));
-  return [...out, orgLog(ctx, org, `Set how decisions are made: ${words.join(", ")}`, by !== "" ? { by, power: "org.govern" } : {})];
+  return [...out, orgLog(ctx, org, say("org_log_set_how_decisions_are_made_words", { words: words.join(", ") }), by !== "" ? { by, power: "org.govern" } : {})];
 }
 
 /** `orgs.vote_rule`: someone's standing vote (for, against, abstain, or with another voter; `none` clears it), set by them or by the GM. */
@@ -412,7 +412,7 @@ export function standingEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rej
   if (vote === "with" && (follows === "" || follows === who || !own(ctx.state.entities, follows))) return refuse("bad_args", say("why_say_whose_vote_it_follows"));
   const rules = rulesOf(ctx, org).standing.filter((s) => s.who !== who);
   const next: StandingVote[] = vote === "none" ? rules : [...rules, vote === "with" ? { who, vote: "with", with: follows } : { who, vote: vote as StandingVote["vote"] }];
-  const words = vote === "none" ? `${labelOf(ctx, who)} no longer has a standing vote` : vote === "with" ? `${labelOf(ctx, who)} votes with ${labelOf(ctx, follows)}` : `${labelOf(ctx, who)} votes ${VOTE_WORDS[vote as "for" | "against" | "abstain"]} as a rule`;
+  const words = vote === "none" ? say("org_log_who_no_longer_has_a_standing_vote", { who: labelOf(ctx, who) }) : vote === "with" ? say("org_log_who_votes_with_follows", { who: labelOf(ctx, who), follows: labelOf(ctx, follows) }) : say("org_log_who_votes_abstain_as_a_rule", { who: labelOf(ctx, who), abstain: VOTE_WORDS[vote as "for" | "against" | "abstain"] });
   return [{ type: "set", entity: org, field: DECISION_FIELDS.standing, value: next.length > 0 ? (next as unknown as JsonValue) : null }, orgLog(ctx, org, words, { ...(by !== "" ? { by } : {}), names: [who, ...(follows !== "" ? [follows] : [])] })];
 }
 
@@ -447,7 +447,7 @@ export function stepMotions(ctx: ReadContext, rng: (entity: EntityId) => Rng): L
     if (!failed) continue;
     w.restore(mark);
     const s = settled(m, true);
-    if (s && unit(ended(w.ctx, org, m, "failed", `couldn't be carried out: ${failed.reason}`, s.tally), group)) w.restore(mark);
+    if (s && unit(ended(w.ctx, org, m, "failed", say("org_log_couldnt_be_carried_out_reason", { reason: failed.reason }), s.tally), group)) w.restore(mark);
   }
   return w.events;
 }

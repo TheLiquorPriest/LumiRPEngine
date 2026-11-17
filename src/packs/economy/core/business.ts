@@ -356,7 +356,7 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   const customer = strOf(args.customer) || strOf(args.customer_name).trim();
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   // Sent by someone who may bill for the business (`money.invoice`, ORG-SPEC §3.6), and told in its History.
-  return actAs(ctx, { by, party: business, power: "money.invoice", line: () => `Sent ${labelOf(ctx, customer)} an invoice for ${moneyWords(ctx, cents)}`, names: [customer] }, () => {
+  return actAs(ctx, { by, party: business, power: "money.invoice", line: () => say("org_log_sent_customer_an_invoice_for_cents", { customer: labelOf(ctx, customer), cents: moneyWords(ctx, cents) }), names: [customer] }, () => {
     if (customer === "" || customer === business) return reject("bad_party", say("why_an_invoice_needs_someone_to_bill"));
     // A business the manager runs for others can't be billed by one that is theirs, nor by one whose till they hold a card on: its money would pay them (DESIGN §25.1).
     if (by !== "" && customer !== by && managesParty(ctx.state, customer, by) && api.paysFor(ctx, by, business, customer, operatingAccount(api, ctx, business) ?? undefined)) return reject("not_owner", say("why_pov_runs_customer_for_others_so_cant", { pov: shownLabel(ctx, ctx.world.pov, by), customer: shownLabel(ctx, ctx.world.pov, customer), business: shownLabel(ctx, ctx.world.pov, business) }));
@@ -390,7 +390,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   // Paid by its customer, or for an organization billed by someone who may spend for it (`money.spend`, ORG-SPEC §3.6); the fiduciary rule is `paysFor`'s, in its words.
   if (by !== "" && by !== inv.party && !(inv.party && orgTypeOf(ctx, inv.party) !== null)) return reject("not_customer", say("why_by_isnt_billed_for_memo", { by: labelOf(ctx, by), memo: inv.memo }));
   const deposit = operatingAccount(api, ctx, inv.business);
-  return actAs(ctx, { by, party: inv.party ?? payer, power: "money.spend", amount: inv.left, line: () => `Paid ${labelOf(ctx, inv.business)}'s invoice for ${moneyWords(ctx, inv.left)}`, names: [inv.business] }, () => {
+  return actAs(ctx, { by, party: inv.party ?? payer, power: "money.spend", amount: inv.left, line: () => say("org_log_paid_business_s_invoice_for_left", { business: labelOf(ctx, inv.business), left: moneyWords(ctx, inv.left) }), names: [inv.business] }, () => {
     if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party, deposit ?? undefined)) return reject("not_owner", say("why_party_pays_for_itself_not_for_pov", { party: shownLabel(ctx, ctx.world.pov, inv.party), pov: shownLabel(ctx, ctx.world.pov, by) }));
     const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
     if (!Array.isArray(paid)) return paid;
@@ -402,7 +402,7 @@ function voidInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, J
   const inv = readInvoice(ctx, strOf(args.invoice));
   if (!inv) return reject("missing_entity", say("why_no_invoice_invoice", { invoice: labelOf(ctx, strOf(args.invoice)) }));
   // Voided by someone who may bill for the business that sent it (`money.invoice`).
-  return actAs(ctx, { by: strOf(args.by), party: inv.business, power: "money.invoice", line: () => `Voided the invoice to ${labelOf(ctx, inv.customer)} for ${moneyWords(ctx, inv.cents)}`, names: [inv.customer] }, () => {
+  return actAs(ctx, { by: strOf(args.by), party: inv.business, power: "money.invoice", line: () => say("org_log_voided_the_invoice_to_customer_for_cents", { customer: labelOf(ctx, inv.customer), cents: moneyWords(ctx, inv.cents) }), names: [inv.customer] }, () => {
     if (inv.state === "paid" || inv.state === "void") return reject("settled", say("why_name_is_already_to", { name: inv.memo, to: inv.state }));
     return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
   });
@@ -535,7 +535,7 @@ function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   if (trust && stated === null) return reject("bad_amount", say("why_business_pays_out_a_stated_amount_say", { business: labelOf(ctx, business) }));
   // Paid out by someone who may pay out its profit (`money.payout`, ORG-SPEC §3.6), and told in its History.
   let total = 0;
-  return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => (trust ? `Paid ${moneyWords(ctx, total)} out to its beneficiaries` : `Paid ${moneyWords(ctx, total)} of profit out to its owners`) }, () => {
+  return actAs(ctx, { by: strOf(args.by), party: business, power: "money.payout", line: () => (trust ? say("org_log_paid_total_out_to_its_beneficiaries", { total: moneyWords(ctx, total) }) : say("org_log_paid_total_of_profit_out_to_its", { total: moneyWords(ctx, total) })) }, () => {
     const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
     const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
     // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.

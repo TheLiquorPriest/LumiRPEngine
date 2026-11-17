@@ -289,7 +289,7 @@ export function registerStakes(r: FinanceRegistry): void {
       const units = typeof a.units === "number" ? a.units : undefined;
       const price = typeof a.price === "number" ? a.price : 0;
       const what = units !== undefined ? `${units} units` : `${Math.round((share ?? 0) * 100) / 100}%`;
-      return actAs(ctx, { by: strOf(a.by), party, power: "shares.manage", line: () => `${price > 0 ? "Sold" : "Gave"} ${what} of ${labelOf(ctx, strOf(a.business))}${buyer ? ` to ${labelOf(ctx, buyer)}` : ""}${price > 0 ? ` for ${moneyWords(ctx, price)}` : ""}`, names: [buyer] }, () =>
+      return actAs(ctx, { by: strOf(a.by), party, power: "shares.manage", line: () => say("org_log_soldgave_what_of_business_to_buyer_for", { what: what, business: labelOf(ctx, strOf(a.business)), buyer: labelOf(ctx, buyer), price: moneyWords(ctx, price), if_price: price > 0, if_buyer: !!(buyer) }), names: [buyer] }, () =>
         sellStake(r.api, ctx, { party, business: strOf(a.business), price, ...(share !== undefined ? { share } : {}), ...(units !== undefined ? { units } : {}), ...(buyer ? { buyer } : {}), ...(to ? { to } : {}) }),
       );
     },

@@ -146,14 +146,14 @@ export function approversOf(ctx: ReadContext, org: EntityId, ask: Ask): EntityId
 
 /** Why `who` may not answer `r` (`approversOf`): it is their own, they aren't up its chain of command, or it is more than they may do themselves. */
 function notApprover(ctx: ReadContext, org: EntityId, r: ApprovalRequest, who: EntityId): string {
-  if (who === r.by) return "it's their own request";
-  return chainOf(ctx, org, r).includes(who) ? `it's more than they may do themselves for ${labelOf(ctx, org)}` : `they aren't above ${labelOf(ctx, r.by)} at ${labelOf(ctx, org)}`;
+  if (who === r.by) return say("org_log_its_their_own_request");
+  return chainOf(ctx, org, r).includes(who) ? say("org_log_its_more_than_they_may_do_themselves", { org: labelOf(ctx, org) }) : say("org_log_they_arent_above_r_at_org", { r: labelOf(ctx, r.by), org: labelOf(ctx, org) });
 }
 
 // ---------------------------------------------------------------- words
 
 function nameFor(ctx: ReadContext, viewer: EntityId | undefined, id: EntityId): string {
-  if (id === "") return "the GM";
+  if (id === "") return say("org_log_the_gm");
   if (viewer !== undefined && id === viewer) return "you";
   if (viewer !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id)) return "someone";
   return labelOf(ctx, id);
@@ -200,7 +200,7 @@ export function askApproval(ctx: ReadContext, ask: { org: EntityId; by: EntityId
   const first = approvers[0] ?? "";
   return [
     { type: ORGS_ASK, data: { org: ask.org, request: JSON.parse(JSON.stringify(r)) as JsonObject, visibility: povIn(ctx, r) ? "public" : "secret" } },
-    orgLog(ctx, ask.org, `${labelOf(ctx, ask.by)} asked ${labelOf(ctx, first)} to approve: ${ask.text} (${ask.why})`, { by: ask.by, names: [ask.by, first, ...(ask.target !== undefined ? [ask.target] : []), ...actNames(ctx, what)], power: ask.power }),
+    orgLog(ctx, ask.org, say("org_log_ask_asked_first_to_approve_text_why", { ask: labelOf(ctx, ask.by), first: labelOf(ctx, first), text: ask.text, why: ask.why }), { by: ask.by, names: [ask.by, first, ...(ask.target !== undefined ? [ask.target] : []), ...actNames(ctx, what)], power: ask.power }),
   ];
 }
 
@@ -235,11 +235,11 @@ export function answerEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejec
   }
   if (answer === "withdraw") {
     if (who !== "" && who !== r.by) return refuse("not_allowed", say("why_only_m_may_withdraw_it", { m: labelOf(ctx, r.by) }));
-    return [end("withdrawn"), orgLog(ctx, org, `${labelOf(ctx, r.by)} withdrew the request: ${r.text}`, { by: r.by, names: [r.by, ...named], power: r.power })];
+    return [end("withdrawn"), orgLog(ctx, org, say("org_log_r_withdrew_the_request_text", { r: labelOf(ctx, r.by), text: r.text }), { by: r.by, names: [r.by, ...named], power: r.power })];
   }
   if (answer !== "approve" && answer !== "deny") return refuse("bad_args", say("why_a_request_is_approved_denied_or_withdrawn"));
   if (who !== "" && !approversOf(ctx, org, r).includes(who)) return refuse("not_allowed", say("why_who_may_not_answer_it_who2", { who: labelOf(ctx, who), answer: answer, who2: notApprover(ctx, org, r, who) }));
-  if (answer === "deny") return [end("denied"), orgLog(ctx, org, `${who !== "" ? labelOf(ctx, who) : "The GM"} denied ${labelOf(ctx, r.by)}'s request: ${r.text}${why !== "" ? `: ${why}` : ""}`, { ...(who !== "" ? { by: who } : {}), names: [r.by, who, ...named].filter((x) => x !== ""), power: r.power })];
+  if (answer === "deny") return [end("denied"), orgLog(ctx, org, say("org_log_who_the_gm_denied_r_s_request", { who: labelOf(ctx, who), r: labelOf(ctx, r.by), text: r.text, why: why, if_who: who !== "", if_why: why !== "" }), { ...(who !== "" ? { by: who } : {}), names: [r.by, who, ...named].filter((x) => x !== ""), power: r.power })];
   const def = ctx.registry.effects.get(r.what.type);
   if (!def) return refuse("unknown_effect", say("why_this_world_cant_carry_out_type", { type: r.what.type }));
   const carried = def.resolve({ ...r.what.args }, { ...ctx, rng: ctx.rng.fork(`approve:${r.id}`), params: {}, effect: { type: r.what.type, args: { ...r.what.args } }, carried: { org, approval: r.id, ...(who !== "" ? { by: who } : {}), ...(r.cents !== undefined ? { cents: r.cents } : {}) } });

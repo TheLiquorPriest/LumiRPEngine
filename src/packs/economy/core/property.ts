@@ -982,7 +982,7 @@ export function registerProperty(r: FinanceRegistry): void {
       // Moving in (`live`): the buyer's home is the property's place from today.
       const place = strOf(fieldsOf(at.state, property).place);
       const moveIn: LedgerEvent[] = a.live === true && place !== "" && own(ctx.world.places, place) && own(ctx.state.entities, buyer)?.fields.home !== place ? [{ type: "set", entity: buyer, field: "home", value: place }] : [];
-      return acted(a, ctx, "property.trade", () => `Bought ${labelOf(at, property)}${price !== undefined ? ` for ${money(ctx, price)}` : ""}`, [], () => {
+      return acted(a, ctx, "property.trade", () => say("org_log_bought_what_for_paid", { what: labelOf(at, property), paid: money(ctx, price), if_paid: price !== undefined }), [], () => {
         // A purchase the story made with nothing to price it by (no price, no asking price, no value) is the buyer's with nothing charged: its unpriced chip prices it.
         const e = own(at.state.entities, property);
         if (a.story === true && price === undefined && num(e?.fields.asking_price) === undefined && propertyValue(at.state, property) <= 0 && ownersIn(e?.fields ?? {}).length === 0) {
@@ -1020,7 +1020,7 @@ export function registerProperty(r: FinanceRegistry): void {
       const to = s(a, "to");
       const property = strOf(a.property);
       const price = n(a, "price") ?? NaN;
-      return acted(a, ctx, "property.trade", () => `Sold ${labelOf(ctx, property)}${buyer ? ` to ${labelOf(ctx, buyer)}` : ""} for ${money(ctx, price)}`, [buyer], () =>
+      return acted(a, ctx, "property.trade", () => say("org_log_sold_property_to_buyer_for_price", { property: labelOf(ctx, property), buyer: buyer ? labelOf(ctx, buyer) : undefined, price: money(ctx, price), if_buyer: !!(buyer) }), [buyer], () =>
         sellProperty(r.api, ctx, { party: party(a, ctx), property, price, ...(buyer ? { buyer } : {}), ...(to ? { to } : {}) }),
       );
     },
@@ -1036,19 +1036,19 @@ export function registerProperty(r: FinanceRegistry): void {
       const property = strOf(a.property);
       const tenant = strOf(a.tenant);
       const rent = n(a, "rent") ?? NaN;
-      return acted(a, ctx, "property.manage", () => `Let ${unitName ? `${unitName}, ` : ""}${labelOf(ctx, property)} to ${labelOf(ctx, tenant)} for ${money(ctx, rent)} a month`, [tenant], () =>
+      return acted(a, ctx, "property.manage", () => say("org_log_let_unitname_property_to_tenant_for_rent", { unitName: unitName, property: labelOf(ctx, property), tenant: labelOf(ctx, tenant), rent: money(ctx, rent), if_unitName: !!(unitName) }), [tenant], () =>
         startLease(r.api, ctx, { party: party(a, ctx), property, tenant, rent, ...(months !== undefined ? { months } : {}), ...(day !== undefined ? { day } : {}), ...(unitName ? { unit: unitName } : {}), ...(from ? { from } : {}) }),
       );
     },
   });
-  r.core.effect({ type: "economy.lease_end", args: ["lease", "on?", "party?", "by?"], resolve: (a, ctx) => acted(a, ctx, "property.manage", () => `Ended ${labelOf(ctx, strOf(a.lease))}`, [], () => endLease(r.api, ctx, party(a, ctx), strOf(a.lease), s(a, "on"))) });
+  r.core.effect({ type: "economy.lease_end", args: ["lease", "on?", "party?", "by?"], resolve: (a, ctx) => acted(a, ctx, "property.manage", () => say("org_log_ended_lease", { lease: labelOf(ctx, strOf(a.lease)) }), [], () => endLease(r.api, ctx, party(a, ctx), strOf(a.lease), s(a, "on"))) });
   r.core.effect({
     type: "economy.property_list",
     args: ["property", "price?", "party?", "by?"],
     resolve: (a, ctx) => {
       const property = strOf(a.property);
       const price = n(a, "price");
-      return acted(a, ctx, "property.manage", () => (price !== undefined && price > 0 ? `Put ${labelOf(ctx, property)} up for sale at ${money(ctx, price)}` : `Took ${labelOf(ctx, property)} off the market`), [], () => listProperty(r.api, ctx, party(a, ctx), property, price));
+      return acted(a, ctx, "property.manage", () => (price !== undefined && price > 0 ? say("org_log_put_property_up_for_sale_at_price", { property: labelOf(ctx, property), price: money(ctx, price) }) : say("org_log_took_property_off_the_market", { property: labelOf(ctx, property) })), [], () => listProperty(r.api, ctx, party(a, ctx), property, price));
     },
   });
 

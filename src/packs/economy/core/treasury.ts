@@ -114,7 +114,7 @@ function setDues(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCo
   const no = refusal(ctx, by, org, "org.govern");
   if (no) return no;
   const value: JsonObject | null = cents > 0 ? { cents, every, ...(typeof args.day === "number" && Number.isInteger(args.day) ? { day: args.day } : {}) } : null;
-  return [{ type: "set", entity: org, field: "dues", value: value ? [value] : null }, ...acted(ctx, org, by, { power: "org.govern", text: value ? `Set dues of ${api.money(ctx, cents)} a ${every}` : "Ended dues" })];
+  return [{ type: "set", entity: org, field: "dues", value: value ? [value] : null }, ...acted(ctx, org, by, { power: "org.govern", text: value ? say("org_log_set_dues_of_cents_a_every", { cents: api.money(ctx, cents), every: every }) : say("org_log_ended_dues") })];
 }
 
 /**
@@ -148,7 +148,7 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
     if (!Array.isArray(paid)) return paid;
     out.push(...paid);
   }
-  return [...out, ...acted(ctx, org, by, { power: "money.payout", text: `Shared out ${api.money(ctx, cents)}${approvedWords(ctx, org)}`, cents, names: to })];
+  return [...out, ...acted(ctx, org, by, { power: "money.payout", text: say("org_log_shared_out_cents_org", { cents: api.money(ctx, cents), org: approvedWords(ctx, org) }), cents, names: to })];
 }
 
 /** Treasuries: dues flows, and setting dues and sharing out, for households, groups and the party. */

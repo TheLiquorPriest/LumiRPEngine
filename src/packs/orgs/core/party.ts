@@ -47,12 +47,12 @@ function refuse(code: string, reason: string): Rejection {
 /** "a companion", "an ally". */
 function aTier(tier: PartyTier): string {
   const noun = TIER_NOUNS[tier][0];
-  return `${/^[aeiou]/.test(noun) ? "an" : "a"} ${noun}`;
+  return say("org_log_ana_noun", { noun: noun, if_noun: /^[aeiou]/.test(noun) });
 }
 
 /** Why `by` may not act as the party's leader here, or null when they lead it. */
 function notLeader(ctx: ReadContext, by: EntityId | null): string | null {
-  return by === ctx.world.pov ? null : "Only the party's leader may do that";
+  return by === ctx.world.pov ? null : say("org_log_only_the_partys_leader_may_do_that");
 }
 
 /** Someone in the party in a share-out's tiers, in id order: whom `org_share_out` pays for the party. */
@@ -73,13 +73,13 @@ function tierEvents(ctx: EffectContext, by: EntityId, who: EntityId, tier: strin
   const now = partyTierIn(e.relations, pov);
   if (tier === PARTY_OUT) {
     if (now === null) return refuse("not_in_party", say("why_name_isnt_in_your_party", { name: e.name }));
-    return [...unlinkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov }), orgLog(ctx, party, `${labelOf(ctx, by)} took ${e.name} out of the party.`, { by, names: [by, who] })];
+    return [...unlinkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov }), orgLog(ctx, party, say("org_log_by_took_name_out_of_the_party", { by: labelOf(ctx, by), name: e.name }), { by, names: [by, who] })];
   }
   if (!isPartyTier(tier)) return refuse("bad_tier", say("why_a_tier_is_one_of_join_or", { join: PARTY_TIERS.join(", "), pARTY_OUT: PARTY_OUT }));
   if (now === tier) return refuse("unchanged", say("why_name_is_already_tier_of_the_party", { name: e.name, tier: aTier(tier) }));
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked)) return linked;
-  const text = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
+  const text = now === null ? say("org_log_by_added_name_to_the_party_as", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) }) : say("org_log_by_made_name_tier_of_the_party", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) });
   return [...linked, orgLog(ctx, party, text, { by, names: [by, who] })];
 }
 
@@ -94,7 +94,7 @@ function spawnParty(ctx: ReadContext, id: EntityId, name?: string): LedgerEvent 
   const pov = ctx.world.pov;
   const leader = own(ctx.state.entities, pov);
   const first = (leader?.name ?? pov).split(/\s+/)[0] || pov;
-  return { type: "spawn", entity: { id, kind: PARTY_KIND, name: name ?? `${first}'s party`, tier: leader?.tier ?? "background", fields: { leader: pov }, relations: [] } };
+  return { type: "spawn", entity: { id, kind: PARTY_KIND, name: name ?? say("org_log_first_s_party", { first: first }), tier: leader?.tier ?? "background", fields: { leader: pov }, relations: [] } };
 }
 
 /** Name the party: its entity made with the name, or its name changed. */
@@ -106,7 +106,7 @@ function nameEvents(ctx: EffectContext, by: EntityId, raw: string): LedgerEvent[
   const was = own(ctx.state.entities, party.id)?.name;
   if (party.exists && was === name) return refuse("unchanged", say("why_the_party_is_already_called_name", { name: name }));
   const named: LedgerEvent = party.exists ? { type: "engine.rename", data: { entity: party.id, name, was: was ?? party.id } } : spawnParty(ctx, party.id, name);
-  return [named, orgLog(ctx, party.id, `${labelOf(ctx, by)} named the party ${name}.`, { by, names: [by] })];
+  return [named, orgLog(ctx, party.id, say("org_log_by_named_the_party_name", { by: labelOf(ctx, by), name: name }), { by, names: [by] })];
 }
 
 /**
@@ -135,17 +135,17 @@ function purseEvents(ctx: EffectContext, by: EntityId, cents: number, from: Enti
   if (!open || !pay) return refuse("no_money", say("why_a_purse_needs_the_economy"));
   const spawned = party.exists ? null : apply([spawnParty(w.ctx, party.id)]);
   if (spawned) return spawned;
-  const opened = open(w.ctx, { name: "Party purse", product: "checking", owners: [{ party: party.id, role: "owner" }] });
+  const opened = open(w.ctx, { name: say("org_log_party_purse"), product: "checking", owners: [{ party: party.id, role: "owner" }] });
   if (!Array.isArray(opened)) return opened;
   const failed = apply(opened);
   if (failed) return failed;
   const account = opened.find((ev): ev is Extract<LedgerEvent, { type: "spawn" }> => ev.type === "spawn")?.entity.id;
   if (account === undefined) return refuse("no_account", say("why_the_purse_didnt_open"));
-  const paid = pay(w.ctx, source, account, cents, `Into ${labelOf(w.ctx, party.id)}'s purse`);
+  const paid = pay(w.ctx, source, account, cents, say("org_log_into_id_s_purse", { id: labelOf(w.ctx, party.id) }));
   if (!Array.isArray(paid)) return paid;
   const short = apply(paid);
   if (short) return short;
-  const logged = apply([orgLog(w.ctx, party.id, `${labelOf(ctx, by)} started the party's purse with ${formatMoney(cents, ctx.world.currency)}.`, { by, names: [by] })]);
+  const logged = apply([orgLog(w.ctx, party.id, say("org_log_by_started_the_partys_purse_with_currency", { by: labelOf(ctx, by), currency: formatMoney(cents, ctx.world.currency) }), { by, names: [by] })]);
   return logged ?? w.events;
 }
 
@@ -180,7 +180,7 @@ function hireEvents(ctx: EffectContext, by: EntityId, args: Record<string, JsonV
   const tier = e ? partyTierIn(e.relations, ctx.world.pov) : null;
   const linked = tier === "hired" ? [] : linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: worker, to: ctx.world.pov, fields: { tier: "hired", since: sinceOf(ctx, worker) } });
   if (!Array.isArray(linked)) return linked;
-  return [...hired, ...linked, orgLog(ctx, party.id, `${labelOf(ctx, by)} hired ${labelOf(ctx, worker)} as a hand.`, { by, names: [by, worker] })];
+  return [...hired, ...linked, orgLog(ctx, party.id, say("org_log_by_hired_worker_as_a_hand", { by: labelOf(ctx, by), worker: labelOf(ctx, worker) }), { by, names: [by, worker] })];
 }
 
 // ---------------------------------------------------------------- the party's section
@@ -191,7 +191,7 @@ function whereOf(ctx: ReadContext, viewer: EntityId, who: EntityId): string | nu
   const place = placeOfEntity(state, who);
   if (place !== null && canSeeField(reg, world, state, viewer, who, "place") && canSeePlace(reg, world, state, viewer, place)) return own(world.places, place)?.name ?? place;
   const last = viewer === world.pov ? lastSighting(state, who) : null;
-  return last && canSeePlace(reg, world, state, viewer, last.place) ? `last seen at ${own(world.places, last.place)?.name ?? last.place}` : null;
+  return last && canSeePlace(reg, world, state, viewer, last.place) ? say("org_log_last_seen_at_place", { place: own(world.places, last.place)?.name ?? last.place }) : null;
 }
 
 /** The jobs the party employs `who` in: each one's id and whether it has ended. */
@@ -211,9 +211,9 @@ function canOf(ctx: ReadContext, party: { id: EntityId; exists: boolean }, viewe
   return {
     manage: lead,
     name: lead,
-    purse: lead ?? (purse !== null ? "The party has a purse" : level < PURSE_LEVEL ? "A purse needs money in play (Money 2)" : null),
-    hire: lead ?? (purse === null ? "Start a purse first: the party pays its hands from it" : level < HIRE_LEVEL ? "Hiring needs jobs in play (Money 3)" : null),
-    shareOut: lead ?? (purse === null ? "Start a purse first" : shares === 0 ? "Share out pays core members and companions, and the party has none" : party.exists && viewer !== null && mayAct(ctx, viewer, party.id, "money.payout").ok ? null : "Only the party's leader shares out its money"),
+    purse: lead ?? (purse !== null ? say("org_log_the_party_has_a_purse") : level < PURSE_LEVEL ? say("org_log_a_purse_needs_money_in_play_money") : null),
+    hire: lead ?? (purse === null ? say("org_log_start_a_purse_first_the_party_pays") : level < HIRE_LEVEL ? say("org_log_hiring_needs_jobs_in_play_money_3") : null),
+    shareOut: lead ?? (purse === null ? say("org_log_start_a_purse_first") : shares === 0 ? say("org_log_share_out_pays_core_members_and_companions") : party.exists && viewer !== null && mayAct(ctx, viewer, party.id, "money.payout").ok ? null : say("org_log_only_the_partys_leader_shares_out_its")),
   };
 }
 

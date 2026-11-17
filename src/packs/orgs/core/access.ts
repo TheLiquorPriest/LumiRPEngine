@@ -57,7 +57,7 @@ function keysArg(v: JsonValue | undefined): string[] | null | undefined | Reject
 /** A key in words: a thing's name as the reader may see it, else an item type's name, else the words written. */
 function keyWords(ctx: ReadContext, key: string, viewer: EntityId | null): string {
   const thing = own(ctx.state.entities, key);
-  if (thing) return viewer === null || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, key) ? thing.name : "a key";
+  if (thing) return viewer === null || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, key) ? thing.name : say("org_log_a_key");
   for (const table of TYPE_TABLES) {
     const name = rowOf(ctx, table, key)?.name;
     if (typeof name === "string" && name !== "") return name;
@@ -69,7 +69,7 @@ function keyWords(ctx: ReadContext, key: string, viewer: EntityId | null): strin
 function entryWords(ctx: ReadContext, place: PlaceId): string {
   const set = setEntryOf(ctx, place);
   if (set) return ENTRY_WORDS[set.entry];
-  return businessAt(ctx, place) !== null ? "Customers while it trades; staff only after hours" : "Anyone";
+  return businessAt(ctx, place) !== null ? say("org_log_customers_while_it_trades_staff_only_after") : say("org_log_anyone");
 }
 
 /** A business's trading days and hours in words: "Mon to Sat, 9:00 AM to 5:00 PM". */
@@ -84,7 +84,7 @@ export function hoursWords(ctx: ReadContext, business: EntityId): string {
   }
   const dayWords = listWords(runs.map((r) => (r.length > 2 ? `${weekdayName(cal, r[0] ?? 0)} to ${weekdayName(cal, r.at(-1) ?? 0)}` : r.map((d) => weekdayName(cal, d)).join(", "))));
   const { open, close } = hoursOf(ctx, business);
-  return `${dayWords}, ${open === 0 && close === 24 * 60 ? "all day" : `${formatTimeOfDay(open)} to ${formatTimeOfDay(close)}`}`;
+  return say("org_log_daywords_all_day_open_to_close", { dayWords: dayWords, open: formatTimeOfDay(open), close: formatTimeOfDay(close), if_close: open === 0 && close === 24 * 60 });
 }
 
 /** The organizations whose places hold `place`, in id order. */
@@ -122,11 +122,11 @@ function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEven
   const data: JsonObject = { place, ...(entry !== undefined ? { entry } : {}), ...(keys !== undefined ? { keys } : {}), ...(actor !== null ? { by: actor } : {}), ...(org !== "" ? { org } : {}), visibility: "secret" };
   const pov = ctx.world.pov;
   const said = [
-    ...(entry === undefined ? [] : [entry === null ? "who may enter as the world has it" : `who may enter: ${ENTRY_WORDS[entry].toLowerCase()}`]),
-    ...(keys === undefined ? [] : [keys === null ? "its keys as the world has them" : keys.length === 0 ? "no keys" : `keys: ${listWords(keys.map((k) => keyWords(ctx, k, pov)))}`]),
+    ...(entry === undefined ? [] : [entry === null ? say("org_log_who_may_enter_as_the_world_has") : say("org_log_who_may_enter_entry", { entry: ENTRY_WORDS[entry].toLowerCase() })]),
+    ...(keys === undefined ? [] : [keys === null ? say("org_log_its_keys_as_the_world_has_them") : keys.length === 0 ? say("org_log_no_keys") : say("org_log_keys_pov", { pov: listWords(keys.map((k) => keyWords(ctx, k, pov))) })]),
   ].join("; ");
-  const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : actor !== null ? "a place" : "A place";
-  const text = `${actor !== null ? `${labelOf(ctx, actor)} set ` : ""}${where}: ${said}`;
+  const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : actor !== null ? say("org_log_a_place") : say("org_log_a_place_2");
+  const text = say("org_log_actor_set_where_said", { actor: actor !== null ? labelOf(ctx, actor) : undefined, where: where, said: said, if_actor: actor !== null });
   const logs = (org !== "" ? [org] : holdersOf(ctx, place)).map((o) => orgLog(ctx, o, text, actor !== null ? { by: actor, names: [actor] } : {}));
   return [{ type: ORGS_ENTRY, data }, ...logs];
 }
@@ -197,7 +197,7 @@ const TRESPASS_EVENT: EventTypeDef<PackEvent> = {
     const who = str(e, "entity");
     const place = str(e, "place");
     const where = viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? labelOf(ctx, place) : null;
-    const name = who === viewer ? "You" : viewer === undefined || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, who) ? labelOf(ctx, who) : null;
+    const name = who === viewer ? say("org_log_you") : viewer === undefined || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, who) ? labelOf(ctx, who) : null;
     return say("org_trespass", { ...(name !== null ? { name } : {}), ...(where !== null ? { place: where } : {}) });
   },
 };
@@ -235,7 +235,7 @@ function premiseOf(ctx: ReadContext, id: PlaceId, viewer: EntityId | null, canCh
     playEntry: inPlay.entry ?? null,
     inPlay: inPlay.entry !== undefined || inPlay.keys !== undefined,
     words: entryWords(ctx, id),
-    now: closed === null ? (placeEntry(ctx, id, ctx.state.clock) === "customers" ? "Open to customers now" : "Open to anyone now") : `${ENTRY_WORDS[closed]} now`,
+    now: closed === null ? (placeEntry(ctx, id, ctx.state.clock) === "customers" ? say("org_log_open_to_customers_now") : say("org_log_open_to_anyone_now")) : say("org_log_closed_now", { closed: ENTRY_WORDS[closed] }),
     hours: business !== null ? hoursWords(ctx, business) : null,
     keys: keysSet.map((k) => keyWords(ctx, k, viewer)),
     keysSet,
@@ -244,7 +244,7 @@ function premiseOf(ctx: ReadContext, id: PlaceId, viewer: EntityId | null, canCh
     trespass: canChange
       ? trespassesAt(ctx.state, id)
           .slice(0, 5)
-          .map((t) => ({ who: t.who === viewer ? "You" : seesWho(t.who) ? labelOf(ctx, t.who) : "Someone", at: formatClock(cal, t.at) }))
+          .map((t) => ({ who: t.who === viewer ? say("org_log_you") : seesWho(t.who) ? labelOf(ctx, t.who) : say("org_log_someone"), at: formatClock(cal, t.at) }))
       : [],
   };
 }

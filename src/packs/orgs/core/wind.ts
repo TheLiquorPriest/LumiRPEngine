@@ -77,14 +77,14 @@ function windUpEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerE
   if (property === undefined) return refuse("bad_property", `its property is ${WIND_PROPERTY.join(" or ")}`);
   const by = strOf(a.by);
   const why = plainWords(strOf(a.why));
-  const what = { all: `Wind up ${name}`, begin: `Begin winding up ${name}`, finish: `Finish winding up ${name}`, resume: `Stop winding up ${name}` }[stage];
-  const decider = decide(ctx, by, org, stage === "resume" ? "Resuming" : "Winding up", what);
+  const what = { all: say("org_log_wind_up_name", { name: name }), begin: say("org_log_begin_winding_up_name", { name: name }), finish: say("org_log_finish_winding_up_name", { name: name }), resume: say("org_log_stop_winding_up_name", { name: name }) }[stage];
+  const decider = decide(ctx, by, org, stage === "resume" ? say("org_log_resuming") : say("org_log_winding_up"), what);
   if (Array.isArray(decider) || isRejection(decider)) return decider;
   const holder = decider.party !== by && decider.party !== "" ? decider.party : null;
   const credit = by !== "" ? { by } : {};
   if (stage === "resume") {
     if (windingUpSince(ctx.state, org) === null) return refuse("not_winding", say("why_name_isnt_winding_up", { name: name }));
-    return [{ type: "set", entity: org, field: WINDING_FIELD, value: null }, orgLog(ctx, org, withWhy("Stopped winding up: it trades again", why), { ...credit, power: "org.govern" })];
+    return [{ type: "set", entity: org, field: WINDING_FIELD, value: null }, orgLog(ctx, org, withWhy(say("org_log_stopped_winding_up_it_trades_again"), why), { ...credit, power: "org.govern" })];
   }
   const money = optionalService(ctx, "economy.wind_up");
   if (!money) return refuse("no_money", say("why_winding_up_a_company_needs_the_economy"));
@@ -101,9 +101,9 @@ function windUpEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerE
       : [MEMBER_OF, ACTS_FOR].flatMap((rel) =>
           linksTo(w.ctx, rel, org).map((l): LedgerEvent => ({ type: "unlink", rel, from: l.from, to: org })),
         );
-  const said = stage === "begin" ? result.said : [...result.said, { text: "Dissolved", names: [] }];
+  const said = stage === "begin" ? result.said : [...result.said, { text: say("org_log_dissolved"), names: [] }];
   const lines = linesOf(ctx, org, said.map((s, i) => (i === 0 ? { ...s, text: withWhy(s.text, why) } : s)), by);
-  const told = holder !== null ? [orgLog(ctx, holder, `${name}: ${stage === "begin" ? "began winding up" : "wound up and dissolved"}`, { ...credit, names: [org], power: "org.govern" })] : [];
+  const told = holder !== null ? [orgLog(ctx, holder, say("org_log_name_began_winding_upwound_up_and_dissolved", { name: name, if_begin: stage === "begin" }), { ...credit, names: [org], power: "org.govern" })] : [];
   return [...result.events, ...ends, ...lines, ...told];
 }
 
@@ -156,10 +156,10 @@ function mergeEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEv
   const by = strOf(a.by);
   const why = plainWords(strOf(a.why));
   // One motion carries it, the company's whose votes fell short; the other company decides as it is carried out.
-  const what = keep ? `${intoName} takes over ${name} as its subsidiary` : `Merge ${name} into ${intoName}`;
-  const theirs = decide(ctx, by, org, keep ? "Selling the whole of" : "Merging", what);
+  const what = keep ? say("org_log_intoname_takes_over_name_as_its_subsidiary", { intoName: intoName, name: name }) : say("org_log_merge_name_into_intoname", { name: name, intoName: intoName });
+  const theirs = decide(ctx, by, org, keep ? say("org_log_selling_the_whole_of") : say("org_log_merging"), what);
   if (Array.isArray(theirs) || isRejection(theirs)) return theirs;
-  const ours = decide(ctx, by, into, keep ? "Taking over a company for" : "Merging into", what);
+  const ours = decide(ctx, by, into, keep ? say("org_log_taking_over_a_company_for") : say("org_log_merging_into"), what);
   if (Array.isArray(ours) || isRejection(ours)) return ours;
   const money = optionalService(ctx, "economy.merge");
   if (!money) return refuse("no_money", say("why_merging_companies_needs_the_economy"));
@@ -201,8 +201,8 @@ function mergeEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEv
   const credit = by !== "" ? { by } : {};
   const lines = [
     ...linesOf(ctx, into, result.said.map((s, i) => (i === 0 ? { ...s, text: withWhy(s.text, why) } : s)), by),
-    orgLog(ctx, org, withWhy(keep ? `Became ${intoName}'s subsidiary` : `Merged into ${intoName}, and dissolved`, why), { ...credit, names: [], power: "org.govern" }),
-    ...[theirs.party, ours.party].filter((p, i, all) => p !== "" && p !== by && p !== org && p !== into && all.indexOf(p) === i).map((p) => orgLog(ctx, p, `${name} ${keep ? `became ${intoName}'s subsidiary` : `merged into ${intoName}`}`, { ...credit, power: "org.govern" })),
+    orgLog(ctx, org, withWhy(keep ? say("org_log_became_intoname_s_subsidiary", { intoName: intoName }) : say("org_log_merged_into_intoname_and_dissolved", { intoName: intoName }), why), { ...credit, names: [], power: "org.govern" }),
+    ...[theirs.party, ours.party].filter((p, i, all) => p !== "" && p !== by && p !== org && p !== into && all.indexOf(p) === i).map((p) => orgLog(ctx, p, say("org_log_name_became_intoname_s_subsidiarymerged_into_intoname", { name: name, intoName: intoName, if_keep: !!(keep) }), { ...credit, power: "org.govern" })),
   ];
   return [...w.events, ...lines];
 }

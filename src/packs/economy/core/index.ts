@@ -983,7 +983,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       if (financing && (term < numOf(terms.min, 12) || term > numOf(terms.max, 96))) return reject("bad_term", say("why_car_loans_run_min_to_max_months", { min: numOf(terms.min, 12), max: numOf(terms.max, 96) }));
       const down = financing && priced ? Math.max(0, Math.min(priced.price.cents, Math.round(typeof args.down === "number" ? args.down : (priced.price.cents * numOf(auto.down_payment_pct_typical, 12)) / 100))) : 0;
       const financed = financing && priced ? priced.price.cents - down : 0;
-      return actAs(ctx, { by, party: payer, power: "money.spend", ...(seller !== "" ? { target: seller } : {}), line: (paid) => `Bought ${what}${paid !== undefined ? ` for ${moneyWords(ctx, paid)}` : ""}` }, () => {
+      return actAs(ctx, { by, party: payer, power: "money.spend", ...(seller !== "" ? { target: seller } : {}), line: (paid) => say("org_log_bought_what_for_paid", { what: what, paid: paid !== undefined ? moneyWords(ctx, paid) : undefined, if_paid: paid !== undefined }) }, () => {
         const out: LedgerEvent[] = [];
         if (priced && priced.price.cents > 0) {
           const { price, row } = priced;
@@ -1056,7 +1056,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const source = card?.kind === "card" ? strOf(card.fields.account) : named;
       const to = strOf(a.to);
       const cents = amountOf(a.cents);
-      return actAs(ctx, { by, party: partyOf(ctx, from), power: "money.spend", target: to, amount: cents, line: () => `Paid ${labelOf(ctx, partyOf(ctx, to))} ${moneyWords(ctx, cents)}`, names: [partyOf(ctx, to)] }, () => transfer(hooks, ctx, source || from, to, cents, strOf(a.memo, "Payment"), words !== "" ? payMethodOf(words) : "auto", a.story === true));
+      return actAs(ctx, { by, party: partyOf(ctx, from), power: "money.spend", target: to, amount: cents, line: () => say("org_log_paid_partyof_cents", { partyOf: labelOf(ctx, partyOf(ctx, to)), cents: moneyWords(ctx, cents) }), names: [partyOf(ctx, to)] }, () => transfer(hooks, ctx, source || from, to, cents, strOf(a.memo, say("org_log_payment")), words !== "" ? payMethodOf(words) : "auto", a.story === true));
     },
   });
   // Between accounts of one holder; `party` the organization it is moved for, `by` who moves it (ORG-SPEC §3.6).
@@ -1067,7 +1067,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const from = strOf(a.from);
       const to = strOf(a.to);
       const cents = amountOf(a.cents);
-      return actAs(ctx, { by: strOf(a.by), party: strOf(a.party) || partyOf(ctx, from), power: "money.manage", account: from, line: () => `Moved ${moneyWords(ctx, cents)} from ${labelOf(ctx, from)} to ${labelOf(ctx, to)}` }, () => move(ctx, from, to, cents, strOf(a.memo, "Transfer")));
+      return actAs(ctx, { by: strOf(a.by), party: strOf(a.party) || partyOf(ctx, from), power: "money.manage", account: from, line: () => say("org_log_moved_cents_from_from_to_to", { cents: moneyWords(ctx, cents), from: labelOf(ctx, from), to: labelOf(ctx, to) }) }, () => move(ctx, from, to, cents, strOf(a.memo, say("org_log_transfer"))));
     },
   });
   // Template `price_modifier`: `percent` (+25 = 25 % dearer) for a `scope` (a category, or all) at a `place`, for `minutes` or until cleared (`percent: 0` or `clear`).
@@ -1098,7 +1098,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const who = strOf(a.who) || holdersOf(ctx.state, card).find((h) => own(ctx.state.entities, h)) || "";
       const owed = Math.max(0, -balance(ctx.state, card));
       const cents = typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : owed;
-      return actAs(ctx, { by: strOf(a.by), party: who, power: "money.manage", account: card, line: () => `Paid ${moneyWords(ctx, cents)} toward ${labelOf(ctx, card)}` }, () => {
+      return actAs(ctx, { by: strOf(a.by), party: who, power: "money.manage", account: card, line: () => say("org_log_paid_cents_toward_card", { cents: moneyWords(ctx, cents), card: labelOf(ctx, card) }) }, () => {
         if (rightsOf(ctx.state, card, who) === null) return reject("not_owner", say("why_card_isnt_who_s_to_pay", { card: labelOf(ctx, card), who: labelOf(ctx, who) }));
         const from = strOf(a.from) || depositAccount(ctx, who, card) || "";
         if (from === "") return reject("missing_account", say("why_who_has_no_account_to_pay_card", { who: labelOf(ctx, who), card: labelOf(ctx, card) }));
@@ -1110,22 +1110,22 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   });
   // Each of these is `who`'s, or, `by` someone acting for it, an organization's (ORG-SPEC §3.6): managing its accounts, cards and standing payments, or borrowing in its name.
   const managed = (a: Record<string, JsonValue>, ctx: EffectContext, line: string, run: () => LedgerEvent[] | Rejection, account?: EntityId): LedgerEvent[] | Rejection => actAs(ctx, { by: strOf(a.by), party: actor(ctx, a), power: "money.manage", ...(account !== undefined && account !== "" ? { account } : {}), line: () => line }, run);
-  r.effect({ type: "economy.withdraw", args: ["account", "cents", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `Took ${moneyWords(ctx, amountOf(a.cents))} out of ${labelOf(ctx, strOf(a.account))}`, () => withdraw(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)), strOf(a.account)) });
-  r.effect({ type: "economy.deposit", args: ["account", "cents", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `Put ${moneyWords(ctx, amountOf(a.cents))} into ${labelOf(ctx, strOf(a.account))}`, () => deposit(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)), strOf(a.account)) });
+  r.effect({ type: "economy.withdraw", args: ["account", "cents", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_took_cents_out_of_account", { cents: moneyWords(ctx, amountOf(a.cents)), account: labelOf(ctx, strOf(a.account)) }), () => withdraw(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)), strOf(a.account)) });
+  r.effect({ type: "economy.deposit", args: ["account", "cents", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_put_cents_into_account", { cents: moneyWords(ctx, amountOf(a.cents)), account: labelOf(ctx, strOf(a.account)) }), () => deposit(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)), strOf(a.account)) });
   const CARD_WORDS: Readonly<Record<string, string>> = { frozen: "Froze", active: "Unfroze", lost: "Reported lost" };
-  r.effect({ type: "economy.card_state", args: ["card", "state", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `${own(CARD_WORDS, strOf(a.state)) ?? "Changed"} ${labelOf(ctx, strOf(a.card))}`, () => setCardState(ctx, actor(ctx, a), strOf(a.card), strOf(a.state))) });
-  r.effect({ type: "economy.card_replace", args: ["card", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `Ordered a replacement for ${labelOf(ctx, strOf(a.card))}`, () => replaceCard(ctx, actor(ctx, a), strOf(a.card))) });
-  r.effect({ type: "economy.set_autopay", args: ["account", "mode", "from?", "cents?", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `Set ${labelOf(ctx, strOf(a.account))}'s autopay to ${strOf(a.mode, "none")}`, () => setAutopay(ctx, actor(ctx, a), strOf(a.account), strOf(a.mode), strOf(a.from), numOf(a.cents)), strOf(a.account)) });
+  r.effect({ type: "economy.card_state", args: ["card", "state", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_a_changed_card", { a: own(CARD_WORDS, strOf(a.state)), card: labelOf(ctx, strOf(a.card)) }), () => setCardState(ctx, actor(ctx, a), strOf(a.card), strOf(a.state))) });
+  r.effect({ type: "economy.card_replace", args: ["card", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_ordered_a_replacement_for_card", { card: labelOf(ctx, strOf(a.card)) }), () => replaceCard(ctx, actor(ctx, a), strOf(a.card))) });
+  r.effect({ type: "economy.set_autopay", args: ["account", "mode", "from?", "cents?", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_set_account_s_autopay_to_none", { account: labelOf(ctx, strOf(a.account)), none: strOf(a.mode, "none") }), () => setAutopay(ctx, actor(ctx, a), strOf(a.account), strOf(a.mode), strOf(a.from), numOf(a.cents)), strOf(a.account)) });
   const FLOW_ARGS = ["label?", "kind?", "from?", "to?", "amount?", "every?", "interval?", "weekday?", "day?", "month?", "at?", "once?", "start?", "end?", "count?", "shortfall?", "retry_days?", "retries?", "fallback?", "roll?", "category?", "who?", "by?"];
   const FLOW_WORDS: Readonly<Record<string, string>> = { paused: "Paused", ended: "Cancelled", active: "Resumed" };
-  r.effect({ type: "economy.flow_create", args: FLOW_ARGS, resolve: (a, ctx) => managed(a, ctx, `Set up a standing payment${strOf(a.label) !== "" ? `: ${strOf(a.label)}` : ""}`, () => createFlow(ctx, actor(ctx, a), a)) });
-  r.effect({ type: "economy.flow_update", args: ["flow", ...FLOW_ARGS, "clear?"], resolve: (a, ctx) => managed(a, ctx, `Changed the standing payment ${labelOf(ctx, strOf(a.flow))}`, () => updateFlow(ctx, actor(ctx, a), strOf(a.flow), a)) });
-  r.effect({ type: "economy.flow_status", args: ["flow", "status", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, `${own(FLOW_WORDS, strOf(a.status)) ?? "Resumed"} the standing payment ${labelOf(ctx, strOf(a.flow))}`, () => setFlowStatus(ctx, actor(ctx, a), strOf(a.flow), a.status === "paused" ? "paused" : a.status === "ended" ? "ended" : "active")) });
+  r.effect({ type: "economy.flow_create", args: FLOW_ARGS, resolve: (a, ctx) => managed(a, ctx, say("org_log_set_up_a_standing_payment_label", { label: strOf(a.label), if_label: strOf(a.label) !== "" }), () => createFlow(ctx, actor(ctx, a), a)) });
+  r.effect({ type: "economy.flow_update", args: ["flow", ...FLOW_ARGS, "clear?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_changed_the_standing_payment_flow", { flow: labelOf(ctx, strOf(a.flow)) }), () => updateFlow(ctx, actor(ctx, a), strOf(a.flow), a)) });
+  r.effect({ type: "economy.flow_status", args: ["flow", "status", "who?", "by?"], resolve: (a, ctx) => managed(a, ctx, say("org_log_status_resumed_the_standing_payment_flow", { status: own(FLOW_WORDS, strOf(a.status)), flow: labelOf(ctx, strOf(a.flow)) }), () => setFlowStatus(ctx, actor(ctx, a), strOf(a.flow), a.status === "paused" ? "paused" : a.status === "ended" ? "ended" : "active")) });
   r.effect({
     type: "economy.apply_credit",
     args: ["product", "cents?", "term?", "secured_by?", "who?", "by?"],
     resolve: (a, ctx) =>
-      actAs(ctx, { by: strOf(a.by), party: actor(ctx, a), power: "money.borrow", line: () => `Applied for ${strOf(a.product).replace(/_/g, " ") || "credit"}${typeof a.cents === "number" && a.cents > 0 ? ` of ${moneyWords(ctx, a.cents)}` : ""}` }, () =>
+      actAs(ctx, { by: strOf(a.by), party: actor(ctx, a), power: "money.borrow", line: () => say("org_log_applied_for_product_credit_of_cents", { product: strOf(a.product).replace(/_/g, " "), cents: typeof a.cents === "number" ? moneyWords(ctx, a.cents) : undefined, if_number: typeof a.cents === "number" && a.cents > 0 }) }, () =>
         applyForCredit(ctx, actor(ctx, a), strOf(a.product), typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : undefined, typeof a.term === "number" && a.term > 0 ? Math.round(a.term) : undefined, strOf(a.secured_by) || undefined),
       ),
   });

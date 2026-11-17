@@ -13,7 +13,7 @@ import { DiceError, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { createRng } from "../engine/rng";
 import { WORLD_STATE_DEFAULTS } from "../store/world-state";
-import { renderView } from "../store/words";
+import type { ViewLine } from "../store/words";
 import { rulesetData } from "./bestiary";
 import { type Call, oneOf, Reply, SEARCH_KINDS, type StateKind, TEXT, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { baseOf, isPlaceFactPart, PLACE_FACT_PARTS, PLACES_DEFAULTS, placeAtState, placeSliceOf, sourcesNow, sourcesOf, withPlaceLines } from "../places";
@@ -81,23 +81,22 @@ export const WORLD_QUERY: ToolSpec = {
     const part = typeof args.part === "string" && isPlaceFactPart(args.part) ? args.part : undefined;
     if (args.part !== undefined && args.part !== null && part === undefined) return reply.line("unreadable", { field: "part", value: JSON.stringify(args.part), choices: textOf(PLACE_FACT_PARTS) }).fail();
     if (part !== undefined && !at.ref.startsWith("place:")) return reply.line("part_needs_place", { at: `${at.name} [${at.id}]`, choices: textOf(PLACE_FACT_PARTS) }).fail();
-    const found = reading.view().query(at.ref, depth, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead });
     // Its sources are read live, as Lumiverse holds the entries now, and set against its base.
     const sources = call.deps.placeSources !== undefined && at.ref.startsWith("place:") && part === undefined ? await sourcesNow(call.deps.placeSources, { user: call.scope.user, chat: call.scope.chat }, at.id, baseOf(placeSliceOf(reading.state), at.id), sourcesOf(placeSliceOf(reading.state), at.id)) : undefined;
-    const view =
-      found !== null && at.ref.startsWith("place:")
-        ? {
-            lines: withPlaceLines(found.lines, {
-              at: placeAtState(call.deps.store, call.deps.env, call.scope.chat, reading.turn?.id ?? null, reading.state, reading.ctx),
-              place: at.id,
-              settings: { ...PLACES_DEFAULTS, ...(call.deps.places ?? {}) },
-              ...(call.deps.mapSettings !== undefined ? { config: call.deps.mapSettings } : {}),
-              ...(part !== undefined ? { part } : {}),
-              ...(sources !== undefined ? { sources } : {}),
-            }),
-          }
-        : found;
-    if (view !== null) reply.tree(renderView(view, call.tree));
+    // A place's own lines carry its record; the levels below it are worded as the tree keeps them.
+    const placeRecord = at.ref.startsWith("place:")
+      ? (lines: ViewLine[]): ViewLine[] =>
+          withPlaceLines(lines, {
+            at: placeAtState(call.deps.store, call.deps.env, call.scope.chat, reading.turn?.id ?? null, reading.state, reading.ctx),
+            place: at.id,
+            settings: { ...PLACES_DEFAULTS, ...(call.deps.places ?? {}) },
+            ...(call.deps.mapSettings !== undefined ? { config: call.deps.mapSettings } : {}),
+            ...(part !== undefined ? { part } : {}),
+            ...(sources !== undefined ? { sources } : {}),
+          })
+      : undefined;
+    const printed = reading.view().print(at.ref, depth, call.tree, { due: call.deps.due, ahead: call.deps.dueAhead ?? WORLD_STATE_DEFAULTS.dueAhead }, placeRecord);
+    if (printed !== null) reply.tree(printed);
     if (typeof args.due === "string") {
       const to = timeFrom(reading, reading.state.world, args.due);
       if (to === null) return reply.line("unreadable", { field: "due", value: JSON.stringify(args.due), wants: reading.lines.line("wants_time") ?? "" }).fail();

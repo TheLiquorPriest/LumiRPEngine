@@ -216,7 +216,7 @@ export function registerOptions(r: FinanceRegistry): void {
     resolve: (a, ctx) => {
       const party = strOf(a.party) || ctx.world.pov;
       const holding = strOf(a.holding);
-      return actAs(ctx, { by: strOf(a.by), party, power: "money.manage", line: () => `Exercised ${labelOf(ctx, holding)}` }, () => exercise(r.api, ctx, { party, holding, ...(typeof a.qty === "number" ? { qty: a.qty } : {}), ...(strOf(a.from) !== "" ? { from: strOf(a.from) } : {}), ...(strOf(a.to) !== "" ? { to: strOf(a.to) } : {}) }));
+      return actAs(ctx, { by: strOf(a.by), party, power: "money.manage", line: () => say("org_log_exercised_holding", { holding: labelOf(ctx, holding) }) }, () => exercise(r.api, ctx, { party, holding, ...(typeof a.qty === "number" ? { qty: a.qty } : {}), ...(strOf(a.from) !== "" ? { from: strOf(a.from) } : {}), ...(strOf(a.to) !== "" ? { to: strOf(a.to) } : {}) }));
     },
   });
   r.core.action({

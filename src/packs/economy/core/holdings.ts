@@ -531,7 +531,7 @@ export function registerHoldings(r: FinanceRegistry): void {
     resolve: (a, ctx) => {
       const t = tradeArgs(a, ctx);
       const what = t.holding !== undefined ? labelOf(ctx, t.holding) : (t.asset ?? "investments");
-      return actAs(ctx, { by: strOf(a.by), party: t.party, power: "money.manage", line: () => `${t.side === "sell" ? "Sold" : "Bought"} ${what}${t.amount !== undefined ? ` for ${moneyWords(ctx, t.amount)}` : ""}` }, () => trade(r.api, ctx, t));
+      return actAs(ctx, { by: strOf(a.by), party: t.party, power: "money.manage", line: () => say("org_log_soldbought_what_for_amount", { what: what, amount: t.amount !== undefined ? moneyWords(ctx, t.amount) : undefined, if_sell: t.side === "sell", if_amount: t.amount !== undefined }) }, () => trade(r.api, ctx, t));
     },
   });
   r.core.action({

@@ -90,7 +90,7 @@ export function groupKinds(ctx: Pick<ReadContext, "registry" | "world">): { id: 
 
 /** Why `who` may not start `what` now (Money 3), or null when they may. */
 function startRefusal(ctx: ReadContext, who: EntityId, what: string): string | null {
-  return ctx.levelOf(who, "money") < COMPANY_LEVEL ? `${what} needs payroll and books in play (Money ${COMPANY_LEVEL})` : null;
+  return ctx.levelOf(who, "money") < COMPANY_LEVEL ? say("org_log_what_needs_payroll_and_books_in_play", { what: what, cOMPANY_LEVEL: COMPANY_LEVEL }) : null;
 }
 
 /** What Orgs' Start something… offers `who` (§4.2): a company, a trust and a nonprofit, each with the accounts what goes into it may come from, and a group of one of the world's group kinds (null when it has none). */
@@ -98,9 +98,9 @@ export function startOptions(ctx: ReadContext, who: EntityId): OrgStartView {
   const kinds = groupKinds(ctx);
   const sources = fundingSources(ctx, who);
   return {
-    company: { why: startRefusal(ctx, who, "Starting a company"), sources },
-    trust: { why: startRefusal(ctx, who, "Settling a trust"), sources },
-    nonprofit: { why: startRefusal(ctx, who, "Starting a nonprofit"), sources },
+    company: { why: startRefusal(ctx, who, say("org_log_starting_a_company")), sources },
+    trust: { why: startRefusal(ctx, who, say("org_log_settling_a_trust")), sources },
+    nonprofit: { why: startRefusal(ctx, who, say("org_log_starting_a_nonprofit")), sources },
     group: kinds.length > 0 ? { kinds } : null,
   };
 }
@@ -158,7 +158,7 @@ function applyAll(w: Working, events: readonly LedgerEvent[]): Rejection | null 
 function sourceOf(ctx: ReadContext, f: Founding, what: string): EntityId | Rejection {
   const sources = fundingSources(ctx, f.founder);
   const source = f.from === "" ? sources[0]?.id : sources.find((s) => s.id === f.from)?.id;
-  const whose = f.founder === f.by ? "of yours" : `of ${labelOf(ctx, f.founder)}'s`;
+  const whose = f.founder === f.by ? say("org_log_of_yours") : say("org_log_of_founder_s", { founder: labelOf(ctx, f.founder) });
   return source ?? refuse("no_source", f.from === "" ? say("why_you_have_founder_has_no_account_to", { founder: labelOf(ctx, f.founder), what: what, f: f.founder === f.by }) : say("why_from_isnt_an_account_whose_what_can", { from: labelOf(ctx, f.from), whose: whose, what: what }));
 }
 
@@ -218,7 +218,7 @@ function spending(ctx: ReadContext, f: Founding, source: EntityId | null, benefi
  * it too.
  */
 function companyEvents(ctx: EffectContext, c: Company): LedgerEvent[] | Rejection {
-  const refused = startRefusal(ctx, c.founder, "Starting a company");
+  const refused = startRefusal(ctx, c.founder, say("org_log_starting_a_company"));
   if (refused) return refuse("level", refused);
   if (!(c.cents > 0)) return refuse("bad_amount", say("why_a_company_starts_with_capital_above_nothing"));
   if (!STRUCTURES.some((s) => s === c.structure)) return refuse("bad_structure", say("why_a_companys_structure_is_one_of_join", { join: STRUCTURES.join(", ") }));
@@ -237,7 +237,7 @@ function companyEvents(ctx: EffectContext, c: Company): LedgerEvent[] | Rejectio
   const scorp = optionalService(w.ctx, "economy.scorp_holders")?.(w.ctx, id, [c.founder]) ?? null;
   if (scorp) return scorp;
   // Capital, not income: filed under investment, so neither side's books count it as profit (DESIGN §26.2).
-  const account = openAndFund(ctx, w, c, { org: id, label: "checking", product: "business_checking", users: [c.founder], source, category: "investment", memo: `Capital into ${c.name}` });
+  const account = openAndFund(ctx, w, c, { org: id, label: "checking", product: "business_checking", users: [c.founder], source, category: "investment", memo: say("org_log_capital_into_name", { name: c.name }) });
   if (typeof account !== "string") return account;
   const set = applyAll(w, [{ type: "set", entity: id, field: "operating_account", value: account }]);
   if (set) return set;
@@ -245,7 +245,7 @@ function companyEvents(ctx: EffectContext, c: Company): LedgerEvent[] | Rejectio
   const basis = applyAll(w, [{ type: "economy.acquire", data: { entity: id, party: c.founder, cents: c.cents } }]);
   if (basis) return basis;
   const money = formatMoney(c.cents, ctx.world.currency);
-  const logged = applyAll(w, foundedLines(w, c, id, `${labelOf(ctx, c.founder)} founded ${c.name} with ${money}.`, `Started ${c.name}, its subsidiary, with ${money}.`));
+  const logged = applyAll(w, foundedLines(w, c, id, say("org_log_founder_founded_name_with_money", { founder: labelOf(ctx, c.founder), name: c.name, money: money }), say("org_log_started_name_its_subsidiary_with_money", { name: c.name, money: money })));
   return logged ?? w.events;
 }
 
@@ -264,13 +264,13 @@ function holderOk(ctx: ReadContext, id: EntityId): boolean {
  * posting names who moved it, and both Histories tell it.
  */
 function trustEvents(ctx: EffectContext, t: Trust): LedgerEvent[] | Rejection {
-  const refused = startRefusal(ctx, t.founder, "Settling a trust");
+  const refused = startRefusal(ctx, t.founder, say("org_log_settling_a_trust"));
   if (refused) return refuse("level", refused);
   if (t.cents < 0) return refuse("bad_amount", say("why_what_goes_into_a_trust_is_nothing"));
   for (const [role, id] of [["trustee", t.trustee], ["beneficiary", t.beneficiary]] as const) if (!holderOk(ctx, id)) return refuse("missing_entity", say("why_no_one_id_to_be_its_role", { id: labelOf(ctx, id), role: role }));
   if (t.until !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(t.until)) return refuse("bad_date", say("why_a_trust_ends_on_a_day_yyyy"));
   if (t.until !== "" && t.until <= today(ctx)) return refuse("bad_date", say("why_a_trust_ends_after_today"));
-  const source = t.cents > 0 ? sourceOf(ctx, t, "money for it") : null;
+  const source = t.cents > 0 ? sourceOf(ctx, t, say("org_log_money_for_it")) : null;
   if (source !== null && typeof source !== "string") return source;
   const spent = spending(ctx, t, source, t.beneficiary);
   if (!Array.isArray(spent)) return spent;
@@ -292,10 +292,10 @@ function trustEvents(ctx: EffectContext, t: Trust): LedgerEvent[] | Rejection {
   };
   const spawned = applyAll(w, [{ type: "spawn", entity: { id, kind: TRUST_KIND, name: t.name, tier: settlor?.tier ?? "background", fields, relations: [] } }]);
   if (spawned) return spawned;
-  const account = openAndFund(ctx, w, t, { org: id, label: "trust account", product: "trust", users: [], source, category: "investment", memo: `Into ${t.name}` });
+  const account = openAndFund(ctx, w, t, { org: id, label: "trust account", product: "trust", users: [], source, category: "investment", memo: say("org_log_into_name", { name: t.name }) });
   if (typeof account !== "string") return account;
-  const into = t.cents > 0 ? ` with ${formatMoney(t.cents, ctx.world.currency)}` : "";
-  const logged = applyAll(w, [...spent, ...foundedLines(w, t, id, `${labelOf(ctx, t.founder)} settled ${t.name}${into}${t.revocable ? ", revocably" : ""}.`, `Settled ${t.name}, a trust${into}.`)]);
+  const into = t.cents > 0 ? say("org_log_with_currency", { currency: formatMoney(t.cents, ctx.world.currency) }) : "";
+  const logged = applyAll(w, [...spent, ...foundedLines(w, t, id, say("org_log_founder_settled_name_into_revocably", { founder: labelOf(ctx, t.founder), name: t.name, into: into, if_revocable: !!(t.revocable) }), say("org_log_settled_name_a_trust_into", { name: t.name, into: into }))]);
   return logged ?? w.events;
 }
 
@@ -307,10 +307,10 @@ function trustEvents(ctx: EffectContext, t: Trust): LedgerEvent[] | Rejection {
  * organization's gift is spent as `by`'s money powers allow (`spending`).
  */
 function nonprofitEvents(ctx: EffectContext, f: Founding): LedgerEvent[] | Rejection {
-  const refused = startRefusal(ctx, f.founder, "Starting a nonprofit");
+  const refused = startRefusal(ctx, f.founder, say("org_log_starting_a_nonprofit"));
   if (refused) return refuse("level", refused);
   if (f.cents < 0) return refuse("bad_amount", say("why_what_goes_into_a_nonprofit_is_nothing"));
-  const source = f.cents > 0 ? sourceOf(ctx, f, "a gift") : null;
+  const source = f.cents > 0 ? sourceOf(ctx, f, say("org_log_a_gift")) : null;
   if (source !== null && typeof source !== "string") return source;
   const spent = spending(ctx, f, source);
   if (!Array.isArray(spent)) return spent;
@@ -326,12 +326,12 @@ function nonprofitEvents(ctx: EffectContext, f: Founding): LedgerEvent[] | Rejec
   const seated = applyAll(w, linked);
   if (seated) return seated;
   const person = orgTypeOf(ctx, f.founder) === null;
-  const account = openAndFund(ctx, w, f, { org: id, label: "checking", product: "business_checking", users: person ? [f.founder] : [], source, category: "donations", memo: `Gift to ${f.name}` });
+  const account = openAndFund(ctx, w, f, { org: id, label: "checking", product: "business_checking", users: person ? [f.founder] : [], source, category: "donations", memo: say("org_log_gift_to_name", { name: f.name }) });
   if (typeof account !== "string") return account;
   const set = applyAll(w, [{ type: "set", entity: id, field: "operating_account", value: account }]);
   if (set) return set;
-  const into = f.cents > 0 ? ` with ${formatMoney(f.cents, ctx.world.currency)}` : "";
-  const logged = applyAll(w, [...spent, ...foundedLines(w, f, id, `${labelOf(ctx, f.founder)} founded ${f.name}, a nonprofit${into}, as its Director.`, `Started ${f.name}, a nonprofit${into}, as its Director.`)]);
+  const into = f.cents > 0 ? say("org_log_with_currency", { currency: formatMoney(f.cents, ctx.world.currency) }) : "";
+  const logged = applyAll(w, [...spent, ...foundedLines(w, f, id, say("org_log_founder_founded_name_a_nonprofit_into_as", { founder: labelOf(ctx, f.founder), name: f.name, into: into }), say("org_log_started_name_a_nonprofit_into_as_its", { name: f.name, into: into }))]);
   return logged ?? w.events;
 }
 
@@ -349,7 +349,7 @@ function groupEvents(ctx: EffectContext, by: EntityId, name: string, kind: strin
   if (failed) return failed;
   const linked = linkEvents(w.ctx.registry, w.ctx.world, w.ctx.state, { rel: MEMBER_OF, from: by, to: id, fields: { position: LEADER, since: today(ctx) } });
   if (!Array.isArray(linked)) return linked;
-  return [spawn, ...linked, orgLog(w.ctx, id, `${labelOf(ctx, by)} founded ${name}, a ${of.label.toLowerCase()}, and leads it.`, { by, names: [by] })];
+  return [spawn, ...linked, orgLog(w.ctx, id, say("org_log_by_founded_name_a_label_and_leads", { by: labelOf(ctx, by), name: name, label: of.label.toLowerCase() }), { by, names: [by] })];
 }
 
 /**
@@ -406,15 +406,15 @@ function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): Le
     }
     const may = mayAct(ctx, party, org, "org.govern");
     if (!may.ok) return refuse("not_allowed", may.reason);
-    const votes = optionalQuery(ctx, "economy.decide")?.(ctx, org, party, "Changing the structure of") ?? null;
-    if (votes !== null) return putToVote(ctx, { org, by, party, text: `Make ${labelOf(ctx, org)} ${STRUCTURE_WORDS[structure] ?? structure}`, why: votes }) ?? refuse("votes", votes);
+    const votes = optionalQuery(ctx, "economy.decide")?.(ctx, org, party, say("org_log_changing_the_structure_of")) ?? null;
+    if (votes !== null) return putToVote(ctx, { org, by, party, text: say("org_log_make_org_structure", { org: labelOf(ctx, org), structure: STRUCTURE_WORDS[structure] ?? structure }), why: votes }) ?? refuse("votes", votes);
   }
   const change = optionalService(ctx, "economy.restructure");
   if (!change) return refuse("no_money", say("why_a_companys_structure_needs_the_economy"));
   const events = change(ctx, org, structure);
   if (!Array.isArray(events) || events.length === 0) return events;
   const from = events.flatMap((e) => (e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : []))[0] ?? "";
-  const text = `Became ${STRUCTURE_WORDS[structure] ?? structure}${from !== "" ? `, taxed as one from ${dateWords(ctx, from)}` : ""}`;
+  const text = say("org_log_became_structure_taxed_as_one_from_from", { structure: STRUCTURE_WORDS[structure] ?? structure, from: dateWords(ctx, from), if_from: from !== "" });
   return [...events, orgLog(ctx, org, text, by !== "" ? { by } : {}), ...(party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text}`, { by, names: [org] })] : [])];
 }
 

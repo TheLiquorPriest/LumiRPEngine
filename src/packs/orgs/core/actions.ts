@@ -104,7 +104,7 @@ function powersOf(v: JsonValue | undefined): OrgPower[] | Rejection {
 /** Limits in words, as a History line gives them: ", up to $200.00 a payment and $1,000.00 a month". */
 function limitWords(ctx: ReadContext, limits: OrgLimits): string {
   const { currency } = ctx.world;
-  const parts = [...(limits.payment !== undefined ? [`${formatMoney(limits.payment, currency)} a payment`] : []), ...(limits.month !== undefined ? [`${formatMoney(limits.month, currency)} a month`] : [])];
+  const parts = [...(limits.payment !== undefined ? [say("org_log_currency_a_payment", { currency: formatMoney(limits.payment, currency) })] : []), ...(limits.month !== undefined ? [say("org_log_currency_a_month", { currency: formatMoney(limits.month, currency) })] : [])];
   return parts.length > 0 ? `, up to ${parts.join(" and ")}` : "";
 }
 
@@ -125,7 +125,7 @@ const SCOPED: readonly OrgPower[] = ["members.admit", "members.remove", "members
 /** A member's History line, ending with why when the act gives one (a GM's reason, the reply's own words). */
 function withWhy(text: string, a: Args): string {
   const why = strOf(a.why).trim();
-  return why === "" ? text : `${text}: ${why}`;
+  return why === "" || text === "" ? text : `${text}: ${why}`;
 }
 
 /** Who did it and the power they used, as its History line keeps them: none for the GM's own change (no `by`), nor a power for what they may do as themselves. */
@@ -157,7 +157,7 @@ function admitMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const linked = relink(ctx, who, org, { ...(titled !== "" ? { role: titled } : {}), ...(position ? { position: position.id } : {}) });
   if (isRejection(linked)) return linked;
   const as = position?.title ?? titled;
-  return [...linked, orgLog(ctx, org, withWhy(`Admitted ${labelOf(ctx, who)}${as !== "" ? ` as ${as}` : ""}`, a), { ...actedBy(by, "members.admit"), names: [who] })];
+  return [...linked, orgLog(ctx, org, withWhy(say("org_log_admitted_who_as_as", { who: labelOf(ctx, who), as: as, if_as: as !== "" }), a), { ...actedBy(by, "members.admit"), names: [who] })];
 }
 
 function removeMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
@@ -170,7 +170,7 @@ function removeMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
     const denied = mayReach(ctx, by, org, "members.remove", who);
     if (denied) return denied;
   }
-  return [{ type: "unlink", rel: MEMBER_OF, from: who, to: org }, orgLog(ctx, org, withWhy(`Removed ${labelOf(ctx, who)}`, a), { ...actedBy(by, "members.remove"), names: [who] })];
+  return [{ type: "unlink", rel: MEMBER_OF, from: who, to: org }, orgLog(ctx, org, withWhy(say("org_log_removed_who", { who: labelOf(ctx, who) }), a), { ...actedBy(by, "members.remove"), names: [who] })];
 }
 
 /** Anyone may leave (§3.13); an owner leaves a company only by selling their share. */
@@ -182,7 +182,7 @@ function leaveOrg(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
     const owner = ownersIn(own(ctx.state.entities, org)?.fields ?? {}).some((o) => o.party === who && ROLE_RIGHTS[o.role].worth);
     return owner ? refuse("owner", say("why_who_owns_part_of_org_selling_that", { who: labelOf(ctx, who), org: labelOf(ctx, org) })) : refuse("not_member", say("why_who_isnt_a_member_of_org", { who: labelOf(ctx, who), org: labelOf(ctx, org) }));
   }
-  return [{ type: "unlink", rel: MEMBER_OF, from: who, to: org }, orgLog(ctx, org, withWhy(`${labelOf(ctx, who)} left`, a), { by: who, names: [who] })];
+  return [{ type: "unlink", rel: MEMBER_OF, from: who, to: org }, orgLog(ctx, org, withWhy(say("org_log_who_left", { who: labelOf(ctx, who) }), a), { by: who, names: [who] })];
 }
 
 /** Into a position, or out of every one with none (§3.3): one position per membership link, which is made when there is none. */
@@ -208,7 +208,7 @@ function appointMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const linked = relink(ctx, who, org, { position: position?.id ?? null });
   if (isRejection(linked)) return linked;
   const left = positionsOf(ctx, org).find((p) => p.id === was)?.title ?? was;
-  const text = position ? `Appointed ${labelOf(ctx, who)} ${position.title}` : `${labelOf(ctx, who)} no longer holds ${left}`;
+  const text = position ? say("org_log_appointed_who_title", { who: labelOf(ctx, who), title: position.title }) : say("org_log_who_no_longer_holds_left", { who: labelOf(ctx, who), left: left });
   return [...linked, orgLog(ctx, org, withWhy(text, a), { ...actedBy(by, "members.appoint"), names: [who] })];
 }
 
@@ -227,7 +227,7 @@ function titleMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   }
   const linked = relink(ctx, who, org, { role: words === "" ? null : words });
   if (isRejection(linked)) return linked;
-  return [...linked, orgLog(ctx, org, withWhy(words !== "" ? `${labelOf(ctx, who)} goes by ${words}` : `${labelOf(ctx, who)} no longer has a title of their own`, a), { ...actedBy(by, by === who ? null : "members.appoint"), names: [who] })];
+  return [...linked, orgLog(ctx, org, withWhy(words !== "" ? say("org_log_who_goes_by_words", { who: labelOf(ctx, who), words: words }) : say("org_log_who_no_longer_has_a_title_of", { who: labelOf(ctx, who) }), a), { ...actedBy(by, by === who ? null : "members.appoint"), names: [who] })];
 }
 
 /**
@@ -251,7 +251,7 @@ function setPosition(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   if (a.remove === true) {
     if (!before) return refuse("bad_position", say("why_employer_has_no_position_position", { employer: labelOf(ctx, org), position: id }));
     const rest = positions.filter((p) => p.id !== id).map((p) => (p.reports_to === id ? (({ reports_to: _gone, ...keep }) => keep)(p) : p));
-    return [write(rest), orgLog(ctx, org, `Removed the position ${before.title}`, by !== "" ? { by, power: "org.govern" } : {})];
+    return [write(rest), orgLog(ctx, org, say("org_log_removed_the_position_title", { title: before.title }), by !== "" ? { by, power: "org.govern" } : {})];
   }
   const powers = a.powers === undefined || a.powers === null || a.powers === "" ? (before?.powers ?? []) : powersOf(a.powers);
   if (isRejection(powers)) return powers;
@@ -284,7 +284,7 @@ function setPosition(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   }
   const list = [...positions.filter((p) => p.id !== id).map((p) => (next.default === true && p.default === true ? (({ default: _was, ...keep }) => keep)(p) : p)), next];
   const ordered = before ? positions.map((p) => list.find((q) => q.id === p.id) ?? p) : list;
-  return [write(ordered), orgLog(ctx, org, `${before ? "Changed" : "Added"} the position ${next.title}`, by !== "" ? { by, power: "org.govern" } : {})];
+  return [write(ordered), orgLog(ctx, org, say("org_log_changedadded_the_position_title", { title: next.title, if_before: !!(before) }), by !== "" ? { by, power: "org.govern" } : {})];
 }
 
 /** The last minute of the day a date names, as a link's `until` reads it; a clock as given. */
@@ -335,8 +335,8 @@ function delegatePowers(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection 
   const fields: JsonObject = { powers, ...(limits.payment !== undefined ? { payment: limits.payment } : {}), ...(limits.month !== undefined ? { month: limits.month } : {}), ...(limits.accounts !== undefined ? { accounts: limits.accounts } : {}), ...(by !== "" ? { by } : {}) };
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: ACTS_FOR, from: to, to: org, fields, ...(until !== undefined ? { until } : {}) });
   if (isRejection(linked)) return linked;
-  const when = typeof a.until === "string" && a.until.trim() !== "" ? `, until ${dateWords(ctx, a.until.trim().slice(0, 10))}` : "";
-  return [...linked, orgLog(ctx, org, `Let ${labelOf(ctx, to)} ${powers.map((p) => POWER_WORDS[p]).join(", ")}${limitWords(ctx, limits)}${when}`, { ...actedBy(by, "delegate"), names: [to] })];
+  const when = typeof a.until === "string" && a.until.trim() !== "" ? say("org_log_until_until", { until: dateWords(ctx, a.until.trim().slice(0, 10)) }) : "";
+  return [...linked, orgLog(ctx, org, say("org_log_let_to_powers_limits_when", { to: labelOf(ctx, to), powers: powers.map((p) => POWER_WORDS[p]).join(", "), limits: limitWords(ctx, limits), when: when }), { ...actedBy(by, "delegate"), names: [to] })];
 }
 
 /** A delegation ended (§3.5): by its granter, or by a holder of `delegate` whose own powers cover it. */
@@ -355,7 +355,7 @@ function revokeDelegation(ctx: EffectContext, a: Args): LedgerEvent[] | Rejectio
     const beyond = given.find((p) => orgPower(ctx, by, org, p) === null);
     if (beyond !== undefined) return refuse("not_allowed", say("why_by_may_not_beyond_for_org_so", { by: labelOf(ctx, by), beyond: POWER_WORDS[beyond], org: labelOf(ctx, org) }));
   }
-  return [{ type: "unlink", rel: ACTS_FOR, from: to, to: org }, orgLog(ctx, org, `${labelOf(ctx, to)} no longer acts for it`, { ...actedBy(by, by === strOf(f.by) ? null : "delegate"), names: [to] })];
+  return [{ type: "unlink", rel: ACTS_FOR, from: to, to: org }, orgLog(ctx, org, say("org_log_to_no_longer_acts_for_it", { to: labelOf(ctx, to) }), { ...actedBy(by, by === strOf(f.by) ? null : "delegate"), names: [to] })];
 }
 
 /** A new name (§3.13, `org.govern`), applied at once. */
@@ -371,7 +371,7 @@ function renameOrg(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
     const may = mayAct(ctx, by, org, "org.govern");
     if (!may.ok) return refuse("not_allowed", may.reason);
   }
-  return [{ type: ENGINE_EVENTS.rename, data: { entity: org, name, was } }, orgLog(ctx, org, `Renamed from ${was} to ${name}`, actedBy(by, "org.govern"))];
+  return [{ type: ENGINE_EVENTS.rename, data: { entity: org, name, was } }, orgLog(ctx, org, say("org_log_renamed_from_was_to_name", { was: was, name: name }), actedBy(by, "org.govern"))];
 }
 
 /** At once, as bookkeeping (§4.6): positions and renaming. */

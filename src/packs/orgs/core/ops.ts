@@ -53,7 +53,7 @@ export function historyLine(org: EntityId, text: string, opts: { by?: EntityId; 
 /** A History line with its reason: "Hired Jess Kowalczyk as Receptionist: she starts Monday". */
 export function withWhy(text: string, why: string | undefined): string {
   const reason = plainWords(why ?? "");
-  return reason === "" ? text : `${text}: ${reason}`;
+  return reason === "" || text === "" ? text : `${text}: ${reason}`;
 }
 
 /**
@@ -62,8 +62,8 @@ export function withWhy(text: string, why: string | undefined): string {
  */
 export function flagged(ctx: ReadContext, by: EntityId | undefined, org: EntityId, power: OrgPower, did: string): EffectSpec[] {
   if (by === undefined || by === "" || by === org || orgTypeOf(ctx, org) === null || orgPower(ctx, by, org, power) !== null) return [];
-  const who = labelOf(ctx, by);
-  return [{ type: "note", args: { text: plainWords(`${who} ${did}, though ${who} may not ${POWER_WORDS[power]} for ${labelOf(ctx, org)}.`), visibility: "secret" } }];
+  const text = plainWords(say("org_log_who_did_though_who_may_not_power", { who: labelOf(ctx, by), did: did, power: POWER_WORDS[power], org: labelOf(ctx, org) }));
+  return text === "" ? [] : [{ type: "note", args: { text, visibility: "secret" } }];
 }
 
 /** The id of `org`'s position that `said` names: its id, or its title in any case; null for none it defines. */
@@ -170,7 +170,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const job = own(ctx.state.entities, op.who)?.relations.some((r) => r.type === MEMBER_OF && r.to === op.org) === true ? null : isStaff(ctx, op.who, op.org);
       if (!job) return [{ type: "orgs.appoint", args: { org: op.org, who: op.who, position: op.position ?? "", why: plainWords(op.why) } }];
       const title = op.position === null ? null : (positionsOf(ctx, op.org).find((p) => p.id === op.position)?.title ?? op.position);
-      const text = title === null ? `${name(op.who)} no longer holds a position` : `Appointed ${name(op.who)} ${title}`;
+      const text = title === null ? say("org_log_who_no_longer_holds_a_position", { who: name(op.who) }) : say("org_log_appointed_who_title", { who: name(op.who), title: title });
       return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text, op.why), { names: [op.who] })];
     }
     case "title": {
@@ -207,14 +207,14 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const until = op.until === undefined ? undefined : endOfDay(ctx, op.until);
       if (typeof until === "object") return until;
       const fields: JsonObject = { powers: op.powers, ...(op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}), ...(op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}), ...(op.accounts !== undefined ? { accounts: op.accounts } : {}), by: op.by };
-      const limits = [...(op.payment !== undefined && op.payment > 0 ? [`${money(ctx, op.payment)} a payment`] : []), ...(op.month !== undefined && op.month > 0 ? [`${money(ctx, op.month)} a month`] : [])];
+      const limits = [...(op.payment !== undefined && op.payment > 0 ? [say("org_log_currency_a_payment", { currency: money(ctx, op.payment) })] : []), ...(op.month !== undefined && op.month > 0 ? [say("org_log_currency_a_month", { currency: money(ctx, op.month) })] : [])];
       const text = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...(until !== undefined ? { until } : {}) } },
         historyLine(op.org, text, { by: op.by, names: [op.by, op.to] }),
-        ...flagged(ctx, op.by, op.org, "delegate", `let ${name(op.to)} act for ${name(op.org)}`),
-        ...(lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, `let ${name(op.to)} ${POWER_WORDS[lacking]}`) : []),
+        ...flagged(ctx, op.by, op.org, "delegate", say("org_log_let_name_act_for_org", { name: name(op.to), org: name(op.org) })),
+        ...(lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, say("org_log_let_name_lacking", { name: name(op.to), lacking: POWER_WORDS[lacking] })) : []),
       ];
     }
     case "revoke": {
@@ -228,20 +228,20 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const title = op.title ?? (op.position !== undefined ? positionsOf(ctx, op.org).find((p) => p.id === op.position)?.title : undefined);
       return [
         { type: "economy.hire", args: { business: op.org, worker: op.who, ...(op.position !== undefined ? { position: op.position } : {}), ...(op.title !== undefined ? { title: plainWords(op.title) } : {}), ...(op.basis !== undefined ? { basis: op.basis } : {}), ...(op.rate !== undefined ? { rate: Math.round(op.rate) } : {}), ...(op.hours !== undefined ? { hours_per_week: op.hours } : {}) } },
-        historyLine(op.org, `Hired ${name(op.who)}${title !== undefined && title !== "" ? ` as ${title}` : ""}`, { names: [op.who] }),
+        historyLine(op.org, say("org_log_hired_who_as_title", { who: name(op.who), title: title, if_title: title !== undefined && title !== "" }), { names: [op.who] }),
       ];
     }
     case "fire": {
       const job = jobOf(ctx, op.job);
       if (!job) return missingJob(ctx, op.job);
-      return [{ type: "economy.job_end", args: { job: op.job } }, ...(job.org !== null ? [historyLine(job.org, withWhy(`Let ${name(job.worker)} go`, op.why), { names: [job.worker] })] : [])];
+      return [{ type: "economy.job_end", args: { job: op.job } }, ...(job.org !== null ? [historyLine(job.org, withWhy(say("org_log_let_worker_go", { worker: name(job.worker) }), op.why), { names: [job.worker] })] : [])];
     }
     case "pay": {
       const job = jobOf(ctx, op.job);
       if (!job) return missingJob(ctx, op.job);
       const was = typeof job.fields.rate === "number" ? job.fields.rate : 0;
       const rate = op.rate !== undefined ? Math.round(op.rate) : Math.round(was * (1 + (op.pct ?? 0) / 100));
-      return [{ type: "economy.job_raise", args: { job: op.job, ...(op.rate !== undefined ? { rate: Math.round(op.rate) } : { pct: op.pct ?? 0 }) } }, ...(job.org !== null && rate > 0 ? [historyLine(job.org, `Set ${name(job.worker)}'s pay to ${money(ctx, rate)}`, { names: [job.worker] })] : [])];
+      return [{ type: "economy.job_raise", args: { job: op.job, ...(op.rate !== undefined ? { rate: Math.round(op.rate) } : { pct: op.pct ?? 0 }) } }, ...(job.org !== null && rate > 0 ? [historyLine(job.org, say("org_log_set_worker_s_pay_to_rate", { worker: name(job.worker), rate: money(ctx, rate) }), { names: [job.worker] })] : [])];
     }
     case "issue": {
       const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.shares_issue", "issue shares");
@@ -295,7 +295,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const was = duesNow(ctx, op.org);
       const every = op.every ?? was?.every ?? "month";
       const day = was !== null && was.every === every ? was.day : undefined;
-      return [{ type: "economy.dues", args: { org: op.org, cents, every, ...(day !== undefined ? { day } : {}) } }, historyLine(op.org, cents > 0 ? `Set dues of ${money(ctx, cents)} a ${every}` : "Ended dues")];
+      return [{ type: "economy.dues", args: { org: op.org, cents, every, ...(day !== undefined ? { day } : {}) } }, historyLine(op.org, cents > 0 ? say("org_log_set_dues_of_cents_a_every", { cents: money(ctx, cents), every: every }) : say("org_log_ended_dues"))];
     }
     case "tier":
       // The party pack's own: a tier for someone the player character knows, or out of the party.
@@ -324,13 +324,13 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.tax_status", "change a tax-exempt status");
       if (missing) return missing;
       const row = op.status === null ? undefined : ctx.tables.get("economy.exempt")?.rows[op.status];
-      const words = op.status === null ? "No longer exempt from income tax" : `Exempt from income tax as ${strOf(row?.name, op.status)}`;
+      const words = op.status === null ? say("org_log_no_longer_exempt_from_income_tax") : say("org_log_exempt_from_income_tax_as_status", { status: strOf(row?.name, op.status) });
       return [{ type: "economy.tax_status", args: { org: op.org, status: op.status ?? "" } }, historyLine(op.org, words)];
     }
     case "consolidate": {
       const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.consolidate", "file a consolidated return");
       if (missing) return missing;
-      return [{ type: "economy.consolidate", args: { org: op.org, elect: op.elect } }, historyLine(op.org, op.elect ? "Elected to file one consolidated return" : "Stopped filing a consolidated return")];
+      return [{ type: "economy.consolidate", args: { org: op.org, elect: op.elect } }, historyLine(op.org, op.elect ? say("org_log_elected_to_file_one_consolidated_return") : say("org_log_stopped_filing_a_consolidated_return"))];
     }
     // Decisions (ORG-SPEC Phase 5), each the orgs pack's own effect, which writes its History line: a decision put to a vote for someone, the GM's vote, a motion closed or withdrawn, a request answered, the rules.
     case "propose":
@@ -365,7 +365,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     case "lend": {
       const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.lend", "lend money");
       if (missing) return missing;
-      return [{ type: "economy.lend", args: { who: op.org, to: op.to, cents: Math.round(op.cents), ...(op.apr !== undefined ? { apr: op.apr } : {}), ...(op.months !== undefined ? { months: op.months } : {}), ...(op.from !== undefined ? { from: op.from } : {}) } }, historyLine(op.org, `Lent ${money(ctx, op.cents)} to ${name(op.to)}`, { names: [op.to] })];
+      return [{ type: "economy.lend", args: { who: op.org, to: op.to, cents: Math.round(op.cents), ...(op.apr !== undefined ? { apr: op.apr } : {}), ...(op.months !== undefined ? { months: op.months } : {}), ...(op.from !== undefined ? { from: op.from } : {}) } }, historyLine(op.org, say("org_log_lent_cents_to_name", { cents: money(ctx, op.cents), name: name(op.to) }), { names: [op.to] })];
     }
   }
 }

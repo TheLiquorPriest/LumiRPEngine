@@ -959,7 +959,7 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
   const id = `job:${hashParts(ctx.rng.seed, "hire", employer, worker, String(ctx.state.clock)).slice(0, 10)}`;
   const entity: EntityDef = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, employer)}`, tier: "background", fields, relations: [] };
   const as = strOf(fields.title) || into?.title || "";
-  return [{ type: "spawn", entity }, ...acted(ctx, employer, by, "staff.hire", `Hired ${labelOf(ctx, worker)}${as ? ` as ${as}` : ""}`, [worker])];
+  return [{ type: "spawn", entity }, ...acted(ctx, employer, by, "staff.hire", say("org_log_hired_worker_as_as", { worker: labelOf(ctx, worker), as: as, if_as: !!(as) }), [worker])];
 }
 
 /**
@@ -996,7 +996,7 @@ function endJob(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEven
   return [
     { type: "set", entity: job.id, field: "end", value: end },
     { type: "set", entity: job.id, field: "status", value: "ended" },
-    ...(job.party !== null && by !== job.worker ? acted(ctx, job.party, by, "staff.fire", `Let ${labelOf(ctx, job.worker)} go`, [job.worker]) : []),
+    ...(job.party !== null && by !== job.worker ? acted(ctx, job.party, by, "staff.fire", say("org_log_let_worker_go", { worker: labelOf(ctx, job.worker) }), [job.worker]) : []),
   ];
 }
 
@@ -1009,7 +1009,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (problem !== null) return reject("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", say("why_a_raise_needs_a_new_rate_above"));
-  const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s pay to ${api.money(ctx, rate)} ${BASIS_WORDS[job.basis]}`, [job.worker])] as LedgerEvent[];
+  const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", say("org_log_set_worker_s_pay_to_rate_basis", { worker: labelOf(ctx, job.worker), rate: api.money(ctx, rate), basis: BASIS_WORDS[job.basis] }), [job.worker])] as LedgerEvent[];
   if (strOf(own(ctx.state.entities, job.id)?.fields.pay_every) !== UNPAID) return said;
   // An unpaid title starts to pay from today, never back to its start: on the employer's pay schedule, else its staff's own cycle, else monthly.
   const cal = calendarOf(ctx.world);
@@ -1027,7 +1027,7 @@ function setHours(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
   const by = strOf(args.by);
   const problem = payProblem(ctx, api, by, job);
   if (problem !== null) return reject("not_owner", problem);
-  return [{ type: "set", entity: job.id, field: "hours_per_week", value: hours }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s hours to ${hours} a week`, [job.worker])];
+  return [{ type: "set", entity: job.id, field: "hours_per_week", value: hours }, ...acted(ctx, job.party, by, "staff.pay", say("org_log_set_worker_s_hours_to_hours_a", { worker: labelOf(ctx, job.worker), hours: hours }), [job.worker])];
 }
 
 /** `economy.job_leave`: someone goes on leave (a pay period on leave is covered and pays nothing) or comes back from it. */
@@ -1037,7 +1037,7 @@ function setLeave(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEv
   const leave = args.leave !== false;
   const who = labelOf(ctx, job.worker);
   if (leave === (job.status === "leave")) return reject("unchanged", leave ? say("why_who_is_already_on_leave", { who: who }) : say("why_who_isnt_on_leave", { who: who }));
-  return [{ type: "set", entity: job.id, field: "status", value: leave ? "leave" : "active" }, ...acted(ctx, job.party, strOf(args.by), "staff.pay", leave ? `Put ${who} on leave` : `${who} came back from leave`, [job.worker])];
+  return [{ type: "set", entity: job.id, field: "status", value: leave ? "leave" : "active" }, ...acted(ctx, job.party, strOf(args.by), "staff.pay", leave ? say("org_log_put_who_on_leave", { who: who }) : say("org_log_who_came_back_from_leave", { who: who }), [job.worker])];
 }
 
 /** `economy.job_position`: someone working there is appointed to one of its positions (promoted or moved), or to none. */
@@ -1050,7 +1050,7 @@ function setPosition(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
   if ("code" in job) return job;
   const who = labelOf(ctx, job.worker);
   if (position === strOf(own(ctx.state.entities, job.id)?.fields.position)) return reject("unchanged", into ? say("why_who_already_holds_title", { who: who, title: into.title }) : say("why_who_holds_no_position", { who: who }));
-  return [{ type: "set", entity: job.id, field: "position", value: into ? position : null }, ...acted(ctx, job.party, strOf(args.by), "members.appoint", into ? `Appointed ${who} ${into.title}` : `${who} no longer holds a position`, [job.worker])];
+  return [{ type: "set", entity: job.id, field: "position", value: into ? position : null }, ...acted(ctx, job.party, strOf(args.by), "members.appoint", into ? say("org_log_appointed_who_title", { who: who, title: into.title }) : say("org_log_who_no_longer_holds_a_position", { who: who }), [job.worker])];
 }
 
 /**
@@ -1107,7 +1107,7 @@ function paySchedule(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
       if (JSON.stringify(f[field] ?? null) !== JSON.stringify(value)) out.push({ type: "set", entity: job.id, field, value });
     }
   }
-  return [...out, ...acted(ctx, org, by, "staff.pay", `Changed the pay schedule to ${every}`, [])];
+  return [...out, ...acted(ctx, org, by, "staff.pay", say("org_log_changed_the_pay_schedule_to_every", { every: every }), [])];
 }
 
 // ---------------------------------------------------------------- views
