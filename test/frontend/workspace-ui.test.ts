@@ -16,7 +16,7 @@ import type { VNode } from "preact";
 import { Button, Empty, Field, Seg } from "../../src/frontend/components";
 import { atLevel, ChipRow, guardDraft, heldCreate, moveProblem, newNoteFolder, newNoteProblem, paneFile, PathDialog, type PathDialogState, provenanceWords, SESSION_PAGE, sizeWords, workspaceControls, WorkspaceBrowser, type WorkspaceBrowserProps, type WorkspaceBody, type WorkspaceControls, WorkspaceFilePane, type WorkspaceFilePaneProps, workspaceReadKeys, type WorkspaceResult } from "../../src/frontend/gm/workspace";
 import { fileChips, naturalCompare, systemWords, treeFiles, workspaceArea, workspaceGroups, workspaceTree } from "../../src/frontend/gm/workspace-tree";
-import { gmReloadKey } from "../../src/frontend/play/gm";
+import { gmReloadKey } from "../../src/frontend/gm/use-gm-parts";
 import type { SessionView, WorkspaceFileView } from "../../src/shared/protocol";
 import { propsOf, type Props } from "../support/tree";
 

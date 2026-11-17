@@ -16,8 +16,7 @@ import { type BulkEditor, editNotice, type EditNotice, noticeStands, sendEdits }
 import { partsOf } from "../../frontend/gm/parts";
 import { ThingsSection } from "../../frontend/gm/things";
 import { EditNoticeBar } from "../../frontend/gm/ui";
-import { useGmParts } from "../../frontend/gm/use-gm-parts";
-import { gmReloadKey } from "../../frontend/play/gm";
+import { gmReloadKey, useGmParts } from "../../frontend/gm/use-gm-parts";
 import { editRequest } from "../../frontend/requests";
 import type { EditOp } from "../../shared/edit-ops";
 import { DEFAULT_CURRENCY } from "../../shared/world";

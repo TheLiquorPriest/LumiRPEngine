@@ -1,7 +1,6 @@
 // Play → Story → Calendar (DESIGN §12): the clock and today, today's holidays, what's coming up,
-// Pause/Resume and Timelapse. This chat's time controls (scene ticks, scale, interrupts…) live in
-// GM → This chat; a pointer leads there. The calendar's glance on Now gives
-// the POV's next two commitments.
+// Pause/Resume and Timelapse. The world's clock is changed on RPE's World page, at the world's time;
+// a pointer leads there. The calendar's glance on Now gives the POV's next two commitments.
 
 import { isRecord } from "../../../shared/json";
 import { useApp } from "../../../frontend/app";
@@ -82,8 +81,8 @@ export function CalendarPanel(props: PanelProps) {
         )}
       </Section>
       <div class="lre-world-pointer">
-        <Button variant="ghost" size="sm" icon="sliders" iconAfter="chevron-right" onClick={() => app.ui.update((ui) => ({ ...ui, mode: "gm", gm: { ...ui.gm, section: "chat" } }))}>
-          This chat's time controls are in GM → This chat
+        <Button variant="ghost" size="sm" icon="sliders" iconAfter="chevron-right" onClick={() => app.open?.({ page: "world", chat: props.chatId, at: ["world", "time"] })}>
+          Change the clock on World
         </Button>
       </div>
     </div>

@@ -7,14 +7,13 @@
 // `orgs.org` view's, as the player character may see the organization, opened on the tab its route
 // names (`orgRoute`), else on Overview. The header's overflow holds Rename where you may govern it
 // and Leave where you're a member of your own (each done at once, off screen, with Undo: DESIGN §11)
-// and Open in GM, which shows it in GM → Orgs.
+// and Open in GM, which opens RPE's World page at it, behind the spoiler gate.
 
 import type { ComponentChildren } from "preact";
 import { useId, useState } from "preact/hooks";
 import { orgRoute, orgRouteOf, useApp, type App, type SheetRoute } from "../../../frontend/app";
 import { OverflowMenu, type MenuItem } from "../../../frontend/build/chrome";
 import { Banner, Button, Empty, Field, IdText, PageHeader, Section, Tabs, tabPanel, useBusy } from "../../../frontend/components";
-import { gmOpen } from "../../../frontend/gm/gate";
 import type { OrgShellTab, OrgTabDef, Send, SheetProps } from "../../../frontend/registry";
 import type { ChatId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
@@ -26,7 +25,6 @@ import { toastQueued } from "../../../frontend/queued";
 import { hasChart } from "./chart-model";
 import { OrgChart } from "./chart";
 import { decodeOrgList, decodeOrgPage } from "./decode";
-import { GM_ORGS_SECTION } from "./gm";
 import { OrgOverview } from "./overview";
 import type { PartyAct } from "./party";
 import { OrgPeople } from "./people";
@@ -212,7 +210,7 @@ export function OrgSheet(props: SheetProps) {
   const menu = orgMenu(org, {
     rename: () => setRenaming(true),
     leave: () => void app.host.confirm("Leave", `Leave ${org.name}? ${OFFSTAGE_NOTE}`, "danger", "Leave").then((yes) => (yes ? act(ORG_ACTIONS.leave, { org: org.id }) : undefined)),
-    openInGm: () => app.ui.update((ui) => ({ ...gmOpen(ui, GM_ORGS_SECTION, org.id), mode: "gm" })),
+    openInGm: () => app.open?.({ page: "world", chat: props.chatId, at: [`entity:${org.id}`] }),
   });
   const above = renaming ? <OrgRenameForm name={org.name} busy={busy} onSave={(name) => act(ORG_ACTIONS.rename, { org: org.id, name }, () => setRenaming(false))} onCancel={() => setRenaming(false)} /> : null;
   // The other pages the Chart's ownership tree walks, each read once a render.

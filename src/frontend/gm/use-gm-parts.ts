@@ -8,9 +8,19 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { GmReadPart } from "../../shared/gm-parts";
 import { GM_PAGE_DEFAULTS } from "../../shared/settings";
-import type { ChatStatus, GmView } from "../../shared/state-view";
+import type { ChatStatus, GmView, StateView } from "../../shared/state-view";
 import type { App } from "../app";
 import { GmParts, gmReload, type GmNeed, type GmWant } from "./parts";
+
+/**
+ * What the GM view is loaded again on when the chat has no GM key (`StateView.gmKey`): the chat
+ * moving on (a turn, an edit, an undo), as the player's state shows it. Chips count by id, not by
+ * number: an answer that swaps one chip for another (a routine's Yes leaves its Undo) changes the
+ * chat while their count stays.
+ */
+export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "journal">): string {
+  return `${state.status}\u0000${state.journal.length}\u0000${state.chips.map((c) => c.id).join("\u0000")}`;
+}
 
 /** The GM page's view, as `useGmParts` keeps it. */
 export interface GmPartsPage {

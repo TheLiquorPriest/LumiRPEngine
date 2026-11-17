@@ -11,7 +11,7 @@ import { toChain } from "../../src/migrate/today/ledger-io";
 import type { JsonObject } from "../../src/shared/json";
 import type { VNode } from "preact";
 import { Badge, IdText, ListRow } from "../../src/frontend/components";
-import { gmReloadKey } from "../../src/frontend/play/gm";
+import { gmReloadKey } from "../../src/frontend/gm/use-gm-parts";
 import { CharacterRows, RoutineSections } from "../../src/packs/castlife/ui/routines-gm";
 import { routineRows } from "../../src/packs/castlife/ui/routines-ops";
 import type { LaidBlock, RoutineChangeSummary, RoutineGmView } from "../../src/shared/routines";

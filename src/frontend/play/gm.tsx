@@ -13,7 +13,6 @@
 
 import { useEffect, useState } from "preact/hooks";
 import type { EditOp } from "../../shared/protocol";
-import type { StateView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY } from "../../shared/world";
 import { useApp, useUi } from "../app";
 import { sendInChunks } from "../batch";
@@ -28,7 +27,7 @@ import { partsOf } from "../gm/parts";
 import { EditsLog, PlacesSection, StorySection } from "../gm/sections";
 import { ThingsSection } from "../gm/things";
 import { EditNoticeBar } from "../gm/ui";
-import { useGmParts } from "../gm/use-gm-parts";
+import { gmReloadKey, useGmParts } from "../gm/use-gm-parts";
 import { WorldSection } from "../gm/world";
 import type { PanelProps } from "../registry";
 import { editRequest } from "../requests";
@@ -36,16 +35,6 @@ import { QUEUED_TOAST, toastQueued } from "../queued";
 
 /** GM mode's own bounds, today's fixed ones: the World page's browser reads RPE's settings instead (`ui/kept/things.tsx`). */
 const GM_LIMITS = { editOps: EDIT_OPS_MAX, thingsMost: FIX_THINGS_MAX, tidyRun: TIDY_BOUNDS.findings } as const;
-
-/**
- * What the GM view is loaded again on when the chat has no GM key (`StateView.gmKey`): the chat
- * moving on (a turn, an edit, an undo), as the player's state shows it. Chips count by id, not by
- * number: an answer that swaps one chip for another (a routine's Yes leaves its Undo) changes the
- * chat while their count stays.
- */
-export function gmReloadKey(state: Pick<StateView, "status" | "chips" | "journal">): string {
-  return `${state.status}\u0000${state.journal.length}\u0000${state.chips.map((c) => c.id).join("\u0000")}`;
-}
 
 export function GmPanel(props: PanelProps) {
   const app = useApp();
