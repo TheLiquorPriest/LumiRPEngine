@@ -293,6 +293,13 @@ export function indexOf(grid: Pick<Drawn, "width" | "height">, s: Square): numbe
   return Number.isInteger(c) && Number.isInteger(r) && c >= 1 && r >= 1 && c <= grid.width && r <= grid.height ? (r - 1) * grid.width + (c - 1) : null;
 }
 
+/** The place whose area holds a square of the grid (a room of the grid's place drawn as an area of it); else the place the grid draws. */
+export function roomAt(world: Pick<WorldDoc, "places">, grid: Pick<Drawn, "scope" | "zones" | "width" | "height">, s: Square): PlaceId {
+  const i = indexOf(grid, s);
+  if (i === null) return grid.scope;
+  return Object.keys(grid.zones).sort().find((zone) => world.places[zone]?.parent === grid.scope && (grid.zones[zone] ?? []).includes(i)) ?? grid.scope;
+}
+
 export function squareAt(grid: Pick<Drawn, "width">, index: number): Square {
   return [(index % grid.width) + 1, Math.floor(index / grid.width) + 1];
 }

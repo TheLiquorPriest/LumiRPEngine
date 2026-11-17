@@ -10,6 +10,7 @@ import { MAP_DEFAULTS } from "../../../src/shared/map-config";
 import { mapRoutes } from "../../../src/iface/map/routes";
 import { migrateStore } from "../../../src/store/schema";
 import { openStore } from "../../../src/store/store";
+import type { MapDoc, WorldDoc } from "../../../src/shared/world";
 import { INN, registry, worldWith } from "./fixtures";
 
 const USER = "user-a";
@@ -18,8 +19,9 @@ const CHAT = "chat-a";
 type Handler = (call: unknown) => Promise<unknown> | unknown;
 
 /** The routes over a store with one chat on the inn's world, the world kept with a draft of its own; each called by its method and the end of its path. */
-async function rig() {
-  const world = worldWith(INN);
+async function rig(maps: MapDoc[] = [INN], tweak?: (w: WorldDoc) => void) {
+  const world = worldWith(...maps);
+  tweak?.(world);
   const revision = hashJson(world);
   const db = new Database(":memory:");
   migrateStore(db);
@@ -76,5 +78,24 @@ describe("the owner's routes on a chat's maps", () => {
     const listed = (await t.call("GET", "/maps")) as { maps: { place: string; from: string }[] };
     expect(listed.maps.find((m) => m.place === "far_road")?.from).toBe("laid");
     await expect(t.call("GET", "/maps/:place", { params: { place: "the_moon" } })).rejects.toThrow("has no grid");
+  });
+
+  test("a piece dropped on a square of another room's area is in that room, and one lying on the table is taken off it", async () => {
+    const floor: MapDoc = { id: "inn_floor", scope: "lamp_ladle", layout: ["#######", "#FFF.K#", "#FFF.K#", "#######"], cellMeters: 1.524, legend: { F: { place: "front_hall" }, K: { place: "back_hall" } }, places: [{ id: "front_hall", name: "Front Hall" }, { id: "back_hall", name: "Back Hall" }] };
+    const rooms = await rig([floor], (w) => void Object.assign(w.entities.bram?.fields ?? {}, { place: "front_hall" }));
+    const placeOf = (t: Awaited<ReturnType<typeof rig>>, id: string): unknown => t.s.headState(CHAT).state.world.entities[id]?.fields.place;
+    expect(placeOf(rooms, "bram")).toBe("front_hall");
+    await rooms.call("POST", "/moves", { params: { place: "lamp_ladle" }, body: { who: "bram", square: [6, 2] } });
+    expect(placeOf(rooms, "bram")).toBe("back_hall");
+    const floorRead = (await rooms.call("GET", "/maps/:place", { params: { place: "lamp_ladle" } })) as { pieces: { id: string; square: number[] }[] };
+    expect(floorRead.pieces.find((p) => p.id === "bram")?.square).toEqual([6, 2]);
+    // The lantern lies on the long table; dragged to a square it stands there with no table under it.
+    const inn = await rig();
+    const lying = (await inn.call("GET", "/maps/:place", { params: { place: "common_room" } })) as { pieces: { id: string; on?: string }[] };
+    expect(lying.pieces.find((p) => p.id === "lantern")?.on).toBe("long_table");
+    await inn.call("POST", "/moves", { params: { place: "common_room" }, body: { who: "lantern", square: [5, 3] } });
+    const moved = (await inn.call("GET", "/maps/:place", { params: { place: "common_room" } })) as { pieces: { id: string; square: number[]; on?: string }[] };
+    expect(moved.pieces.find((p) => p.id === "lantern")).toMatchObject({ square: [5, 3] });
+    expect(moved.pieces.find((p) => p.id === "lantern")?.on).toBeUndefined();
   });
 });

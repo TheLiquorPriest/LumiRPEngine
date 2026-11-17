@@ -7,9 +7,9 @@
 // none declares `touches`: an Upgrade to a new revision carries the records on (`carrySpace`): a
 // square the new revision took in (it draws the symbol the chat drew there, and gives it the
 // meaning the chat gave it) is dropped from the chat's record, so the world's later edit of it shows
-// in the chat; any other plays on over what that revision draws. A record whose map, place or
-// thing the revision no longer has is kept, shows nothing while its target is gone, is named in the
-// Upgrade's notes, and shows again if a later revision brings the target back. Two optional fields of the map format (`lre-map-v1`) carry what a
+// in the chat; any other plays on over what that revision draws. A record (squares, doors, footprints,
+// where someone is) whose map, place or thing the revision no longer has is kept, shows nothing while
+// its target is gone, is named in the Upgrade's notes, and shows again if a later revision brings the target back. Two optional fields of the map format (`lre-map-v1`) carry what a
 // map draws once: a terrain that blocks the way and not the view (`seeThrough`), and the grid's time
 // step (`step`). A record is replaced, never changed in place, so a reader may keep what it works out
 // from one by its identity. None is told in a line, as a step on a grid is not (`space.pos`): the
@@ -24,6 +24,7 @@ import mapFormat from "../../../shared/lre-map-v1.schema.json";
 import type { MapCellDef, MapDoc, WorldDoc } from "../../../shared/world";
 import { labelOf, mutableSlice, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, Rejection } from "../../../engine/registry";
+import { GONE_FIELD } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { chatDraftOf, draftedWorld } from "../../../engine/world-draft";
 
@@ -156,14 +157,16 @@ function leftOver(doc: MapDoc, edits: SquareEdits): SquareEdits | null {
 /**
  * A chat's records of what it changed on grids, as an Upgrade carries them to the revision `to` (a
  * `migrate` marker's step, `upgrade.ts`, beside `carryDraft`): the squares `to` took in leave the
- * chat's record, what `to` left alone or drew otherwise plays on over it, and a record whose map or
- * place `to` (with this chat's own draft laid over it) no longer has is kept as it was. The notes
- * name each of those, so they are seen; nothing is dropped for it.
+ * chat's record, what `to` left alone or drew otherwise plays on over it, and a record whose map,
+ * place or thing `to` (with this chat's own draft laid over it) no longer has is kept as it was. The
+ * notes name each of those, so they are seen; nothing is dropped for it.
  */
 export function carrySpace(state: WorldState, to: WorldDoc): string[] {
   const squares = record(state, "squares");
   const doors = record(state, "doors");
-  if (Object.keys(squares).length === 0 && Object.keys(doors).length === 0) return [];
+  const shapes = record(state, "shapes");
+  const where = record(state, "where");
+  if (Object.keys(squares).length === 0 && Object.keys(doors).length === 0 && Object.keys(shapes).length === 0 && Object.keys(where).length === 0) return [];
   const played = draftedWorld(to, chatDraftOf(state));
   const notes: string[] = [];
   const kept: Record<string, unknown> = {};
@@ -187,6 +190,17 @@ export function carrySpace(state: WorldState, to: WorldDoc): string[] {
   const drawn = (place: PlaceId): boolean => own(played.grids, place) !== undefined || Object.values(played.maps).some((m) => m.scope === place && m.layout !== undefined);
   for (const place of Object.keys(doors)) {
     if (!drawn(place)) notes.push(`the doors set at ${own(played.places, place)?.name ?? place} are kept: this revision draws no map there, and they show again if a later one does`);
+  }
+  // A footprint, or where someone was said to be, of a thing that has left the world (an Upgrade took it out): its record stays.
+  const left = (id: EntityId): boolean => {
+    const e = own(state.entities, id);
+    return e === undefined || e.fields[GONE_FIELD] === true;
+  };
+  for (const id of Object.keys(shapes)) {
+    if (left(id)) notes.push(`the footprint set for ${id} is kept: that thing is gone from this chat's world, and it shows again if it comes back`);
+  }
+  for (const id of Object.keys(where)) {
+    if (left(id)) notes.push(`where ${id} was said to be is kept: that one is gone from this chat's world, and it shows again if it comes back`);
   }
   return notes;
 }

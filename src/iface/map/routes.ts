@@ -12,12 +12,15 @@
 
 import { type LiveHub, route, RouteError, shape, type WriteQueue } from "../../app";
 import { playedWorld } from "../../engine/places-in-play";
+import { relocate } from "../../engine/relocate";
+import { placeOfEntity } from "../../engine/scope";
 import { chatDraftOf } from "../../engine/world-draft";
 import { MAP_SIDE_MAX, squareEditsOf, whereOf } from "../../packs/space/core/grid-play";
-import { doorState, drawnOf, indexOf, movingOf, squareAt, standsAt, type Drawn, type Square } from "../../packs/space/core/grid-model";
+import { doorState, drawnOf, indexOf, movingOf, roomAt, squareAt, squareOf as squareOfCell, standsAt, type Drawn, type Square } from "../../packs/space/core/grid-model";
 import { type Head, recordOwnerEdit, Refused } from "../../play/owner-edits";
 import { type MapConfig, METRES_PER_FOOT } from "../../shared/map-config";
 import type { JsonObject, JsonValue } from "../../shared/json";
+import { doorTerrainsOf, entranceCell, gridOf } from "../../shared/grid";
 import type { LedgerEvent } from "../../shared/ledger";
 import type { MapCellDef, WorldDoc } from "../../shared/world";
 import { JoinedTurnError, type Report, type Store, type UserStore } from "../../store";
@@ -238,7 +241,7 @@ export function mapRoutes(deps: MapRoutesDeps) {
       path: "/api/v1/chats/:chat/maps/:place/moves",
       access: "page",
       group: "places",
-      does: "Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to.",
+      does: "Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to. Dropped on the area of another room of the place, it is in that room (at the room's entrance when the room has a grid of its own); one that lies on or in something is taken off it and stands on the square.",
       body: shape.object({ who: shape.field(T, "Who or what is moved: its id, or its name."), square: shape.field(SQUARE, "Where: [column, row], counted from 1 at the top left."), tell: opt(shape.yesNo(), "Whether the Author is told; the chat's setting when left out.") }),
       reply: wroteReply,
       handle: async ({ user, params, body }) => {
@@ -257,8 +260,16 @@ export function mapRoutes(deps: MapRoutesDeps) {
           const who = hits.length === 1 ? hits[0] : undefined;
           if (who === undefined) throw new RouteError(404, hits.length > 1 ? `More than one on the grid of ${params.place} is called ${body.who}: name one by its id (${hits.join(", ")}).` : `Nobody and nothing on the grid of ${params.place} is ${body.who}. On it: ${here.join(", ") || "nobody"}.`);
           const piece = ground.moving.pieces[who];
-          if (piece?.on !== undefined) throw new RouteError(409, `${who} lies on or in ${piece.on}: move that, or take ${who} off it first.`);
-          return { events: [positionEvent(drawn, who, to, piece?.at ?? null) as unknown as LedgerEvent] };
+          const room = roomAt(world, drawn, to);
+          // Where he drops it is where it is: in the room whose area holds the square, taken off whatever it lies on or in.
+          if (piece?.on === undefined && placeOfEntity(head.state, who) === room) return { events: [positionEvent(drawn, who, to, piece?.at ?? null) as unknown as LedgerEvent] };
+          const moved = relocate(head.registry.context(world, head.state), who, room);
+          if (!Array.isArray(moved)) throw new RouteError(409, moved.reason);
+          // A room with a grid of its own is a map of its own, entered at its entrance on that grid, as a step into it is.
+          const inner = room !== drawn.scope ? gridOf(world, room) : undefined;
+          const entry = inner ? entranceCell(inner, doorTerrainsOf(world)) : null;
+          const stands = inner ? (entry ? positionEvent({ scope: room }, who, squareOfCell(entry), null) : null) : positionEvent(drawn, who, to, null);
+          return { events: [...moved, ...(stands ? [stands as unknown as LedgerEvent] : [])] };
         });
       },
     }),
