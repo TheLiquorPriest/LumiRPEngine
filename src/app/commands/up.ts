@@ -96,7 +96,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   const config = await loadConfig(paths, io.env);
   // Whether RPE can be a service here, decided before anything is asked or written.
   const manager: Manager | null = switches.has("systemd") ? await managerOf(io, host, options.appFile, bun, paths) : null;
-  if (manager !== null && !manager.systemd) for (const line of withoutSystemd(manager.why, io, paths, options.appFile)) io.err(line);
+  if (manager !== null && !manager.systemd) for (const line of withoutSystemd(manager.why, io, paths, bun, options.appFile)) io.err(line);
 
   const address = flags.url ?? config.lumiverse.url ?? io.env.LUMIVERSE_URL?.trim() ?? (await io.ask("Lumiverse address (as you open it in a browser): "));
   if (address === null || address === undefined || address === "") throw new UsageError("rpe up needs Lumiverse's address: --url <address>, LUMIVERSE_URL, or the one RPE's config holds.");
@@ -205,7 +205,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   if (runs) {
     if (options.appFile === undefined) throw new Error("This process runs from no single app file, so RPE's own copy cannot be made.");
     await installService({ ctx, config: current, host, bun, appFile: options.appFile, service, existing, update });
-  }
+  } else if (manager !== null && options.appFile !== undefined) await installCopy(data, options.appFile, io.now());
   const left = await extensionLeft(call);
   if (runs) left.push(`See that RPE answers: ${runLine(io, paths, "status")} (its service's own log: journalctl --user -u ${service.unit}).`);
   const answer = runs ? null : await answerAt(loopbackUrl(current.port), current, io);
@@ -219,6 +219,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   if (runs) return 0;
   if (blocked !== null || answer !== null) return answer !== null && "rpe" in answer ? 0 : 1;
   io.out("");
-  io.out(`RPE serves in the foreground now: stop it with Ctrl-C. To keep it running without this terminal: ${runLine(io, paths, "up", "--systemd")}`);
+  // Asked for a service where there is no systemd, the way to keep it running was said above.
+  io.out(`RPE serves in the foreground now: stop it with Ctrl-C.${manager === null ? ` To keep it running without this terminal: ${runLine(io, paths, "up", "--systemd")}` : ""}`);
   return await serveHere(paths, current);
 }

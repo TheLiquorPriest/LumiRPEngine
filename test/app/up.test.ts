@@ -369,7 +369,9 @@ describe("rpe up", () => {
       expect(bare.err).toContain("there is no systemctl on this machine's PATH, so none is installed here");
       expect(bare.err).toContain("To keep RPE running here");
       expect(bare.out).toContain("RPE serves in the foreground now");
-      expect(await Bun.file(join(bed.paths.root, "app", "current", "rpe.js")).exists()).toBe(false);
+      // RPE's own copy is installed all the same, and the line to keep running is that copy's (R-13).
+      expect(await Bun.file(join(bed.paths.root, "app", "current", "rpe.js")).exists()).toBe(true);
+      expect(bare.err).toContain(join("app", "current", "rpe.js"));
     } finally {
       await m.remove();
     }

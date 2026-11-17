@@ -96,16 +96,11 @@ By default RPE listens on `127.0.0.1`, port `7871`.
 
 ### Keep it running on macOS, Windows and in a container
 
-Without systemd, `rpe up` starts RPE itself and stays in the foreground (where `--systemd` was asked for and there is none, it says so and does the same); you keep RPE running across logouts and reboots with your system's own service manager, running this line, as your account: `bun <folder>/dist/rpe.js serve`. RPE does not restart itself onto an update there: stop it and start it again after you update the extension, and copy the new `dist/rpe.js` and its folders over the ones the service runs.
+Without systemd, `rpe up` starts RPE itself and stays in the foreground. Asked for `--systemd` where there is none, it says so, installs RPE's own copy in the data folder all the same (`<data>/app/current/rpe.js`, with its folders; `<data>` is RPE's data folder, `~/.local/share/rpe` unless `--data` or `RPE_DATA` names another), prints the line that runs that copy, and serves in the foreground. You keep RPE running across logouts and reboots with your system's own service manager, running that line as your account: `<bun> <data>/app/current/rpe.js serve --data <data>`. Nothing restarts RPE onto an update there: after you update the extension, run `rpe up --systemd` again, which puts the new build in RPE's copy, then restart RPE (below, for each system).
 
-**macOS (launchd).** First run `rpe up` once in the foreground, to sign in and write RPE's config; stop it with Ctrl-C. Copy RPE where an update of the extension will not change it:
+**macOS (launchd).** First run `rpe up --systemd` once, to sign in, write RPE's config and install RPE's own copy; stop it with Ctrl-C.
 
-```sh
-mkdir -p ~/.local/share/rpe-program
-cp -R <folder>/dist/rpe.js <folder>/dist/guidance <folder>/dist/guidance-harness <folder>/dist/ui ~/.local/share/rpe-program/
-```
-
-Save this as `~/Library/LaunchAgents/rpe.plist`, with your own Bun and home folder written in full (launchd reads no `~`):
+Save this as `~/Library/LaunchAgents/rpe.plist`, with your own Bun, data folder and home folder written in full (launchd reads no `~`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -117,8 +112,10 @@ Save this as `~/Library/LaunchAgents/rpe.plist`, with your own Bun and home fold
   <key>ProgramArguments</key>
   <array>
     <string><bun></string>
-    <string><home>/.local/share/rpe-program/rpe.js</string>
+    <string><data>/app/current/rpe.js</string>
     <string>serve</string>
+    <string>--data</string>
+    <string><data></string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -132,12 +129,10 @@ Save this as `~/Library/LaunchAgents/rpe.plist`, with your own Bun and home fold
 
 Load it, which starts it: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/rpe.plist`. Restart it with `launchctl kickstart -k gui/$(id -u)/rpe`; stop and unload it with `launchctl bootout gui/$(id -u)/rpe`.
 
-**Windows (Task Scheduler).** First run `rpe up` once in the foreground, in PowerShell; stop it with Ctrl+C. Then, with your own `<bun>` and `<folder>`:
+**Windows (Task Scheduler).** First run `rpe up --systemd` once in the foreground, in PowerShell, to sign in, write RPE's config and install RPE's own copy; stop it with Ctrl+C. Then, with your own `<bun>` and `<data>`:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\.local\share\rpe-program" | Out-Null
-Copy-Item -Recurse "<folder>\dist\rpe.js", "<folder>\dist\guidance", "<folder>\dist\guidance-harness", "<folder>\dist\ui" "$HOME\.local\share\rpe-program"
-$action = New-ScheduledTaskAction -Execute "<bun>" -Argument "`"$HOME\.local\share\rpe-program\rpe.js`" serve"
+$action = New-ScheduledTaskAction -Execute "<bun>" -Argument "`"<data>\app\current\rpe.js`" serve --data `"<data>`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName "rpe" -Action $action -Trigger $trigger -Settings $settings
@@ -146,7 +141,7 @@ Start-ScheduledTask -TaskName "rpe"
 
 Stop it with `Stop-ScheduledTask -TaskName "rpe"`, and remove it with `Unregister-ScheduledTask -TaskName "rpe" -Confirm:$false`. Task Scheduler keeps no log of its words: to read them, stop the task and run its line yourself.
 
-**In a container.** Lumiverse's 127.0.0.1 is the container's own: run RPE inside Lumiverse's container as a second process (`bun <folder>/dist/rpe.js up --url <address>` once, which signs in, writes RPE's config and starts RPE in the foreground; stop it with Ctrl-C, then keep its `serve` line as the process that runs), or as a compose service that shares Lumiverse's network (`network_mode: "service:lumiverse"`, `command: ["bun", "/path/rpe.js", "serve"]`, `restart: always`, a `mem_limit`), with RPE's data folder on a volume.
+**In a container.** Lumiverse's 127.0.0.1 is the container's own: run RPE inside Lumiverse's container as a second process (`bun <folder>/dist/rpe.js up --url <address> --systemd` once, which signs in, writes RPE's config, installs RPE's own copy and starts RPE in the foreground; stop it with Ctrl-C, then keep the copy's `serve` line it printed as the process that runs), or as a compose service that shares Lumiverse's network (`network_mode: "service:lumiverse"`, `command: ["bun", "<data>/app/current/rpe.js", "serve", "--data", "<data>"]`, `restart: always`, a `mem_limit`), with RPE's data folder on a volume.
 
 ## RPE's connection in Lumiverse
 

@@ -5,7 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { appCopyPlaces, installCopy, isInstalledCopy } from "../app-copy";
+import { appCopyPlaces, copiedFile, installCopy, isInstalledCopy } from "../app-copy";
 import type { CliIO } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { COMMAND_PATHS } from "../command-routes";
@@ -14,6 +14,7 @@ import type { UpdateSettings } from "../update";
 import { isRecord } from "../../shared/json";
 import { lumiverseFolderOf } from "./lumiverse-folder";
 import { changeableRefusal } from "./safety";
+import { shellWord } from "../../migrate/going-back";
 import { runLine } from "./run-line";
 import { runningServer, type WriterContext } from "./writer";
 
@@ -54,14 +55,21 @@ export async function managerOf(io: CliIO, host: Host, appFile: string | undefin
   return { systemd: true };
 }
 
-/** What `rpe up --systemd` says where there is no systemd: that, and how to keep RPE running there. */
-export function withoutSystemd(why: string, io: CliIO, paths: DataPaths, appFile: string | undefined): string[] {
-  const keep = runLine(io, paths, "serve");
+/**
+ * What `rpe up --systemd` says where there is no systemd: that, and how to keep RPE running there. It still runs on a copy of its own
+ * (R-13): the line to keep running is that copy's. Nothing restarts it onto an update there, so an update of the extension reaches the
+ * copy when this is run again, and RPE is then restarted by hand. With no single app file to copy, the line is `rpe serve`.
+ */
+export function withoutSystemd(why: string, io: CliIO, paths: DataPaths, bun: string, appFile: string | undefined): string[] {
+  const data = resolve(paths.root);
+  const keep = appFile === undefined ? runLine(io, paths, "serve") : [bun, copiedFile(data), "serve", "--data", data].map(shellWord).join(" ");
   return [
-    `--systemd installs a systemd service, and ${why}, so none is installed here; RPE runs in the foreground below instead.`,
+    `--systemd installs a systemd service, and ${why}, so none is installed here; ${appFile === undefined ? "" : "RPE's own copy is, and "}RPE runs in the foreground below instead.`,
     `To keep RPE running here, have your system start this line when you log in and again whenever it stops: ${keep}`,
     "On macOS that is launchd, on Windows Task Scheduler, in a container a second process or a compose service that shares Lumiverse's network (127.0.0.1 is then the same for both); docs/install.md, \"Keep it running\", has the entries.",
-    ...(appFile === undefined ? [] : [`RPE does not restart itself onto an update there: stop it and start it again after you update the extension.`]),
+    appFile === undefined
+      ? "RPE does not restart itself onto an update there: stop it and start it again after you update the extension."
+      : `RPE does not restart itself onto an update there: after you update the extension, run ${runLine(io, paths, "up", "--systemd")} again, which puts the new build in RPE's copy, then restart RPE.`,
   ];
 }
 
