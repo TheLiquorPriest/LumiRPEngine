@@ -310,6 +310,13 @@ describe("correcting from the page", () => {
     await expect(page.correct({ id: "b-nowhere", fields: { text: "x" } })).rejects.toMatchObject({ status: 404, message: words("unknown_id", { id: '"b-nowhere"' }) });
   });
 
+  test("a field he sends blank is blanked, where a tool's blank is a field not given", async () => {
+    const { page, ids } = await played();
+    const done = await page.correct({ id: ids.thread, fields: { state: "" } });
+    expect(done).toMatchObject({ changed: true, said: [], item: { id: ids.thread, fields: expect.objectContaining({ state: "" }) } });
+    expect(done.item.writes.at(-1)).toMatchObject({ by: "player", wrote: { state: "" } });
+  });
+
   test("a reading of the player is corrected in his words, shown with its writes by the Author and then by the player", async () => {
     const { page, ids } = await played();
     const before = (await page.story()).model.player.items[0] as StoryItemShown;

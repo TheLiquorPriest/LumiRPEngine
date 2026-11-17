@@ -139,12 +139,19 @@ interface Reading {
   lines: Lines;
   /** Who writes: its operations carry a source, a precision and a standing of their own; none for a page's correction. */
   agent?: AgentRef;
+  /** A page's correction of his: a field sent blank is blanked, where a tool's blank is a field not given. */
+  blanking?: true;
   /** The ref of the place a name or id names in the world the turn stands in; null when it names none there, undefined when that world has no place to name. */
   placeRef(words: string): string | null | undefined;
   /** The ref of the quest, the world's or one opened in play, a name or id names; null when it names none. Absent: quests are not tied to refs. */
   questRef?(words: string): string | null;
   /** What an answer about an id the record does not hold adds: the near ids of that part (of any part with none), or that the record holds none. */
   near(said: string, part: StoryPart | null): Fields;
+}
+
+/** Whether he sent nothing in a field: null, no words, or no names. */
+function isBlank(v: JsonValue | undefined): boolean {
+  return v === null || (typeof v === "string" && v.trim() === "") || (Array.isArray(v) && v.every((x) => x === null || (typeof x === "string" && x.trim() === "")));
 }
 
 function isUnread(v: unknown): v is Unread {
@@ -314,6 +321,8 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
     if (isUnread(got)) out.unread.push(got);
     // A stretch is kept as its first and last message; a beat's first is the message it came from, as a carried beat's is.
     else if (got !== undefined) value[field === "from" ? (def.part === "beat" ? "message" : "first") : field === "to" ? "last" : field] = got;
+    // His correction can leave words, a time or a list of names empty: the field is set to nothing, as he sent it.
+    else if (r.blanking === true && isBlank(given[field]) && (kind === "text" || kind === "due" || kind === "names")) value[field] = kind === "names" ? [] : "";
   }
   const found = findItem(r, def, n, given, value);
   if (isUnread(found)) {
@@ -322,13 +331,15 @@ function readOp(r: Reading, n: number, raw: JsonValue): OpRead {
   }
   const reports: Unread[] = [];
   // A place named by words is tied to the place's ref, the words kept beside it; words that name none stay words, and the answer says so.
-  if (typeof value.place === "string" && PLACED[def.part] === true) {
+  if (value.place === "" && r.blanking === true && PLACED[def.part] === true) value.place_ref = null;
+  else if (typeof value.place === "string" && PLACED[def.part] === true) {
     const ref = r.placeRef(value.place);
     if (typeof ref === "string") value.place_ref = ref;
     else if (ref === null) reports.push({ line: "place_unresolved", fields: { n, op, place: value.place } });
   }
   // The quests a beat moved are tied to their refs, the words kept beside them; words that name none stay words, and the answer says so.
-  if (Array.isArray(value.quests) && def.part === "beat" && r.questRef !== undefined) {
+  if (Array.isArray(value.quests) && value.quests.length === 0 && r.blanking === true && def.part === "beat") value.quest_refs = [];
+  else if (Array.isArray(value.quests) && def.part === "beat" && r.questRef !== undefined) {
     const refs: string[] = [];
     for (const words of value.quests as string[]) {
       const ref = r.questRef(words);
@@ -366,7 +377,7 @@ export interface CorrectionRead {
  * is refused in the line that says so. The item's record of a turn is read as that turn's.
  */
 export function readCorrection(r: CorrectionReading, item: StoryItem, fields: JsonObject): CorrectionRead | { refused: Unread } {
-  const reading: Reading = { ...r, turn: item.part === "record" ? item.opened : null, near: (said, part) => nearIds(r.lines, STORY_DEFAULTS, r.record, said, part) };
+  const reading: Reading = { ...r, turn: item.part === "record" ? item.opened : null, blanking: true, near: (said, part) => nearIds(r.lines, STORY_DEFAULTS, r.record, said, part) };
   // What names the item is the item's own, whatever the page sent: an arc is found by who it is about.
   const given: JsonObject = { ...fields, op: item.part, id: item.id, ...(item.part === "arc" ? { who: item.fields.who ?? "" } : {}) };
   const out = readOp(reading, 1, given);
