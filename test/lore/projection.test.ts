@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EntryNumbers, Lore, type LoreEntryFields, LoreProjection, type ProjectionBooks, storePath, storeWorlds } from "../../src/lore/index";
 import { madeOf } from "../../src/lore/made";
+import { placeOp, playedWorld } from "../../src/engine/places-in-play";
+import type { JsonObject } from "../../src/shared/json";
+import type { WorldDoc } from "../../src/shared/world";
 import { recordStory } from "../../src/story/record";
 import { CHAT, openTable, USER } from "../story/rig";
 import { Shelf, Tags } from "./fixtures";
@@ -114,5 +117,29 @@ describe("the projection book", () => {
     await t.tie(turn);
     expect(await projection.refresh(USER, CHAT)).toMatchObject({ written: true });
     expect([...books.held.values()].flat()).toEqual([{ comment: "Bram", content: "The inn has twelve rooms.", keys: ["Bram"] }]);
+  });
+
+  test("the book holds an entry for a place the story made, under its name and its aliases", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rpe-lore-projection-"));
+    dirs.push(dir);
+    const files = await shippedGuidance(dir, [CHAT]);
+    const t = await openTable();
+    const lore = new Lore({ books: new Shelf(), worlds: storeWorlds(t.store), turns: new Tags(), numbers: new EntryNumbers(t.db, t.writes) });
+    const books = new StandInBooks();
+    const projection = new LoreProjection({ db: t.db, writes: t.writes, lore, path: storePath(t.store), books, enabled: async () => true, made: madeOf({ store: t.store, lore }), lines: async (at) => {
+      const part = await files.guidance(at.chat).part("lore-answers");
+      return part?.format === "lines" ? part : undefined;
+    } });
+    await t.play();
+    const turn = await t.begin();
+    const u = t.store.user(USER);
+    const head = u.headState(CHAT).state.world;
+    const ctx = t.store.env.registry.context(playedWorld(t.store.env.worlds(head.revision) as WorldDoc, head), head);
+    const made = placeOp(ctx, { do: "make", name: "The Salt Cellar", parent: "cellar", as: "room", aliases: ["the brine room"], description: "A cold stone room that smells of brine.", why: "the story needed one" }, { by: "gm", salt: "test" });
+    if (!("events" in made)) throw new Error(`the place was not made: ${made.reason}`);
+    await t.writes.run(() => u.addChanges(turn.id, made.events.map((e) => ({ lane: "engine" as const, op: e.type, value: e as unknown as JsonObject, by: "gm", source: "gm" as const }))));
+    await t.tie(turn);
+    expect(await projection.refresh(USER, CHAT)).toMatchObject({ written: true });
+    expect([...books.held.values()].flat()).toEqual([{ comment: "The Salt Cellar", content: "The Salt Cellar (room) is a place this chat's story made, inside The Cellar. A cold stone room that smells of brine.", keys: ["The Salt Cellar", "the brine room"] }]);
   });
 });

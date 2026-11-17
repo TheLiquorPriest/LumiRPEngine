@@ -42,3 +42,4 @@ projection_book: RPE story notes for chat {{chat}}
 projection_entry: {{title}}, as this chat's story has it now:{{#notes}} {{.}}{{/notes}}
 projection_canon: {{text}}
 projection_person: {{name}}{{#tier}} ({{tier}}){{/tier}} came into this chat's story{{#place}} and was last at {{place}}{{/place}}.
+projection_place: {{name}}{{#kind}} ({{kind}}){{/kind}} is a place this chat's story made{{#inside}}, inside {{inside}}{{/inside}}.{{#description}} {{description}}{{/description}}

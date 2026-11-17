@@ -30,7 +30,7 @@ export interface ProjectionBooks {
 
 /** Something the story made, as the book holds it: the names it goes by, which its entry answers to, and the facts its line words. */
 export interface MadeThing {
-  kind: "person" | "canon";
+  kind: "person" | "place" | "canon";
   title: string;
   keys: string[];
   facts: Fields;
@@ -97,7 +97,7 @@ export class LoreProjection {
       const content = loreLine(lines, "projection_entry", { id: e.id, title: e.title, notes: notes.get(e.id) ?? [] });
       return content === undefined ? [] : [{ comment: e.title, content, keys: [...e.keys] }];
     });
-    // What the story made, each worded by the line of its kind (`projection_person`, `projection_canon`) under the names it goes by.
+    // What the story made, each worded by the line of its kind (`projection_person`, `projection_place`, `projection_canon`) under the names it goes by.
     const made = ((await this.deps.made?.(user, chat)) ?? []).flatMap((m): LoreEntryFields[] => {
       const content = loreLine(lines, `projection_${m.kind}`, m.facts);
       return content === undefined ? [] : [{ comment: m.title, content, keys: m.keys }];
