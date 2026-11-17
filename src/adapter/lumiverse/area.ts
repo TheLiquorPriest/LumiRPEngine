@@ -17,8 +17,8 @@ declare module "../../app/hooks" {
   interface DoorFills extends Partial<AdapterLanes> {}
 }
 
-/** The lanes the door has an answer for while no area fills them; the secrecy of lore has none, and says so. */
-type UnfilledLanes = Omit<AdapterLanes, "secrecy">;
+/** The lanes the door has an answer for while no area fills them; the secrecy of lore, at the question and on receipt, has none, and says so. */
+type UnfilledLanes = Omit<AdapterLanes, "secrecy" | "receiptSecrecy">;
 
 const none = (lane: string): Error => new Error(`RPE has no area that fills the door's ${lane} lane.`);
 
@@ -78,6 +78,12 @@ export function doorArea(deps: AdapterDeps): LumiverseDoor {
       const secrecy = filled.secrecy;
       if (secrecy === undefined) throw none("secrecy");
       return secrecy(ask, signal);
+    },
+    // No area fills it: the check on receipt cannot work the secrets out, and the turn's record says so.
+    receiptSecrecy: async (ask, signal) => {
+      const receiptSecrecy = filled.receiptSecrecy;
+      if (receiptSecrecy === undefined) throw none("receiptSecrecy");
+      return receiptSecrecy(ask, signal);
     },
     hiddenReadable: (chat) => lane("hiddenReadable")(chat),
     storyFrom: (chat) => lane("storyFrom")(chat),

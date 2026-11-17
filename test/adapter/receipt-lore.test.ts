@@ -84,8 +84,7 @@ function checkOf(entries: ReturnType<typeof entry>[], secrecy: () => Promise<Sec
     resolve: async (text: string) => ({ text, diagnostics: [] }),
     resolveBatch: async (templates: Readonly<Record<string, string>>) => Object.fromEntries(Object.entries(templates).map(([k, v]) => [k, v.replaceAll("{{char}}", "Mara")])),
   };
-  const start = async () => ({ messages: [], at: null, known: true });
-  return createLoreCheck({ user: "user-a", reads, secrecy, start, answers, macros });
+  return createLoreCheck({ user: "user-a", reads, receipt: secrecy, answers, macros });
 }
 
 const message = (role: string, text: string, places: LaidMessage["places"] = []): LaidMessage => ({ role, content: text, text, media: 0, places });

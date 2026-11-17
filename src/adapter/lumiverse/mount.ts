@@ -20,7 +20,7 @@ import type { SettingsReader } from "../../app/config-read";
 import { PAGE_SETTINGS } from "../../app/page-settings";
 import { isRecord } from "../../shared/json";
 import { lumiverseAccounts } from "./accounts";
-import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyRules, type TurnStarts } from "./answer";
+import { KeptAnswers, questionRoute, type HistoryWindow, type ReceiptSecrecy, type SecrecyRules, type TurnStarts } from "./answer";
 import { promptReads, type ModelRooms } from "./receipt";
 import { createChatReads, type ChatReads, type MeaningNearest, type StoryFrom } from "./chat";
 import { createDbReader, type DbReader } from "./db";
@@ -61,6 +61,8 @@ export interface AdapterLanes {
   room: ModelRooms;
   /** The lore lane: what each secret reads as in this prompt. */
   secrecy: SecrecyRules;
+  /** The lore lane on receipt (R-59): its own verdict over the entries RPE read itself, where the extension applied its fail-closed one. */
+  receiptSecrecy: ReceiptSecrecy;
   /** A chat's setting: agents may read the messages the user hid. */
   hiddenReadable(chat: string): Promise<boolean>;
   /** The turn lane: a chat's setting `story.from`, whose messages are its story (R-176); the chat tools mark each message it leaves out. */
@@ -346,7 +348,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             passConnection: lanes.passConnection,
             passWords: lanes.passWords,
             holdMs: () => settings().wholeHoldMs,
-            lore: createLoreCheck({ user, reads: p.reads, secrecy: lanes.secrecy, start: lanes.start, answers, macros: p.calls.macros }),
+            lore: createLoreCheck({ user, reads: p.reads, receipt: lanes.receiptSecrecy, answers, macros: p.calls.macros }),
             feedback: createFeedback({ reads: p.reads, replaced: lanes.replaced }),
             heard,
             untaggedWhileAwaited: () => settings().untaggedWhileAwaited,

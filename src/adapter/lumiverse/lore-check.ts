@@ -2,9 +2,9 @@
 // about the secrets in time (or none it could use, or the extension itself failed) it applies today's fail-closed verdict, which knows only what the
 // candidate entries say of themselves. The prompt that reaches RPE, which is the one place that holds the chat's state and sends the prompt to a model,
 // then has RPE's own verdict applied to the lore in it before any agent is given it: an entry RPE keeps out is taken out, an entry it words otherwise is
-// worded so. The verdict is the one RPE answered late with, kept for the generation (`KeptAnswers`), or else asked of the lore's secrecy rules now at the
-// same point of the path the question would have been asked at, over the entries the attached books hold now. Where it cannot be worked out here either,
-// the turn's record says so with the reason: it is never only a line in the log.
+// worded so. The verdict is the one RPE answered late with, kept for the generation (`KeptAnswers`), or else the lore lane's own verdict on receipt
+// (`receiptSecrecy`, PlanLore-6's) at the same point of the path the question would have been asked at, over the entries the attached books hold now,
+// whole, as RPE read them itself. Where it cannot be worked out here either, the turn's record says so with the reason: it is never only a line in the log.
 //
 // Each entry is found in the prompt by its text as Lumiverse inserted it: the stored text, or the extension's own fail-closed wording of it, with its macros
 // resolved by Lumiverse's own route. It may stand as a message of its own or inside a block Lumiverse joined it into. An entry RPE's verdict would turn on
@@ -13,9 +13,8 @@
 import { blind, usersOwn } from "../../secrecy/blind";
 import type { WorldInfoCandidate } from "../../shared/host";
 import { isRecord } from "../../shared/json";
-import { pointOf, type KeptAnswers, type SecrecyRules, type TurnStarts } from "./answer";
+import { pointOf, type KeptAnswers, type ReceiptSecrecy } from "./answer";
 import { attachedBooks } from "./books";
-import { questionEntryOf } from "./candidate";
 import type { MacroCalls } from "./lumiverse-calls";
 import type { LaidMessage } from "./overlay";
 import type { LumiverseReads } from "./reads";
@@ -53,10 +52,8 @@ export type LoreRecord =
 export interface LoreCheckDeps {
   user: string;
   reads: LumiverseReads;
-  /** The lore lane's secrecy rules, asked as at the question. */
-  secrecy: SecrecyRules;
-  /** The turn lane: where the coming turn starts on the path. */
-  start: TurnStarts;
+  /** The lore lane's own verdict on receipt, over the entries RPE read itself. */
+  receipt: ReceiptSecrecy;
   /** What RPE answered late with, kept by generation. */
   answers: KeptAnswers;
   macros: MacroCalls;
@@ -151,10 +148,7 @@ export function createLoreCheck(deps: LoreCheckDeps): LoreCheck {
       try {
         const generation = generationOf(tag);
         const path = pathOf(tag);
-        const point = pointOf(generation, path);
-        const start = deps.start({ user: tag.user, chat: tag.chat, path, point }, signal);
-        start.catch(() => undefined);
-        verdict = await deps.secrecy({ user: tag.user, chat: tag.chat, purpose: "prompt", generation, path, start, point, entries: candidates.map(questionEntryOf) }, signal);
+        verdict = await deps.receipt({ user: tag.user, chat: tag.chat, path, point: pointOf(generation, path), entries: candidates }, signal);
         from = "now";
       } catch (error) {
         unworked = words(error);

@@ -15,6 +15,7 @@ import { RELAY_DEFAULTS } from "../../src/adapter/lumiverse/relay";
 import { KEEP_EVERY_MS } from "../../src/adapter/lumiverse/session";
 import { EXTENSION_LOG_CHARS, LUMIVERSE_DEFAULTS, LUMIVERSE_SETTING_DEFS, LUMIVERSE_SETTINGS, lumiverseSettings, QUESTION_BODY_BYTES, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
 import { PAGE_ROAD_DEFAULTS } from "../../src/ext/page";
+import { WHOSE_WAIT_MS } from "../../src/ext/registration";
 import { SOCKET_DEFAULTS } from "../../src/adapter/lumiverse/socket";
 import { COMMENT_MS } from "../../src/adapter/lumiverse/stream";
 import { QUESTION_PATH, type Question } from "../../src/adapter/lumiverse/wire";
@@ -50,7 +51,7 @@ describe("the door's settings", () => {
       wholeHoldMs: WHOLE_HOLD_MS,
       relay: RELAY_DEFAULTS,
       questionBytes: QUESTION_BODY_BYTES,
-      extension: { questionMs: QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS, requestMs: PAGE_ROAD_DEFAULTS.requestMs, renewMs: PAGE_ROAD_DEFAULTS.renewMs },
+      extension: { questionMs: QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS, requestMs: PAGE_ROAD_DEFAULTS.requestMs, renewMs: PAGE_ROAD_DEFAULTS.renewMs, whoseMs: WHOSE_WAIT_MS },
       search: CHAT_SEARCH_DEFAULTS,
       stores: { hits: STORE_HITS },
       untaggedWhileAwaited: "pass",

@@ -117,6 +117,7 @@ export async function openDoor(options: DoorOptions): Promise<DoorBed> {
         heard.questions.push(ask);
         return { disabled: [], enabled: [], mutated: [] };
       },
+      receiptSecrecy: async () => ({ disabled: [], enabled: [], mutated: [] }),
       hiddenReadable: async () => false,
       storyFrom: async () => "everyone",
       ranges: async () => ({}),

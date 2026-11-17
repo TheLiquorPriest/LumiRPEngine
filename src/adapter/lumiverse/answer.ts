@@ -6,6 +6,7 @@
 // the history window are asked there. Each half not worked out within the question's wait is answered
 // not known, and what it works out after is kept for that generation's check on receipt.
 
+import type { WorldInfoCandidate } from "../../shared/host";
 import { readQuestion, type Answer, type GenerationFacts, type KeepPoint, type PathStep, type Question, type QuestionEntry, type SecrecyVerdict } from "./wire";
 
 /**
@@ -42,6 +43,18 @@ export interface SecrecyAsk {
 
 /** What each secret reads as in this prompt, worked out at this point of the path, by today's rules (§9.6). */
 export type SecrecyRules = (ask: SecrecyAsk, signal: AbortSignal) => Promise<SecrecyVerdict>;
+
+/** What the lore lane is asked on receipt (R-59): the chat, the path, where the coming turn starts on it, and the entries RPE read itself from the attached books, whole. */
+export interface ReceiptSecrecyAsk {
+  user: string;
+  chat: string;
+  path: readonly PathStep[];
+  point: StartPoint;
+  entries: readonly WorldInfoCandidate[];
+}
+
+/** The lore lane's own verdict on receipt (PlanLore-6's): the same rules at the same point of the path, over the entries RPE read itself. */
+export type ReceiptSecrecy = (ask: ReceiptSecrecyAsk, signal: AbortSignal) => Promise<SecrecyVerdict>;
 
 /** A message of the chat as the window counts it: its id and place; whether it is the player's, since Lumiverse joins two of the player's messages next to each other into one (READINGS R-202); and whether the user hid it, where that is known. */
 export interface WindowStep {

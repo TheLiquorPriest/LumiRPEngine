@@ -3,7 +3,8 @@
 // question's route and the provider endpoint, given scripted secrecy rules, a scripted history window
 // and a scripted turn. Every name, chat and lore line is invented.
 
-import { KeptAnswers, questionRoute, type HistoryWindow, type SecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { KeptAnswers, questionRoute, type HistoryWindow, type ReceiptSecrecyAsk, type TurnStarts, type WindowStep } from "../../src/adapter/lumiverse/answer";
+import { questionEntryOf } from "../../src/adapter/lumiverse/candidate";
 import { createLoreCheck } from "../../src/adapter/lumiverse/lore-check";
 import type { LumiverseReads } from "../../src/adapter/lumiverse/reads";
 import { changeOf } from "../../src/adapter/lumiverse/events";
@@ -13,7 +14,7 @@ import { CONFIRM_PATH, EXTENSION_IDENTIFIER, readConfirmAsk, USER_HEADER, type R
 import { EXTENSION_LOG_CHARS, QUESTION_WAIT_MS } from "../../src/adapter/lumiverse/settings";
 import { providerEndpoint, type TaggedTurn } from "../../src/adapter/lumiverse/provider";
 import { streamedReply, wholeReply } from "../../src/adapter/lumiverse/stream";
-import { QUESTION_PATH, readQuestion, type Question, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
+import { QUESTION_PATH, readQuestion, type Question, type QuestionEntry, type SecrecyVerdict } from "../../src/adapter/lumiverse/wire";
 import { NEEDS } from "../../src/ext/permissions";
 import { NOTICE_ID, startExtension, type RunningExtension } from "../../src/ext/start";
 import { textOf as textKey } from "../../src/secrecy/lore-secrets";
@@ -126,7 +127,7 @@ export interface RigOptions {
 }
 
 /** RPE's scripted secrecy rules: the ferry's mark shown as RPE words it; the vault (a whole-entry secret), its unmarked copy and the entry a world secret was indexed from kept out. */
-function harborSecrecy(ask: SecrecyAsk): SecrecyVerdict {
+function harborSecrecy(ask: { entries: readonly QuestionEntry[] }): SecrecyVerdict {
   const vaultKey = textKey(VAULT_SECRET);
   const disabled = ask.entries.filter((e) => e.id === "e-vault" || e.id === "e-indexed" || e.key === vaultKey).map((e) => e.id);
   const ferry = ask.entries.find((e) => e.id === "e-ferry");
@@ -176,10 +177,12 @@ export class Rig {
     const onReceipt: HistoryWindow = async (ask) => counted(await ask.path());
     // RPE's state of the chat as the turn lane holds it: the fixture's hidden marks, heard; the path up to the question's point.
     const start: TurnStarts = async ({ path, point }) => ({ messages: path.filter((s) => s.id !== point.replaces).map((s) => ({ ...s, hidden: hidden.has(s.id) })), at: null, known: true });
-    const secrecy = async (ask: SecrecyAsk): Promise<SecrecyVerdict> => {
+    const secrecy = async (ask: { entries: readonly QuestionEntry[] }): Promise<SecrecyVerdict> => {
       if (options.secretsFail) throw new Error("RPE does not work out its lore's secrets yet");
       return harborSecrecy(ask);
     };
+    // On receipt the rig's rules read the entries RPE read itself, each as the question would carry it.
+    const receipt = (ask: ReceiptSecrecyAsk): Promise<SecrecyVerdict> => secrecy({ entries: ask.entries.map(questionEntryOf) });
     // The books and the chat as RPE's reads give them to the check: the stand-in's own.
     const answers = new KeptAnswers();
     const loreReads = {
@@ -193,11 +196,11 @@ export class Rig {
     const question = questionRoute({ secrecy, window: atQuestion, start, kept: answers, allowed: (r) => r.headers.get("authorization") === `Bearer ${EXTENSION_KEY}` && r.headers.get(USER_HEADER) === USER, log: (m) => this.rpeLog.push(m) });
     const provider = providerEndpoint({
       user: USER,
-      allowed: (r) => r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}`,
+      keyModels: (r) => (r.headers.get("authorization") === `Bearer ${PROVIDER_KEY}` ? ["rpe"] : null),
       window: onReceipt,
       start,
       // RPE's check of the lore on receipt, over the stand-in's books as Lumiverse reads them, with the rig's own secrecy rules.
-      lore: createLoreCheck({ user: USER, reads: loreReads, secrecy, start, answers, macros: { resolve: async (text) => ({ text, diagnostics: [] }), resolveBatch: async (templates) => ({ ...templates }) } }),
+      lore: createLoreCheck({ user: USER, reads: loreReads, receipt, answers, macros: { resolve: async (text) => ({ text, diagnostics: [] }), resolveBatch: async (templates) => ({ ...templates }) } }),
       feedback: async () => null,
       // No model's window is known to the rig: nothing is trimmed past the window's cut.
       room: async () => ({ room: null, count: async () => 0, covered: async () => false }),
@@ -236,7 +239,6 @@ export class Rig {
         untagged: () => false,
       },
       untaggedWhileAwaited: () => "pass",
-      modelNames: () => ["rpe"],
       turns: {
         play: async (turn, out) => {
           this.turns.push(turn);
