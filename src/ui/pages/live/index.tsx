@@ -5,13 +5,17 @@
 // `todo` list and the rules that fired. Nothing an agent did is left out of the tree. With nothing
 // running it shows the last runs, as they ended; the runs it keeps are a setting, and one let go is named
 // with a link to its Turn page. A turn whose limit on wall time was held for want of a keep-alive line
-// says so in the notices file's words.
+// says so in the notices file's words. A job is read whole when the page opens, so all it did since it
+// began is there however late the page comes. With no chat open, the page watches his jobs of no chat
+// the same way, behind the one gate those jobs have.
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren, RefObject } from "preact";
 import { useSelect } from "../../store";
 import { useApp, useNow } from "../../app";
 import { replyOf } from "../../client";
+import { LIVE_JOBS } from "../../../shared/api";
+import { JOB_STATE_WORDS } from "../jobs/words";
 import { Banner, Button, Empty, Gated, PageHeader, Pre, Section } from "../../../frontend/components";
 import { type Follow, useFollowNewest } from "../../live-follow";
 import { type RunNode, shownRuns, stopOf } from "../../live-model";
@@ -26,13 +30,14 @@ import { counted, errorWords } from "../../words";
 
 /** A Stop pressed on the Live page: the chat and the run (by RPH's own id for it) it was pressed for, and why it did not go through, in RPE's words, once that is known. */
 export interface StopPress {
-  chat: string;
+  chat: string | null;
   run: string;
   problem: string | null;
 }
 
 export interface LiveViewProps {
-  chat: string;
+  /** The chat watched; null: the jobs of no chat. */
+  chat: string | null;
   /** The runs to show, in order: those going on first (`shownRuns`). */
   runs: readonly RunNode[];
   /** The runs the page let go, the one let go first first. */
@@ -62,7 +67,7 @@ export interface LiveViewProps {
 }
 
 /** One run: its head and Stop, and what it sent to the chat. */
-function RunBlock(props: { chat: string; run: RunNode; now: number; stops: readonly StopPress[]; onStop(run: RunNode): void; onOpenTurn(turn: string): void; extras?: (run: RunNode) => ComponentChildren }) {
+function RunBlock(props: { chat: string | null; run: RunNode; now: number; stops: readonly StopPress[]; onStop(run: RunNode): void; onOpenTurn(turn: string): void; extras?: (run: RunNode) => ComponentChildren }) {
   const { run } = props;
   const running = run.outcome === null;
   const pressed = props.stops.find((s) => s.chat === props.chat && s.run === run.run);
@@ -114,7 +119,7 @@ function LetGoList(props: { letGo: readonly LetGo[]; onOpenTurn(turn: string): v
           return (
             <li key={gone.run} data-let-go={gone.run}>
               {runTitle(gone)}
-              {gone.status === null ? "" : `: ${STATUS_WORDS[gone.status].words.toLowerCase()}`}{" "}
+              {gone.job !== null ? `: ${JOB_STATE_WORDS[gone.job].words}` : gone.status === null ? "" : `: ${STATUS_WORDS[gone.status].words.toLowerCase()}`}{" "}
               {turn === null ? null : (
                 <Button size="sm" variant="ghost" onClick={() => props.onOpenTurn(turn)}>
                   Its page
@@ -133,11 +138,12 @@ export function LiveView(props: LiveViewProps) {
   const going = runs.some((run) => run.outcome === null);
   const turns = [...new Set(runs.flatMap((run) => (run.turn === null ? [] : [run.turn])))];
   const follow = props.follow;
+  const ofChat = props.chat !== null;
   return (
     <div class="lre-stack rpe-page" data-page="live" ref={props.root} tabIndex={-1}>
-      <PageHeader title="Live" subtitle="Watch what runs in this chat as it runs." />
+      <PageHeader title="Live" subtitle={ofChat ? "Watch what runs in this chat as it runs." : "Watch your jobs of no chat as they run."} />
       {props.problem === null ? null : (
-        <Banner tone="neg" icon="alert" title="Part of this chat could not be read">
+        <Banner tone="neg" icon="alert" title={ofChat ? "Part of this chat could not be read" : "Part of your jobs could not be read"}>
           <span>{props.problem}</span>
         </Banner>
       )}
@@ -153,14 +159,14 @@ export function LiveView(props: LiveViewProps) {
             </Button>
           ))}
         >
-          <span>{counted(props.behind, "event")} were not sent to it because it could not keep up. It read what it needed again; the Turn page holds all of it.</span>
+          <span>{counted(props.behind, "event")} were not sent to it because it could not keep up. It read what it needed again; {ofChat ? "the Turn page holds" : "each job's page holds"} all of it.</span>
         </Banner>
       )}
       {runs.length === 0 ? (
         props.loading ? (
-          <p class="lre-muted rpe-line">Reading this chat's turns…</p>
+          <p class="lre-muted rpe-line">{ofChat ? "Reading this chat's turns and jobs…" : "Reading your jobs of no chat…"}</p>
         ) : props.problem === null ? (
-          <Empty icon="pulse" title="No turn has run on RPE in this chat yet">
+          <Empty icon="pulse" title={ofChat ? "No turn has run on RPE in this chat yet" : "None of your jobs of no chat runs now"}>
             <span>When one starts, it shows here as it runs.</span>
           </Empty>
         ) : null
@@ -206,13 +212,15 @@ export function LiveView(props: LiveViewProps) {
   );
 }
 
-export function LivePage(props: { chat: string }) {
+export function LivePage(props: { chat: string | null }) {
   const app = useApp();
   const { chat } = props;
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
   const [stops, setStops] = useState<readonly StopPress[]>([]);
   const [dismissed, setDismissed] = useState<ReadonlySet<number>>(new Set());
-  const gateOpen = useSelect(app.gate, (opened) => opened.has(chat));
+  // A job of no chat is behind the one gate the jobs of no chat have, as on the Jobs page.
+  const gated = chat ?? LIVE_JOBS;
+  const gateOpen = useSelect(app.gate, (opened) => opened.has(gated));
   const notices = useNoticeLines(chat);
   // What the watch is held to is read when it is used, so a setting changed meanwhile holds at once.
   const limits = useRef({ renderMs: 0, keepRuns: 0, keepFailures: 0 });
@@ -230,17 +238,18 @@ export function LivePage(props: { chat: string }) {
 
   const pressStop = (run: RunNode): void => {
     const target = stopOf(run);
-    if (target === null) return;
+    if (target === null || ("turn" in target && chat === null)) return;
     const press: StopPress = { chat, run: run.run, problem: null };
     setStops((held) => [...held.filter((s) => s.run !== run.run), press]);
     // RPE's answer counts only while this press is the page's own: not once the page has left the chat, or Stop was pressed again.
     const answered = (next: StopPress | null): void => setStops((held) => held.flatMap((s) => (s !== press ? [s] : next === null ? [] : [next])));
     const failed = (error: unknown): void => answered({ ...press, problem: errorWords(error) });
-    if ("turn" in target) {
+    if ("job" in target) app.client.call("POST /api/v1/jobs/:job/cancel", { job: target.job }).then(undefined, failed);
+    else if (chat !== null) {
       app.client.call("POST /api/v1/chats/:chat/turns/:turn/stop", { chat, turn: target.turn }).then(replyOf).then((answer) => {
         if (!answer.stopped) answered(null);
       }, failed);
-    } else app.client.call("POST /api/v1/jobs/:job/cancel", { job: target.job }).then(undefined, failed);
+    }
   };
 
   return (
@@ -258,14 +267,16 @@ export function LivePage(props: { chat: string }) {
       stops={stops}
       notices={notices}
       onStop={pressStop}
-      onOpenGate={() => app.gate.open(chat)}
-      onCloseGate={() => app.gate.close(chat)}
-      onOpenTurn={(turn) => app.go({ page: "turns", chat, at: [turn] })}
-      extras={(run) => <RunExtras chat={chat} run={run} gateOpen={gateOpen} />}
+      onOpenGate={() => app.gate.open(gated)}
+      onCloseGate={() => app.gate.close(gated)}
+      onOpenTurn={(turn) => {
+        if (chat !== null) app.go({ page: "turns", chat, at: [turn] });
+      }}
+      extras={chat === null ? undefined : (run) => <RunExtras chat={chat} run={run} gateOpen={gateOpen} />}
       follow={follow}
       root={root}
     />
   );
 }
 
-export const entry: PageEntry = { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: true, often: true, order: 20, render: (route) => <LivePage chat={route.chat} /> };
+export const entry: PageEntry = { id: "live", title: "Live", icon: "pulse", shells: ["web", "drawer"], needsChat: false, withChat: true, often: true, order: 20, render: (route) => <LivePage chat={route.chat ?? null} /> };

@@ -260,8 +260,8 @@ export function jobRoutes(deps: JobRoutesDeps) {
       handle: async ({ user, params }) => {
         const job = await jobOf(user, params.job);
         const { scope } = job;
-        // A job's run is traced under its own id: in its turn's folder for a job a turn started, in its own session's for his own; a job of no chat keeps none.
-        const trace = ofChat(scope) ? (await turns.trace.records(scope)).filter((r) => r.run === job.id) : [];
+        // A job's run is traced under its own id: in its turn's folder for a job a turn started, in its own session's for his own (a job of no chat's at the user's level).
+        const trace = (await turns.trace.records(scope)).filter((r) => r.run === job.id);
         const spent = (await turns.harness.usage.run(user, job.id)) ?? null;
         const windows =
           ofChat(scope) && spent !== null

@@ -50,8 +50,8 @@ export interface TreeFilesDeps {
 export interface TreeFiles extends FilesPort {
   /** The folder of the scope's turn on disk; null when the chat is not placed or the scope names no turn RPE knows. */
   turnDisk(scope: Scope): Promise<string | null>;
-  /** The scope's session folder on disk; null when the chat is not placed. */
-  sessionDisk(scope: Scope): Promise<string | null>;
+  /** The scope's session folder on disk (a job of no chat's under `jobs/`, at the user's level); null when the chat is not placed. */
+  sessionDisk(scope: RunScope): Promise<string | null>;
   /**
    * RPE's own change of a file it writes as the harness (a turn's `turn.json`): `change` is given what the file holds now (null: none)
    * and gives what it is to hold, read and written in the file's one turn of its queue, so two changes never lose each other.
@@ -230,7 +230,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return { status: "refused", path, reason, writable: writer === undefined ? at.writable : writableFor(at, writer) };
   }
 
-  async function disk(scope: Scope, view: string): Promise<string | null> {
+  async function disk(scope: RunScope, view: string): Promise<string | null> {
     const lookup = await locate(location(scope), view);
     return lookup.ok ? lookup.at.disk : null;
   }

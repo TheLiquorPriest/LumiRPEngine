@@ -11,6 +11,7 @@ import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shar
 import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
+import { JOB_STATE_WORDS } from "./pages/jobs/words";
 import { counted, duration, json, num, tokenWords } from "./words";
 
 export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
@@ -81,11 +82,11 @@ export function runSpan(run: RunNode, now: number): number | null {
   return (run.endedAt ?? (run.outcome === null ? now : run.lastAt ?? from)) - from;
 }
 
-/** A run's head; `kind`, where the page knows it from RPE, names a settle run as one (the harness runs it as a continue) and its ending with no reply as normal. */
+/** A run's head; `kind`, where the page knows it from RPE, names a settle run as one (the harness runs it as a continue) and its ending with no reply as normal. A job's run stands as its job does, in the Jobs page's words. */
 export function RunHead(props: { run: RunNode; now: number; kind?: TurnRunKind }) {
   const { run, kind } = props;
   const outcome = run.outcome?.status ?? "running";
-  const status = statusWords(kind, outcome);
+  const status = run.job === null ? statusWords(kind, outcome) : JOB_STATE_WORDS[run.job.state];
   const span = runSpan(run, props.now);
   const totals = runTotals(run);
   const failure = run.outcome?.error === undefined || (kind === "settle" && outcome === "no-reply") ? null : replyErrorWords(run.outcome.error, run.outcome.status);

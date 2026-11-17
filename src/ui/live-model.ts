@@ -17,7 +17,7 @@
 // new objects only along its path (run, agent, step), so a view can tell what changed by identity.
 
 import type { AgentStatus, TodoItem } from "rp-harness/contract";
-import type { AgentRef, LiveEvent, Release, ReplyPiece, RunOutcome, RunScope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
+import type { AgentRef, JobView, LiveEvent, Release, ReplyPiece, RunOutcome, RunScope, ToolResult, TraceDelta, TraceEvent, TraceRecord, TurnReply, Usage } from "../shared/api";
 import { isRecord } from "../shared/json";
 
 export type EventOf<K extends TraceEvent["kind"]> = Extract<TraceEvent, { kind: K }>;
@@ -97,8 +97,11 @@ export interface RunNode {
   readonly roots: readonly string[];
   readonly released: Release | null;
   readonly releasedAt: number | null;
+  /** How it ended: a turn's run by its `run_ended`, a job's by its job's view that says it ended (`jobOutcome`). */
   readonly outcome: RunOutcome | null;
   readonly endedAt: number | null;
+  /** For a job's run: its job as the newest of its records gives it (where it stands, what it spent, its report); null for any other run. */
+  readonly job: JobView | null;
   readonly reply: ReplySoFar;
   /** The last record folded: every record up to it is in. */
   readonly seq: number;
@@ -119,7 +122,7 @@ const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
 function emptyRun(run: string, turn: string | null = null): RunNode {
-  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, job: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
@@ -224,6 +227,12 @@ function adopt(parent: AgentNode, child: string, call: string | undefined): Agen
 /** A record of a run: one about an agent. */
 type RunRecord = TraceRecord & { readonly agent: AgentRef };
 
+/** A job's end as a run's outcome: a job sends nothing to the chat, so one that did its work ended with no reply; its own words for how it ended are its job's state (`RunNode.job`). */
+function jobOutcome(job: JobView): RunOutcome {
+  const status = job.limit !== undefined ? "limit" : job.state === "failed" ? "failed" : job.state === "done" ? "no-reply" : "stopped";
+  return { status, released: false, usage: job.usage, ...(job.limit === undefined ? {} : { limit: job.limit }) };
+}
+
 /** The run with the record that follows its last one folded in. */
 function fold(run: RunNode, record: RunRecord): RunNode {
   const { event, at } = record;
@@ -252,6 +261,10 @@ function fold(run: RunNode, record: RunRecord): RunNode {
       return { ...next, released: event.release, releasedAt: at };
     case "run_ended":
       return { ...next, outcome: event.outcome, endedAt: at };
+    // A job's run never has a `run_ended`: its job's view, on the job's own run, says where it stands and when it ended.
+    case "job":
+      if (event.job.id !== record.run) return next;
+      return event.job.ended === undefined ? { ...next, job: event.job } : { ...next, job: event.job, outcome: jobOutcome(event.job), endedAt: event.job.ended };
     default:
       return next;
   }

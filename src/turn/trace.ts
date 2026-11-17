@@ -1,19 +1,19 @@
 // RPE's trace port (`TracePort` in `rp-harness/contract`): everything RPH does goes to the live hub, on
-// the chat the run is played in, and is kept at the top of the turn's folder (or of the session's, for a
-// job of no turn) in a file of RPE's own, `trace.jsonl`, for the Turn page and a live view that joins
-// late. Each agent's traffic (its messages, its tool calls and their results) has one writer, RPH, in
-// that agent's transcript (plan §5.3 `transcripts/`, §13.4): this port writes nothing in `transcripts/`,
-// keeps a record of a message, a call or a result without what the transcript holds, and reads that
-// back from the transcript when the trace is read. Streaming text goes to the live hub only; the call's
-// `call_ended` holds it whole. A piece of streaming text names only its run, by RPH's own id for it: its
-// chat is the one its run's records name, each run's first record coming before any piece of it. A job
-// of no chat has no chat to tell nor folder to keep its records in: the runs are given them, and nothing
-// more is done.
+// the chat the run is played in (a job of no chat's on `LIVE_JOBS`, the name the pages that follow his
+// jobs follow), and is kept at the top of the turn's folder (or of the session's, for a job of no turn:
+// a job of no chat's session sits at the user's level, under `jobs/`) in a file of RPE's own,
+// `trace.jsonl`, for the Turn page, the Jobs page and a live view that joins late. Each agent's traffic
+// (its messages, its tool calls and their results) has one writer, RPH, in that agent's transcript (plan
+// §5.3 `transcripts/`, §13.4): this port writes nothing in `transcripts/`, keeps a record of a message, a
+// call or a result without what the transcript holds, and reads that back from the transcript when the
+// trace is read. Streaming text goes to the live hub only; the call's `call_ended` holds it whole. A
+// piece of streaming text names only its run, by RPH's own id for it: where it goes is where its run's
+// records go, each run's first record coming before any piece of it.
 
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentRef, JsonValue, Log, Scope, ToolContent, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
-import type { LiveHub } from "../app";
+import type { AgentRef, JsonValue, Log, RunScope, ToolContent, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
+import { LIVE_JOBS, type LiveHub } from "../app";
 import { isRecord } from "../shared/json";
 import { type TreeFiles, TURN_TRACE, TURN_TRANSCRIPTS } from "../tree";
 import type { RunTimes } from "./spans";
@@ -136,8 +136,8 @@ export interface TraceDeps {
 }
 
 export interface TurnTrace extends TracePort {
-  /** Every record kept for a scope's turn so far, in the order RPH gave them. */
-  records(scope: Scope): Promise<TraceRecord[]>;
+  /** Every record kept for a scope's turn so far (for a scope of no turn, its session's: a job's), in the order RPH gave them. */
+  records(scope: RunScope): Promise<TraceRecord[]>;
 }
 
 /** A turn folder that records are being written to: its place on disk, its chain of appends, the runs whose records go there, and the appends not settled. */
@@ -154,12 +154,12 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
    * let go, so nothing is held for a turn whose run has ended. A past turn's folder is looked up again when it is read.
    */
   const open = new Map<string, Open>();
-  /** Each run going on, by RPH's id for it, from its records: its chat and the folder its records go to; let go when the run ends. */
-  const going = new Map<string, { chat: string; key: string }>();
+  /** Each run going on, by RPH's id for it, from its records: where the live hub tells it (its chat, or `LIVE_JOBS`) and the folder its records go to; let go when the run ends. */
+  const going = new Map<string, { to: string; key: string }>();
   const pending = new Set<Promise<unknown>>();
 
-  const keyOf = (scope: Scope): string => JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null]);
-  const lookup = (scope: Scope): Promise<string | null> => (scope.turn === undefined ? deps.files.sessionDisk(scope) : deps.files.turnDisk(scope));
+  const keyOf = (scope: RunScope): string => JSON.stringify([scope.user, scope.chat ?? null, scope.session, scope.turn ?? null]);
+  const lookup = (scope: RunScope): Promise<string | null> => (scope.turn === undefined ? deps.files.sessionDisk(scope) : deps.files.turnDisk(scope));
   const release = (key: string): void => {
     const at = open.get(key);
     if (at !== undefined && at.runs.size === 0 && at.writes === 0) open.delete(key);
@@ -170,12 +170,12 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
    * record about no agent is no run's (the host's word: a session's change, a session-close hook), never started or ended: nothing
    * is held for it.
    */
-  const follow = (record: TraceRecord, chat: string, key: string, at: Open): void => {
+  const follow = (record: TraceRecord, to: string, key: string, at: Open): void => {
     if (record.agent === undefined) return;
     const { event } = record;
     const ended = event.kind === "run_ended" ? record.run : event.kind === "job" && event.job.ended !== undefined ? event.job.id : null;
     if (ended === null) {
-      going.set(record.run, { chat, key });
+      going.set(record.run, { to, key });
       at.runs.add(record.run);
       return;
     }
@@ -211,21 +211,21 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     event(record) {
       deps.runs.record(record);
       const { scope } = record;
-      if (scope.chat === undefined) return;
+      const to = scope.chat ?? LIVE_JOBS;
       const key = keyOf(scope);
       let at = open.get(key);
       if (at === undefined) {
         at = { folder: lookup(scope), tail: Promise.resolve(), runs: new Set(), writes: 0 };
         open.set(key, at);
       }
-      follow(record, scope.chat, key, at);
-      deps.live.publish(scope.chat, { kind: "trace", data: record });
+      follow(record, to, key, at);
+      deps.live.publish(to, { kind: "trace", data: record });
       keep(record, key, at);
     },
     delta(delta: TraceDelta) {
       deps.runs.delta(delta);
-      const chat = going.get(delta.run)?.chat;
-      if (chat !== undefined) deps.live.publish(chat, { kind: "delta", data: delta });
+      const to = going.get(delta.run)?.to;
+      if (to !== undefined) deps.live.publish(to, { kind: "delta", data: delta });
     },
     async flush() {
       while (pending.size > 0) await Promise.allSettled([...pending]);

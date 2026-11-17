@@ -100,14 +100,14 @@ export function noticeLine(lines: NoticeLines, name: string, fields: Readonly<Re
   return template === undefined ? undefined : render(parse(template), [fields]);
 }
 
-/** The notices file in force for a chat, read once when the page opens it; none where it cannot be read. */
-export function useNoticeLines(chat: string): NoticeLines {
+/** The notices file in force for a chat (null: for no chat, the shipped and global levels'), read once when the page opens it; none where it cannot be read. */
+export function useNoticeLines(chat: string | null): NoticeLines {
   const app = useApp();
   const [lines, setLines] = useState<NoticeLines>(NO_NOTICES);
   useEffect(() => {
     setLines(NO_NOTICES);
     let alive = true;
-    app.client.call("GET /api/v1/files-in-force/*", { "*": NOTICES_FILE }, { query: { chat } }).then(
+    app.client.call("GET /api/v1/files-in-force/*", { "*": NOTICES_FILE }, { query: chat === null ? {} : { chat } }).then(
       (answer) => {
         if (alive) setLines(parseNoticeLines(replyOf(answer).text));
       },

@@ -279,7 +279,7 @@ export interface LiveKindDeclaration {
 
 /** Every kind a chat's live socket carries, each declared once. The hub publishes no other. */
 export const LIVE_KINDS = {
-  trace: { data: traceRecord, does: "A record of RPH's trace, for a run played in the chat: every event of the run, as RPH gave it." },
+  trace: { data: traceRecord, does: "A record of RPH's trace, for a run played in the chat (on ~jobs, for a job of no chat): every event of the run, as RPH gave it." },
   delta: { data: traceDelta, does: "A piece of a model call's text as it streams, for the live view; the call's call_ended record holds it whole." },
   reply: {
     data: shape.named(
@@ -304,7 +304,7 @@ export type LiveKind = keyof typeof LIVE_KINDS;
 /** What an event of a kind carries. */
 export type LiveData<K extends LiveKind> = Infer<(typeof LIVE_KINDS)[K]["data"]>;
 
-/** The user's jobs, in every chat and in none: followed and published to by this name, which no chat id has. */
+/** The user's jobs, in every chat and in none: followed and published to by this name, which no chat id has. A job of no chat's trace and streaming text are told here, as a chat's runs are told to the chat. */
 export const LIVE_JOBS = "~jobs";
 /** What concerns the user and no one chat or job (the extension's status): followed and published to by this name. */
 export const LIVE_USER = "~user";
