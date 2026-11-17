@@ -27,6 +27,7 @@ import type { Migration, MigrationArea } from "../app/migrations";
 import { chatLine } from "../cast";
 import { WS_DELETE, WS_WRITE, workspaceOf, workspacePins } from "../engine/workspace";
 import { isRecord } from "../shared/json";
+import { GLOBAL_PREFIX, PINS_PATH } from "../shared/stores";
 import type { TurnRow, UserStore } from "../store";
 import { readBytes, sha256 } from "./files";
 import { AREA_DOC, type AreaFile, areaDoc, areaOf, chatOfKey, docKey, pathTurns, type TurnAreas } from "./history";
@@ -226,6 +227,24 @@ async function agentsWorkspace(today: Today, history: NoteHistory, chat: string)
     if (body !== null) files.push({ path, text: body, pinned: pinned[path] === true });
   }
   return { files, changes };
+}
+
+/** The files each role's entry of a workspace's pins manifest (`.pins.json`) lists, as today's reader takes them: a role's list of paths, or its `files`; a file that does not read lists none. */
+function pinsManifest(text: string | null): Record<string, string[]> {
+  let raw: unknown = null;
+  try {
+    raw = text === null ? null : (JSON.parse(text) as unknown);
+  } catch {
+    raw = null;
+  }
+  if (!isRecord(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [role, value] of Object.entries(raw)) {
+    const files = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.files) ? value.files : [];
+    const paths = files.filter((p): p is string => typeof p === "string" && p !== "" && p !== PINS_PATH);
+    if (paths.length > 0) out[role] = [...new Set(paths)];
+  }
+  return out;
 }
 
 /** A definition's header in the new format (`name`, `description`, and for an agent its `model`, `effort`, `tools`, what it is `given` and its `limits`), and its body. */
@@ -430,11 +449,14 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
   const latest = await latestAreas(today, items);
   // A chat RPE's store holds that this run did not import keeps what an earlier run wrote for it: it was played on RPE, or its earlier import stands.
   const keeps = (chat: string): boolean => chat !== "" && !history.carried.has(chat) && history.s.chat(chat) !== null;
-  // The agents engine's global workspace, into the global notes folder with his own `~/` files, which every chat's agents read and none writes.
+  // The agents engine's global workspace, into the global notes folder with his own `~/` files, which every chat's agents read and none writes; a file pinned in GM → Workspace is the Author's pin.
   const global = json(await today.userView.read("agents/global.json"));
   for (const [path, f] of Object.entries(isRecord(global) && isRecord(global.files) ? global.files : {})) {
     const body = isRecord(f) && typeof f.hash === "string" ? await today.userView.read(`agents/blobs/${f.hash}`) : null;
-    if (body !== null && (await put("", places.notes, path, body))) out.global++;
+    if (body !== null && (await put("", places.notes, path, body))) {
+      out.global++;
+      if (isRecord(f) && f.pinned === true) pin(null, `@global/${places.notes}/${path}`, ["main"]);
+    }
   }
   // Each chat's into its own notes folder, placed as RPE places the chat: by its name and its character's, as Lumiverse has them.
   for (const id of [...new Set([...history.carried, ...latest.keys(), ...learned.keys()])].sort()) {
@@ -461,10 +483,19 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       pin(config, `${places.notes}/${f.path}`, f.pins);
     }
     for (const f of knows) if (await put(id, folder, `learned/${f.path}`, f.text)) mine.learned++;
+    const inWorkspace = new Set<string>();
     for (const f of heads?.files ?? []) if (await put(id, folder, f.path, f.text)) {
       out.workspace++;
       mine.notes++;
+      inWorkspace.add(f.path);
       if (f.pinned) pin(config, `${places.notes}/${f.path}`, ["main"]);
+    }
+    // The workspace's pins manifest (`.pins.json`): each role's files, a chat's or a global `~/` one, pinned for that role.
+    for (const [role, files] of Object.entries(pinsManifest(heads?.files.find((f) => f.path === PINS_PATH)?.text ?? null))) {
+      for (const path of files) {
+        if (path.startsWith(GLOBAL_PREFIX)) pin(null, `@global/${places.notes}/${path}`, [role]);
+        else if (inWorkspace.has(path)) pin(config, `${places.notes}/${path}`, [role]);
+      }
     }
     for (const [path, file] of keptLearned) {
       const body = await today.userView.read(`agents/blobs/${file.hash}`);
