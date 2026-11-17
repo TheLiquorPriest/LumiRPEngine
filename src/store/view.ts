@@ -663,17 +663,22 @@ export class TreeView {
 
   /**
    * The tree over this state made from `prev`'s, the tree over a state this one was folded from (PlanStore-S2 item 5): the levels
-   * nothing changed are `prev`'s own; each thing that changed is placed again, and every level above where it was and where it is, or
-   * whose own last change moved, is summed again. Null, with nothing kept, where a thing's presence, kind or being gone changed, a
-   * level the tree adds emptied, or a chain of holders loops: the tree is built afresh, as it gives the same. `shares` where no thing
-   * that changed changed its name, its kind or its groups, which the lines of other levels read: the levels' kept lines are `prev`'s.
-   * `taken`: the levels this tree holds anew; `moved`: the things whose data changed.
+   * nothing changed are `prev`'s own; each thing that changed is placed again, a thing play made is placed, and every level above
+   * where it was and where it is, or whose own last change moved, is summed again. Null, with nothing kept, where a thing's kind or
+   * being gone changed, a thing went, a thing play made is one another names (what is in it, or what it is linked to, would move with
+   * it), a level the tree adds is wanted and missing or emptied, or a chain of holders loops: the tree is built afresh, as it gives the
+   * same. `shares` where no thing that changed changed its name, its kind or its groups, and none made joins a group or is a region,
+   * which the lines of other levels read: the levels' kept lines are `prev`'s. `taken`: the levels this tree holds anew; `moved`: the
+   * things whose data changed or that were made.
    */
   private update(prev: TreeView): Updated | null {
     const before = prev.state.world.entities;
     const now = this.state.world.entities;
     const ids = Object.keys(now);
-    if (prev.loopsBroken || ids.length !== Object.keys(before).length) return null;
+    if (prev.loopsBroken) return null;
+    const count = Object.keys(before).length;
+    let made = 0;
+    let named: Set<string> | null = null;
     let shares = true;
     const moved: string[] = [];
     for (const [ref, node] of prev.nodes) this.nodes.set(ref, node);
@@ -691,13 +696,30 @@ export class TreeView {
     const sorted = new Set<string>();
     for (const id of ids) {
       const e = now[id] as EntityState;
-      // An entity a pack's event copied with the rest of the world, holding what it held, is unchanged (and `same` knows it).
       if (e === before[id]) continue;
+      const ref = `entity:${id}`;
+      // A thing play made: placed, where nothing names it.
+      if (!Object.hasOwn(before, id)) {
+        named ??= new Set(Object.values(now).flatMap((x) => x.relations.map((r) => r.to)));
+        if (named.has(id)) return null;
+        const category = this.categoryOf(e);
+        const parent = this.entityParent(e, category);
+        if (!this.nodes.has(parent)) return null;
+        if (e.relations.some((r) => r.type === "member_of") || kindIs(this.env.registry, this.doc, e.kind, "region")) shares = false;
+        this.add({ ref, id, kind: "entity", name: e.name, what: this.labelOf(e), parent, category, gone: isGone(this.state.world, id) });
+        mine.add(ref);
+        take(parent).children.push(ref);
+        sorted.add(parent);
+        dirty.add(ref);
+        moved.push(id);
+        made++;
+        continue;
+      }
+      // An entity a pack's event copied with the rest of the world, holding what it held, is unchanged (and `same` knows it).
       if (Bun.deepEquals(e, before[id], true)) {
         this.sameAs.set(before[id] as EntityState, { now: e, equal: true });
         continue;
       }
-      const ref = `entity:${id}`;
       const was = prev.nodes.get(ref);
       const category = this.categoryOf(e);
       if (was === undefined || was.category !== category || was.gone !== isGone(this.state.world, id)) return null;
@@ -719,6 +741,8 @@ export class TreeView {
       node.what = this.labelOf(e);
       dirty.add(ref);
     }
+    // A thing that went, which leaves the levels that held it to be summed afresh.
+    if (ids.length - made !== count) return null;
     for (const ref of sorted) take(ref).children.sort((a, b) => this.compare(a, b));
     for (const key of new Set([...Object.keys(this.state.touched), ...Object.keys(prev.state.touched)])) if (this.state.touched[key] !== prev.state.touched[key] && this.nodes.has(key)) dirty.add(key);
     // Every dirty level and those above it, deepest first; a chain that does not reach the world loops.
