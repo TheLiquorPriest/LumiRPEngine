@@ -29,7 +29,7 @@ import type { WorldService } from "../worlds/service";
 import { castArea } from "../cast/area";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
-import { EntryNumbers, type LoreBooks, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
+import { EntryNumbers, type LoreBooks, loreLines, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
 import { LORE_PROPOSAL_SETTING_DEFS } from "../lore/settings";
 import { MIGRATED_NOTICE, MIGRATED_PART, migratedChat } from "../migrate/briefing";
 import { oldRecord } from "../migrate/old-records";
@@ -48,6 +48,7 @@ import { globalConfig } from "../turn/settings";
 import { bootstrapArea } from "../turn/bootstrap/area";
 import { guidanceTexts } from "../turn/texts";
 import { switchesListing } from "./switches-listing";
+import { loadGuidance } from "./guidance";
 import { appArea } from "./area";
 import type { TurnTimes } from "./service-timings";
 import type { App, Area } from "./app";
@@ -156,7 +157,9 @@ export function compose(options: ComposeOptions = {}): Composition {
     // His books for Build's lore: read as the lore reads them, an entry's fields written through the lore's one recorded writer, and a chat's messages as Lumiverse holds them.
     lore: {
       books,
-      writes: { edit: (user, entry, fields, revision) => proposals().edit(user, entry, fields, revision) },
+      writes: { edit: (user, entry, fields, revision) => proposals().edit(user, entry, fields, revision), create: (user, book, fields) => proposals().create(user, book, fields) },
+      // The lore index of the books a world reads, worded by the lore's lines in force for him.
+      index: async (user, world) => made().loreIndex.ofWorld(user, world, await loreLines(loadGuidance(made().files, { user }))),
       messages: async (_user, chat) => {
         const reads = lumiverse().reads;
         const path = await reads.path(chat);
