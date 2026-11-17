@@ -85,7 +85,7 @@ export function BootstrapAsk(props: { chat: string; job: JobView; stamp: number;
   if (question === null) return answer.loading ? <p class="lre-muted rpe-line">Reading its question…</p> : null;
   return (
     <div class="lre-stack" data-bootstrap-ask>
-      <QuestionView question={question} busy={busy} onAnswer={answered} />
+      <QuestionView question={question} chat={chat} busy={busy} onAnswer={answered} />
       {problem === null ? null : <p class="rpe-line" data-problem>{problem}</p>}
     </div>
   );
