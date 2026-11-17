@@ -255,6 +255,22 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
   const facts = (m: ChainMessage): SwipeFacts | undefined => chat.swipes.get(m.id);
   const hashOf = (m: ChainMessage, swipe: number): string => facts(m)?.hashes[swipe] ?? textHash(m.swipes[swipe] ?? "");
   const dateOf = (m: ChainMessage, swipe: number): number | null => facts(m)?.dates[swipe] ?? null;
+  /**
+   * When a swipe's reply went out, in milliseconds as a run's record keeps it (Lumiverse dates a swipe in seconds): its own date, else that of the
+   * nearest reply before it on the chain that has one, else the nearest after; 0 only for a chat none of whose replies is dated.
+   */
+  const wentOut = (at: number, swipe: number): number => {
+    const own = dateOf(chain[at] as ChainMessage, swipe);
+    if (own !== null) return own * 1000;
+    for (let i = 1; i < chain.length; i++) {
+      for (const j of [at - i, at + i]) {
+        const near = chain[j];
+        const date = near === undefined || near.isUser ? null : dateOf(near, near.swipeId);
+        if (date !== null) return date * 1000;
+      }
+    }
+    return 0;
+  };
   const own = new Map<string, string>();
   const turnOf = (at: number, swipe: number): string | null => (link?.shared.has(at) ? turnOfShared(link, at, swipe) : (own.get(`${at}:${swipe}`) ?? null));
   // A chain's prefix is folded before the chain: replies in order, the swipe each shows last, since the next reply's own path most often runs through it.
@@ -299,7 +315,7 @@ function importOne(s: UserStore, db: Database, registry: Registry, chat: ChatToI
     const rec = m.ledger?.swipes[String(p.swipe)];
     if (rec) keepRecord(db, s.id, { chat: id, turn: turn.id, message: m.id, swipe: p.swipe, record: rec });
     // Every imported turn has its run record, one with nothing saved otherwise included: the telling reads the chat's newest kept run, so a turn without one would show an older turn's lines.
-    keepRun?.(db, { user: s.id, chat: id, turn: turn.id, at: dateOf(m, p.swipe) ?? 0, released: m.swipes[p.swipe] ?? "", saved: savedOf(rec) });
+    keepRun?.(db, { user: s.id, chat: id, turn: turn.id, at: wentOut(p.at, p.swipe), released: m.swipes[p.swipe] ?? "", saved: savedOf(rec) });
     out.turns++;
     out.placed[p.how === "shown" && p.lost ? "lost" : p.how]++;
     out.dropped += step.dropped;

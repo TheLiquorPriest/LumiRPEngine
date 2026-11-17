@@ -71,7 +71,8 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
       const turn = turns.find((t) => hash !== null && t.hash === hash) ?? turns[0];
       return turn === undefined || turn.chat !== chat ? null : turn.id;
     };
-    const dateOf = (message: string, swipe: number): number => swipes.get(message)?.dates[swipe] ?? 0;
+    /** When a swipe was written, in milliseconds as the turn lane's tables keep a time (Lumiverse dates a swipe in seconds); 0 for one with no date. */
+    const dateOf = (message: string, swipe: number): number => (swipes.get(message)?.dates[swipe] ?? 0) * 1000;
 
     wrote.push(() => {
       db.run("DELETE FROM chip WHERE user = ? AND chat = ? AND source = 'import'", [user, chat]);
@@ -134,7 +135,7 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
       for (const tool of kept.tools) {
         if (typeof tool !== "string") continue;
         const at = typeof times[tool] === "number" ? times[tool] : null;
-        const turn = (at === null ? undefined : turns.findLast((t) => t.date !== null && t.date <= at)) ?? turns[0];
+        const turn = (at === null ? undefined : turns.findLast((t) => t.date !== null && t.date * 1000 <= at)) ?? turns[0];
         wrote.push(() => db.run("INSERT OR REPLACE INTO chip (user, id, chat, turn, kind, data, at, source) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'import')", [user, `carried:${chat}:approval:${tool}`, chat, turn?.id ?? null, JSON.stringify({ tool, approvedFor: "chat" }), at ?? 0]));
         out.approvals++;
       }
