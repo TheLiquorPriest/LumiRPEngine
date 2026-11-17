@@ -26,7 +26,7 @@ import type { RpeClient } from "../client";
 import type { Timers } from "../roads";
 import { createStore, type Readable, type Store } from "../store";
 import { openChatState } from "./chat-state";
-import { type CallFile, type OldRoad, keptTransport } from "./client";
+import { type CallFile, keptTransport } from "./client";
 import type { KeptHost } from "./host";
 import { keptMapHand } from "./maps";
 import type { ChatState } from "./play/source";
@@ -68,8 +68,6 @@ export interface KeptDeps {
   chat: Store<string | null>;
   /** Which kept view the App is for. */
   mode: "build" | "play";
-  /** The road a request no call file takes yet goes by. */
-  oldRoad: OldRoad;
   host: KeptHost;
   timers: Timers;
   /** The toasts' count and times, read at each toast. */
@@ -154,7 +152,7 @@ export function keptApp(deps: KeptDeps): Kept {
   const clock = { set: (run: () => void, ms: number) => timers.setTimeout(run, ms), clear: (handle: unknown) => timers.clearTimeout(handle) };
   const stops: (() => void)[] = [];
   // The world is read from the chat's state when a call asks for it, so it is the state's as it stands then (`state` is made below).
-  const transport = keptTransport({ client: deps.client, chat: () => deps.chat.get(), world: () => state.get().view?.worldId ?? null, oldRoad: deps.oldRoad, ...(deps.calls === undefined ? {} : { calls: deps.calls }) });
+  const transport = keptTransport({ client: deps.client, chat: () => deps.chat.get(), world: () => state.get().view?.worldId ?? null, ...(deps.calls === undefined ? {} : { calls: deps.calls }) });
   stops.push(() => transport.close());
   // What RPE's live feed says of the chat the App is for reaches today's client as the pushes today's backend sent (each call file's `live`).
   const state = openChatState(deps.client, deps.chat, (events) => {

@@ -22,7 +22,7 @@ describe("Build's lore and secrecy requests", () => {
     const rpe = routeClient();
     const book = rpe.books.add("Port Alder");
     const key = rpe.books.put(book, { comment: "The key", content: "Helen keeps the spare key under the mat." });
-    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => SETTINGS });
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => SETTINGS });
     expect((await kept.app.request({ type: "lre.lore", op: "books" }))?.books?.map((b) => b.name)).toEqual(["Port Alder"]);
     const read = (await kept.app.request({ type: "lre.lore", op: "entries", bookId: book }))?.entries ?? [];
     expect(read.map((e) => [e.title, e.revision])).toEqual([["The key", 1]]);

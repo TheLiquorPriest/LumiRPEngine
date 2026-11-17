@@ -154,7 +154,8 @@ describe("world documents by revision", () => {
   test("carried and Build's world files move in byte for byte, checksums equal", () => {
     const db = new Database(":memory:");
     for (const m of [...MIGRATE_TABLES].sort((a, b) => a.version - b.version)) if ("sql" in m) db.run(m.sql);
-    for (const m of BUILD_MIGRATIONS) if ("sql" in m) db.run(m.sql);
+    // Build's tables as an earlier build kept them, before its step 5 dropped them.
+    for (const m of BUILD_MIGRATIONS.filter((step) => step.version === 1)) if ("sql" in m) db.run(m.sql);
     const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
     const carried = db.query("INSERT INTO world_file (user, world, file, bytes, sha256, run) VALUES (?, ?, ?, ?, ?, 'run-1')");
     const text = JSON.stringify(world, null, 2);

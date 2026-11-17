@@ -115,7 +115,7 @@ export function KeptThings(props: { chat: string }) {
         if (!live) return;
         const host = app.keptHost();
         const removeStyle = host.addStyle(PLAY_CSS);
-        const kept = keptApp({ client: app.client, chat: createStore<string | null>(props.chat), mode: "play", oldRoad: "chat", host, timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go });
+        const kept = keptApp({ client: app.client, chat: createStore<string | null>(props.chat), mode: "play", host, timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go });
         const offCurrency = kept.app.sync.subscribe((held) => setCurrency(held.view?.currency ?? null));
         render(
           <TodayContext.Provider value={kept.app}>

@@ -4,11 +4,11 @@
 import { describe, expect, test } from "bun:test";
 import { worldsRoutes } from "../../src/build";
 import { callRoute, type Given } from "../app/call";
-import { buildServiceOn, makeBed, USER } from "./bed";
+import { makeBed, USER, worldsOn } from "./bed";
 
 describe("the worlds routes", () => {
   test("a stale write gets the current draft and writes nothing; a commit over the command socket is the agent's", async () => {
-    const routes = worldsRoutes(buildServiceOn(makeBed()).worlds, 4 * 1024 * 1024);
+    const routes = worldsRoutes(worldsOn(makeBed()), 4 * 1024 * 1024);
     const found = (method: string, path: string) => {
       const route = routes.find((r) => r.method === method && r.path === path);
       if (route === undefined) throw new Error(`no route ${method} ${path}`);

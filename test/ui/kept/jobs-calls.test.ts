@@ -22,7 +22,7 @@ const quiet = { follow: () => () => undefined };
 describe("Build's jobs through the kept App", () => {
   test("a job is started, read back as the Tools list shows it, cancelled where it has ended and dismissed; none of it is said as unavailable", async () => {
     const rpe = routeClient();
-    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => SETTINGS });
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", host: webHost({ revokeMs: () => 1000 }), timers: handTimers(), settings: () => SETTINGS });
     const created = await kept.app.request({ type: "lre.world", op: "create", name: "Fernwick", template: "fantasy_town" });
     const worldId = created?.world?.id ?? "";
     const started = await kept.app.request({ type: "lre.job", op: "start", kind: "playtest", worldId, input: { turns: ["look around"] } });

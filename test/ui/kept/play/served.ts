@@ -1,4 +1,4 @@
-// RPE as the Play page reaches it, served by RPE's own handlers in this process: Build's route and the
+// RPE as the Play page reaches it, served by RPE's own handlers in this process: Build's typed routes and the
 // three play routes over one store and write queue (test/build-mode/bed.ts), with the application's
 // live hub, which the page follows as it follows RPE's live socket. Every body goes and comes back as
 // JSON, as over a road, and a route's refusal reaches the page as the client's error does. Turns are
@@ -9,7 +9,7 @@
 import { expect } from "bun:test";
 import type { HostTool, JsonObject, ToolCtx } from "rp-harness/contract";
 import { LiveHub, RouteError } from "../../../../src/app";
-import { buildRoutes, chatsRoutes, jobsRoutes, worldsRoutes } from "../../../../src/build";
+import { chatsRoutes, jobsRoutes, worldsRoutes } from "../../../../src/build";
 import { engineTools, shippedTexts, stateScan } from "../../../../src/iface/index";
 import { PORTS } from "../../../iface/rig";
 import { playRoutes, PlayService } from "../../../../src/play";
@@ -18,11 +18,10 @@ import { MAP_DEFAULTS } from "../../../../src/shared/map-config";
 import { HARNESS_MIGRATIONS } from "../../../../src/turn/tables";
 import { migrateStore } from "../../../../src/store";
 import { Database } from "bun:sqlite";
-import type { ResultBodies } from "../../../../src/shared/protocol";
 import type { Store } from "../../../../src/store";
 import type { WriteQueue } from "../../../../src/app";
 import { type LiveListener, type RpeClient, RpeError } from "../../../../src/ui/client";
-import { buildServiceOn, GUIDANCE, jobHomeOn, makeBed, USER } from "../../../build-mode/bed";
+import { GUIDANCE, jobHomeOn, makeBed, USER, worldsOn } from "../../../build-mode/bed";
 import { asHarnessPasses } from "../../../story/rig";
 import { callRoute } from "../../../app/call";
 
@@ -37,8 +36,8 @@ export interface ServedRpe {
   running: Set<string>;
   /** Each call the page made: its route key and the body it sent. */
   asked: { key: string; body: unknown }[];
-  /** One of today's world messages (its `lre` and `reqId` added) to Build's route, as a page of the owner's would send it; its result. */
-  build(message: Record<string, unknown>): Promise<ResultBodies["lre.world"]>;
+  /** Attaches `world` to `chat` through the world service, as Build's Attach does: the chat plays its newest revision from its next turn. */
+  attach(world: string, chat: string): Promise<void>;
   /** A world made in Build from a starter template: its id and name. */
   world(name: string, template?: string): Promise<{ id: string; name: string }>;
   /** A turn of `chat` begun after its newest; its id. */
@@ -55,9 +54,8 @@ export function servedRpe(): ServedRpe {
   const bed = makeBed();
   const live = new LiveHub({ queueEvents: 64, now: () => 0 });
   const running = new Set<string>();
-  const service = buildServiceOn(bed);
-  const [post] = buildRoutes(service);
-  const worlds = [...worldsRoutes(service.worlds, 4 * 1024 * 1024), ...chatsRoutes(service.worlds), ...jobsRoutes(jobHomeOn(bed, service.worlds))];
+  const service = worldsOn(bed);
+  const worlds = [...worldsRoutes(service, 4 * 1024 * 1024), ...chatsRoutes(service), ...jobsRoutes(jobHomeOn(bed, service))];
   // This bed holds no asks for the next message and has no Lumiverse to put a message in.
   const noLumiverse = (): never => {
     throw new Error("This bed has no Lumiverse to put a message in.");
@@ -70,15 +68,9 @@ export function servedRpe(): ServedRpe {
   worlds.push(...(play as unknown as typeof worlds));
 
   const serve = async (key: string, params: Record<string, string>, body: unknown, query: Record<string, string>): Promise<unknown> => {
-    switch (key) {
-      case "POST /api/v1/build":
-        return await callRoute(post, { body, user: USER });
-      default: {
-        const found = worlds.find((r) => `${r.method} ${r.path}` === key);
-        if (found === undefined) throw new RpeError(404, `No route ${key}.`);
-        return await callRoute(found, { params, query, body, user: USER });
-      }
-    }
+    const found = worlds.find((r) => `${r.method} ${r.path}` === key);
+    if (found === undefined) throw new RpeError(404, `No route ${key}.`);
+    return await callRoute(found, { params, query, body, user: USER });
   };
 
   const rpe: ServedRpe = {
@@ -116,14 +108,11 @@ export function servedRpe(): ServedRpe {
     live,
     running,
     asked: [],
-    async build(message) {
-      const answer = await callRoute(post, { body: { lre: 1, reqId: `setup-${++asked}`, type: "lre.world", ...message }, user: USER });
-      if (answer.result.type !== "lre.result" || answer.result.request !== "lre.world") throw new Error(`Build refused: ${JSON.stringify(answer.result)}`);
-      return answer.result.body;
+    async attach(world, chat) {
+      await service.chats.attach(USER, world, chat);
     },
     async world(name, template = "fantasy_town") {
-      const made = (await rpe.build({ op: "create", name, template })).world;
-      if (made === undefined) throw new Error("Build made no world");
+      const made = (await service.create(USER, name, template)).world;
       return { id: made.id, name: made.name };
     },
     async begin(chat) {

@@ -54,9 +54,8 @@ function button(root: PageElement, text: string): PageElement {
 async function twoWorlds(rpe: RouteClient): Promise<Map<string, { worldId: string; head: string }>> {
   const made = new Map<string, { worldId: string; head: string }>();
   for (const name of ["Fernwick", "Mossbank"]) {
-    const { result } = await rpe.client.call("POST /api/v1/build", {}, { body: { lre: 1, type: "lre.world", reqId: `made-${name}`, op: "create", name, template: "fantasy_town" } });
-    if (result.type !== "lre.result" || result.request !== "lre.world" || !result.body.world || !result.body.revision) throw new Error(`RPE made no ${name}`);
-    made.set(name, { worldId: result.body.world.id, head: result.body.revision });
+    const created = await rpe.client.call("POST /api/v1/worlds", {}, { body: { name, template: "fantasy_town" } });
+    made.set(name, { worldId: (created.world as { id: string }).id, head: created.revision });
   }
   return made;
 }

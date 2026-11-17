@@ -28,9 +28,9 @@ describe("the world service", () => {
     expect(again.world.name).toBe("Fernwick");
     expect((await service.list(USER)).length).toBe(2);
     expect(await service.list(OTHER)).toEqual([]);
-    // Kept once: the store's own reader gives each revision, and Build keeps no file of its own.
+    // Kept once: the store's own reader gives each revision, and Build has no table of worlds of its own.
     expect(bed.store.user(USER).worldRevisions(id).map((r) => r.revision)).toEqual([made.revision, committed.revision]);
-    expect(bed.db.query("SELECT count(*) AS n FROM build_file").get()).toEqual({ n: 0 });
+    expect(bed.db.query("SELECT count(*) AS n FROM sqlite_master WHERE name IN ('build_file', 'build_seed')").get()).toEqual({ n: 0 });
     expect(await service.remove(USER, id)).toHaveLength(1);
   });
 

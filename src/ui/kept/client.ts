@@ -5,14 +5,13 @@
 // a test on the request (its type, its op, the fields that choose its function) and sends each to its
 // typed route through the page's client. No call's body carries today's `lre`, `type` or `reqId`: the
 // file's route takes what the route takes, and the file hands back today's result body, which this
-// seam puts in an `lre.result` under the request's id. A request no call file takes goes, on Build's
-// App, by Build's one route until Build's last package deletes that road; on a chat's App the chat's
-// old actions route is gone, and the page answers it itself as not served by this build.
+// seam puts in an `lre.result` under the request's id. There is no other road: a request no call file
+// takes, on Build's App as on a chat's, is answered here as not served by this build.
 //
 // Nothing here remembers an answer. An answer that depends on a state that changes (no turn yet, no
 // revision) is asked again at the next request. A road failure, when RPE was not reached, is said as
-// the road's failure in the client's words (code `internal`), never as RPE's refusal; RPE's own
-// `unavailable` answer on the old road is a refusal, told apart by the request it answers (`refused`).
+// the road's failure in the client's words (code `internal`), never as RPE's refusal; a request not
+// served is a refusal, told apart by the request it answers (`refused`), so the page says it once.
 
 import type { Transport } from "../../frontend/protocol-client";
 import type { RequestBody } from "../../frontend/registry";
@@ -60,11 +59,8 @@ export interface CallFile {
   live?(event: LiveEvent, ctx: CallContext): readonly unknown[];
 }
 
-/** Which of today's two roads a request no call file takes goes by: Build's one route, or the chat's actions routes. */
-export type OldRoad = "build" | "chat";
-
 export interface KeptTransport extends Transport {
-  /** Whether RPE refused the request answered under this id (its `unavailable` on the old road); told once, then forgotten. */
+  /** Whether the request answered under this id was refused as not served; told once, then forgotten. */
   takeRefusal(reqId: string | null): boolean;
   /** Hands today's client a push as RPE's own are: to every hearer, in order. */
   push(payload: unknown): void;
@@ -79,7 +75,6 @@ export interface TransportDeps {
   chat(): string | null;
   /** The world the open chat plays (`CallContext.world`); none where left out. */
   world?(): string | null;
-  oldRoad: OldRoad;
   /** The call files; the folder's list unless a test gives its own. */
   calls?: readonly CallFile[];
 }
@@ -132,31 +127,15 @@ export function keptTransport(deps: TransportDeps): KeptTransport {
       },
     );
   };
-  /** A request no call file takes: Build's by its one route, a chat's answered here as not served (RPE's refusal, so the page says it). */
-  const byOldRoad = (message: FrontendToBackend): Promise<unknown> => {
-    const chat = deps.chat();
-    if (!(deps.oldRoad === "build" || message.type === "lre.world" || chat === null)) {
-      refused.add(message.reqId);
-      return Promise.resolve(errorOf(message.reqId, "unavailable", `This page's request ${message.type} is not served by this build of RPE.`));
-    }
-    return deps.client.call("POST /api/v1/build", {}, { body: message }).then((answer) => {
-      // Build's route answers with the pushes the request caused too: they come after the result.
-      queueMicrotask(() => {
-        if (!closed) for (const push of answer.pushes) hand(push);
-      });
-      const result = answer.result as ResultMessage | ErrorMessage;
-      // RPE's own refusal of a request it does not serve: told apart by the request it answers.
-      if (result.type === "lre.error" && result.code === "unavailable" && result.reqId !== null) refused.add(result.reqId);
-      return result;
-    });
-  };
   return {
     send(message) {
       if (closed) return;
       const request = bodyOf(message);
       const file = calls.find((candidate) => candidate.takes(request));
       if (file === undefined) {
-        answerWith(message.reqId, byOldRoad(message));
+        // No call file takes it: not served by this build, a refusal, so the page says it once.
+        refused.add(message.reqId);
+        answerWith(message.reqId, Promise.resolve(errorOf(message.reqId, "unavailable", `This page's request ${message.type} is not served by this build of RPE.`)));
         return;
       }
       answerWith(

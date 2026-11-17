@@ -44,7 +44,7 @@ const hud = (root: PageElement): string => words(root.querySelector(".rpe-play-h
 async function playing(chat: string): Promise<ServedRpe> {
   const rpe = servedRpe();
   const world = await rpe.world("Fernwick");
-  await rpe.build({ op: "attach", worldId: world.id, chatId: chat });
+  await rpe.attach(world.id, chat);
   return rpe;
 }
 
@@ -96,7 +96,7 @@ describe("the Play page on RPE's own routes", () => {
     const none = (): string => words(root.querySelector('[data-lre-section="play-not-world"] .lre-play-none'));
     await until("the picker", () => none() === "No worlds yet. Create one in Build.");
     await act(() => button(root, "Open Build").click());
-    expect(route()).toEqual({ page: "build" });
+    expect(route()).toEqual({ page: "build", chat: NO_WORLD });
     await leave(root);
   });
 

@@ -1,7 +1,7 @@
 // The one App the kept views share (src/ui/kept/app.ts), over the one transport (client.ts): a request a
-// call file takes reaches its typed route with no envelope, one no file takes goes the old road, an answer
-// is never remembered, a road failure is the road's and not RPE's refusal, a refusal is held back from the
-// toasts by the request it answers, and the toasts' count and times are the page's settings.
+// call file takes reaches its typed route with no envelope, one no file takes is answered as not served,
+// an answer is never remembered, a road failure is the road's and not RPE's refusal, a refusal is held back
+// from the toasts by the request it answers, and the toasts' count and times are the page's settings.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
@@ -35,24 +35,22 @@ function worldsFile(asked: unknown[], answer: () => Promise<unknown>): CallFile 
 }
 
 describe("the App kept for Build and Play", () => {
-  test("requests reach typed routes: a call file takes what it serves with no envelope, and what none takes goes the old road", async () => {
+  test("requests reach typed routes: a call file takes what it serves with no envelope, and what none takes is not served, with nothing sent", async () => {
     const rpe = routeClient();
     const asked: unknown[] = [];
     const calls = [worldsFile(asked, async () => ({ worlds: [] }))];
-    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls });
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>(null), mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls });
     expect(await kept.app.request({ type: "lre.world", op: "list" })).toEqual({ worlds: [] });
     expect(asked).toEqual([{ type: "lre.world", op: "list" }]);
+    expect(await kept.app.send({ type: "lre.world", op: "templates" })).toMatchObject({ type: "lre.error", code: "unavailable" });
     expect(rpe.asked).toEqual([]);
-    const templates = await kept.app.request({ type: "lre.world", op: "templates" });
-    expect(templates?.templates?.map((t) => t.id)).toContain("fantasy_town");
-    expect(rpe.asked.map((a) => a.key)).toEqual([rpe.route]);
     kept.stop();
   });
 
   test("asked again: a request refused once and then served is shown served, and nothing remembers the refusal", async () => {
     const answers: (() => Promise<unknown>)[] = [() => Promise.reject(new RpeError(409, "Not yet.")), async () => ({ worlds: [] })];
     const asked: unknown[] = [];
-    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls: [worldsFile(asked, () => (answers.shift() as () => Promise<unknown>)())] });
+    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS, calls: [worldsFile(asked, () => (answers.shift() as () => Promise<unknown>)())] });
     expect(await kept.app.send({ type: "lre.world", op: "list" })).toMatchObject({ type: "lre.error", code: "conflict", message: "Not yet." });
     expect(await kept.app.send({ type: "lre.world", op: "list" })).toMatchObject({ type: "lre.result", body: { worlds: [] } });
     expect(asked).toHaveLength(2);
@@ -61,7 +59,7 @@ describe("the App kept for Build and Play", () => {
 
   test("a road failure is said as the road's, never coded as RPE's refusal, and is toasted; RPE's own refusal is said on the page, not toasted, held back by the request it answers", async () => {
     const reason = "RPE did not answer: the connection was refused.";
-    const failing = keptApp({ client: { call: (async () => Promise.reject(new RpeError(0, reason))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    const failing = keptApp({ client: { call: (async () => Promise.reject(new RpeError(0, reason))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
     const failed = await failing.app.send({ type: "lre.job", op: "list", worldId: "w-fernwick" });
     expect(failed).toMatchObject({ type: "lre.error", message: reason });
     expect(failed.type === "lre.error" ? failed.code : "").not.toBe("unavailable");
@@ -71,7 +69,7 @@ describe("the App kept for Build and Play", () => {
 
     // RPE's `unavailable` for a request it does not serve is said on the page; another error with the very same words is toasted.
     const rpe = routeClient();
-    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>("c"), mode: "play", oldRoad: "chat", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    const kept = keptApp({ client: { ...rpe.client, ...quiet }, chat: createStore<string | null>("c"), mode: "play", host: host(), timers: handTimers(), settings: () => SETTINGS });
     expect(await kept.app.request({ type: "lre.minds", op: "status", chatId: "c" })).toBeNull();
     const said = kept.said.get();
     expect(said).toHaveLength(1);
@@ -84,7 +82,7 @@ describe("the App kept for Build and Play", () => {
   test("the toasts' count and times are the page's settings, read at each toast", () => {
     const timers = handTimers();
     let settings: ToastSettings = SETTINGS;
-    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", oldRoad: "build", host: host(), timers, settings: () => settings });
+    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", host: host(), timers, settings: () => settings });
     for (const text of ["one", "two", "three", "four"]) kept.app.toast(text);
     expect(kept.app.toasts.get().map((t) => t.text)).toEqual(["two", "three", "four"]);
     settings = { toastsShown: 1, errorToastMs: 100, toastMs: 200 };
@@ -104,7 +102,7 @@ describe("the App kept for Build and Play", () => {
       read.push(params.chat);
       return { status: "not_world" } as unknown;
     }) as RpeClient["call"];
-    const kept = keptApp({ client: { call, ...quiet }, chat, mode: "build", oldRoad: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+    const kept = keptApp({ client: { call, ...quiet }, chat, mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(kept.app.sync.get().chatId).toBe("c1");
     chat.set("c2");

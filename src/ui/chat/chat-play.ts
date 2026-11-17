@@ -37,7 +37,7 @@ export function chatPlay(env: FrameEnv): ChatPlay | null {
     openWorld: () => sheets?.open("world") ?? Promise.resolve(),
     closeWorld: () => sheets?.close("world"),
   };
-  const kept = keptApp({ client: env.client, chat: createStore<string | null>(chat), mode: "play", oldRoad: "chat", host: env.host, timers: env.timers, settings: () => env.settings.values.get(), open: env.open, overlays });
+  const kept = keptApp({ client: env.client, chat: createStore<string | null>(chat), mode: "play", host: env.host, timers: env.timers, settings: () => env.settings.values.get(), open: env.open, overlays });
   sheets = createOverlays(kept.app, env.host);
   const play: ChatPlay = {
     chat,

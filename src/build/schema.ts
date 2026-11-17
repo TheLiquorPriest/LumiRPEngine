@@ -1,16 +1,12 @@
-// Build's own tables (plan §14, "What happens to today's UI": Build mode is kept, and RPE serves its
-// messages), as steps for the application's migration runner (its area `build`). Every table carries
-// the user.
+// Build's own tables (plan §14, "What happens to today's UI": Build mode is kept, on RPE's typed routes), as steps for the application's
+// migration runner (its area `build`). Every table carries the user. His worlds are kept once, in the store's `world_part`.
 //
-//   build_file  each file today's world store keeps, by its storage path: `worlds/<id>/index.json`,
-//               `draft.json`, `history.json` and `rev/<hash>.json`, with what it writes on the way
-//               (`<path>.tmp`, a damaged file set aside). The worlds as Build keeps them.
-//   build_seed  each world a migration run put into `build_file`, with one fingerprint of its files
-//               as that run put them, so a later run tells a copy changed in RPE from one it may
-//               replace (`seed.ts`)
 //   build_job   each job Build ran or runs, with its status, progress, input and result (`jobs/schema.ts`)
 //   build_secrecy  each book a secrecy move was made on, with every move of it for Restore (`lore/schema.ts`)
 //   build_lore_index  the lore index entry Build wrote of each world, at its revision, with its text's hash (`lore/schema.ts`)
+//
+// Steps 1 and 5 made and then dropped the tables of the worlds as an earlier build of Build kept them (`build_file`, and `build_seed`,
+// what a migration run put there): the store's step 13, which runs before Build's in every open, moved their content into `world_part`.
 
 import type { Migration } from "../app/migrations";
 import { JOB_MIGRATION } from "./jobs/schema";
@@ -37,4 +33,10 @@ CREATE TABLE build_seed (
   JOB_MIGRATION,
   SECRECY_MIGRATION,
   INDEX_ENTRY_MIGRATION,
+  {
+    version: 5,
+    name: "the worlds kept once: Build's own copies go",
+    sql: `DROP TABLE IF EXISTS build_file;
+DROP TABLE IF EXISTS build_seed`,
+  },
 ];

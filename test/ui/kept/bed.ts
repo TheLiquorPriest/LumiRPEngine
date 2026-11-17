@@ -1,34 +1,32 @@
-// What the tests of the kept Build page share: a client whose roads are RPE's own Build routes (the old one, and the worlds'), run in
-// this process over a fresh database (test/build-mode/bed.ts), and timers the test moves by hand.
+// What the tests of the kept Build page share: a client whose roads are RPE's own typed Build routes (the worlds', the chats', the jobs'
+// and the lore's), run in this process over a fresh database (test/build-mode/bed.ts), and timers the test moves by hand.
 
-import { buildRoutes, chatsRoutes, jobsRoutes, loreRoutes, worldsRoutes } from "../../../src/build";
+import { chatsRoutes, jobsRoutes, loreRoutes, worldsRoutes } from "../../../src/build";
+import { IndexEntries } from "../../../src/build/lore/index-entry";
 import type { KeptTransport } from "../../../src/ui/kept/client";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
 import type { Timers } from "../../../src/ui/roads";
-import { buildServiceOn, jobHomeOn, makeBed, USER, words } from "../../build-mode/bed";
+import { jobHomeOn, makeBed, USER, worldsOn } from "../../build-mode/bed";
 import { FakeBooks, loreOn } from "../../build-mode/books-bed";
 import { callRoute } from "../../app/call";
 
-export { USER, words };
+export { USER };
 
 export interface RouteClient {
   client: Pick<RpeClient, "call">;
   /** Each call made, by its route key, with the body it sent. */
   asked: { key: string; body: unknown }[];
-  /** The route's own method and path, as the pages' route map keys it. */
-  route: string;
   /** His books, which the lore routes read and write. */
   books: FakeBooks;
 }
 
-/** A client whose one road is RPE's own Build route; every body goes and comes back as JSON, as over a road. */
+/** A client whose roads are RPE's own Build routes; every body goes and comes back as JSON, as over a road. */
 export function routeClient(): RouteClient {
   const bed = makeBed();
   const books = new FakeBooks();
-  const service = buildServiceOn(bed);
-  const [post] = buildRoutes(service);
-  const routes = [post, ...worldsRoutes(service.worlds, 4 * 1024 * 1024), ...chatsRoutes(service.worlds), ...jobsRoutes(jobHomeOn(bed, service.worlds)), ...loreRoutes(loreOn(bed, books).lore)];
-  const route = `${post.method} ${post.path}`;
+  const worlds = worldsOn(bed);
+  const index = new IndexEntries({ db: bed.db, queue: bed.writes, worlds, books, writes: books, index: async () => ({ text: "", books: [] }) });
+  const routes = [...worldsRoutes(worlds, 4 * 1024 * 1024), ...chatsRoutes(worlds), ...jobsRoutes(jobHomeOn(bed, worlds)), ...loreRoutes(loreOn(bed, books).lore, index)];
   const asked: RouteClient["asked"] = [];
   const call = async (key: string, params: Record<string, string> | undefined, options?: { body?: unknown; query?: Record<string, string | number> }): Promise<unknown> => {
     asked.push({ key, body: options?.body });
@@ -37,7 +35,7 @@ export function routeClient(): RouteClient {
     const reply = await callRoute(found, { params: params ?? {}, ...(options?.query === undefined ? {} : { query: options.query }), body: options?.body, user: USER });
     return reply === undefined ? undefined : JSON.parse(JSON.stringify(reply));
   };
-  return { client: { call: call as RpeClient["call"] }, asked, route, books };
+  return { client: { call: call as RpeClient["call"] }, asked, books };
 }
 
 /** A transport that counts who subscribed and has not let go, so a test can see none is left (closing it lets nobody go). */

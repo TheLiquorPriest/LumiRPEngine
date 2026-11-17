@@ -77,7 +77,7 @@ function PlayBody(props: { said: Readable<readonly string[]> }) {
 /** Puts today's Play for `mount.chat` in `root`; the returned function takes it away with all it started. */
 export function mountPlay(root: HTMLElement, mount: PlayMount): () => void {
   const removeStyle = mount.host.addStyle(PLAY_CSS);
-  const kept = keptApp({ ...mount, chat: createStore<string | null>(mount.chat), mode: "play", oldRoad: "chat" });
+  const kept = keptApp({ ...mount, chat: createStore<string | null>(mount.chat), mode: "play" });
   // Amounts read in the chat's world's currency: set before the panels render a state, as today's setup does.
   const offCurrency = kept.app.sync.subscribe((held) => setCurrency(held.view?.currency ?? null));
   render(
