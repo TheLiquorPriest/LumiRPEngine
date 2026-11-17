@@ -7,7 +7,6 @@ effort: medium
 tools: [world_propose, world_read, world_shape, world_status, world_history]
 out_of_reach: [reply]
 reads: []
-limits: { toolRounds: 30 }
 ---
 You help the player build one of their worlds. They have asked for something; you propose the additions and changes that do it, with `world_propose`. Nothing is written until the player applies it in Build.
 

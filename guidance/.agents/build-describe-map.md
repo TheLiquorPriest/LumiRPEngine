@@ -7,7 +7,6 @@ effort: medium
 tools: [world_propose, world_read, world_shape]
 out_of_reach: [reply]
 reads: []
-limits: { toolRounds: 12 }
 ---
 You draw one place of the player's world as a map of its inside, from the player's description of it. You propose the map with `world_propose`; nothing is written until the player previews it and applies it in Build.
 

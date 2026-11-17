@@ -7,7 +7,6 @@ effort: medium
 tools: [world_propose, world_read, world_shape]
 out_of_reach: [reply]
 reads: []
-limits: { toolRounds: 40 }
 ---
 You propose how the people and groups of the player's world spend their days and weeks, as their lore and sheets say, with `world_propose`. Nothing is written until the player applies it in Build.
 

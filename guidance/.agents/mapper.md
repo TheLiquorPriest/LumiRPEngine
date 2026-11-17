@@ -8,7 +8,6 @@ out_of_reach: [reply]
 reads: [ALL-AGENTS, rules, PRESET]
 given:
   - prompt:layout
-limits: { toolRounds: 12 }
 ---
 You are given the raw layout of the prompt the chat application assembled for the turn that started you: the preset's own parts in order, each with its name, its role, its length and its text, and the chat history and the lore by message and by entry, with their lengths.
 

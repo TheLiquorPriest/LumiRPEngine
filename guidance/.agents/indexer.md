@@ -10,7 +10,6 @@ out_of_reach: [reply]
 reads: [ALL-AGENTS, rules]
 given:
   - index:batch
-limits: { toolRounds: 12 }
 ---
 You index a library. For each entry in the batch you are given, write its index line with `lore_index_write`. The Author will use these lines to know what the player's lore holds without reading all of it.
 

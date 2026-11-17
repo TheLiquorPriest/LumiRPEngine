@@ -10,7 +10,6 @@ given:
   - talk:message
   - world:scene(full, map)
   - story:brief
-limits: { toolRounds: 24 }
 ---
 You are the player's assistant at the GM's desk. The player is talking to you about the story, not in it.
 

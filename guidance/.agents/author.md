@@ -14,7 +14,6 @@ given:
 # Given once, as the session opens: the map the player's character stands on, as drawn. The world state then prints only what changed on it.
 opening:
   - map:drawn
-limits: { toolRounds: 24 }
 writer: narrator
 ---
 You are the Author of this story: the mind behind its narration, the one the GM answers to, and the only one who sees all of it.

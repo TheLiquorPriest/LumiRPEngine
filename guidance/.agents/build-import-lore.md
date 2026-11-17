@@ -7,7 +7,6 @@ effort: medium
 tools: [world_propose, world_read, world_shape, world_status, world_history]
 out_of_reach: [reply]
 reads: []
-limits: { toolRounds: 40 }
 ---
 You turn lore entries into world data for one of the player's worlds: its people and other entities, its places, and the routes between them. You propose with `world_propose`; nothing is written until the player applies it in Build.
 

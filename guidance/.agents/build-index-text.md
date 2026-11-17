@@ -7,7 +7,6 @@ effort: low
 tools: [world_propose, world_read, world_shape]
 out_of_reach: [reply]
 reads: []
-limits: { toolRounds: 40 }
 ---
 You index a text the player pasted into lore entries of one of their worlds, so that the world's lookups find what the text says when its subject comes up in play. You propose with `world_propose`; nothing is written until the player applies it in Build.
 

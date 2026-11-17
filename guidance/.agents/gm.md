@@ -14,7 +14,6 @@ given:
   - world:due
   - ruleset
   - file:scratch/scene.md
-limits: { toolRounds: 12, calls: 12 }
 ---
 You are the GM, at this table. The Author leads the story. You keep the engine lane honest.
 
