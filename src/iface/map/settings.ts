@@ -102,6 +102,7 @@ export const MAP_SETTING_DEFS = {
   areaShare: {
     key: "map.areaShare",
     default: MAP_DEFAULTS.areaShare,
+    // A share: past 0 and 1 it has no meaning (plan §2.1 point 5 keeps such a bound).
     takes: { type: "number", least: 0, most: 1 },
     perConnection: false,
     name: "Share of a square an area must cover",
@@ -111,6 +112,7 @@ export const MAP_SETTING_DEFS = {
   coverHalf: {
     key: "map.coverHalf",
     default: MAP_DEFAULTS.coverHalf,
+    // One to four of the four lines: past them it has no meaning.
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for half cover",
@@ -120,6 +122,7 @@ export const MAP_SETTING_DEFS = {
   coverThreeQuarters: {
     key: "map.coverThreeQuarters",
     default: MAP_DEFAULTS.coverThreeQuarters,
+    // One to four of the four lines: past them it has no meaning.
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for three-quarters cover",
@@ -129,6 +132,7 @@ export const MAP_SETTING_DEFS = {
   coverTotal: {
     key: "map.coverTotal",
     default: MAP_DEFAULTS.coverTotal,
+    // One to four of the four lines: past them it has no meaning.
     takes: { type: "whole", least: 1, most: 4 },
     perConnection: false,
     name: "Lines blocked for total cover",

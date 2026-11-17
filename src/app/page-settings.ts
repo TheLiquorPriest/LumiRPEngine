@@ -10,7 +10,8 @@ import type { Setting } from "./setting-list";
 export const PAGE_SETTINGS: readonly Setting[] = Object.values(PAGE_SETTING_DEFS).map((def) => ({
   key: def.key,
   default: def.default,
-  takes: { type: "whole", least: def.least, most: def.most },
+  takes: { type: "whole", least: def.least },
+  advice: def.advice,
   levels: ["shipped", "global"],
   perConnection: false,
   name: def.name,

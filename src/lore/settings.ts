@@ -132,6 +132,7 @@ export const SECRETS_TRACKED_DEF = {
 export const SECRETS_THRESHOLD_DEF = {
   key: "secrets.threshold",
   default: KNOWLEDGE_DEFAULTS.threshold,
+  // A sureness from 0 to 1: past them it has no meaning (plan §2.1 point 5 keeps such a bound).
   takes: { type: "number", least: 0, most: 1 },
   perConnection: false,
   name: "How sure a holding must be",

@@ -114,7 +114,8 @@ export const TAP_SETTING_DEFS = {
   tidyRunMost: {
     key: "things.tidyRunMost",
     default: TAP_DEFAULTS.tidyRunMost,
-    takes: { type: "whole", least: 1, most: 500 },
+    takes: { type: "whole", least: 1 },
+    advice: [{ above: 500, says: "Over 500 findings in one run are listed and drawn at once." }],
     levels: ["shipped", "global"],
     perConnection: false,
     name: "Findings one Tidy up shows",

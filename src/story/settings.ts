@@ -30,6 +30,7 @@ export const STORY_FACT_SETTING_DEFS = {
 
 /** The story so far's (`storySoFar`): read at every level, since it is worked out for each turn's briefing. */
 export const STORY_SO_FAR_SETTING_DEFS = {
+  // A share of the window: past 0 and 1 it has no meaning (plan §2.1 point 5 keeps such a bound).
   share: { key: "story.soFar.share", default: STORY_SO_FAR_DEFAULTS.share, takes: { type: "number", least: 0, most: 1 }, perConnection: false, name: "The story so far: share of the window", about: "The share of the Author's window the briefing's story so far may fill.", effect: "turn", row: "The story so far, in the briefing" },
   floor: { key: "story.soFar.floor", default: STORY_SO_FAR_DEFAULTS.floor, takes: { type: "whole", least: 0 }, perConnection: false, name: "The story so far: fewest tokens", about: "The fewest tokens the briefing's story so far may fill, however small the window.", effect: "turn", row: "The story so far, in the briefing" },
 } as const satisfies NumberSettings<keyof StorySoFarSettings>;
