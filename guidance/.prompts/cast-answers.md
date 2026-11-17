@@ -56,6 +56,7 @@ no_memories_sent: memories cannot be read: send a list of memories.
 no_memories: Nothing comes back for {{cue}}.
 more_memories: {{count}} more memories touch {{cue}}. Recall again with skip {{skip}} to bring them back.
 top_left: Top of mind holds {{limit}} at most, so {{count}} left it to make room, the weakest first: {{ids}}. They stay memories; recall brings them back.
+recall_not_kept: The player allows no writes to the {{lane}} lane, so recalling changed nothing: no memory was strengthened{{#top}} and none was put at top of mind{{/top}}. What touches the cue is shown as it stands.
 no_entries_sent: entries cannot be read: send what is on your mind as a list of entries.
 no_relationships_sent: relationships cannot be read: send a list of the people you feel something about.
 page_no_entry: {{who}} has no entry {{id}} on this chat's record.

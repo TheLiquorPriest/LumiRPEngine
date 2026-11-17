@@ -5,6 +5,7 @@
 // plus those lines, made with the engine's own answer builder, so every lane answers in one shape.
 
 import type { JsonObject } from "rp-harness/contract";
+import type { ApprovalsPort } from "rp-harness/contract";
 import type { ConfigRead } from "../app/config-read";
 import type { NumberSettings, Setting } from "../app/setting-list";
 import { calendarOf, formatClock, placeOffset } from "../engine/calendar";
@@ -125,6 +126,8 @@ export interface CastDeps {
   search?: MemorySearch;
   /** What keeps the values each line of the answers part was last said with in a chat, for the Prompts preview; none: nothing is kept. */
   lastUse?: LastUseKeeper;
+  /** The user's setting for each lane in the chat: only `recall` asks it (the strengthening it records is a change of the story lane, which a Never holds back); the tools that write are held by the harness's gate before they run. */
+  approvals?: Pick<ApprovalsPort, "permission">;
   /** Settings over `CAST_DEFAULTS`. */
   settings?: Partial<CastSettings>;
   /** Milliseconds since 1970, for a row's time; `Date.now` when absent. */

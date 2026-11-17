@@ -4,7 +4,8 @@
 // the arithmetic (`memory.ts`): recalling strengthens what it brings back, dreaming settles what is
 // still short term into long term and raises or lowers the weights the character names. When the
 // memory work runs, and what the character makes of anything, is guidance. The user's setting for
-// the story lane is held by the harness's gate before a call runs.
+// the story lane is held by the harness's gate before a call of a tool that writes runs; `recall` is
+// a read, and the strengthening it records is a change of that lane, made unless the setting is Never.
 //
 // Each call is read in whatever shape its arguments were sent. What it does not read, or a value it
 // cannot read (a weight off the scale, an id that is none of the character's), is left out: the rest
@@ -110,23 +111,27 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
   const back = touched.slice(from, from + call.settings.recallItems);
   if (back.length === 0) return reply.line("no_memories", { cue });
   // Recalling strengthens each memory it brings back: one more recall, as of now, and it comes back in full. With `top`, what comes back is put at top of mind.
-  const putting = value.top === true ? new Set(back.map((m) => m.item.id)) : new Set<string>();
+  // That is a change of the story lane like any other, on the turn's review card; where the player's setting for the lane is Never it is not made, and the answer says so. Nothing is ever asked per recall.
+  const kept = call.deps.approvals === undefined || (await call.deps.approvals.permission(call.scope, CAST_LANE)) !== "never";
+  const putting = value.top === true && kept ? new Set(back.map((m) => m.item.id)) : new Set<string>();
   const leaving = leavingTop(self, call.settings, putting, 0);
-  await call.deps.writes.run(
-    () =>
-      writeCast(call.deps.store, self.writer, [
-        ...back.map((m) => ({
-          character: self.character.id,
-          part: "memory" as const,
-          item: m.item.id,
-          value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}), ...(dimmedOf(m.item) < 1 ? { dimmed: 1 } : {}), ...(putting.has(m.item.id) ? { top: true } : {}) },
-          stamp: CHARACTER_STAMP,
-        })),
-        ...offTop(self, leaving).map((w) => ({ ...w, stamp: CHARACTER_STAMP })),
-      ]),
-    call.tool,
-  );
-  saidLeft(reply, call.settings, leaving);
+  if (kept) {
+    await call.deps.writes.run(
+      () =>
+        writeCast(call.deps.store, self.writer, [
+          ...back.map((m) => ({
+            character: self.character.id,
+            part: "memory" as const,
+            item: m.item.id,
+            value: { recalls: (typeof m.item.fields.recalls === "number" ? m.item.fields.recalls : 0) + 1, ...(self.now !== null ? { recalled: self.now } : {}), ...(dimmedOf(m.item) < 1 ? { dimmed: 1 } : {}), ...(putting.has(m.item.id) ? { top: true } : {}) },
+            stamp: CHARACTER_STAMP,
+          })),
+          ...offTop(self, leaving).map((w) => ({ ...w, stamp: CHARACTER_STAMP })),
+        ]),
+      call.tool,
+    );
+    saidLeft(reply, call.settings, leaving);
+  } else reply.line("recall_not_kept", { lane: CAST_LANE, top: value.top === true });
   const shown = after(call, reply, self, back.map((m) => m.item.id));
   if (shown === null) return reply;
   reply.data({ cue, memories: shown });
@@ -138,8 +143,7 @@ async function recall(args: JsonObject, call: CastCall): Promise<Reply> {
 export const RECALL: CastToolSpec = {
   name: "recall",
   family: "cast",
-  tier: "write",
-  lane: CAST_LANE,
+  tier: "read",
   properties: unchecked(RECALL_READS.reads),
   required: [],
   example: { cue: "the reeve" },

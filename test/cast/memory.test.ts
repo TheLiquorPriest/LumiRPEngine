@@ -73,6 +73,44 @@ describe("a character's memory", () => {
     expect(texts(await b.call("recall", { cue: "the harbour" }, (await b.t.begin()).id, BRAM)).join("\n")).toBe("Nothing comes back for the harbour.");
   });
 
+  test("with the story lane on Never recall still answers and nothing is strengthened; on Confirm nothing is asked during the turn", async () => {
+    for (const permission of ["never", "confirm"] as const) {
+      const lanes: string[] = [];
+      const asked: unknown[] = [];
+      const approvals = {
+        permission: async (_scope: unknown, lane: string) => {
+          lanes.push(lane);
+          return permission;
+        },
+        ask: async (...said: unknown[]) => {
+          asked.push(said);
+          return { go: true };
+        },
+      };
+      const b = await openBench({ ...({ approvals } as object) });
+      const seen = await bram(b);
+      await remember(b, [{ text: "She went pale at the letter.", gist: "Saw her go pale.", from: [seen] }]);
+      await days(b, 10);
+      const turn = await b.t.begin();
+      const r = await b.call("recall", { cue: "letter", top: true }, turn.id, BRAM);
+      expect(wordsFromFiles(r)).toBe(true);
+      expect(r.error).toBeUndefined();
+      expect(dataOf(r).memories).toEqual([expect.objectContaining({ gist: "Saw her go pale." })]);
+      expect(asked).toEqual([]);
+      expect(lanes).toEqual(["story"]);
+      await b.t.tie(turn);
+      const held = now(b).get("Saw her go pale.");
+      if (permission === "never") {
+        expect(texts(r).join("\n")).toContain("so recalling changed nothing");
+        expect(held?.item.fields.recalls).toBeUndefined();
+        expect(held?.tier).not.toBe("top");
+      } else {
+        expect(held?.item.fields.recalls).toBe(1);
+        expect(held?.tier).toBe("top");
+      }
+    }
+  });
+
   test("top of mind holds the newest it was given, as many as the setting; a dream settles the rest into long term, weighs what it keeps and lets go of what it fades", async () => {
     const b = await openBench({ settings: { topOfMind: 2 } });
     await bram(b);
