@@ -17,14 +17,14 @@
 //   6. a thing made in play whose size nothing gives: a size to pick;
 //   7. a Gear or Place line the head turn's final review dropped or rewrote in the narrator's prompt
 //      (`Rec.finalEdits`), which says the state may be wrong: the things it names, to look at.
-// Secrecy is marks: a finding about a hidden or secret thing says so. Every turn tidies the first
-// and third kinds' findings (`tidyTurn`), each its own unit with Undo, as play can't have them. Pure.
+// Secrecy is marks: a finding about a hidden or secret thing says so. Code never applies a tidy by
+// itself (R-173): each finding is put right only through its own GM edit. Pure.
 
 import { ownersIn } from "../shared/finance";
 import { hashParts } from "../shared/hash";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { isRecord } from "../shared/json";
-import type { LedgerEvent, Rec, FinalEdit } from "../shared/ledger";
+import type { LedgerEvent, FinalEdit } from "../shared/ledger";
 import type { EditOp } from "../shared/edit-ops";
 import type { TidyFinding, TidyFix, TidyKind, TidyRun } from "../shared/thing-gm";
 import { TIDY_KINDS } from "../shared/thing-gm";
@@ -39,8 +39,6 @@ import { flatPath, type PathEvent } from "./thing-gm";
 import { thingIndex } from "./thing-index";
 import { thingVisibility } from "./thing-view";
 import { holderOf, holdersOf, holdsOf, possessorOf, sizeOf } from "./things";
-import { applyItemOp } from "./thing-ops";
-import type { Working } from "./working";
 
 /** A head noun shared by more things than this is too common to pair them by (every "key" of a large world). */
 const PAIR_LIMIT = 64;
@@ -282,91 +280,4 @@ export function tidyRun(all: readonly TidyFinding[], left: ReadonlySet<string>, 
   const standing = all.filter((f) => !left.has(f.key));
   const out = all.filter((f) => left.has(f.key));
   return { findings: standing.slice(0, limit), total: standing.length, left: out.length, limit, leftOut: out.slice(0, limit) };
-}
-
-/**
- * The group of the Things tidied fix's units (ITEMS-SPEC §9): a turn's tidy writes each finding it
- * puts right as its own unit, `gear.tidied:<the finding's key>`; the one-time fix of an earlier
- * build wrote `gear.tidied` alone.
- */
-export const TIDIED_GROUP = "gear.tidied";
-
-/** Whether an event's group is a Things tidied unit's (`TIDIED_GROUP`, alone or with its finding's key). */
-export function isTidiedGroup(group: string | undefined): boolean {
-  return group !== undefined && (group === TIDIED_GROUP || group.startsWith(`${TIDIED_GROUP}:`));
-}
-
-/**
- * The things whose tidy the player undid (ITEMS-SPEC §9), each with whom it was taken off or out
- * of, from the chain's records oldest first: a later tidy of it that stands forgets the Undo.
- */
-export function tidyUndone(records: readonly Pick<Rec, "events" | "undone">[]): Map<EntityId, EntityId> {
-  const out = new Map<EntityId, EntityId>();
-  for (const rec of records) {
-    const undone = new Set(rec.undone.flatMap((r) => (r.in === "events" ? [r.index] : [])));
-    rec.events.forEach((e, i) => {
-      if (!isTidiedGroup(e.group) || e.type !== "unlink" || (e.rel !== "in" && e.rel !== "worn_by" && e.rel !== "equipped")) return;
-      if (undone.has(i)) out.set(e.from, e.to);
-      else out.delete(e.from);
-    });
-  }
-  return out;
-}
-
-/** What a turn's tidy reads beyond the head (`tidyTurn`). */
-export interface TidyTurnInput {
-  /** The events on the chain's path, read only when the scan finds something to put right. */
-  path: () => readonly PathEvent[];
-  /** The findings left as they are in this chat (Leave it), by key. */
-  left: ReadonlySet<string>;
-  /** The chain's turn records, oldest first, for the player's Undo of an earlier tidy. */
-  records: readonly Pick<Rec, "events" | "undone">[];
-}
-
-/**
- * Every turn's tidy of impossible holds (ITEMS-SPEC §9), before the turn reads: a thing too big to
- * carry on a person put at the buyer's home when it was bought, else where the person is; a thing
- * worn by someone but lying elsewhere taken off them. A cheap scan of the head finds them, and only
- * then is the path read. Each is put right as its own unit (`gear.tidied:<key>`), a confirmed
- * change, so a Built-in thing moves too; one left as it is (Leave it), or whose tidy the player
- * undid while it stays on that person, stays as it is. Its events; none when nothing needs it.
- */
-export function tidyTurn(w: Working, input: TidyTurnInput): LedgerEvent[] {
-  const ctx = w.ctx;
-  const hits = readPass(() => {
-    const ceiling = sizeRank(thingsConfigOf(ctx.world).sizes.ceiling);
-    const out: { key: string; thing: EntityId; on: EntityId }[] = [];
-    for (const id of thingIndex(ctx).things) {
-      if (isGone(ctx.state, id)) continue;
-      const holder = holderOf(ctx.state, id);
-      const lying = own(ctx.state.entities, id)?.fields.place;
-      if (holder !== null && (typeof lying !== "string" || lying === "") && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, holder)?.kind ?? "", "person")) {
-        const size = sizeOf(ctx, id).size;
-        if (size === "vehicle" || (isSize(size) && sizeRank(size) > ceiling)) out.push({ key: `too_big:${id}`, thing: id, on: holder });
-      }
-      const wearer = wornElsewhere(ctx, id);
-      if (wearer !== null) out.push({ key: `worn_elsewhere:${id}`, thing: id, on: wearer });
-    }
-    return out;
-  });
-  if (hits.length === 0) return [];
-  const undone = tidyUndone(input.records);
-  const due = hits.filter((h) => !input.left.has(h.key) && undone.get(h.thing) !== h.on);
-  if (due.length === 0) return [];
-  const keys = new Set(due.map((h) => h.key));
-  const from = w.events.length;
-  for (const finding of tidyFindings(ctx, input.path(), { kinds: ["too_big", "worn_elsewhere"], things: new Set(due.map((h) => h.thing)) })) {
-    if (!keys.has(finding.key)) continue;
-    const start = w.events.length;
-    for (const op of finding.fix?.ops ?? []) {
-      if (op.op !== "item" || op.change.do === "remove") continue;
-      const mark = w.mark();
-      if ("code" in applyItemOp(w, op.change, { by: "engine", confirmed: true, gm: true, salt: `tidied:${finding.key}`, viewer: w.world.pov })) w.restore(mark);
-    }
-    for (let i = start; i < w.events.length; i++) {
-      const e = w.events[i];
-      if (e) w.events[i] = { ...e, group: `${TIDIED_GROUP}:${finding.key}` };
-    }
-  }
-  return w.events.slice(from);
 }
