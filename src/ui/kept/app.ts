@@ -12,7 +12,6 @@
 // transport knows which), not by what its words are. Nothing is remembered: the same request asked again
 // is asked again. A road failure is not a refusal and toasts as the road's.
 
-import type { AgentsView } from "../../shared/agents";
 import { type App, type Draft, initialUi, type Overlays, playAt, type Toast, type UiState } from "../../frontend/app";
 import { ProtocolClient } from "../../frontend/protocol-client";
 import type { Send } from "../../frontend/registry";
@@ -264,7 +263,6 @@ export function keptApp(deps: KeptDeps): Kept {
     host: deps.host,
     overlays: deps.overlays ?? (deps.mode === "play" ? playOverlays(ui, say) : NO_OVERLAYS),
     drafts: createStore<Draft | null>(null),
-    agents: createStore<AgentsView | null>(null),
     toast,
     request,
     maps: keptMapHand(deps.client, () => state.read()),

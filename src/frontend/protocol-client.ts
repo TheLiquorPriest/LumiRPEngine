@@ -21,7 +21,6 @@ import type { Activity } from "../shared/turn-activity";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { AssistantUpdate, AssistantView, DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, GeneratePush, JobUpdate, MindsRunUpdate, ResultBodies, ResultMessage, ReviewCardView, ReviewUpdate } from "../shared/protocol";
-import type { AgentsView } from "../shared/agents";
 import type { StateView } from "../shared/state-view";
 import { applyDelta, DeltaError } from "./delta";
 import type { RequestBody, Send } from "./registry";
@@ -156,7 +155,6 @@ export class ProtocolClient {
   private readonly mindsListeners = new Set<(update: MindsRunUpdate) => void>();
   private readonly draftListeners = new Set<(push: DraftChanged) => void>();
   private readonly generateListeners = new Set<(push: GeneratePush) => void>();
-  private readonly agentsListeners = new Set<(view: AgentsView) => void>();
   private readonly assistantListeners = new Set<(update: AssistantUpdate) => void>();
   private readonly reviewListeners = new Set<(update: ReviewUpdate) => void>();
   private readonly unsubscribe: () => void;
@@ -218,12 +216,6 @@ export class ProtocolClient {
   onGenerate(listener: (push: GeneratePush) => void): () => void {
     this.generateListeners.add(listener);
     return () => this.generateListeners.delete(listener);
-  }
-
-  /** The MCP servers this account has seen, or the update notice, changed (`lre.agents.changed`, DESIGN §23). */
-  onAgents(listener: (view: AgentsView) => void): () => void {
-    this.agentsListeners.add(listener);
-    return () => this.agentsListeners.delete(listener);
   }
 
   /** A chat's thread with the GM assistant changed (`lre.assistant.update`): GM data, which only GM → Assistant shows, behind the gate. */
@@ -413,12 +405,6 @@ export class ProtocolClient {
         if (typeof payload.chatId === "string" && typeof payload.turn === "string" && (payload.as === "regenerate" || payload.as === "continue" || payload.as === "send")) {
           const push: GeneratePush = { lre: PROTOCOL_VERSION, type: "lre.generate", chatId: payload.chatId, as: payload.as, turn: payload.turn };
           for (const listener of this.generateListeners) listener(push);
-        }
-        return;
-      case "lre.agents.changed":
-        if (isRecord(payload.view) && typeof payload.view.build === "string" && Array.isArray(payload.view.clients)) {
-          const view = payload.view as unknown as AgentsView;
-          for (const listener of this.agentsListeners) listener(view);
         }
         return;
       case "lre.assistant.update":
