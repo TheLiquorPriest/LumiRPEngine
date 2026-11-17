@@ -590,7 +590,7 @@ export const storyPack: PackDef = {
         leakyIds(world, registry).map((l) => ({
           severity: "warning" as const,
           code: "story.leaky_id",
-          message: `The id "${l.id}" gives away a secret (${l.secrets.map((s) => `"${s}"`).join(", ")}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "${l.neutral}".`,
+          message: say("lint_the_id_id_gives_away_a_secret", { id: l.id, secrets: l.secrets.map((s) => `"${s}"`).join(", "), neutral: l.neutral }),
           path: l.path,
         })),
     });

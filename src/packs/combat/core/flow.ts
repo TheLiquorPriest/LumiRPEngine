@@ -34,7 +34,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fightById, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
-import { say } from "../../../engine/lines";
+import { orOf, say } from "../../../engine/lines";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;
@@ -80,7 +80,7 @@ export function spendFor(ctx: ReadContext, actor: EntityId, action: Pick<ActionD
   const cost = costOf(action);
   if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost)) return { code: "not_your_turn", reason: you ? say("why_it_isnt_your_turn") : say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, actor) }) };
   const short = Object.entries(cost).filter(([budget, n]) => (f.left[budget] ?? 0) < n).map(([budget]) => own(rules.economy, budget)?.label ?? budget);
-  if (short.length > 0) return { code: "spent", reason: `no ${short.join(" or ")} left` };
+  if (short.length > 0) return { code: "spent", reason: say("why_no_short_left", { short: orOf(short) }) };
   return Object.keys(cost).length > 0 ? [{ type: "combat.spend", data: { encounter: enc.id, who: actor, cost } }] : [];
 }
 

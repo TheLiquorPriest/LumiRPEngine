@@ -93,7 +93,7 @@ keys:
   rel_knows: a relation made or ended as a sentence, one line for each relation (rel_knows, rel_carried_by, rel_in, rel_uses, rel_uses_ended, rel_owns, rel_worn_by, rel_equipped, rel_member_of, rel_regard, rel_regard_none, rel_other) - from, to, now (true where it was made), many
   entity_gone: a thing removed, back, or made (entity_gone, entity_back, entity_appears) - name; add_down and add_up a number that went down or up - whose, noun, amount; stage_now a quest stage - track, stage; change_unseen the line for a change the player may not see
   ev_set: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - what each names is in the line itself
-  list_and: how a list is read, the last item after the others - head (the others, with commas), last
+  list_and: how a list is read, the last item after the others - head (the others, with commas), last; list_or reads a choice the same way
   castlife_in_chat: a change to someone's routine or schedule in this chat, as the GM reads it - what (the sentence below), story (set where the story made it)
   castlife_follow: how someone follows their routine in this chat - name, parts (the follow_* lines, read as a list); castlife_follow_world when none is set
   follow_mode_*, follow_awareness_*, follow_role_*, follow_skips_*: one part of how someone follows their routine, as a phrase after the name (follows, no_invitations, off; story_first, balanced, routine_first; informative, enforced, off; stay, routine, model)
@@ -2657,3 +2657,15 @@ word_tier_ally: party ally
 word_whose_you: Your
 word_whose: {{name}}'s
 feed_title_for_employername_an_outside_employer_rate: {{title}} for {{#employerName}}{{employerName}}{{/employerName}}{{^employerName}}an outside employer{{/employerName}}, {{rate}} {{basis}}, paid {{#if_every}}nothing{{/if_every}}{{^if_every}}{{every}}{{/if_every}}.
+list_or: {{head}} or {{last}}
+lint_no_helper_is_called_names: no helper is called {{names}}
+lint_term_is_an_alias_of_others_but_the: "{{term}}" is an alias of {{others}}, but the term doesn't lead there
+lint_name_is_def_targets_allows_one: {{name}} is {{def}} {{targets}}; “{{label}}” allows one.
+lint_from_are_each_def_to_allows_one: {{from}} are each {{def}} {{to}}; “{{label}}” allows one.
+why_no_short_left: no {{short}} left
+why_its_property_is_options: its property is {{options}}
+why_what_is_at_most_max_characters_as: {{what}} is at most {{max}} characters, as Settings → Minds → Lengths has it, and this is {{length}}
+lint_the_id_id_gives_away_a_secret: The id "{{id}}" gives away a secret ({{secrets}}): a player's views carry it wherever the player acts on what it names. Give it an id that names no one, such as "{{neutral}}".
+lint_label_may_use_only_lines_any_other: "{{label}}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values
+lint_open_name_close_isnt_an_engine_placeholder: {{open}}{{name}}{{close}} isn't an engine placeholder for a {{purpose}} step; it renders empty
+lint_open_name_close_isnt_a_placeholder_who_skill: {{open}}{{name}}{{close}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.

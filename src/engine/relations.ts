@@ -20,7 +20,7 @@ import { kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
 import { playerKnows } from "./player-events";
 import { canSeePlace } from "./visibility";
-import { say } from "./lines";
+import { listOf, say } from "./lines";
 
 /** What relation lookups need from the registry; a fold's event types are the registry. */
 export interface RelationTypes {
@@ -235,14 +235,14 @@ export function relationIssues(reg: Registry, world: WorldDoc): LintIssue[] {
     }
     for (const [type, targets] of counts) {
       const def = relationDef(reg, world, type);
-      if (def && targets.length > 1) err(`entities.${id}.relations`, "cardinality", `${nameOf(id)} is ${inline(def)} ${targets.map(nameOf).join(" and ")}; “${def.label}” allows one.`);
+      if (def && targets.length > 1) err(`entities.${id}.relations`, "cardinality", say("lint_name_is_def_targets_allows_one", { name: nameOf(id), def: inline(def), targets: listOf(targets.map(nameOf)), label: def.label }));
     }
   }
   for (const [key, from] of sources) {
     const [type = "", to = ""] = key.split("\u0000");
     const def = relationDef(reg, world, type);
     const last = from.at(-1);
-    if (def && last !== undefined && from.length > 1) err(`entities.${last}.relations`, "cardinality", `${from.map(nameOf).join(" and ")} are each ${inline(def)} ${nameOf(to)}; “${def.label}” allows one.`);
+    if (def && last !== undefined && from.length > 1) err(`entities.${last}.relations`, "cardinality", say("lint_from_are_each_def_to_allows_one", { from: listOf(from.map(nameOf)), def: inline(def), to: nameOf(to), label: def.label }));
   }
   return issues;
 }

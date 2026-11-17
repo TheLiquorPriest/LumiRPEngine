@@ -48,3 +48,9 @@ export function listOf(words: readonly string[]): string {
   const last = words[words.length - 1] ?? "";
   return words.length <= 1 ? last : say("list_and", { head: words.slice(0, -1).join(", "), last });
 }
+
+/** Words joined as a choice is read ("a", "a or b", "a, b or c"): the connecting word is the line `list_or`'s. */
+export function orOf(words: readonly string[]): string {
+  const last = words[words.length - 1] ?? "";
+  return words.length <= 1 ? last : say("list_or", { head: words.slice(0, -1).join(", "), last });
+}

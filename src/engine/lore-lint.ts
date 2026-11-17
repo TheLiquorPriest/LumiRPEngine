@@ -45,7 +45,7 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     if (!l.gate || l.gate.trim() === "") push("error", `lore.${id}.gate`, "no_gate", say("lint_secret_lore_title_needs_a_gate_it", { title: l.title }));
     const audience = Array.isArray(l.audience) ? l.audience : [];
     const unknown = audience.filter((s) => !LORE_AUDIENCE.includes(s));
-    if (unknown.length > 0) push("warning", `lore.${id}.audience`, "unknown_step", `no helper is called ${unknown.map((s) => `"${String(s)}"`).join(", ")}`);
+    if (unknown.length > 0) push("warning", `lore.${id}.audience`, "unknown_step", say("lint_no_helper_is_called_names", { names: unknown.map((s) => `"${String(s)}"`).join(", ") }));
     const prose = audience.filter((s) => PROSE_STEPS.includes(s));
     if (prose.length > 0) push("warning", `lore.${id}.audience`, "prose_audience", say("lint_secret_lore_title_lists_prose_which_never", { title: l.title, prose: prose.join(", ") }));
   }
@@ -67,7 +67,7 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     if (entries.length === 0) push("warning", path, "empty_term", say("lint_term_leads_to_no_entry", { term: term }));
     for (const id of entries) if (!hasOwn(world.lore, id)) push("warning", path, "missing_ref", say("lint_id_is_not_a_lore_entry", { id: id }));
     const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries.includes(id));
-    if (elsewhere.length > 0) push("warning", path, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
+    if (elsewhere.length > 0) push("warning", path, "alias_elsewhere", say("lint_term_is_an_alias_of_others_but_the", { term, others: elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ") }));
   }
   for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
     const path = `loreIndex.topics.${id}`;

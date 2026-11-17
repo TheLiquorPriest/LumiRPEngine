@@ -168,7 +168,7 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
     }
     const text = given.replace(/\s+/g, " ").trim();
     if (text.length > INFERRED_BOUNDS.guidance) warn(`.guidance.${key}`, "inferred_value", say("lint_a_guidance_line_holds_at_most_guidance", { guidance: INFERRED_BOUNDS.guidance, textCount: text.length }));
-    for (const [, name] of text.matchAll(/\{([^{}]*)\}/g)) if (!GUIDANCE_PLACEHOLDERS.has(name ?? "")) warn(`.guidance.${key}`, "inferred_guidance", `{${name}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.`);
+    for (const [, name] of text.matchAll(/\{([^{}]*)\}/g)) if (!GUIDANCE_PLACEHOLDERS.has(name ?? "")) warn(`.guidance.${key}`, "inferred_guidance", say("lint_open_name_close_isnt_a_placeholder_who_skill", { open: "{", name, close: "}" }));
   }
   return issues;
 }

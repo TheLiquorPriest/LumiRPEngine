@@ -313,7 +313,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   // Section templates wrap engine values: the only macro they may hold is the engine's `{{lines}}`;
   // no escape sentinel or `<user>`-style shorthand either.
   for (const [id, s] of Object.entries(world.sections)) {
-    if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", `"${s.label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+    if (macroHazards(s.template, ["{{lines}}"]).length > 0) err(`sections.${id}.template`, "section_macro", say("lint_label_may_use_only_lines_any_other", { label: s.label, lines: "{{lines}}" }));
   }
   // The world's wording of a built-in section: a text holding `{{lines}}` and no other macro, for a
   // built-in section the world has without listing it (one it lists uses its own template).
@@ -327,7 +327,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     }
     const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text) : `there is no built-in section "${id}"`;
     if (problem !== null) err(path, "section_template", `"${label}": ${problem}`);
-    if (macroHazards(text, ["{{lines}}"]).length > 0) err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
+    if (macroHazards(text, ["{{lines}}"]).length > 0) err(path, "section_macro", say("lint_label_may_use_only_lines_any_other", { label, lines: "{{lines}}" }));
     if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id)) warn(path, "section_template_unused", say("lint_label_is_the_worlds_own_section_so", { label: label }));
   }
   // A section only the engine's renderers (its own slot's, or its `include`'s) or the turn itself
@@ -351,7 +351,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     for (const s of t.signals) if (!knownSignal(s)) warn(`steps.${id}.signals`, "unknown_signal", say("lint_unknown_signal_s", { s: s }));
     if (t.template.trim() === "" && !(MIND_PURPOSES as readonly string[]).includes(t.purpose)) warn(`steps.${id}.template`, "step_blank", say("lint_this_purpose_template_is_blank_it_takes", { purpose: t.purpose }));
     const known: readonly string[] = [...STEP_PLACEHOLDERS, ...(PURPOSE_PLACEHOLDERS[t.purpose] ?? [])];
-    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!known.includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
+    for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!known.includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", say("lint_open_name_close_isnt_an_engine_placeholder", { open: "{{", name: m[1] ?? "", close: "}}", purpose: t.purpose }));
   }
   issues.push(...lintStructure(world, registry));
   for (const rule of registry.lints) issues.push(...rule.check(world, registry));

@@ -24,7 +24,7 @@ import { Working } from "../../../engine/working";
 import { orgLog } from "./log";
 import { putToVote } from "./motions";
 import { plainWords, withWhy } from "./ops";
-import { say } from "../../../engine/lines";
+import { orOf, say } from "../../../engine/lines";
 
 function refuse(code: string, reason: string): Rejection {
   return { code, reason };
@@ -74,7 +74,7 @@ function windUpEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerE
   const stage = WIND_STAGES.find((s) => s === strOf(a.stage, "all"));
   if (stage === undefined) return refuse("bad_stage", say("why_winding_up_is_join", { join: WIND_STAGES.join(", ") }));
   const property = WIND_PROPERTY.find((p) => p === strOf(a.property, "distribute"));
-  if (property === undefined) return refuse("bad_property", `its property is ${WIND_PROPERTY.join(" or ")}`);
+  if (property === undefined) return refuse("bad_property", say("why_its_property_is_options", { options: orOf(WIND_PROPERTY) }));
   const by = strOf(a.by);
   const why = plainWords(strOf(a.why));
   const what = { all: say("org_log_wind_up_name", { name: name }), begin: say("org_log_begin_winding_up_name", { name: name }), finish: say("org_log_finish_winding_up_name", { name: name }), resume: say("org_log_stop_winding_up_name", { name: name }) }[stage];

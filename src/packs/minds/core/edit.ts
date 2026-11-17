@@ -58,7 +58,7 @@ function gmText(v: JsonValue | undefined, max: number | undefined, kept: string 
   if (typeof v !== "string" || v.trim() === "") return null;
   const t = tidy(v);
   if (max === undefined || t.length <= max || t === kept) return t;
-  return reject("too_long", `${what} is at most ${max.toLocaleString("en-US")} characters, as Settings → Minds → Lengths has it, and this is ${t.length.toLocaleString("en-US")}`);
+  return reject("too_long", say("why_what_is_at_most_max_characters_as", { what, max: max.toLocaleString("en-US"), length: t.length.toLocaleString("en-US") }));
 }
 
 const minutes = (v: JsonValue | undefined): number | null => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
