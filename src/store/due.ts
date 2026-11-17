@@ -14,6 +14,7 @@ import type { JsonValue } from "../shared/json";
 import type { ScheduleDef } from "../shared/world";
 import { isRecord } from "../shared/json";
 import { NEED_IDS, needsSettingsOf } from "../shared/needs";
+import { chatWorld } from "../engine/holidays";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import { chatSchedulesIn, scheduleOwners, slotStarts } from "../engine/schedules";
@@ -169,7 +170,7 @@ export function timeDue(store: Store): DueSource {
         }
         return slots[slot] ?? null;
       };
-      const { starts, more } = slotStarts(world, chatSchedulesIn(ctx), span.from, span.to, most, (schedule, slot) => entryOf(schedule, slot) !== null);
+      const { starts, more } = slotStarts(chatWorld(ctx), chatSchedulesIn(ctx), span.from, span.to, most, (schedule, slot) => entryOf(schedule, slot) !== null);
       const items: DueEntry[] = [];
       for (const i of starts) {
         const entry = entryOf(i.schedule, i.slot);
