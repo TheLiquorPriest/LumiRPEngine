@@ -5,11 +5,13 @@
 // asked (`POST /api/v1/generate/dry-run`, `routes/generate.routes.ts:20-43`; its answer carries the breakdown, `generate.service.ts:424-486`).
 //
 // A dry run builds the whole prompt again, so a reply never waits for one (§22: slow reads are kept off the reply's path): the turn's layout names its
-// parts by place, the dry run goes on beside the turn, and its names are kept for the next turn and for the prompt's mapping job (`latest`). A dry run's
-// macros are not committed, so a random macro may read differently in it (`generate.service.ts:1131`).
+// parts by place, the dry run goes on beside the turn, and its names are kept for the next turn and for the prompt's mapping job, which reads that
+// turn's layout named by them (`named`). A dry run's macros are not committed, so a random macro may read differently in it (`generate.service.ts:1131`).
 
+import type { RawLayout } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
-import { presetMarkers, readBlocksHint, type BlocksHint } from "./layout";
+import { presetMarkers, readBlocksHint, type BlocksHint, withBlocks } from "./layout";
+import { readBodyMessages } from "./overlay";
 import type { LumiverseReads } from "./reads";
 import type { LumiverseSession } from "./session";
 import type { ReplyKind, Tag } from "./wire";
@@ -70,9 +72,18 @@ export class Hints {
     return { hint: fits ? kept.hint : null, revision };
   }
 
-  /** The names last found for the chat's prompt, from a breakdown or a dry run: what the mapping job reads. Null where none was found. */
-  latest(chat: string): BlocksHint | null {
-    return this.#kept.get(chat)?.hint ?? null;
+  /**
+   * A turn's layout made before the names of its prompt's blocks were known, named by those found since for its chat (a breakdown, or the dry run
+   * that went on beside the turn) where they are of its preset as it then stood: what the prompt's mapping job reads, and the Prompt page. `prompt`:
+   * the turn's messages as they were passed on. The layout as it was where it had names already, or none fit.
+   */
+  named(chat: string, layout: RawLayout, prompt: readonly { role: string; content: string | unknown[] }[]): RawLayout {
+    const kept = this.#kept.get(chat);
+    const preset = layout.preset;
+    if (kept === undefined || layout.blocksFrom !== null || preset === null || kept.hint.presetId !== preset.id) return layout;
+    if (kept.revision !== null && preset.revision !== undefined && kept.revision !== preset.revision) return layout;
+    const texts = readBodyMessages(prompt)?.map((m) => m.text);
+    return texts === undefined ? layout : withBlocks(layout, texts, kept.hint);
   }
 
   /** A message of the chat was deleted: Lumiverse then drops the breakdowns of every message after it, so the one that is left is of an earlier prompt. */

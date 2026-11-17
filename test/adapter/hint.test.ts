@@ -12,6 +12,8 @@ import { textHash, type Tag } from "../../src/adapter/lumiverse/wire";
 
 const entries = (name: string) => [{ name, type: "block", role: "system", content: `${name} text.`, blockId: `b-${name}` }];
 const breakdown = (name: string) => ({ presetId: "preset-1", presetName: "Plain", entries: entries(name) });
+/** A turn's layout made with no names for its blocks, of one system message, and that message as it was passed on. */
+const unnamed = (text: string) => ({ layout: rawLayout(tag(), [{ role: "system", content: text, text, media: 0, places: [] }], true, null, "100.3"), prompt: [{ role: "system", content: text }] });
 
 function tag(over: Partial<Tag> = {}): Tag {
   return {
@@ -68,7 +70,11 @@ describe("the hint for the names of a prompt's blocks", () => {
     await later();
     const next = await b.hints.forReply(tag());
     expect(next.hint?.blocks.map((x) => x.name)).toEqual(["Main"]);
-    expect(b.hints.latest("chat-1")?.from).toBe("dry-run");
+    const turn = unnamed("Main text.");
+    const named = b.hints.named("chat-1", turn.layout, turn.prompt);
+    expect(named.blocksFrom).toBe("dry-run");
+    expect(named.blocks.map((x) => x.name)).toEqual(["Main"]);
+    expect(named.messages[0]?.parts[0]?.blocks).toEqual([{ block: 0, start: 0, end: 10 }]);
     expect(b.asked).toHaveLength(1);
   });
 
@@ -92,7 +98,8 @@ describe("the hint for the names of a prompt's blocks", () => {
     expect(b.asked).toHaveLength(1);
     // The next reply's breakdown is pushed when it lands.
     await b.hints.heard("GENERATION_BREAKDOWN_READY", { chatId: "chat-1", messageId: "m9", breakdown: breakdown("Landed") });
-    expect(b.hints.latest("chat-1")?.blocks.map((x) => x.name)).toEqual(["Landed"]);
+    const landed = unnamed("Landed text.");
+    expect(b.hints.named("chat-1", landed.layout, landed.prompt).blocks.map((x) => x.name)).toEqual(["Landed"]);
     b.store(breakdown("Landed"));
     expect((await b.hints.forReply(tag())).hint?.blocks.map((x) => x.name)).toEqual(["Landed"]);
   });

@@ -23,6 +23,7 @@ import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
+import type { Hints } from "../adapter/lumiverse/hint";
 import type { IndexFeed } from "../adapter/lumiverse/index-feed";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
@@ -189,10 +190,11 @@ export interface TurnsOptions {
   store: Store;
   /**
    * The adapter's reads of Lumiverse, its chat port, and Lumiverse's Stop of one generation of the
-   * user's (false when it was not going on), and the search index's feed the lore searches books by;
-   * null before it is mounted, or when RPE is not set up for a Lumiverse.
+   * user's (false when it was not going on), the search index's feed the lore searches books by, and
+   * the names of a chat's prompt's blocks found since a turn's layout was made (`Hints`); null before
+   * it is mounted, or when RPE is not set up for a Lumiverse.
    */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean>; feed?: Pick<IndexFeed, "foundEntries"> } | null;
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean>; feed?: Pick<IndexFeed, "foundEntries">; hints?: Pick<Hints, "named"> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
@@ -301,6 +303,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       await generated.write(user, chat, PROMPT_MAP_FILENAME, `${part.render(promptMapFields(map, layout)).text.trim()}\n`);
     },
     app.log,
+    (chat, layout, prompt) => options.lumiverse()?.hints?.named(chat, layout, prompt) ?? layout,
   );
   const runs = new Runs(app.db, app.writes);
   const requests = new Requests(app.db, app.writes, (chat, waiting) => REQUESTS_KIND.publish(app.live, chat, { waiting }));

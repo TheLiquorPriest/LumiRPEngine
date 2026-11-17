@@ -76,15 +76,14 @@ export interface TurnPrompts extends PromptPort {
 /** Writes a chat's `PROMPT-MAP.md` from its preset's map (undefined: none learned yet) and its latest layout. */
 export type MapFileWriter = (user: string, chat: string, map: PromptMap | undefined, layout: RawLayout | null) => Promise<void>;
 
+/** A turn's kept layout, made before the names of its prompt's blocks were known, named by those the door found since for its chat (`Hints.named`); `prompt`: the turn's messages as passed on. */
+export type LayoutNames = (chat: string, layout: RawLayout, prompt: readonly PassedMessage[]) => RawLayout;
+
 /** The prompt part `PROMPT-MAP.md` is laid out by, and the file's name at the top of the chat's folder. */
 export const PROMPT_MAP_FILE = "prompt-map-file";
 export const PROMPT_MAP_FILENAME = "PROMPT-MAP.md";
 
-export function turnPrompts(db: Database, writes: Writes, now: () => number, writeMapFile?: MapFileWriter, log?: Log): TurnPrompts {
-  const layoutOf = (user: string, turn: string): RawLayout | null => {
-    const row = db.query<{ layout: string }, [string, string]>("SELECT layout FROM turn_prompt WHERE user = ? AND turn = ?").get(user, turn);
-    return row === null ? null : (JSON.parse(row.layout) as RawLayout);
-  };
+export function turnPrompts(db: Database, writes: Writes, now: () => number, writeMapFile?: MapFileWriter, log?: Log, names?: LayoutNames): TurnPrompts {
   /** The preset the scope's turn was played on; for a scope with no turn, the chat's latest turn's. */
   const presetOf = (scope: Scope): string | null => {
     const row =
@@ -194,9 +193,11 @@ export function turnPrompts(db: Database, writes: Writes, now: () => number, wri
 
     async layout(scope) {
       if (scope.turn === undefined) throw new Error("A prompt's layout is asked for a turn, and this scope names none.");
-      const layout = layoutOf(scope.user, scope.turn);
-      if (layout === null) throw new Error(`RPE received no prompt for turn ${scope.turn}.`);
-      return layout;
+      const row = db.query<{ layout: string; prompt: string | null }, [string, string]>("SELECT layout, prompt FROM turn_prompt WHERE user = ? AND turn = ?").get(scope.user, scope.turn);
+      if (row === null) throw new Error(`RPE received no prompt for turn ${scope.turn}.`);
+      const layout = JSON.parse(row.layout) as RawLayout;
+      // A dry run goes on beside a turn whose prompt had no names for its blocks: what it found is the mapping job's to read, in this turn's layout.
+      return names === undefined || row.prompt === null ? layout : names(scope.chat, layout, JSON.parse(row.prompt) as PassedMessage[]);
     },
 
     async map(scope) {

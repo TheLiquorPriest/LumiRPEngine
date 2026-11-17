@@ -146,3 +146,16 @@ export function rawLayout(tag: Tag, messages: readonly LaidMessage[], told: bool
   const preset = tag.preset === null ? null : { id: tag.preset, ...(hint !== null && hint.presetId === tag.preset && hint.presetName !== null ? { name: hint.presetName } : {}), ...(revision !== null ? { revision } : {}) };
   return { preset, messages: out, complete: told, blocks, blocksFrom: hint?.from ?? null };
 }
+
+/**
+ * A layout made with no names for its blocks (`blocksFrom` null), with a hint found since placed in it as `rawLayout` places one: its blocks, and
+ * its preset's name where it names the same preset. `texts`: each message's text as the prompt was passed on; the layout as it was where they are
+ * not its messages.
+ */
+export function withBlocks(layout: RawLayout, texts: readonly string[], hint: BlocksHint): RawLayout {
+  if (texts.length !== layout.messages.length) return layout;
+  const messages: RawMessage[] = layout.messages.map((m) => ({ ...m, parts: m.parts.map((p) => ({ ...p, blocks: [] })) }));
+  placeBlocks(messages, texts, hint.blocks);
+  const preset = layout.preset === null ? null : { ...layout.preset, ...(hint.presetId === layout.preset.id && hint.presetName !== null ? { name: hint.presetName } : {}) };
+  return { ...layout, preset, messages, blocks: hint.blocks, blocksFrom: hint.from };
+}

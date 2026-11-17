@@ -115,7 +115,7 @@ export interface Lumiverse {
   stores: Stores;
   /** What the index file holds of the user's chats' messages and books' entries, and the search over them. */
   feed: IndexFeed;
-  /** The names of the blocks of the chat's prompt Lumiverse's breakdown or a dry run gave, kept for the prompt's mapping job (`latest`). */
+  /** The names of the blocks of the chat's prompt Lumiverse's breakdown or a dry run gave, kept for the next turn and for the prompt's mapping job (`named`). */
   hints: Hints;
   /** Lets go of what the door holds of one chat for the Storage page's prune: its held reads, and its entries in the search index, fed again at the chat's next search. */
   dropChat(chat: string): Promise<void>;
