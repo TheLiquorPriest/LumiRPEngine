@@ -14,7 +14,6 @@ import { LEDGER_NAMESPACE } from "../../shared/ledger";
 import { bookLoreFieldsOf, type BookFieldsEdit, editedBookFields, OLD_SECRECY_FIELDS, topicIdOf, withBookLoreFields } from "../../shared/lore";
 import { neutralizeMacros } from "../../shared/macros";
 import type { LoreBookEntryView, LoreBookView, LoreMarkChange, LorePinsView } from "../../shared/lore-views";
-import { PROTOCOL_VERSION } from "../../shared/protocol";
 import type { Store } from "../../store";
 import type { WorldService } from "../../worlds/service";
 import { WorldError } from "../../worlds/worlds";
@@ -173,7 +172,7 @@ export class BuildLore {
       await this.deps.worlds.worlds.editFrom(world, user, (draft) => {
         for (let n = 2; hasOwn(draft.lore, id); n++) id = `${base}_${n}`;
         const value: JsonObject = { id, title, content, keys: [], links: [], source: { kind: "chat", chatId: chat, messageId: from.id } };
-        return { lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "", worldId: world, base: null, op: "put", collection: "lore", id, value };
+        return { lre: 1, type: "lre.editor", reqId: "", worldId: world, base: null, op: "put", collection: "lore", id, value };
       });
     } catch (error) {
       if (error instanceof WorldError) throw new LoreError(error.code === "not_found" ? "not_found" : "bad_request", error.message);

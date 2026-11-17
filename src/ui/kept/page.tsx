@@ -122,10 +122,11 @@ export function BuildPage(props: { chat?: string | null; at?: readonly string[] 
   const [place] = useState(() => createStore<BuildRoute>(placeOf(props.at)));
   // The chat changes under a page that stays: Build keeps its draft, and the App's view of the open chat follows.
   chat.set(props.chat ?? null);
-  // A route that moved (Back, a link, a reload) moves Build; Build's own move goes into the route.
-  const routed = placeOf(props.at);
-  if (!samePlace(routed, place.get())) place.set(routed);
-  useEffect(() => place.subscribe((next) => app.go({ page: "build", chat: props.chat ?? null, at: atOf(next) })), [props.chat]);
+  // A route that moved (Back, a link, a reload) moves Build; Build's own move goes into the route, once.
+  const routed = useRef(placeOf(props.at));
+  routed.current = placeOf(props.at);
+  if (!samePlace(routed.current, place.get())) place.set(routed.current);
+  useEffect(() => place.subscribe((next) => (samePlace(next, routed.current) ? undefined : app.go({ page: "build", chat: props.chat ?? null, at: atOf(next) }))), [props.chat]);
   useEffect(() => {
     const at = root.current;
     if (at === null) return undefined;
