@@ -400,6 +400,7 @@ src/frontend/build/table-editor.tsx	kept	builder
 src/frontend/build/things-model.ts	kept	builder
 src/frontend/build/things.tsx	kept	builder
 src/frontend/build/tiers-editor.tsx	kept	builder
+src/frontend/build/world-policies.tsx	kept	builder		Build's controls for the narrator's view, player claims and the ruleset's floors, out of the removed settings pages (PlanSwap-9 item 1)
 src/frontend/character/bed-picker.tsx	kept	hud		the character views
 src/frontend/character/place-picker.tsx	kept	hud		the character views
 src/frontend/character/places.ts	kept	hud		the character views
@@ -409,7 +410,7 @@ src/frontend/chip-roles.ts	kept	hud
 src/frontend/chips.tsx	kept	hud
 src/frontend/components.tsx	kept	under
 src/frontend/decode.ts	kept	under
-src/frontend/delta.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
+src/frontend/delta.ts	kept	under		the in-page client applies a chat's state deltas with it (protocol-client.ts); found kept at the removal
 src/frontend/diagnostics.tsx	removed	PlanSwap-9	ui	the old engines' views; its ActivityLine gives way to src/frontend/play/activity.tsx (PlanChatUI-P1)
 src/frontend/drawer.tsx	removed	PlanSwap-9	ui	the previous extension's entry and drawer
 src/frontend/fix-editor.tsx	kept	hud
@@ -437,14 +438,14 @@ src/frontend/gm/section-preview.tsx	removed	PlanSwap-9	ui	GM mode's old views, f
 src/frontend/gm/sections.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
 src/frontend/gm/things.tsx	kept	things		GM mode's things browser, kept by PlanSwap-9 for PlanChatUI-P6, which mounts it on World behind the gate
 src/frontend/gm/ui.tsx	moved	PlanSwap-9	src/ui/	ActionRow and ActionRows, which Build's lore files and the packs' GM panels import
-src/frontend/gm/use-gm-parts.ts	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
+src/frontend/gm/use-gm-parts.ts	kept	things		the World page's things browser (src/ui/kept/things.tsx) reads the GM parts through it; found kept at the removal
 src/frontend/gm/workspace-tree.ts	removed	PlanSwap-9	ui
 src/frontend/gm/workspace.tsx	removed	PlanSwap-9	ui
 src/frontend/gm/world.tsx	removed	PlanSwap-9	ui	GM mode's old views, folded into World, Cast, Story and Turn (§14 l.1539)
 src/frontend/harness/mode.ts	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
 src/frontend/harness/pages.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
 src/frontend/host.ts	kept	under
-src/frontend/hud-float.ts	kept	hud
+src/frontend/hud-float.ts	removed	PlanSwap-10	ui	only the previous extension's entry (setup.tsx) drew it; nothing reached it once that went (PlanSwap-10 item 3)
 src/frontend/hud.tsx	kept	hud
 src/frontend/hud.tsx	cut	PlanChatUI-P1		its import of ActivityLine from the removed src/frontend/diagnostics.tsx (:13) (PlanChatUI-part-panels.md:23)
 src/frontend/icons.tsx	moved	PlanSwap-6	src/ui/icons.tsx	a shell file the new pages use (its file name there is PlanSwap-6's)
@@ -470,8 +471,7 @@ src/frontend/play/play.tsx	kept	hud
 src/frontend/play/play.tsx	cut	PlanChatUI-P1		its import of the removed src/frontend/gm/engine.tsx (:21) (PlanChatUI-part-panels.md:23)
 src/frontend/play/scene.tsx	kept	hud
 src/frontend/play/scene.tsx	cut	PlanChatUI-P1		its imports of the removed src/frontend/gm/engine.tsx, story/connections.ts and story/prepare.tsx (:23, :25, :28) (PlanChatUI-part-panels.md:23)
-src/frontend/protocol-client.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
-src/frontend/protocol-client.ts	piece	PlanSwap-9	src/ui/kept/protocol-client.ts	ProtocolClient, Transport, SyncState and Timers, which the kept UI builds and takes (src/ui/kept/app.ts:19, src/ui/kept/play/app.ts:23, src/ui/kept/transport.ts:12, src/ui/kept/play/transport.ts:15, src/ui/kept/play/source.ts:11, src/frontend/app.ts:16, src/frontend/build/jobs.tsx:28)
+src/frontend/protocol-client.ts	kept	under		the in-page request client the kept UI's call files answer (src/ui/kept/app.ts, client.ts, chat-state.ts, play/source.ts, src/frontend/app.ts); kept in place at the removal
 src/frontend/queued.ts	kept	under
 src/frontend/reconnect.ts	removed	PlanSwap-9	halves	the page's half of the previous extension's protocol: the kept UI talks RPE's typed routes (R-47)
 src/frontend/registry.ts	kept	under
@@ -512,6 +512,7 @@ src/frontend/settings/steps.tsx	removed	PlanSwap-9	settings	a settings page only
 src/frontend/settings/story.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
 src/frontend/settings/timeouts.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
 src/frontend/settings/upgrade.tsx	moved	PlanChatUI-B4	src/frontend/build/upgrade.tsx	today's Upgrade sheet, into Build
+src/frontend/setting-row.tsx	kept	packs		SettingRow, which a pack's config fields lay out with (gear), out of the removed settings/kit.tsx (PlanSwap-9 item 1)
 src/frontend/setup.tsx	removed	PlanSwap-9	ui	the previous extension's entry and drawer
 src/frontend/store.ts	moved	PlanSwap-6	src/ui/store.ts	a shell file the new pages use (its file name there is PlanSwap-6's)
 src/frontend/story/cast.tsx	removed	PlanSwap-9	gate	today's harness engine's pages, rebuilt in RPE's UI because LumiAH is no longer a dependency (§14 l.1541)
@@ -562,7 +563,7 @@ src/frontend/things/specs.tsx	kept	things
 src/frontend/things/what-it-is.tsx	kept	things
 src/frontend/things/where-picker.tsx	kept	things
 src/frontend/things/where.ts	kept	things
-src/frontend/time-controls.tsx	kept	hud
+src/frontend/time-controls.tsx	removed	PlanSwap-10	ui	only GM mode's chat page and the removed settings drew it; nothing reached it once they went (PlanSwap-10 item 3)
 src/frontend/to-top.tsx	removed	PlanSwap-9	ui	the old engines' views
 src/frontend/ui-registry.ts	kept	under
 src/packs/calendar/core/index.ts	kept	packs
@@ -591,7 +592,7 @@ src/packs/castlife/ui/index.ts	kept	packs
 src/packs/castlife/ui/needs.tsx	kept	packs
 src/packs/castlife/ui/panel.tsx	kept	packs
 src/packs/castlife/ui/person.tsx	kept	packs
-src/packs/castlife/ui/routines-gm.tsx	kept	packs
+src/packs/castlife/ui/routines-gm.tsx	removed	PlanSwap-9	ui	GM mode's Routines tab, drawn only by GM mode
 src/packs/castlife/ui/routines-ops.ts	kept	packs
 src/packs/combat/core/flow.ts	kept	packs
 src/packs/combat/core/index.ts	kept	packs
@@ -725,11 +726,11 @@ src/packs/minds/core/known.ts	kept	packs
 src/packs/minds/core/lint.ts	kept	packs
 src/packs/minds/core/section.ts	kept	packs
 src/packs/minds/core/state.ts	kept	packs
-src/packs/minds/ui/gm.tsx	kept	packs
+src/packs/minds/ui/gm.tsx	removed	PlanSwap-9	ui	GM mode's Minds tab, drawn only by GM mode
 src/packs/minds/ui/index.ts	kept	packs
 src/packs/minds/ui/known.tsx	kept	packs
 src/packs/minds/ui/ops.ts	kept	packs
-src/packs/minds/ui/run.tsx	kept	packs
+src/packs/minds/ui/run.tsx	removed	PlanSwap-9	ui	GM mode's minds run, drawn only by its Minds tab
 src/packs/orgs/core/access.ts	kept	packs
 src/packs/orgs/core/actions.ts	kept	packs
 src/packs/orgs/core/agenda.ts	kept	packs
@@ -755,7 +756,7 @@ src/packs/orgs/ui/decisions.tsx	kept	packs
 src/packs/orgs/ui/decode.ts	kept	packs
 src/packs/orgs/ui/edit.ts	kept	packs
 src/packs/orgs/ui/feed.tsx	kept	packs
-src/packs/orgs/ui/gm.tsx	kept	packs
+src/packs/orgs/ui/gm.tsx	removed	PlanSwap-9	ui	GM mode's Orgs tab, drawn only by GM mode
 src/packs/orgs/ui/home.tsx	kept	packs
 src/packs/orgs/ui/index.ts	kept	packs
 src/packs/orgs/ui/member.tsx	kept	packs
@@ -906,7 +907,7 @@ src/shared/profiles/types.ts	kept	under
 src/shared/projects.ts	kept	under
 src/shared/prompts.ts	removed	PlanSwap-10	texts	the texts registry (§4.3 l.295); PromptVar has no piece, since only removed files take it
 src/shared/prompts.ts	piece	PlanSwap-15	src/migrate/today/	what today's settings store reads of the stored prompt edits, carried without texts, against the table of shipped texts (prompt-texts.ts, shipped-texts.ts)
-src/shared/protocol.ts	moved	PlanSwap-13	src/ui/kept/protocol.ts	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); what is left, the old wire (FrontendToBackend, BackendToFrontend, ResultMessage, ErrorMessage, ErrorCode, ResultBodies, DraftChanged, PROTOCOL_VERSION, AGENT_API, ENGINE_EXTENSION, FIX_THINGS_MAX, EDIT_OPS_MAX), only today's importers import, each ended by its own package (PlanSwap-13 item 4); PlanSwap-10 removes it
+src/shared/protocol.ts	moved	PlanSwap-13	src/ui/kept/protocol.ts	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); what is left, the old wire (FrontendToBackend, BackendToFrontend, ResultMessage, ErrorMessage, ErrorCode, ResultBodies, DraftChanged, PROTOCOL_VERSION, AGENT_API, ENGINE_EXTENSION, FIX_THINGS_MAX, EDIT_OPS_MAX), stays at the removal: the kept UI's in-page client and the command line (PlanOps-16, deferred) still speak it; its removed engines' requests (live, story, prepare, acceptance) went with them
 src/shared/protocol.ts	piece	PlanSwap-13	src/ui/kept/protocol.ts	the kept UI's request and answer types (PlanSwap-13 item 1)	ChipRequest, GmThingsRead, JobResult, LoreBookEntryView, LoreBookView, LoreIndexView, LoreMarkChange, LoreMarkView, LorePinView, LorePinsView, ReviewCardView, ReviewItemView, RoutineJobInput, SecrecyBookPlan, SecrecyBookView, SecrecyEntryView, ThingsRead, UpgradeChange, UpgradePreview	src/frontend/, src/packs/calendar/ui/, src/packs/castlife/ui/, src/packs/combat/ui/, src/packs/economy/ui/, src/packs/gear/ui/, src/packs/minds/ui/, src/packs/orgs/ui/, src/packs/sheets/ui/, src/packs/space/ui/, src/packs/story/ui/, src/packs/vehicles/ui/, src/ui/kept/, test/frontend/, test/ui/
 src/shared/protocol.ts	piece	PlanSwap-13	src/shared/	the shapes kept code reads as data, each to a home of its own (PlanSwap-13 item 2)	ChatExport, EditOp, EditorRequest, GenerateAs, JobKind, JobProposal, JobSummary, JsonPatchOp, LintFix, LintIssue, MarkerPreview, TableNames, TableRowChanges, TableUpdate, TemplateInfo, WorldCollection, WorldPart	src/, test/
 src/shared/protocol.ts	piece	PlanSwap-13	src/migrate/today/	what the migration's readers take of it, PROTOCOL_VERSION as today's value (PlanSwap-13 item 3)	ActionRequest, ExtractionModeView, GeneratePush, PROTOCOL_VERSION, SettingsResult	src/migrate/, test/migrate/
@@ -917,7 +918,7 @@ src/shared/routines.ts	kept	under
 src/shared/schema-check.ts	kept	under
 src/shared/secret-marks.ts	kept	under
 src/shared/sections.ts	kept	under		the world's own wording of the built-in sections (WorldDoc.sectionTemplates, §15.2 l.1595); engine/authoring.ts:17 reads it
-src/shared/settings.ts	moved	PlanSwap-13	src/migrate/today/	moved in part by PlanSwap-13 (wave 4, after PlanSwap-9); the rest, the old registry, removed by PlanSwap-10 (§4.3 l.295)
+src/shared/settings.ts	moved	PlanSwap-13	src/migrate/today/	moved whole to src/migrate/today/user-settings.ts at the removal: today's registry, which only the migration reads (§4.3 l.295)
 src/shared/settings.ts	piece	PlanSwap-13	src/migrate/today/	what reading today's settings needs (PlanSwap-13 item 3)	UserSettings, AGENT_CHANGE_DEFAULTS, AGENT_CHANGE_TYPES, AgentChangeType, ASK_BEYOND_DEFAULT, CHANGE_TYPES, ChangeType, DEFAULT_HELPER, EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, GM_PAGE_DEFAULTS, GateSettings, HELPER_MAX_TOKENS, HelperDefault, JOB_SETTINGS_DEFAULTS, LORE_INDEX_DEFAULTS, LORE_POLICIES, LORE_TRANSPORTS, LookupLimits, ModelUseSettings, NARRATION_DEFAULTS, PERF_DEFAULTS, PhaseBudget, REASONING_CHOICES, RealismSettings, RecentHistory, SAMPLING_PARAMS, SETTINGS_DEFAULTS_REV, STORY_DEFAULTS, SWIPE_DEFAULTS, StepConfig, StepLore, StepRoute, THING_READ_DEFAULTS, TIDY_DEFAULTS, TimeSettings, UNREASONED_ROUTE, UNREASONED_STEPS, gmPageSettingsOf, jobSettingsOf, loreBooksSettingOf, loreIndexSettingsOf, narrationSettingsOf, narratorSettingsOf, perfSettingsOf, stepConfigOf, storyPresetSettingsOf, storySettingsOf, thingReadsOf, tidySettingsOf	src/migrate/, test/migrate/
 src/shared/settings.ts	piece	PlanSwap-13	src/shared/	what kept code reads of the registry, each to a home of its own: the narrator's view of secrets, the clock's reach and speed, LorePolicy, SamplingParams, ReasoningChoice, GmDuringTurn (PlanSwap-13 item 3)	NarratorView, narratorViewOf, NARRATOR_DEFAULTS, NARRATOR_KNOWLEDGE, NARRATOR_SECRETS, SPEED_THRESHOLD_MINUTES, TIMELAPSE_REACH_MINUTES, SPEED_ACTIVITIES, SPEED_DEFAULT, LorePolicy, SamplingParams, ReasoningChoice, GmDuringTurn	src/, test/
 src/shared/settings.ts	piece	PlanSwap-13	src/ui/kept/protocol.ts	BuiltLoreIndex, with the kept UI's answer types that hold it (PlanSwap-13 item 1)	BuiltLoreIndex	src/frontend/, src/packs/calendar/ui/, src/packs/castlife/ui/, src/packs/combat/ui/, src/packs/economy/ui/, src/packs/gear/ui/, src/packs/minds/ui/, src/packs/orgs/ui/, src/packs/sheets/ui/, src/packs/space/ui/, src/packs/story/ui/, src/packs/vehicles/ui/, src/ui/kept/, test/frontend/, test/ui/
@@ -936,9 +937,9 @@ src/shared/thing-view.ts	kept	under
 src/shared/things.ts	kept	under
 src/shared/time-reach.ts	kept	under		the clock's reach and Speed through, moved out of settings.ts by PlanSwap-13 item 3
 src/shared/tiers.ts	kept	under
-src/shared/timeouts.ts	kept	under
-src/shared/timeouts.ts	cut	PlanSwap-9		the six turn timeouts (engineRunMs, preLookupMs, finalReviewMs, postReplyMs, postLookupMs, skipPlanMs) and guardMs
+src/shared/timeouts.ts	kept	under		only formatMs, timerMs and the in-page client's wait are left; today's registry, the six turn timeouts and guardMs among it, moved to src/migrate/today/timeouts.ts for the migration (PlanSwap-9 item 2)
 src/shared/travel.ts	kept	under
+src/shared/turn-activity.ts	kept	under		the activity line's shape, out of the removed shared/diagnostics.ts
 src/shared/vehicles.ts	kept	under
 src/shared/upgrade.ts	kept	under		what an Upgrade brings into a chat, moved out of protocol.ts by PlanSwap-13 (the world store reads it too)
 src/shared/words.ts	kept	under
