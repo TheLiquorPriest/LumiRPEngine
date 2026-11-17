@@ -42,6 +42,7 @@ import { Working, type WorkingMark } from "./working";
 import { chatWorld } from "./holidays";
 import { minutesBetween } from "./world-state";
 import { clampUnitCap } from "./time-limits";
+import { say } from "./lines";
 
 // Agent processes (`ProcessDef.scope === "agent"`) step once per LOD1 agent (and the POV in a
 // timelapse) with that agent as `agent`. During catch-up the state's clock may be past the slot:
@@ -678,7 +679,7 @@ function collapse(reg: Registry, start: Readonly<WorldState>, events: readonly L
       // Postings per account and direction over the period: amounts sum (integer cents, exact).
       const lines = tail.lines.map((l, j) => ({ account: l.account, amount: list.reduce((a, p) => a + (p.type === "post" ? (p.lines[j]?.amount ?? 0) : 0), 0) }));
       // One posting keeps its memo; a sum says how many it holds (a memo's own amounts would misread the total).
-      const memo = list.length === 1 ? tail.memo : `${(tail.memo ?? "").split(":")[0]?.trim() ?? ""} (${list.length} postings)`;
+      const memo = list.length === 1 ? tail.memo : say("eng_split_listcount_postings", { split: (tail.memo ?? "").split(":")[0]?.trim() ?? "", listCount: list.length });
       if (lines.some((l) => l.amount !== 0)) out.push({ ...tail, lines, ...(memo !== undefined ? { memo } : {}) });
     } else if (k.startsWith("h\u0000")) {
       const hook = reg.get(e.type)?.coarsen;

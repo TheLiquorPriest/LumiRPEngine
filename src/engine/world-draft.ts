@@ -252,62 +252,62 @@ function changeOf(data: unknown): DraftChange | null {
 
 /** What is wrong with `v` as the world's place `id`, in plain words; null where nothing is. */
 function placeProblem(id: string, v: JsonObject): string | null {
-  if (v.id !== id) return `a place's id is its key, ${id}`;
-  if (typeof v.name !== "string" || v.name.trim() === "") return "a place needs a name";
-  if (v.parent !== undefined && (typeof v.parent !== "string" || v.parent === "")) return "a place's parent is the id of a place";
-  if (!isRecord(v.fields)) return "a place's fields are an object";
-  if (v.visibility !== undefined && !VISIBILITIES.some((s) => s === v.visibility)) return `a place's visibility is one of ${VISIBILITIES.join(", ")}`;
-  for (const key of ["timeZone", "sceneType", "grid"] as const) if (v[key] !== undefined && typeof v[key] !== "string") return `a place's ${key} is text`;
+  if (v.id !== id) return say("eng_a_places_id_is_its_key_id", { id: id });
+  if (typeof v.name !== "string" || v.name.trim() === "") return say("eng_a_place_needs_a_name");
+  if (v.parent !== undefined && (typeof v.parent !== "string" || v.parent === "")) return say("eng_a_places_parent_is_the_id_of");
+  if (!isRecord(v.fields)) return say("eng_a_places_fields_are_an_object");
+  if (v.visibility !== undefined && !VISIBILITIES.some((s) => s === v.visibility)) return say("eng_a_places_visibility_is_one_of_visibilities", { vISIBILITIES: VISIBILITIES.join(", ") });
+  for (const key of ["timeZone", "sceneType", "grid"] as const) if (v[key] !== undefined && typeof v[key] !== "string") return say("eng_a_places_key_is_text", { key: key });
   for (const key of ["cell", "layoutPos"] as const) {
     const at = v[key];
-    if (at !== undefined && !(isRecord(at) && typeof at.x === "number" && typeof at.y === "number")) return `a place's ${key} is {x, y}`;
+    if (at !== undefined && !(isRecord(at) && typeof at.x === "number" && typeof at.y === "number")) return say("eng_a_places_key_is_x_y", { key: key });
   }
-  if (v.knownBy !== undefined && !isRecord(v.knownBy)) return "a place's knownBy is a selector";
-  if (v.adjudicate !== undefined && typeof v.adjudicate !== "boolean") return "a place's adjudicate is true or false";
-  if (v.sources !== undefined && !(Array.isArray(v.sources) && v.sources.every((s) => typeof s === "string"))) return "a place's sources are a list of entries";
-  if (v.map !== undefined) return "only a map marks what it draws";
-  if (v.made !== undefined) return "a place made in play is changed by place_label and place_remove";
+  if (v.knownBy !== undefined && !isRecord(v.knownBy)) return say("eng_a_places_knownby_is_a_selector");
+  if (v.adjudicate !== undefined && typeof v.adjudicate !== "boolean") return say("eng_a_places_adjudicate_is_true_or_false");
+  if (v.sources !== undefined && !(Array.isArray(v.sources) && v.sources.every((s) => typeof s === "string"))) return say("eng_a_places_sources_are_a_list_of");
+  if (v.map !== undefined) return say("eng_only_a_map_marks_what_it_draws");
+  if (v.made !== undefined) return say("eng_a_place_made_in_play_is_changed");
   return null;
 }
 
 /** What is wrong with `v` as the world's path `id`; null where nothing is. */
 function routeProblem(id: string, v: JsonObject): string | null {
-  if (v.id !== id) return `a path's id is its key, ${id}`;
-  if (typeof v.from !== "string" || typeof v.to !== "string" || v.from === "" || v.to === "") return "a path joins two places, from and to";
-  if (v.from === v.to) return "a path joins two different places";
-  if (typeof v.bidirectional !== "boolean") return "a path goes both ways or one way (bidirectional is true or false)";
-  if (!isRecord(v.modes) || Object.keys(v.modes).length === 0) return "a path has at least one way of travelling it";
+  if (v.id !== id) return say("eng_a_paths_id_is_its_key_id", { id: id });
+  if (typeof v.from !== "string" || typeof v.to !== "string" || v.from === "" || v.to === "") return say("eng_a_path_joins_two_places_from_and");
+  if (v.from === v.to) return say("eng_a_path_joins_two_different_places");
+  if (typeof v.bidirectional !== "boolean") return say("eng_a_path_goes_both_ways_or_one");
+  if (!isRecord(v.modes) || Object.keys(v.modes).length === 0) return say("eng_a_path_has_at_least_one_way");
   for (const [mode, leg] of Object.entries(v.modes)) {
-    if (!TRAVEL_MODES.some((m) => m === mode)) return `${mode} is no way of travelling: ${TRAVEL_MODES.join(", ")}`;
-    if (!isRecord(leg) || typeof leg.minutes !== "number" || !Number.isFinite(leg.minutes) || leg.minutes <= 0) return `the ${mode} way takes some minutes, above 0`;
-    if (leg.distanceKm !== undefined && !(typeof leg.distanceKm === "number" && Number.isFinite(leg.distanceKm) && leg.distanceKm > 0)) return `the ${mode} way's distance is kilometres, above 0`;
-    if (leg.terrain !== undefined && typeof leg.terrain !== "string") return `the ${mode} way's terrain is text`;
+    if (!TRAVEL_MODES.some((m) => m === mode)) return say("eng_mode_is_no_way_of_travelling_travel", { mode: mode, tRAVEL_MODES: TRAVEL_MODES.join(", ") });
+    if (!isRecord(leg) || typeof leg.minutes !== "number" || !Number.isFinite(leg.minutes) || leg.minutes <= 0) return say("eng_the_mode_way_takes_some_minutes_above", { mode: mode });
+    if (leg.distanceKm !== undefined && !(typeof leg.distanceKm === "number" && Number.isFinite(leg.distanceKm) && leg.distanceKm > 0)) return say("eng_the_mode_ways_distance_is_kilometres_above", { mode: mode });
+    if (leg.terrain !== undefined && typeof leg.terrain !== "string") return say("eng_the_mode_ways_terrain_is_text", { mode: mode });
   }
-  if (v.map !== undefined) return "only a map marks what it draws";
+  if (v.map !== undefined) return say("eng_only_a_map_marks_what_it_draws");
   return null;
 }
 
 /** What is wrong with `v` as the world's map `id`: the map's own published shape, then its key. */
 function mapProblem(id: string, v: JsonObject): string | null {
   const { map, problems } = readMap(v);
-  if (!map) return problems.slice(0, 3).map((p) => p.message).join("; ") || "that isn't a map";
-  return map.id === id ? null : `a map's id is its key, ${id}`;
+  if (!map) return problems.slice(0, 3).map((p) => p.message).join("; ") || say("eng_that_isnt_a_map");
+  return map.id === id ? null : say("eng_a_maps_id_is_its_key_id", { id: id });
 }
 
 const ITEM_PROBLEM: Readonly<Record<DraftCollection, (id: string, v: JsonObject) => string | null>> = { places: placeProblem, routes: routeProblem, maps: mapProblem };
 
 /** What is wrong with `v` as the map settings, as the space pack's checks read them; null where nothing is. */
 function settingsProblem(v: JsonObject): string | null {
-  if (v.display !== undefined && v.display !== "knowledge" && v.display !== "fog") return 'the map shows "knowledge" or "fog"';
+  if (v.display !== undefined && v.display !== "knowledge" && v.display !== "fog") return say("eng_the_map_shows_knowledge_or_fog");
   const grid = v.grid;
   if (grid !== undefined) {
-    if (!isRecord(grid)) return "the grid system's settings are an object: movement and sightRadius";
-    if (grid.movement !== undefined && typeof grid.movement !== "boolean") return "grid movement is true or false";
+    if (!isRecord(grid)) return say("eng_the_grid_systems_settings_are_an_object");
+    if (grid.movement !== undefined && typeof grid.movement !== "boolean") return say("eng_grid_movement_is_true_or_false");
     const r = grid.sightRadius;
-    if (r !== undefined && !(typeof r === "number" && Number.isInteger(r) && r >= 0 && r <= SIGHT_MAX)) return `the sight radius is a whole number of cells from 0 to ${SIGHT_MAX}`;
+    if (r !== undefined && !(typeof r === "number" && Number.isInteger(r) && r >= 0 && r <= SIGHT_MAX)) return say("eng_the_sight_radius_is_a_whole_number", { sIGHT_MAX: SIGHT_MAX });
   }
-  if (v.travelSimulation !== undefined && typeof v.travelSimulation !== "boolean") return "the travel simulation is true or false";
-  if (v.travel !== undefined && !isRecord(v.travel)) return "travel times are an object";
+  if (v.travelSimulation !== undefined && typeof v.travelSimulation !== "boolean") return say("eng_the_travel_simulation_is_true_or_false");
+  if (v.travel !== undefined && !isRecord(v.travel)) return say("eng_travel_times_are_an_object");
   return null;
 }
 
@@ -335,30 +335,30 @@ function leftProblem(ctx: ReadContext, change: DraftChange): string | null {
   const after = withChange(before, change);
   const has = (id: string): boolean => hasOwn(after.places, id);
   const lost = (id: string): boolean => hasOwn(before.places, id) && !has(id);
-  if (lost(before.start.place)) return `it would take away ${labelOf(ctx, before.start.place)}, where the world starts`;
+  if (lost(before.start.place)) return say("eng_it_would_take_away_place_where_the", { place: labelOf(ctx, before.start.place) });
   for (const [id, e] of Object.entries(ctx.state.entities)) {
     const at = e.fields.place;
-    if (typeof at === "string" && lost(at)) return `${e.name} (${id}) is at ${labelOf(ctx, at)}, which it would take away`;
+    if (typeof at === "string" && lost(at)) return say("eng_name_id_is_at_at_which_it", { name: e.name, id: id, at: labelOf(ctx, at) });
   }
   for (const [id, p] of Object.entries(after.places)) {
-    if (p.parent !== undefined && !has(p.parent) && (lost(p.parent) || (!("part" in change) && change.collection === "places" && change.id === id))) return `${p.name} (${id}) would be inside ${p.parent}, which isn't a place`;
+    if (p.parent !== undefined && !has(p.parent) && (lost(p.parent) || (!("part" in change) && change.collection === "places" && change.id === id))) return say("eng_name_id_would_be_inside_parent_which", { name: p.name, id: id, parent: p.parent });
   }
   for (const [id, r] of Object.entries(after.routes)) {
     if (has(r.from) && has(r.to)) continue;
     const was = own(before.routes, id);
     // A path the world already had without one of its ends is the world's own fault, not this change's.
     if (was && was.from === r.from && was.to === r.to && !(hasOwn(before.places, r.from) && hasOwn(before.places, r.to))) continue;
-    return `the path ${id} would lead to ${has(r.from) ? r.to : r.from}, which isn't a place`;
+    return say("eng_the_path_id_would_lead_to_from", { id: id, from: has(r.from) ? r.to : r.from });
   }
   if ("part" in change || !("value" in change)) return null;
   if (change.collection === "places") {
     let at = own(after.places, change.id)?.parent;
     for (let guard = Object.keys(after.places).length; at !== undefined && guard >= 0; guard--) {
-      if (at === change.id) return `${labelOf(ctx, change.id)} can't be inside itself`;
+      if (at === change.id) return say("eng_id_cant_be_inside_itself", { id: labelOf(ctx, change.id) });
       at = own(after.places, at)?.parent;
     }
   }
-  if (change.collection === "maps" && typeof change.value.scope === "string" && !has(change.value.scope)) return `the map ${change.id} draws ${change.value.scope}, which isn't a place`;
+  if (change.collection === "maps" && typeof change.value.scope === "string" && !has(change.value.scope)) return say("eng_the_map_id_draws_scope_which_isnt", { id: change.id, scope: change.value.scope });
   return null;
 }
 

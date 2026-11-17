@@ -7,7 +7,8 @@
 import type { EntityId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { formatMoney, type FieldDef } from "../shared/world";
-import { fieldNoun, listWords, possessive } from "../shared/words";
+import { fieldNoun, possessive } from "../shared/words";
+import { say, listOf } from "./lines";
 import { belongsTo, orgTypeOf } from "./org";
 import { optionalQuery, own, rowOf } from "./pack-kit";
 import type { ReadContext } from "./registry";
@@ -122,7 +123,7 @@ export function thingDescription(ctx: ReadContext, id: EntityId): string | null 
 /** From Gear 3 (the player character's, unless `gearLevel` says whose), a kit's pieces present: "44 of its 45 pieces". */
 function kitWords(ctx: ReadContext, id: EntityId, gearLevel: number): string | null {
   const kit = gearLevel >= 3 ? (optionalQuery(ctx, "gear.kit_status")?.(ctx, id) ?? null) : null;
-  return kit ? `${kit.present} of its ${kit.total} pieces` : null;
+  return kit ? say("eng_present_of_its_total_pieces", { present: kit.present, total: kit.total }) : null;
 }
 
 /** A thing's name with a count above one ("Flare ×3"). */
@@ -168,14 +169,14 @@ export function whoseWords(ctx: ReadContext, id: EntityId, viewer: EntityId = ct
   let yours = false;
   for (const owner of whoseOf(ctx, id).owners) {
     if (owner === viewer) yours = true;
-    else if (orgTypeOf(ctx, owner) === "household" && belongsTo(ctx, viewer, owner)) others.push("your household's");
+    else if (orgTypeOf(ctx, owner) === "household" && belongsTo(ctx, viewer, owner)) others.push(say("eng_your_households"));
     else {
       const e = own(ctx.state.entities, owner);
       if (e && canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, owner)) others.push(possessive(e.name));
     }
   }
-  if (yours) return others.length > 0 ? `yours and ${listWords(others)}` : "yours";
-  return others.length > 0 ? listWords(others) : null;
+  if (yours) return others.length > 0 ? say("eng_yours_and_others", { others: listOf(others) }) : "yours";
+  return others.length > 0 ? listOf(others) : null;
 }
 
 /**
@@ -190,7 +191,7 @@ export function whereWords(ctx: ReadContext, id: EntityId, viewer: EntityId = ct
   if (e.fields.lost === true) return "lost";
   const see = (other: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, other);
   const holder = possessorOf(ctx, id);
-  if (holder !== null) return holder !== viewer && see(holder) ? `with ${own(ctx.state.entities, holder)?.name ?? holder}` : null;
+  if (holder !== null) return holder !== viewer && see(holder) ? say("eng_with_holder", { holder: own(ctx.state.entities, holder)?.name ?? holder }) : null;
   const inside = holdersOf(ctx.state, id)[0];
   const box = inside !== undefined && see(inside) ? `in ${own(ctx.state.entities, inside)?.name ?? inside}` : null;
   const place = placeOfEntity(ctx.state, id);

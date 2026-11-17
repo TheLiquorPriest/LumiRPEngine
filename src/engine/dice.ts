@@ -37,6 +37,7 @@
 //     (`opposedDice`) and the joint law of the natural die and the total (`naturalSplit`).
 
 import type { Rng } from "./rng";
+import { say } from "./lines";
 
 export class DiceError extends Error {
   constructor(message: string) {
@@ -74,10 +75,10 @@ export interface ParsedDice {
 }
 
 export function parseDice(src: string): ParsedDice {
-  if (typeof src !== "string") throw new DiceError("Dice notation must be a string");
-  if (src.length > DICE_LIMITS.maxNotationLength) throw new DiceError(`Dice notation is longer than ${DICE_LIMITS.maxNotationLength} characters`);
+  if (typeof src !== "string") throw new DiceError(say("eng_dice_notation_must_be_a_string"));
+  if (src.length > DICE_LIMITS.maxNotationLength) throw new DiceError(say("eng_dice_notation_is_longer_than_maxnotationlength_character", { maxNotationLength: DICE_LIMITS.maxNotationLength }));
   const s = src.trim().toLowerCase();
-  if (!s) throw new DiceError("Dice notation is empty");
+  if (!s) throw new DiceError(say("eng_dice_notation_is_empty"));
   const term = /\s*([+-]?)\s*(?:(\d*)d(\d+|%)(?:(kh|kl)(\d+))?(!)?|(\d+))/y;
   const groups: DiceGroup[] = [];
   let flat = 0;
@@ -88,21 +89,21 @@ export function parseDice(src: string): ParsedDice {
     const m = term.exec(s);
     if (!m) break;
     if (terms > 0 && !m[1]) break; // every term after the first needs its own + or -
-    if (++terms > DICE_LIMITS.maxTerms) throw new DiceError(`"${src}": more than ${DICE_LIMITS.maxTerms} terms`);
+    if (++terms > DICE_LIMITS.maxTerms) throw new DiceError(say("eng_src_more_than_maxterms_terms", { src: src, maxTerms: DICE_LIMITS.maxTerms }));
     const sign = m[1] === "-" ? -1 : 1;
     if (m[7] !== undefined) {
       const n = Number(m[7]);
-      if (n > DICE_LIMITS.maxFlat) throw new DiceError(`"${src}": flat bonus is larger than ${DICE_LIMITS.maxFlat}`);
+      if (n > DICE_LIMITS.maxFlat) throw new DiceError(say("eng_src_flat_bonus_is_larger_than_maxflat", { src: src, maxFlat: DICE_LIMITS.maxFlat }));
       flat += sign * n;
     } else {
       const count = m[2] ? Number(m[2]) : 1;
       const sides = m[3] === "%" ? 100 : Number(m[3]);
-      if (count < 1 || count > DICE_LIMITS.maxCount) throw new DiceError(`"${src}": dice count must be 1–${DICE_LIMITS.maxCount}`);
-      if (sides < DICE_LIMITS.minSides || sides > DICE_LIMITS.maxSides) throw new DiceError(`"${src}": dice need ${DICE_LIMITS.minSides}–${DICE_LIMITS.maxSides} sides`);
+      if (count < 1 || count > DICE_LIMITS.maxCount) throw new DiceError(say("eng_src_dice_count_must_be_1_maxcount", { src: src, maxCount: DICE_LIMITS.maxCount }));
+      if (sides < DICE_LIMITS.minSides || sides > DICE_LIMITS.maxSides) throw new DiceError(say("eng_src_dice_need_minsides_maxsides_sides", { src: src, minSides: DICE_LIMITS.minSides, maxSides: DICE_LIMITS.maxSides }));
       const g: DiceGroup = { count, sides, sign };
       if (m[4]) {
         const n = Number(m[5]);
-        if (n < 1 || n > count) throw new DiceError(`"${src}": can't keep ${n} of ${count} dice`);
+        if (n < 1 || n > count) throw new DiceError(say("eng_src_cant_keep_n_of_count_dice", { src: src, n: n, count: count }));
         g.keep = { mode: m[4] as "kh" | "kl", n };
       }
       if (m[6]) g.explode = true;
@@ -110,8 +111,8 @@ export function parseDice(src: string): ParsedDice {
     }
     pos = term.lastIndex;
   }
-  if (pos !== s.length) throw new DiceError(`"${src}" isn't valid dice notation (try d20, 2d6, d100, 4d6kh3)`);
-  if (!groups.length) throw new DiceError(`"${src}" has no dice in it`);
+  if (pos !== s.length) throw new DiceError(say("eng_src_isnt_valid_dice_notation_try_d20", { src: src }));
+  if (!groups.length) throw new DiceError(say("eng_src_has_no_dice_in_it", { src: src }));
   return { groups, flat, primarySides: Math.max(...groups.map((g) => g.sides)) };
 }
 
@@ -205,7 +206,7 @@ class Work {
   spend(n: number): void {
     this.spent += n;
     if (this.spent > DICE_LIMITS.maxExactWork) {
-      throw new DiceError("This expression is too large to compute exact odds for");
+      throw new DiceError(say("eng_this_expression_is_too_large_to_compute"));
     }
   }
 }

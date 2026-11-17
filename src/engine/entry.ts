@@ -10,7 +10,8 @@
 import { ownersIn } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { admits, type Audience } from "../shared/org";
-import { listWords, possessive } from "../shared/words";
+import { possessive } from "../shared/words";
+import { say, listOf } from "./lines";
 import { acts } from "./life";
 import { belongsTo, businessAt, entryInPlay, isStaff, orgPlaces, orgPower, orgTypeOf, placeEntry, placesOf, placesUp, setEntryOf } from "./org";
 import { own } from "./pack-kit";
@@ -167,12 +168,12 @@ export function entryClosed(ctx: EntryContext, place: PlaceId, clock: number = c
 export function entryRefusal(ctx: EntryContext, viewer: EntityId | null, place: PlaceId, clock: number = ctx.state.clock): string {
   const entry = entryClosed(ctx, place, clock);
   if (entry === null) return "";
-  if (entry === "staff") return "Staff only";
+  if (entry === "staff") return say("eng_staff_only");
   const owners = placeOwnersOf(ctx, place);
-  if (entry === "members" && owners.some((o) => orgTypeOf(ctx, o) !== null)) return "Members only";
+  if (entry === "members" && owners.some((o) => orgTypeOf(ctx, o) !== null)) return say("eng_members_only");
   const shown = owners.every((o) => viewer === null || o === viewer || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, o));
   const names = owners.map((o) => own(ctx.state.entities, o)?.name ?? o);
-  return shown && names.length > 0 ? `Private: ${possessive(listWords(names))}` : "Private";
+  return shown && names.length > 0 ? `Private: ${possessive(listOf(names))}` : say("eng_private");
 }
 
 /** Someone else there who acts and may enter it (at the place, in a part of it or around it in the same building): whose company makes an entry no trespass. Null for nobody. */

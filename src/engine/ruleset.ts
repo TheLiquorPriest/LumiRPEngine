@@ -13,6 +13,7 @@ import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { bandOf, evalExpr, fieldDef, kindIs, poolMax, scopeEnv } from "./scope";
 import { own } from "./pack-kit";
+import { say } from "./lines";
 
 /** Whether a progression applies to entities of a kind: its `kind` (descendants too), else any kind with both its fields. */
 export function progressionApplies(reg: Registry, world: WorldDoc, prog: ProgressionDef, kind: KindId): boolean {
@@ -106,7 +107,7 @@ function display(ctx: ReadContext, def: FieldDef | undefined, v: JsonValue | und
     return band ? { value: shown(v), detail: band.label } : { value: shown(v) };
   }
   if (typeof v === "string") return { value: own(ctx.state.entities, v)?.name ?? own(ctx.world.places, v)?.name ?? v };
-  return { value: Array.isArray(v) ? `${v.length} item${v.length === 1 ? "" : "s"}` : "—" };
+  return { value: Array.isArray(v) ? say("eng_vcount_items", { vCount: v.length, if_length: v.length === 1 }) : "—" };
 }
 
 const FIXABLE: Readonly<Record<string, true>> = { number: true, text: true, bool: true, enum: true, money: true, duration: true };
@@ -152,7 +153,7 @@ function rowOf(reg: Registry, ctx: ReadContext, entity: EntityId, row: SheetRowD
     return {
       label: row.label ?? prog.label,
       value: shown(p.level),
-      detail: p.next === null ? `${shown(p.xp)} ${xpLabel} · top level` : `${shown(p.xp)} / ${shown(p.next)} ${xpLabel}`,
+      detail: p.next === null ? say("eng_xp_xplabel_top_level", { xp: shown(p.xp), xpLabel: xpLabel }) : `${shown(p.xp)} / ${shown(p.next)} ${xpLabel}`,
       progress: { level: p.level, xp: p.xp, from: p.from, next: p.next },
       ...(fix ? { fix } : {}),
     };
@@ -200,28 +201,28 @@ const ROW_PARTS = ["field", "formula", "pool", "progression"] as const;
  * ruleset could hold the backend for seconds, and a malformed one would fail inside the sheet.
  */
 export function sheetRulesetProblem(raw: unknown): string | null {
-  if (!isRecord(raw)) return "The ruleset must be an object.";
+  if (!isRecord(raw)) return say("eng_the_ruleset_must_be_an_object");
   const limits = SHEET_PREVIEW_LIMITS;
   if (raw.sheet !== undefined) {
     const sheet = raw.sheet;
-    if (!isRecord(sheet) || !Array.isArray(sheet.sections)) return "A sheet is a list of sections.";
-    if (sheet.sections.length > limits.sections) return `A sheet has at most ${limits.sections} sections.`;
+    if (!isRecord(sheet) || !Array.isArray(sheet.sections)) return say("eng_a_sheet_is_a_list_of_sections");
+    if (sheet.sections.length > limits.sections) return say("eng_a_sheet_has_at_most_sections_sections", { sections: limits.sections });
     for (const section of sheet.sections) {
-      if (!isRecord(section) || typeof section.id !== "string" || typeof section.label !== "string" || !Array.isArray(section.rows)) return "A section needs an id, a title and a list of rows.";
-      if (section.rows.length > limits.rows) return `A section has at most ${limits.rows} rows.`;
+      if (!isRecord(section) || typeof section.id !== "string" || typeof section.label !== "string" || !Array.isArray(section.rows)) return say("eng_a_section_needs_an_id_a_title");
+      if (section.rows.length > limits.rows) return say("eng_a_section_has_at_most_rows_rows", { rows: limits.rows });
       for (const row of section.rows) {
-        if (!isRecord(row) || ROW_PARTS.filter((k) => typeof row[k] === "string").length !== 1 || (row.label !== undefined && typeof row.label !== "string")) return "A row shows one thing: a field, a formula, a pool or a progression.";
-        if (typeof row.formula === "string" && row.formula.length > limits.formula) return `A formula is at most ${limits.formula} characters.`;
+        if (!isRecord(row) || ROW_PARTS.filter((k) => typeof row[k] === "string").length !== 1 || (row.label !== undefined && typeof row.label !== "string")) return say("eng_a_row_shows_one_thing_a_field");
+        if (typeof row.formula === "string" && row.formula.length > limits.formula) return say("eng_a_formula_is_at_most_formula_characters", { formula: limits.formula });
       }
     }
   }
   if (raw.progression !== undefined) {
-    if (!isRecord(raw.progression)) return "Progressions are an object by id.";
+    if (!isRecord(raw.progression)) return say("eng_progressions_are_an_object_by_id");
     for (const p of Object.values(raw.progression)) {
-      if (!isRecord(p) || typeof p.xpField !== "string" || typeof p.levelField !== "string") return "A progression needs an XP field and a level field.";
+      if (!isRecord(p) || typeof p.xpField !== "string" || typeof p.levelField !== "string") return say("eng_a_progression_needs_an_xp_field_and");
       const t = p.thresholds;
-      if (Array.isArray(t) ? t.some((x) => typeof x !== "number" || !Number.isFinite(x)) : !(isRecord(t) && typeof t.table === "string" && typeof t.column === "string")) return "Thresholds are a list of XP amounts, or a data table and column.";
-      if (Array.isArray(t) && t.length > limits.thresholds) return `A progression has at most ${limits.thresholds} thresholds.`;
+      if (Array.isArray(t) ? t.some((x) => typeof x !== "number" || !Number.isFinite(x)) : !(isRecord(t) && typeof t.table === "string" && typeof t.column === "string")) return say("eng_thresholds_are_a_list_of_xp_amounts");
+      if (Array.isArray(t) && t.length > limits.thresholds) return say("eng_a_progression_has_at_most_thresholds_thresholds", { thresholds: limits.thresholds });
     }
   }
   return null;

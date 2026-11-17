@@ -12,8 +12,8 @@ import { heldBy } from "../shared/finance";
 import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { formatMoney, formatTemperature } from "../shared/world";
-import { fieldNoun, listWords, possessive } from "../shared/words";
-import { say } from "./lines";
+import { fieldNoun, possessive } from "../shared/words";
+import { listOf, say } from "./lines";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";
@@ -362,7 +362,7 @@ function setLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, wo
     const items = value.map((x) => (typeof x === "string" ? (hasOwn(world.places, x) || hasOwn(state.entities, x) ? ref(x) : humanize(x)) : typeof x === "number" ? String(x) : null));
     if (items.some((x) => x === null)) return say("set_list_changed", { whose, noun });
     const shown = items.filter((x): x is string => x !== null);
-    return shown.length === 0 ? say("set_list_none", { whose, noun }) : say("set_list", { whose, noun, items: listWords(shown) });
+    return shown.length === 0 ? say("set_list_none", { whose, noun }) : say("set_list", { whose, noun, items: listOf(shown) });
   }
   const v = field === "temp_c" && typeof value === "number" ? formatTemperature(value) : valueText(reg, world, state, words, kind, field, value);
   return v === null ? null : say(atMost ? "set_value_at_most" : "set_value", { whose, noun, value: v });

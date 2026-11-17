@@ -202,7 +202,7 @@ function landing<S extends Spot | Support>(ctx: ReadContext, name: string, size:
     }
     const place = placeOfEntity(ctx.state, to.in);
     if (!place) return reject("too_big", say("why_name_is_too_big_for_name2_to", { name: name, name2: holder.name }));
-    return { spot: { place }, noted: `${name} is too big to carry (${SIZE_LABELS[size]}), so it is at ${labelOf(ctx, place)} rather than on ${holder.name}.` };
+    return { spot: { place }, noted: say("eng_name_is_too_big_to_carry_size", { name: name, size: SIZE_LABELS[size], place: labelOf(ctx, place), name2: holder.name }) };
   }
   return bend(reject("too_big", say("why_name_is_too_big_for_name2_which", { name: name, name2: holder.name, holds: SIZE_LABELS[holds] }))) ?? asked();
 }
@@ -582,7 +582,7 @@ function grant(w: Working, op: Extract<ItemOp, { do: "grant" | "revoke" }>, opts
   const basis = op.basis ?? (op.until !== undefined ? "loan" : "assign");
   const events: LedgerEvent[] = [{ type: "link", rel: "uses", from: op.who, to: op.item, fields: { basis, ...(op.by !== undefined ? { by: op.by } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) }];
   // From someone it isn't theirs to lend, it lands with its giver, flagged for the GM (§3.4).
-  if (op.by !== undefined && assignFor(ctx, op.by, op.item) === null) events.push(note(`${labelOf(ctx, op.by)} let ${labelOf(ctx, op.who)} use ${labelOf(ctx, op.item)}, though it isn't theirs to lend.`, op.item));
+  if (op.by !== undefined && assignFor(ctx, op.by, op.item) === null) events.push(note(say("eng_by_let_who_use_item_though_it", { by: labelOf(ctx, op.by), who: labelOf(ctx, op.who), item: labelOf(ctx, op.item) }), op.item));
   const bad = applyAll(w, events);
   if (bad) return bad;
   return past && op.until !== undefined ? { advice: [endsBeforeNow(ctx, ref(ctx, op.item), ref(ctx, op.who), op.until)] } : {};
@@ -599,7 +599,7 @@ function permit(w: Working, op: Extract<ItemOp, { do: "permit" | "unpermit" }>, 
   if (past && opts.advise !== true) return reject("bad_until", say("why_a_permissions_end_is_after_now"));
   const events: LedgerEvent[] = [{ type: "link", rel: "permits", from: op.from, to: op.to, fields: { scope: op.scope ?? "all", ...(op.by !== undefined ? { by: op.by } : {}) }, ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) }];
   // Given on an organization's behalf by someone without the say over its things: flagged for the GM.
-  if (op.by !== undefined && op.by !== op.from && (orgTypeOf(ctx, op.from) === null || orgPower(ctx, op.by, op.from, "assets.assign") === null)) events.push(note(`${labelOf(ctx, op.by)} let ${labelOf(ctx, op.to)} use what is ${labelOf(ctx, op.from)}'s, without the say to.`, op.from));
+  if (op.by !== undefined && op.by !== op.from && (orgTypeOf(ctx, op.from) === null || orgPower(ctx, op.by, op.from, "assets.assign") === null)) events.push(note(say("eng_by_let_to_use_what_is_from", { by: labelOf(ctx, op.by), to: labelOf(ctx, op.to), from: labelOf(ctx, op.from) }), op.from));
   const bad = applyAll(w, events);
   if (bad) return bad;
   return past && op.until !== undefined ? { advice: [endsBeforeNow(ctx, ref(ctx, op.from), ref(ctx, op.to), op.until)] } : {};

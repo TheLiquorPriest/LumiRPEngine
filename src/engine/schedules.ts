@@ -694,7 +694,7 @@ export function scheduleOverlaps(reg: Registry, world: WorldDoc): LintIssue[] {
       }
       if (!clash) continue;
       const names = shared.map((id) => own(state.entities, id)?.name ?? id);
-      const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+      const who = names.length <= 3 ? names.join(", ") : say("eng_names_and_names2_more", { names: names.slice(0, 3).join(", "), names2: names.length - 3 });
       issues.push({ severity: "warning", path: `schedules.${b.schedule.id}`, code: "schedule_overlap", message: say("lint_who_isare_double_booked_id_and_id2", { who: who, id: a.schedule.id, id2: b.schedule.id, target: a.schedule.target, if_names: names.length === 1 }) });
     }
   }

@@ -10,12 +10,11 @@ import type { PackEvent } from "../shared/ledger";
 import { secretMarkText, type SecretMarkWording } from "../shared/secret-marks";
 import type { NarratorView } from "../shared/narrator-view";
 import { readSectionFeed, SECTION_FEED_KEYS, type FeedScope, type SectionFeed, type SectionTemplate } from "../shared/world";
-import { feedSentence } from "../shared/words";
 import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./registry";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { engineSlice } from "./scope";
-import { say } from "./lines";
+import { listOf, say } from "./lines";
 
 /** The engine's state-slice key for the GM's per-chat section overrides. */
 const FEED_KEY = "feed";
@@ -87,10 +86,10 @@ export function linesOf(r: SectionRenderer, ctx: ReadContext, scope: FeedScope):
   return lines.filter((l) => l.text !== "");
 }
 
-/** The note a fact beyond the player character's carries for the narrator (DESIGN §6.11); the narrator rules' marked-facts text says what it means (`MARKED_FACTS_RULE`, `shared/prompts.ts`). */
+/** The note a fact beyond the player character's carries for the narrator (DESIGN §6.11), worded by the lines `feed_marked_scene` and `feed_marked_gm`; the narrator rules' marked-facts text says what it means (`MARKED_FACTS_RULE`, `shared/prompts.ts`). */
 export function markedText(line: FeedLine): string {
   if (line.known === "pov") return line.text;
-  return line.known === "scene" ? `${line.text} [unknown to you; known to ${line.who ?? "others here"}]` : `${line.text} [unknown to you; GM only]`;
+  return line.known === "scene" ? say("feed_marked_scene", { text: line.text, ...(line.who !== undefined ? { who: line.who } : {}) }) : say("feed_marked_gm", { text: line.text });
 }
 
 /**
@@ -132,3 +131,20 @@ export const feedEvent: EventTypeDef<PackEvent> = {
     return feedSentence(label, e.data.to === null ? null : readSectionFeed(e.data.to));
   },
 };
+
+/**
+ * A section's settings in a chat as one sentence (`lre.edit` `feed`, DESIGN §6.11): out of the prompt, back to the world's, or
+ * what this chat sets for it (whose knowledge it tells, its caps, the sources picked), the notice the save leaves and the GM's
+ * Edits log alike, worded by the lines `feedset_*`. A section that sets no scope follows the narrator's knowledge (`sectionScope`).
+ */
+function feedSentence(label: string, to: SectionFeed | null): string {
+  if (to === null) return say("feedset_world", { label });
+  if (to.enabled === false) return say("feedset_off", { label });
+  const caps = [to.maxLines !== undefined ? say("feedset_lines", { n: to.maxLines, one: to.maxLines === 1 }) : "", to.maxTokens !== undefined ? say("feedset_tokens", { n: to.maxTokens }) : ""].filter((c) => c !== "");
+  const parts = [
+    to.scope ? say(`feedset_scope_${to.scope}`) : say("feedset_scope_narrator"),
+    caps.length > 0 ? say("feedset_cut", { caps: listOf(caps) }) : say("feedset_uncapped"),
+    to.include ? say("feedset_sources", { n: to.include.length, one: to.include.length === 1 }) : "",
+  ].filter((p) => p !== "");
+  return say("feedset", { label, parts: parts.join(", ") });
+}

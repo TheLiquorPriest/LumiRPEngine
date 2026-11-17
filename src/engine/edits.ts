@@ -102,34 +102,34 @@ function shapeProblem(reg: Registry, w: Working, type: FieldType, def: FieldDef,
   switch (type) {
     case "number":
     case "duration":
-      return typeof value === "number" && Number.isFinite(value) ? null : "must be a number";
+      return typeof value === "number" && Number.isFinite(value) ? null : say("eng_must_be_a_number");
     case "money":
-      return Number.isSafeInteger(value) ? null : "must be a whole amount";
+      return Number.isSafeInteger(value) ? null : say("eng_must_be_a_whole_amount");
     case "date":
-      return (typeof value === "number" && Number.isFinite(value)) || typeof value === "string" ? null : "must be a date";
+      return (typeof value === "number" && Number.isFinite(value)) || typeof value === "string" ? null : say("eng_must_be_a_date");
     case "bool":
-      return typeof value === "boolean" ? null : "must be yes or no";
+      return typeof value === "boolean" ? null : say("eng_must_be_yes_or_no");
     case "text":
-      return typeof value === "string" ? null : "must be text";
+      return typeof value === "string" ? null : say("eng_must_be_text");
     case "enum":
-      return typeof value === "string" && (!def.values || def.values.includes(value)) ? null : `must be one of ${(def.values ?? []).join(", ")}`;
+      return typeof value === "string" && (!def.values || def.values.includes(value)) ? null : say("eng_must_be_one_of_values", { values: (def.values ?? []).join(", ") });
     case "dice":
-      if (typeof value !== "string") return "must be dice, like 2d6+1";
+      if (typeof value !== "string") return say("eng_must_be_dice_like_2d6_1");
       try {
         parseDice(value);
         return null;
       } catch {
-        return "must be dice, like 2d6+1";
+        return say("eng_must_be_dice_like_2d6_1");
       }
     case "ref": {
       // Null clears a reference (no owner, no employer).
       if (value === null) return null;
       const target = typeof value === "string" ? own(w.state.entities, value) : undefined;
-      if (def.ref) return target && kindIs(reg, w.world, target.kind, def.ref) ? null : `must name a ${(kindDef(reg, w.world, def.ref)?.label ?? def.ref).toLowerCase()}`;
-      return target || (typeof value === "string" && own(w.world.places, value)) ? null : "must name a place or something in the world";
+      if (def.ref) return target && kindIs(reg, w.world, target.kind, def.ref) ? null : say("eng_must_name_a_def", { def: (kindDef(reg, w.world, def.ref)?.label ?? def.ref).toLowerCase() });
+      return target || (typeof value === "string" && own(w.world.places, value)) ? null : say("eng_must_name_a_place_or_something_in");
     }
     case "list": {
-      if (!Array.isArray(value)) return "must be a list";
+      if (!Array.isArray(value)) return say("eng_must_be_a_list");
       if (!def.of) return null;
       for (const item of value) {
         const problem = shapeProblem(reg, w, def.of, { ...def, type: def.of }, item);
@@ -151,8 +151,8 @@ export function valueProblem(reg: Registry, w: Working, entity: EntityId, def: F
   const { min, max } = fieldBounds(reg, w.ctx, entity, def);
   const show = (n: number): string => (def.type === "money" ? formatMoney(n, w.world.currency) : String(n));
   if ((min === undefined || value >= min) && (max === undefined || value <= max)) return null;
-  if (min !== undefined && max !== undefined) return `must be between ${show(min)} and ${show(max)}`;
-  return min !== undefined ? `must be at least ${show(min)}` : `must be at most ${show(max ?? value)}`;
+  if (min !== undefined && max !== undefined) return say("eng_must_be_between_min_and_max", { min: show(min), max: show(max) });
+  return min !== undefined ? say("eng_must_be_at_least_min", { min: show(min) }) : say("eng_must_be_at_most_value", { value: show(max ?? value) });
 }
 
 /** Runs effects with literal arguments; the first rejection (a level-up's included) refuses the edit. */
@@ -332,7 +332,7 @@ function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, 
   if (op.rel === "in" && isThing(w.ctx, op.from)) return thingMove(w, op.from, { in: op.to }, opts, rng);
   for (const [key, value] of Object.entries(op.fields ?? {})) {
     const fdef = def ? own(def.fields, key) : undefined;
-    const problem = !safeKey(key) ? "isn't a field name" : fdef ? shapeProblem(reg, w, fdef.type, fdef, value) : null;
+    const problem = !safeKey(key) ? say("eng_isnt_a_field_name") : fdef ? shapeProblem(reg, w, fdef.type, fdef, value) : null;
     if (problem) return reject("bad_value", `${fdef?.label ?? key.replace(/_/g, " ")} ${problem}`);
   }
   if (op.until !== undefined && !Number.isFinite(op.until)) return reject("bad_until", say("why_an_end_time_is_a_time"));
@@ -445,7 +445,7 @@ function adjustOp(reg: Registry, w: Working, account: EntityId, cents: number, r
     const events = adjust(w.ctx, account, cents);
     return Array.isArray(events) ? applyAll(w, events) : events;
   }
-  return run(reg, w, [{ type: "post", args: { memo: "Correction", lines: [{ account, amount: cents }, { account: CORRECTION, amount: -cents }] } }], rng);
+  return run(reg, w, [{ type: "post", args: { memo: say("eng_correction"), lines: [{ account, amount: cents }, { account: CORRECTION, amount: -cents }] } }], rng);
 }
 
 /**

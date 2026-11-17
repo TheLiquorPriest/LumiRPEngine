@@ -10,7 +10,6 @@ import type { EntityId } from "../../../shared/ids";
 import type { FeedScope } from "../../../shared/world";
 import type { GrantBasis } from "../../../shared/things";
 import { gotOf, grantBasisOf, madeOf, SET_KINDS, setsOf, thingsConfigOf } from "../../../shared/things";
-import { listWords } from "../../../shared/words";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { orgPower, orgTypeOf } from "../../../engine/org";
 import { own } from "../../../engine/pack-kit";
@@ -23,7 +22,7 @@ import { contentsOf, holderOf, holdersOf, possessorOf, restOf, whoseOf } from ".
 import { sentence, thingName, thingText, whereWords, whoseWords } from "../../../engine/thing-words";
 import { canSeeEntity } from "../../../engine/visibility";
 import { carriedBy } from "./model";
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 
 /** What a holder wears or has equipped. */
 export function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
@@ -166,7 +165,7 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     };
     const owners = (id: EntityId): string => {
       const seen = whoseOf(ctx, id).owners.filter(see).map(nameOf);
-      return seen.length > 0 ? listWords(seen) : "someone";
+      return seen.length > 0 ? listOf(seen) : "someone";
     };
     const lines: FeedLine[] = [];
     const rank = (id: EntityId): number => {
@@ -204,7 +203,7 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const sets = level >= 3 ? Object.values(setsOf(own(ctx.state.entities, pov)?.fields)) : [];
     for (const kind of SET_KINDS) {
       const names = sets.filter((s) => s.kind === kind).map((s) => s.name).sort((a, b) => a.localeCompare(b));
-      if (names.length > 0) lines.push({ text: say("feed_saved_outfitssaved_loadouts_names", { names: listWords(names), if_outfit: kind === "outfit" }), known: "pov" });
+      if (names.length > 0) lines.push({ text: say("feed_saved_outfitssaved_loadouts_names", { names: listOf(names), if_outfit: kind === "outfit" }), known: "pov" });
     }
     if (scope === "gm") {
       const unknown = [...new Set([...carriedBy(ctx.state, pov), ...wornBy(ctx, pov)])].filter((id) => own(ctx.state.entities, id)?.kind !== "account" && !see(id));

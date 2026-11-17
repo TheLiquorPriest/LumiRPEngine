@@ -58,7 +58,7 @@ function oneSource(c: Cardinality): boolean {
 
 function kindPhrase(reg: Registry, world: WorldDoc, kind: string): string {
   const label = (kindDef(reg, world, kind)?.label ?? kind.replace(/_/g, " ")).toLowerCase();
-  return `${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`;
+  return say("eng_ana_label", { label: label, if_test: /^[aeiou]/.test(label) });
 }
 
 /** `Parent of` → `parent of`, for a sentence. */
@@ -96,17 +96,17 @@ function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     const gm = sentence(say((end) => end.name));
     return reason === gm ? reject(code, reason) : { code, reason, gm };
   };
-  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from)) return worded("relation_kind", (name) => `“${def.label}” runs from ${kindPhrase(reg, world, def.from)}; ${name(a)} is ${kindPhrase(reg, world, a.kind)}`);
-  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to)) return worded("relation_kind", (name) => `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${name(b)} is ${kindPhrase(reg, world, b.kind)}`);
+  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from)) return worded("relation_kind", (name) => say("eng_def_runs_from_from_name_is_kindphrase", { def: def.label, from: kindPhrase(reg, world, def.from), name: name(a), kindPhrase: kindPhrase(reg, world, a.kind) }));
+  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to)) return worded("relation_kind", (name) => say("eng_def_runs_to_def2_b_is_b2", { def: def.label, def2: kindPhrase(reg, world, def.to), b: name(b), b2: kindPhrase(reg, world, b.kind) }));
   if (oneTarget(def.cardinality)) {
     const other = a.relations.find((r) => r.type === def.id && r.to !== b.id);
-    if (other) return worded("cardinality", (name) => `${name(a)} is already ${inline(def)} ${name({ id: other.to, name: own(state.entities, other.to)?.name ?? other.to })}; “${def.label}” allows one at a time`);
+    if (other) return worded("cardinality", (name) => say("eng_name_is_already_def_other_def2_allows", { name: name(a), def: inline(def), other: name({ id: other.to, name: own(state.entities, other.to)?.name ?? other.to }), def2: def.label }));
   }
   if (oneSource(def.cardinality)) {
     const holder = Object.keys(state.entities)
       .sort()
       .find((id) => id !== a.id && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === b.id));
-    if (holder) return worded("cardinality", (name) => `${name({ id: holder, name: own(state.entities, holder)?.name ?? holder })} is already ${inline(def)} ${name(b)}; “${def.label}” allows one at a time`);
+    if (holder) return worded("cardinality", (name) => say("eng_name_is_already_def_other_def2_allows", { name: name({ id: holder, name: own(state.entities, holder)?.name ?? holder }), def: inline(def), other: name(b), def2: def.label }));
   }
   return null;
 }
@@ -148,8 +148,8 @@ export function spawnLinks(reg: Registry, world: WorldDoc, state: Readonly<World
     if (!target) {
       if (def && def.to !== "*") {
         const name = own(world.places, r.to)?.name ?? r.to;
-        const reason = (place: string): string => `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${place} isn't one`;
-        return canSeePlace(reg, world, state, world.pov, r.to) ? reject("relation_kind", reason(name)) : { code: "relation_kind", reason: reason("that place"), gm: reason(name) };
+        const reason = (place: string): string => say("eng_def_runs_to_def2_place_isnt_one", { def: def.label, def2: kindPhrase(reg, world, def.to), place: place });
+        return canSeePlace(reg, world, state, world.pov, r.to) ? reject("relation_kind", reason(name)) : { code: "relation_kind", reason: reason(say("eng_that_place")), gm: reason(name) };
       }
       continue;
     }

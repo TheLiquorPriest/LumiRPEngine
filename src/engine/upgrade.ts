@@ -50,6 +50,7 @@ import { visibilityOf } from "./visibility";
 import { carryDraft, chatDraftOf, NO_DRAFT } from "./world-draft";
 import { carrySpace } from "../packs/space/core/grid-play";
 import { clampLevels } from "./world-state";
+import { say } from "./lines";
 
 /** What the merge needs from the registry: event types (an account's posting), relation types and read contexts. */
 export interface UpgradeTypes extends EventTypes, RelationTypes {
@@ -134,7 +135,7 @@ function setLag(state: WorldState, revision: RevisionId | null): void {
 
 function revisionDoc(env: MarkerEnv, revision: RevisionId): WorldDoc {
   const world = env.worlds(revision);
-  if (!world) throw new FoldError(`unknown revision ${revision}`);
+  if (!world) throw new FoldError(say("eng_unknown_revision_revision", { revision: revision }));
   return world;
 }
 
@@ -486,7 +487,7 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
     state.tracks[t.track] = { stage: t.start, since: state.clock };
     const def = own(after.tracks, t.track);
     // Only a public track's stages reach the player (`eventVisible`).
-    if (def && visibilityOf(def.visibility) === "public") notes.push(`${def.label}: back to ${own(def.stages, t.start)?.label ?? "its start"}, since this revision of the world no longer has the stage it was at`);
+    if (def && visibilityOf(def.visibility) === "public") notes.push(say("eng_def_back_to_start_its_start_since", { def: def.label, start: own(def.stages, t.start)?.label }));
   }
 
   // Someone the revision brings back to a state that acts (its own, or a custom state now acting)

@@ -236,7 +236,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     const outcome = !target ? { code: "bad_target", reason: say("why_no_timelapse_target") } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
     if ("code" in outcome) {
       w.restore(before);
-      w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
+      w.apply({ type: ENGINE_EVENTS.note, data: { text: say("eng_timelapse_not_run_reason", { reason: outcome.reason }) } });
     } else {
       combat.push(...broke);
       timelapse = outcome;

@@ -9,7 +9,7 @@
 // `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
 // `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
-import { say } from "./lines";
+import { listOf, say } from "./lines";
 import { facetsInOrder } from "../shared/classes";
 import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -17,7 +17,7 @@ import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
 import { DOMAIN_LABEL, DOMAINS, INTERRUPT_CLASSES, LEVEL_LABEL } from "../shared/ids";
 import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
-import { fieldNoun, listWords, possessive } from "../shared/words";
+import { fieldNoun, possessive } from "../shared/words";
 import type { PackEvent } from "../shared/ledger";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
@@ -423,7 +423,7 @@ const events: EventTypeDef<PackEvent>[] = [
           const level = LEVELS.find((n) => n === v);
           clauses.push(v === null ? say("ev_entity_level_cleared", { area }) : say("ev_entity_level", { area, level: String(v), ...(level !== undefined ? { label: LEVEL_LABEL[level] } : {}) }));
         }
-      return clauses.length === 0 ? "" : say("ev_entity", { name: own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity"), clauses: listWords(clauses) });
+      return clauses.length === 0 ? "" : say("ev_entity", { name: own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity"), clauses: listOf(clauses) });
     },
   },
   {
@@ -450,7 +450,7 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) => {
       const classes = classOf(e.data.class) ?? {};
       const name = own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity");
-      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? listWords(values.map((v) => own(f.values, v)?.label ?? v)) : say("ev_none"));
+      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? listOf(values.map((v) => own(f.values, v)?.label ?? v)) : say("ev_none"));
       // "Danny Okafor's trade is now mechanic": each facet as what it is, then its values.
       const facetLine = (f: FacetDef, values: readonly string[]): string => say("ev_class_facet", { whose: possessive(name), noun: fieldNoun(f.label, "").noun, values: valuesOf(f, values) });
       if (viewer !== undefined) {
@@ -470,7 +470,7 @@ const events: EventTypeDef<PackEvent>[] = [
         return values.length > 0 ? [facetLine(f, values)] : [];
       });
       const tags = tagList(e.data.tags) ?? [];
-      if (tags.length > 0) parts.push(say("ev_class_tags", { whose: possessive(name), tags: listWords(tags) }));
+      if (tags.length > 0) parts.push(say("ev_class_tags", { whose: possessive(name), tags: listOf(tags) }));
       return parts.length > 0 ? parts.join("; ") : say("ev_class_none", { name });
     },
   },
@@ -545,7 +545,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const id = str(e, "entity");
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e.data.who) ? e.data.who.filter((x): x is string => typeof x === "string") : [];
-      if (viewer === undefined) return say("ev_told", { who: listWords(who.map((w) => own(ctx.state.entities, w)?.name ?? w)), ...(who.length === 1 ? { one: true } : {}), name, reads: lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads });
+      if (viewer === undefined) return say("ev_told", { who: listOf(who.map((w) => own(ctx.state.entities, w)?.name ?? w)), ...(who.length === 1 ? { one: true } : {}), name, reads: lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads });
       // Someone else being told is nobody's news; the POV hears what it now takes to be so.
       return who.includes(viewer) ? say("ev_life_reads", { name, reads: lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads }) : "";
     },

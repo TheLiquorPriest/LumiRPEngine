@@ -242,7 +242,7 @@ export const lifeChannel: ProposalChannelDef = {
     if (!e || isGone(ctx.state, subject)) return { code: "missing_entity", reason: say("why_theres_no_one_by_that_name") };
     if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_a_character", reason: say("why_only_people_live_and_die") };
     const to = stateNamed(ctx.world, p.state);
-    if (to === null) return { code: "bad_life", reason: `there's no life state ${typeof p.state === "string" ? p.state : ""}`.trim() };
+    if (to === null) return { code: "bad_life", reason: say("eng_theres_no_life_state_string", { string: typeof p.state === "string" ? p.state : "" }).trim() };
     if (lifeKnownTo(ctx.state, subject, ctx.world.pov) === to) return { code: "already", reason: say("why_name_already_reads", { name: e.name, reads: lifeStateOf(ctx.world, to).reads }) };
     return null;
   },

@@ -39,6 +39,7 @@ import { flatPath, type PathEvent } from "./thing-gm";
 import { thingIndex } from "./thing-index";
 import { thingVisibility } from "./thing-view";
 import { holderOf, holdersOf, holdsOf, possessorOf, sizeOf } from "./things";
+import { say } from "./lines";
 
 /** A head noun shared by more things than this is too common to pair them by (every "key" of a large world). */
 const PAIR_LIMIT = 64;
@@ -184,21 +185,21 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
         const home = buyer !== undefined ? own(ctx.state.entities, buyer)?.fields.home : undefined;
         const homePlace = typeof home === "string" && own(ctx.world.places, home) ? home : null;
         const to: PlaceId | null = homePlace ?? placeOfEntity(ctx.state, holder);
-        const why = big === "vehicle" ? "a vehicle goes only on another vehicle" : `too big to carry (${SIZE_LABELS[big]}; a person carries up to ${SIZE_LABELS[ceiling]})`;
-        const where = to === null ? "" : homePlace !== null && buyer !== undefined ? ` It was bought: put it at ${name(to)}, where ${name(buyer)} lives?` : ` Put it at ${name(to)}, where ${name(holder)} is?`;
-        add("too_big", [id], `${e.name} is on ${name(holder)}: ${why}.${where}`, to === null ? null : { label: `Put it at ${name(to)}`, ops: [move(id, { place: to }, homePlace !== null ? "Too big to carry: delivered to the buyer's home" : "Too big to carry: set down where they are")], done: `${e.name} is at ${name(to)} now.` });
+        const why = big === "vehicle" ? say("eng_a_vehicle_goes_only_on_another_vehicle") : say("eng_too_big_to_carry_big_a_person", { big: SIZE_LABELS[big], ceiling: SIZE_LABELS[ceiling] });
+        const where = to === null ? "" : homePlace !== null && buyer !== undefined ? say("eng_it_was_bought_put_it_at_name", { name: name(to), buyer: name(buyer) }) : say("eng_put_it_at_name_where_holder_is", { name: name(to), holder: name(holder) });
+        add("too_big", [id], `${e.name} is on ${name(holder)}: ${why}.${where}`, to === null ? null : { label: `Put it at ${name(to)}`, ops: [move(id, { place: to }, homePlace !== null ? say("eng_too_big_to_carry_delivered_to_the") : say("eng_too_big_to_carry_set_down_where"))], done: say("eng_name_is_at_name2_now", { name: e.name, name2: name(to) }) });
       }
       // 2. Lying at a place and in a holder (on a person) at once.
       if (wanted("two_places") && holder !== null && lying !== null) {
-        const held = `${isPerson(holder) ? "on" : "in"} ${name(holder)}`;
-        const keepIn: TidyFix[] = holdsOf(ctx, holder) !== null ? [{ label: `Keep it ${held}`, ops: [move(id, { in: holder }, "One place at a time")], done: `${e.name} is ${held} now.` }] : [];
-        add("two_places", [id], `${e.name} lies at ${name(lying)} and is ${held} at once; play reads it at ${name(lying)}.`, own(ctx.world.places, lying) ? { label: `Keep it at ${name(lying)}`, ops: [move(id, { place: lying }, "One place at a time")], done: `${e.name} lies at ${name(lying)} now, in nothing.` } : null, keepIn);
+        const held = say("eng_onin_holder", { holder: name(holder), if_holder: !!(isPerson(holder)) });
+        const keepIn: TidyFix[] = holdsOf(ctx, holder) !== null ? [{ label: `Keep it ${held}`, ops: [move(id, { in: holder }, say("eng_one_place_at_a_time"))], done: say("eng_name_is_held_now", { name: e.name, held: held }) }] : [];
+        add("two_places", [id], `${e.name} lies at ${name(lying)} and is ${held} at once; play reads it at ${name(lying)}.`, own(ctx.world.places, lying) ? { label: `Keep it at ${name(lying)}`, ops: [move(id, { place: lying }, say("eng_one_place_at_a_time"))], done: say("eng_name_lies_at_lying_now_in_nothing", { name: e.name, lying: name(lying) }) } : null, keepIn);
       }
       // 3. Worn by someone, lying elsewhere.
       const wearer = wanted("worn_elsewhere") ? wornElsewhere(ctx, id) : null;
       if (wearer !== null) {
-        const at = lying !== null ? `lies at ${name(lying)}` : holder !== null ? `is ${isPerson(holder) ? "on" : "in"} ${name(holder)}` : "is nowhere";
-        add("worn_elsewhere", [id], `${e.name} ${at}, yet ${name(wearer)} still wears it.`, { label: `Take it off ${name(wearer)}`, ops: [{ op: "item", change: { do: "wear", item: id, who: wearer, off: true } }], done: `${name(wearer)} doesn't wear ${e.name} now.` });
+        const at = lying !== null ? say("eng_lies_at_lying", { lying: name(lying) }) : holder !== null ? say("eng_is_onin_holder", { holder: name(holder), if_holder: !!(isPerson(holder)) }) : say("eng_is_nowhere");
+        add("worn_elsewhere", [id], `${e.name} ${at}, yet ${name(wearer)} still wears it.`, { label: `Take it off ${name(wearer)}`, ops: [{ op: "item", change: { do: "wear", item: id, who: wearer, off: true } }], done: say("eng_wearer_doesnt_wear_name_now", { wearer: name(wearer), name: e.name }) });
       }
       // 6. Made in play, its size nothing gives.
       if (wanted("size_unknown") && made(id) && size === "unknown") {
@@ -207,7 +208,7 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
           [id],
           `${e.name} was made in play, and nothing gives its size (its type, volume or category), so play treats it as portable. What size is it?`,
           null,
-          SIZES.map((s) => ({ label: SIZE_LABELS[s], ops: [{ op: "item", change: { do: "label", item: id, size: s } }], done: `${e.name} is ${SIZE_LABELS[s]} now.` })),
+          SIZES.map((s) => ({ label: SIZE_LABELS[s], ops: [{ op: "item", change: { do: "label", item: id, size: s } }], done: say("eng_name_is_held_now", { name: e.name, held: SIZE_LABELS[s] }) })),
         );
       }
     }
@@ -217,8 +218,8 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
       const owners = e ? ownersIn(e.fields).map((o) => o.party) : [];
       if (!e || isGone(ctx.state, h.thing) || !own(ctx.state.entities, h.from) || isGone(ctx.state, h.from) || owners.length !== 1 || owners[0] !== h.to || Array.isArray(e.fields.owners)) continue;
       const held = possessorOf(ctx, h.thing) === h.to;
-      const ops: EditOp[] = [{ op: "item", change: { do: "own", item: h.thing, owner: h.from, why: "A handover keeps the owner" } }, ...(held ? [{ op: "item", change: { do: "grant", item: h.thing, who: h.to, basis: "hold", by: h.from } } satisfies EditOp] : [])];
-      add("handover_owner", [h.thing], `${e.name} became ${possessive(name(h.to))} when ${name(h.from)} handed it over in a reply. A handover keeps the owner unless the story says it was a gift, a sale or a trade.`, { label: `Make it ${possessive(name(h.from))} again`, ops, done: held ? `${e.name} is ${possessive(name(h.from))} again, held by ${name(h.to)}.` : `${e.name} is ${possessive(name(h.from))} again.` });
+      const ops: EditOp[] = [{ op: "item", change: { do: "own", item: h.thing, owner: h.from, why: say("eng_a_handover_keeps_the_owner") } }, ...(held ? [{ op: "item", change: { do: "grant", item: h.thing, who: h.to, basis: "hold", by: h.from } } satisfies EditOp] : [])];
+      add("handover_owner", [h.thing], `${e.name} became ${possessive(name(h.to))} when ${name(h.from)} handed it over in a reply. A handover keeps the owner unless the story says it was a gift, a sale or a trade.`, { label: `Make it ${possessive(name(h.from))} again`, ops, done: held ? say("eng_name_is_from_again_held_by_h", { name: e.name, from: possessive(name(h.from)), h: name(h.to) }) : say("eng_name_is_from_again", { name: e.name, from: possessive(name(h.from)) }) });
     }
     // 5. Likely duplicates.
     const index = thingIndex(ctx);
@@ -237,7 +238,7 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
           const ownersB = new Set(ownersIn(own(ctx.state.entities, b)?.fields ?? {}).map((o) => o.party));
           const shared = ownersIn(own(ctx.state.entities, a)?.fields ?? {}).find((o) => ownersB.has(o.party))?.party;
           const at = placeOfEntity(ctx.state, a);
-          const why = shared !== undefined ? `both ${possessive(name(shared))}` : at !== null && at === placeOfEntity(ctx.state, b) ? `both at ${name(at)}` : null;
+          const why = shared !== undefined ? say("eng_both_shared", { shared: possessive(name(shared)) }) : at !== null && at === placeOfEntity(ctx.state, b) ? say("eng_both_at_name", { name: name(at) }) : null;
           if (why !== null) pairs.set([a, b].sort().join("+"), { a, b, why });
         }
       }
@@ -245,7 +246,7 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
     for (const id of wanted("duplicate") ? things : []) {
       const same = own(ctx.state.entities, id)?.fields.maybe_same_as;
       // One holding the other is no duplicate, as for the name pairs: merging them would put a thing inside itself.
-      if (typeof same === "string" && same !== id && own(ctx.state.entities, same) && !isGone(ctx.state, same) && !holdersOf(ctx.state, id).includes(same) && !holdersOf(ctx.state, same).includes(id)) pairs.set([id, same].sort().join("+"), { a: same, b: id, why: "made beside a hidden one it may be" });
+      if (typeof same === "string" && same !== id && own(ctx.state.entities, same) && !isGone(ctx.state, same) && !holdersOf(ctx.state, id).includes(same) && !holdersOf(ctx.state, same).includes(id)) pairs.set([id, same].sort().join("+"), { a: same, b: id, why: say("eng_made_beside_a_hidden_one_it_may") });
     }
     const at = (id: EntityId): string => {
       const who = possessorOf(ctx, id);
@@ -256,7 +257,7 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
       // The one made in play goes; of two, the later made.
       const drop = made(a) && made(b) ? ((facts.order.get(a) ?? -1) > (facts.order.get(b) ?? -1) ? a : b) : made(a) ? a : b;
       const keep = drop === a ? b : a;
-      add("duplicate", [keep, drop].sort(), `${name(keep)} (${at(keep)}) and ${name(drop)} (${at(drop)}, made in play) may be the same thing: ${why}.`, { label: `Merge into ${name(keep)}`, ops: [{ op: "item", change: { do: "merge", keep, drop } }], done: `${name(drop)} is merged into ${name(keep)}.` });
+      add("duplicate", [keep, drop].sort(), `${name(keep)} (${at(keep)}) and ${name(drop)} (${at(drop)}, made in play) may be the same thing: ${why}.`, { label: `Merge into ${name(keep)}`, ops: [{ op: "item", change: { do: "merge", keep, drop } }], done: say("eng_drop_is_merged_into_keep", { drop: name(drop), keep: name(keep) }) });
     }
     // 7. A Gear or Place line the head turn's final review took out of the narrator's prompt, or rewrote.
     for (const edit of wanted("final_dropped") ? (opts.finalEdits ?? []) : []) {
@@ -267,9 +268,9 @@ export function tidyFindings(ctx: ReadContext, path: readonly PathEvent[], opts:
         const n = own(ctx.state.entities, id)?.name.toLowerCase() ?? "";
         return n.length >= 3 && said.includes(n);
       });
-      const how = edit.op === "drop" ? "took this line out of" : `rewrote this line in`;
-      const then = edit.op === "replace" ? ` as "${edit.text}"` : "";
-      out.push({ key: `final_dropped:${edit.part}:${hashParts("lre.tidy.final", edit.line).slice(0, 12)}`, kind: "final_dropped", things: named.slice(0, 8), text: `The last turn's final review ${how} the narrator's ${part} section${then}: "${edit.line}". A line it can't use often means the things are wrong: look at what it names.`, fix: null, choices: [], secret: named.some(secret) });
+      const how = edit.op === "drop" ? say("eng_took_this_line_out_of") : say("eng_rewrote_this_line_in");
+      const then = edit.op === "replace" ? say("eng_as_text", { text: edit.text }) : "";
+      out.push({ key: `final_dropped:${edit.part}:${hashParts("lre.tidy.final", edit.line).slice(0, 12)}`, kind: "final_dropped", things: named.slice(0, 8), text: say("eng_the_last_turns_final_review_how_the", { how: how, part: part, then: then, line: edit.line }), fix: null, choices: [], secret: named.some(secret) });
     }
     return out.sort((x, y) => TIDY_KINDS.indexOf(x.kind) - TIDY_KINDS.indexOf(y.kind) || x.text.localeCompare(y.text) || x.key.localeCompare(y.key));
   });

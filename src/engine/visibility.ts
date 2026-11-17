@@ -28,6 +28,7 @@ import { selectorMatches } from "./selector";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
+import { say } from "./lines";
 
 /** Whether `who` knows `subject` (an entity, place or fact id); everyone knows themselves. */
 export function knows(state: Readonly<WorldState>, who: EntityId, subject: string): boolean {
@@ -386,7 +387,7 @@ export function playerTrack(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return {
     id: shownTrackId(world, id),
     kind: t.kind,
-    label: secret && truths.length === 0 ? "Something is going on" : t.label,
+    label: secret && truths.length === 0 ? say("eng_something_is_going_on") : t.label,
     stage: secret && truths.length === 0 ? "" : stage.label,
     cue,
     truths,

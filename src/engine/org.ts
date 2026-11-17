@@ -22,6 +22,7 @@ import type { ReadContext } from "./registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { siteOf, together } from "./presence";
 import { COMPANY_KIND, GROUP_KIND, isMemberOf, linkedMemberOf, providersOf, type MembershipContext } from "./selector";
+import { say } from "./lines";
 
 type OrgContext = MembershipContext;
 
@@ -632,8 +633,8 @@ const WINDING_STOPS: readonly OrgPower[] = ["staff.hire", "money.invoice", "mone
 /** Why no one may use `power` for `org` any more: it was dissolved, or it is winding up and the power is trading; null otherwise. */
 function endedRefusal(ctx: ReadContext, org: EntityId, power: OrgPower): string | null {
   const dissolved = dissolvedOn(ctx.state, org);
-  if (dissolved !== null) return `${labelOf(ctx, org)} was dissolved on ${dayWords(ctx.world, dissolved)}`;
-  return windingUpSince(ctx.state, org) !== null && WINDING_STOPS.includes(power) ? `${labelOf(ctx, org)} is winding up` : null;
+  if (dissolved !== null) return say("eng_org_was_dissolved_on_dissolved", { org: labelOf(ctx, org), dissolved: dayWords(ctx.world, dissolved) });
+  return windingUpSince(ctx.state, org) !== null && WINDING_STOPS.includes(power) ? say("eng_org_is_winding_up", { org: labelOf(ctx, org) }) : null;
 }
 
 // ---------------------------------------------------------------- places

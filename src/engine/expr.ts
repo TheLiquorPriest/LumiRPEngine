@@ -1,3 +1,4 @@
+import { say } from "./lines";
 // A small, safe, deterministic formula language for rules, predicates and derived fields.
 //
 //   20 + skill / 12 - here.security
@@ -102,7 +103,7 @@ export class ExprLimitError extends ExprError {
   readonly limit: ExprLimitKind;
   readonly max: number;
   constructor(limit: ExprLimitKind, max: number) {
-    super(`Formula exceeds the ${LIMIT_NAMES[limit]} limit of ${max}`);
+    super(say("eng_formula_exceeds_the_limit_limit_of_max", { limit: LIMIT_NAMES[limit], max: max }));
     this.name = "ExprLimitError";
     this.limit = limit;
     this.max = max;
@@ -195,7 +196,7 @@ function tokenize(src: string): Tok[] {
         if (src[j] === "\\" && j + 1 < src.length) { s += src[j + 1]; j += 2; continue; }
         s += src[j++];
       }
-      if (j >= src.length) throw new ExprError(`Unclosed quote starting at character ${i + 1}`);
+      if (j >= src.length) throw new ExprError(say("eng_unclosed_quote_starting_at_character_i", { i: i + 1 }));
       out.push({ t: "str", v: s, at: i });
       i = j + 1;
       continue;
@@ -208,7 +209,7 @@ function tokenize(src: string): Tok[] {
       continue;
     }
     const op = OPS.find((o) => src.startsWith(o, i));
-    if (!op) throw new ExprError(`Unexpected "${c}" at character ${i + 1}`);
+    if (!op) throw new ExprError(say("eng_unexpected_c_at_character_i", { c: c, i: i + 1 }));
     out.push({ t: "op", v: op, at: i });
     i += op.length;
   }
@@ -238,7 +239,7 @@ class Parser {
 
   parse(): { root: Node; nodeCount: number } {
     const root = this.expr(0);
-    if (this.i < this.toks.length) this.fail(`Unexpected "${this.toks[this.i].v}"`);
+    if (this.i < this.toks.length) this.fail(say("eng_unexpected_toks", { toks: this.toks[this.i].v }));
     return { root, nodeCount: this.nodes };
   }
 
@@ -246,12 +247,12 @@ class Parser {
 
   private fail(msg: string): never {
     const at = this.peek()?.at;
-    throw new ExprError(at === undefined ? `${msg} at end of expression` : `${msg} at character ${at + 1}`);
+    throw new ExprError(at === undefined ? say("eng_msg_at_end_of_expression", { msg: msg }) : say("eng_msg_at_character_at", { msg: msg, at: at + 1 }));
   }
 
   private eat(v: string): void {
     const t = this.peek();
-    if (!t || t.v !== v) this.fail(`Expected "${v}"`);
+    if (!t || t.v !== v) this.fail(say("eng_expected_v", { v: v }));
     this.i++;
   }
 
@@ -302,7 +303,7 @@ class Parser {
 
   private unary(): Node {
     const t = this.peek();
-    if (!t) this.fail("Expression ended too early");
+    if (!t) this.fail(say("eng_expression_ended_too_early"));
     if (t.t === "op" && t.v === "-") { this.i++; return this.node({ k: "un", op: "-", a: this.nest(() => this.unary()) }); }
     // Leading plus is just emphasis ("+(12 + x)" reads as "add this"), so it is a no-op.
     if (t.t === "op" && t.v === "+") { this.i++; return this.nest(() => this.unary()); }
@@ -315,11 +316,11 @@ class Parser {
 
   private primary(): Node {
     const t = this.peek();
-    if (!t) this.fail("Expression ended too early");
+    if (!t) this.fail(say("eng_expression_ended_too_early"));
     this.i++;
     if (t.t === "num") {
       const v = Number(t.v);
-      if (!Number.isFinite(v)) throw new ExprError(`Number too large at character ${t.at + 1}`);
+      if (!Number.isFinite(v)) throw new ExprError(say("eng_number_too_large_at_character_t", { t: t.at + 1 }));
       return this.node({ k: "num", v });
     }
     if (t.t === "str") return this.node({ k: "str", v: t.v });
@@ -349,14 +350,14 @@ class Parser {
       while (this.peek()?.v === ".") {
         this.i++;
         const next = this.peek();
-        if (!next || next.t !== "id") this.fail('Expected a name after "."');
+        if (!next || next.t !== "id") this.fail(say("eng_expected_a_name_after"));
         path.push(next.v);
         this.i++;
       }
       return this.node({ k: "id", path });
     }
     this.i--;
-    this.fail(`Unexpected "${t.v}"`);
+    this.fail(say("eng_unexpected_toks", { toks: t.v }));
   }
 }
 
@@ -428,7 +429,7 @@ function fromEnv(v: Value, what: string): Value {
     case "string": case "boolean": return v;
     default:
       if (v === null) return v;
-      throw new ExprError(`The environment returned an unsupported value for ${what}`);
+      throw new ExprError(say("eng_the_environment_returned_an_unsupported_value_for", { what: what }));
   }
 }
 

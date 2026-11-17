@@ -16,7 +16,7 @@ import type { GmThingExtras, GmThingsList, HistorySource, KeepResult, LoanChoice
 import type { Spot } from "../shared/things";
 import { gotOf, grantBasisOf, type GotHow } from "../shared/things";
 import type { EntityDef, RelationInstance, WorldDoc } from "../shared/world";
-import { listWords } from "../shared/words";
+import { say, listOf } from "./lines";
 import { calendarOf, formatClock } from "./calendar";
 import { own } from "./pack-kit";
 import { baseWorld, keptPlace, madePlaces, type MadePlace } from "./places-in-play";
@@ -59,23 +59,23 @@ const nameOf = (ctx: Pick<ReadContext, "world" | "state">, id: string): string =
 function gotWords(how: GotHow, from: string | null, owners: string | null): string {
   switch (how) {
     case "bought":
-      return "Bought it";
+      return say("eng_bought_it");
     case "given":
-      return from ? `Given it by ${from}` : "Given it";
+      return from ? say("eng_given_it_by_from", { from: from }) : say("eng_given_it");
     case "holding":
-      return owners ? `Holding it for ${owners}` : "Holding it for its owner";
+      return owners ? say("eng_holding_it_for_owners", { owners: owners }) : say("eng_holding_it_for_its_owner");
     case "loan":
-      return from ? `Borrowing it from ${from}` : "Borrowing it";
+      return from ? say("eng_borrowing_it_from_from", { from: from }) : say("eng_borrowing_it");
     case "found":
-      return "Found it";
+      return say("eng_found_it");
     case "took":
-      return "Took it, with no right to it";
+      return say("eng_took_it_with_no_right_to_it");
     case "fetched":
-      return "Fetched it";
+      return say("eng_fetched_it");
     case "put_away":
-      return "Put away on them";
+      return say("eng_put_away_on_them");
     case "made":
-      return "Had it since it was made";
+      return say("eng_had_it_since_it_was_made");
   }
 }
 
@@ -88,19 +88,19 @@ export function thingWhy(ctx: ReadContext, id: EntityId): string | null {
   const who = possessorOf(ctx, id);
   if (who === null) return null;
   const whose = whoseOf(ctx, id);
-  const owners = whose.owners.length > 0 ? listWords(whose.owners.map((o) => nameOf(ctx, o))) : null;
+  const owners = whose.owners.length > 0 ? listOf(whose.owners.map((o) => nameOf(ctx, o))) : null;
   const got = gotOf(own(ctx.state.entities, id)?.fields.got);
   if (got) {
     const words = gotWords(got.how, got.from !== undefined ? nameOf(ctx, got.from) : null, owners);
     return got.why ? `${words}: ${got.why}` : words;
   }
-  if (whose.owners.includes(who)) return whose.presumed === undefined ? "Theirs" : "Theirs, presumed: nobody says otherwise";
+  if (whose.owners.includes(who)) return whose.presumed === undefined ? say("eng_theirs") : say("eng_theirs_presumed_nobody_says_otherwise");
   const grant = own(ctx.state.entities, who)?.relations.find((r) => r.type === "uses" && r.to === id);
   if (grant) {
     const basis = grantBasisOf(grant.fields, grant.until);
-    return basis === "hold" ? (owners ? `Holding it for ${owners}` : "Holding it for its owner") : basis === "loan" ? "Borrowing it" : "May use it";
+    return basis === "hold" ? (owners ? say("eng_holding_it_for_owners", { owners: owners }) : say("eng_holding_it_for_its_owner")) : basis === "loan" ? say("eng_borrowing_it") : say("eng_may_use_it");
   }
-  return owners ? `Has it; it is ${owners}'s` : "Has it";
+  return owners ? say("eng_has_it_it_is_owners_s", { owners: owners }) : say("eng_has_it");
 }
 
 // ---------------------------------------------------------------- where it rests
@@ -188,9 +188,9 @@ export function loanChoices(ctx: ReadContext): LoanChoice[] {
   const cal = calendarOf(ctx.world);
   const now = ctx.state.clock;
   return [
-    { days: 1, words: "For a day" },
-    { days: 3, words: "For three days" },
-    { days: 7, words: "For a week" },
+    { days: 1, words: say("eng_for_a_day") },
+    { days: 3, words: say("eng_for_three_days") },
+    { days: 7, words: say("eng_for_a_week") },
   ].map(({ days, words }) => ({ label: `${words}, until ${formatClock(cal, now + days * 1440)}`, until: now + days * 1440 }));
 }
 
@@ -254,7 +254,7 @@ export function keepThings(ctx: ReadContext, ids: readonly EntityId[], draft: Pi
   const wanted = [...new Set(ids)].sort();
   const keeping = new Set<EntityId>();
   for (const id of wanted) {
-    const reason = !own(ctx.state.entities, id) || !isThing(ctx, id) ? "it isn't a thing in this chat" : isGone(ctx.state, id) ? "it is out of the world" : own(ctx.world.entities, id) ? "the world has it already" : own(draft.entities, id) ? "the world's draft has it already" : null;
+    const reason = !own(ctx.state.entities, id) || !isThing(ctx, id) ? say("eng_it_isnt_a_thing_in_this_chat") : isGone(ctx.state, id) ? say("eng_it_is_out_of_the_world") : own(ctx.world.entities, id) ? say("eng_the_world_has_it_already") : own(draft.entities, id) ? say("eng_the_worlds_draft_has_it_already") : null;
     if (reason) result.skipped.push({ id, reason: `${nameOf(ctx, id)}: ${reason}` });
     else keeping.add(id);
   }
@@ -285,25 +285,25 @@ export function keepThings(ctx: ReadContext, ids: readonly EntityId[], draft: Pi
     const owner = typeof fields.owner === "string" ? fields.owner : null;
     if (owner !== null && !has(owner)) {
       delete fields.owner;
-      result.notes.push(`${name}: its owner ${nameOf(ctx, owner)} isn't in the world, so it is kept as nobody's.`);
+      result.notes.push(say("eng_name_its_owner_owner_isnt_in_the", { name: name, owner: nameOf(ctx, owner) }));
     }
     if (typeof fields.home === "string" && fields.home !== "owner" && !has(fields.home) && !placeOk(fields.home)) {
-      result.notes.push(`${name}: where it is kept, ${nameOf(ctx, fields.home)}, isn't in the world, so it rests where it is.`);
+      result.notes.push(say("eng_name_where_it_is_kept_home_isnt", { name: name, home: nameOf(ctx, fields.home) }));
       delete fields.home;
     }
     const relations: RelationInstance[] = [];
     for (const r of e.relations) {
       if (r.type === "in") continue;
       if (has(r.to)) relations.push(structuredClone(r));
-      else result.notes.push(`${name}: ${r.type.replace(/_/g, " ")} ${nameOf(ctx, r.to)} is left out: they aren't in the world.`);
+      else result.notes.push(say("eng_name_type_r_is_left_out_they", { name: name, type: r.type.replace(/_/g, " "), r: nameOf(ctx, r.to) }));
     }
     const holder = holderOf(ctx.state, id);
     const lying = typeof fields.place === "string" && fields.place !== "" ? fields.place : null;
     if (lying !== null || holder === null || !has(holder)) {
       // Lying somewhere, or in a holder the world won't have: at the nearest place the draft has.
       const at = reachable(lying ?? placeOfEntity(ctx.state, id));
-      if (lying === null && holder !== null) result.notes.push(`${name}: ${nameOf(ctx, holder)} isn't in the world, so it lies ${at !== null ? `at ${nameOf(ctx, at)}` : "nowhere"}.`);
-      else if (lying !== null && at !== lying) result.notes.push(`${name}: ${nameOf(ctx, lying)} isn't in the world, so it lies ${at !== null ? `at ${nameOf(ctx, at)}` : "nowhere"}.`);
+      if (lying === null && holder !== null) result.notes.push(say("eng_name_holder_isnt_in_the_world_so", { name: name, holder: nameOf(ctx, holder), at: at !== null ? nameOf(ctx, at) : undefined, if_at: at !== null }));
+      else if (lying !== null && at !== lying) result.notes.push(say("eng_name_holder_isnt_in_the_world_so", { name: name, holder: nameOf(ctx, lying), at: at !== null ? nameOf(ctx, at) : undefined, if_at: at !== null }));
       if (at !== null) fields.place = at;
       else delete fields.place;
     } else relations.unshift({ type: "in", to: holder });
@@ -341,7 +341,7 @@ export function keepPlaces(ctx: ReadContext, ids: readonly PlaceId[], draft: Pic
   const keeping = new Map<PlaceId, MadePlace>();
   for (const id of [...new Set(ids)].sort()) {
     const p = made.get(id);
-    const reason = !p ? "it isn't a place made in this chat" : hasOwn(base.places, id) ? "the world has it already" : own(draft.places, id) ? "the world's draft has it already" : null;
+    const reason = !p ? say("eng_it_isnt_a_place_made_in_this") : hasOwn(base.places, id) ? say("eng_the_world_has_it_already") : own(draft.places, id) ? say("eng_the_worlds_draft_has_it_already") : null;
     if (reason) result.skipped.push({ id, reason: `${nameOf(ctx, id)}: ${reason}` });
     else if (p) keeping.set(id, p);
   }

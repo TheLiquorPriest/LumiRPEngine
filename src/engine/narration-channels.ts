@@ -99,21 +99,21 @@ function unlearnable(ctx: ReadContext, fact: string): Rejection | null {
   if (fact === pov) return reject("already_known", say("why_everyone_knows_themselves"));
   if (hasOwn(state.entities, fact)) {
     if (!isPublic(own(world.entities, fact)?.visibility ?? own(state.entities, fact)?.fields.visibility)) {
-      return povMayKnow(registry, world, state, fact) ? reject("not_public", say("why_only_public_facts_are_read_from_a")) : noSuchFact(fact, `${labelOf(ctx, fact)} isn't public, and the POV doesn't know them`);
+      return povMayKnow(registry, world, state, fact) ? reject("not_public", say("why_only_public_facts_are_read_from_a")) : noSuchFact(fact, say("eng_fact_isnt_public_and_the_pov_doesnt", { fact: labelOf(ctx, fact) }));
     }
     return knowsAlready(ctx, pov, fact) ? reject("already_known", say("why_already_knows_fact", { fact: labelOf(ctx, fact) })) : null;
   }
   const place = hasOwn(world.places, fact) ? own(world.places, fact) : undefined;
   if (place) {
     // A reply can tell of a place kept to those who know it or hidden until found; a secret one only its story reveals.
-    if (placeKept(ctx, fact)) return noSuchFact(fact, `${place.name} is secret`);
+    if (placeKept(ctx, fact)) return noSuchFact(fact, say("eng_name_is_secret", { name: place.name }));
     if (place.visibility !== "known_by" && place.visibility !== "discoverable") return isPublic(place.visibility) ? reject("already_known", say("why_name_is_public", { name: place.name })) : reject("not_public", say("why_only_public_facts_are_read_from_a"));
     return canSeePlace(registry, world, state, pov, fact) ? reject("already_known", say("why_already_knows_fact", { fact: place.name })) : null;
   }
   const lore = hasOwn(world.lore, fact) ? own(world.lore, fact) : undefined;
-  if (lore && loreIsSecret(lore) && !loreGateReader(registry, world, state)(lore)) return noSuchFact(fact, "secret lore whose gate doesn't hold");
+  if (lore && loreIsSecret(lore) && !loreGateReader(registry, world, state)(lore)) return noSuchFact(fact, say("eng_secret_lore_whose_gate_doesnt_hold"));
   if (lore && (loreIsSecret(lore) || lore.gate !== undefined)) return reject("not_public", say("why_secret_lore_is_learned_through_its_gate"));
-  if (hasOwn(world.tracks, fact)) return trackShown(registry, world, state, pov, fact) ? reject("not_public", say("why_tracks_advance_through_their_stages_never_from")) : noSuchFact(fact, "a track the POV may not know of");
+  if (hasOwn(world.tracks, fact)) return trackShown(registry, world, state, pov, fact) ? reject("not_public", say("why_tracks_advance_through_their_stages_never_from")) : noSuchFact(fact, say("eng_a_track_the_pov_may_not_know"));
   return noSuchFact(fact);
 }
 

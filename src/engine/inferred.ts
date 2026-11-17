@@ -124,7 +124,7 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
   const raw: unknown = isRecord(world.ruleset) ? world.ruleset.inferred : undefined;
   if (raw === undefined) return [];
   const at = "ruleset.inferred";
-  const unset = "Until it does, inferred checks play as unset, by each chat's realism preset.";
+  const unset = say("eng_until_it_does_inferred_checks_play_as");
   if (!isRecord(raw)) return [{ severity: "error", path: at, code: "inferred", message: say("lint_inferred_checks_must_be_an_object_with", { unset: unset }) }];
   const policy = readInferred(raw);
   if (!policy) return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: say("lint_it_names_no_mode_mode_isnt_a", { mode: String(raw.mode), unset: unset, if_mode: raw.mode === undefined }) }];
@@ -303,18 +303,18 @@ export type InferredVerdict =
  */
 export function inferredRead(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, params: JsonObject): InferredVerdict {
   const policy = inferredOf(world, state);
-  if (policy.mode === "off") return { ok: false, why: "inferred checks are off in this chat" };
+  if (policy.mode === "off") return { ok: false, why: say("eng_inferred_checks_are_off_in_this_chat") };
   const read = tryRead(params);
   const sources = allowedSkills(policy, skillSources(reg, world, state));
   const skill = skillNamed(sources, read.skill);
-  if (!skill) return { ok: false, why: `"${read.skill}" isn't a skill this chat infers checks for` };
-  if (policy.when === "tries" && !read.tried) return { ok: false, why: "the message doesn't say the player character tries it" };
+  if (!skill) return { ok: false, why: say("eng_skill_isnt_a_skill_this_chat_infers", { skill: read.skill }) };
+  if (policy.when === "tries" && !read.tried) return { ok: false, why: say("eng_the_message_doesnt_say_the_player_character") };
   const band = clampBand(policy, read.difficulty);
   const companions = policy.who === "pov" ? [] : read.with.filter((id) => involvable(reg, world, state, id));
   const against = read.against.filter((a) => !companions.includes(a.who) && involvable(reg, world, state, a.who)).map((a) => ({ who: a.who, skill: skillNamed(sources, a.skill)?.id ?? skill.id }));
   if (policy.when === "risky") {
     const verdict = actionOdds(reg, world, state, tryRequest(world, skill, band, against, band.dc)).verdict;
-    if (verdict?.risky === false && verdict.chance !== null) return { ok: false, why: `it isn't risky (${Math.round(verdict.chance * 100)}% to succeed at ${band.label.toLowerCase()})` };
+    if (verdict?.risky === false && verdict.chance !== null) return { ok: false, why: say("eng_it_isnt_risky_chance_to_succeed_at", { chance: Math.round(verdict.chance * 100), band: band.label.toLowerCase() }) };
   }
   const kept: JsonObject = { attempt: read.attempt, skill: skill.id, difficulty: band.id, with: companions, against: against.map((a) => ({ who: a.who, skill: a.skill })), ...(read.tried ? { tried: true } : {}) };
   return { ok: true, params: kept, read: { ...read, skill: skill.id, with: companions, against }, skill, band, policy };

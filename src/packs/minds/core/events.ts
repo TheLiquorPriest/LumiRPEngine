@@ -6,14 +6,13 @@
 // Player lines: none. A mind is private, so every describer words nothing for a viewer and the
 // Journal never shows one; the GM's and the author's lines name what changed, never a monologue.
 
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
 import type { CommitmentStatus, FactId, FactTruth, Fidelity, Holding, KnowledgeFact, LearnEventData, MindCommitment, MindIntent, MindNote, MindPlan, MindRecord, MindsCharacter, PlanStatus, WitnessEntry } from "../../../shared/minds";
 import { COMMITMENT_KINDS, COMMITMENT_STATUSES, FACT_KINDS, FACT_TRUTHS, FIDELITIES, HOLDING_BELIEFS, HOLDING_HOWS, isConfidence, isWitnessRef, keptFromOf, MIND_APPROACHES, MINDS_EVENTS, MINDS_KEEP, parseFactId, PLAN_KINDS, PLAN_PRIORITY } from "../../../shared/minds";
-import { listWords } from "../../../shared/words";
 import { own } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -247,7 +246,7 @@ const presence: EventTypeDef<PackEvent> = {
   describe: (e, ctx, viewer) => {
     if (viewer !== undefined) return "";
     const who = ids(e.data.who) ? e.data.who.map((id) => nameOf(ctx, id)) : [];
-    return who.length === 0 ? say("mind_present_none") : say("mind_present", { who: listWords(who), ...(who.length === 1 ? { one: true } : {}) });
+    return who.length === 0 ? say("mind_present_none") : say("mind_present", { who: listOf(who), ...(who.length === 1 ? { one: true } : {}) });
   },
 };
 
@@ -510,7 +509,7 @@ function claimOf(ctx: ReadContext, fact: JsonValue | undefined): string {
 
 /** Names for the GM's lines, in a list. */
 function namesOf(ctx: ReadContext, who: JsonValue | undefined): string {
-  return listWords(ids(who) ? who.map((id) => nameOf(ctx, id)) : []);
+  return listOf(ids(who) ? who.map((id) => nameOf(ctx, id)) : []);
 }
 
 const HOW_WORDS: Record<Holding["how"], string> = { authored: "from the start", witnessed: "witnessed", told: "told", inferred: "inferred", guessed: "a guess" };

@@ -9,13 +9,12 @@
 // GM → Places shows the same for every place, with whose it is (`orgs.place_entry`). Who may enter
 // is `engine/entry.ts`'s, pure; this pack keeps the records.
 
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { AS_THE_WORLD, AUDIENCES, ENTRY_WORDS, isAudience, NO_KEYS, ORG_ENTRY_ACTION, ORGS_ENTRY } from "../../../shared/org";
 import type { GmPlaceEntry, PremisesView, PremiseView } from "../../../shared/org-view";
-import { listWords } from "../../../shared/words";
 import type { LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
 import { calendarOf, formatClock, formatTimeOfDay, weekdayName } from "../../../engine/calendar";
@@ -82,7 +81,7 @@ export function hoursWords(ctx: ReadContext, business: EntityId): string {
     if (last && last.at(-1) === d - 1) last.push(d);
     else runs.push([d]);
   }
-  const dayWords = listWords(runs.map((r) => (r.length > 2 ? `${weekdayName(cal, r[0] ?? 0)} to ${weekdayName(cal, r.at(-1) ?? 0)}` : r.map((d) => weekdayName(cal, d)).join(", "))));
+  const dayWords = listOf(runs.map((r) => (r.length > 2 ? `${weekdayName(cal, r[0] ?? 0)} to ${weekdayName(cal, r.at(-1) ?? 0)}` : r.map((d) => weekdayName(cal, d)).join(", "))));
   const { open, close } = hoursOf(ctx, business);
   return say("org_log_daywords_all_day_open_to_close", { dayWords: dayWords, open: formatTimeOfDay(open), close: formatTimeOfDay(close), if_close: open === 0 && close === 24 * 60 });
 }
@@ -123,7 +122,7 @@ function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEven
   const pov = ctx.world.pov;
   const said = [
     ...(entry === undefined ? [] : [entry === null ? say("org_log_who_may_enter_as_the_world_has") : say("org_log_who_may_enter_entry", { entry: ENTRY_WORDS[entry].toLowerCase() })]),
-    ...(keys === undefined ? [] : [keys === null ? say("org_log_its_keys_as_the_world_has_them") : keys.length === 0 ? say("org_log_no_keys") : say("org_log_keys_pov", { pov: listWords(keys.map((k) => keyWords(ctx, k, pov))) })]),
+    ...(keys === undefined ? [] : [keys === null ? say("org_log_its_keys_as_the_world_has_them") : keys.length === 0 ? say("org_log_no_keys") : say("org_log_keys_pov", { pov: listOf(keys.map((k) => keyWords(ctx, k, pov))) })]),
   ].join("; ");
   const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : actor !== null ? say("org_log_a_place") : say("org_log_a_place_2");
   const text = say("org_log_actor_set_where_said", { actor: actor !== null ? labelOf(ctx, actor) : undefined, where: where, said: said, if_actor: actor !== null });

@@ -19,7 +19,7 @@
 //   3  multiple axes plus appraisal rules
 //   4  history, group regard
 
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -30,7 +30,7 @@ import { bandOf } from "../../../engine/scope";
 import { GROUP_KIND, linkRows, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { CONVERSATION, STATED_MINUTES } from "../../../shared/needs";
-import { listWords, possessive } from "../../../shared/words";
+import { possessive } from "../../../shared/words";
 
 export interface Axis {
   id: string;
@@ -264,7 +264,7 @@ const regardEvent: EventTypeDef<PackEvent> = {
       .map(([axis, d]) => ({ axis: (axesOf(ctx).find((a) => a.id === axis)?.label ?? axis.replace(/_/g, " ")).toLowerCase(), moved: say(d > 0 ? "regard_rose" : "regard_fell", { by: Math.round(Math.abs(d) * 10) / 10 }) }));
     const [only] = parts;
     if (parts.length === 1 && only) return say("regard_axis", { whose: possessive(from), axis: only.axis, to, moved: only.moved });
-    return parts.length > 0 ? say("regard_changed", { whose: possessive(from), to, parts: listWords(parts.map((p) => `${p.axis} ${p.moved}`)) }) : say("regard_settles", { whose: possessive(from), to });
+    return parts.length > 0 ? say("regard_changed", { whose: possessive(from), to, parts: listOf(parts.map((p) => `${p.axis} ${p.moved}`)) }) : say("regard_settles", { whose: possessive(from), to });
   },
 };
 

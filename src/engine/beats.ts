@@ -21,6 +21,7 @@ import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 import type { TimelapseOutcome } from "./time";
 import { canSeeEntity, canSeeField, playerTrack, signalVisible } from "./visibility";
+import { say } from "./lines";
 
 export interface BeatInput {
   /** The turn's actions as played, in order (DESIGN §11 action queue). */
@@ -62,14 +63,14 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   for (const r of input.resolutions ?? []) {
     // The action as the narrator is told it: its picks in words, where it started, its time and what it changed (`toldAction`).
     const what = r.told?.what ?? r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
-    const took = r.told && r.told.minutes > 0 ? `, taking ${spanText(r.told.minutes)}` : "";
-    const changed = r.told && r.told.changes.length > 0 ? ` What changed: ${r.told.changes.join("; ")}.` : "";
+    const took = r.told && r.told.minutes > 0 ? say("eng_taking_minutes", { minutes: spanText(r.told.minutes) }) : "";
+    const changed = r.told && r.told.changes.length > 0 ? say("eng_what_changed_changes", { changes: r.told.changes.join("; ") }) : "";
     // The player's action that plays as plain roleplay is theirs to tell: no beat says it failed (DESIGN §11).
     if (playsAsRoleplay(r)) continue;
     // A hard lock's expression can name a secret or its stage: it reads as not possible, as on the Outcome.
-    if (!r.ok) lines.push(`${what} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
+    if (!r.ok) lines.push(say("eng_what_doesnt_happen_reason_not_possible_here", { what: what, reason: r.failed?.reason, if_requirement: r.failed && r.failed.code !== "requirement" }));
     // A check the adjudication policy settled without a roll is decided all the same.
-    else if (r.check || r.adjudged) lines.push(`${what}: the result is decided — ${r.outcome}${took}.${changed}`);
+    else if (r.check || r.adjudged) lines.push(say("eng_what_the_result_is_decided_outcome_took", { what: what, outcome: r.outcome, took: took, changed: changed }));
     else lines.push(`${what} happens${took}.${changed}`);
   }
   const tl = input.timelapse;
@@ -79,13 +80,13 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     // tells of it: the player's directive, never overruled. What else happened in it is the Montage's.
     const span =
       stop && signalVisible(reg, world, state, pov, stop)
-        ? `Time passes until it's interrupted: ${stop.text}.`
+        ? say("eng_time_passes_until_its_interrupted_text", { text: stop.text })
         : // A time skip a character's mind stopped (DESIGN §24.7): what they do comes from their mind, never stated here.
           tl.summary.stoppedBy === "mind"
-          ? `Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section.`
-          : "Time passes.";
-    const filled = input.fill ? ` The player's message fills this time: “${input.fill}”. Narrate that as what the player character does in it.` : "";
-    lines.push(`${span}${filled} What ${filled ? "else " : ""}happened in it is in the Montage.`);
+          ? say("eng_time_passes_until_mindname_someone_steps_in", { mindName: tl.mindName })
+          : say("eng_time_passes");
+    const filled = input.fill ? say("eng_the_players_message_fills_this_time_fill", { fill: input.fill }) : "";
+    lines.push(say("eng_span_filled_what_else_happened_in_it", { span: span, filled: filled, if_filled: !!(filled) }));
   }
   for (const e of input.events) {
     if (e.type === "stage") {
@@ -113,7 +114,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
       else if (typeof act === "string") {
         // "Danny Okafor is at work.", never "is work": the activity's own words as a predicate.
         const doing = activityPhrase(shownActivity ? shownActivity(ctx, id, act) : act);
-        if (doing) lines.push(`${e.name} is ${doing}.`);
+        if (doing) lines.push(say("eng_name_is_doing", { name: e.name, doing: doing }));
       }
     }
   }
@@ -127,7 +128,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     const v = n?.slot.value;
     const doing = typeof v === "string" ? activityPhrase(shown ? shown(ctx, pov, v) : v) : null;
     if (n && doing && n.at > state.clock && n.at - state.clock <= SOON) {
-      lines.push(`You are due to be ${doing} from ${formatHHMM(dateAt(cal, n.at + placeOffset(world, n.at, here)).minuteOfDay)} (in ${spanText(n.at - state.clock)}).`);
+      lines.push(say("eng_you_are_due_to_be_doing_from", { doing: doing, minuteOfDay: formatHHMM(dateAt(cal, n.at + placeOffset(world, n.at, here)).minuteOfDay), clock: spanText(n.at - state.clock) }));
       break;
     }
   }

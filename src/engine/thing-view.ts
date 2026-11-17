@@ -15,7 +15,7 @@ import { partyPossessive } from "../shared/thing-view";
 import type { Rest, Spot } from "../shared/things";
 import { grantBasisOf, nameTokens, thingsConfigOf } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
-import { listWords } from "../shared/words";
+import { say, listOf } from "./lines";
 import { accessFor, atHome, type AccessAnswer } from "./access";
 import { calendarOf, formatClock } from "./calendar";
 import { orgPlaces, orgTypeOf, placesOf } from "./org";
@@ -268,7 +268,7 @@ export function thingPicks(ctx: ReadContext): ThingPicks {
 
 /** Names as a chip lists them: two, then how many more. */
 function chipNames(names: readonly string[]): string {
-  return names.length <= CHIP_NAMES ? listWords(names) : `${names.slice(0, CHIP_NAMES).join(", ")} and ${names.length - CHIP_NAMES} more`;
+  return names.length <= CHIP_NAMES ? listOf(names) : say("eng_names_and_names2_more", { names: names.slice(0, CHIP_NAMES).join(", "), names2: names.length - CHIP_NAMES });
 }
 
 /** The place of an organization's that a thing is at, by name. */
@@ -307,7 +307,7 @@ export function useChips(ctx: ReadContext, thing: EntityId, keep: (who: EntityId
       case "public":
         return { basis: "public", label: "Anyone · nobody's", who: [] };
       case "owner":
-        return { basis: "owner", label: via === undefined ? `${chipNames(who)} · owner${presumed}` : `${chipNames(who)} · ${partyPossessive(partyRef(ctx, via))} owner`, who };
+        return { basis: "owner", label: via === undefined ? say("eng_who_owner_presumed", { who: chipNames(who), presumed: presumed }) : say("eng_who_via_owner", { who: chipNames(who), via: partyPossessive(partyRef(ctx, via)) }), who };
       case "member":
         return { basis: "member", label: `${nameOf(via)} · members${presumed}`, who };
       case "staff": {

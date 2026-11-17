@@ -24,6 +24,7 @@ import type { MembershipProvider, ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { isGone, kindDef, kindIs, kindParent } from "./scope";
 import type { WorldState } from "./state";
+import { say } from "./lines";
 
 /** What a membership question reads: the registry's kinds and providers, the world and the state. */
 export type MembershipContext = Pick<ReadContext, "registry" | "world" | "state">;
@@ -217,40 +218,40 @@ function stringsIn(v: unknown): string[] | null {
  * ("names an unknown kind …"). Tags are free-form, so they are never wrong.
  */
 export function selectorProblems(reg: Registry, world: WorldDoc, selector: unknown): string[] {
-  if (!isRecord(selector)) return ["isn't a selector"];
+  if (!isRecord(selector)) return [say("eng_isnt_a_selector")];
   const out: string[] = [];
   const list = (key: string): string[] => {
     const v = selector[key];
     if (v === undefined) return [];
     const items = stringsIn(v);
-    if (items === null) out.push(`has a "${key}" that isn't a list`);
+    if (items === null) out.push(say("eng_has_a_key_that_isnt_a_list", { key: key }));
     return items ?? [];
   };
-  for (const id of list("ids")) if (!hasOwn(world.entities, id)) out.push(`names "${id}", which isn't in the world`);
-  for (const kind of list("kind")) if (!kindDef(reg, world, kind)) out.push(`names an unknown kind "${kind}"`);
-  for (const tier of list("tier")) if (!tierOf(world, tier)) out.push(`names tier "${tier}", which isn't one of the world's tiers`);
+  for (const id of list("ids")) if (!hasOwn(world.entities, id)) out.push(say("eng_names_id_which_isnt_in_the_world", { id: id }));
+  for (const kind of list("kind")) if (!kindDef(reg, world, kind)) out.push(say("eng_names_an_unknown_kind_kind", { kind: kind }));
+  for (const tier of list("tier")) if (!tierOf(world, tier)) out.push(say("eng_names_tier_tier_which_isnt_one_of", { tier: tier }));
   const groups = list("memberOf");
   for (const group of groups) {
     const e = hasOwn(world.entities, group) ? world.entities[group] : undefined;
-    if (!e) out.push(`names the group "${group}", which isn't in the world`);
-    else if (providersOf(reg, world, e.kind).length === 0) out.push(`names ${e.name} as a group, but it isn't an organization`);
+    if (!e) out.push(say("eng_names_the_group_group_which_isnt_in", { group: group }));
+    else if (providersOf(reg, world, e.kind).length === 0) out.push(say("eng_names_name_as_a_group_but_it", { name: e.name }));
   }
-  for (const tier of list("party")) if (!isPartyTier(tier)) out.push(`names the party tier "${tier}", which isn't one of ${PARTY_TIERS.join(", ")}`);
+  for (const tier of list("party")) if (!isPartyTier(tier)) out.push(say("eng_names_the_party_tier_tier_which_isnt", { tier: tier, pARTY_TIERS: PARTY_TIERS.join(", ") }));
   for (const position of list("position")) {
     const where = groups.length > 0 ? groups : Object.keys(world.entities);
-    if (!where.some((org) => positionsIn((hasOwn(world.entities, org) ? world.entities[org] : undefined)?.fields.positions).some((p) => p.id === position))) out.push(`names the position "${position}", which no organization${groups.length > 0 ? " it names" : ""} defines`);
+    if (!where.some((org) => positionsIn((hasOwn(world.entities, org) ? world.entities[org] : undefined)?.fields.positions).some((p) => p.id === position))) out.push(say("eng_names_the_position_position_which_no_organization", { position: position, if_groups: groups.length > 0 }));
   }
   list("tag");
   const classes = selector.class;
-  if (classes !== undefined && !isRecord(classes)) out.push("has a class that isn't a facet → values map");
+  if (classes !== undefined && !isRecord(classes)) out.push(say("eng_has_a_class_that_isnt_a_facet"));
   if (isRecord(classes)) {
     for (const [facet, values] of Object.entries(classes)) {
       const def = hasOwn(world.classifications, facet) ? world.classifications[facet] : undefined;
       if (!def) {
-        out.push(`names an unknown classification "${facet}"`);
+        out.push(say("eng_names_an_unknown_classification_facet", { facet: facet }));
         continue;
       }
-      for (const v of stringsIn(values) ?? []) if (!hasOwn(def.values, v)) out.push(`names "${v}", which isn't a value of ${def.label}`);
+      for (const v of stringsIn(values) ?? []) if (!hasOwn(def.values, v)) out.push(say("eng_names_v_which_isnt_a_value_of", { v: v, def: def.label }));
     }
   }
   return out;
@@ -267,21 +268,21 @@ export interface ClassProblem {
  */
 export function classProblems(world: WorldDoc, value: unknown, who: string): ClassProblem[] {
   if (value === undefined) return [];
-  if (!isRecord(value)) return [{ code: "unknown_facet", message: `${who}'s classification isn't a facet → values map.` }];
+  if (!isRecord(value)) return [{ code: "unknown_facet", message: say("eng_who_s_classification_isnt_a_facet_values", { who: who }) }];
   const out: ClassProblem[] = [];
   for (const [facet, raw] of Object.entries(value)) {
     const def = hasOwn(world.classifications, facet) ? world.classifications[facet] : undefined;
     if (!def) {
-      out.push({ code: "unknown_facet", message: `${who} is classed under "${facet}", which isn't one of the world's classifications.` });
+      out.push({ code: "unknown_facet", message: say("eng_who_is_classed_under_facet_which_isnt", { who: who, facet: facet }) });
       continue;
     }
     const values = stringsIn(raw);
     if (values === null || values.length !== (Array.isArray(raw) ? raw.length : -1)) {
-      out.push({ code: "unknown_class", message: `${who}'s ${def.label} isn't a list of values.` });
+      out.push({ code: "unknown_class", message: say("eng_who_s_def_isnt_a_list_of", { who: who, def: def.label }) });
       continue;
     }
-    for (const v of values) if (!hasOwn(def.values, v)) out.push({ code: "unknown_class", message: `${who} is classed as "${v}", which isn't a value of ${def.label}.` });
-    if (!def.multiple && values.length > 1) out.push({ code: "single_class", message: `${who} holds ${values.length} ${def.label} values; ${def.label} takes one.` });
+    for (const v of values) if (!hasOwn(def.values, v)) out.push({ code: "unknown_class", message: say("eng_who_is_classed_as_v_which_isnt", { who: who, v: v, def: def.label }) });
+    if (!def.multiple && values.length > 1) out.push({ code: "single_class", message: say("eng_who_holds_valuescount_def_values_def_takes", { who: who, valuesCount: values.length, def: def.label }) });
   }
   return out;
 }
