@@ -299,7 +299,12 @@ export class BootstrapJobs {
       let view: JobView | JobRefusal;
       try {
         // With the skill switched off the job is given nothing of it: its brief is empty, and it has no stated end (D.2).
-        view = await jobs.start(scope, { agent: lead, brief: skill?.body ?? "", attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS], limits: { askAt: given.tokenLimit, calls: settings.runCalls, time: settings.runTime } });
+        view = await jobs.start(scope, {
+          agent: lead,
+          brief: skill?.body ?? "",
+          attach: [BOOTSTRAP_JOB, BOOTSTRAP_FACTS],
+          limits: { askAt: given.tokenLimit, ...(settings.runCalls === null ? {} : { calls: settings.runCalls }), ...(settings.runTime === null ? {} : { time: settings.runTime }) },
+        });
       } catch (error) {
         return refused(409, error instanceof Error ? error.message : String(error));
       }
