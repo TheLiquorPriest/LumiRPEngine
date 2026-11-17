@@ -1,9 +1,9 @@
 // The words of the lines the chat's history and the narrator's notices are made of (an event's line, a bill, a payday, a fight's
-// start), which come from a shipped file (`guidance/.prompts/history-lines.md`, `format: lines`, one `name: text` template per
-// line), never from code: code gives the values a line is filled with and the name of the line. The engine is pure, so the file is
-// read where the application lays out its texts and handed in here as a source of lines (`useLines`); a caller that has the chat's
-// own copy of the file (the one nearer the chat than the shipped one) wraps its work in `withLines`, so the lines it words are the
-// chat's. A line the file does not have, or the user deleted, is a line that is not said: `say` gives the empty text and the callers
+// start), which come from shipped files (`guidance/.prompts/history-*.md`, one per family of lines, each `format: lines`, one `name: text`
+// template per line), never from code: code gives the values a line is filled with and the name of the line. The engine is pure, so the
+// files are read where the application lays out its texts and handed in here as a source of lines (`useLines`); a caller that has the
+// chat's own copy of the files (each the one nearer the chat than the shipped one) wraps its work in `withLines`, so the lines it words
+// are the chat's. A line the files do not have, or the user deleted, is a line that is not said: `say` gives the empty text and the callers
 // say nothing in its place.
 
 import type { JsonValue } from "../shared/json";

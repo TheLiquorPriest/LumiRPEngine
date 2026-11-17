@@ -1313,7 +1313,7 @@ export function signal(cls: "bill" | "decline", text: string, who: EntityId, at:
   return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
 }
 
-/** A signal worded by the line `line` of the history lines (`guidance/.prompts/history-lines.md`) filled with `fields`; none where that line is not said. */
+/** A signal worded by the line `line` of the history lines (`guidance/.prompts/history-*.md`) filled with `fields`; none where that line is not said. */
 export function notice(cls: "bill" | "decline", line: string, fields: LineFields, who: EntityId, at: number): LedgerEvent[] {
   const text = say(line, fields);
   return text === "" ? [] : [signal(cls, text, who, at)];

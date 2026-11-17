@@ -97,7 +97,7 @@ export interface PlayDeps {
   live: Pick<LiveHub, "publish" | "follow">;
   /** The guidance folder whose `.prompts/` holds this area's words. */
   guidance: string;
-  /** The guidance files in force for a chat, whose history lines (`.prompts/history-lines.md`, the nearest level's) the engine's lines of the chat are worded in. */
+  /** The guidance files in force for a chat, whose history lines (`.prompts/history-*.md`, each the nearest level's) the engine's lines of the chat are worded in. */
   texts(user: string, chat: string): Pick<GuidanceFiles, "read">;
   /** Whether a turn of the user's chat runs now. */
   turning(user: string, chat: string): boolean;
