@@ -77,6 +77,6 @@ export {
   type UserFor,
 } from "./routes";
 export { SecretsFile } from "./secrets";
-export { draftChanged, errorMessage, requestMessage, resultMessage, stateView } from "./tunnel";
+export { stateView } from "./tunnel";
 export type { RunningServer } from "./server";
 export { switchDigest, Switches, type SwitchEntry, type SwitchState } from "./switches";
