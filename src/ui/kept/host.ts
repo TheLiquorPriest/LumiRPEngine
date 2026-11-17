@@ -200,7 +200,8 @@ export function webHost(options: WebHostOptions): KeptHost {
     },
     activeChat: () => null,
     generate: async () => false,
-    revealMessage: () => false,
+    closeDrawer: async () => false,
+    revealMessage: async () => false,
     addStyle(css) {
       const style = document.createElement("style");
       style.textContent = css;

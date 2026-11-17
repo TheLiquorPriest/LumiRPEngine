@@ -68,7 +68,7 @@ export function needsYouDetail(chip: Chip): string | undefined {
   return chip.kind === "review" ? "Under the reply: apply them or turn them down." : chip.detail;
 }
 
-/** The decisions waiting under replies; tapping one shows that reply in the chat (on a phone the drawer stays open over it: no route closes it in this build). */
+/** The decisions waiting under replies; tapping one shows that reply in the chat (on a phone the drawer closes first, so the reply is in view). */
 export function NeedsYou(props: { state: StateView }) {
   const app = useApp();
   const [busy, run] = useBusy();
@@ -76,7 +76,7 @@ export function NeedsYou(props: { state: StateView }) {
   if (chips.length === 0) return null;
   const reveal = (chip: Chip) =>
     run(async () => {
-      if (!app.host.revealMessage(chip.messageId)) app.toast("That reply isn't loaded in the chat. Scroll to it to answer.", "info");
+      if (!(await app.host.revealMessage(chip.messageId))) app.toast("That reply isn't loaded in the chat. Scroll to it to answer.", "info");
     });
   return (
     <div class="lre-play-needs">

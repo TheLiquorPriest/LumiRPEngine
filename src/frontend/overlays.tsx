@@ -241,8 +241,8 @@ export function createOverlays(app: App, host: Host): OverlaySet {
     (widget) => placeSheet(widget, worldHeight > 0 ? worldHeight : host.viewport.get().height / 2),
   );
 
-  // No route closes Lumiverse's drawer in this build: on a phone the overlay is drawn inside the drawer instead.
-  const closeDrawer = async (): Promise<boolean> => false;
+  // On a phone the open drawer covers the float widgets, so it is closed first (through the extension's backend); where it could not be, the overlay is drawn inside the drawer instead.
+  const closeDrawer = (): Promise<boolean> => host.closeDrawer();
   const mapControl = new OverlayController({
     viewport: () => host.viewport.get(),
     drawerOpen: () => host.drawer.get().open,

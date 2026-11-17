@@ -127,7 +127,7 @@ export function mount(shell: ShellMount, deps: RoadDeps = browserDeps()): Mounte
     gate,
     route,
     timers: deps.timers,
-    keptHost: () => lumiverseHost(ctx, { revokeMs: () => settings.values.get().downloadRevokeMs }),
+    keptHost: () => lumiverseHost(ctx, { revokeMs: () => settings.values.get().downloadRevokeMs, closeDrawer: () => shell.road.closeDrawer() }),
     // The kept views are the extension's second file, which Lumiverse serves beside the first, fetched when one is first shown.
     kept: once(() => importHostFile(ctx, "frontend/widget", process.env.LRE_BUILD_ID ?? "dev") as Promise<KeptChunk>),
     go: (next) => route.set(next),

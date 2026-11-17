@@ -279,8 +279,10 @@ export interface HostBridge {
   activeChat(): ChatId | null;
   /** Runs the host's Regenerate or Continue (`command:action-regenerate`, `action-continue`, gated by `generation`); false when unavailable. */
   generate(as: "regenerate" | "continue"): Promise<boolean>;
-  /** Scrolls a reply into view in the chat; false when it isn't mounted (scrolled out of a virtual list, another chat). */
-  revealMessage(messageId: MessageId): boolean;
+  /** Closes Lumiverse's drawer, which on a phone covers the chat and the float widgets over it; false when it could not be closed. */
+  closeDrawer(): Promise<boolean>;
+  /** Scrolls a reply into view in the chat, closing the drawer first where it covers the chat (a phone's); false when it isn't mounted (scrolled out of a virtual list, another chat). */
+  revealMessage(messageId: MessageId): Promise<boolean>;
 }
 
 /** The world being edited in Build: the draft the backend returned and the revision it started from. */

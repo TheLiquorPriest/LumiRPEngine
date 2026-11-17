@@ -8,7 +8,7 @@ import { isRecord } from "../shared/json";
 import type { SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { HostUi } from "../spindle-augment";
 import type { DrawerState, HostBridge } from "./app";
-import type { Viewport } from "./layout";
+import { isMobile, type Viewport } from "./layout";
 import { createStore } from "../ui/store";
 
 /** Lumiverse's frontend context, which the extension shell hands the loader's mount and makes the bridge from. */
@@ -22,6 +22,8 @@ export interface Host extends HostBridge {
 export interface HostOptions {
   /** How long a download's link is kept before the browser lets it go (ms), read at each download: the page's `pages.downloadRevokeMs`. */
   revokeMs: () => number;
+  /** Asks for Lumiverse's drawer to be closed (the one call the host has for it is the backend's, reached through the extension's pipe); without it the bridge says the drawer could not be closed. */
+  closeDrawer?: () => Promise<boolean>;
 }
 
 function readViewport(ui: HostUi): Viewport {
@@ -44,6 +46,15 @@ export function createHost(ctx: SpindleFrontendContext, options: HostOptions = {
   const offDrawer = ui.events.onDrawerChange((state) => {
     if (state.open !== drawer.get().open) drawer.set({ open: state.open });
   });
+  const closeDrawer = async (): Promise<boolean> => {
+    if (options.closeDrawer === undefined) return false;
+    try {
+      return await options.closeDrawer();
+    } catch (error) {
+      console.warn("[LumiRPEngine] closing the drawer failed", error);
+      return false;
+    }
+  };
   return {
     ui,
     viewport,
@@ -88,9 +99,12 @@ export function createHost(ctx: SpindleFrontendContext, options: HostOptions = {
         return false;
       }
     },
-    revealMessage(messageId) {
+    closeDrawer,
+    async revealMessage(messageId) {
       const element = ctx.dom.findMessageElement(messageId);
       if (!element) return false;
+      // On a phone the open drawer covers the chat: it closes first, and the reply is scrolled to once the chat shows (a drawer that would not close leaves the reply scrolled to behind it).
+      if (isMobile(viewport.get()) && drawer.get().open) await closeDrawer();
       // Nothing moves under reduced motion: the jump is instant there.
       const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
       element.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });

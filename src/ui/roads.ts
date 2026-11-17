@@ -530,6 +530,8 @@ export interface RelayChannel {
   unfollow(chat: string): Promise<void>;
   onUpdates(handler: (updates: unknown[], reset: boolean) => void): () => void;
   onPermissions(handler: (missing: MissingPermissionShown[]) => void): () => void;
+  /** Asks the extension to close Lumiverse's drawer (the one call the host has for it is the backend's); false when it did not, or did not say within the road's wait. */
+  closeDrawer(): Promise<boolean>;
 }
 
 /** The relay road over the extension's pipe. The pipe itself is the loader's: closing the road leaves it running. */
