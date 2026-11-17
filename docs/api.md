@@ -1576,6 +1576,19 @@ Makes a folder of the user's, and the folders above it, at a path of a chat's vi
 | Body | [`FolderAsk`](#folderask) |
 | Reply | `{ path: string }` |
 
+### `GET /api/v1/files-in-force/*`
+
+The file a chat's agents are given by the name of the file at a path (a shipped file's, say), whether or not that file is there: the nearest level's file of that name, not switched off; read as one file of the tree is read. With no chat, of the shipped and global levels.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `*` (the rest of the path) |
+| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`line` (may be left out): `number`, The first line to read, from 1<br>`lines` (may be left out): `number`, How many lines to read; the `files.readLines` setting's when left out<br>`offset` (may be left out): `number`, Read bytes instead of lines: the first byte, with `length`<br>`length` (may be left out): `number`, How many bytes to read from `offset` |
+| Body | none |
+| Reply | [`TreeFileReply`](#treefilereply) |
+
 ### `GET /api/v1/files-list`
 
 The chat's view of the tree read like a filesystem: one folder's files and folders a page at a time (the chat's own top, with the other levels' folders, when none is named), or a search by name and by text across every level, each file with whether RPH takes it and why not; with no chat, the shipped and global levels.

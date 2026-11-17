@@ -325,14 +325,7 @@ export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: read
   if (rest.length === 2 && rest[1] === HOOKS_FILE && kindAt(layer, rest[0]) === "hooks") entry.hooks = await hooksAt(ctx, level, disk, place);
   if (item === null) return entry;
   // The file of this name at each level, the farthest first; the nearest is the one taken.
-  const same = new Map<LayerLevel, string>([[level, entry.path]]);
-  for (const other of FARTHEST_FIRST) {
-    const at = other === level ? null : place(other);
-    if (at === null) continue;
-    const lookup = await locate(ctx.loc, viewPath(other, at));
-    const otherLayer = ctx.layers.find((l) => l.level === other);
-    if (lookup.ok && lookup.at.is === "file" && otherLayer !== undefined && itemOf(otherLayer, lookup.at.rest, lookup.at.kind) === item) same.set(other, lookup.at.path);
-  }
+  const same = await filesOfName(ctx, level, rest, item, entry.path);
   const layered = !item.includes("/") && ctx.names.layered.has(item);
   const taken = FARTHEST_FIRST.findLast((l) => same.has(l));
   const takenPath = taken === undefined ? undefined : same.get(taken);
@@ -354,6 +347,33 @@ export async function entryAt(ctx: ListingContext, level: LayerLevel, rest: read
   const was = placeAt(level, rest, "shipped");
   if (was !== null) entry.defaultRemoved = since(viewPath("shipped", was)).findLast((u) => u.removed)?.at ?? null;
   return entry;
+}
+
+/** The file of the name `item` at each level that has one, found by where the name of `rest` at `level` goes there (`placeAt`); `own`: the path at `level` itself, where it is known to be a file of that name. */
+async function filesOfName(ctx: ListingContext, level: LayerLevel, rest: readonly string[], item: string, own: string | null): Promise<Map<LayerLevel, string>> {
+  const same = new Map<LayerLevel, string>(own === null ? [] : [[level, own]]);
+  for (const other of FARTHEST_FIRST) {
+    const at = (other === level && own !== null) || levelBase(ctx.loc, other) === null ? null : placeAt(level, rest, other);
+    if (at === null) continue;
+    const lookup = await locate(ctx.loc, viewPath(other, at));
+    const otherLayer = ctx.layers.find((l) => l.level === other);
+    if (lookup.ok && lookup.at.is === "file" && otherLayer !== undefined && itemOf(otherLayer, lookup.at.rest, lookup.at.kind) === item) same.set(other, lookup.at.path);
+  }
+  return same;
+}
+
+/**
+ * The file a chat's agents are given by the name of the file at `level` and `rest`, whether or not that file is there: the nearest
+ * level's file of that name (of a name in a `layered:` list, whose every level's is given, the nearest too). Null where the path is
+ * no place of a file RPH loads by its name, the name is switched off or an example's, or no level has a file of it.
+ */
+export async function inForceOf(ctx: ListingContext, level: LayerLevel, rest: readonly string[]): Promise<string | null> {
+  const layer = ctx.layers.find((l) => l.level === level);
+  const item = layer === undefined ? null : itemOf(layer, rest, kindOf(level, rest));
+  if (item === null || ctx.names.off.has(item) || item.startsWith(`rules/${EXAMPLES}/`)) return null;
+  const same = await filesOfName(ctx, level, rest, item, null);
+  const taken = FARTHEST_FIRST.findLast((l) => same.has(l));
+  return taken === undefined ? null : (same.get(taken) ?? null);
 }
 
 /** The hooks a level's hooks file names, each as RPH takes it: off where a config's `off:` list names `hooks/<name>`, replaced where a nearer level's hooks file names it too. */

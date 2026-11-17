@@ -1,9 +1,9 @@
 // The words of RPE's notices file (`.prompts/notices.md`) as a page shows a notice of a turn: the file in
-// force for the chat is read once, and a notice's line is filled from the fields its event carries. The
-// page keeps no words of its own for a notice; a line the file does not hold (deleted) is not shown in
-// words, and the event is drawn as it came. The file's template syntax is the guidance files' own: a
-// field `{{name}}`, a block shown when a field is present `{{#name}}…{{/name}}`, one shown when it is
-// absent `{{^name}}…{{/name}}`, and `{{.}}` for a block's item.
+// force for the chat (the shipped one, or the user's that replaces it) is read once, and a notice's line
+// is filled from the fields its event carries. The page keeps no words of its own for a notice; a line
+// the file does not hold (deleted) is not shown in words, and the event is drawn as it came. The file's
+// template syntax is the guidance files' own: a field `{{name}}`, a block shown when a field is present
+// `{{#name}}…{{/name}}`, one shown when it is absent `{{^name}}…{{/name}}`, and `{{.}}` for a block's item.
 
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "./app";
@@ -15,8 +15,8 @@ export type NoticeLines = ReadonlyMap<string, string>;
 
 export const NO_NOTICES: NoticeLines = new Map();
 
-/** The tree's path of the file. */
-export const NOTICES_FILE = ".prompts/notices.md";
+/** The shipped file, whose name's file in force for the chat is read. */
+export const NOTICES_FILE = "@shipped/.prompts/notices.md";
 
 const LINE = /^([A-Za-z0-9_-]+):[ \t]?(.*)$/;
 
@@ -107,7 +107,7 @@ export function useNoticeLines(chat: string): NoticeLines {
   useEffect(() => {
     setLines(NO_NOTICES);
     let alive = true;
-    app.client.call("GET /api/v1/files/*", { "*": NOTICES_FILE }, { query: { chat } }).then(
+    app.client.call("GET /api/v1/files-in-force/*", { "*": NOTICES_FILE }, { query: { chat } }).then(
       (answer) => {
         if (alive) setLines(parseNoticeLines(replyOf(answer).text));
       },

@@ -5432,6 +5432,16 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The file a chat's agents are given by the name of the file at a path (a shipped file's, say), whether or not that file is there: the nearest level's file of that name, not switched off; read as one file of the tree is read. With no chat, of the shipped and global levels. */
+  "GET /api/v1/files-in-force/*": {
+    params: { "*": string };
+    query: { chat?: string; line?: number; lines?: number; offset?: number; length?: number };
+    body: undefined;
+    reply: TreeFileReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** The chat's view of the tree read like a filesystem: one folder's files and folders a page at a time (the chat's own top, with the other levels' folders, when none is named), or a search by name and by text across every level, each file with whether RPH takes it and why not; with no chat, the shipped and global levels. */
   "GET /api/v1/files-list": {
     params: Record<string, never>;

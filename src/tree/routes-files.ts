@@ -1,13 +1,15 @@
 // The Files page's routes over files (plan §5.1, §5.2, §5.4, §14): the tree's listing for a chat, or with no
-// chat its shipped and global levels; one file read; the difference of a file from the shipped default of
-// its name, and from the default as it stood before every update since the user wrote theirs; a file
-// written as the user at a level, which for a file of another level is the user's own file of that name
-// there, taken in place of the farther one; a file of the user's removed, which for one in place of a
-// default is resetting to the default, and for a shipped file is switching its name off in the `off:`
-// list of the level it is deleted at (§5.2: "Delete" on a shipped file does exactly that); a name
-// switched off or on again in a level's config; and any agent's stack with where each part comes from.
-// Every route is a page's: an agent has no way to them, and reaches the tree only through the file
-// port, held to where it may write.
+// chat its shipped and global levels; one file read; the file in force for a chat of a name, the one its
+// agents are given (a path of the view names one level's file, so a page that wants what the agents get,
+// the shipped file or the nearer one that replaces it, names the file and asks for that); the difference
+// of a file from the shipped default of its name, and from the default as it stood before every update
+// since the user wrote theirs; a file written as the user at a level, which for a file of another level is
+// the user's own file of that name there, taken in place of the farther one; a file of the user's removed,
+// which for one in place of a default is resetting to the default, and for a shipped file is switching its
+// name off in the `off:` list of the level it is deleted at (§5.2: "Delete" on a shipped file does exactly
+// that); a name switched off or on again in a level's config; and any agent's stack with where each part
+// comes from. Every route is a page's: an agent has no way to them, and reaches the tree only through the
+// file port, held to where it may write.
 //
 // The page's shape asked for switching off at `/api/v1/files/*/off`; the route table takes a `*` only as
 // a path's last part, so it is `/api/v1/files-off/*`, and the difference is `/api/v1/files-diff/*`.
@@ -15,14 +17,14 @@
 import { stat } from "node:fs/promises";
 import { route, RouteError, shape } from "../app";
 import { readText } from "../app/disk";
-import { kindAt, listingContext, namesInForce, userMayWrite, writtenKey } from "./catalog";
+import { inForceOf, kindAt, listingContext, namesInForce, userMayWrite, writtenKey } from "./catalog";
 import { defaultStanding, defaultUpdateTexts, lineDiff, updatesSince } from "./defaults";
 import { listFolder, searchTree } from "./listing";
-import { OFF_LEVELS } from "./own-files";
+import { OFF_LEVELS, type FoundFile } from "./own-files";
 import { readBytes, readLines } from "./ranged";
 import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit";
 import { treeSettingsOf } from "./settings";
-import { locate, treeLayers } from "./view";
+import { type ChatLocation, locate, treeLayers } from "./view";
 import { rphStanding, withStanding } from "./standing";
 import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, partPreviewBody, partPreviewReply, pinsReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
 
@@ -31,6 +33,29 @@ const FILE_PATH = "/api/v1/files/*";
 const OFF_PATH = "/api/v1/files-off/*";
 const PIN_PATH = "/api/v1/files-pin/*";
 const DIFF_PATH = "/api/v1/files-diff/*";
+const IN_FORCE_PATH = "/api/v1/files-in-force/*";
+
+/** How a read of one file names the part of it to read. */
+const READ_QUERY = {
+  chat: chatQuery,
+  line: shape.optional(shape.whole({ least: 1 }), "The first line to read, from 1."),
+  lines: shape.optional(shape.whole({ least: 0 }), "How many lines to read; the `files.readLines` setting's when left out."),
+  offset: shape.optional(shape.whole({ least: 0 }), "Read bytes instead of lines: the first byte, with `length`."),
+  length: shape.optional(shape.whole({ least: 0 }), "How many bytes to read from `offset`."),
+};
+
+/** A file found, read: a short file whole, a long one the lines or the bytes asked for, `files.readLines` lines when it asks for none. */
+async function readFound(loc: ChatLocation, at: FoundFile, ask: { line?: number; lines?: number; offset?: number; length?: number }) {
+  if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
+  const file = { path: at.path, level: at.level, kind: at.kind, editable: userMayWrite(at.level, at.rest, at.kind) };
+  if (ask.offset !== undefined) {
+    if (ask.length === undefined) throw new RouteError(400, "A read by bytes names `offset` and `length`.");
+    const part = await readBytes(at.disk, ask.offset, ask.length);
+    return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.offset, to: part.offset + part.length, more: part.offset + part.length < part.bytes };
+  }
+  const part = await readLines(at.disk, ask.line ?? 1, ask.lines ?? (await treeSettingsOf(loc)).readLines);
+  return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.from, to: part.to, more: part.to < part.lines };
+}
 
 export function fileRoutes(kit: RouteKit) {
   const { deps, own } = kit;
@@ -148,26 +173,27 @@ export function fileRoutes(kit: RouteKit) {
       access: "page",
       group: "files",
       does: "One file of the tree, as text: a short file whole, a long one the lines (`line`, `lines`) or the bytes (`offset`, `length`) asked for, `files.readLines` lines when it asks for none; with the file's size and its count of lines, and whether it goes on.",
-      query: {
-        chat: chatQuery,
-        line: shape.optional(shape.whole({ least: 1 }), "The first line to read, from 1."),
-        lines: shape.optional(shape.whole({ least: 0 }), "How many lines to read; the `files.readLines` setting's when left out."),
-        offset: shape.optional(shape.whole({ least: 0 }), "Read bytes instead of lines: the first byte, with `length`."),
-        length: shape.optional(shape.whole({ least: 0 }), "How many bytes to read from `offset`."),
-      },
+      query: READ_QUERY,
       reply: treeFileReply,
       handle: async ({ user, params, query }) => {
         const loc = own.locationOf(user, chatOf(query.chat));
-        const at = await own.found(loc, viewPathOf(params["*"]));
-        if (at.is !== "file") throw new RouteError(404, `The tree has no file ${at.path}.`);
-        const file = { path: at.path, level: at.level, kind: at.kind, editable: userMayWrite(at.level, at.rest, at.kind) };
-        if (query.offset !== undefined) {
-          if (query.length === undefined) throw new RouteError(400, "A read by bytes names `offset` and `length`.");
-          const part = await readBytes(at.disk, query.offset, query.length);
-          return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.offset, to: part.offset + part.length, more: part.offset + part.length < part.bytes };
-        }
-        const part = await readLines(at.disk, query.line ?? 1, query.lines ?? (await treeSettingsOf(loc)).readLines);
-        return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.from, to: part.to, more: part.to < part.lines };
+        return await readFound(loc, await own.found(loc, viewPathOf(params["*"])), query);
+      },
+    }),
+    route({
+      method: "GET",
+      path: IN_FORCE_PATH,
+      access: "page",
+      group: "files",
+      does: "The file a chat's agents are given by the name of the file at a path (a shipped file's, say), whether or not that file is there: the nearest level's file of that name, not switched off; read as one file of the tree is read. With no chat, of the shipped and global levels.",
+      query: READ_QUERY,
+      reply: treeFileReply,
+      handle: async ({ user, params, query }) => {
+        const loc = own.locationOf(user, chatOf(query.chat));
+        const named = await own.found(loc, viewPathOf(params["*"]));
+        const path = await inForceOf(await listingContext(loc), named.level, named.rest);
+        if (path === null) throw new RouteError(404, `No file of the name of ${named.path} is in force for this chat: none is there, or its name is switched off.`);
+        return await readFound(loc, await own.found(loc, path), query);
       },
     }),
     route({
