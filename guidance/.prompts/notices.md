@@ -46,7 +46,6 @@ panel_request: From a panel{{#from}} ({{from}}){{/from}}: {{what}}{{#on}}, on {{
 depth_asked: The player asked for this turn to be played at the depth {{depth}}.{{#words}} They typed with it: {{words}}{{/words}}
 swipe_asked: The player asked for this attempt to be played in the mode {{mode}}.{{#words}} They typed with it: {{words}}{{/words}}
 feedback_typed: The player typed this in Lumiverse's regenerate dialog before this attempt: {{text}}{{#position}} Lumiverse put it in a {{position}} message of the prompt.{{/position}}
-change_awaiting: A change is waiting for the player's yes or no: {{what}}
 settle_asked: The player asked, from the Turn page, for this turn to be settled now against the chat as it reads. This run writes no reply, and nothing of it reaches the chat.
 saved_differs: What the chat saved as message {{message}} is not what was released. Released: {{released}} Saved: {{saved}}
 cut_short: The reply in message {{message}} was stopped before it was finished. The chat kept only the part written by then.

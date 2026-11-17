@@ -57,7 +57,6 @@ keep_no_map: {{id}}: the world's draft has no such map to lay the squares on.
 keep_no_world: This chat's world is not one the store keeps a draft for, so nothing could be kept.
 keep_unreadable: The world's draft could not be read, so nothing was kept.
 keep_busy: The world's draft kept changing while it was written, so nothing was kept; try again.
-placed_instead: {{op}}: {{what}} was put at {{where}}, not {{asked}}, by the size of things.
 rule_bent: {{op}}: {{what}} was put with {{where}} although the world's rules for things say otherwise ({{code}}).
 no_grid: {{at}}{{#place}}, at {{place}},{{/place}} has no map of squares yet. map_lay lays one for it.{{#soft}} Kept there by a zone or words: {{soft}}.{{/soft}}{{#maps}} Places near it that have a map: {{maps}}.{{/maps}}{{^maps}} No place has a map yet.{{/maps}}
 bad_square: {{#op}}{{op}}: {{/op}}{{field}} cannot be read{{#value}}: you sent {{value}}{{/value}}. A square is [column, row], counted from 1 at the top left.
@@ -88,9 +87,7 @@ piece_on: {{what}} lies on {{holder}}{{#square}}, at {{square}}{{/square}}.
 piece_lifted: {{what}} was taken off {{square}} and stands on no square now.
 piece_shape: {{what}} covers {{columns}} by {{rows}} squares{{#blocksWay}}, blocking the way{{/blocksWay}}{{#blocksView}}, blocking the view{{/blocksView}}.
 not_a_thing: {{op}}: {{what}} is not a thing, so it cannot lie on something.
-no_square_near: {{op}}: there is no free square beside {{near}} for {{what}}.
 no_zone: {{op}}: this map has no zone {{zone}}.{{#zones}} Its zones: {{zones}}.{{/zones}}
-no_square_free: {{op}}: zone {{zone}} has no free square.
 not_a_door: {{op}}: there is no door at {{square}} on the map of {{place}}.{{#doors}} Its doors: {{doors}}.{{/doors}}
 door_already: {{op}}: the door at {{square}} was {{state}} already; nothing changed.
 door_set: The door at {{square}} is {{state}} now{{#was}}; it was {{was}}{{/was}}.

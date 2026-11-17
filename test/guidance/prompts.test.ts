@@ -43,7 +43,6 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   swipe_asked: { mode: "afresh", words: "Start from the quay." },
   feedback_typed: { text: "Less talk, more quay.", position: "user" },
   approval_waiting: { tool: "world_apply", lane: "engine", turn: "t-4" },
-  change_awaiting: { what: "Wren's purse goes to the harbour master" },
   settle_asked: {},
   saved_differs: { message: 4, released: "Wren waved.", saved: "Wren waved twice." },
   cut_short: { message: 4 },
