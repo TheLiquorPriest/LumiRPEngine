@@ -21,7 +21,7 @@ import type { Selector, WorldDoc } from "../../../shared/world";
 import { Button, IconButton } from "../../../frontend/components";
 import { AddPicker, CheckField, Chip, FormGroup, FormSheet, Issues, ItemRow, type RefOption } from "../../../frontend/build/form-kit";
 import { ChoiceInput, lintAt, LintBadge, NumberInput, TextInput } from "../../../frontend/build/schema-form";
-import { SettingRow } from "../../../frontend/settings/kit";
+import { SettingRow } from "../../../frontend/setting-row";
 import { NOT_WITH_YOU_PATH, NotWithYouField } from "../../../frontend/build/section-template";
 import { SelectorEditor, selectorOf } from "../../../frontend/build/selector-editor";
 import type { PackConfigProps } from "../../../frontend/registry";
