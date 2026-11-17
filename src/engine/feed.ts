@@ -81,10 +81,10 @@ export function renderersOf(renderers: readonly SectionRenderer[], section: Sect
   return include ? renderers.filter((r) => include.includes(sourceOf(r))) : renderers.filter((r) => r.slot === section.id);
 }
 
-/** A renderer's lines in a scope: its own scoped lines, else its player lines, which every scope keeps. */
+/** A renderer's lines in a scope: its own scoped lines, else its player lines, which every scope keeps. A line the history lines have no words for (the user deleted it) is said as nothing, so it is no line. */
 export function linesOf(r: SectionRenderer, ctx: ReadContext, scope: FeedScope): FeedLine[] {
-  if (r.feed) return r.feed(ctx, scope);
-  return r.render(ctx).map((text) => ({ text, known: "pov" }));
+  const lines = r.feed ? r.feed(ctx, scope) : r.render(ctx).map((text): FeedLine => ({ text, known: "pov" }));
+  return lines.filter((l) => l.text !== "");
 }
 
 /** The note a fact beyond the player character's carries for the narrator (DESIGN §6.11); the narrator rules' marked-facts text says what it means (`MARKED_FACTS_RULE`, `shared/prompts.ts`). */

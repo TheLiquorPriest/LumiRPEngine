@@ -566,20 +566,20 @@ export function planNarratorLines(ctx: ReadContext): string[] {
     const goals = plan.goals.filter((g) => isPlanStatusLive(g.status));
     const orders = plan.orders.filter((o) => isPlanStatusLive(o.status));
     if (goals.length === 0 && orders.length === 0) continue;
-    const orgName = orgTypeOf(ctx, org) === null ? "your party" : (own(ctx.state.entities, org)?.name ?? org);
-    out.push(`${orgName}: the plan and the orders given, as the story stands.`);
-    const set = (x: PlanGoal | PlanOrder): string => `set${x.by === undefined ? " by the GM" : ` by ${name(x.by)}`} ${formatClock(cal, x.at)}${lateOf(ctx, x) ? " (its time has passed)" : ""}`;
-    const latest = (x: PlanGoal | PlanOrder): string => (x.last && x.last.note !== "" ? `; latest: ${x.last.said ?? x.last.note} (${formatClock(cal, x.last.at)}, ${SOURCE_WORDS[x.last.source]})` : "");
+    const orgName = orgTypeOf(ctx, org) === null ? say("feed_your_party") : (own(ctx.state.entities, org)?.name ?? org);
+    out.push(say("feed_orgname_the_plan_and_the_orders_given", { orgName: orgName }));
+    const set = (x: PlanGoal | PlanOrder): string => say("feed_set_by_the_gm_by_name_cal", { name: x.by !== undefined ? name(x.by) : undefined, cal: formatClock(cal, x.at), if_by: x.by === undefined, if_lateOf: !!(lateOf(ctx, x)) });
+    const latest = (x: PlanGoal | PlanOrder): string => (x.last && x.last.note !== "" ? say("feed_latest_note_last_source", { note: x.last.said ?? x.last.note, last: formatClock(cal, x.last.at), source: SOURCE_WORDS[x.last.source] }) : "");
     // The planner's marker (`orgs.lived`) says only what the day as laid says, never that it is done.
-    const orderLine = (o: PlanOrder): string => `- ${o.to.map(name).join(", ")}${o.lead ? ` (${name(o.lead)} leads)` : ""}: ${o.text}${o.where ? `, at ${labelOf(ctx, o.where)}` : ""}${o.when !== undefined ? `, by ${formatClock(cal, o.when)}` : ""}. ${PLAN_STATUS_WORDS[o.status]}, ${set(o)}${latest(o)}.${o.lived !== undefined ? " By the day as laid it should be done; not told yet." : ""}`;
+    const orderLine = (o: PlanOrder): string => say("feed_o_lead_leads_text_at_where_by", { o: o.to.map(name).join(", "), lead: o.lead ? name(o.lead) : undefined, text: o.text, where: o.where ? labelOf(ctx, o.where) : undefined, when: o.when !== undefined ? formatClock(cal, o.when) : undefined, status: PLAN_STATUS_WORDS[o.status], o2: set(o), o3: latest(o), if_lead: !!(o.lead), if_where: !!(o.where), if_when: o.when !== undefined, if_lived: o.lived !== undefined });
     for (const g of goals) {
-      out.push(`Goal, ${set(g)}: ${g.text}${g.window ? ` (${g.window === "today" ? "today" : `by ${g.window}`})` : ""}. ${PLAN_STATUS_WORDS[g.status]}${latest(g)}.`);
+      out.push(say("feed_goal_g_text_todayby_window_status_g2", { g: set(g), text: g.text, window: g.window, status: PLAN_STATUS_WORDS[g.status], g2: latest(g), if_window: !!(g.window), if_today: g.window === "today" }));
       for (const o of orders.filter((x) => x.goal === g.id)) out.push(orderLine(o));
     }
     for (const o of orders.filter((x) => x.goal === undefined || !goals.some((g) => g.id === x.goal))) out.push(orderLine(o));
   }
   if (out.length === 0) return [];
-  out.push("Play each one carrying out their order in character unless the scene gives them a reason not to. Show progress only as the player's message and the time that passes cover; never mark anything done, hand out a task, or change who does what yourself.");
+  out.push(say("feed_play_each_one_carrying_out_their_order"));
   return out;
 }
 

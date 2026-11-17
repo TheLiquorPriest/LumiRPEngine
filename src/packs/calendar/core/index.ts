@@ -148,12 +148,12 @@ export const calendarPack: PackDef = {
         const place = placeOfEntity(ctx.state, ctx.world.pov);
         const offset = sceneOffset(ctx.world, ctx.state.clock, place, level);
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
-        const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
+        const lines = [level === 1 ? say("feed_time_part", { part: part }) : say("feed_time_offset_part", { offset: formatClock(cal, ctx.state.clock, offset), part: part.toLowerCase() })];
         if (level >= 4) {
           const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex);
           if (today.length > 0) lines.push(`Today is ${today.map((h) => h.label).join(" and ")}.`);
         }
-        if (clockPaused(ctx.world, ctx.state)) lines.push("The clock is paused for this scene.");
+        if (clockPaused(ctx.world, ctx.state)) lines.push(say("feed_the_clock_is_paused_for_this_scene"));
         return lines;
       },
     });

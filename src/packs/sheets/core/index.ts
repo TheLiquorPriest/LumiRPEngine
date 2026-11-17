@@ -293,7 +293,7 @@ export const sheetsPack: PackDef = {
       label: "Conditions your character is under",
       render(ctx) {
         const conditions = activeConditions(ctx, ctx.world.pov);
-        return conditions.length > 0 ? [`You are ${conditions.map((c) => c.label.toLowerCase()).join(", ")}.`] : [];
+        return conditions.length > 0 ? [say("feed_you_are_conditions", { conditions: conditions.map((c) => c.label.toLowerCase()).join(", ") })] : [];
       },
     });
     r.view({ panel: "sheets.you", build: (ctx) => buildSheetView(ctx) as unknown as JsonValue });

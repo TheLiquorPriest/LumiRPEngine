@@ -210,7 +210,7 @@ export function decisionNarratorLines(ctx: ReadContext): string[] {
   for (const org of orgsWithMotions(ctx.state)) {
     for (const m of motionsOf(ctx.state, org)) {
       if (m.status !== "open" || ctx.state.clock > m.closes || !(m.by === pov || m.party === pov || m.electorate[pov] !== undefined)) continue;
-      out.push(`- To a vote at ${labelOf(ctx, org)}: ${m.text}; it closes ${formatStamp(cal, m.closes)}; ${standingWords(ctx, m, pov)}.`);
+      out.push(say("feed_to_a_vote_at_org_text_it", { org: labelOf(ctx, org), text: m.text, closes: formatStamp(cal, m.closes), pov: standingWords(ctx, m, pov) }));
     }
   }
   for (const org of orgsWithRequests(ctx.state)) {
@@ -220,7 +220,7 @@ export function decisionNarratorLines(ctx: ReadContext): string[] {
       out.push(`- Waiting for approval at ${labelOf(ctx, org)}, asked by ${refFor(ctx, pov, r.by).name}: ${r.text} (${r.why}); ${r.approvers.map((a) => refFor(ctx, pov, a).name).join(" or ")} may approve it.`);
     }
   }
-  return out.length > 0 ? [...out, "- Show a vote or an answer only as the player's message and the time that passes cover; never decide one for anyone."] : [];
+  return out.length > 0 ? [...out, say("feed_show_a_vote_or_an_answer_only")] : [];
 }
 
 // ---------------------------------------------------------------- the reply's votes and answers

@@ -29,6 +29,7 @@ import { planMindLines } from "./agenda";
 import { decisionAlerts, decisionMindLines } from "./decisions";
 import { orgsSetting } from "./seats";
 import { partyIdOf, powersAt, rowsAt } from "./view";
+import { listOf, say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -320,8 +321,8 @@ export function personTitles(ctx: ReadContext, who: EntityId): string[] {
     const title = role !== undefined && role !== "owner" ? role.replace(/_/g, " ") : given;
     const orgName = own(ctx.state.entities, org)?.name ?? org;
     const staffOnly = theirs.every((r) => r.how === "staff");
-    const phrase = / of /i.test(title) ? lowerFirst(title) : `${lowerFirst(title)} ${staffOnly ? "at" : "of"} ${orgName}`;
-    const yours = mine.length === 0 ? "" : type === "household" ? ", your household" : mine.some((r) => r.how === "staff") ? ", where you work" : mine.some((r) => r.how === "owner") ? ", which you own" : ", which you belong to";
+    const phrase = / of /i.test(title) ? lowerFirst(title) : say("feed_title_atof_orgname", { title: lowerFirst(title), orgName: orgName, if_staffOnly: !!(staffOnly) });
+    const yours = mine.length === 0 ? "" : type === "household" ? say("feed_your_household") : mine.some((r) => r.how === "staff") ? say("feed_where_you_work") : mine.some((r) => r.how === "owner") ? say("feed_which_you_own") : say("feed_which_you_belong_to");
     out.push(`${phrase}${yours}`);
     if (out.length >= TITLES_KEPT) break;
   }
@@ -334,17 +335,18 @@ export function personTitles(ctx: ReadContext, who: EntityId): string[] {
 function limitWords(ctx: ReadContext, limits: OrgLimits | undefined): string[] {
   if (!limits) return [];
   return [
-    ...(limits.payment !== undefined ? [`up to ${money(ctx, limits.payment)} a payment`] : []),
-    ...(limits.month !== undefined ? [`up to ${money(ctx, limits.month)} a month`] : []),
-    ...(limits.accounts && limits.accounts.length > 0 ? [`only from ${limits.accounts.map((a) => own(ctx.state.entities, a)?.name ?? a).join(", ")}`] : []),
+    ...(limits.payment !== undefined ? [say("feed_up_to_payment_a_payment", { payment: money(ctx, limits.payment) })] : []),
+    ...(limits.month !== undefined ? [say("feed_up_to_month_a_month", { month: money(ctx, limits.month) })] : []),
+    ...(limits.accounts && limits.accounts.length > 0 ? [say("feed_only_from_accounts", { accounts: limits.accounts.map((a) => own(ctx.state.entities, a)?.name ?? a).join(", ") })] : []),
   ];
 }
 
 function andList(items: readonly string[]): string {
-  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  return listOf(items);
 }
 
-const TYPE_WORDS: Readonly<Record<OrgType, string>> = { company: "a company", household: "a household", group: "a group", trust: "a trust", party: "a party" };
+/** What kind of organization it is, as a phrase after its name (the lines `feed_org_type_*`). */
+const typeWords = (type: OrgType): string => say(`feed_org_type_${type}`);
 
 /** One organization as a mind of `who` reads it. */
 function orgMindLine(ctx: ReadContext, who: EntityId, org: EntityId): string | null {
@@ -354,24 +356,24 @@ function orgMindLine(ctx: ReadContext, who: EntityId, org: EntityId): string | n
   const parts: string[] = [];
   const title = orgTitle(ctx, who, org);
   const held = heldPositions(ctx, who, org)[0];
-  if (title !== null) parts.push(`you are ${title}${held && held.position.title.toLowerCase() !== title.toLowerCase() ? `, holding ${held.position.title}` : ""}`);
+  if (title !== null) parts.push(say("feed_you_are_title_holding_title2", { title: title, title2: held.position.title, if_title: held && held.position.title.toLowerCase() !== title.toLowerCase() }));
   const people = [...new Set(membersOfOrg(ctx, org).map((r) => r.who))].filter((id) => id !== who && orgTypeOf(ctx, id) === null && !isGone(ctx.state, id));
   if (held) {
     const reports = held.position.reports_to;
     const above = reports === undefined ? [] : people.filter((id) => heldPositions(ctx, id, org).some((h) => h.position.id === reports));
     const below = people.filter((id) => heldPositions(ctx, id, org).some((h) => h.position.reports_to === held.position.id));
-    if (above.length > 0) parts.push(`you report to ${andList(above.map(name))}`);
-    if (below.length > 0) parts.push(`${andList(below.map(name))} ${below.length === 1 ? "reports" : "report"} to you`);
+    if (above.length > 0) parts.push(say("feed_you_report_to_name", { name: andList(above.map(name)) }));
+    if (below.length > 0) parts.push(say("feed_name_reportsreport_to_you", { name: andList(below.map(name)), if_below: below.length === 1 }));
   }
   const powers = orgPowers(ctx, who, org).filter((p) => p.grant.basis !== "delegate");
   const limits = held ? limitWords(ctx, held.position.limits) : [];
-  if (powers.length === ORG_POWERS.length) parts.push("you may do anything for it");
-  else if (powers.length > 0) parts.push(`you may ${andList(powers.map((p) => POWER_WORDS[p.power]))}${limits.length > 0 ? `, ${andList(limits)}` : ""}`);
-  const lines = [`${name(org)} (${TYPE_WORDS[type]}): ${parts.length > 0 ? parts.join("; ") : "you belong to it"}.`];
+  if (powers.length === ORG_POWERS.length) parts.push(say("feed_you_may_do_anything_for_it"));
+  else if (powers.length > 0) parts.push(say("feed_you_may_power_limits", { power: andList(powers.map((p) => POWER_WORDS[p.power])), limits: andList(limits), if_limits: limits.length > 0 }));
+  const lines = [say("feed_org_type_parts_you_belong_to_it", { org: name(org), type: typeWords(type), parts: parts.join("; "), if_parts: parts.length > 0 })];
   for (const d of delegationsOf(ctx, org).filter((x) => x.who === who)) {
     const words = d.powers.map((p) => POWER_WORDS[p]);
     const extra = limitWords(ctx, d.limits);
-    lines.push(`You act for ${name(org)}${d.by ? ` by ${name(d.by)}'s delegation` : ""}: you may ${andList(words)}${extra.length > 0 ? `, ${andList(extra)}` : ""}${d.until !== undefined ? `, until ${formatClock(calendarOf(ctx.world), d.until)}` : ""}.`);
+    lines.push(say("feed_you_act_for_org_by_d_s", { org: name(org), d: d.by ? name(d.by) : undefined, words: andList(words), extra: andList(extra), until: d.until !== undefined ? formatClock(calendarOf(ctx.world), d.until) : undefined, if_d: !!(d.by), if_extra: extra.length > 0, if_until: d.until !== undefined }));
   }
   return lines.join(" ");
 }
@@ -385,7 +387,7 @@ export function orgMindLines(ctx: ReadContext, who: EntityId): string[] {
   const party = partyIdOf(ctx);
   if (!party.exists) {
     const row = partyRoster(ctx, ctx.world.pov).find((r) => r.who === who && r.how !== "leader");
-    if (row) lines.push(`You travel with ${own(ctx.state.entities, ctx.world.pov)?.name ?? ctx.world.pov} (the player character) in their party, as ${row.how === "core" ? "a core member" : row.how === "companion" ? "a companion" : row.how === "hired" ? "a hired hand" : "an ally"}.`);
+    if (row) lines.push(say("feed_you_travel_with_pov_the_player_character", { pov: own(ctx.state.entities, ctx.world.pov)?.name ?? ctx.world.pov, if_core: row.how === "core", if_companion: row.how === "companion", if_hired: row.how === "hired" }));
   }
   return [...planMindLines(ctx, who), ...decisionMindLines(ctx, who), ...lines.map((l) => `- ${l}`)];
 }

@@ -1013,15 +1013,15 @@ export function projectNarratorLines(api: FinanceApi, ctx: ReadContext): string[
   for (const id of projectIds(ctx.state)) {
     const p = projectOf(ctx, id);
     if (!p || (p.status !== "active" && p.status !== "paused") || !povFollows(ctx, p.def.org)) continue;
-    const whose = p.def.org === ctx.world.pov ? "Your" : `${labelOf(ctx, p.def.org)}'s`;
+    const whose = p.def.org === ctx.world.pov ? say("feed_your") : `${labelOf(ctx, p.def.org)}'s`;
     const done = p.def.steps.filter((s) => doneAt(p, s) !== null).length;
     const ends = dueEnds(cal, p, now);
     const last = ends && ends.size > 0 ? Math.max(...ends.values()) : null;
     const next = p.def.steps.find((s) => stateOf(p, s) === "ready" || stateOf(p, s) === "pending");
-    out.push(`${whose} ${p.def.name}: ${nowWords(api, ctx, p, now) ?? PROJECT_STATUS_WORDS[p.status]}; ${done} of ${p.def.steps.length} steps done${next ? `; next: ${next.name}` : ""}${last !== null ? `; due to be done ${dayText(cal, last)}` : ""}.`);
+    out.push(say("feed_whose_name_status_done_of_stepscount_steps", { whose: whose, name: p.def.name, status: nowWords(api, ctx, p, now) ?? PROJECT_STATUS_WORDS[p.status], done: done, stepsCount: p.def.steps.length, name2: next ? next.name : undefined, last: last !== null ? dayText(cal, last) : undefined, if_next: !!(next), if_last: last !== null }));
   }
   if (out.length === 0) return [];
-  out.push("The engine runs each project day by day: tell its progress only as the time that passes covers, never say a step is done before its day, and never start, finish or drop one yourself. A setback or an extra cost the story makes is noted with project_note.");
+  out.push(say("feed_the_engine_runs_each_project_day_by"));
   return out;
 }
 

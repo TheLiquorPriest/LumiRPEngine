@@ -100,7 +100,8 @@ export const CLIMATES: Record<string, Climate> = {
   },
 };
 
-const MOOD: Record<Season, string> = { winter: "a cold winter", spring: "a mild spring", summer: "a warm summer", autumn: "a crisp autumn" };
+/** A season as a phrase (the lines `feed_mood_*`). */
+const mood = (season: Season): string => say(`feed_mood_${season}`);
 
 export const REGION: KindDef = {
   id: "region",
@@ -271,7 +272,7 @@ export function buildWeatherView(ctx: ReadContext): WeatherView {
   const e = region ? own(ctx.state.entities, region) : undefined;
   const placed = level >= 2 ? placeWeatherAt(ctx, here) : null;
   const name = e?.name ?? (placed !== null ? (own(ctx.world.places, here ?? "")?.name ?? null) : null);
-  if (level <= 1 || (!e && placed === null)) return { level, label: level === 0 ? "" : MOOD[season], region: name, season, sky: null, tempC: null, closed: [] };
+  if (level <= 1 || (!e && placed === null)) return { level, label: level === 0 ? "" : mood(season), region: name, season, sky: null, tempC: null, closed: [] };
   const st = stateAt(ctx, here);
   const sky = placed ?? strOf(e?.fields.weather, "clear");
   const heat = e?.fields.temp_c;
@@ -425,7 +426,7 @@ export const weatherPack: PackDef = {
       render(ctx) {
         const v = buildWeatherView(ctx);
         if (v.level === 0 || v.label === "") return [];
-        if (v.level === 1) return [`Season: ${v.label}.`];
+        if (v.level === 1) return [say("feed_season_label", { label: v.label })];
         return [`Weather: ${v.label.toLowerCase()}.${v.closed.length > 0 ? ` No ${v.closed.join(" or ")} travel.` : ""}`];
       },
     });

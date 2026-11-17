@@ -20,6 +20,7 @@ import { chatSchedulesIn, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, canSeeField, canSeePlace, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { activeBlocks, blockOnDay, blockPlace, routineRole, scheduleOff } from "./routines";
+import { listOf, say } from "../../../engine/lines";
 
 /** One clause of someone's usual routine, and what a reader needs to choose and screen it. */
 export interface UsualClause {
@@ -38,9 +39,9 @@ export interface UsualClause {
   own: boolean;
 }
 
-/** A list of words as English joins it: "a", "a and b", "a, b and c". */
+/** A list of words as the lines join it: "a", "a and b", "a, b and c". */
 function joined(words: readonly string[]): string {
-  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
+  return listOf(words);
 }
 
 /** Weekdays as a phrase: "weekdays", "weekends", "on Tue", "on Mon and Thu" (the calendar's own names); every day is "". */
@@ -57,13 +58,13 @@ function blockDays(cal: Calendar, d: RoutineDays | undefined): string {
   if (!d) return "";
   const parts: string[] = [];
   if (d.weekdays) parts.push(weekdaysPhrase(cal, d.weekdays));
-  if (d.off === "only") parts.push("on days off");
-  if (d.off === "never") parts.push("on working days");
-  if (d.holidays) parts.push("on holidays");
-  if (d.birthday === "own") parts.push("on their birthday");
-  if (d.birthday === "friend") parts.push("on a friend's birthday");
+  if (d.off === "only") parts.push(say("feed_on_days_off"));
+  if (d.off === "never") parts.push(say("feed_on_working_days"));
+  if (d.holidays) parts.push(say("feed_on_holidays"));
+  if (d.birthday === "own") parts.push(say("feed_on_their_birthday"));
+  if (d.birthday === "friend") parts.push(say("feed_on_a_friends_birthday"));
   if (d.seasons) parts.push(`in ${joined(d.seasons)}`);
-  if (d.weather) parts.push(`in ${d.weather} weather`);
+  if (d.weather) parts.push(say("feed_in_weather_weather", { weather: d.weather }));
   return parts.filter((p) => p !== "").join(", ");
 }
 
@@ -80,8 +81,8 @@ function blockClause(cal: Calendar, day: number, block: RoutineBlock): { text: s
   const fixed = block.kind === "fixed" && block.at !== undefined;
   const start = fixed && block.at ? parseHHMM(block.at) : block.window ? parseHHMM(block.window.from) : 0;
   // A window reads as the day part it opens in, as the world's calendar names it.
-  const time = fixed ? ` at ${block.at}` : block.window ? ` in the ${dayPartAt(cal, clockAt(cal, day, start)).label.toLowerCase()}` : "";
-  const often = block.kind === "optional" ? "sometimes" : block.perWeek !== undefined && block.perWeek < 7 ? `${block.perWeek} day${block.perWeek === 1 ? "" : "s"} a week` : "";
+  const time = fixed ? ` at ${block.at}` : block.window ? say("feed_in_the_start", { start: dayPartAt(cal, clockAt(cal, day, start)).label.toLowerCase() }) : "";
+  const often = block.kind === "optional" ? "sometimes" : block.perWeek !== undefined && block.perWeek < 7 ? say("feed_perweek_days_a_week", { perWeek: block.perWeek, if_perWeek: block.perWeek === 1 }) : "";
   const days = [blockDays(cal, block.days), often].filter((p) => p !== "").join(", ");
   return { text: `${days !== "" ? `${days}, ` : ""}${block.label.trim().replace(/[.;]+$/, "")}${time}`, start };
 }
@@ -221,8 +222,8 @@ export function knownUsual(ctx: ReadContext, who: EntityId, place: (id: PlaceId,
  */
 export function usualRoutineHints(ctx: ReadContext): string[] {
   if (!routineSettingsOf(ctx.world).narrator) return [];
-  const lines = presentUsual(ctx, (_id, name) => name).map((p) => `${p.name} usually: ${p.told.join("; ")}.`);
-  return lines.length === 0 ? [] : ["Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):", ...lines];
+  const lines = presentUsual(ctx, (_id, name) => name).map((p) => say("feed_name_usually_told", { name: p.name, told: p.told.join("; ") }));
+  return lines.length === 0 ? [] : [say("feed_usual_routines_background_you_may_use_or"), ...lines];
 }
 
 /**
@@ -234,7 +235,7 @@ export function usualRoutineHints(ctx: ReadContext): string[] {
  */
 export function usualRoutineForExtract(ctx: ReadContext): string[] {
   try {
-    return presentUsual(ctx, (id, name) => `${name} (${id})`).map((p) => `${p.id} (${p.name}) usually: ${p.told.join("; ")}.`);
+    return presentUsual(ctx, (id, name) => `${name} (${id})`).map((p) => say("feed_id_name_usually_told", { id: p.id, name: p.name, told: p.told.join("; ") }));
   } catch {
     // A world whose routines can't be read has none to give: the reply is read as before.
     return [];

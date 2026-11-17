@@ -742,7 +742,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     const level = ctx.levelOf(pov, "money");
     if (level === 0) return [];
     const lines: FeedLine[] = [];
-    if (level === 1 || !hasLedger(ctx, pov)) lines.push({ text: `How well off you are: ${wealthOf(hooks, ctx, pov)}.`, known: "pov" });
+    if (level === 1 || !hasLedger(ctx, pov)) lines.push({ text: say("feed_how_well_off_you_are_pov", { pov: wealthOf(hooks, ctx, pov) }), known: "pov" });
     else {
       const mine = accountsOf(ctx, pov);
       const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
@@ -750,16 +750,16 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const parts = shown.map((id) => {
         const b = balance(ctx.state, id);
         const name = own(ctx.state.entities, id)?.name ?? id;
-        return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
+        return traitsOf(ctx, id)?.liability ? say("feed_name_owes_currency", { name: name, currency: formatMoney(-b, ctx.world.currency) }) : `${name} ${formatMoney(b, ctx.world.currency)}`;
       });
-      if (parts.length > 0) lines.push({ text: `Balances now: ${parts.join("; ")}.`, known: "pov" });
+      if (parts.length > 0) lines.push({ text: say("feed_balances_now_parts", { parts: parts.join("; ") }), known: "pov" });
     }
     if (scope === "player") return lines;
     const here = placeOfEntity(ctx.state, pov);
     for (const id of Object.keys(ctx.state.entities).sort()) {
       const e = own(ctx.state.entities, id);
       if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id) || !together(ctx.world, here, placeOfEntity(ctx.state, id))) continue;
-      const text = `${e.name}'s money: ${wealthOf(hooks, ctx, id)}.`;
+      const text = say("feed_name_s_money_id", { name: e.name, id: wealthOf(hooks, ctx, id) });
       if (canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) lines.push({ text, known: "scene", who: e.name });
       else if (scope === "gm") lines.push({ text, known: "gm" });
     }
@@ -777,7 +777,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const place = placeOfEntity(ctx.state, pov);
       const offers = ctx.levelOf(pov, "money") === 0 || place === null ? [] : offersAtPlace(ctx, place);
       if (place === null || offers.length === 0) return [];
-      const taxed = featureFor(ctx, pov, "sales_tax") ? ", before sales tax" : "";
+      const taxed = featureFor(ctx, pov, "sales_tax") ? say("feed_before_sales_tax") : "";
       return [`Prices at ${labelOf(ctx, place)}${taxed}: ${offers.map((o) => `${o.name} ${formatMoney(o.cents, ctx.world.currency)}`).join("; ")}.`];
     },
   });

@@ -23,6 +23,7 @@ import { contentsOf, holderOf, holdersOf, possessorOf, restOf, whoseOf } from ".
 import { sentence, thingName, thingText, whereWords, whoseWords } from "../../../engine/thing-words";
 import { canSeeEntity } from "../../../engine/visibility";
 import { carriedBy } from "./model";
+import { say } from "../../../engine/lines";
 
 /** What a holder wears or has equipped. */
 export function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {
@@ -42,8 +43,8 @@ export function wornAs(ctx: ReadContext, id: EntityId, who: EntityId): WornAs | 
   return slot === "pocket" || slot === "pocket_or_bag" ? "pocket" : r.type === "equipped" || slot === "hand_held" ? "hand" : "worn";
 }
 
-/** How a thing on the player character is, in a Gear line's words. */
-const WORN_WORDS: Readonly<Record<WornAs, string>> = { worn: "worn", pocket: "in your pocket", hand: "in your hand" };
+/** How a thing on the player character is, in a Gear line's words (the lines `feed_worn_*`). */
+const wornWords = (worn: WornAs): string => say(`feed_worn_${worn}`);
 
 /** The order things on someone are told in: what they wear, then their pockets, their hands, and after them the rest they carry. */
 export const WORN_ORDER: readonly WornAs[] = ["worn", "pocket", "hand"];
@@ -159,7 +160,7 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     // How a thing is on the player character: worn, in a pocket or in hand, else what it is in when that is something other than them.
     const onYou = (id: EntityId): string[] => {
       const worn = as(id);
-      if (worn) return [WORN_WORDS[worn]];
+      if (worn) return [wornWords(worn)];
       const holder = holderOf(ctx.state, id);
       return holder !== null && holder !== pov && see(holder) ? [`in ${nameOf(holder)}`] : [];
     };
@@ -176,22 +177,22 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     for (const id of on) {
       // Theirs as one of an organization they belong to (the household's milk): told whose.
       const whose = whoseOf(ctx, id).owners.includes(pov) ? [] : [whoseWords(ctx, id)].filter((w): w is string => w !== null);
-      lines.push({ text: sentence(`On you: ${thingText(ctx, id, [...onYou(id), ...whose])}`), known: "pov" });
+      lines.push({ text: sentence(say("feed_on_you_whose", { whose: thingText(ctx, id, [...onYou(id), ...whose]) })), known: "pov" });
     }
     for (const id of gear.holding.filter(see)) {
       const got = gotOf(own(ctx.state.entities, id)?.fields.got);
-      const lead = got?.how === "took" ? `Taken from ${owners(id)}` : `Holding for ${owners(id)}`;
+      const lead = got?.how === "took" ? say("feed_taken_from_id", { id: owners(id) }) : say("feed_holding_for_id", { id: owners(id) });
       lines.push({ text: sentence(`${lead}: ${thingText(ctx, id, [...onYou(id), ...(got?.why !== undefined ? [got.why] : [])])}`), known: "pov" });
     }
     for (const g of gear.borrowed.filter((x) => see(x.thing))) {
-      const terms = g.basis === "assign" ? ["yours to use"] : g.overdue ? ["overdue: it should go back"] : g.until !== undefined ? [`until ${formatClock(cal, g.until)}`] : [];
+      const terms = g.basis === "assign" ? [say("feed_yours_to_use")] : g.overdue ? [say("feed_overdue_it_should_go_back")] : g.until !== undefined ? [say("feed_until_until", { until: formatClock(cal, g.until) })] : [];
       const where = holdersOf(ctx.state, g.thing).includes(pov) ? onYou(g.thing) : [whereWords(ctx, g.thing)].filter((w): w is string => w !== null);
-      lines.push({ text: sentence(`Borrowed from ${owners(g.thing)}: ${thingText(ctx, g.thing, [...terms, ...where])}`), known: "pov" });
+      lines.push({ text: sentence(say("feed_borrowed_from_thing_where", { thing: owners(g.thing), where: thingText(ctx, g.thing, [...terms, ...where]) })), known: "pov" });
     }
     for (const g of gear.lent.filter((x) => see(x.thing))) {
       const to = see(g.who) ? nameOf(g.who) : "someone";
-      const terms = g.basis === "hold" ? ["holding it for you"] : g.basis === "assign" ? [`for ${to} to use`] : g.overdue ? [`to ${to}`, "overdue: it should have come back by now"] : [`to ${to}${g.until !== undefined ? ` until ${formatClock(cal, g.until)}` : ""}`];
-      lines.push({ text: sentence(`${g.basis === "hold" ? `With ${to}` : "Lent out"}: ${thingText(ctx, g.thing, terms)}`), known: "pov" });
+      const terms = g.basis === "hold" ? [say("feed_holding_it_for_you")] : g.basis === "assign" ? [say("feed_for_to_to_use", { to: to })] : g.overdue ? [`to ${to}`, say("feed_overdue_it_should_have_come_back_by")] : [say("feed_to_to_until_until", { to: to, until: g.until !== undefined ? formatClock(cal, g.until) : undefined, if_until: g.until !== undefined })];
+      lines.push({ text: sentence(say("feed_with_to_lent_out_terms", { to: to, terms: thingText(ctx, g.thing, terms), if_hold: g.basis === "hold" })), known: "pov" });
     }
     const away = gear.elsewhere.filter((id) => shown(id) && restsOn(ctx, id, pov)).slice(0, thingsConfigOf(ctx.world).notWithYou);
     for (const id of away) {
@@ -203,11 +204,11 @@ export function gearLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const sets = level >= 3 ? Object.values(setsOf(own(ctx.state.entities, pov)?.fields)) : [];
     for (const kind of SET_KINDS) {
       const names = sets.filter((s) => s.kind === kind).map((s) => s.name).sort((a, b) => a.localeCompare(b));
-      if (names.length > 0) lines.push({ text: `${kind === "outfit" ? "Saved outfits" : "Saved loadouts"}: ${listWords(names)}.`, known: "pov" });
+      if (names.length > 0) lines.push({ text: say("feed_saved_outfitssaved_loadouts_names", { names: listWords(names), if_outfit: kind === "outfit" }), known: "pov" });
     }
     if (scope === "gm") {
       const unknown = [...new Set([...carriedBy(ctx.state, pov), ...wornBy(ctx, pov)])].filter((id) => own(ctx.state.entities, id)?.kind !== "account" && !see(id));
-      if (unknown.length > 0) lines.push({ text: `On you without your knowing: ${unknown.map((id) => thingName(ctx, id, level)).join(", ")}.`, known: "gm" });
+      if (unknown.length > 0) lines.push({ text: say("feed_on_you_without_your_knowing_unknown", { unknown: unknown.map((id) => thingName(ctx, id, level)).join(", ") }), known: "gm" });
     }
     return lines;
   });
@@ -236,7 +237,7 @@ export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[]
         const e = own(ctx.state.entities, id);
         return !!e && e.kind !== "account" && e.fields.slot !== "pocket" && !worn.includes(id);
       });
-      const say = (ids: readonly EntityId[]): string =>
+      const idsNamed = (ids: readonly EntityId[]): string =>
         ids
           .map((id) => {
             const whose = whoseOf(ctx, id).owners.includes(who) ? null : whoseWords(ctx, id);
@@ -245,14 +246,14 @@ export function presentGearLines(ctx: ReadContext, scope: FeedScope): FeedLine[]
           .join(", ");
       const wornSeen = worn.filter((id) => see(pov, id));
       const heldSeen = held.filter((id) => see(pov, id));
-      const parts = [...(wornSeen.length > 0 ? [`wears ${say(wornSeen)}`] : []), ...(heldSeen.length > 0 ? [`carries ${say(heldSeen)}`] : [])];
+      const parts = [...(wornSeen.length > 0 ? [say("feed_wears_wornseen", { wornSeen: idsNamed(wornSeen) })] : []), ...(heldSeen.length > 0 ? [say("feed_carries_heldseen", { heldSeen: idsNamed(heldSeen) })] : [])];
       if (parts.length > 0) lines.push({ text: `${person.name} ${parts.join("; ")}.`, known: "pov" });
       if (scope === "player") continue;
       const hidden = [...worn, ...held].filter((id) => !see(pov, id));
       const theirs = hidden.filter((id) => see(who, id));
       const gms = hidden.filter((id) => !see(who, id));
-      if (theirs.length > 0) lines.push({ text: `${person.name} has ${say(theirs)}.`, known: "scene", who: person.name });
-      if (scope === "gm" && gms.length > 0) lines.push({ text: `${person.name} has ${say(gms)}.`, known: "gm" });
+      if (theirs.length > 0) lines.push({ text: say("feed_name_has_theirs", { name: person.name, theirs: idsNamed(theirs) }), known: "scene", who: person.name });
+      if (scope === "gm" && gms.length > 0) lines.push({ text: say("feed_name_has_theirs", { name: person.name, theirs: idsNamed(gms) }), known: "gm" });
     }
     return lines;
   });

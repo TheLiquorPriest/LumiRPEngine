@@ -52,9 +52,9 @@ export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   for (const t of buildQuestLog(ctx).active) {
     lines.push({ text: `${t.label}: ${t.cue ?? t.stage}`, known: "pov" });
     // Each tied to its quest by name: a bare "- step" can't say whose it is once lines are listed.
-    for (const o of t.objectives) if (!o.done) lines.push({ text: `${t.label}, still to do: ${o.label.replace(/[.!?]\s*$/, "")}.`, known: "pov" });
-    for (const h of t.hints.slice(0, t.opened)) lines.push({ text: `${t.label}, a hint your character has: ${h}`, known: "pov" });
-    for (const truth of t.truths) lines.push({ text: `${t.label}, known to be true: ${truth}`, known: "pov" });
+    for (const o of t.objectives) if (!o.done) lines.push({ text: say("feed_t_still_to_do_o", { t: t.label, o: o.label.replace(/[.!?]\s*$/, "") }), known: "pov" });
+    for (const h of t.hints.slice(0, t.opened)) lines.push({ text: say("feed_t_a_hint_your_character_has_h", { t: t.label, h: h }), known: "pov" });
+    for (const truth of t.truths) lines.push({ text: say("feed_t_known_to_be_true_truth", { t: t.label, truth: truth }), known: "pov" });
   }
   if (scope === "player") return lines;
   const pov = ctx.world.pov;
@@ -73,7 +73,7 @@ export function questLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     // A secret track is no one's to know but the GM's (`trackKnown` reads only `known_by`), and so is a truth.
     const who = visibilityOf(t.visibility) === "secret" ? [] : withHim.filter((k) => trackKnown(ctx.registry, ctx.world, ctx.state, k, t)).map((k) => own(ctx.state.entities, k)?.name ?? k);
     if (who.length > 0) lines.push({ text: `${t.label}: ${stage.label}.`, known: "scene", who: who.join(", ") });
-    else if (scope === "gm") lines.push({ text: `${t.label}: ${stage.label}${stage.truth ? ` (the truth: ${stage.truth})` : ""}.`, known: "gm" });
+    else if (scope === "gm") lines.push({ text: say("feed_t_stage_the_truth_truth", { t: t.label, stage: stage.label, truth: stage.truth, if_truth: !!(stage.truth) }), known: "gm" });
   }
   return lines;
 }

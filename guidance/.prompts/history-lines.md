@@ -101,6 +101,7 @@ keys:
   castlife_schedule_label: a schedule as a phrase - schedule, sets (what it sets, the schedule_sets_* lines); castlife_schedule_world, castlife_schedule_off, castlife_schedule_own say what happened to it - name, label
   why_*: why a change was not made, as the reason the answer to a refused change gives (world_apply's not_applied, a refused edit, a rejected event) - each is one reason, filled with what it names (a name, a number, a list)
   lint_*: what a check of a world, a ruleset, a routine, a lore entry, a map, an organization or another part says is wrong, as one line of its problem list (the line a problem lists in Build and the map and routine jobs read) - each is filled with what it names
+  feed_*: the narrator's own sections (what a person is doing and how they regard the player's character, a project, a plan and the orders given, a vote waiting, a quest's stage, what is owed and what is on a person, a thing carried or lent, the date and time, the weather, the conditions someone is under, how an organization names a person and what they may do there, the usual routines of the people here), each a phrase or a sentence filled with what it names; feed_org_type_*, feed_role_*, feed_worn_*, feed_mood_* are the single words those fill in
 ---
 credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
 credit_declined: The application for a {{product}} was declined: {{reason}}.
@@ -1891,3 +1892,103 @@ lint_name_lists_no_weekdays_so_its_never: {{name}}: lists no weekdays, so it's n
 lint_name_its_window_and_length_run_past: {{name}}: its window and length run past the next day.
 lint_name_its_window_opens_and_closes_at: {{name}}: its window opens and closes at {{from}}, which reads as a whole day; give it a span.
 lint_name_perweek_times_a_week_but_its: {{name}}: {{perWeek}} times a week, but it's on only {{weekdaysCount}} weekdays.
+feed_name_knowsdoesnt_know_you_and_feels_words: {{name}} {{#if_known}}knows{{/if_known}}{{^if_known}}doesn't know{{/if_known}} you{{#if_words}} and feels {{words}} toward you{{/if_words}}.
+feed_right_now_they_are_doing: Right now they are {{doing}}.
+feed_agenda: Agenda
+feed_decided: Decided
+feed_name_s_private_agenda_track_stagelabel: {{name}}'s private agenda, {{track}}: {{stageLabel}}.
+feed_id_s_cues: {{id}}'s cues
+feed_name_is_here_act: {{name}} is here{{#if_act}}, {{act}}{{/if_act}}.
+feed_on_days_off: on days off
+feed_on_working_days: on working days
+feed_on_holidays: on holidays
+feed_on_their_birthday: on their birthday
+feed_on_a_friends_birthday: on a friend's birthday
+feed_in_weather_weather: in {{weather}} weather
+feed_in_the_start:  in the {{start}}
+feed_perweek_days_a_week: {{perWeek}} day{{^if_perWeek}}s{{/if_perWeek}} a week
+feed_name_usually_told: {{name}} usually: {{told}}.
+feed_usual_routines_background_you_may_use_or: Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):
+feed_id_name_usually_told: {{id}} ({{name}}) usually: {{told}}.
+feed_your: Your
+feed_whose_name_status_done_of_stepscount_steps: {{whose}} {{name}}: {{status}}; {{done}} of {{stepsCount}} steps done{{#if_next}}; next: {{name2}}{{/if_next}}{{#if_last}}; due to be done {{last}}{{/if_last}}.
+feed_the_engine_runs_each_project_day_by: The engine runs each project day by day: tell its progress only as the time that passes covers, never say a step is done before its day, and never start, finish or drop one yourself. A setback or an extra cost the story makes is noted with project_note.
+feed_your_party: your party
+feed_orgname_the_plan_and_the_orders_given: {{orgName}}: the plan and the orders given, as the story stands.
+feed_set_by_the_gm_by_name_cal: set{{#if_by}} by the GM{{/if_by}}{{^if_by}} by {{name}}{{/if_by}} {{cal}}{{#if_lateOf}} (its time has passed){{/if_lateOf}}
+feed_latest_note_last_source: ; latest: {{note}} ({{last}}, {{source}})
+feed_o_lead_leads_text_at_where_by: - {{o}}{{#if_lead}} ({{lead}} leads){{/if_lead}}: {{text}}{{#if_where}}, at {{where}}{{/if_where}}{{#if_when}}, by {{when}}{{/if_when}}. {{status}}, {{o2}}{{o3}}.{{#if_lived}} By the day as laid it should be done; not told yet.{{/if_lived}}
+feed_goal_g_text_todayby_window_status_g2: Goal, {{g}}: {{text}}{{#if_window}} ({{#if_today}}today{{/if_today}}{{^if_today}}by {{window}}{{/if_today}}){{/if_window}}. {{status}}{{g2}}.
+feed_play_each_one_carrying_out_their_order: Play each one carrying out their order in character unless the scene gives them a reason not to. Show progress only as the player's message and the time that passes cover; never mark anything done, hand out a task, or change who does what yourself.
+feed_to_a_vote_at_org_text_it: - To a vote at {{org}}: {{text}}; it closes {{closes}}; {{pov}}.
+feed_show_a_vote_or_an_answer_only: - Show a vote or an answer only as the player's message and the time that passes cover; never decide one for anyone.
+feed_t_still_to_do_o: {{t}}, still to do: {{o}}.
+feed_t_a_hint_your_character_has_h: {{t}}, a hint your character has: {{h}}
+feed_t_known_to_be_true_truth: {{t}}, known to be true: {{truth}}
+feed_t_stage_the_truth_truth: {{t}}: {{stage}}{{#if_truth}} (the truth: {{truth}}){{/if_truth}}.
+feed_how_well_off_you_are_pov: How well off you are: {{pov}}.
+feed_balances_now_parts: Balances now: {{parts}}.
+feed_name_s_money_id: {{name}}'s money: {{id}}.
+feed_before_sales_tax: , before sales tax
+feed_on_you_whose: On you: {{whose}}
+feed_taken_from_id: Taken from {{id}}
+feed_holding_for_id: Holding for {{id}}
+feed_yours_to_use: yours to use
+feed_overdue_it_should_go_back: overdue: it should go back
+feed_borrowed_from_thing_where: Borrowed from {{thing}}: {{where}}
+feed_holding_it_for_you: holding it for you
+feed_for_to_to_use: for {{to}} to use
+feed_overdue_it_should_have_come_back_by: overdue: it should have come back by now
+feed_to_to_until_until: to {{to}}{{#if_until}} until {{until}}{{/if_until}}
+feed_with_to_lent_out_terms: {{#if_hold}}With {{to}}{{/if_hold}}{{^if_hold}}Lent out{{/if_hold}}: {{terms}}
+feed_saved_outfitssaved_loadouts_names: {{#if_outfit}}Saved outfits{{/if_outfit}}{{^if_outfit}}Saved loadouts{{/if_outfit}}: {{names}}.
+feed_on_you_without_your_knowing_unknown: On you without your knowing: {{unknown}}.
+feed_name_has_theirs: {{name}} has {{theirs}}.
+feed_your_household: , your household
+feed_where_you_work: , where you work
+feed_which_you_own: , which you own
+feed_which_you_belong_to: , which you belong to
+feed_up_to_payment_a_payment: up to {{payment}} a payment
+feed_up_to_month_a_month: up to {{month}} a month
+feed_only_from_accounts: only from {{accounts}}
+feed_you_are_title_holding_title2: you are {{title}}{{#if_title}}, holding {{title2}}{{/if_title}}
+feed_you_report_to_name: you report to {{name}}
+feed_name_reportsreport_to_you: {{name}} {{#if_below}}reports{{/if_below}}{{^if_below}}report{{/if_below}} to you
+feed_you_may_do_anything_for_it: you may do anything for it
+feed_you_may_power_limits: you may {{power}}{{#if_limits}}, {{limits}}{{/if_limits}}
+feed_org_type_parts_you_belong_to_it: {{org}} ({{type}}): {{#if_parts}}{{parts}}{{/if_parts}}{{^if_parts}}you belong to it{{/if_parts}}.
+feed_you_act_for_org_by_d_s: You act for {{org}}{{#if_d}} by {{d}}'s delegation{{/if_d}}: you may {{words}}{{#if_extra}}, {{extra}}{{/if_extra}}{{#if_until}}, until {{until}}{{/if_until}}.
+feed_you_travel_with_pov_the_player_character: You travel with {{pov}} (the player character) in their party, as {{#if_core}}a core member{{/if_core}}{{^if_core}}{{#if_companion}}a companion{{/if_companion}}{{^if_companion}}{{#if_hired}}a hired hand{{/if_hired}}{{^if_hired}}an ally{{/if_hired}}{{/if_companion}}{{/if_core}}.
+feed_party_someone_o: {{#if_party}}{{party}}{{/if_party}}{{^if_party}}someone{{/if_party}} ({{o}})
+feed_yours_direct_with_rest: yours ({{direct}}){{#if_rest}}, with {{rest}}{{/if_rest}}
+feed_you_role: you: {{role}}
+feed_you_through_party_someone: you: through {{#if_party}}{{party}}{{/if_party}}{{^if_party}}someone{{/if_party}}
+feed_held_by_rest: held by {{rest}}
+feed_time_part: Time: {{part}}.
+feed_time_offset_part: Time: {{offset}} ({{part}}).
+feed_the_clock_is_paused_for_this_scene: The clock is paused for this scene.
+feed_season_label: Season: {{label}}.
+feed_you_are_conditions: You are {{conditions}}.
+feed_name_owes_currency: {{name}} owes {{currency}}
+feed_until_until: until {{until}}
+feed_wears_wornseen: wears {{wornSeen}}
+feed_carries_heldseen: carries {{heldSeen}}
+feed_title_atof_orgname: {{title}} {{#if_staffOnly}}at{{/if_staffOnly}}{{^if_staffOnly}}of{{/if_staffOnly}} {{orgName}}
+feed_org_type_company: a company
+feed_org_type_household: a household
+feed_org_type_group: a group
+feed_org_type_trust: a trust
+feed_org_type_party: a party
+feed_role_owner: owner
+feed_role_joint: joint owner
+feed_role_custodian: custodian
+feed_role_beneficiary: beneficiary
+feed_role_trustee: trustee
+feed_role_authorized_user: authorized user
+feed_worn_worn: worn
+feed_worn_pocket: in your pocket
+feed_worn_hand: in your hand
+feed_mood_winter: a cold winter
+feed_mood_spring: a mild spring
+feed_mood_summer: a warm summer
+feed_mood_autumn: a crisp autumn

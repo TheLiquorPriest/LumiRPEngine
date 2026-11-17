@@ -1633,10 +1633,10 @@ export function stanceLines(ctx: ReadContext): string[] {
     // Nobody regards a stranger: regard toward the POV is knowing it as much as a `knows` relation.
     const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
     const words = regard?.(ctx, id, pov) ?? null;
-    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? ` and feels ${words} toward you` : ""}.`];
+    const parts = [say("feed_name_knowsdoesnt_know_you_and_feels_words", { name: e.name, words: words, if_known: !!(known), if_words: !!(words) })];
     const activity = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
     const doing = typeof activity === "string" ? activityPhrase(shownActivity(ctx, id, activity)) : null;
-    if (doing !== null && safe(doing)) parts.push(`Right now they are ${doing}.`);
+    if (doing !== null && safe(doing)) parts.push(say("feed_right_now_they_are_doing", { doing: doing }));
     // A public agenda's current stage, in its cue's words where the author wrote one, else its label as Cast shows it.
     const agenda = agendaFor(world, state, id)
       .filter((a) => publicTrack(world, a.track))
@@ -1646,9 +1646,9 @@ export function stanceLines(ctx: ReadContext): string[] {
         return cue ? cue : a.stageLabel;
       })
       .filter(safe);
-    if (agenda.length > 0) parts.push(listed("Agenda", agenda));
+    if (agenda.length > 0) parts.push(listed(say("feed_agenda"), agenda));
     const decided = e.agent && ctx.levelOf(id, "castlife") >= 3 ? decidedBlock(ctx, id) : null;
-    if (decided !== null && safe(decided)) parts.push(listed("Decided", [decided]));
+    if (decided !== null && safe(decided)) parts.push(listed(say("feed_decided"), [decided]));
     lines.push(parts.join(" "));
   }
   return lines;
@@ -1667,7 +1667,7 @@ export function stanceFeed(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     for (const a of agendaFor(ctx.world, ctx.state, id).filter((x) => !publicTrack(ctx.world, x.track))) {
       const track = own(ctx.world.tracks, a.track);
       const secret = visibilityOf(track?.visibility) === "secret";
-      const text = `${name}'s private agenda, ${track?.label ?? a.track}: ${a.stageLabel}.`;
+      const text = say("feed_name_s_private_agenda_track_stagelabel", { name: name, track: track?.label ?? a.track, stageLabel: a.stageLabel });
       if (!secret) lines.push({ text, known: "scene", who: name });
       else if (scope === "gm") lines.push({ text, known: "gm" });
     }
@@ -1683,7 +1683,7 @@ export function stanceCues(ctx: ReadContext): string[] {
   const { people, safe } = stanceCast(ctx);
   return people.flatMap((id) => {
     const cues = cuesFor(ctx, id, safe);
-    return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
+    return cues.length > 0 ? [listed(say("feed_id_s_cues", { id: own(ctx.state.entities, id)?.name ?? id }), cues)] : [];
   });
 }
 
@@ -1719,7 +1719,7 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       if (scope === "player") continue;
       const knowers = present.filter((k) => k !== id && see(pov, k) && see(k, id)).map((k) => own(ctx.state.entities, k)?.name ?? k);
       const act = typeof e.fields.activity === "string" ? activityPhrase(e.fields.activity) : null;
-      const text = `${e.name} is here${act ? `, ${act}` : ""}.`;
+      const text = say("feed_name_is_here_act", { name: e.name, act: act, if_act: !!(act) });
       if (knowers.length > 0) lines.push({ text, known: "scene", who: knowers.join(", ") });
       else if (scope === "gm") lines.push({ text, known: "gm" });
       continue;
@@ -1734,7 +1734,7 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const tier = partyTierIn(e.relations, pov);
     const marks = [...(tier ? [TIER_MARKS[tier]] : []), ...(optionalQuery(ctx, "orgs.titles")?.(ctx, id) ?? [])];
     const name = marks.length > 0 ? `${e.name} (${marks.join("; ")})` : e.name;
-    lines.push({ text: life ? `${name} ${life.reads}.` : `${name} is here${doing ? `, ${doing}` : ""}.`, known: "pov" });
+    lines.push({ text: life ? `${name} ${life.reads}.` : say("feed_name_is_here_act", { name: name, act: doing, if_act: !!(doing) }), known: "pov" });
     // How they regard the POV follows them; a body the POV knows of holds no regard to voice.
     const regard = life && !life.acts ? null : (voice?.(ctx, id) ?? null);
     if (regard) lines.push({ text: regard, known: "pov" });

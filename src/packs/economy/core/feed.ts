@@ -16,12 +16,13 @@ import type { FeedLine, ReadContext } from "../../../engine/registry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { propertyIds } from "./property";
+import { say } from "../../../engine/lines";
 
 /** At most this many properties beyond the player character's are told. */
 const OTHERS_CAP = 10;
 
-/** A holder's role as a property line says it. */
-const ROLE_LABEL: Record<OwnerRole, string> = { owner: "owner", joint: "joint owner", custodian: "custodian", beneficiary: "beneficiary", trustee: "trustee", authorized_user: "authorized user" };
+/** A holder's role as a property line says it (the lines `feed_role_*`). */
+const roleLabel = (role: OwnerRole): string => say(`feed_role_${role}`);
 
 /** The roles that make a property the holder's own; the rest only keep it, benefit from it or use it. */
 const OWNING: Record<OwnerRole, boolean> = { owner: true, joint: true, custodian: false, beneficiary: false, trustee: false, authorized_user: false };
@@ -40,7 +41,7 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     return at === name(id) ? "" : ` at ${at}`;
   };
   /** A holder's role and share, as every property line names them. */
-  const roleOf = (o: { role: OwnerRole; worth: number }): string => `${ROLE_LABEL[o.role]}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
+  const roleOf = (o: { role: OwnerRole; worth: number }): string => `${roleLabel(o.role)}${o.worth > 0 ? `, ${Math.round(o.worth)}%` : ""}`;
   const lines: FeedLine[] = [];
   const others: EntityId[] = [];
   for (const id of propertyIds(ctx.state)) {
@@ -53,15 +54,15 @@ export function propertyLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     }
     // "Yours" only when he owns it outright or jointly; otherwise its holders first, each with their
     // role, then what he is to it (his own role, or the group he holds through). Holders as he may know them.
-    const holder = (o: (typeof access.owners)[number]): string => `${see(pov, o.party) ? name(o.party) : "someone"} (${roleOf(o)})`;
+    const holder = (o: (typeof access.owners)[number]): string => say("feed_party_someone_o", { party: name(o.party), o: roleOf(o), if_party: !!(see(pov, o.party)) });
     const direct = access.owners.find((o) => o.party === pov);
     const through = direct ? undefined : access.owners.find((o) => o.party !== pov && ownsThrough(ctx, pov, o.party));
     const rest = access.owners.filter((o) => o !== direct).map(holder);
     let stake: string;
-    if (direct && OWNING[direct.role]) stake = `yours (${roleOf(direct)})${rest.length > 0 ? `, with ${rest.join(", ")}` : ""}`;
+    if (direct && OWNING[direct.role]) stake = say("feed_yours_direct_with_rest", { direct: roleOf(direct), rest: rest.join(", "), if_rest: rest.length > 0 });
     else {
-      const you = direct ? `you: ${ROLE_LABEL[direct.role]}` : through ? `you: through ${see(pov, through.party) ? name(through.party) : "someone"}` : null;
-      stake = [rest.length > 0 ? `held by ${rest.join(", ")}` : null, you].filter((p) => p !== null).join("; ");
+      const you = direct ? say("feed_you_role", { role: roleLabel(direct.role) }) : through ? say("feed_you_through_party_someone", { party: name(through.party), if_party: !!(see(pov, through.party)) }) : null;
+      stake = [rest.length > 0 ? say("feed_held_by_rest", { rest: rest.join(", ") }) : null, you].filter((p) => p !== null).join("; ");
     }
     lines.push({ text: `${name(id)}${where(id, pov)}${stake !== "" ? `: ${stake}` : ""}.`, known: "pov" });
   }
