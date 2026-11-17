@@ -155,6 +155,8 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   // The files pinned in today's build as pins, each for the agent that is handed it (R-174).
   const pinned = tree === null || ownFiles === null ? null : await carryPins({ wanted: ownFiles.pins, globalConfig: paths.globalConfig, shipped: join(paths.files, SHIPPED_FOLDER, tree.agents), own: new Set(ownFiles.agentIds), earlier });
   if (pinned !== null) keepPutPrints(db, user, pinned.put);
+  // A chat's config is a path in the file tree, which names the chat and its character: the report holds no such name, and the pins are written now (the report keeps each pin's file and role, `pins`).
+  if (ownFiles !== null) ownFiles.pins = [];
   // Each chat's own choices into its `RPE.yml`, where its setting stands over the user's.
   const chatSettings = tree === null ? null : await carryChatSettings({ today, chats, places: tree, globalConfig: paths.globalConfig, earlier, ...(input.settings ? { registry: input.settings } : {}) });
   if (chatSettings !== null) keepPutPrints(db, user, chatSettings.put, chatSettings.drop);
