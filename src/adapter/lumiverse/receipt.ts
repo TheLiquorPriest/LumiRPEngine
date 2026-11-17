@@ -234,8 +234,10 @@ function words(error: unknown): string {
  * message is cut here. Where it had no answer, the window is asked here, over the chat's rows read now,
  * and the cut made here: by the tag's list over the body where every listed message is found; where some
  * are not, the body messages that are wholly history before the window's start are left out, the rest
- * goes as it came, and the turn's notices say what stays. A window that is on and a chat whose rows
- * cannot be read are refused rather than sent with more history than the window allows.
+ * goes as it came, and the turn's notices say what stays. A chat whose history the window holds whole
+ * (its stored numbers span no more than the window) passes whole with its rows unread; where a cut is
+ * needed and the rows cannot be read, it is refused rather than sent with more history than the window
+ * allows, a chat RPE's reads cannot find told apart from a read that failed.
  */
 export async function receive(tag: Tag, body: Record<string, unknown>, own: { user: string; window: HistoryWindow; start: TurnStarts; reads: PromptReads; room: ModelRooms }, signal: AbortSignal): Promise<Received> {
   if (tag.user !== own.user) throw new Refused(403, "This reply's chat belongs to another Lumiverse user than the one this RPE plays for.");
@@ -267,7 +269,12 @@ export async function receive(tag: Tag, body: Record<string, unknown>, own: { us
       if (read === null) throw new Refused(404, "RPE found no chat of yours in Lumiverse by this reply's chat, so it could not count your history window, and sent nothing.");
       return windowPath(tag, read);
     };
-    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path, follows }, signal);
+    // The stored numbers the prompt's history spans, first listed history message to last.
+    const span = (): number => {
+      const listed = pathOf(tag);
+      return listed.length === 0 ? 0 : listed.at(-1)!.index - listed[0]!.index + 1;
+    };
+    keep = await own.window({ user: tag.user, chat: tag.chat, generation, path, follows, span }, signal);
   }
   const left = new Set(historyCut(tag.messages.map((m) => ({ history: m.history === true, index: m.source?.index ?? null })), keep));
   /** The body with these listed messages left out: by the tag's list where every listed message was found, else as far as the body says. */

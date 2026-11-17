@@ -116,10 +116,12 @@ export function turnArea(takes: TurnTakes): TurnArea {
         turns: { play: (turn, out, signal) => made().lane.play(turn, out, signal) },
         changes: { changed: (change) => made().lane.changed(change), reopened: () => made().lane.reopened() },
         // The history window on the chat's settings: the first history message the prompt keeps; with the window off the chat's path is
-        // never read. Its hold reads the record the coming turn starts from: the turn it follows.
+        // never read, nor where the prompt's history spans no more than the window (on receipt), which it keeps whole. Its hold reads the
+        // record the coming turn starts from: the turn it follows.
         window: async (ask) => {
           const { window } = await chatSettings(ask.chat);
-          return window.size === null ? null : historyWindow(await ask.path(), window, covered(ask.chat, (await ask.follows())?.turn ?? null)).first;
+          if (window.size === null || (ask.span !== undefined && ask.span() <= window.size)) return null;
+          return historyWindow(await ask.path(), window, covered(ask.chat, (await ask.follows())?.turn ?? null)).first;
         },
         // The window as a page shows it, read at the chat's head: whether it is on, the first message it keeps, and what the story has covered.
         windowView: async (chat, path) => {

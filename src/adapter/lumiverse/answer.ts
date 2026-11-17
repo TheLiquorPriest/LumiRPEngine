@@ -82,6 +82,12 @@ export interface WindowAsk {
    * turn's own line, never at the chat's head, so a swipe or a branch is cut by its own story. Rejects where the point could not be worked out. Asked only by a window that needs it.
    */
   follows(): Promise<PathStart["at"]>;
+  /**
+   * On receipt: how many of the chat's stored numbers the prompt's history spans, its first listed history message to its last (0 for
+   * none). A window at least that large has nothing to cut, so its rows are not read and nothing is refused for them (PlanAdapter-S2-fix1
+   * item 4). Absent at the question, whose path the extension sends whole.
+   */
+  span?(): number;
 }
 
 /** The first history message to keep (the window, its step and its hold, §4.2); null keeps all. */
