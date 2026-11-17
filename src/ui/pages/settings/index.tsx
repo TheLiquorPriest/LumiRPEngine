@@ -5,7 +5,7 @@
 // whether a change is for every chat or for this chat alone. The settings set for one connection or one agent at a time are a table,
 // a row for each. The install's facts, and what waits for the server's command line, are listed under Server and service.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Banner, Button, Disclosure, PageHeader, SearchField, Seg } from "../../../frontend/components";
 import type { LayerLevel, LoreBooks, SettingsReply, SettingView, SwitchEntry } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
@@ -83,19 +83,28 @@ export function settingsControl(calls: SettingsCalls, onChange: (shown: Settings
   };
 }
 
-/** The settings of a chat's levels (null: those every chat shares), read and written by one control while the page is open. */
-export function useSettings(chat: string | null): { shown: SettingsShown; actions: RowActions } {
+/**
+ * The settings of a chat's levels (null: those every chat shares), read and written by one control while the page is open; `written`
+ * hears of each write RPE took. A change of `again` reads them again (a definition added by a file written), what was read staying
+ * shown until the new read comes.
+ */
+export function useSettings(chat: string | null, written: () => void = () => undefined, again: unknown = null): { shown: SettingsShown; actions: RowActions } {
   const app = useApp();
   // The page's own settings (pages.*) are read again after each write.
   const ui = useUiSettings();
   const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
   const [control, setControl] = useState<SettingsControl | null>(null);
+  const readFor = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    setShown(NO_SETTINGS);
-    const made = settingsControl(settingsCalls(app.client, chat), setShown, () => ui.reread());
+    if (readFor.current !== chat) setShown(NO_SETTINGS);
+    readFor.current = chat;
+    const made = settingsControl(settingsCalls(app.client, chat), setShown, () => {
+      ui.reread();
+      written();
+    });
     setControl(made);
     return () => made.stop();
-  }, [chat]);
+  }, [chat, again]);
   return { shown, actions: { onWrite: (key, level, value, none) => control?.onWrite(key, level, value, none), onTakeAway: (key, level) => control?.onTakeAway(key, level) } };
 }
 

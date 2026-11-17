@@ -1,6 +1,7 @@
-// Agents (plan §14, App. C): every definition in force for the chat open (or, with none open, as a new chat takes them), each with which connection,
-// model and effort it will really run with, its tools, what it reads and what it is given; one open by address (`agents/<name>`), the list beside it
-// at desktop width and gone for it, with Back, on a phone. He changes any of it there: the definition saved as his own file at a level.
+// Agents (plan §14, App. C, §2.1 point 5): every definition in force for the chat open (or, with none open, as a new chat takes them), each with
+// which connection, model and effort it will really run with, its effort and limits as settings, its tools, what it reads and what it is given;
+// one open by address (`agents/<name>`), the list beside it at desktop width and gone for it, with Back, on a phone. He changes any of it there:
+// a setting for every chat or this chat, and the definition saved as his own file at a level.
 
 import type { ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
@@ -9,6 +10,7 @@ import { Badge, Banner, Empty, PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { LEVEL_WORDS } from "../../words";
+import { useSettings } from "../settings";
 import { AgentOpen } from "./open";
 
 export { toolStanding } from "./open";
@@ -53,7 +55,10 @@ export function AgentsPage(props: { chat: string | null; at: readonly string[] |
   const app = useApp();
   const { chat } = props;
   const [changed, setChanged] = useState(0);
-  const agents = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat, changed]);
+  const [settingsWritten, setSettingsWritten] = useState(0);
+  // A setting written changes what an agent runs with (its effort): the list is read again. A file written may add a definition: the settings are read again.
+  const agents = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }), [chat, changed, settingsWritten]);
+  const settings = useSettings(chat, () => setSettingsWritten((n) => n + 1), changed);
   const connections = useRead(() => app.client.call("GET /api/v1/connections", {}), []);
   const name = props.at?.[0] ?? null;
   const list = sortedAgents(agents.value?.agents ?? []);
@@ -92,6 +97,8 @@ export function AgentsPage(props: { chat: string | null; at: readonly string[] |
                 chat={chat}
                 agent={open}
                 connections={connections.value?.connections ?? []}
+                settings={settings.shown}
+                {...settings.actions}
                 onChanged={() => setChanged((n) => n + 1)}
                 onConnection={(id) => app.go({ page: "connections", chat, at: [id] })}
                 onFile={(path) => app.go({ page: "files", chat, at: [path] })}

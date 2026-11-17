@@ -1,8 +1,10 @@
-// One definition open (plan §5.2, §5.4, §14 Agents): which connection, model and effort it will really run with, its tools (each with its family, a
-// tool nobody registers marked), what it reads (its stack in the chat open, part by part, each with its file and level), and what it is given by
-// name with what provides each; and the change form: its header as fields (model from the connections, effort, tools from what is registered,
-// what it reads, what it is given) and its text, saved as his own file at a level, a shipped one reset to its default, a copy of it made as a
-// new agent, its file opened on Files. A change to its tools or to what it is given holds from the next session, or at once by Apply now.
+// One definition open (plan §5.2, §5.4, §14 Agents, §2.1 point 5): which connection, model and effort it will really run with; its
+// effort, its limits and its sampling as settings, each changed for every chat or this chat with what its header says beside it and the
+// way back to it; its tools (each with its family, a tool nobody registers marked), what it reads (its stack in the chat open, part by
+// part, each with its file and level), and what it is given by name with what provides each; and the change form: its header as fields
+// (model from the connections, tools from what is registered, what it reads, what it is given) and its text, saved as his own file at a
+// level, a shipped one reset to its default, a copy of it made as a new agent, its file opened on Files. A change to its tools or to
+// what it is given holds from the next session, or at once by Apply now.
 
 import type { ListedDefinition, RegisteredTool } from "rp-harness/contract";
 import { useState } from "preact/hooks";
@@ -13,10 +15,11 @@ import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, LEVEL_WORDS, num } from "../../words";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
+import type { SettingsShown } from "../settings";
+import type { RowActions } from "../settings/row";
 import { windowOfModel } from "../usage";
 import { listLine, rewrite, splitFile } from "./header";
-
-const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+import { AgentSettings } from "./settings";
 
 /** What a name in `given:` is, in words, by the kind the route gives it. */
 export const GIVEN_KIND_WORDS: Readonly<Record<string, string>> = {
@@ -34,10 +37,12 @@ export const GIVEN_KIND_WORDS: Readonly<Record<string, string>> = {
   view: "a view of the world",
 };
 
-export interface AgentOpenProps {
+export interface AgentOpenProps extends RowActions {
   chat: string | null;
   agent: ListedDefinition;
   connections: readonly ConnectionShown[];
+  /** The settings of the chat's levels, the ones set per agent among them. */
+  settings: SettingsShown;
   /** Called when a file was written, so the list is read again. */
   onChanged(): void;
   onConnection(id: string): void;
@@ -73,7 +78,7 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
       )}
       <p class="rpe-line" data-effort>
         Thinks at {run.effort === null ? "its provider's own default" : <strong>{run.effort}</strong>}
-        {agent.effort === undefined ? ": its definition sets none, so its connection's own holds." : ": as its definition sets it."}
+        {agent.effort === undefined ? ". Its definition sets none." : `. Its definition says ${agent.effort}.`} An effort set below, for every chat or this one, stands over it.
       </p>
     </Section>
   );
@@ -162,7 +167,6 @@ function ChangeSection(props: AgentOpenProps) {
   const file = useRead(() => files.read(agent.path, 0, piece), [agent.path, chat]);
   const tools = useRead(() => app.client.call("GET /api/v1/agents/:agent/tools", { agent: agent.name }, { query: chat === null ? {} : { chat } }), [agent.name, chat]);
   const [model, setModel] = useState(agent.model ?? "default");
-  const [effort, setEffort] = useState(agent.effort ?? "");
   const [picked, setPicked] = useState<readonly string[]>(agent.tools);
   const [reads, setReads] = useState(agent.reads.join(", "));
   const [given, setGiven] = useState(agent.given.join(", "));
@@ -192,7 +196,7 @@ function ChangeSection(props: AgentOpenProps) {
   const save = (): void =>
     press("save", async () => {
       if (file.value === null) return;
-      const { text, kept } = rewrite(file.value.text, { model: model === "" ? null : model, effort: effort === "" ? null : effort, tools: listLine(picked), reads: listLine(names(reads)), given: listLine(names(given)) }, bodyText);
+      const { text, kept } = rewrite(file.value.text, { model: model === "" ? null : model, tools: listLine(picked), reads: listLine(names(reads)), given: listLine(names(given)) }, bodyText);
       await files.save(agent.path, level, text);
       setSaid(`Saved as your own file ${level === "global" ? "for every chat" : level === "chat" ? "for this chat" : "for this character"}.${kept.length === 0 ? "" : ` ${kept.join(", ")} is written over several lines in its file and was left as it is: change it on Files.`} A change to its tools or to what it is given holds from the next session, or at once with Apply now.`);
       file.again();
@@ -237,17 +241,6 @@ function ChangeSection(props: AgentOpenProps) {
                 </option>
               ))}
               {model !== "default" && !props.connections.some((c) => c.name === model) ? <option value={model}>{model} (not one of yours)</option> : null}
-            </select>
-          </label>
-          <label class="lre-field">
-            <span class="label">Effort</span>
-            <select class="lre-input" value={effort} onChange={(e) => setEffort((e.currentTarget as HTMLSelectElement).value)}>
-              <option value="">its connection's own</option>
-              {EFFORTS.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
             </select>
           </label>
           <Disclosure summary={`Tools (${picked.length})`}>
@@ -353,6 +346,7 @@ export function AgentOpen(props: AgentOpenProps) {
       </p>
       <p class="rpe-line">{agent.description}</p>
       <ModelSection agent={agent} connections={props.connections} onConnection={props.onConnection} />
+      <AgentSettings chat={props.chat} agent={agent} shown={props.settings} onWrite={props.onWrite} onTakeAway={props.onTakeAway} />
       <ToolsSection chat={props.chat} agent={agent} />
       <StackSection chat={props.chat} agent={agent.name} />
       <GivenSection chat={props.chat} agent={agent} />

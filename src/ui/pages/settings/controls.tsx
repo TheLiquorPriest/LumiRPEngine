@@ -51,12 +51,15 @@ function SaveCancel(props: { busy: boolean; ok: boolean; onSave(): void; onCance
   );
 }
 
+/** Nothing sets it, and what then holds is not what `~` means (a definition's own value): neither `~` nor a value is chosen. */
+const unsetNow = (props: ControlProps): boolean => props.start === null && props.setting.from === null && props.setting.unset !== null;
+
 /** Choices side by side where they are few and short; else a list to pick from. `~` is one more choice where it may be set. */
 function ChoiceControl(props: ControlProps & { values: readonly { value: string; label: string }[] }) {
   const { setting: s } = props;
   const current = props.start === null ? null : typeof props.start === "string" ? props.start : String(props.start);
   const options = [...props.values, ...(s.orNone ? [{ value: NONE, label: noneLabel(s), title: noneWords(s, true) }] : [])];
-  const chosen = current ?? (s.orNone ? NONE : null);
+  const chosen = current ?? (s.orNone && !unsetNow(props) ? NONE : null);
   const pick = (value: string): void => {
     if (value === chosen) return;
     if (value === NONE) props.onNone();
@@ -67,7 +70,7 @@ function ChoiceControl(props: ControlProps & { values: readonly { value: string;
     <select class="lre-input rpe-set-select" aria-label={s.name} disabled={props.busy} onChange={(event) => pick(event.currentTarget.value)}>
       {chosen === null ? (
         <option value="" selected>
-          Choose one
+          {s.unset !== null && unsetNow(props) ? s.unset.charAt(0).toUpperCase() + s.unset.slice(1) : "Choose one"}
         </option>
       ) : null}
       {current !== null && !options.some((o) => o.value === current) ? (
@@ -104,17 +107,19 @@ function typedNumber(takes: Takes, text: string): number | null {
   return takes.type === "whole" && !Number.isInteger(n) ? null : n;
 }
 
-/** A number with its unit beside it; where `~` may be set, its meaning and "A value" side by side above it. */
+/** A number with its unit beside it; where `~` may be set, its meaning and "A value" side by side above it (neither chosen while it is unset). */
 function NumberControl(props: ControlProps) {
   const { setting: s } = props;
   const startText = typeof props.start === "number" ? String(props.start) : "";
+  const startMode = props.start !== null || !s.orNone ? "value" : unsetNow(props) ? "unset" : "none";
   const [text, setText] = useState(startText);
-  const [wantValue, setWantValue] = useState(props.start !== null || !s.orNone);
+  const [mode, setMode] = useState<"value" | "none" | "unset">(startMode);
+  const wantValue = mode === "value";
   const n = typedNumber(s.takes, text);
   const dirty = wantValue && text.trim() !== startText;
   const cancel = (): void => {
     setText(startText);
-    setWantValue(props.start !== null || !s.orNone);
+    setMode(startMode);
     props.onDraft(undefined);
   };
   const save = (): void => {
@@ -126,7 +131,7 @@ function NumberControl(props: ControlProps) {
     <div class="lre-stack rpe-set-number">
       {s.orNone ? (
         <Seg
-          value={wantValue ? "value" : "none"}
+          value={mode === "unset" ? null : mode}
           options={[
             { value: "none", label: noneLabel(s), title: noneWords(s, true) },
             { value: "value", label: "A value" },
@@ -134,10 +139,10 @@ function NumberControl(props: ControlProps) {
           label={s.name}
           disabled={props.busy}
           onChange={(to) => {
-            setWantValue(to === "value");
+            setMode(to);
             if (to === "value") return;
             props.onDraft(undefined);
-            if (props.start !== null) props.onNone();
+            if (props.start !== null || unsetNow(props)) props.onNone();
           }}
         />
       ) : null}

@@ -33,6 +33,8 @@ export interface SettingRowProps extends RowActions {
   title?: string;
   /** The address names it: it is marked. */
   opened?: boolean;
+  /** What holds where nothing of his sets it, said in place of the default where the page knows it better: a definition's own effort or limit. */
+  shipped?: string;
 }
 
 export function SettingRow(props: SettingRowProps) {
@@ -77,12 +79,10 @@ export function SettingRow(props: SettingRowProps) {
         </p>
       )}
       <div class="rpe-set-foot">
-        <span class="rpe-meta">
-          {s.joined ? "Shipped" : "Default"}: {valueWords(s, shippedValue(s), false)}
-        </span>
+        <span class="rpe-meta">{props.shipped ?? `${s.joined ? "Shipped" : "Default"}: ${valueWords(s, shippedValue(s), false)}`}</span>
         {back === null ? null : (
           <Button size="sm" variant="ghost" icon="undo" busy={busy} onClick={() => props.onTakeAway(s.key, back.level)}>
-            {s.joined ? `Clear what is set ${SET_AT_WORDS[back.level]}` : back.to === "farther" ? "Use every chat's value" : "Back to the default"}
+            {s.joined ? `Clear what is set ${SET_AT_WORDS[back.level]}` : back.to === "farther" ? "Use every chat's value" : s.setFor?.kind === "definition" ? "Back to its definition's" : "Back to the default"}
           </Button>
         )}
         <span class="rpe-meta rpe-set-meta">
