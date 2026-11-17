@@ -5,9 +5,7 @@
 
 import type { ComponentType } from "preact";
 import type { PanelHome, SheetKind, SheetRoute } from "./app";
-import type { IconName } from "../ui/icons";
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { GmReadPart } from "../shared/gm-parts";
 import type { ChatId, EntityId, FieldId, KindId, PackId, PanelId } from "../shared/ids";
 import type { FrontendToBackend, ResultMessage, ErrorMessage } from "../shared/protocol";
 import type { EditOp } from "../shared/edit-ops";
@@ -148,10 +146,10 @@ export interface ChipProps {
   send: Send;
 }
 
-/** What a pack's GM view tab gets: the GM view as loaded, and the one way it changes the chat. */
+/** What a GM view of a pack gets (an organization's GM tab, `OrgGmTabProps`): the GM view as loaded, and the one way it changes the chat. */
 export interface GmSectionProps {
   chatId: ChatId;
-  /** The GM view as the tab reads it: its parts (`GmSectionDef.parts`) as loaded, the rest as last loaded or empty. */
+  /** The GM view as the page reads it: its parts as loaded, the rest as last loaded or empty. */
   gm: GmView;
   currency: WorldCurrency;
   /**
@@ -173,24 +171,6 @@ export interface GmSectionProps {
    */
   changed(text: string, result: { pending?: boolean; undo?: string | null }): Promise<void>;
   send: Send;
-}
-
-/** A tab of the GM view (DESIGN §7) a pack adds, after the engine's own World, Places and Story. */
-export interface GmSectionDef {
-  /** Unique across packs, with a dot (`economy.money`). */
-  id: `${string}.${string}`;
-  label: string;
-  /** Its icon in GM mode's bottom bar. */
-  icon: IconName;
-  /** Order among the packs' tabs. */
-  order: number;
-  component: ComponentType<GmSectionProps>;
-  /**
-   * The GM view's parts the tab reads (`lre.gm.part`, the roster for a list of entities), loaded when
-   * it opens and again when the chat moves on; the edits are read with every tab's. Absent, every
-   * part: a tab that reads entities' fields, relations or levels reads `entities` whole.
-   */
-  parts?: readonly GmReadPart[];
 }
 
 /** The tabs the orgs pack's own page draws (ORG-SPEC §4.3): a pack's part may join one of them. */
@@ -263,8 +243,6 @@ export interface UiRegistry {
   chip(kind: ChipKind, component: ComponentType<ChipProps>): void;
   /** Draws a proposed value of a collection in a job's review; one per collection. */
   preview(collection: WorldCollection, component: ComponentType<PreviewProps>): void;
-  /** Adds a tab to the GM view; ids are unique across packs. */
-  gm(def: GmSectionDef): void;
   /** Draws one declared field of a kind with the pack's own editor in Build's entity form; one per kind and field. */
   field(def: FieldEditorDef): void;
   /** Draws one field of every place with the pack's own editor in Build's place form; one per field. */

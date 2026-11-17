@@ -51,7 +51,7 @@ function Browser(props: { chat: string; limits: Limits }) {
   const view = useSelect(app.sync, (s) => s.view);
   const [notice, setNotice] = useState<EditNotice | null>(null);
   const [busy, run] = useBusy();
-  const page = useGmParts(app, props.chat, true, partsOf("things", undefined), view === null ? "" : (view.gmKey ?? gmReloadKey(view)), view?.status ?? "idle");
+  const page = useGmParts(app, props.chat, true, partsOf("things"), view === null ? "" : (view.gmKey ?? gmReloadKey(view)), view?.status ?? "idle");
   if (page.gm === null) return <Empty icon="hourglass">Reading this chat's things…</Empty>;
   const commit = (sendAll: (send: (ops: EditOp[]) => Promise<boolean>) => Promise<{ applied: number; of: number }>, done?: (count: number) => string) => {
     const { promise, resolve } = Promise.withResolvers<{ applied: number; of: number }>();

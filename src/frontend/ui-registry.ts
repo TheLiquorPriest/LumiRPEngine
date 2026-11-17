@@ -1,14 +1,14 @@
 // The UiRegistry implementation (ARCHITECTURE §5). Each pack's ui registers its panels, Build
-// editors, config fields, chip renderers, detail sheets, Now glances, GM view tabs, editors for
-// its kinds' structured fields, tabs of an organization's page and parts of the place sheet; a
-// duplicate registration is a pack conflict and throws, so two packs can never silently shadow each other.
+// editors, config fields, chip renderers, detail sheets, Now glances, editors for its kinds'
+// structured fields, tabs of an organization's page and parts of the place sheet; a duplicate
+// registration is a pack conflict and throws, so two packs can never silently shadow each other.
 
 import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/world";
 import type { ChipKind } from "../shared/state-view";
 import type { SheetKind } from "./app";
-import type { ChipProps, EditorDef, FieldEditorDef, GlanceDef, GmSectionDef, OrgTabDef, PackConfigProps, PanelDef, PlaceFieldDef, PlacePartDef, PreviewProps, SheetProps, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, FieldEditorDef, GlanceDef, OrgTabDef, PackConfigProps, PanelDef, PlaceFieldDef, PlacePartDef, PreviewProps, SheetProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Panels in `order`, ties by id. */
@@ -19,8 +19,6 @@ export interface UiCatalog {
   chips: ReadonlyMap<ChipKind, ComponentType<ChipProps>>;
   /** How a job's review draws a proposed value, by collection. */
   previews: ReadonlyMap<WorldCollection, ComponentType<PreviewProps>>;
-  /** The packs' GM view tabs in `order`, ties by id. */
-  gmSections: readonly GmSectionDef[];
   /** Build's editors for structured fields, by kind and field. */
   fields: readonly FieldEditorDef[];
   /** Build's editors for place fields, in registration order. */
@@ -42,7 +40,6 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const configs = new Map<PackId, ComponentType<PackConfigProps>>();
   const chips = new Map<ChipKind, ComponentType<ChipProps>>();
   const previews = new Map<WorldCollection, ComponentType<PreviewProps>>();
-  const gmSections = new Map<string, GmSectionDef>();
   const fields = new Map<string, FieldEditorDef>();
   const placeFields = new Map<string, PlaceFieldDef>();
   const sheets = new Map<SheetKind, ComponentType<SheetProps>>();
@@ -73,10 +70,6 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
       preview(collection, component) {
         if (previews.has(collection)) throw new Error(`A preview for ${collection} (pack ${pack.id}) is already registered`);
         previews.set(collection, component);
-      },
-      gm(def) {
-        if (gmSections.has(def.id)) throw new Error(`A GM view tab ${def.id} (pack ${pack.id}) is already registered`);
-        gmSections.set(def.id, def);
       },
       field(def) {
         const key = `${def.kind}.${def.field}`;
@@ -112,7 +105,6 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
     configs,
     chips,
     previews,
-    gmSections: [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
     fields: [...fields.values()],
     placeFields: [...placeFields.values()],
     sheets,

@@ -1,6 +1,5 @@
 // GM → the page by part (DESIGN §7): each tab reads only the GM view's parts it shows, each one
-// `lre.gm.part` (`GM_TAB_PARTS` for the engine's tabs; a pack's tab its own `GmSectionDef.parts`, or
-// every part when it names none), with `edits`, which the notice over the tab bar reads, for every
+// `lre.gm.part` (`GM_TAB_PARTS`), with `edits`, which the notice over the tab bar reads, for every
 // tab. `GmParts` keeps one chat's parts while its truth is shown: when the chat moves on, every part
 // goes stale and only the open tab's are asked again, each with the key it was read at (`since`), so
 // one the move left as it was comes back `same`, built by nothing; another tab's are asked again when
@@ -16,7 +15,7 @@ import { hasOwn } from "../../shared/json";
 import { DEFAULT_WORLD_MINDS, knowledgeThreshold, MIND_LENGTH_DEFAULTS } from "../../shared/minds";
 import type { ChatStatus, GmEntity, GmRosterEntry, GmView } from "../../shared/state-view";
 import type { GmSection } from "../app";
-import type { GmSectionDef, RequestBody } from "../registry";
+import type { RequestBody } from "../registry";
 
 /** The engine's own tabs: World, Places, Things, Story and This chat. */
 export type GmEngineTab = "world" | "places" | "things" | "story" | "chat";
@@ -35,13 +34,9 @@ export const GM_TAB_PARTS: Readonly<Record<GmEngineTab, readonly GmReadPart[]>> 
   chat: ["edits", "refused", "held"],
 });
 
-/**
- * The parts a GM tab reads, `edits` always among them: an engine tab's (`GM_TAB_PARTS`); a pack's
- * tab its own (`GmSectionDef.parts`), every part when it names none; a tab no pack has, World's, as
- * the page shows World for it.
- */
-export function partsOf(section: GmSection, def: Pick<GmSectionDef, "parts"> | undefined): readonly GmReadPart[] {
-  const own = hasOwn(GM_TAB_PARTS, section) ? GM_TAB_PARTS[section as GmEngineTab] : def ? (def.parts ?? GM_PARTS) : GM_TAB_PARTS.world;
+/** The parts a GM tab reads, `edits` always among them: its own (`GM_TAB_PARTS`); a tab the page doesn't name, World's, as the page shows World for it. */
+export function partsOf(section: GmSection): readonly GmReadPart[] {
+  const own = hasOwn(GM_TAB_PARTS, section) ? GM_TAB_PARTS[section as GmEngineTab] : GM_TAB_PARTS.world;
   return own.includes("edits") ? own : [...own, "edits"];
 }
 

@@ -1,21 +1,14 @@
-// GM mode → Money (DESIGN §7, §25; ORG-SPEC §6.2): a person's money, picked under Whose money, as
-// the same segments the player sees at that person's own level, with the GM's controls: money in
-// and out, statuses, autopay, card states, flows, jobs, prices and every declared field, each one
-// edit with its own GM edit chip. Organizations are GM → Orgs' (their Money tab draws the same
-// hub, `GmHub`); a person's Summary links their organizations there. Its pages stack over the
-// segments as GM pages, each kept mounted under the one over it.
+// A party's money with the GM's controls (DESIGN §7, §25; ORG-SPEC §6.2), the hub an organization's
+// Money tab draws for the GM (`OrgTabDef.gm`): the same segments the player sees at that party's own
+// level, with money in and out, statuses, autopay, card states, flows, jobs, prices and every
+// declared field, each one edit with its own GM edit chip. Its pages stack over the segments as GM
+// pages, each kept mounted under the one over it.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { FinanceView } from "../../../shared/finance";
 import { useApp, useView } from "../../../frontend/app";
-import { Disclosure, Empty, HostSelect, JsonView } from "../../../frontend/components";
-import { humanize } from "../../../frontend/format";
 import { gmOpen } from "../../../frontend/gm/gate";
-import { useGmFocus } from "../../../frontend/gm/ui";
-import { Icon } from "../../../ui/icons";
-import type { GmSectionProps } from "../../../frontend/registry";
-import { decodeFinanceView } from "./decode";
 import { MoneyHub, type GmControls } from "./hub";
 import { ALL_ACTIVITY, possessive, type ActivityFilter, type MoneySegment } from "./layout";
 import type { Elsewhere, HubNav, HubPage } from "./nav";
@@ -99,47 +92,4 @@ export function GmHub(props: { view: FinanceView; controls: GmControls; above?: 
       ))}
     </div>
   );
-}
-
-export function GmMoneySection(props: GmSectionProps) {
-  // Whose money lists people; organizations are GM → Orgs'.
-  const parties = props.gm.money.map((raw) => ({ raw, view: decodeFinanceView(raw) })).filter((p) => p.view === null || p.view.partyKind === "person");
-  const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<string | null>(null);
-  // A link from a character's sheet shows their money here.
-  useGmFocus(setPicked);
-  if (parties.length === 0) return <Empty icon="coins">No one's money is tracked.</Empty>;
-  const q = query.trim().toLowerCase();
-  const shown = parties.filter((p) => q === "" || (p.view?.name ?? "").toLowerCase().includes(q) || (p.view?.party ?? "").toLowerCase().includes(q));
-  const current = parties.find((p) => p.view !== null && p.view.party === picked) ?? shown.find((p) => p.view !== null) ?? null;
-  const unreadable = parties.filter((p) => p.view === null);
-  const picker = (
-    <div class="lre-money-whose" data-lre-gm-money-picker>
-      {parties.length > 8 ? (
-        <label class="lre-gm-search">
-          <Icon name="search" size={16} />
-          <input class="lre-input" type="search" placeholder="Search" aria-label="Search people" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
-        </label>
-      ) : null}
-      <HostSelect label="Whose money" value={current?.view?.party ?? ""} options={shown.flatMap((p) => (p.view ? [{ value: p.view.party, label: p.view.name, sublabel: `${humanize(p.view.partyKind)} · Money ${p.view.level}` }] : []))} onChange={setPicked} />
-    </div>
-  );
-  const extra =
-    unreadable.length > 0 ? (
-      <Disclosure summary={`Money this build can't draw (${unreadable.length})`}>
-        {unreadable.map((p, i) => (
-          <JsonView key={i} value={p.raw} />
-        ))}
-      </Disclosure>
-    ) : null;
-  if (!current?.view) {
-    return (
-      <div class="lre-money-root" data-lre-gm-money>
-        {picker}
-        <Empty icon="coins">Nothing to show for that person.</Empty>
-        {extra}
-      </div>
-    );
-  }
-  return <GmHub key={current.view.party} view={current.view} controls={{ mode: "gm", busy: props.busy, currency: props.currency, edit: props.edit, gm: props.gm }} above={picker} below={extra} />;
 }
