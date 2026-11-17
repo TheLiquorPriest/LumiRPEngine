@@ -255,6 +255,8 @@ export interface BuildsStatus {
   /** Every build known is the running one, and the file on disk starts. */
   agree: boolean;
   restart: RestartState;
+  /** The newest update this process heard of; null before any. */
+  update: UpdateProgress | null;
   /** All of it in a sentence or two, as `rpe status` prints it. */
   words: string;
 }
@@ -3672,6 +3674,24 @@ export interface TurnTold {
 export interface UndoReply {
   recorded: string[];
   left: ReportShown[];
+}
+
+/** The newest update this process heard of, stage by stage from its arrival to the restart onto it. */
+export interface UpdateProgress {
+  /** The build it brings, once its check said it. */
+  build: string | null;
+  stages: UpdateStage[];
+}
+
+/** One stage an update reached: its arrival (the extension's word with the hash stated, or the app file on disk found changed), its check (every file against that hash, or the file asked its build), its start (for real on a scratch copy of RPE's data), or the restart onto it; under way, passed, or where the update stopped, and why. */
+export interface UpdateStage {
+  stage: "arrived" | "checked" | "started" | "restart";
+  /** Under way, passed, or where the update stopped. */
+  state: "going" | "done" | "refused";
+  /** When it began, in milliseconds since 1970. */
+  at: number;
+  /** Why the update stopped here; null where it did not. */
+  why: string | null;
 }
 
 /** Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning. */

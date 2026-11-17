@@ -1,7 +1,7 @@
-// Runtime (plan §4.4, §4.6, §14): how RPE runs. How it runs and a Restart that waits for what is running; its builds
-// with "Update now" and, in the web shell, when the web key this browser holds ends; RPE's own log, a page at a time,
-// narrowed by level, area, chat, turn and job (the narrowing is in the address: `runtime/log/job/<id>`); and where
-// the time goes across the latest turns. The update's stages wait for the update route to give them (Ops-4).
+// Runtime (plan §4.4, §4.6, §14): how RPE runs. How it runs and a Restart that waits for what is running; its builds,
+// the newest update stage by stage (read again while one goes on) and "Update now", and, in the web shell, when the web
+// key this browser holds ends; RPE's own log, a page at a time, narrowed by level, area, chat, turn and job (the
+// narrowing is in the address: `runtime/log/job/<id>`); and where the time goes across the latest turns.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -99,8 +99,9 @@ export function RuntimePage(props: { route?: Route }) {
   const [builds, setBuilds] = useState<BuildsShown>(NO_BUILDS);
   const [reader, setReader] = useState<BuildsReader | null>(null);
   const [sessionEnds, setSessionEnds] = useState<number | null>(null);
+  const pollMs = useUiSetting("jobPollMs");
   useEffect(() => {
-    const reading = readBuilds(app.client, setBuilds);
+    const reading = readBuilds(app.client, setBuilds, { every: pollMs, timers: app.timers });
     setReader(reading);
     const forget = app.shell === "web" ? readSession(app.client, setSessionEnds) : () => undefined;
     return () => {

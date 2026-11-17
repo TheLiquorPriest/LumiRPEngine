@@ -1,12 +1,12 @@
 // The builds line on Runtime: which build RPE runs, which is on disk, which the extension is, in the
-// status's own words; "Update now" only where the build on disk is another one and nothing else will
-// restart RPE onto it; its answer shown; refusals in RPE's words. And the line that says when the web
+// status's own words; "Update now" always there, its answer shown (the restart, none to take, or why the
+// last one was refused); refusals in RPE's words. And the line that says when the web
 // key ends, read from the session route: nothing for a key with no end.
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { BuildsStatus, RestartState } from "../../../src/shared/api";
-import { type BuildsShown, BuildsView, canUpdate, NO_BUILDS, readBuilds, readSession } from "../../../src/ui/pages/runtime/builds";
+import type { BuildsStatus } from "../../../src/shared/api";
+import { type BuildsShown, BuildsView, NO_BUILDS, readBuilds, readSession, updateAnswer } from "../../../src/ui/pages/runtime/builds";
 import { RuntimeView } from "../../../src/ui/pages/runtime";
 import { when } from "../../../src/ui/words";
 import { askingClient, settle } from "../asking";
@@ -27,23 +27,18 @@ describe("the builds line", () => {
     expect(text).toContain(AGREE.words);
     expect(text).toMatch(/RPE runssince .+a1b2c3d4Its app file on diska1b2c3d4/);
     expect(text).toContain("The extension in Lumiversea1b2c3d4");
-    expect(updateButton(tree)).toBeUndefined();
+    expect(updateButton(tree)).toBeDefined();
     expect(view({ reply: reply({ ...AGREE, disk: null, broken: "The app file does not start." }) }).text).toContain("Its app file on diskThe app file does not start.");
     expect(view({ reply: reply({ ...AGREE, extension: null }) }).text).toContain("has not said yet");
   });
 
-  test("Update now only where the build on disk is another one and the restart is off or none", () => {
-    const cases: [RestartState, boolean][] = [
-      ["off", true],
-      ["none", true],
-      ["waiting", false],
-      ["restarting", false],
-      ["by hand", false],
-    ];
-    for (const [restart, offered] of cases) expect([restart, canUpdate({ ...NEWER, restart })]).toEqual([restart, offered]);
-    expect(canUpdate({ ...NEWER, disk: NEWER.running })).toBe(false);
-    expect(canUpdate({ ...NEWER, disk: null })).toBe(false);
-    const offered = view({ reply: reply(NEWER) });
+  test("Update now is always there: its answer is the restart onto a build that passed, or that there is none, or why the last one was refused", () => {
+    expect(updateAnswer(NEWER)).toBe(NEWER.words);
+    expect(updateAnswer(AGREE)).toBe("There is no new build that has passed its checks: RPE runs build a1b2c3d4.");
+    const refused: BuildsStatus = { ...AGREE, broken: "a file does not match the hash stated for it", update: { build: null, stages: [{ stage: "arrived", state: "done", at: 1, why: null }, { stage: "checked", state: "refused", at: 2, why: "a file does not match the hash stated for it" }] } };
+    expect(updateAnswer(refused)).toBe("There is no new build to take: the last one was refused at its check (a file does not match the hash stated for it). RPE runs build a1b2c3d4, as it did.");
+    const offered = view({ reply: reply(refused) });
+    expect(offered.text).toContain("The refused file changed nothing: RPE goes on running build a1b2c3d4.");
     press(offered.tree, "Update now");
     expect(offered.pressed()).toBe(1);
   });
@@ -64,7 +59,7 @@ describe("the builds line", () => {
     expect(banners(after.tree)).toEqual([{ title: "Update now", text: `Update now${answer.words}` }]);
     // Said once, in the banner: the builds line below it does not repeat the answer's words.
     expect(after.text.split(answer.words)).toHaveLength(2);
-    expect(updateButton(after.tree)).toBeUndefined();
+    expect(updateButton(after.tree)).toBeDefined();
     reader.update();
     asked[2]?.fail(new Error("This needs a page token or the web UI's token."));
     await settle();

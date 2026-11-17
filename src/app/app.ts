@@ -148,6 +148,16 @@ export const restartState = shape.named(
   "Where a restart onto RPE's app file on disk stands: nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand.",
   shape.oneOf("none", "waiting", "restarting", "off", "by hand"),
 );
+const updateStage = shape.named(
+  "UpdateStage",
+  "One stage an update reached: its arrival (the extension's word with the hash stated, or the app file on disk found changed), its check (every file against that hash, or the file asked its build), its start (for real on a scratch copy of RPE's data), or the restart onto it; under way, passed, or where the update stopped, and why.",
+  shape.object({
+    stage: shape.oneOf("arrived", "checked", "started", "restart"),
+    state: shape.field(shape.oneOf("going", "done", "refused"), "Under way, passed, or where the update stopped."),
+    at: shape.field(shape.number(), "When it began, in milliseconds since 1970."),
+    why: shape.field(shape.nullable(T), "Why the update stopped here; null where it did not."),
+  }),
+);
 export const buildsStatus = shape.named(
   "BuildsStatus",
   "The builds that meet at RPE, as its builds route and \"Update now\" give them.",
@@ -158,6 +168,10 @@ export const buildsStatus = shape.named(
     extension: shape.field(shape.nullable(T), "The extension's build as it said at its last registration; null before it has."),
     agree: shape.field(shape.yesNo(), "Every build known is the running one, and the file on disk starts."),
     restart: restartState,
+    update: shape.field(
+      shape.nullable(shape.named("UpdateProgress", "The newest update this process heard of, stage by stage from its arrival to the restart onto it.", shape.object({ build: shape.field(shape.nullable(T), "The build it brings, once its check said it."), stages: shape.list(updateStage) }))),
+      "The newest update this process heard of; null before any.",
+    ),
     words: shape.field(T, "All of it in a sentence or two, as `rpe status` prints it."),
   }),
 );
@@ -252,7 +266,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const secrets = new SecretsFile(paths.secrets);
   // The model layer's documents written before they were kept by user are the install's user's, moved under him before anything reads them.
   await ownModels(paths, secrets, user, log);
-  const builds = new Builds({ version, file: options.appFile ?? null, log });
+  const builds = new Builds({ version, file: options.appFile ?? null, log, now });
   await builds.start();
   routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers, config.lumiverse.url));
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.

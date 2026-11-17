@@ -48,6 +48,6 @@ export const BOOT: BootstrapChatReply = {
 
 export const BATCH: BootstrapBatchReply = { started: [{ chat: "chat-calder", job: job("job-9", "running") }], refused: [{ chat: "chat-harbour", why: "A bootstrap job of this chat is under way." }] };
 
-export const AGREE: BuildsStatus = { running: "a1b2c3d4", disk: "a1b2c3d4", broken: null, extension: "a1b2c3d4", agree: true, restart: "none", words: "RPE runs build a1b2c3d4, the build of its app file on disk and of the extension." };
+export const AGREE: BuildsStatus = { running: "a1b2c3d4", disk: "a1b2c3d4", broken: null, extension: "a1b2c3d4", agree: true, restart: "none", update: null, words: "RPE runs build a1b2c3d4, the build of its app file on disk and of the extension." };
 export const NEWER: BuildsStatus = { ...AGREE, disk: "e5f6a7b8", agree: false, restart: "off", words: "RPE runs build a1b2c3d4; its app file on disk is build e5f6a7b8. update.restart is off, so RPE stays on a1b2c3d4." };
 export const buildsReply = (builds: BuildsStatus): BuildsReply => ({ name: "rpe", version: "a1b2c3d4", started: 1_700_000_000_000, builds });

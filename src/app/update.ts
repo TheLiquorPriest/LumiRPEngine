@@ -14,6 +14,10 @@
 // user asks ("Update now"), with the setting `update.restart` off. Should a build start and then fail
 // all the same, the service's unit stops starting it after `update.startTries` starts within
 // `update.startWindow` seconds (`rpe up` writes them into it).
+//
+// Each update is kept stage by stage (`UpdateProgress`): its arrival, its check, its start and the restart onto
+// it, each under way, passed or where it stopped and why, so the Runtime page shows it from its arrival to the
+// restart and a refused one beside the build that goes on running.
 
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
@@ -146,6 +150,31 @@ export type RestartState =
   /** A restart is needed, and nothing would start RPE again: it runs by hand. */
   | "by hand";
 
+/**
+ * A stage of an update (plan §4.6: "RPE checks its hash, tests that it starts, swaps and restarts"): its arrival (the extension's word with the
+ * hash stated, or the app file on disk found changed), its check (every file copied against the hash stated for it, or the file asked its
+ * build), its start (for real on a scratch copy of the data, or this RPE's config and migrations on a copy of its database), and the restart
+ * onto it, which `RestartState` says more of.
+ */
+export type UpdateStageName = "arrived" | "checked" | "started" | "restart";
+
+/** One stage an update reached: under way, passed, or where the update stopped, and why. */
+export interface UpdateStage {
+  stage: UpdateStageName;
+  state: "going" | "done" | "refused";
+  /** When it began, in milliseconds since 1970. */
+  at: number;
+  /** Why the update stopped here; null where it did not. */
+  why: string | null;
+}
+
+/** The newest update this process heard of, stage by stage from its arrival to the restart onto it. */
+export interface UpdateProgress {
+  /** The build it brings, once its check said it; null before, or where the check refused it. */
+  build: string | null;
+  stages: UpdateStage[];
+}
+
 /** The builds that meet at RPE, as `rpe status` and the status route give them. */
 export interface BuildsStatus {
   /** The build this process runs. */
@@ -159,6 +188,8 @@ export interface BuildsStatus {
   /** Every build known is the running one, and the file on disk starts. */
   agree: boolean;
   restart: RestartState;
+  /** The newest update this process heard of, stage by stage; null before any. */
+  update: UpdateProgress | null;
   /** All of it in a sentence or two, as `rpe status` prints it and a page shows it. */
   words: string;
 }
@@ -214,6 +245,8 @@ export interface BuildsDeps {
   /** Null where the process runs from no single file: it then reads none, and never restarts. */
   file: AppFile | null;
   log: Log;
+  /** The clock an update's stages are timed by; the system's where absent. */
+  now?: () => number;
 }
 
 /** What `rpe status` and a page say of a new build the extension has not told RPE of, or that was not taken. */
@@ -236,8 +269,28 @@ export class Builds {
   #ready: { build: string; hash: string } | null = null;
   #fellBack: string | null = null;
   #arriving: Promise<unknown> = Promise.resolve();
+  /** The newest update heard of, stage by stage. */
+  #update: UpdateProgress | null = null;
 
   constructor(private readonly deps: BuildsDeps) {}
+
+  /** A new update has arrived: its stages start again from its arrival, which `why` says was refused at once. */
+  #arrivedNow(why: string | null = null): void {
+    this.#update = { build: null, stages: [{ stage: "arrived", state: why === null ? "done" : "refused", at: (this.deps.now ?? Date.now)(), why }] };
+  }
+
+  /** The update goes into `stage`. */
+  #enter(stage: UpdateStageName): void {
+    this.#update?.stages.push({ stage, state: "going", at: (this.deps.now ?? Date.now)(), why: null });
+  }
+
+  /** The stage under way has ended: passed, or the update stopped there because of `why`. */
+  #leave(why: string | null = null): void {
+    const last = this.#update?.stages.at(-1);
+    if (last === undefined || last.state !== "going") return;
+    last.state = why === null ? "done" : "refused";
+    last.why = why;
+  }
 
   /** Keeps the app file's hash as it is at the start; an installed copy keeps what happened to the last swap. */
   async start(): Promise<void> {
@@ -300,10 +353,12 @@ export class Builds {
     const answer = (taken: boolean): { taken: boolean; words: string } => ({ taken, words: this.status().words });
     if (file === null || copy === undefined) {
       this.#refused = "RPE runs from no installed copy of its own, so it takes no app file the extension brings: restart it onto a new one by hand";
+      this.#arrivedNow(this.#refused);
       return answer(false);
     }
     if (hash === null || hash === "") {
       this.#refused = "the extension said an app file arrived and stated no hash for it, so RPE takes none";
+      this.#arrivedNow(this.#refused);
       log.warn("RPE did not take the app file the extension brought: no hash was stated for it.");
       return answer(false);
     }
@@ -314,24 +369,33 @@ export class Builds {
       this.#sourceBuild = null;
       return answer(false);
     }
+    this.#arrivedNow();
+    this.#enter("checked");
     const fetched = await copy.fetch(stated);
     if ("refused" in fetched) {
       await copy.drop();
       this.#refused = fetched.refused;
       this.#sourceBuild = null;
+      this.#leave(fetched.refused);
       log.warn("RPE did not take the app file the extension brought; it goes on running its own build.", { running: version, why: fetched.refused });
       return answer(false);
     }
     this.#sourceBuild = fetched.build;
+    if (this.#update !== null) this.#update.build = fetched.build;
+    this.#leave();
+    this.#enter("started");
     const why = await copy.tryStart(settings.checkWaitMs);
     if (why !== null) {
       await copy.drop();
       this.#refused = why;
+      this.#leave(why);
       log.warn("RPE did not take the app file the extension brought: the build does not start; it goes on running its own build.", { running: version, build: fetched.build, why });
       return answer(false);
     }
+    this.#leave();
     this.#refused = null;
     this.#ready = { build: fetched.build, hash: stated };
+    this.#enter("restart");
     log.info("RPE has a new build that starts, and will swap onto it.", { running: version, build: fetched.build });
     if (!settings.restart && !now) this.#restart = "off";
     else if (!(await file.service())) this.#restart = "by hand";
@@ -339,6 +403,7 @@ export class Builds {
       this.#restart = "waiting";
       void this.#waitThenRestart(file, copy, now).catch((error: unknown) => {
         this.#restart = "none";
+        this.#leave(error instanceof Error ? error.message : String(error));
         log.error("RPE's restart onto its new build failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
       });
     }
@@ -378,7 +443,8 @@ export class Builds {
     const extension = this.#extension;
     const agree = broken === null && (disk === null || disk === version) && (extension === null || extension === version);
     const parts = { running: version, disk, broken, extension, agree, restart: this.#restart };
-    return { ...parts, words: wordsOf(parts, copy, this.#extras(copy, disk)) };
+    const update = this.#update === null ? null : { build: this.#update.build, stages: this.#update.stages.map((s) => ({ ...s })) };
+    return { ...parts, update, words: wordsOf(parts, copy, this.#extras(copy, disk)) };
   }
 
   /** What an installed copy adds to the words: that the extension's build is not taken until it says so with its hash, and what the pre-start step did. */
@@ -402,12 +468,14 @@ export class Builds {
       return this.status();
     }
     if (this.#restart === "waiting" || this.#restart === "restarting") return status;
+    if (this.#update !== null && this.#update.stages.at(-1)?.stage !== "restart") this.#enter("restart");
     if (!asked && !settings.restart) this.#restart = "off";
     else if (!(await file.service())) this.#restart = "by hand";
     else {
       this.#restart = "waiting";
       void this.#waitThenRestart(file, undefined, false).catch((error: unknown) => {
         this.#restart = "none";
+        this.#leave(error instanceof Error ? error.message : String(error));
         this.deps.log.error("RPE's restart onto its new app file failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
       });
     }
@@ -423,10 +491,19 @@ export class Builds {
       return;
     }
     if (this.#seen !== null && this.#seen.hash === hash) return;
+    // A file other than the one at the start, or than the one read last, is an update: its stages are kept from here.
+    this.#arrivedNow();
+    this.#enter("checked");
     let result: BuildOf = hash === null ? { failed: "the file is not there" } : await file.buildOf(file.path, settings.versionWaitMs);
-    // Another build is restarted onto only once it is known to start on this RPE's data: its config read, its migrations applied to a copy of the database.
-    if ("build" in result && result.build !== version) {
+    if ("failed" in result) this.#leave(result.failed);
+    else if (result.build === version) this.#update = null;
+    else {
+      if (this.#update !== null) this.#update.build = result.build;
+      this.#leave();
+      // Another build is restarted onto only once it is known to start on this RPE's data: its config read, its migrations applied to a copy of the database.
+      this.#enter("started");
       const why = await file.startsOn(file.path, settings.checkWaitMs);
+      this.#leave(why);
       if (why !== null) result = { failed: why };
     }
     this.#seen = { hash, result };
@@ -460,6 +537,7 @@ export class Builds {
             this.#restart = "none";
             return;
           }
+          if (this.#update !== null && this.#update.stages.at(-1)?.stage !== "restart") this.#enter("restart");
         } else if (this.#ready === null) {
           this.#restart = "none";
           return;
@@ -522,7 +600,7 @@ export class Builds {
 }
 
 /** The builds in a sentence or two, as `rpe status` prints them and a page shows them; `extras` are what an installed copy adds. */
-function wordsOf(s: Omit<BuildsStatus, "words">, copy: boolean, extras: readonly string[] = []): string {
+function wordsOf(s: Omit<BuildsStatus, "words" | "update">, copy: boolean, extras: readonly string[] = []): string {
   const more = extras.length === 0 ? "" : ` ${extras.join(" ")}`;
   const extension = s.extension === null ? "the extension has not said its build yet" : `the extension is build ${s.extension}`;
   if (s.broken !== null) return `RPE runs build ${s.running}. ${copy ? `A new app file was not taken (${s.broken})` : `Its app file on disk was replaced by one that does not start (${s.broken})`}, so RPE goes on running build ${s.running}; ${extension}.${more}`;

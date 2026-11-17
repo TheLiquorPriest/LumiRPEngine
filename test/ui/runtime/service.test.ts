@@ -26,7 +26,7 @@ describe("how RPE runs", () => {
   });
 
   test("a fall back to the known-good copy and the restart's own answer are said in their words", () => {
-    const tree = expand(h(ServiceView, { how: { ...HOW, fellBack: "The new build did not start twice." }, problem: null, restart: { busy: false, problem: null, answer: { running: "a1b2c3d4", disk: null, broken: null, extension: null, agree: true, restart: "waiting", words: "RPE restarts once the job running ends." } }, onRestart: () => undefined }));
+    const tree = expand(h(ServiceView, { how: { ...HOW, fellBack: "The new build did not start twice." }, problem: null, restart: { busy: false, problem: null, answer: { running: "a1b2c3d4", disk: null, broken: null, extension: null, agree: true, restart: "waiting", update: null, words: "RPE restarts once the job running ends." } }, onRestart: () => undefined }));
     expect(banners(tree).map((b) => b.title)).toEqual(["Restart", "The known-good copy was put back"]);
     expect(textOf(tree)).toContain("RPE restarts once the job running ends.");
   });
