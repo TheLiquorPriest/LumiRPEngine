@@ -7,7 +7,6 @@
       "devDependencies": {
         "@earendil-works/pi-ai": "1.5.2",
         "bun-types": "^1.4.2",
-        "lumi-ah": "github:TheLiquorPriest/LumiAH#6a38779a5e33fe563f0c8c617640343473617569",
         "lumiverse-spindle-types": "0.6.80",
         "preact": "11.0.1",
         "rp-harness": "git+https://rph.invalid/RPHarness.git#d291710711daccfd782dd7fa6ad6d41a4166ad6d",
@@ -192,8 +191,6 @@
 
     "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
 
-    "lumi-ah": ["lumi-ah@github:TheLiquorPriest/LumiAH#6a38779", { "dependencies": { "preact": "^11.0.1" }, "bin": { "lumiah": "dist/lumiah.js" } }, "TheLiquorPriest-LumiAH-6a38779", "sha512-hyehlbIP+eEDuTCyXDu8BSUe/qYwoL1Y0ie++6i/LKydPrDWmgtSEGlKLnct481enWut8nHKlVwioL5eeXJBzQ=="],
-
     "lumiverse-spindle-types": ["lumiverse-spindle-types@0.6.80", "", {}, "sha512-YaAiNKzYnFFo199jkXwIu0bJYcTBZZ2RAYjIFmXbbcpPIVOiPwS4y5vb+Zf2NCjwMc13zHYybOgnmVPe3P98nw=="],
 
     "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
@@ -243,8 +240,6 @@
     "@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "gaxios/https-proxy-agent": ["https-proxy-agent@7.0.6", "", { "dependencies": { "agent-base": "^7.1.2", "debug": "4" } }, "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw=="],
-
-    "lumi-ah/preact": ["preact@11.2.0", "", { "peerDependencies": { "preact-render-to-string": ">=6.7.0" }, "optionalPeers": ["preact-render-to-string"] }, "sha512-/HfHI/7N84e6GrWBJ3J280z3mLaRJiDcSvj/A+y/4AbLnND/1UlGHe1sR6oYuTGwId0nP7dqDU9OnLxMPZ7xBg=="],
 
     "gaxios/https-proxy-agent/agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
   }
