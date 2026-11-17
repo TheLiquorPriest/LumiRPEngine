@@ -9,6 +9,7 @@
 // in the business, which adds to their stake), and each payout is income for their year. Selling
 // part of a stake moves the share and realises the seller's gain against what they put in.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -166,7 +167,7 @@ const routeEvent: EventTypeDef<PackEvent> = {
     else mine[str(e, "owner")] = str(e, "to");
     routes[str(e, "business")] = mine;
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "owner"))}'s profit from ${labelOf(ctx, str(e, "business"))} goes to ${str(e, "to") || "their account"}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("profit_goes_to", { owner: labelOf(ctx, str(e, "owner")), business: labelOf(ctx, str(e, "business")), ...(str(e, "to") !== "" ? { to: str(e, "to") } : {}) })),
 };
 
 /** Where an owner's profit share from a business lands (`economy.route` with a business). */

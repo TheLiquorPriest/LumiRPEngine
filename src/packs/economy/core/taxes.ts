@@ -11,6 +11,7 @@
 // flow per person (contract pay, their share of pass-through profit) and per C corporation (its
 // profit). The flat rate below the top level is the occupation's set-aside.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -979,7 +980,7 @@ export const ESTIMATED_TAX: EventTypeDef<PackEvent> = {
     all[party] = paid;
     if (e.data.business === true) addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: total });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `Estimated tax: ${labelOf(ctx, str(e, "party"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("estimated_tax", { party: labelOf(ctx, str(e, "party")) })),
 };
 
 /** The estimated-tax flow: on the four due dates, rolled to the next business day, from the payer to the tax authority. */

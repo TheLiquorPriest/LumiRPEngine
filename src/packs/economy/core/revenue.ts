@@ -11,6 +11,7 @@
 // (`economy.revenue_adjust`): a GM op, or what the story says, which asks first. A property with a
 // `valuation` (a mineral interest by default) is worth what its streams are projected to pay.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
@@ -383,7 +384,7 @@ const RECORD: EventTypeDef<PackEvent> = {
     produced[property] = kept(byMonth);
   },
   // The record is the GM's line; the player reads the posting.
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, strOf(e.data.stream))}: ${formatMoney(Math.round(numOf(e.data.cents)), ctx.world.currency)} earned`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("stream_earned", { stream: labelOf(ctx, strOf(e.data.stream)), amount: formatMoney(Math.round(numOf(e.data.cents)), ctx.world.currency) })),
 };
 
 // ---------------------------------------------------------------- adjustments
@@ -504,7 +505,7 @@ function adjustedEvent(api: FinanceApi): EventTypeDef<PackEvent> {
     const live = adjustmentsOf(state, stream).filter((a) => a.until > state.clock);
     all[stream] = [...live, { ...e.data }] as unknown as JsonValue;
   },
-  describe: (e, ctx) => `${labelOf(ctx, strOf(e.data.stream))}: ${typeof e.data.factor === "number" ? `×${e.data.factor} a payment` : `${formatMoney(numOf(e.data.cents), ctx.world.currency)} on each payment`} until ${dateText(ctx.world, numOf(e.data.until))}${e.data.reason ? ` (${strOf(e.data.reason)})` : ""}`,
+  describe: (e, ctx) => say(typeof e.data.factor === "number" ? "stream_adjusted_factor" : "stream_adjusted_amount", { stream: labelOf(ctx, strOf(e.data.stream)), ...(typeof e.data.factor === "number" ? { factor: e.data.factor } : { amount: formatMoney(numOf(e.data.cents), ctx.world.currency) }), until: dateText(ctx.world, numOf(e.data.until)), ...(e.data.reason ? { reason: strOf(e.data.reason) } : {}) }),
   };
 }
 

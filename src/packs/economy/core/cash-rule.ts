@@ -8,6 +8,7 @@
 // - Cash goes hand to hand: an action done at once, off screen, that pays cash to someone who isn't
 //   where the payer is, is refused (`economy.offstage_refusal`), since nobody walked it over.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
@@ -46,7 +47,7 @@ export const cashRuleEvent: EventTypeDef<PackEvent> = {
   },
   describe: (e) => {
     const atm = ruleOf(e.data.atm);
-    return atm === null || atm === undefined ? "Cash follows the world's rule again" : atm ? "In this chat, cash needs a machine or a branch" : "In this chat, cash needs no machine";
+    return say(atm === null || atm === undefined ? "cash_rule_world" : atm ? "cash_rule_machine" : "cash_rule_free");
   },
 };
 

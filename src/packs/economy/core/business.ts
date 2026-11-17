@@ -7,6 +7,7 @@
 // what its customers owe it and what it owes (§27.10). Every money movement here goes through the
 // foundation's flows and postings.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
@@ -102,7 +103,7 @@ export const SALE: EventTypeDef<PackEvent> = {
     sales[business] = [...list.slice(-(SALES_KEPT - 1)), { at: state.clock, cents, tax, memo: str(e, "memo"), payer: str(e, "payer"), category: str(e, "category") }];
   },
   // The book of a sale is the GM's line; the player reads its posting.
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: sale ${str(e, "payer") === "" ? "to walk-in customers" : `of ${str(e, "memo")} to ${labelOf(ctx, str(e, "payer"))}`}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : str(e, "payer") === "" ? say("business_sale_walkin", { business: labelOf(ctx, str(e, "business")) }) : say("business_sale", { business: labelOf(ctx, str(e, "business")), memo: str(e, "memo"), payer: labelOf(ctx, str(e, "payer")) })),
 };
 
 /** `economy.remit`: a business paid what it owed its suppliers, or the sales tax it collected. */
@@ -117,7 +118,7 @@ export const REMIT: EventTypeDef<PackEvent> = {
       addToBooks(state, business, monthOf(ctx.world, state.clock), { tax_remitted: cents });
     } else addToPayables(state, business, { suppliers: -cents });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "sales_tax" ? "sales tax paid" : "suppliers paid"}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say(e.data.what === "sales_tax" ? "business_remit_tax" : "business_remit_suppliers", { business: labelOf(ctx, str(e, "business")) })),
 };
 
 /** Commission on a sale for each commission job at the business whose worker is `working`, split evenly. */
@@ -275,7 +276,7 @@ export const INVOICE_PAID: EventTypeDef<PackEvent> = {
     const customer = str(e, "customer");
     if (own(state.entities, customer) && kindIs(ctx.registry, ctx.world, own(state.entities, customer)?.kind ?? "", "business")) addToBooks(state, customer, month, { bills: cents });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: invoice paid by ${own(ctx.state.entities, str(e, "customer")) ? labelOf(ctx, str(e, "customer")) : str(e, "customer")}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("business_invoice_paid", { business: labelOf(ctx, str(e, "business")), customer: own(ctx.state.entities, str(e, "customer")) ? labelOf(ctx, str(e, "customer")) : str(e, "customer") })),
 };
 
 /** The events that mark an invoice paid in full with a payment of `cents`, and book it. */
@@ -429,7 +430,7 @@ export const PAYOUT: EventTypeDef<PackEvent> = {
     for (const [month, cents] of months) addToBooks(state, business, month, { distributions: numOf(cents) });
     sliceRecord(state, "economy", "distributed")[business] = state.clock;
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "draw" ? "owner's draw" : "profit distributed"}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say(e.data.what === "draw" ? "business_draw" : "business_profit", { business: labelOf(ctx, str(e, "business")) })),
 };
 
 /** Whether an owner may draw on a business: an owner or joint owner; a corporation pays its owners by salary or dividends instead. */

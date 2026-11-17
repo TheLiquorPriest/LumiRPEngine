@@ -7,6 +7,7 @@
 // a sale's proceeds land where the player says, else in the holding's account, else the seller's
 // deposit account: never simply in the first checking account.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
@@ -261,7 +262,7 @@ function lotsEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       return qty < 0 && held + qty < -QTY_EPSILON ? reject("declined", `${h.name} holds ${held} units, not ${-qty}`) : null;
     },
     apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str(e, "holding")))),
-    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "holding"))}: ${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)} units (${strOf(e.data.kind, "trade")}) for ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`),
+    describe: (e, ctx, viewer) => (viewer ? "" : say("holding_units", { holding: labelOf(ctx, str(e, "holding")), qty: `${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)}`, kind: strOf(e.data.kind, "trade"), amount: formatMoney(numOf(e.data.cents), ctx.world.currency) })),
     touches: (e) => [{ entity: str(e, "holding"), field: "lots" }, ...(str(e, "legacy") !== "" ? [{ entity: str(e, "legacy"), field: "units" }] : [])],
   };
 }

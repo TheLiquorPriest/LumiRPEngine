@@ -21,6 +21,7 @@
 // sets a step back or adds to its cost (`project_note`, within bounds, with its receipt and Undo).
 // No one marks a step done: only its time does.
 
+import { say } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
@@ -255,7 +256,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       const id = strOf(e.data.project);
       writeRun(state, id, { ...projectRunOf(state, id), status: "active", started: numOf(e.data.at) });
     },
-    describe: (e, ctx) => `Started ${labelOf(ctx, strOf(e.data.project))}`,
+    describe: (e, ctx) => say("project_started", { project: labelOf(ctx, strOf(e.data.project)) }),
   },
   {
     // A step started (its payment beside it), waiting for money, or done (its payment and what it made beside it); the last one done ends the project.
@@ -286,8 +287,8 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       const name = p?.def.steps.find((s) => s.id === strOf(e.data.step))?.name ?? strOf(e.data.step);
       const what = labelOf(ctx, strOf(e.data.project));
       const phase = strOf(e.data.phase);
-      if (phase === "wait") return `${what}: ${name} waits for ${formatMoneyIn(ctx.world, numOf(e.data.cents))} to ${e.data.side === "end" ? "finish" : "start"}`;
-      return `${what}: ${name} ${phase === "start" ? "started" : "done"}`;
+      if (phase === "wait") return say(e.data.side === "end" ? "project_step_waits_finish" : "project_step_waits_start", { project: what, step: name, amount: formatMoneyIn(ctx.world, numOf(e.data.cents)) });
+      return say(phase === "start" ? "project_step_started" : "project_step_done", { project: what, step: name });
     },
   },
   {
@@ -302,7 +303,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       for (const [step, minutes] of Object.entries(left)) if (typeof minutes === "number") steps[step] = { ...steps[step], left: minutes };
       writeRun(state, id, { ...run, status: "paused", paused: numOf(e.data.at), steps });
     },
-    describe: (e, ctx) => `Paused ${labelOf(ctx, strOf(e.data.project))}`,
+    describe: (e, ctx) => say("project_paused", { project: labelOf(ctx, strOf(e.data.project)) }),
   },
   {
     // A paused project going again: each step under way ends its work left after now.
@@ -320,7 +321,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       }
       writeRun(state, id, { ...run, status: "active", steps });
     },
-    describe: (e, ctx) => `Resumed ${labelOf(ctx, strOf(e.data.project))}`,
+    describe: (e, ctx) => say("project_resumed", { project: labelOf(ctx, strOf(e.data.project)) }),
   },
   {
     // A project dropped: what it paid stays paid, and what it made stays made; what nothing it made took is written off.
@@ -332,7 +333,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       const { paused: _paused, ...run } = projectRunOf(state, id);
       writeRun(state, id, writtenOff(state, ctx.world, id, { ...run, status: "dropped", ended: at }, at));
     },
-    describe: (e, ctx) => `Dropped ${labelOf(ctx, strOf(e.data.project))}`,
+    describe: (e, ctx) => say("project_dropped", { project: labelOf(ctx, strOf(e.data.project)) }),
   },
   {
     // A step set back or costing more, as the story or the GM tells it: its days and cost on top, and its end moved when it is under way.
@@ -364,7 +365,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx) => {
       const p = projectOf(ctx, strOf(e.data.project));
       const name = p?.def.steps.find((s) => s.id === strOf(e.data.step))?.name ?? strOf(e.data.step);
-      return `${labelOf(ctx, strOf(e.data.project))}: ${noteWords(ctx.world, name, numOf(e.data.days), numOf(e.data.cents))}${strOf(e.data.text) !== "" ? ` (${strOf(e.data.text)})` : ""}`;
+      return say("project_note", { project: labelOf(ctx, strOf(e.data.project)), note: noteWords(ctx.world, name, numOf(e.data.days), numOf(e.data.cents)), ...(strOf(e.data.text) !== "" ? { text: strOf(e.data.text) } : {}) });
     },
   },
 ];

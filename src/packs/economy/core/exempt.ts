@@ -9,6 +9,7 @@
 // organization whose status says so, at the time of the gift. The taxes module takes a year's
 // deductible gifts off the donor's ordinary income and, at the top level, refunds what they saved.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -122,7 +123,7 @@ export const DONATION_EVENT: EventTypeDef<PackEvent> = {
     addDonation(state, "given", str(e, "donor"), year, (was) => ({ ...objOf(was), [key]: numOf(objOf(was)[key]) + cents, ...(foundation ? { foundation: numOf(objOf(was).foundation) + cents } : {}) }));
     addDonation(state, "received", str(e, "org"), year, (was) => numOf(was) + cents);
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `Donation: ${labelOf(ctx, str(e, "donor"))} to ${labelOf(ctx, str(e, "org"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("donation", { donor: labelOf(ctx, str(e, "donor")), org: labelOf(ctx, str(e, "org")) })),
 };
 
 /** What a gift or a status change finds that does not add up, as data: a code and its values. The tool that records it reports each; nothing of it stops the record. */

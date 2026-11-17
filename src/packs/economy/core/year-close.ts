@@ -19,6 +19,7 @@
 // each holder takes their part as that year's dividend and adds it to their basis. A foundation's
 // excise and its 30% tax are paid with its return on 15 May, with an alert before.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -298,7 +299,7 @@ export const YEAR_CLOSE_EVENT: EventTypeDef<PackEvent> = {
     const party = str(e, "party");
     all[party] = trimmed({ ...objOf(own(all, party)), [String(numOf(e.data.year))]: objOf(e.data.record) }, YEARS_KEPT);
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "party"))} closed ${numOf(e.data.year)}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("money_year_closed", { party: labelOf(ctx, str(e, "party")), year: numOf(e.data.year) })),
 };
 
 /** `economy.foundation_mark`: a foundation's assets as a month ends. */
@@ -310,7 +311,7 @@ export const FOUNDATION_MARK_EVENT: EventTypeDef<PackEvent> = {
     const org = str(e, "org");
     all[org] = trimmed({ ...objOf(own(all, org)), [str(e, "month")]: numOf(e.data.cents) }, MARKS_KEPT);
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "org"))}'s assets marked for ${str(e, "month")}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("money_foundation_marked", { org: labelOf(ctx, str(e, "org")), month: str(e, "month") })),
 };
 
 /** Adds to a corporation's dividends received in a month, and the part it deducts (inside an event's apply). */
@@ -327,7 +328,7 @@ export const DIVIDEND_RECEIVED_EVENT: EventTypeDef<PackEvent> = {
   type: DIVIDEND_RECEIVED,
   validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && own(ctx.state.entities, str(e, "source")) && typeof e.data.cents === "number" && e.data.cents > 0 && typeof e.data.deducted === "number" ? null : ({ code: "bad_event", reason: "a dividend received names its receiver, its payer, its amount and what is deducted of it" } satisfies Rejection)),
   apply: (e, state, ctx) => addReceived(state, str(e, "party"), monthOf(ctx.world, state.clock), numOf(e.data.cents), numOf(e.data.deducted)),
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "party"))} received a dividend from ${labelOf(ctx, str(e, "source"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("money_dividend_received", { party: labelOf(ctx, str(e, "party")), source: labelOf(ctx, str(e, "source")) })),
 };
 
 /** A dividend a corporation receives from a company it holds a stake in, with the share of it it deducts (`pct`), as bookkeeping riding with the payout; nothing for any other receiver. */
@@ -358,7 +359,7 @@ export const CONSENT_DIVIDEND_EVENT: EventTypeDef<PackEvent> = {
       if (kindIs(ctx.registry, ctx.world, own(state.entities, party)?.kind ?? "", "business")) addReceived(state, party, monthKey(year, 12), cents, Math.round((cents * numOf(p.deductPct)) / 100));
     }
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "org"))}: consent dividend for ${numOf(e.data.year)}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("money_consent_dividend", { org: labelOf(ctx, str(e, "org")), year: numOf(e.data.year) })),
 };
 
 /** `economy.penalty_tax`: a corporation's PHC tax or AET for a year, paid: booked as its income tax. Rides with the payment. */
@@ -371,7 +372,7 @@ export const PENALTY_TAX_EVENT: EventTypeDef<PackEvent> = {
     all[party] = trimmed({ ...objOf(own(all, party)), [String(numOf(e.data.year))]: { kind: str(e, "kind"), cents: numOf(e.data.cents) } }, YEARS_KEPT);
     addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: numOf(e.data.cents) });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "party"))}: ${str(e, "kind") === "phc" ? "personal holding company tax" : "accumulated earnings tax"} for ${numOf(e.data.year)}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say(str(e, "kind") === "phc" ? "money_phc_tax" : "money_aet_tax", { party: labelOf(ctx, str(e, "party")), year: numOf(e.data.year) })),
 };
 
 /** `economy.foundation_tax`: a foundation's excise and 30% tax for a year, paid. Rides with the payment. */
@@ -383,7 +384,7 @@ export const FOUNDATION_TAX_EVENT: EventTypeDef<PackEvent> = {
     const all = sliceRecord(state, "economy", "foundation_taxes");
     all[org] = trimmed({ ...objOf(own(all, org)), [String(numOf(e.data.year))]: { excise: numOf(e.data.excise), tax: numOf(e.data.tax), cents: numOf(e.data.cents) } }, YEARS_KEPT);
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "org"))}: foundation taxes for ${numOf(e.data.year)}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("money_foundation_tax", { org: labelOf(ctx, str(e, "org")), year: numOf(e.data.year) })),
 };
 
 // ---------------------------------------------------------------- the close itself

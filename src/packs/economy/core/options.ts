@@ -12,7 +12,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import { formatMoney } from "../../../shared/world";
-import type { LineFields } from "../../../engine/lines";
+import { type LineFields, say } from "../../../engine/lines";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
@@ -64,7 +64,7 @@ function exerciseEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       if (e.data.right === "call") applyLots(api, state, ctx.world, ctx.tables, into, numOf(e.data.units), cash + premium, label);
       else applyLots(api, state, ctx.world, ctx.tables, into, -numOf(e.data.units), Math.max(0, cash - premium), label);
     },
-    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "option"))}: ${numOf(e.data.qty)} exercised`),
+    describe: (e, ctx, viewer) => (viewer ? "" : say("option_qty_exercised", { option: labelOf(ctx, str(e, "option")), qty: numOf(e.data.qty) })),
     touches: (e) => [
       { entity: str(e, "option"), field: "lots" },
       { entity: str(e, "into"), field: "lots" },

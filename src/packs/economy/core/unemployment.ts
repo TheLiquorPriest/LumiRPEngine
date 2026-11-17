@@ -18,6 +18,7 @@
 // settles the year before (with the credit reduction); SUTA pays each quarter ended and any unpaid
 // one before it. A company books both as payroll.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -228,7 +229,7 @@ export const ACCRUED_EVENT: EventTypeDef<PackEvent> = {
     rec.reduction += numOf(e.data.reduction);
     writeYear(state, employer, year, rec);
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `Unemployment tax accrued: ${labelOf(ctx, str(e, "employer"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("unemployment_accrued", { employer: labelOf(ctx, str(e, "employer")) })),
 };
 
 /** `economy.unemployment_paid`: what a FUTA deposit or return, or a SUTA payment, paid toward each period; a company's goes in its books as payroll. */
@@ -253,7 +254,7 @@ export const PAID_EVENT: EventTypeDef<PackEvent> = {
     }
     if (e.data.business === true && total !== 0) addToBooks(state, employer, monthOf(ctx.world, state.clock), { payroll: total });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${e.data.kind === "suta" ? "SUTA" : "FUTA"} paid: ${labelOf(ctx, str(e, "employer"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say(e.data.kind === "suta" ? "suta_paid" : "futa_paid", { employer: labelOf(ctx, str(e, "employer")) })),
 };
 
 // ---------------------------------------------------------------- payments

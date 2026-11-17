@@ -10,6 +10,7 @@
 // module gives a party's ordinary income and brackets (`economy.ordinary_income`,
 // `economy.income_tax`), read through the registry.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -81,7 +82,7 @@ function disposeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       recordGain(state, ctx.world, party, { term: held >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...(home ? { home: true } : {}) });
       setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
-    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "party"))} sold ${numOf(e.data.pct)}% of their share of ${labelOf(ctx, str(e, "entity"))}`),
+    describe: (e, ctx, viewer) => (viewer ? "" : say("stake_sold", { party: labelOf(ctx, str(e, "party")), pct: numOf(e.data.pct), entity: labelOf(ctx, str(e, "entity")) })),
   };
 }
 
@@ -97,7 +98,7 @@ const acquireEvent: EventTypeDef<PackEvent> = {
     const r = basisRecord(state, str(e, "entity"), str(e, "party"));
     setBasisRecord(state, str(e, "entity"), str(e, "party"), { basis: (r?.basis ?? 0) + numOf(e.data.cents), since: r?.since ?? state.clock });
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "party"))} bought into ${labelOf(ctx, str(e, "entity"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("stake_bought", { party: labelOf(ctx, str(e, "party")), entity: labelOf(ctx, str(e, "entity")) })),
 };
 
 // ---------------------------------------------------------------- trusts
@@ -157,7 +158,7 @@ const trustDistributionEvent: EventTypeDef<PackEvent> = {
     record[trust] = mine;
     all.trust_distributions = record;
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "trust"))} distributed to its beneficiaries`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("trust_distributed", { trust: labelOf(ctx, str(e, "trust")) })),
 };
 
 /** A trust's distribution's record: each beneficiary's part, as bookkeeping riding with the payment. */

@@ -8,6 +8,7 @@
 // investment tax read. Rent and business profits are their own flows (property.ts, and the work
 // module's distributions, which `economy.stake_route` routes here).
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
@@ -186,7 +187,7 @@ function incomeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const shares = worthShares(sourceOwners(api, state, source));
       for (const p of byShare(shares, cents)) recordIncome(state, ctx.world, p.party, kind, p.cents);
     },
-    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "source"))}: ${formatMoney(numOf(e.data.cents), ctx.world.currency)} ${str(e, "kind") === "profit" ? "profit share" : str(e, "kind")}`),
+    describe: (e, ctx, viewer) => (viewer ? "" : say(str(e, "kind") === "profit" ? "income_profit" : "income_kind", { source: labelOf(ctx, str(e, "source")), amount: formatMoney(numOf(e.data.cents), ctx.world.currency), kind: str(e, "kind") })),
   };
 }
 

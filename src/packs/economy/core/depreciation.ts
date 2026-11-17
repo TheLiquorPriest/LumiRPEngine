@@ -13,6 +13,7 @@
 // own things never depreciate. Nothing posts in a world that never turns it on, so recorded chats
 // fold as they did.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
@@ -177,7 +178,7 @@ const DEPRECIATE_EVENT: EventTypeDef<PackEvent> = {
       if (party !== "") bookRecovery(state, party, month, kind, numOf(part.cents));
     }
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `${e.data.kind === "depletion" ? "Depletion" : "Depreciation"} of ${labelOf(ctx, str(e, "asset"))} for ${str(e, "month")}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say(e.data.kind === "depletion" ? "depletion_of" : "depreciation_of", { asset: labelOf(ctx, str(e, "asset")), month: str(e, "month") })),
 };
 
 /** Depreciation's fields on property and organizations, its event and its lint. */

@@ -7,6 +7,7 @@
 // anchors. The events of chats recorded before the rebuild (`anchor`, `txn`, `note`, `modifier`,
 // `statement`, `card_paid`, `decline`) fold here unchanged.
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
@@ -231,7 +232,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       if (str(e, "band") === "") delete anchors[str(e, "entity")];
       else anchors[str(e, "entity")] = { band: str(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
     },
-    describe: (e) => (str(e, "band") === "" ? `${str(e, "entity")}'s worth is no longer fixed` : `${str(e, "entity")} is ${str(e, "band")}`),
+    describe: (e) => (str(e, "band") === "" ? say("money_worth_free", { entity: str(e, "entity") }) : say("money_worth_band", { entity: str(e, "entity"), band: str(e, "band") })),
     // An anchor is an assignment: in a record only the last per entity matters.
     coarsen: { key: (e) => str(e, "entity"), merge: (_a, b) => b },
   },
@@ -288,7 +289,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       if (typeof e.data.mult !== "number") delete mods[str(e, "id")];
       else mods[str(e, "id")] = { scope: strOf(e.data.scope, "all"), place: strOf(e.data.place), mult: e.data.mult, ...(typeof e.data.until === "number" ? { until: e.data.until } : {}) };
     },
-    describe: (e) => (typeof e.data.mult === "number" ? `Prices ×${e.data.mult}` : "Prices back to normal"),
+    describe: (e) => (typeof e.data.mult === "number" ? say("money_prices_mult", { mult: e.data.mult }) : say("money_prices_normal")),
   },
   {
     // A credit account's statement closes: the cycle's whole state, and its accrual starts again.
@@ -309,7 +310,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       cycles[account] = cycle;
       sliceRecord(state, "economy", "adb")[account] = { from: at, at, sum: 0, spent: 0 };
     },
-    describe: (e, ctx) => `The statement closed at ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, with at least ${formatMoney(numOf(e.data.minimum), ctx.world.currency)} due`,
+    describe: (e, ctx) => say("money_statement_closed", { closing: formatMoney(numOf(e.data.closing), ctx.world.currency), minimum: formatMoney(numOf(e.data.minimum), ctx.world.currency) }),
   },
   {
     // A payment toward a credit account's statement, or, on a card without statements, toward what it owed when its period began.
@@ -323,7 +324,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const period = objOf(own(objOf(sliceOf(state, "economy").adb), account));
       if (typeof period.owed === "number") sliceRecord(state, "economy", "adb")[account] = { ...period, paid: numOf(period.paid) + numOf(e.data.cents) };
     },
-    describe: (e, ctx) => `A card payment of ${formatMoney(numOf(e.data.cents), ctx.world.currency)} was made`,
+    describe: (e, ctx) => say("money_card_payment", { amount: formatMoney(numOf(e.data.cents), ctx.world.currency) }),
   },
   {
     // A credit account moves to a delinquency stage, or back to current.
@@ -337,7 +338,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       for (const k of ["streak", "ontime", "late30", "late60", "late90"] as const) if (typeof e.data[k] === "number") next[k] = e.data[k];
       cycles[account] = next;
     },
-    describe: (e, ctx) => `${own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account")}'s payments are now ${wordsOf(STAGE_WORDS, str(e, "stage"))}`,
+    describe: (e, ctx) => say("money_stage", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), stage: wordsOf(STAGE_WORDS, str(e, "stage")) }),
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -347,7 +348,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "flows")[str(e, "flow")] = objOf(e.data.state);
     },
-    describe: (e) => `${str(e, "label") || str(e, "flow")}: ${str(e, "outcome")}`,
+    describe: (e) => say("money_flow_outcome", { flow: str(e, "label") || str(e, "flow"), outcome: str(e, "outcome") }),
     coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
   },
   {
@@ -361,7 +362,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const flow = own(state.entities, str(e, "flow"));
       if (flow) flow.name = str(e, "name");
     },
-    describe: (e, _ctx, viewer) => (viewer ? "" : `Standing payment renamed ${str(e, "name")}`),
+    describe: (e, _ctx, viewer) => (viewer ? "" : say("money_flow_renamed", { name: str(e, "name") })),
     // Play's name, so an Upgrade that renames the flow too keeps the chat's.
     touches: (e) => [{ entity: str(e, "flow"), aspect: "name" }],
     coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
@@ -386,7 +387,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       else mine[str(e, "id")] = { cents: Math.round(numOf(e.data.cents)), until: numOf(e.data.until), kind: e.data.kind === "authorization" ? "authorization" : "deposit", memo: str(e, "memo") };
       holds[account] = mine;
     },
-    describe: (e, ctx) => (e.data.release === true ? "Hold released" : `Hold of ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`),
+    describe: (e, ctx) => (e.data.release === true ? say("money_hold_released") : say("money_hold", { amount: formatMoney(numOf(e.data.cents), ctx.world.currency) })),
   },
   {
     // An account's pending journal lines up to a time post.
@@ -404,7 +405,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
         return { ...rest, status: "posted" };
       });
     },
-    describe: () => "Card payments posted",
+    describe: () => say("money_card_posted"),
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -419,7 +420,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
     // A credit report is its person's alone: the player reads their own, never anyone else's.
-    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `${whoseFor(ctx, viewer, str(e, "person"))} credit report now shows ${wordsOf(CREDIT_WORDS, str(e, "kind"))}`),
+    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : say("money_credit_report", { whose: whoseFor(ctx, viewer, str(e, "person")), kind: wordsOf(CREDIT_WORDS, str(e, "kind")) })),
   },
   {
     // A person's monthly score.
@@ -432,7 +433,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
       credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
     },
-    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : `${whoseFor(ctx, viewer, str(e, "person"))} credit score is now ${numOf(e.data.score)}`),
+    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : say("money_credit_score", { whose: whoseFor(ctx, viewer, str(e, "person")), score: numOf(e.data.score) })),
   },
   {
     // A card's spending today: its new totals (an assignment, so a record keeps only the last).
@@ -441,7 +442,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "spend")[str(e, "card")] = { day: numOf(e.data.day), purchase: numOf(e.data.purchase), atm: numOf(e.data.atm) };
     },
-    describe: () => "Card spending",
+    describe: () => say("money_card_spending"),
     coarsen: { key: (e) => str(e, "card"), merge: (_a, b) => b },
   },
   {
@@ -467,7 +468,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
         else opened[a] = true;
       }
     },
-    describe: (e) => (e.data.close === true ? "Accounts closed again" : "Accounts opened"),
+    describe: (e) => say(e.data.close === true ? "money_accounts_closed" : "money_accounts_opened"),
   },
   {
     type: FINANCE_EVENTS.status,
@@ -475,7 +476,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str(e, "account")] = str(e, "status") as AccountStatus;
     },
-    describe: (e, ctx) => `${own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account")} is now ${wordsOf(STATUS_WORDS, str(e, "status"))}`,
+    describe: (e, ctx) => say("money_status", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), status: wordsOf(STATUS_WORDS, str(e, "status")) }),
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -486,8 +487,8 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const at = numOf(e.data.at);
       sliceRecord(state, "economy", "adb")[str(e, "account")] = { from: at, at, sum: 0, spent: 0, ...(typeof e.data.owed === "number" ? { owed: e.data.owed } : {}) };
     },
-    describe: () => "Interest period",
+    describe: () => say("money_interest_period"),
   },
   // A decline recorded by an older build: it moves nothing.
-  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => `${str(e, "memo")} was declined` },
+  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => say("money_declined", { memo: str(e, "memo") }) },
 ];

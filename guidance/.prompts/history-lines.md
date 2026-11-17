@@ -273,3 +273,108 @@ ev_ws_readers_everyone: workspace file {{path}} read with everyone's knowledge
 ev_ws_readers_gm: workspace file {{path}} read with the GM's knowledge
 ev_output_told: {{kind}} lines told to the narrator
 ev_scene_told: the scene's lore and notes told to the narrator
+mind_round_on: A round of character minds ran
+mind_round_off: Character minds are switched off
+mind_line: {{name}}'s mind, at {{fidelity}} fidelity, {{#intent}}means to: {{intent}}{{/intent}}{{^intent}}has no intent{{/intent}}
+mind_memory: {{name}} remembers the turn in {{notes}} {{#oneNote}}note{{/oneNote}}{{^oneNote}}notes{{/oneNote}} and {{commitments}} new {{#oneCommitment}}commitment{{/oneCommitment}}{{^oneCommitment}}commitments{{/oneCommitment}}
+mind_present_none: No one was present for the minds
+mind_present: {{who}} {{#one}}was{{/one}}{{^one}}were{{/one}} present for the minds
+mind_plan_status: {{name}}'s plan {{#plan}}“{{plan}}”{{/plan}}{{^plan}}that's gone{{/plan}} is now {{status}}
+mind_part_deleted: {{name}}'s {{key}} was deleted
+mind_part_edited: {{name}}'s {{key}} was edited
+mind_commitment_status: {{name}}'s commitment is now {{status}}
+mind_consolidated: {{name}}'s older notes folded into their summary
+mind_unpinned: {{name}}'s mind goes by their score again
+mind_pinned: {{name}}'s mind is now pinned at {{fidelity}} fidelity
+mind_refresh: {{name}} gets a fresh mind next turn
+mind_intent_cleared: {{name}} no longer has your intent
+mind_intent: {{name}} now means to “{{text}}”{{#approach}}, {{approach}}ly{{/approach}}
+mind_intent_manner: {{name}} now goes about things{{#approach}} {{approach}}ly{{/approach}}
+mind_skip: The time skip stopped at {{beats}} beats for the minds
+mind_fact: A fact for the minds: “{{claim}}”
+mind_fact_bare: A fact for the minds
+mind_learned: {{who}} learned {{claim}}
+mind_holds: {{who}} {{#one}}holds{{/one}}{{^one}}hold{{/one}} {{claim}} ({{parts}})
+mind_kept_everyone: kept from everyone
+mind_kept_from: kept from {{who}}
+mind_told_by: told by {{who}}
+mind_sure: {{pct}}% sure
+mind_forgot: {{who}} no longer {{#one}}holds{{/one}}{{^one}}hold{{/one}} {{claim}}
+mind_keeps_none: {{name}} no longer keeps {{claim}} from anyone
+mind_keeps: {{name}} keeps {{claim}} from {{from}}
+mind_everyone: everyone
+mind_truth: {{claim}} is now {{#open}}an open question{{/open}}{{^open}}{{truth}}{{/open}}
+mind_tracking_on: Knowledge tracking is on
+mind_tracking_off: Knowledge tracking is off
+mind_threshold: , a holding revealing its fact from {{pct}}% sure
+money_worth_free: {{entity}}'s worth is no longer fixed
+money_worth_band: {{entity}} is {{band}}
+money_prices_mult: Prices ×{{mult}}
+money_prices_normal: Prices back to normal
+money_statement_closed: The statement closed at {{closing}}, with at least {{minimum}} due
+money_card_payment: A card payment of {{amount}} was made
+money_stage: {{account}}'s payments are now {{stage}}
+money_flow_outcome: {{flow}}: {{outcome}}
+money_flow_renamed: Standing payment renamed {{name}}
+money_hold_released: Hold released
+money_hold: Hold of {{amount}}
+money_card_posted: Card payments posted
+money_credit_report: {{whose}} credit report now shows {{kind}}
+money_credit_score: {{whose}} credit score is now {{score}}
+money_card_spending: Card spending
+money_accounts_closed: Accounts closed again
+money_accounts_opened: Accounts opened
+money_status: {{account}} is now {{status}}
+money_interest_period: Interest period
+money_declined: {{memo}} was declined
+money_year_closed: {{party}} closed {{year}}
+money_foundation_marked: {{org}}'s assets marked for {{month}}
+money_dividend_received: {{party}} received a dividend from {{source}}
+money_consent_dividend: {{org}}: consent dividend for {{year}}
+money_phc_tax: {{party}}: personal holding company tax for {{year}}
+money_aet_tax: {{party}}: accumulated earnings tax for {{year}}
+money_foundation_tax: {{org}}: foundation taxes for {{year}}
+project_started: Started {{project}}
+project_step_waits_start: {{project}}: {{step}} waits for {{amount}} to start
+project_step_waits_finish: {{project}}: {{step}} waits for {{amount}} to finish
+project_step_started: {{project}}: {{step}} started
+project_step_done: {{project}}: {{step}} done
+project_paused: Paused {{project}}
+project_resumed: Resumed {{project}}
+project_dropped: Dropped {{project}}
+project_note: {{project}}: {{note}}{{#text}} ({{text}}){{/text}}
+business_sale_walkin: {{business}}: sale to walk-in customers
+business_sale: {{business}}: sale of {{memo}} to {{payer}}
+business_remit_tax: {{business}}: sales tax paid
+business_remit_suppliers: {{business}}: suppliers paid
+business_invoice_paid: {{business}}: invoice paid by {{customer}}
+business_draw: {{business}}: owner's draw
+business_profit: {{business}}: profit distributed
+asset_quote: {{symbol}} at {{price}}
+asset_price: {{asset}} at {{price}}
+asset_yield: {{asset}} yields {{yield}}%
+asset_listed: Contract listed: {{asset}}
+stake_sold: {{party}} sold {{pct}}% of their share of {{entity}}
+stake_bought: {{party}} bought into {{entity}}
+trust_distributed: {{trust}} distributed to its beneficiaries
+payslip: Payslip: {{worker}}, {{job}}
+worked_hours: Worked {{hours}} h
+commission: Commission on sales: {{job}}
+unemployment_accrued: Unemployment tax accrued: {{employer}}
+suta_paid: SUTA paid: {{employer}}
+futa_paid: FUTA paid: {{employer}}
+stream_earned: {{stream}}: {{amount}} earned
+stream_adjusted_factor: {{stream}}: ×{{factor}} a payment until {{until}}{{#reason}} ({{reason}}){{/reason}}
+stream_adjusted_amount: {{stream}}: {{amount}} on each payment until {{until}}{{#reason}} ({{reason}}){{/reason}}
+estimated_tax: Estimated tax: {{party}}
+profit_goes_to: {{owner}}'s profit from {{business}} goes to {{#to}}{{to}}{{/to}}{{^to}}their account{{/to}}
+option_qty_exercised: {{option}}: {{qty}} exercised
+income_profit: {{source}}: {{amount}} profit share
+income_kind: {{source}}: {{amount}} {{kind}}
+holding_units: {{holding}}: {{qty}} units ({{kind}}) for {{amount}}
+donation: Donation: {{donor}} to {{org}}
+depletion_of: Depletion of {{asset}} for {{month}}
+depreciation_of: Depreciation of {{asset}} for {{month}}
+cash_rule_world: Cash follows the world's rule again
+cash_rule_machine: In this chat, cash needs a machine or a branch
+cash_rule_free: In this chat, cash needs no machine

@@ -13,6 +13,7 @@
 // and bonds are priced from those marks and the clock, never stored. A month's last close is kept
 // for every asset that moves (`economy.closes`), for the performance a holding's page shows.
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -570,7 +571,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       prices[str(e, "symbol")] = numOf(e.data.price);
       economy.prices = prices;
     },
-    describe: (e, _ctx, viewer) => (viewer ? "" : `${str(e, "symbol")} at ${numOf(e.data.price).toFixed(2)}`),
+    describe: (e, _ctx, viewer) => (viewer ? "" : say("asset_quote", { symbol: str(e, "symbol"), price: numOf(e.data.price).toFixed(2) })),
   },
   {
     // A day's mark: an asset's price per unit (minor units), or a bond's market yield.
@@ -590,7 +591,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) => {
       if (viewer) return "";
       const label = assetDefOf(ctx, str(e, "asset"))?.label || str(e, "asset");
-      return typeof e.data.price === "number" ? `${label} at ${formatMoney(Math.round(e.data.price), ctx.world.currency)}` : `${label} yields ${numOf(e.data.yield)}%`;
+      return typeof e.data.price === "number" ? say("asset_price", { asset: label, price: formatMoney(Math.round(e.data.price), ctx.world.currency) }) : say("asset_yield", { asset: label, yield: numOf(e.data.yield) });
     },
     // A mark is an assignment: in one timelapse record only an asset's last one matters.
     coarsen: { key: (e) => `${str(e, "asset")}:${typeof e.data.price === "number" ? "p" : "y"}`, merge: (_a, b) => b },
@@ -631,7 +632,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       const def = readAssetDef(e.data.def);
       if (def) holdingsRecord(state, "minted")[str(e, "asset")] = def as unknown as JsonObject;
     },
-    describe: (e, _ctx, viewer) => (viewer ? "" : `Contract listed: ${strOf(objOf(e.data.def).label, str(e, "asset"))}`),
+    describe: (e, _ctx, viewer) => (viewer ? "" : say("asset_listed", { asset: strOf(objOf(e.data.def).label, str(e, "asset")) })),
   },
 ];
 

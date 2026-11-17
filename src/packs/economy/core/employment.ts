@@ -19,6 +19,7 @@
 // pay, hours and leave) or the power to appoint, within the position's scope (`mayAct`), and never
 // puts their own on a payroll they only run (`payrollProblem`).
 
+import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
@@ -684,7 +685,7 @@ export const PAYSLIP: EventTypeDef<PackEvent> = {
     const employer = str(e, "employer");
     if (employer !== "") addPayrollTaxes(state, employer, numOf(e.data.year), numOf(e.data.taxes), numOf(e.data.employer_tax));
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `Payslip: ${labelOf(ctx, str(e, "worker"))}, ${labelOf(ctx, str(e, "job"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("payslip", { worker: labelOf(ctx, str(e, "worker")), job: labelOf(ctx, str(e, "job")) })),
 };
 
 /** The days on a timesheet, as a sorted list of day indexes. */
@@ -708,7 +709,7 @@ export const TIMESHEET: EventTypeDef<PackEvent> = {
     const days = [...new Set([...sheetDays(sheet.days), ...sheetDays(e.data.days)])].sort((a, b) => a - b);
     payroll[job] = { ...cur, sheet: { minutes: numOf(sheet.minutes) + numOf(e.data.minutes), days } };
   },
-  describe: (e) => `Worked ${Math.round((numOf(e.data.minutes) / 60) * 10) / 10} h`,
+  describe: (e) => say("worked_hours", { hours: Math.round((numOf(e.data.minutes) / 60) * 10) / 10 }),
   coarsen: {
     key: (e) => `${str(e, "job")}:${numOf(e.data.since)}`,
     merge: (a, b) => ({ ...b, data: { ...b.data, minutes: numOf(a.data.minutes) + numOf(b.data.minutes), days: [...new Set([...sheetDays(a.data.days), ...sheetDays(b.data.days)])].sort((x, y) => x - y) } }),
@@ -725,7 +726,7 @@ export const COMMISSION: EventTypeDef<PackEvent> = {
     const cur = objOf(own(payroll, job));
     payroll[job] = { ...cur, sales: numOf(cur.sales) + numOf(e.data.cents) };
   },
-  describe: (e, ctx, viewer) => (viewer ? "" : `Commission on sales: ${labelOf(ctx, str(e, "job"))}`),
+  describe: (e, ctx, viewer) => (viewer ? "" : say("commission", { job: labelOf(ctx, str(e, "job")) })),
   coarsen: {
     key: (e) => `${str(e, "job")}:${numOf(e.data.since)}`,
     merge: (a, b) => ({ ...b, data: { ...b.data, cents: numOf(a.data.cents) + numOf(b.data.cents) } }),
