@@ -4,6 +4,7 @@
 // user this RPE belongs to. The words of every refusal are lines of `.prompts/story-answers.md`, as the chat has them.
 
 import { route, RouteError, shape } from "../app";
+import { trackKnown } from "../engine/visibility";
 import type { GuidanceFiles } from "../iface/texts";
 import type { TrackDef } from "../shared/world";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
@@ -28,8 +29,9 @@ export interface QuestRoutesDeps {
   /** The quests' settings for the chat, over `QUESTS_DEFAULTS`: `page` bounds a page of the records. Left out, the defaults. */
   quests?(user: string, chat: string): Promise<Partial<QuestsSettings>>;
   /**
-   * Whether the player's character knows a quest the world made known to some, by the world's own rule. Left out, none is known:
-   * such a quest shows the player nothing until the Author shows it.
+   * Whether the player's character knows a quest the world made known to some, where the application has a rule of its own for it. Left out,
+   * the world's own rule reads it from the state at the point read (`trackKnown`): the quest's owner, whoever knows the owner, whoever its
+   * `knownBy` matches.
    */
   knows?(user: string, chat: string, quest: string): boolean;
 }
@@ -46,6 +48,8 @@ interface Standing {
   open: ReadonlySet<string>;
   standing: Record<string, string>;
   tracks: Readonly<Record<string, TrackDef>>;
+  /** Whether the player's character knows a quest the world made known to some, at the point read, by the world's own rule. */
+  knows(quest: string): boolean;
 }
 
 async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, turn: string | null): Promise<Standing> {
@@ -58,10 +62,15 @@ async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, tur
     if (t.joined !== null) throw new JoinedTurnError(turn, t.joined);
   }
   const folded = turn === null ? s.headState(chat) : s.stateAt(turn);
-  const tracks = row.revision === null ? {} : (deps.store.env.worlds(row.revision)?.tracks ?? {});
+  const doc = row.revision === null ? undefined : deps.store.env.worlds(row.revision);
+  const tracks = doc?.tracks ?? {};
   const standing = Object.fromEntries(Object.entries(folded.state.world.tracks).map(([id, t]) => [id, t.stage]));
   const slice = questSliceOf(folded.state);
-  return { views: questViews(tracks, slice), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks };
+  const knows = (quest: string): boolean => {
+    const track = Object.hasOwn(tracks, quest) ? tracks[quest] : undefined;
+    return doc !== undefined && track !== undefined && trackKnown(deps.store.env.registry, doc, folded.state.world, doc.pov, track);
+  };
+  return { views: questViews(tracks, slice), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks, knows };
 }
 
 export function questRoutes(deps: QuestRoutesDeps) {
@@ -83,7 +92,7 @@ export function questRoutes(deps: QuestRoutesDeps) {
       handle: async ({ user, params, query }): Promise<JournalAnswer> => {
         const turn = query.turn ?? null;
         const at = await standingAt(deps, user, params.chat, turn);
-        const quests = journalOf(at.views, at.standing, (v) => deps.knows?.(user, params.chat, v.id) === true);
+        const quests = journalOf(at.views, at.standing, (v) => deps.knows?.(user, params.chat, v.id) ?? at.knows(v.id));
         return { chat: params.chat, turn, open: quests.filter((q) => at.open.has(q.id)).length, quests };
       },
     }),
