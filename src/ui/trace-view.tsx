@@ -132,20 +132,11 @@ export function ReplyBox(props: { run: RunNode }) {
 
 // ---------------------------------------------------------------- the tree
 
-/** The run's agents as a tree: the lead first, each agent under the one that started it, and above them what the host said of the run that is about no agent. `notices` are the words of the notices file, for the records that are notices. */
+/** The run's agents as a tree: the lead first, each agent under the one that started it. `notices` are the words of the notices file, for the records that are notices. */
 export function AgentTree(props: { run: RunNode; now: number; notices?: NoticeLines }) {
   const notices = props.notices ?? NO_NOTICES;
   return (
     <div class="rpe-tree">
-      {props.run.host.length === 0 ? null : (
-        <ol class="rpe-steps" aria-label="What the harness said of the run" data-host>
-          {props.run.host.map((step) => (
-            <li key={step.key} class="rpe-step note" data-seqs={step.seqs.join(",")}>
-              <NoteView step={step} notices={notices} />
-            </li>
-          ))}
-        </ol>
-      )}
       {props.run.roots.map((id) => (
         <AgentBox key={id} run={props.run} id={id} now={props.now} depth={0} notices={notices} />
       ))}

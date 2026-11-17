@@ -8,6 +8,9 @@
 // text and each piece of what it sent to the chat carries; the turn it belongs to is in its records'
 // scope. A turn's continue is a run of its own under an id of its own, so records never go to a run by
 // a guess on order or time. A chat can have several runs going on at once (a turn and a job beside it).
+// A record about no agent is no run's: it is the host's word outside any agent's work (a session opened,
+// closed, forked or opened again, a session-close hook), which RPH numbers 1 under an id of its own and
+// never starts or ends; it draws no run.
 //
 // Records come in order from the live hub, and again from a read when the page catches up, so a record
 // already folded is passed over and one past a hole waits until the hole is filled. Every change makes
@@ -92,8 +95,6 @@ export interface RunNode {
   readonly agents: ReadonlyMap<string, AgentNode>;
   /** Agents no agent of this run started: the lead, first. */
   readonly roots: readonly string[];
-  /** The records of the run that are about no agent (the host's word: a session opened, closed or forked), in order. */
-  readonly host: readonly NoteStep[];
   readonly released: Release | null;
   readonly releasedAt: number | null;
   readonly outcome: RunOutcome | null;
@@ -102,7 +103,7 @@ export interface RunNode {
   /** The last record folded: every record up to it is in. */
   readonly seq: number;
   /** Records past a hole, in order, waiting for it to be filled. */
-  readonly waiting: readonly TraceRecord[];
+  readonly waiting: readonly RunRecord[];
   readonly firstAt: number | null;
   readonly lastAt: number | null;
 }
@@ -118,7 +119,7 @@ const NO_STREAM = { text: "", thinking: "" } as const;
 const NO_REPLY: ReplySoFar = { text: "", progress: [], held: [] };
 
 function emptyRun(run: string, turn: string | null = null): RunNode {
-  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], host: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
+  return { run, turn, scope: null, startedBy: null, started: null, startedAt: null, intent: null, agents: new Map(), roots: [], released: null, releasedAt: null, outcome: null, endedAt: null, reply: NO_REPLY, seq: 0, waiting: [], firstAt: null, lastAt: null };
 }
 
 function withRun(model: LiveModel, next: RunNode): LiveModel {
@@ -220,29 +221,28 @@ function adopt(parent: AgentNode, child: string, call: string | undefined): Agen
   return { ...parent, children: [...parent.children, child], steps };
 }
 
-/** The run with the record that follows its last one folded in; one about no agent is a note of the run's own. */
-function fold(run: RunNode, record: TraceRecord): RunNode {
+/** A record of a run: one about an agent. */
+type RunRecord = TraceRecord & { readonly agent: AgentRef };
+
+/** The run with the record that follows its last one folded in. */
+function fold(run: RunNode, record: RunRecord): RunNode {
   const { event, at } = record;
   const agents = new Map(run.agents);
   let roots = run.roots;
-  let host = run.host;
-  if (record.agent === undefined) host = [...host, noteOf(record)];
-  else {
-    const id = record.agent.id;
-    let agent = agents.get(id);
-    if (agent === undefined) {
-      const startedBy = record.parent ?? null;
-      agent = { ref: record.agent, startedBy, info: null, at, lastAt: at, steps: [], children: [], todo: null, ended: null, endedAt: null };
-      // A sub-agent's records name the agent and call that started it; an agent of a job started from another run is a root of its own run.
-      const parentId = startedBy !== null ? (startedBy.run === record.run ? startedBy.agent : undefined) : record.agent.parent;
-      const parent = parentId === undefined ? undefined : agents.get(parentId);
-      if (parent === undefined) roots = [...roots, id];
-      else agents.set(parent.ref.id, adopt(parent, id, startedBy?.call));
-    }
-    agents.set(id, stepInto(agent, record));
+  const id = record.agent.id;
+  let agent = agents.get(id);
+  if (agent === undefined) {
+    const startedBy = record.parent ?? null;
+    agent = { ref: record.agent, startedBy, info: null, at, lastAt: at, steps: [], children: [], todo: null, ended: null, endedAt: null };
+    // A sub-agent's records name the agent and call that started it; an agent of a job started from another run is a root of its own run.
+    const parentId = startedBy !== null ? (startedBy.run === record.run ? startedBy.agent : undefined) : record.agent.parent;
+    const parent = parentId === undefined ? undefined : agents.get(parentId);
+    if (parent === undefined) roots = [...roots, id];
+    else agents.set(parent.ref.id, adopt(parent, id, startedBy?.call));
   }
+  agents.set(id, stepInto(agent, record));
   const startedBy = run.firstAt === null && record.parent !== undefined && record.parent.run !== record.run ? record.parent : run.startedBy;
-  const next: RunNode = { ...run, agents, roots, host, startedBy, seq: record.seq, scope: run.scope ?? record.scope, firstAt: run.firstAt ?? at, lastAt: at };
+  const next: RunNode = { ...run, agents, roots, startedBy, seq: record.seq, scope: run.scope ?? record.scope, firstAt: run.firstAt ?? at, lastAt: at };
   switch (event.kind) {
     case "run_started":
       return { ...next, started: event, startedAt: at };
@@ -257,8 +257,9 @@ function fold(run: RunNode, record: TraceRecord): RunNode {
   }
 }
 
-/** The model with one trace record in: folded when it follows its run's last, passed over when it is in already, held when it comes past a hole. */
+/** The model with one trace record in: folded when it follows its run's last, passed over when it is in already or is about no agent (no run's), held when it comes past a hole. */
 export function applyRecord(model: LiveModel, record: TraceRecord): LiveModel {
+  if (!isRunRecord(record)) return model;
   const found = runOf(model, record.run) ?? emptyRun(record.run);
   if (record.seq <= found.seq || found.waiting.some((w) => w.seq === record.seq)) return model;
   // Its turn is known from any record of it, one held past a hole included.
@@ -274,6 +275,10 @@ export function applyRecord(model: LiveModel, record: TraceRecord): LiveModel {
     waiting = waiting.slice(1);
   }
   return withRun(model, { ...next, waiting });
+}
+
+function isRunRecord(record: TraceRecord): record is RunRecord {
+  return record.agent !== undefined;
 }
 
 /** The model with a piece of a model call's streaming text in; a piece for a call not open here is let go, since the call's answer holds the whole. */
@@ -380,7 +385,7 @@ export function holeIn(run: RunNode): number | null {
 /** Whether the run is held by his pause, by the newest `paused` or `resumed` record it holds; null where it holds neither (the page then asks RPE). */
 export function pausedIn(run: RunNode): boolean | null {
   let newest: { seq: number; paused: boolean } | null = null;
-  const notes = [...run.host, ...[...run.agents.values()].flatMap((agent) => agent.steps.filter((s): s is NoteStep => s.kind === "note"))];
+  const notes = [...run.agents.values()].flatMap((agent) => agent.steps.filter((s): s is NoteStep => s.kind === "note"));
   for (const { record } of notes) {
     const { kind } = record.event;
     if ((kind === "paused" || kind === "resumed") && (newest === null || record.seq > newest.seq)) newest = { seq: record.seq, paused: kind === "paused" };
@@ -447,7 +452,7 @@ export interface RunTotals {
 export function runTotals(run: RunNode): RunTotals {
   let calls = 0;
   let tools = 0;
-  let rules = run.host.filter((step) => step.record.event.kind === "rule_fired").length;
+  let rules = 0;
   let usage = ZERO;
   for (const agent of run.agents.values()) {
     usage = addUsage(usage, agentUsage(agent));

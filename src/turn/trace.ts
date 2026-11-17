@@ -59,8 +59,13 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     if (at !== undefined && at.runs.size === 0 && at.writes === 0) open.delete(key);
   };
 
-  /** Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. */
+  /**
+   * Follows which runs are going on, and where: a turn's run ends with its `run_ended`, a job's with the view that says it ended. A
+   * record about no agent is no run's (the host's word: a session's change, a session-close hook), never started or ended: nothing
+   * is held for it.
+   */
   const follow = (record: TraceRecord, chat: string, key: string, at: Open): void => {
+    if (record.agent === undefined) return;
     const { event } = record;
     const ended = event.kind === "run_ended" ? record.run : event.kind === "job" && event.job.ended !== undefined ? event.job.id : null;
     if (ended === null) {
