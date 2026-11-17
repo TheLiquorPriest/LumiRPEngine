@@ -160,11 +160,13 @@ function knowledgeEdit(ctx: ReadContext, op: Extract<MindEditOp, { op: "mind_kno
   if (op.holding === null) return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject("no_change", `${name} doesn't hold that`);
   const h = op.holding as unknown as JsonValue;
   if (!isHolding(h)) return reject("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
-  const named = peopleIn(ctx, [...(h.by === null ? [] : [h.by]), ...(Array.isArray(h.keptFrom) ? h.keptFrom : [])]);
+  // Someone who is their own teller knows it first hand: recorded with no teller, and a holding that was told, as witnessed.
+  const self = h.by === op.entity;
+  const given: typeof h = self ? { ...h, by: null, how: h.how === "told" ? "witnessed" : h.how } : h;
+  const named = peopleIn(ctx, [...(given.by === null ? [] : [given.by]), ...(Array.isArray(given.keptFrom) ? given.keptFrom : [])]);
   if (!Array.isArray(named)) return named;
-  if (h.by === op.entity) return reject("bad_value", `${name} can't have told themselves`);
-  if (h.evidence.some((ref) => ref === op.fact || (!isWitnessRef(ref) && !own(k.facts, ref)))) return reject("missing_fact", "a holding rests on facts the minds hold, never on itself");
-  const next = holdingOf(h, op.entity);
+  if (given.evidence.some((ref) => ref === op.fact || (!isWitnessRef(ref) && !own(k.facts, ref)))) return reject("missing_fact", "a holding rests on facts the minds hold, never on itself");
+  const next = holdingOf(given, op.entity);
   if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next)) return reject("no_change", "nothing to change");
   // The event carries the holding whole, so a fold reads it without the state it was made on.
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...(next.keptFrom ? { keptFrom: next.keptFrom } : {}), msg: next.since.msg, at: next.since.at } }];
