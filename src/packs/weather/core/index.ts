@@ -24,6 +24,7 @@ import { chatDraftOf, draftEvent } from "../../../engine/world-draft";
 import { baseWorld } from "../../../engine/places-in-play";
 import { calendarOf, dateAt, dayPartAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
+import { signalOf } from "../../../engine/notices";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
@@ -313,7 +314,7 @@ function stepRegions(slot: { start: number }, ctx: ReadContext, rng: (entity: En
       if (t !== numOf(e.fields.temp_c, NaN)) out.push({ type: "set", entity: id, field: "temp_c", value: t });
     }
     const st = climate.states.find((s) => s.id === next);
-    if (level >= 4 && next !== cur && st && st.closes.length > 0) out.push({ type: ENGINE_EVENTS.signal, data: { class: "weather", text: `${st.label} over ${e.name}: ${st.closes.join(", ")} travel is closed.` } });
+    if (level >= 4 && next !== cur && st && st.closes.length > 0) out.push(...signalOf("weather", "weather_closes", { state: st.label, place: e.name, closes: st.closes.join(", ") }));
   }
   return out;
 }

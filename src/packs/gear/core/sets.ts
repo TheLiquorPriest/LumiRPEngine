@@ -15,6 +15,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { SET_KIND_LABEL, setIdOf, setsOf, thingsConfigOf, type SavedSet, type SetKind, type SetOp, type SetPiece } from "../../../shared/things";
 import { accessFor, reachOf } from "../../../engine/access";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
+import { noteOf } from "../../../engine/notices";
 import { labelOf, own } from "../../../engine/pack-kit";
 import { together } from "../../../engine/presence";
 import type { ReadContext, Rejection } from "../../../engine/registry";
@@ -184,7 +185,7 @@ function applySet(ctx: ReadContext, op: Extract<SetOp, { do: "set_apply" }>, opt
     }
   }
   const events = [...w.events];
-  if (missing.length > 0) events.push({ type: ENGINE_EVENTS.note, data: { text: `Not to hand for ${set.name}: ${missing.join("; ")}.`, entity: op.who, visibility: op.who === ctx.world.pov ? "public" : "secret" } });
+  if (missing.length > 0) events.push(...noteOf("set_not_to_hand", { set: set.name, missing: missing.join("; ") }, { entity: op.who, visibility: op.who === ctx.world.pov ? "public" : "secret" }));
   return events;
 }
 

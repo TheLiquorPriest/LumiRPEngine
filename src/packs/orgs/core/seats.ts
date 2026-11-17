@@ -18,6 +18,8 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { belongsTo, directMembers, orgTypeOf, positionsOf, seatFilled } from "../../../engine/org";
 import { objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectDef, EventTypeDef, ProcessDef, ReadContext } from "../../../engine/registry";
+import { say } from "../../../engine/lines";
+import { signalOf } from "../../../engine/notices";
 import { linkEvents } from "../../../engine/relations";
 import { isGone } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
@@ -115,12 +117,12 @@ function succeed(ctx: ReadContext, org: EntityId): LedgerEvent[] {
       const seatedBy = seatEvents(ctx, org, p, who, kept, rows);
       if (seatedBy === null) continue;
       taken.add(who);
-      const text = was ? `${name(who)} succeeds ${name(was.who)} as ${p.title}` : `${name(who)} takes the seat of ${p.title}`;
-      const unit: LedgerEvent[] = [...seatedBy, orgLog(ctx, org, text, { names: was ? [who, was.who] : [who] })];
+      const text = say(was ? "seat_succeeds" : "seat_taken", { who: name(who), ...(was ? { was: name(was.who) } : {}), title: p.title });
+      const unit: LedgerEvent[] = [...seatedBy, ...(text === "" ? [] : [orgLog(ctx, org, text, { names: was ? [who, was.who] : [who] })])];
       // The members are told: a signal to the player character when they are one, naming the successor only where they may see them.
       if (belongsTo(ctx, ctx.world.pov, org)) {
-        const told = canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, who) ? name(who) : "Someone";
-        unit.push({ type: ENGINE_EVENTS.signal, data: { class: "incident", text: `${told} now holds ${p.title} for ${orgName}.`, entity: org } });
+        const told = canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, who) ? name(who) : null;
+        unit.push(...signalOf("incident", "seat_incident", { ...(told !== null ? { who: told } : {}), title: p.title, org: orgName }, { entity: org }));
       }
       const group = `orgs.seat:${hashParts(org, p.id, who, String(ctx.state.clock)).slice(0, 10)}`;
       out.push(...unit.map((e) => ({ ...e, group })));

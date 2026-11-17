@@ -19,6 +19,7 @@
 // `may_assign`: the things model's access resolver). The Gear and People sections are `feed.ts`'s;
 // Play → Me → Gear is `view.ts`'s.
 
+import { signalOf } from "../../../engine/notices";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
@@ -926,7 +927,7 @@ export const gearPack: PackDef = {
           if (!thing || g.until === null || g.until > slot.end || thing.fields.overdue === true) continue;
           out.push({ type: "set", entity: g.thing, field: "overdue", value: true });
           const borrower = own(ctx.state.entities, g.borrower)?.name ?? g.borrower;
-          out.push({ type: ENGINE_EVENTS.signal, data: { class: "overdue", text: `${thing.name} is overdue from ${borrower}.`, ...(g.owner ? { entity: g.owner } : {}) } });
+          out.push(...signalOf("overdue", "thing_overdue", { thing: thing.name, borrower }, g.owner ? { entity: g.owner } : {}));
         }
         return out;
       },

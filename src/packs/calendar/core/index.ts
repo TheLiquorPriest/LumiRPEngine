@@ -20,6 +20,7 @@ import type { PackDef } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
 import { mutableSlice, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
+import { say } from "../../../engine/lines";
 import { buildCalendarView } from "./view";
 import { CALENDAR_PACK, calendarIn, dateRuleOf, holidaysOf } from "../../../engine/holidays";
 import dst from "./tables/modern-us/dst.json";
@@ -105,7 +106,7 @@ export const calendarPack: PackDef = {
         }
         mutableSlice(state, CALENDAR_PACK).holidays = kept;
       },
-      describe: (e) => (e.data.removed === true ? `${strOf(e.data.id)} is no longer a holiday` : `${strOf(e.data.label, strOf(e.data.id))} is a holiday`),
+      describe: (e) => (e.data.removed === true ? say("holiday_removed", { holiday: strOf(e.data.id) }) : say("holiday_set", { holiday: strOf(e.data.label, strOf(e.data.id)) })),
     });
 
     r.formula("is_weekend", (ctx) => {

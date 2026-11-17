@@ -97,7 +97,7 @@ made_as_thing: Operation {{n}} ({{op}}): {{name}} was made as a thing, since thi
 holder_nowhere: Operation {{n}} ({{op}}): {{holder}} is at no place, so {{name}} was made at none.
 level_offers: Operation {{n}} ({{op}}): {{who}} reached {{field}} {{level}}, from {{from}}; nothing was rolled or applied for it. The world's effects for {{levels}} are yours to apply or roll: {{effects}}.
 level_beside_xp: Operation {{n}} ({{op}}): {{who}}'s {{field}} is {{level}}, as given, and their experience, {{xp}}, reaches {{reached}}; the level stays as given.
-level_past_bounds: Operation {{n}} ({{op}}): {{who}}'s {{field}} is {{level}}, which the field's bounds ({{bounds}}) do not allow; it is set all the same.
+level_past_bounds: Operation {{n}} ({{op}}): {{who}}'s {{field}} is {{level}}, which the field's bounds ({{#least}}at least {{least}}{{/least}}{{#most}}{{#least}}, {{/least}}at most {{most}}{{/most}}) do not allow; it is set all the same.
 off_the_scale: Operation {{n}} ({{op}}): {{who}}'s {{axis}} toward {{toward}} is now {{value}}, past the axis's range of {{least}} to {{most}}; it is kept as given.
 made_where_said: Operation {{n}} ({{op}}): nothing goes by {{said}}, so {{what}} was made at {{where}}{{#assumed}}, which is recorded as assumed{{/assumed}}, and those words are kept on it as where it was said to be.
 made_nowhere: Operation {{n}} ({{op}}): {{what}} was made at no place, since nothing recorded says where{{#said}}; {{said}} is kept as where it was said to be{{/said}}.

@@ -20,6 +20,7 @@
 // relation type the default sides rule reads (symmetric, so both sides hold it).
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
+import { say } from "../../../engine/lines";
 import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";
@@ -234,7 +235,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const rules = rulesOf(ctx.world);
       writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } }, ctx.world.pov);
     },
-    describe: (e) => `A fight: ${describeSide(e, "party")} against ${describeSide(e, "foes")}`,
+    describe: (e) => say("fight_start", { party: describeSide(e, "party"), foes: describeSide(e, "foes") }),
   },
   {
     type: "combat.join",
@@ -265,7 +266,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const rules = rulesOf(ctx.world);
       writeEncounter(state, { ...enc, order, turn, calm: { ...enc.calm, hp: { ...enc.calm.hp, ...(rules ? hpByFighter(ctx, rules, added) : {}) } } });
     },
-    describe: (e) => `${(Array.isArray(e.data.add) ? e.data.add : []).flatMap((f) => (isRecord(f) && typeof f.id === "string" ? [f.id] : [])).join(", ")} joined the fight`,
+    describe: (e) => say("fight_join", { who: (Array.isArray(e.data.add) ? e.data.add : []).flatMap((f) => (isRecord(f) && typeof f.id === "string" ? [f.id] : [])).join(", ") }),
   },
   {
     type: "combat.turn",
@@ -300,7 +301,7 @@ const events: EventTypeDef<PackEvent>[] = [
         calm,
       });
     },
-    describe: (e) => `${strOf(e.data.actor)}'s turn`,
+    describe: (e) => say("fight_turn", { actor: strOf(e.data.actor) }),
   },
   {
     type: "combat.spend",
@@ -321,7 +322,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const cost = counts(e.data.cost) ?? {};
       if (enc) writeEncounter(state, { ...enc, order: enc.order.map((f) => (f.id !== strOf(e.data.who) ? f : { ...f, left: Object.fromEntries(Object.entries(f.left).map(([b, n]) => [b, n - (cost[b] ?? 0)])) })) });
     },
-    describe: (e) => `${strOf(e.data.who)} spends ${Object.keys(objOf(e.data.cost)).join(", ")}`,
+    describe: (e) => say("fight_spend", { who: strOf(e.data.who), costs: Object.keys(objOf(e.data.cost)).join(", ") }),
   },
   {
     type: "combat.act",
@@ -339,7 +340,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const struck = enc.calm.struck || attacks(ctx, enc, entry.actor, strOf(e.data.action), target);
       writeEncounter(state, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });
     },
-    describe: (e) => `${strOf(e.data.actor)}: ${strOf(e.data.label, strOf(e.data.action))}${typeof e.data.target === "string" ? ` → ${e.data.target}` : ""}${typeof e.data.outcome === "string" ? ` (${e.data.outcome.replace(/_/g, " ")})` : ""}`,
+    describe: (e) => say("fight_act", { actor: strOf(e.data.actor), what: strOf(e.data.label, strOf(e.data.action)), ...(typeof e.data.target === "string" ? { target: e.data.target } : {}), ...(typeof e.data.outcome === "string" ? { outcome: e.data.outcome.replace(/_/g, " ") } : {}) }),
   },
   {
     type: "combat.down",
@@ -356,7 +357,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const enc = fightById(state, strOf(e.data.encounter));
       if (enc) writeEncounter(state, { ...enc, order: enc.order.map((f) => (f.id === strOf(e.data.entity) ? { ...f, down: e.data.down === true } : f)) });
     },
-    describe: (e) => `${strOf(e.data.entity)}: ${e.data.down === true ? "down" : "back up"}`,
+    describe: (e) => say(e.data.down === true ? "fight_down" : "fight_up", { who: strOf(e.data.entity) }),
   },
   {
     type: "combat.end",
@@ -371,7 +372,7 @@ const events: EventTypeDef<PackEvent>[] = [
       return null;
     },
     apply: (e, state, ctx) => removeEncounter(state, strOf(e.data.encounter), ctx.world.pov),
-    describe: (e) => (e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : e.data.reason === "skip" ? "The fight broke off as time moved on" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`),
+    describe: (e) => say(e.data.reason === "left" ? "fight_left" : e.data.reason === "stalemate" ? "fight_stalemate" : e.data.reason === "skip" ? "fight_broke_off" : "fight_over", e.data.winner === "party" ? { won: true } : e.data.winner === "foes" ? { lost: true } : {}),
   },
   {
     type: "combat.decision",
@@ -379,7 +380,7 @@ const events: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, PACK, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
-    describe: (e) => `decided ${strOf(e.data.choice)}`,
+    describe: (e) => say("fight_decided", { choice: strOf(e.data.choice) }),
   },
 ];
 

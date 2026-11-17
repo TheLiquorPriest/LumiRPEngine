@@ -20,6 +20,8 @@ import { hashParts } from "../../../shared/hash";
 import { matchVehicleClass, specWords, vehicleDomainOf, vehiclesConfigOf, vehicleSpecsOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
+import { say } from "../../../engine/lines";
+import { noteOf } from "../../../engine/notices";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
@@ -168,8 +170,8 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const uses = new Map(vehiclesFor(ctx, pov).map((u) => [u.id, u]));
   const here = placeOfEntity(ctx.state, pov);
   const site = siteOf(ctx.world, here);
-  const ownerName = (owner: EntityId): string => (see(pov, owner) ? (own(ctx.state.entities, owner)?.name ?? "someone") : "someone");
-  const placeText = (place: PlaceId | null): string => (!place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere");
+  const ownerName = (owner: EntityId): string => (see(pov, owner) ? (own(ctx.state.entities, owner)?.name ?? say("vehicle_someone")) : say("vehicle_someone"));
+  const placeText = (place: PlaceId | null): string => (!place ? say("vehicle_at_unknown") : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? say("vehicle_at", { place: own(ctx.world.places, place)?.name ?? place }) : say("vehicle_somewhere"));
   // Its class by the table's name for it, under the kind's label for the field ("vehicle class Midsize pickup").
   const classText = (v: EntityId, kind: string): string[] => {
     const name = classRow(ctx, v)?.name;
@@ -183,7 +185,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const specs = vehicleSpecsOf(own(ctx.state.entities, v)?.fields.specs) ?? [];
     if (specs.length === 0) return [];
     const more = specs.length - SPECS_TOLD;
-    return [`specs ${specs.slice(0, SPECS_TOLD).map(specWords).join(", ")}${more > 0 ? `, and ${more} more` : ""}`];
+    return [say("vehicle_specs", { specs: specs.slice(0, SPECS_TOLD).map(specWords).join(", "), ...(more > 0 ? { more } : {}) })];
   };
   // What is in a holder, as far as he can see.
   const contents = (holder: EntityId): EntityId[] =>
@@ -196,7 +198,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const named = (id: EntityId, depth: number, mine: boolean): string => {
     const open = mine || owns(ctx, pov, id);
     const inner = depth >= 8 ? [] : contents(id).filter((x) => open || knows(ctx.state, pov, x)).map((x) => named(x, depth + 1, mine));
-    return `${thingName(ctx, id)}${inner.length > 0 ? ` (holding ${inner.join(", ")})` : ""}`;
+    return inner.length > 0 ? say("vehicle_holding", { name: thingName(ctx, id), inner: inner.join(", ") }) : thingName(ctx, id);
   };
   const usable: FeedLine[] = [];
   const away: FeedLine[] = [];
@@ -208,7 +210,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const u = uses.get(v);
     const owner = u?.owner ?? stated;
     const place = placeOfEntity(ctx.state, v);
-    const whose = !u || useTier(u.use) > level ? null : u.mine ? "yours" : u.use.basis === "grant" ? `${owner ? `${ownerName(owner)}'s, ` : ""}${u.use.until !== undefined ? `lent to you until ${formatClock(cal, u.use.until)}` : "assigned to you"}` : `${owner ? ownerName(owner) : "someone"}'s${u.use.basis === "staff" ? ", yours to use at work" : u.use.basis === "permit" ? ", yours to use" : ""}`;
+    const whose = !u || useTier(u.use) > level ? null : u.mine ? say("vehicle_yours") : u.use.basis === "grant" ? say(u.use.until !== undefined ? "vehicle_lent" : "vehicle_assigned", { ...(owner ? { owner: ownerName(owner) } : {}), ...(u.use.until !== undefined ? { until: formatClock(cal, u.use.until) } : {}) }) : say(u.use.basis === "staff" ? "vehicle_staff" : u.use.basis === "permit" ? "vehicle_permit" : "vehicle_of", { owner: owner ? ownerName(owner) : say("vehicle_someone") });
     if (whose === null || !u) {
       // Someone else's: told when it is at his site.
       if (site !== null && siteOf(ctx.world, place) === site) others.push({ v, owner: stated, place });
@@ -217,13 +219,13 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (!u.mine && !see(pov, v)) continue;
     const elsewhere = site !== null && siteOf(ctx.world, place) !== site;
     // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
-    const head = [placeText(place), ...(level === 1 ? [] : [whose]), ...(elsewhere ? ["away from here"] : [])];
+    const head = [placeText(place), ...(level === 1 ? [] : [whose]), ...(elsewhere ? [say("vehicle_away")] : [])];
     const parts = classText(v, e.kind);
-    if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
+    if (level === 1) parts.push(say(e.fields.status === "broken" ? "vehicle_broken" : "vehicle_runs"));
     else {
       if (burnsFuel(ctx, v) && typeof e.fields.fuel_pct === "number") {
         const range = rangeLeft(ctx, v);
-        parts.push(`fuel ${Math.round(e.fields.fuel_pct)}%${range ? `, about ${Math.round(range.value)} ${range.unit} left` : ""}`);
+        parts.push(say("vehicle_fuel", { pct: Math.round(e.fields.fuel_pct), ...(range ? { range: `${Math.round(range.value)} ${range.unit}` } : {}) }));
       }
       if (e.fields.status !== "ok" && e.fields.status !== undefined) parts.push(String(e.fields.status).replace(/_/g, " "));
     }
@@ -233,22 +235,22 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (interval !== null && canSeeField(ctx.registry, ctx.world, ctx.state, pov, v, "last_service")) {
       const unit = domainOf(ctx, v) === "road" ? "mi" : "h";
       const due = Math.round(numOf(e.fields.last_service) + interval).toLocaleString("en-US");
-      parts.push(usage(ctx, v) > numOf(e.fields.last_service) + interval ? `service overdue (it was due at ${due} ${unit})` : `next service due at ${due} ${unit}`);
+      parts.push(say(usage(ctx, v) > numOf(e.fields.last_service) + interval ? "vehicle_service_overdue" : "vehicle_service_next", { due, unit }));
     }
     parts.push(...specsText(v, place));
     const driver = driverOf(ctx, v);
-    if (driver !== null && see(pov, driver)) parts.push(`driven by ${driver === pov ? "you" : ownerName(driver)}`);
+    if (driver !== null && see(pov, driver)) parts.push(say("vehicle_driven_by", driver === pov ? { you: true } : { who: ownerName(driver) }));
     // Who and what is in it only for one at his site: one away from here he can't see into.
     const inside = elsewhere ? [] : contents(v);
-    const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? "you" : (own(ctx.state.entities, id)?.name ?? id)));
+    const aboard = inside.filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => (id === pov ? say("vehicle_you") : (own(ctx.state.entities, id)?.name ?? id)));
     const cargo = inside.filter((id) => !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")).map((id) => named(id, 0, owns(ctx, pov, v)));
     const description = thingDescription(ctx, v);
     const text = [
-      `${e.name}: ${[head.join(", "), ...parts].join("; ")}.`,
-      ...(aboard.length > 0 ? [`Aboard: ${aboard.join(", ")}.`] : []),
-      ...(cargo.length > 0 ? [`Cargo: ${cargo.join(", ")}.`] : []),
+      say("vehicle_line", { name: e.name, parts: [head.join(", "), ...parts].join("; ") }),
+      ...(aboard.length > 0 ? [say("vehicle_aboard", { who: aboard.join(", ") })] : []),
+      ...(cargo.length > 0 ? [say("vehicle_cargo", { what: cargo.join(", ") })] : []),
       ...(description ? [sentence(description)] : []),
-    ].join(" ");
+    ].filter((t) => t !== "").join(" ");
     (elsewhere ? away : usable).push({ text, known: "pov" });
   }
   // Other people's vehicles at his site: every one he can see, with whose it is and what anyone sees of it.
@@ -258,7 +260,7 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
       const e = own(ctx.state.entities, o.v);
       const looks = e ? [...classText(o.v, e.kind), ...thingDetails(ctx, o.v, (field, def) => TOLD_APART[field] === true || def.domain !== undefined), ...specsText(o.v, o.place)] : [];
       const description = thingDescription(ctx, o.v);
-      return { text: `${e?.name ?? o.v}: ${[`${placeText(o.place)}, ${o.owner ? `${ownerName(o.owner)}'s` : "no one's you know of"}`, ...looks].join("; ")}.${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
+      return { text: `${say("vehicle_line", { name: e?.name ?? o.v, parts: [`${placeText(o.place)}, ${o.owner ? say("vehicle_of", { owner: ownerName(o.owner) }) : say("vehicle_owner_unknown")}`, ...looks].join("; ") })}${description ? ` ${sentence(description)}` : ""}`, known: "pov" };
     });
   const lines = [...usable, ...seen, ...away];
   if (scope === "player") return lines;
@@ -268,9 +270,9 @@ export function vehicleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     // Scene facts are only what someone with him can see by the visibility rules; the rest is the GM's.
     const knower = o.owner !== null && see(pov, o.owner) && see(o.owner, o.v) && together(ctx.world, here, placeOfEntity(ctx.state, o.owner)) ? o.owner : null;
     if (knower && ownerName) {
-      const where = o.place && canSeePlace(ctx.registry, ctx.world, ctx.state, knower, o.place) ? `at ${own(ctx.world.places, o.place)?.name ?? o.place}` : "somewhere";
-      lines.push({ text: `${name}: ${where}, ${ownerName}'s.`, known: "scene", who: ownerName });
-    } else if (scope === "gm") lines.push({ text: `${name}: at ${o.place ? (own(ctx.world.places, o.place)?.name ?? o.place) : "an unknown place"}, ${ownerName ? `${ownerName}'s` : "no one's"}.`, known: "gm" });
+      const where = o.place && canSeePlace(ctx.registry, ctx.world, ctx.state, knower, o.place) ? say("vehicle_at", { place: own(ctx.world.places, o.place)?.name ?? o.place }) : say("vehicle_somewhere");
+      lines.push({ text: say("vehicle_line", { name, parts: `${where}, ${say("vehicle_of", { owner: ownerName })}` }), known: "scene", who: ownerName });
+    } else if (scope === "gm") lines.push({ text: say("vehicle_line", { name, parts: `${o.place ? say("vehicle_at", { place: own(ctx.world.places, o.place)?.name ?? o.place }) : say("vehicle_at_unknown")}, ${ownerName ? say("vehicle_of", { owner: ownerName }) : say("vehicle_owner_none")}` }), known: "gm" });
   }
   return lines;
 }
@@ -775,7 +777,7 @@ export const vehiclesPack: PackDef = {
           const interval = serviceInterval(ctx, v);
           if (interval !== null && e.fields.status === "ok" && usage(ctx, v) - numOf(e.fields.last_service) > interval) {
             out.push({ type: "set", entity: v, field: "status", value: "needs_service" });
-            out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} is due for service.`, entity: v } });
+            out.push(...noteOf("vehicle_service_due", { name: e.name }, { entity: v }));
           }
         }
         return out;

@@ -29,6 +29,8 @@
 // at it in the same unit, so an award, a quest reward, a narrated gain or a correction moves it the
 // same way. Nothing else writes a level (`follows_xp`).
 
+import type { LineFields } from "./lines";
+import { noteOf } from "./notices";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, InterruptClass, KindId } from "../shared/ids";
@@ -440,10 +442,9 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
     out.applied.push(ev);
     return true;
   };
-  if (offering && to !== clampNumber(to, bounds.min, bounds.max)) out.advice = [{ code: "level_past_bounds", values: { who: e.name, field: prog.label, level: to, bounds: [...(bounds.min !== undefined ? [`at least ${bounds.min}`] : []), ...(bounds.max !== undefined ? [`at most ${bounds.max}`] : [])].join(", ") } }];
-  const who = entity === w.world.pov ? "You" : e.name;
+  if (offering && to !== clampNumber(to, bounds.min, bounds.max)) out.advice = [{ code: "level_past_bounds", values: { who: e.name, field: prog.label, level: to, ...(bounds.min !== undefined ? { least: bounds.min } : {}), ...(bounds.max !== undefined ? { most: bounds.max } : {}) } }];
   // The POV's level is the player's news; anyone else's is the author's and the GM's.
-  const line = (text: string): LedgerEvent => ({ type: ENGINE_EVENTS.note, data: { text, entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) } });
+  const line = (name: string, fields: LineFields): LedgerEvent[] => noteOf(name, { name: e.name, progression: prog.label, level: to, ...(entity === w.world.pov ? { you: true } : {}), ...fields }, { entity, ...(entity === w.world.pov ? {} : { visibility: "secret" }) });
   if (spawned) {
     applied({ type: "set", entity, field: prog.levelField, value: to });
     return out;
@@ -468,7 +469,7 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
       const max = fieldBounds(reg, w.ctx, entity, def).max;
       if (typeof value === "number" && max !== undefined && value > max) whole = landed({ type: "set", entity, field, value: max, atMost: true });
     }
-    if (whole && (offering || landed(line(`${who} dropped to ${prog.label} ${to} (from ${from}).`)))) out.applied.push(...unit);
+    if (whole && (offering || line("level_dropped", { from }).every(landed))) out.applied.push(...unit);
     else w.restore(mark);
     return out;
   }
@@ -487,7 +488,7 @@ function followXp(reg: Registry, w: Working, entity: EntityId, id: string, prog:
     if (!prog.onLevel || prog.onLevel.length === 0 || depth + 1 >= NESTING_CAP) continue;
     join(out, applyEffects(reg, w, prog.onLevel, { bindings: { self: entity }, vars: { level, from }, rng: scope.rng.fork(`level:${id}:${entity}:${level}`), depth: depth + 1 }));
   }
-  applied(line(`${who} reached ${prog.label} ${to}${to - from > 1 ? ` (from ${from})` : ""}.`));
+  for (const ev of line("level_reached", to - from > 1 ? { from } : {})) applied(ev);
   return out;
 }
 

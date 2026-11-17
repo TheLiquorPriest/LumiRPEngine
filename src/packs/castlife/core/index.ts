@@ -49,6 +49,8 @@ import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
+import { say } from "../../../engine/lines";
+import { noteOf, signalOf } from "../../../engine/notices";
 import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF, selectEntities, TRUST_KIND } from "../../../engine/selector";
@@ -466,10 +468,10 @@ function takeUp(ctx: ReadContext, who: EntityId, place: PlaceId | null, activity
   if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true) return out;
   if (!held(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
     // Seen as their arrival is: by a POV that can see them, whether or not it holds a `knows` link to them.
-    if (seen && withPov(ctx, who)) out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} leaves.`, entity: who, visibility: "public" } });
+    if (seen && withPov(ctx, who)) out.push(...noteOf("person_leaves", { name: e.name }, { entity: who, visibility: "public" }));
     // The player character's party goes with it, as on every move it makes (DESIGN §9.4).
     out.push(...movesOf(relocate(ctx, who, place, { party: true })));
-    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who, ...(quiet ? { stops: false } : {}) } });
+    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov)) out.push(...signalOf("arrival", "person_arrives", { name: e.name }, { entity: who, ...(quiet ? { stops: false } : {}) }));
   }
   if (activity !== null && !held(ctx.state, who, "activity", at) && e.fields.activity !== activity) out.push({ type: "set", entity: who, field: "activity", value: activity });
   if (holdUntil !== undefined && holdUntil > at) {
@@ -635,7 +637,7 @@ function invitation(ctx: ReadContext, who: EntityId, ask: Ask): LedgerEvent[] {
   const given = sliceOf(ctx.state, "castlife").invitations;
   if (!mayInvite(ctx, who, ask.place) || (Array.isArray(given) && given.some((i) => objOf(i).key === ask.key))) return [];
   const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
-  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key: ask.key, origin: ask.origin.type === "plan" ? `plan:${ask.origin.plan}` : `routine:${ask.origin.block}` } }, ...(text === "" ? [] : [{ type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }])];
 }
 
 /**
@@ -1029,7 +1031,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     const retrieve = lent ? optionalService(ctx, "gear.retrieve") : null;
     if (retrieve) {
       const got = retrieve(ctx, thing);
-      if (Array.isArray(got)) out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
+      if (Array.isArray(got)) out.push(...got, ...noteOf("thing_got_back", { name: e.name, thing: own(ctx.state.entities, thing)?.name ?? thing }, { entity: who, visibility: "known_by" }));
     }
   }
   if (who !== pov || slot.povRoutine !== false) out.push(...liveBlock(ctx, who, plan, block, slot.start, slot.end, slot.povRoutine === false, slot.timelapse === true));
@@ -1049,7 +1051,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     const tuning = tuningOf(ctx);
     for (const need of needsOn(ctx.world)) {
       const alert = tuning[need].alert;
-      if (!met.has(need) && needValue(ctx, who, need, slot.end) >= alert && needValue(ctx, who, need, slot.start) < alert) out.push({ type: ENGINE_EVENTS.signal, data: { class: "needs", text: `You're getting ${NEED_WORDS[need].word}.`, entity: pov } });
+      if (!met.has(need) && needValue(ctx, who, need, slot.end) >= alert && needValue(ctx, who, need, slot.start) < alert) out.push(...signalOf("needs", "need_alert", { word: NEED_WORDS[need].word }, { entity: pov }));
     }
     return out;
   }
@@ -1083,7 +1085,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
  */
 export function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null, at: number, viewer?: EntityId): string {
   const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? (own(ctx.world.places, place)?.name ?? place) : null;
-  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
+  return say("invitation", { name: own(ctx.state.entities, agent)?.name ?? agent, ...(named !== null ? { place: named } : {}), time: formatTimeOfDay(dateAt(calendarOf(ctx.world), at).minuteOfDay) });
 }
 
 /**
