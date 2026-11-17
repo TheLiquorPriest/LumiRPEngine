@@ -16,7 +16,7 @@ import { proposalRoutes } from "./proposal-routes";
 import type { LoreProposals } from "./proposals";
 import type { LoreProjection } from "./projection";
 import { projectionRoutes } from "./projection-routes";
-import { type SecrecyDeps, secrecyRules } from "./secrets";
+import { type SecrecyDeps, secrecyOnReceipt, secrecyRules } from "./secrets";
 
 /** What the lore's routes take from the turn lane: its store and the tags it keeps of each turn's prompt. */
 export interface LoreTakes {
@@ -51,6 +51,12 @@ export function loreArea(takes?: () => LoreTakes): Area {
                 const { store, secrecy } = takes();
                 if (secrecy === undefined) throw new Error("RPE's secrecy lane is not given its settings and wording.");
                 return secrecyRules({ store, ...secrecy })(ask, signal);
+              },
+              // The check on receipt (R-59): the same verdict, at the point the generation's turn starts from, over the entries RPE read itself.
+              receiptSecrecy: async (ask, signal) => {
+                const { store, secrecy } = takes();
+                if (secrecy === undefined) throw new Error("RPE's secrecy lane is not given its settings and wording.");
+                return secrecyOnReceipt({ store, ...secrecy })(ask, signal);
               },
             },
           },

@@ -113,3 +113,24 @@ export function secrecyRules(deps: SecrecyDeps): (ask: SecrecyQuestion, signal: 
     return { disabled: verdict.disabled, enabled: verdict.enabled, mutated: verdict.mutated ?? [] };
   };
 }
+
+/** What the lane reads on receipt: the chat, the path as the extension saw it, where the generation's turn starts on it, and the entries RPE read itself, whole. */
+export interface SecrecyReceipt {
+  user: string;
+  chat: string;
+  path: readonly SeenMessage[];
+  point: TurnPoint;
+  entries: readonly WorldInfoCandidate[];
+}
+
+/**
+ * The lane the door asks on receipt (R-59): the verdict at the point the generation's turn starts from, over the entries RPE read itself, whole,
+ * worked out by the same function as the question's (`secrecyAt`) from RPE's own store alone.
+ */
+export function secrecyOnReceipt(deps: SecrecyDeps): (ask: SecrecyReceipt, signal: AbortSignal) => Promise<SecrecyAnswer> {
+  return async (ask) => {
+    const start = deps.store.user(ask.user).turnStart(ask.chat, ask.path, ask.point);
+    const verdict = await secrecyAt(deps, { user: ask.user, chat: ask.chat }, start.state.world, ask.entries);
+    return { disabled: verdict.disabled, enabled: verdict.enabled, mutated: verdict.mutated ?? [] };
+  };
+}
