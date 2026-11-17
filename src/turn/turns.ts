@@ -809,6 +809,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // shows, through the swipe route and outside a generation, is his edit.
     else if (change.kind === "message-swiped" && change.updated === true) work = this.#edited(user, change.chat, change.message, null, change.shown);
     else if (change.kind === "message-swiped") work = this.#atRest(user, change.chat);
+    // A message put in before the newest: the comparison between turns places it and keeps it to be told at the next turn's start.
+    else if (change.kind === "message-inserted") work = this.#atRest(user, change.chat);
     else if (change.kind === "chat-forked") work = this.#forked(user, change.chat, change.from, change.ids);
     else if (change.kind === "lore-activated") work = this.#loreHeard(user, change.chat, change.lore);
     // Lumiverse's breakdown of a saved reply names the feedback typed in its regenerate dialog: its word governs what the turn kept.
@@ -819,8 +821,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
     void done.finally(() => this.#recording.delete(done));
-    // A change of the path (a delete, a swipe, an edit, a branch) brings the projection book into step with it.
-    if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "chat-forked") void done.then(() => this.#project(user, change.chat));
+    // A change of the path (a delete, a swipe, an edit, an insert, a branch) brings the projection book into step with it.
+    if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "chat-forked") void done.then(() => this.#project(user, change.chat));
   }
 
   /**
