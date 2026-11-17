@@ -18,9 +18,9 @@
 // The words of every refusal are lines of `.prompts/story-answers.md`, as the chat has it.
 
 import type { JsonObject } from "rp-harness/contract";
-import { route, RouteError, shape } from "../app";
+import { type FormProblem, route, RouteError, shape } from "../app";
 import type { Writes } from "../iface/kit";
-import { type Fields, type GuidanceFiles } from "../iface/texts";
+import { type Fields, type GuidanceFiles, textOf } from "../iface/texts";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { coverageOf } from "./cover";
 import { STORY_DEFAULTS, type StoryClock, placeRefOf, storyClock, storyLines, type StorySettings, valueView } from "./kit";
@@ -102,6 +102,15 @@ async function inWords<T>(deps: StoryRoutesDeps, user: string, chat: string, wor
     const lines = await storyLines(deps.files(user, chat));
     throw new RouteError(error.status, lines.line(error.line, error.fields) ?? "");
   }
+}
+
+/** The form's refusal of a page's query or body, in the story's words as the chat has them: a field it could not read, one it does not take, a page asked larger than the route gives, or a cursor that is not the list's. */
+function formWords(deps: StoryRoutesDeps) {
+  const line = { unreadable: "unreadable", not_taken: "page_not_taken", page_size: "page_size", cursor: "page_cursor" } as const;
+  return async (problem: FormProblem, { user, params }: { user: string; params: { readonly chat: string } }): Promise<string> => {
+    const fields: Fields = { field: problem.field, ...(problem.value !== undefined ? { value: JSON.stringify(problem.value) } : {}), ...(problem.choices.length > 0 ? { choices: textOf(problem.choices) } : {}), ...(problem.most !== undefined ? { most: String(problem.most) } : {}) };
+    return (await storyLines(deps.files(user, params.chat))).line(line[problem.kind], fields) ?? "";
+  };
 }
 
 /** What a page reads: the record on the path read, story time there, and which turns a migration's import wrote. */
@@ -318,6 +327,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
     const size = { ...STORY_DEFAULTS, ...(user === null ? {} : await deps.settings(user, params.chat ?? "")) }.queryItems;
     return { default: size, most: size * 10 };
   };
+  const refusal = formWords(deps);
   return [
     route({
       method: "GET",
@@ -332,6 +342,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       },
       reply: storyReply,
       joined: true,
+      refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryAnswer> => {
           const turn = asked(deps.store, user, params.chat, query.turn);
@@ -366,6 +377,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       does: "Corrects any field of any item of the story record (a beat's text, a thread's state, a summary, the premise, a reading of the player), read as `story_record` reads the same fields of its part, as the player's own change placed after the chat's newest reply on its own line: swiping that reply keeps it, a turn that is running goes on from the state it started with, and a fresh branch takes it on its own line. Says what of it could not be read and the item as it stands.",
       body: storyCorrectBody,
       reply: storyCorrectReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryCorrected> => {
           chatHeld(deps.store, user, params.chat);
@@ -383,6 +395,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       does: "The chat's chapters, scenes and beats as one list in the chat's order, oldest first, a page at a time: each with the chapter and the scene it lies in, and a beat with the messages it stands for, by number and id.",
       reply: storyTimelineReply,
       paged: { sizes },
+      refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, (): StoryTimelinePage => {
           chatHeld(deps.store, user, params.chat);
@@ -396,6 +409,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       group: "story",
       does: "What the record covers of the whole chat: every stretch of messages with the same marks, in and out of the prompt's window, each hidden message, the window's edge, and how many messages above that edge the record does not cover.",
       reply: storyCoverageReply,
+      refusal,
       handle: ({ user, params }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryCoverageAnswer> => {
           chatHeld(deps.store, user, params.chat);
@@ -410,6 +424,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       group: "story",
       does: "The story so far as the next briefing gives it to the Author, worked out at the chat's head: its text, its size against its budget, and each stretch it had no room for.",
       reply: storySoFarReply,
+      refusal,
       handle: ({ user, params }) =>
         inWords(deps, user, params.chat, async (): Promise<StorySoFarAnswer> => {
           chatHeld(deps.store, user, params.chat);
@@ -426,6 +441,7 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       does: "Strikes an item of the story record, or takes its strike back, as the player's own change on the chat's newest turn; says whether anything was recorded and the item as it stands.",
       body: storyStrikeBody,
       reply: storyStrikeReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryStruck> => {
           chatHeld(deps.store, user, params.chat);

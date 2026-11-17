@@ -28,7 +28,7 @@
 // words of every refusal are lines of `.prompts/cast-answers.md`, as the chat has them.
 
 import type { JsonObject } from "rp-harness/contract";
-import { route, RouteError, shape } from "../app";
+import { type FormProblem, route, RouteError, shape } from "../app";
 import { gameSide } from "./game";
 import { IFACE_DEFAULTS, type Writes, Reply } from "../iface/kit";
 import { nearestOf } from "../iface/reading";
@@ -160,6 +160,14 @@ async function inWords<T>(deps: CastRoutesDeps, user: string, chat: string, work
     const lines = await castLines(deps.files(user, chat));
     throw new RouteError(error.status, lines.line(error.line, error.fields) ?? "");
   }
+}
+
+/** The form's refusal of a page's query or body, in the cast's words as the chat has them: a field it could not read by `unreadable`, one it does not take by `page_not_taken`. */
+function formWords(deps: CastRoutesDeps) {
+  return async (problem: FormProblem, { user, params }: { user: string; params: { readonly chat: string } }): Promise<string> => {
+    const fields: Fields = { field: problem.field, ...(problem.value !== undefined ? { value: JSON.stringify(problem.value) } : {}), ...(problem.choices.length > 0 ? { choices: textOf(problem.choices) } : {}) };
+    return (await castLines(deps.files(user, params.chat))).line(problem.kind === "not_taken" ? "page_not_taken" : "unreadable", fields) ?? "";
+  };
 }
 
 /** What a page reads: the chats whose characters the chat knows, the rows on the path read, story time there, and which turns a migration's import wrote. */
@@ -532,6 +540,7 @@ async function seenNow(deps: CastRoutesDeps, user: string, chat: string, charact
 
 export function castRoutes(deps: CastRoutesDeps) {
   const turnQuery = shape.optional(shape.turnId(), "A turn's id: the cast as it stood at that turn; left out, at the chat's newest.");
+  const refusal = formWords(deps);
   return [
     route({
       method: "GET",
@@ -542,6 +551,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       query: { turn: turnQuery },
       reply: castReply,
       joined: true,
+      refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, (): CastList => {
           const turn = asked(deps.store, user, params.chat, query.turn);
@@ -562,6 +572,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       },
       reply: characterReply,
       joined: true,
+      refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, async (): Promise<CastCharacter> => {
           const turn = asked(deps.store, user, params.chat, query.turn);
@@ -580,6 +591,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       does: "Strikes an entry of a character's record, or takes its strike back, as the player's own change on the chat's newest turn; says what it did, in the cast's words.",
       body: castStrikeBody,
       reply: castStrikeReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<CastStruck> => {
           chatHeld(deps.store, user, params.chat);
@@ -610,6 +622,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       query: { turn: turnQuery, count: shape.optional(shape.whole({ least: 1 }), "How many turns of the path, ending at the turn read; left out, that turn alone.") },
       reply: perceptionRecordReply,
       joined: true,
+      refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, async (): Promise<PerceptionRecord> => {
           const turn = asked(deps.store, user, params.chat, query.turn);
@@ -639,6 +652,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       body: perceptionBody,
       reply: perceptionWrittenReply,
       joined: true,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async (): Promise<CastPerceptionWritten> => {
           chatHeld(deps.store, user, params.chat);
@@ -689,6 +703,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       does: "Sets how large a part a character plays, as the owner's own change: pinned, it stands over the Author's castings; not pinned, it is his casting alone and the Author may change it; or takes the pin away. Told to the Author in the next briefing.",
       body: castingBody,
       reply: castEditedReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, () =>
           edited(deps, user, params.chat, params.character, "setting a casting from the Cast page", (e): Edited => {
@@ -720,6 +735,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       does: "Redraws documents of a character's base as the owner's own change: each document given that differs from the one in force is written as the next version of its part, drawn against the sources as they stand in Lumiverse now. Told to the Author in the next briefing.",
       body: baseBody,
       reply: castEditedReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async () => {
           chatHeld(deps.store, user, params.chat);
@@ -747,6 +763,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       does: "Binds a source to a character (a card, a persona, a lore entry or a memory entity Lumiverse holds), says again which side of it a bound source defines, or takes the binding away, as the owner's own change. Told to the Author in the next briefing.",
       body: sourceBody,
       reply: castEditedReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, async () => {
           chatHeld(deps.store, user, params.chat);
@@ -783,6 +800,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       does: "Says which of the world's people a character is, by the person's id or name (null takes the reference away), as the owner's own change; the character's game side and its holdings are found by it. Told to the Author in the next briefing.",
       body: personBody,
       reply: castEditedReply,
+      refusal,
       handle: ({ user, params, body }) =>
         inWords(deps, user, params.chat, () =>
           edited(deps, user, params.chat, params.character, "naming a character's person from the Cast page", (e): Edited => {
