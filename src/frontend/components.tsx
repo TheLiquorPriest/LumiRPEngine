@@ -319,12 +319,12 @@ export function useBusy(): [boolean, (run: () => Promise<unknown>) => void] {
 // ---------------------------------------------------------------- shared UI atoms
 
 /** A button on the shared look: 40 px tall at least, an optional icon either side. `label` names it when its text alone doesn't. */
-export function Button(props: { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm"; icon?: IconName; iconAfter?: IconName; block?: boolean; disabled?: boolean; busy?: boolean; label?: string; title?: string; type?: "button" | "submit"; onClick?(event: MouseEvent): void; children?: ComponentChildren }) {
+export function Button(props: { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm"; icon?: IconName; iconAfter?: IconName; block?: boolean; disabled?: boolean; busy?: boolean; label?: string; title?: string; type?: "button" | "submit"; current?: boolean; onClick?(event: MouseEvent): void; children?: ComponentChildren }) {
   const variant = props.variant ?? "secondary";
   const iconSize = props.size === "sm" ? 16 : 20;
   const classes = ["lre-btn", variant === "secondary" ? null : variant, props.size === "sm" ? "small" : null, props.block ? "block" : null].filter((c) => c !== null).join(" ");
   return (
-    <button type={props.type ?? "button"} class={classes} disabled={props.disabled || props.busy} aria-busy={props.busy || undefined} aria-label={props.label} title={props.title} onClick={props.onClick}>
+    <button type={props.type ?? "button"} class={classes} disabled={props.disabled || props.busy} aria-busy={props.busy || undefined} aria-label={props.label} aria-current={props.current === true ? "page" : undefined} title={props.title} onClick={props.onClick}>
       {props.icon ? <Icon name={props.icon} size={iconSize} /> : null}
       {props.children}
       {props.iconAfter ? <Icon name={props.iconAfter} size={iconSize} /> : null}
@@ -341,10 +341,10 @@ export function IconButton(props: { icon: IconName; label: string; variant?: "gh
   );
 }
 
-/** A titled group: a quiet section label above a card. `flush` drops the card's padding, for a List of rows. */
-export function Section(props: { title?: ComponentChildren; aside?: ComponentChildren; flush?: boolean; children: ComponentChildren }) {
+/** A titled group: a quiet section label above a card. `flush` drops the card's padding, for a List of rows; `id` names it for a page that points at it. */
+export function Section(props: { title?: ComponentChildren; aside?: ComponentChildren; flush?: boolean; id?: string; children: ComponentChildren }) {
   return (
-    <section class={props.flush ? "lre-section flush" : "lre-section"}>
+    <section class={props.flush ? "lre-section flush" : "lre-section"} data-section={props.id}>
       {props.title !== undefined || props.aside !== undefined ? (
         <div class="lre-section-head">
           {props.title !== undefined ? <h3 class="lre-section-title">{props.title}</h3> : <span />}
@@ -432,8 +432,15 @@ export function Meter(props: { label: string; value: number; max: number; min?: 
   );
 }
 
-export function Badge(props: { tone?: "neutral" | "accent" | "pos" | "neg" | "warn" | "gm"; children: ComponentChildren }) {
-  return <span class={props.tone && props.tone !== "neutral" ? `lre-badge ${props.tone}` : "lre-badge"}>{props.children}</span>;
+/** A badge's tones: the colours it can carry beyond the plain one. */
+export type Tone = "accent" | "warn" | "neg" | "pos" | "gm";
+
+export function Badge(props: { tone?: "neutral" | Tone; title?: string; children: ComponentChildren }) {
+  return (
+    <span class={props.tone && props.tone !== "neutral" ? `lre-badge ${props.tone}` : "lre-badge"} title={props.title}>
+      {props.children}
+    </span>
+  );
 }
 
 /** Each tone's icon, so a banner never says what it means by colour alone. */
@@ -442,7 +449,7 @@ const BANNER_ICON: Record<"info" | "warn" | "neg" | "gm", IconName> = { info: "i
 /** A status message across the content: an icon, a title, the details and actions. */
 export function Banner(props: { tone: "info" | "warn" | "neg" | "gm"; icon?: IconName; title?: ComponentChildren; actions?: ComponentChildren; children?: ComponentChildren }) {
   return (
-    <div class={`lre-banner ${props.tone}`} role="status">
+    <div class={`lre-banner ${props.tone}`} role={props.tone === "neg" ? "alert" : "status"}>
       <div class="lre-banner-main">
         <Icon name={props.icon ?? BANNER_ICON[props.tone]} class="lre-banner-icon" />
         <div class="lre-banner-text">
@@ -460,10 +467,10 @@ export function Banner(props: { tone: "info" | "warn" | "neg" | "gm"; icon?: Ico
  * `open` it is controlled: `onToggle` hears each open and close, and the details are rendered only
  * while it is open, so a closed one costs nothing however much it holds.
  */
-export function Disclosure(props: { summary: ComponentChildren; defaultOpen?: boolean; open?: boolean; onToggle?(open: boolean): void; children?: ComponentChildren }) {
+export function Disclosure(props: { summary: ComponentChildren; defaultOpen?: boolean; open?: boolean; onToggle?(open: boolean): void; class?: string; children?: ComponentChildren }) {
   const onToggle = props.onToggle;
   return (
-    <details class="lre-disclosure" open={props.open ?? props.defaultOpen} onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}>
+    <details class={props.class === undefined ? "lre-disclosure" : `lre-disclosure ${props.class}`} open={props.open ?? props.defaultOpen} onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}>
       <summary>
         <span class="lre-disclosure-label">{props.summary}</span>
         <Icon name="chevron-down" size={16} />
@@ -823,6 +830,40 @@ export function HostModelPicker(props: { connectionId: string; value: string; la
     <div class="lre-field">
       <span class="label">{props.label}</span>
       <div ref={slot} class="lre-host-slot" role="group" aria-label={props.label} />
+    </div>
+  );
+}
+
+/** Text as it was written, line breaks kept, in the page's monospace when it is data. */
+export function Pre(props: { text: string; mono?: boolean; live?: boolean }) {
+  const classes = ["rpe-pre", props.mono === false ? "prose" : undefined, props.live === true ? "rpe-stream" : undefined].filter((c) => c !== undefined).join(" ");
+  return <pre class={classes}>{props.text}</pre>;
+}
+
+/**
+ * What sits behind the spoiler gate (`ui/gate.ts`): while it is shut, a notice and the one button that opens
+ * it, and nothing of what it holds; once open, what it holds, and a way to shut it again. `why` says what
+ * it hides could give away; the Turn and Live pages' sentence when absent.
+ */
+export function Gated(props: { open: boolean; onOpen: () => void; onClose: () => void; why?: string; children: ComponentChildren }) {
+  if (!props.open) {
+    return (
+      <div data-gate="shut">
+        <Banner tone="gm" icon="eye-off" title="Spoilers are hidden" actions={<Button onClick={props.onOpen}>Show them for this chat</Button>}>
+          <span>{props.why ?? "The intent record and what the agents planned and did can give away what comes next."}</span>
+        </Banner>
+      </div>
+    );
+  }
+  return (
+    <div class="lre-stack" data-gate="open">
+      <div class="lre-spread rpe-gatebar">
+        <Badge tone="gm">Spoilers shown for this chat</Badge>
+        <Button size="sm" variant="ghost" onClick={props.onClose}>
+          Hide them
+        </Button>
+      </div>
+      {props.children}
     </div>
   );
 }
