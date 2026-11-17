@@ -1,7 +1,7 @@
 ---
 description: How the tools that read and write the world's recorded state are called - world_query, world_search, world_apply and roll. It says how to call them, not when. Delete this file and an agent that holds one of them is given no such guide.
 ---
-world_query reads the world's tree at a point: `at` is a place, someone or something by name or id, or `world`, `groups`, `elsewhere` or `ruleset`; `depth` is how many levels below to show, or `full`; `due` is a span ahead (two hours, until 22:00) to list what falls due there; `map` true adds the place's map as text. world_search finds people, things, places and groups by `words`, best first; `kind` limits it to one of them.
+world_query reads the world's tree at a point: `at` is a place, someone or something by name or id, or `world`, `groups`, `elsewhere`, `ruleset` or `quests` (a quest by its name or id reads its record whole); `depth` is how many levels below to show, or `full`; `due` is a span ahead (two hours, until 22:00) to list what falls due there; `map` true adds the place's map as text; `part` (since, feature or access) reads that part of a place's record whole. world_search finds people, things, places, groups and quests by `words`, best first; `kind` limits it to one of them.
 
     world_query {"at": "Keeper's kitchen", "depth": 2}
 
