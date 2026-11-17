@@ -5,7 +5,6 @@
 
 import { createContext } from "preact";
 import { useContext, useEffect, useState } from "preact/hooks";
-import type { AgentsView } from "../shared/agents";
 import type { MapGridReply, MapWrote } from "../shared/api";
 import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { ResultBodies } from "../shared/protocol";
@@ -363,8 +362,6 @@ export interface App {
   host: HostBridge;
   overlays: Overlays;
   drafts: Store<Draft | null>;
-  /** The MCP servers this account has seen and the update notice (DESIGN §23), as last pushed or asked for; null until then. */
-  agents: Store<AgentsView | null>;
   toast(text: string, tone?: Toast["tone"]): void;
   /** Sends a request; on an error, shows it and resolves null. */
   request<K extends keyof ResultBodies>(body: Extract<RequestBody, { type: K }>): Promise<ResultBodies[K] | null>;
