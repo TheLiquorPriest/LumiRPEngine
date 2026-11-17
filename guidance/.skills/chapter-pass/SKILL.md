@@ -14,7 +14,7 @@ Read the chapter's scene summaries in order. Write the chapter's summary with `s
 - Every fact later chapters stand on: who allied with whom, who knows what, what was won or lost, promises made.
 - What is still open at its end.
 
-Where a scene's summary is thin, read that scene's beats before you write, and its messages with `chat_read` if the beats are thin too.
+Where a scene's summary is thin (a line or two for a scene that turned the story), read that scene's beats before you write, and its messages with `chat_read` if the beats are thin too.
 
 ## 2. The reread
 
