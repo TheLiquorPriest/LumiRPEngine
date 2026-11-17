@@ -151,7 +151,8 @@ async function settingsNow(deps: SettingsDeps, user: string, chat: string | null
   const read = readConfig(await diskTexts(files), null, deps.settings);
   const [connections, definitions] = await Promise.all([deps.connections(), deps.definitions(user, chat)]);
   const settings: SettingView[] = [];
-  for (const def of deps.settings) {
+  // In the order of the page's sections and of the groups within each; the registry's order within a group (`sort` keeps it).
+  for (const def of [...deps.settings].sort((a, b) => groupOf(a).order - groupOf(b).order)) {
     const { section, group } = groupOf(def);
     const view = (named?: Infer<typeof setForView>): SettingView => {
       const name = named?.key;

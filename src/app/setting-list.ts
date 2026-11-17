@@ -247,12 +247,19 @@ const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>
 /** The group every setting set per connection is shown in, one row for each connection. */
 export const EACH_CONNECTION = "For each connection";
 
-/** The section and group a setting is shown in: one set per connection with every other, as one table; else by its key's first part. */
-export function groupOf(def: Pick<SettingDef, "key" | "perConnection">): { section: string; group: string } {
-  if (def.perConnection) return { section: "Connections and model calls", group: EACH_CONNECTION };
+/** Every group's title, in the order the page shows the groups of a section: each connection's values first in theirs, then as `GROUPS` lists them. */
+const GROUP_ORDER: readonly string[] = [...new Set([EACH_CONNECTION, ...Object.values(GROUPS).map(([group]) => group)])];
+
+/**
+ * The section and group a setting is shown in: one set per connection with every other, as one table; else by its key's first part.
+ * `order` puts the settings in the order of the page's sections and of the groups within each, the registry's order kept within a group.
+ */
+export function groupOf(def: Pick<SettingDef, "key" | "perConnection">): { section: string; group: string; order: number } {
   const first = def.key.split(".")[0] ?? def.key;
   const found = GROUPS[first];
-  return found === undefined ? { section: "Other", group: first } : { section: found[1], group: found[0] };
+  const [group, section] = def.perConnection ? [EACH_CONNECTION, "Connections and model calls"] : found === undefined ? [first, "Other"] : found;
+  const groupAt = GROUP_ORDER.indexOf(group);
+  return { section, group, order: SECTIONS.findIndex((s) => s.title === section) * (GROUP_ORDER.length + 1) + (groupAt < 0 ? GROUP_ORDER.length : groupAt) };
 }
 
 /** The units a number's key may end with (the key convention), and each as the page names it. */

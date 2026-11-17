@@ -1,9 +1,10 @@
 // `bun scripts/settings/generate.ts` (plan Appendix D.1, §18.4 l.1997; READINGS N-9, N-10): docs/settings.md
 // written from the one registry of settings, as the app composes it from its areas' lists (RPH's own
-// list among them), and the install's facts config.json holds. Every setting is one row: its default,
-// where it is changed, when a change takes effect, its Appendix D.1 row or "beyond Appendix D.1, for
-// the owner's approval", and its name and line. The test that holds the page to the registry reads it
-// the same way (`test/docs-standalone/docs.test.ts`).
+// list among them), and the install's facts config.json holds. The settings stand in the Settings
+// page's sections and groups (`groupOf`), and every setting is one row: its default in its unit, where
+// it is changed, when a change takes effect, its Appendix D.1 row or "beyond Appendix D.1, for the
+// owner's approval", and its name, its line and the advice the page gives past what is usual. The test
+// that holds the page to the registry reads it the same way (`test/docs-standalone/docs.test.ts`).
 
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -11,7 +12,7 @@ import type { JsonValue, LayerLevel } from "rp-harness/contract";
 import { compose } from "../../src/app/compose";
 import { CONFIG_DEFAULTS, CONFIG_ENV, dataPaths, installFacts, type InstallFact } from "../../src/app/config";
 import { gatherSettings } from "../../src/app/hooks";
-import { EFFECT_WORDS, type Setting } from "../../src/app/setting-list";
+import { EFFECT_WORDS, groupOf, SECTIONS, type Setting, unitOf } from "../../src/app/setting-list";
 
 const ROOT = resolve(import.meta.dir, "../..");
 export const SETTINGS_DOC = join(ROOT, "docs/settings.md");
@@ -31,69 +32,15 @@ export function configFacts(): InstallFact[] {
   return installFacts(CONFIG_DEFAULTS, dataPaths("data")).filter((fact) => fact.from === "config.json");
 }
 
-/** The section each group of keys stands in, by the key's first part; a group not named here stands under its own name. */
-const SECTIONS: Readonly<Record<string, string>> = {
-  update: "Updates",
-  server: "The server",
-  auth: "The server",
-  liveSocket: "The server",
-  database: "The server",
-  commandLine: "The server",
-  service: "The service",
-  workers: "The server",
-  index: "The server",
-  backup: "The server",
-  pages: "Pages",
-  switches: "Switches",
-  store: "The store",
-  worldState: "The world state",
-  lore: "Lore",
-  migration: "The migration",
-  engine: "The engine's tools",
-  retention: "Files and notes",
-  files: "Files and notes",
-  notes: "Files and notes",
-  off: "The files in force",
-  layered: "The files in force",
-  added: "The files in force",
-  instructions: "The files in force",
-  pins: "The files in force",
-  limits: "Limits",
-  usage: "Usage",
-  jobs: "Jobs",
-  calls: "Model calls",
-  throttles: "Model calls",
-  tokens: "Model calls",
-  sampling: "Model calls",
-  reply: "The reply",
-  progress: "The reply",
-  results: "Tools and rules",
-  tools: "Tools and rules",
-  rules: "Tools and rules",
-  trace: "What is kept of a turn",
-  prompt: "What is kept of a turn",
-  live: "What you see while a turn runs",
-  compaction: "Sessions",
-  carry: "Sessions",
-  lead: "The turn",
-  chat: "The turn",
-  since: "The turn",
-  history: "The turn",
-  passConnection: "The turn",
-  bootstrap: "Bootstrap",
-  cast: "Characters and their memories",
-  story: "The story record",
-  lumiverse: "Lumiverse",
-};
-
 /** A value as a cell writes it: in code, a text as it is, anything else as JSON. */
 function shown(value: JsonValue): string {
   return `\`${typeof value === "string" ? value : JSON.stringify(value)}\``;
 }
 
-/** A setting's default as its row writes it: the value, or none with what none means. */
+/** A setting's default as its row writes it: the value in its unit, or none with what none means. */
 export function defaultCell(def: Setting): string {
-  return def.default === null ? `none (${def.none ?? ""})` : shown(def.default);
+  const unit = unitOf(def);
+  return def.default === null ? `none (${def.none ?? ""})` : `${shown(def.default)}${unit === null ? "" : ` ${unit}`}`;
 }
 
 /** Where a setting is changed: the user's RPE-global.yml, and a chat's RPE.yml where it is read at the chat's level. */
@@ -109,7 +56,8 @@ function cell(text: string): string {
 
 function row(def: Setting): string {
   const d1 = def.row === undefined ? "beyond Appendix D.1, for the owner's approval" : `Appendix D.1: ${def.row}`;
-  return `| \`${def.key}\` | ${cell(defaultCell(def))} | ${whereWords(def.levels)} | ${EFFECT_WORDS[def.effect]} | ${cell(d1)} | ${cell(`${def.name}: ${def.about}`)} |`;
+  const advice = (def.advice ?? []).map((a) => ` ${a.below !== undefined ? `Below ${a.below}` : `Above ${a.above}`}: ${a.says}`).join("");
+  return `| \`${def.key}\` | ${cell(defaultCell(def))} | ${whereWords(def.levels)} | ${EFFECT_WORDS[def.effect]} | ${cell(d1)} | ${cell(`${def.name}: ${def.about}${advice}`)} |`;
 }
 
 const INTRO = `# Settings
@@ -135,7 +83,9 @@ A value a setting does not take is passed over, with a line in RPE's log naming 
 
 Each row says when a change is in force: at the setting's next use, from the next turn, or from RPE's next start. The Settings page lists every setting with its value, its default and the file it comes from, and writes one key into a file at a level, keeping your comments.
 
-**Per connection.** A key with \`<connection>\` in it is set for one model connection at a time, named by its name or its id.
+**Per connection, per agent.** A key with \`<connection>\` in it is set for one model connection at a time, named by its name or its id; one with \`<definition>\`, for one agent definition, named by its name. The Settings page shows each as a table, a row for each connection or agent.
+
+**No hard cap.** A setting takes any value that has a meaning. Past what is usual, its row says what such a value does, and the value is taken.
 `;
 
 const TABLE_HEAD = "| Setting | Default | Where | In force | Appendix D.1 | What it does |\n|---|---|---|---|---|---|";
@@ -155,15 +105,17 @@ function installSection(facts: readonly InstallFact[]): string {
   ].join("\n");
 }
 
-/** docs/settings.md as the registry and the install's facts give it. */
+/** docs/settings.md as the registry and the install's facts give it: a section of the Settings page each, a group of it each. */
 export function renderSettingsDoc(settings: readonly Setting[], facts: readonly InstallFact[]): string {
-  const sections = new Map<string, Setting[]>();
-  for (const def of settings) {
-    const first = def.key.split(".")[0] ?? def.key;
-    const title = SECTIONS[first] ?? `\`${first}\``;
-    sections.set(title, [...(sections.get(title) ?? []), def]);
-  }
-  const body = [...sections].map(([title, defs]) => [`## ${title}`, "", TABLE_HEAD, ...defs.map(row), ""].join("\n"));
+  const body = SECTIONS.flatMap((section) => {
+    const groups = new Map<string, Setting[]>();
+    for (const def of [...settings].sort((a, b) => groupOf(a).order - groupOf(b).order)) {
+      const at = groupOf(def);
+      if (at.section === section.title) groups.set(at.group, [...(groups.get(at.group) ?? []), def]);
+    }
+    if (groups.size === 0) return [];
+    return [[`## ${section.title}`, "", section.about, "", ...[...groups].flatMap(([group, defs]) => [`### ${group}`, "", TABLE_HEAD, ...defs.map(row), ""])].join("\n")];
+  });
   return [INTRO, ...body, installSection(facts)].join("\n");
 }
 

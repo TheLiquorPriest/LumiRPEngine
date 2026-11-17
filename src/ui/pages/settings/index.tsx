@@ -1,23 +1,26 @@
-// Settings (plan §14, §5.2, §5.4 "Config"): every setting RPH and RPE read, with the value in force, its
-// shipped default, and the level and file that decide it; a value set at a level, or taken away there so
-// the level above shows through; the settings set per connection, once for each connection, under it.
-// With a chat open its own level is there too. What RPE refuses is shown in its words.
+// Settings (plan §14, §5.2, §5.4 "Config", §2.1 point 5): every setting RPH and RPE read, found by what it does. The page is in
+// sections of plain words, chosen from a row of them (a column beside the settings where the page is wide); a search over every
+// setting's name and what it does; and a filter to the settings he changed. Each setting shows what it does, the control that fits
+// it, its unit, the advice its value passes, what was shipped and a way back to it, and where it is set. With a chat open he chooses
+// whether a change is for every chat or for this chat alone. The settings set for one connection or one agent at a time are a table,
+// a row for each. The install's facts, and what waits for the server's command line, are listed under Server and service.
 
 import { useEffect, useState } from "preact/hooks";
-import type { LayerLevel, LoreBooks, SettingsReply, SettingView, SwitchEntry, Takes } from "../../../shared/api";
-import { isRecord, type JsonValue } from "../../../shared/json";
+import { Badge, Banner, Button, Disclosure, PageHeader, SearchField, Seg } from "../../../frontend/components";
+import type { LayerLevel, LoreBooks, SettingsReply, SettingView, SwitchEntry } from "../../../shared/api";
+import type { JsonValue } from "../../../shared/json";
 import { useApp } from "../../app";
-import { Badge, Banner, Button, Fold, PageHeader } from "../../atoms";
 import { useRead } from "../../reading";
 import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { useUiSettings } from "../../ui-settings";
-import { errorWords, LEVEL_WORDS, num } from "../../words";
-import { BooksChoice } from "./books";
-import { changedFromDefault, groupTitle, settingMatches } from "./find";
+import { errorWords, LEVEL_WORDS } from "../../words";
+import { type ChangeLevel, isChanged, type SectionShown, sectionsOf, settingMatches } from "./model";
+import { type RowActions, SettingRow } from "./row";
+import { SettingsTable } from "./table";
 import { WaitingSection } from "./waiting";
 
-// ---------------------------------------------------------------- the calls
+// ---------------------------------------------------------------- the calls and the state over them
 
 export interface SettingsCalls {
   read(): Promise<SettingsReply>;
@@ -33,105 +36,22 @@ export function settingsCalls(client: Pick<RpeClient, "call">, chat: string | nu
   };
 }
 
-// ---------------------------------------------------------------- values as said and typed
-
-/** A list's items one after the other: a record by its fields' values. */
-const listed = (items: readonly JsonValue[], gap: string): string => items.map((item) => (typeof item === "string" ? item : isRecord(item) ? Object.values(item).map((v) => valueWords(v as JsonValue, null)).join(" → ") : JSON.stringify(item))).join(gap);
-
-/** A value as the page says it: yes or no, a list item by item, a table entry by entry, and no value as what it means. */
-export function valueWords(value: JsonValue, none: string | null): string {
-  if (value === null) return none ?? "none";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "number") return num(value);
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.length === 0 ? "none listed" : listed(value, ", ");
-  const entries = Object.entries(value);
-  return entries.length === 0 ? "none listed" : entries.map(([name, v]) => `${name}: ${valueWords(v, null)}`).join("; ");
-}
-
-/** A setting being changed: the level it is set at, and its value as typed. */
-export interface SettingDraft {
-  key: string;
-  level: LayerLevel;
-  text: string;
-}
-
-/** A line's parts between `by`, each trimmed, the blank ones left out. */
-const parts = (line: string, by: string): string[] => line.split(by).flatMap((part) => (part.trim() === "" ? [] : [part.trim()]));
-
-/** The lines of a text that hold something. */
-const lines = (text: string): string[] => text.split("\n").filter((line) => line.trim() !== "");
-
-/**
- * The value typed, as the setting takes it: a number where the text is one, yes or no, a list one name
- * per line, a table one entry per line (`swipe: SWIPE, RECAP`), a list of records one per line, its
- * fields in order between `|`. Anything else goes as typed, for RPE to take or refuse in its own words.
- */
-export function draftValue(takes: Takes, text: string): JsonValue {
-  const trimmed = text.trim();
-  if (takes.type === "whole" || takes.type === "number") return trimmed !== "" && Number.isFinite(Number(trimmed)) ? Number(trimmed) : text;
-  if (takes.type === "yesNo") return trimmed === "yes" ? true : trimmed === "no" ? false : text;
-  if (takes.type === "texts") return lines(text).map((line) => line.trim());
-  if (takes.type === "table") {
-    const entries = lines(text);
-    // A list for every name, where the setting takes one and no line names an entry.
-    if (takes.whole === true && entries.every((line) => !line.includes(":"))) return entries.map((line) => line.trim());
-    return Object.fromEntries(entries.map((line) => (line.includes(":") ? [line.slice(0, line.indexOf(":")).trim(), parts(line.slice(line.indexOf(":") + 1), ",")] : [line.trim(), []])));
-  }
-  if (takes.type === "records") return lines(text).map((line) => Object.fromEntries(takes.fields.map((field, i) => [field.name, line.split("|")[i]?.trim() ?? ""])));
-  return text;
-}
-
-/** A value as the change form starts with it, by what the setting takes. */
-function draftText(value: JsonValue, takes: Takes): string {
-  if (value === null) return "";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "string") return value;
-  if (takes.type === "records" && Array.isArray(value)) return value.map((item) => (isRecord(item) ? takes.fields.map((field) => valueWords((item[field.name] ?? "") as JsonValue, null)).join(" | ") : JSON.stringify(item))).join("\n");
-  if (takes.type === "table" && isRecord(value)) return Object.entries(value).map(([name, v]) => `${name}: ${Array.isArray(v) ? listed(v, ", ") : valueWords(v as JsonValue, null)}`).join("\n");
-  return Array.isArray(value) ? listed(value, "\n") : JSON.stringify(value);
-}
-
-/** What a setting is changed from at a level: for one every level of which applies, that level's own; else the value in force. */
-function startingValue(s: SettingView, level: LayerLevel): JsonValue {
-  return s.joined ? (s.set.find((at) => at.level === level)?.value ?? s.default) : s.value;
-}
-
-/** How to type a value, where its field does not say. */
-function typingHelp(takes: Takes): string | null {
-  if (takes.type === "texts") return "One on each line.";
-  if (takes.type === "table") return `One on each line, a name, a colon, then its files between commas: swipe: SWIPE, RECAP.${takes.whole === true ? " Or one file on each line, for every name." : ""}`;
-  if (takes.type === "records") return `One on each line: ${takes.fields.map((f) => f.name).join(" | ")}.`;
-  return null;
-}
-
-// ---------------------------------------------------------------- what the page holds
-
-/** What the page shows: the settings once read, or why they could not be; the one being changed; whether a change is under way, and RPE's refusal of the last one, under its setting. */
+/** What a page over the settings holds: the settings once read, or why they could not be; the key a write is out for; and RPE's refusal of the last write, by its key. */
 export interface SettingsShown {
   reply: SettingsReply | null;
   loading: boolean;
   problem: string | null;
-  editing: SettingDraft | null;
-  busy: boolean;
+  busy: string | null;
   refusal: { key: string; words: string } | null;
 }
 
-export const NO_SETTINGS: SettingsShown = { reply: null, loading: true, problem: null, editing: null, busy: false, refusal: null };
+export const NO_SETTINGS: SettingsShown = { reply: null, loading: true, problem: null, busy: null, refusal: null };
 
-export interface SettingsControl {
-  /** Starts changing a setting, from the value in force at the level that decides it; null stops. */
-  edit(key: string | null): void;
-  draft(draft: SettingDraft): void;
-  save(): void;
-  /** Sets `~` at the level being changed. */
-  none(): void;
-  /** Takes a setting away at a level, so the level above shows through. */
-  takeAway(key: string, level: LayerLevel): void;
+export interface SettingsControl extends RowActions {
   stop(): void;
 }
 
-/** The page's state over its calls: the settings at once, and as RPE answers each write; nothing once `stop()` is called. `written` is told of each write RPE took. */
+/** The state over the calls: the settings at once, and as RPE answers each write; nothing once `stop()` is called. `written` is told of each write RPE took. */
 export function settingsControl(calls: SettingsCalls, onChange: (shown: SettingsShown) => void, written: () => void = () => undefined): SettingsControl {
   let shown = NO_SETTINGS;
   let alive = true;
@@ -145,250 +65,182 @@ export function settingsControl(calls: SettingsCalls, onChange: (shown: Settings
     (error: unknown) => show({ ...shown, loading: false, problem: errorWords(error) }),
   );
   const write = (key: string, level: LayerLevel, value: JsonValue, none: boolean): void => {
-    show({ ...shown, busy: true, refusal: null });
+    show({ ...shown, busy: key, refusal: null });
     calls.write(level, key, value, none).then(
       (reply) => {
-        show({ ...shown, reply, busy: false, editing: null });
+        show({ ...shown, reply, busy: null });
         written();
       },
-      (error: unknown) => show({ ...shown, busy: false, refusal: { key, words: errorWords(error) } }),
+      (error: unknown) => show({ ...shown, busy: null, refusal: { key, words: errorWords(error) } }),
     );
   };
   return {
-    edit(key) {
-      const s = key === null ? undefined : shown.reply?.settings.find((one) => one.key === key);
-      // Changed where it is decided, when that is a level it may be set at here; else at the user's own.
-      const level = s?.from !== null && s?.from !== undefined && s.levels.includes(s.from) ? s.from : (s?.levels[0] ?? "global");
-      show({ ...shown, refusal: null, editing: s === undefined ? null : { key: s.key, level, text: draftText(startingValue(s, level), s.takes) } });
-    },
-    draft(draft) {
-      show({ ...shown, editing: draft });
-    },
-    save() {
-      const draft = shown.editing;
-      const s = shown.reply?.settings.find((one) => one.key === draft?.key);
-      if (draft !== null && s !== undefined) write(draft.key, draft.level, draftValue(s.takes, draft.text), false);
-    },
-    none() {
-      const draft = shown.editing;
-      if (draft !== null) write(draft.key, draft.level, null, true);
-    },
-    takeAway(key, level) {
-      write(key, level, null, false);
-    },
+    onWrite: write,
+    onTakeAway: (key, level) => write(key, level, null, false),
     stop() {
       alive = false;
     },
   };
 }
 
+/** The settings of a chat's levels (null: those every chat shares), read and written by one control while the page is open. */
+export function useSettings(chat: string | null): { shown: SettingsShown; actions: RowActions } {
+  const app = useApp();
+  // The page's own settings (pages.*) are read again after each write.
+  const ui = useUiSettings();
+  const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
+  const [control, setControl] = useState<SettingsControl | null>(null);
+  useEffect(() => {
+    setShown(NO_SETTINGS);
+    const made = settingsControl(settingsCalls(app.client, chat), setShown, () => ui.reread());
+    setControl(made);
+    return () => made.stop();
+  }, [chat]);
+  return { shown, actions: { onWrite: (key, level, value, none) => control?.onWrite(key, level, value, none), onTakeAway: (key, level) => control?.onTakeAway(key, level) } };
+}
+
 // ---------------------------------------------------------------- the view
 
-export interface SettingsViewProps {
+/** The settings that name a connection or a definition, by key: each is chosen among them rather than typed. */
+const NAMES: Readonly<Record<string, "connections" | "definitions">> = { passConnection: "connections", "embedding.connection": "connections", "rules.judge": "connections", lead: "definitions" };
+
+/** The section the facts of the install and what waits for the server are shown under. */
+const SERVER_SECTION = "Server and service";
+
+export interface SettingsViewProps extends RowActions {
   chat: string | null;
   shown: SettingsShown;
-  onEdit(key: string | null): void;
-  onDraft(draft: SettingDraft): void;
-  onSave(): void;
-  onNone(): void;
-  onTakeAway(key: string, level: LayerLevel): void;
-  /** What he typed to find a setting; a group that holds a match is open while he searches. */
-  query?: string;
-  onQuery?(query: string): void;
-  /** The setting the address names: its group is open and it is marked. */
-  openKey?: string | null;
-  /** His books, which `lore.books` is chosen among (null with no chat open). */
-  books?: LoreBooks | null;
-  /** What runs a command or calls out, and where each stands. */
-  switches?: readonly SwitchEntry[] | null;
-  switchesProblem?: string | null;
-  onGo?(page: "connections" | "files"): void;
+  /** Where a change goes: every chat, or this chat (with a chat open). */
+  level: ChangeLevel;
+  onLevel(level: ChangeLevel): void;
+  query: string;
+  onQuery(query: string): void;
+  changedOnly: boolean;
+  onChangedOnly(on: boolean): void;
+  /** The section shown; null for the first, or the one that holds `openKey`. */
+  section: string | null;
+  onSection(title: string): void;
+  /** The setting the address names: its section is shown and it is marked. */
+  openKey: string | null;
+  /** His connections' and definitions' names, which the settings that name one are chosen among. */
+  connections: readonly string[] | null;
+  definitions: readonly string[] | null;
+  books: LoreBooks | null;
+  switches: readonly SwitchEntry[] | null;
+  switchesProblem: string | null;
+  onGo(page: "connections" | "agents"): void;
 }
 
-/** The field a setting's value is typed in, by what it takes. */
-function ValueField(props: { setting: SettingView; draft: SettingDraft; books: LoreBooks | null; onDraft(draft: SettingDraft): void }) {
-  const { setting, draft } = props;
-  const set = (text: string): void => props.onDraft({ ...draft, text });
-  const takes = setting.takes;
-  if (setting.key === "lore.books" && props.books !== null) return <BooksChoice books={props.books} text={draft.text} onText={set} />;
-  if (takes.type === "oneOf" || takes.type === "yesNo") {
-    const values = takes.type === "oneOf" ? takes.values : ["yes", "no"];
-    return (
-      <select class="lre-input" onChange={(event) => set(event.currentTarget.value)}>
-        {draft.text === "" ? (
-          <option value="" selected>
-            Choose one
-          </option>
-        ) : null}
-        {values.map((value) => (
-          <option key={value} value={value} selected={value === draft.text}>
-            {value}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (takes.type === "texts" || takes.type === "table" || takes.type === "records") return <textarea class="lre-input" spellcheck={false} value={draft.text} onInput={(event) => set(event.currentTarget.value)} />;
-  return <input class="lre-input" inputMode={takes.type === "text" ? undefined : "decimal"} spellcheck={false} autoComplete="off" value={draft.text} onInput={(event) => set(event.currentTarget.value)} />;
-}
-
-/** A list of records as a table: a column for each field, a row for each record. It fills the row's width and wraps a long value, so it fits a phone. */
-function RecordsTable(props: { fields: readonly { name: string; about: string }[]; value: JsonValue }) {
-  const records = Array.isArray(props.value) ? props.value.flatMap((item) => (isRecord(item) ? [item as { readonly [field: string]: JsonValue }] : [])) : [];
-  if (records.length === 0) return <p class="rpe-meta">None listed.</p>;
-  const cell = { textAlign: "left", overflowWrap: "anywhere", padding: "2px 8px 2px 0", verticalAlign: "top" } as const;
+function SectionBody(props: SettingsViewProps & { shownSection: SectionShown }) {
+  const section = props.shownSection;
+  const choices = (s: SettingView): readonly string[] | null => {
+    const from = NAMES[s.key];
+    return from === undefined ? null : from === "connections" ? props.connections : props.definitions;
+  };
+  const refusalOf = (key: string): string | null => (props.shown.refusal !== null && props.shown.refusal.key === key ? props.shown.refusal.words : null);
   return (
-    <table class="rpe-records" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-      <thead>
-        <tr>
-          {props.fields.map((f) => (
-            <th key={f.name} title={f.about} class="rpe-meta" style={cell}>
-              {f.name}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {records.map((record, i) => (
-          <tr key={i}>
-            {props.fields.map((f) => (
-              <td key={f.name} style={cell}>
-                {valueWords((record[f.name] ?? null) as JsonValue, "")}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function SettingRow(props: SettingsViewProps & { setting: SettingView }) {
-  const { setting: s, shown } = props;
-  const editing = shown.editing !== null && shown.editing.key === s.key ? shown.editing : null;
-  const refusal = shown.refusal !== null && shown.refusal.key === s.key ? shown.refusal.words : null;
-  // It is taken away where it is decided, when that is a level it may be set at here.
-  const decides = s.from !== null && s.levels.includes(s.from) ? s.from : null;
-  const from = s.from === null ? "no file sets it" : `set in ${s.file ?? LEVEL_WORDS[s.from]} (${LEVEL_WORDS[s.from]})`;
-  return (
-    <li class={props.openKey === s.key ? "lre-stack rpe-setting rpe-opened" : "lre-stack rpe-setting"} data-setting={s.key}>
-      <div class="lre-row">
-        <span class="k">
-          {s.name}
-          {changedFromDefault(s) ? <Badge tone="accent" title="A file sets it to something other than its default">changed</Badge> : null}
-        </span>
-        <span class="v">{s.takes.type === "records" ? null : valueWords(s.value, s.none)}</span>
+    <section class="rpe-set-section" data-section={section.title}>
+      <div class="rpe-set-sectionhead">
+        <h3 class="lre-section-title">{section.title}</h3>
+        <p class="rpe-meta">{section.about}</p>
       </div>
-      <p class="rpe-line rpe-about">{s.about}</p>
-      {s.takes.type === "records" ? <RecordsTable fields={s.takes.fields} value={s.value} /> : null}
-      {s.joined ? (
-        <ul class="rpe-levels">
-          {s.set.map((at) => (
-            <li key={at.level} data-level={at.level}>
-              <span class="k">{`${at.file} (${LEVEL_WORDS[at.level]})`}</span> <span class="v">{valueWords(at.value, s.none)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <p class="rpe-meta">
-        <code>{s.key}</code> · {from} · default: {valueWords(s.default, s.none)} · takes {s.takesWords} · a change holds {s.effectWords} · {s.row === null ? "beyond Appendix D.1, for the owner's approval" : `Appendix D.1: ${s.row}`}
-      </p>
-      {s.passed === null ? null : (
-        <p class="rpe-line rpe-note">
-          A file sets it to {valueWords(s.passed.value, null)}, which is not taken: {s.passed.why}
-        </p>
-      )}
-      {editing === null ? (
-        <div class="lre-inline rpe-wrap">
-          <Button small onClick={() => props.onEdit(s.key)}>
-            Change
+      {section.title === "Agents" ? (
+        <p class="rpe-line rpe-meta">
+          Each agent's effort and limits are also on its page.{" "}
+          <Button size="sm" variant="ghost" onClick={() => props.onGo("agents")}>
+            Agents
+          </Button>{" "}
+          A model's window and longest reply are its connection's.{" "}
+          <Button size="sm" variant="ghost" onClick={() => props.onGo("connections")}>
+            Connections
           </Button>
-          {decides === null ? null : (
-            <Button small kind="ghost" busy={shown.busy} onClick={() => props.onTakeAway(s.key, decides)}>
-              {`Remove it from ${s.file ?? LEVEL_WORDS[decides]}`}
-            </Button>
+        </p>
+      ) : null}
+      {section.groups.map((group) => (
+        <div key={group.title} class="rpe-set-group" data-group={group.title}>
+          <h4 class="rpe-set-grouptitle">{group.title}</h4>
+          {group.table !== null ? (
+            <SettingsTable settings={group.settings} kind={group.table} level={props.level} busy={props.shown.busy} refusal={props.shown.refusal} choices={choices} books={props.books} openKey={props.openKey} onWrite={props.onWrite} onTakeAway={props.onTakeAway} />
+          ) : (
+            <ul class="rpe-plain rpe-set-rows">
+              {group.settings.map((s) => (
+                <SettingRow key={s.key} setting={s} level={props.level} busy={props.shown.busy} refusal={refusalOf(s.key)} choices={choices(s)} books={props.books} opened={props.openKey === s.key} onWrite={props.onWrite} onTakeAway={props.onTakeAway} />
+              ))}
+            </ul>
           )}
         </div>
-      ) : (
-        <div class="lre-stack">
-          <label class="lre-field">
-            <span class="label">Set at</span>
-            {/* A select's starting choice is its option marked selected: Preact gives a select no defaultValue. */}
-            <select class="lre-input" onChange={(event) => {
-              const level = s.levels.find((l) => l === event.currentTarget.value) ?? editing.level;
-              // A setting every level of which applies is changed from that level's own value.
-              props.onDraft({ ...editing, level, ...(s.joined ? { text: draftText(startingValue(s, level), s.takes) } : {}) });
-            }}>
-              {s.levels.map((level) => (
-                <option key={level} value={level} selected={level === editing.level}>
-                  {LEVEL_WORDS[level]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label class="lre-field">
-            <span class="label">Value</span>
-            <ValueField setting={s} draft={editing} books={props.books ?? null} onDraft={props.onDraft} />
-            {typingHelp(s.takes) === null ? null : <span class="lre-field-help">{typingHelp(s.takes)}</span>}
-          </label>
-          <div class="lre-inline rpe-wrap">
-            <Button small kind="primary" busy={shown.busy} onClick={props.onSave}>
-              Save
-            </Button>
-            {s.orNone ? (
-              <Button small busy={shown.busy} onClick={props.onNone}>
-                {`Set it to ~ (${s.none ?? "none"})`}
-              </Button>
-            ) : null}
-            <Button small kind="ghost" onClick={() => props.onEdit(null)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-      {refusal === null ? null : (
-        <Banner tone="neg" icon="alert" title="RPE did not make that change">
-          <span>{refusal}</span>
-        </Banner>
-      )}
-    </li>
+      ))}
+      {section.title === SERVER_SECTION ? <ServerExtras {...props} /> : null}
+    </section>
   );
 }
 
-/** The settings in groups, in the order RPE lists them: those set per connection under their connection, the rest by the first part of their key. */
-function groupsOf(settings: readonly SettingView[]): { title: string; settings: SettingView[] }[] {
-  const groups = new Map<string, SettingView[]>();
-  for (const s of settings) {
-    const title = groupTitle(s);
-    groups.set(title, [...(groups.get(title) ?? []), s]);
-  }
-  return [...groups].map(([title, inside]) => ({ title, settings: inside }));
+/** What the command line sets and what waits for it: listed, never written here. */
+function ServerExtras(props: SettingsViewProps) {
+  const facts = props.shown.reply?.facts ?? [];
+  return (
+    <>
+      <WaitingSection switches={props.switches} problem={props.switchesProblem} />
+      {facts.length === 0 ? null : (
+        <Disclosure summary={`The install (${facts.length})`}>
+          <p class="rpe-meta">Set by the command line (rpe up, rpe lumiverse), never on this page.</p>
+          <ul class="lre-stack rpe-plain">
+            {facts.map((fact) => (
+              <li key={fact.key} class="rpe-line" data-fact={fact.key}>
+                <strong>{fact.name}</strong>: {fact.value === null ? "not set" : typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value)}
+                <span class="rpe-meta">{fact.from === "environment" ? " (given by the environment, over config.json)" : fact.from === "install" ? " (where the install put it)" : " (config.json)"}</span>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+    </>
+  );
 }
 
 export function SettingsView(props: SettingsViewProps) {
   const { shown } = props;
   const reply = shown.reply;
-  const searching = (props.query ?? "").trim() !== "";
-  const groups = reply === null ? [] : groupsOf(reply.settings.filter((s) => settingMatches(s, props.query ?? "")));
+  const searching = props.query.trim() !== "";
+  const filtering = searching || props.changedOnly;
+  const all = reply === null ? [] : sectionsOf(reply.sections, reply.settings);
+  const shownSettings = reply === null ? [] : reply.settings.filter((s) => settingMatches(s, props.query) && (!props.changedOnly || isChanged(s)));
+  const found = reply === null ? [] : sectionsOf(reply.sections, shownSettings);
+  const changedCount = reply === null ? 0 : reply.settings.filter(isChanged).length;
+  const holding = props.openKey === null ? undefined : reply?.settings.find((s) => s.key === props.openKey)?.section;
+  const current = all.find((s) => s.title === (props.section ?? holding)) ?? all[0];
   return (
-    <div class="lre-stack rpe-page" data-page="settings" data-chat={props.chat ?? undefined}>
-      <PageHeader title="Settings" sub={props.chat === null ? "The settings RPE's agents run under, at your own level." : "The settings RPE's agents run under in this chat."} />
-      <label class="lre-field">
-        <span class="label">Find a setting</span>
-        <input class="lre-input" type="search" value={props.query ?? ""} placeholder="a key, or what it does" onInput={(event) => props.onQuery?.((event.currentTarget as HTMLInputElement).value)} />
-      </label>
+    <div class="lre-stack rpe-page rpe-set-page" data-page="settings" data-chat={props.chat ?? undefined}>
+      <PageHeader title="Settings" subtitle={props.chat === null ? "What RPE and its agents run under. A change here is for every chat; open a chat to make one for it alone." : "What RPE and its agents run under in this chat."} />
+      {props.chat === null ? null : (
+        <div class="rpe-set-levelbar">
+          <span class="rpe-meta">A change here is</span>
+          <Seg
+            value={props.level}
+            options={[
+              { value: "global", label: "For every chat" },
+              { value: "chat", label: "For this chat only" },
+            ]}
+            label="Where a change goes"
+            onChange={props.onLevel}
+          />
+        </div>
+      )}
+      <div class="rpe-set-tools">
+        <SearchField value={props.query} label="Find a setting" placeholder="Find a setting by what it does" status={searching ? `${shownSettings.length} found` : undefined} onInput={props.onQuery} />
+        <button type="button" class="rpe-set-filter" aria-pressed={props.changedOnly} onClick={() => props.onChangedOnly(!props.changedOnly)}>
+          Changed <Badge tone={changedCount > 0 ? "accent" : "neutral"}>{String(changedCount)}</Badge>
+        </button>
+      </div>
       {shown.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="The settings could not be read">
           <span>{shown.problem}</span>
         </Banner>
       )}
       {reply === null ? (
-        shown.loading ? (
-          <p class="lre-muted rpe-line">Reading the settings…</p>
-        ) : null
+        shown.loading ? <p class="lre-muted rpe-line">Reading the settings…</p> : null
       ) : (
         <>
-          <p class="rpe-meta">Read from {reply.files.map((f) => `${f.file} (${LEVEL_WORDS[f.level]})`).join(", ")}.</p>
           {reply.files.flatMap((f) =>
             f.problem === null
               ? []
@@ -398,44 +250,27 @@ export function SettingsView(props: SettingsViewProps) {
                   </Banner>,
                 ],
           )}
-          {groups.map((group) => {
-            const open = searching || group.settings.some((s) => s.key === props.openKey);
-            return (
-              <Fold key={`${group.title}:${open}`} open={open} summary={`${group.title} (${group.settings.length})`}>
-                <ul class="lre-stack rpe-plain">
-                  {group.settings.map((s) => (
-                    <SettingRow key={s.key} {...props} setting={s} />
-                  ))}
-                </ul>
-              </Fold>
-            );
-          })}
-          {searching && groups.length === 0 ? <p class="lre-muted rpe-line">No setting matches that.</p> : null}
-          <Fold summary="Limits">
-            <p class="rpe-line">Every limit RPE and RPH keep is a setting, in the groups above (the ones under <code>limits</code>, <code>turns</code>, <code>pages</code> and the rest, each with the file that decides it). Two are set elsewhere:</p>
-            <div class="lre-inline rpe-wrap">
-              <Button small kind="ghost" onClick={() => props.onGo?.("connections")}>
-                A model's context window and longest reply: Connections
-              </Button>
-              <Button small kind="ghost" onClick={() => props.onGo?.("files")}>
-                A definition's own limits: its file on Files
-              </Button>
+          {filtering ? (
+            <div class="lre-stack rpe-set-body">
+              <p class="rpe-meta">{shownSettings.length === 0 ? (props.changedOnly && !searching ? "Nothing differs from what was shipped." : "No setting matches that.") : `${shownSettings.length} ${shownSettings.length === 1 ? "setting" : "settings"}${props.changedOnly ? " changed" : ""}${searching ? " found" : ""}.`}</p>
+              {found.map((section) => (
+                <SectionBody key={section.title} {...props} shownSection={section} />
+              ))}
             </div>
-          </Fold>
-          <WaitingSection switches={props.switches ?? null} problem={props.switchesProblem ?? null} />
-          {reply.facts.length === 0 ? null : (
-            <Fold summary={`The install (${reply.facts.length})`}>
-              <p class="rpe-meta">Set by the command line (rpe up, rpe lumiverse), never on this page.</p>
-              <ul class="lre-stack rpe-plain">
-                {reply.facts.map((fact) => (
-                  <li key={fact.key} class="rpe-setting" data-fact={fact.key}>
-                    <strong>{fact.name}</strong>: {typeof fact.value === "number" ? String(fact.value) : valueWords(fact.value, "not set")}
-                    <span class="rpe-meta">{fact.from === "environment" ? " (given by the environment, over config.json)" : fact.from === "install" ? " (where the install put it)" : " (config.json)"}</span>
-                  </li>
+          ) : (
+            <div class="rpe-set-layout">
+              <nav class="rpe-set-nav" aria-label="Sections">
+                {all.map((section) => (
+                  <button key={section.title} type="button" aria-current={section === current ? "true" : undefined} onClick={() => props.onSection(section.title)}>
+                    <span>{section.title}</span>
+                    {section.changed > 0 ? <Badge tone="accent">{String(section.changed)}</Badge> : null}
+                  </button>
                 ))}
-              </ul>
-            </Fold>
+              </nav>
+              <div class="lre-stack rpe-set-body">{current === undefined ? null : <SectionBody {...props} shownSection={current} />}</div>
+            </div>
           )}
+          <p class="rpe-meta">Read from {reply.files.map((f) => `${f.file} (${LEVEL_WORDS[f.level]})`).join(", ")}.</p>
         </>
       )}
     </div>
@@ -444,37 +279,44 @@ export function SettingsView(props: SettingsViewProps) {
 
 export function SettingsPage(props: { chat: string | null; at?: readonly string[] }) {
   const app = useApp();
-  // The page's own settings (pages.*) are read again after each save.
-  const ui = useUiSettings();
   const { chat } = props;
-  const [shown, setShown] = useState<SettingsShown>(NO_SETTINGS);
-  const [control, setControl] = useState<SettingsControl | null>(null);
+  const { shown, actions } = useSettings(chat);
+  const [level, setLevel] = useState<ChangeLevel>(chat === null ? "global" : "chat");
   const [query, setQuery] = useState("");
+  const [changedOnly, setChangedOnly] = useState(false);
+  const [section, setSection] = useState<string | null>(null);
+  const openKey = props.at?.[0] ?? null;
   const switches = useRead(() => app.client.call("GET /api/v1/switches", {}).then((got) => got.switches), []);
+  const connections = useRead(() => app.client.call("GET /api/v1/connections", {}).then((got) => got.connections.map((c) => c.name)), []);
+  const definitions = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }).then((got) => got.agents.map((a) => a.name)), [chat]);
   // His books are the choice `lore.books` is made from; with no chat open there are none to choose among.
   const books = useRead(chat === null ? null : () => app.client.call("GET /api/v1/chats/:chat/lore/books", { chat }), [chat]);
+  useEffect(() => setLevel(chat === null ? "global" : "chat"), [chat]);
+  // The setting the address names is brought into view once the settings are read.
   useEffect(() => {
-    setShown(NO_SETTINGS);
-    const made = settingsControl(settingsCalls(app.client, chat), setShown, () => ui.reread());
-    setControl(made);
-    return () => made.stop();
-  }, [chat]);
+    if (openKey === null || shown.reply === null) return;
+    globalThis.document?.querySelector(`[data-setting="${CSS.escape(openKey)}"]`)?.scrollIntoView({ block: "center" });
+  }, [openKey, shown.reply === null]);
   return (
     <SettingsView
       chat={chat}
       shown={shown}
-      onEdit={(key) => control?.edit(key)}
-      onDraft={(draft) => control?.draft(draft)}
-      onSave={() => control?.save()}
-      onNone={() => control?.none()}
-      onTakeAway={(key, level) => control?.takeAway(key, level)}
+      level={level}
+      onLevel={setLevel}
       query={query}
       onQuery={setQuery}
-      openKey={props.at?.[0] ?? null}
+      changedOnly={changedOnly}
+      onChangedOnly={setChangedOnly}
+      section={section}
+      onSection={setSection}
+      openKey={openKey}
+      connections={connections.value}
+      definitions={definitions.value}
       books={books.value}
       switches={switches.value}
       switchesProblem={switches.problem}
       onGo={(page) => app.go({ page, chat })}
+      {...actions}
     />
   );
 }

@@ -6,6 +6,7 @@
 
 import { COMPONENTS_CSS } from "./styles/components";
 import { TOKENS_CSS } from "./styles/tokens";
+import { SETTINGS_PAGE_CSS } from "./pages/settings/styles";
 
 const OWN_CSS = `
 .rpe{min-width:0}
@@ -169,4 +170,4 @@ const OWN_CSS = `
 .rpe-more-list>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
 `;
 
-export const UI_CSS = [TOKENS_CSS, COMPONENTS_CSS, OWN_CSS].join("\n");
+export const UI_CSS = [TOKENS_CSS, COMPONENTS_CSS, OWN_CSS, SETTINGS_PAGE_CSS].join("\n");
