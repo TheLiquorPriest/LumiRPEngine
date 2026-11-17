@@ -121,6 +121,7 @@ const runShown = shape.named(
       "The message its request named: the one a new reply is written into, the reply a swipe or a regenerate writes again, or the one a continue's tag named for it to go on, a first word only. A continue is tied where Lumiverse's end names the message, the turn's `message`: where the two differ, the tag had named another; where this is null, the message was learned at the end.",
     ),
     held: field(nullable(T), "A continue's own turn, which held what it changed until Lumiverse's end decided its turn, and whose folder holds its files (its requests among them): the turn id its files are read under. Null for any other run."),
+    intentRecord: field(nullable(T), "A continue's own intent record, kept with its run, never over the intent record of the turn it extended (the turn's `intent`). Null for any other run, whose intent record is its turn's."),
     timings: moments,
     usage,
     reply: field(replySoFar, "What this run sent to the chat."),

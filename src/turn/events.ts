@@ -390,7 +390,15 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
   return {
     async intent(scope, text) {
       const turn = turnOf(scope);
-      await deps.writes.run(() => deps.store.user(scope.user).updateTurn(turn, { intent: text }), "keeping the intent record");
+      const turns = deps.store.user(scope.user);
+      // A continue's intent record is its run's (R-192 (e)), kept with the run whenever it comes; its held turn's own row too while that
+      // turn has joined none, so a held turn tied as a turn of its own shows it. One that comes after the join is never written over
+      // the extended turn's.
+      const continued = deps.runs.byHeld(scope.user, turn);
+      await deps.writes.run((db) => {
+        if (continued !== null) deps.runs.keepIntent(db, continued, text);
+        if (continued === null || turns.turn(turn)?.joined === null) turns.updateTurn(turn, { intent: text });
+      }, "keeping the intent record");
     },
     async attachments(at, agent, refs, moment) {
       await tell(at, "attachments", { agent, refs, moment });

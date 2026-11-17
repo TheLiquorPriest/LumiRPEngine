@@ -551,4 +551,13 @@ CREATE TABLE measurement (user TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT N
 CREATE INDEX measurement_at ON measurement (user, at);
 `,
   },
+  {
+    version: 23,
+    name: "a continue's own intent record",
+    // `turn_run.intent_record`: the intent record a continue's run made, kept with the run (R-192 (e)): one that comes after its held
+    // turn joined the turn it extended is kept too, and never over that turn's own.
+    sql: `
+ALTER TABLE turn_run ADD COLUMN intent_record TEXT;
+`,
+  },
 ];

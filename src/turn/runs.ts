@@ -153,6 +153,11 @@ export interface RunRecord {
    * continue's, set when its held turn joins the turn it extended, so that turn's counts are of this run's changes. Null for any other run.
    */
   mark: number | null;
+  /**
+   * A continue's own intent record (R-192 (e)): the run's, kept with it whenever it comes, before or after its held turn joined the turn
+   * it extended, and never written over that turn's own. Null for any other run, whose record is its turn's.
+   */
+  intentRecord: string | null;
 }
 
 /** A run's lore lookups: its `lore_search` calls and its `lore_read` calls. */
@@ -204,6 +209,7 @@ interface RunRow {
   settled: number | null;
   held: string | null;
   mark: number | null;
+  intent_record: string | null;
   // Its `usage` row, null where it has none.
   calls: number | null;
   input: number | null;
@@ -256,6 +262,7 @@ function recordOf(user: string, r: RunRow): RunRecord {
     settled: r.settled,
     held: r.held,
     mark: r.mark,
+    intentRecord: r.intent_record,
   };
 }
 
@@ -310,13 +317,13 @@ export class Runs {
    */
   put(into: Database, r: RunRecord): void {
     into.run(
-      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO turn_run (user, id, trace_run, turn, chat, session, generation, target, swipe, kind, status, received, started, first_word, released, finished, ended, intent_time, thinking, without_intent, intake, wait, folder, reply, progress, error, stopped_by, last_text, not_given, base, saved, settled, held, mark, intent_record)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user, id) DO UPDATE SET trace_run = excluded.trace_run, session = excluded.session, generation = excluded.generation, target = excluded.target, swipe = excluded.swipe, kind = excluded.kind,
          status = excluded.status, received = excluded.received, started = excluded.started, first_word = excluded.first_word, released = excluded.released, finished = excluded.finished, ended = excluded.ended,
          intent_time = excluded.intent_time, thinking = excluded.thinking, without_intent = excluded.without_intent, intake = excluded.intake, wait = excluded.wait, folder = excluded.folder,
          reply = excluded.reply, progress = excluded.progress, error = excluded.error, stopped_by = excluded.stopped_by, last_text = excluded.last_text, not_given = excluded.not_given, base = excluded.base, saved = excluded.saved,
-         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark`,
+         settled = COALESCE(turn_run.settled, excluded.settled), mark = excluded.mark, intent_record = COALESCE(excluded.intent_record, turn_run.intent_record)`,
       [
         r.user,
         r.id,
@@ -352,6 +359,7 @@ export class Runs {
         r.settled,
         r.held,
         r.mark,
+        r.intentRecord,
       ],
     );
     const { usage } = r;
@@ -376,6 +384,17 @@ export class Runs {
       this.#running.set(key(r.user, to), live);
     }
     r.turn = to;
+  }
+
+  /**
+   * A continue's intent record kept with its run (`RunRecord.intentRecord`), inside the caller's queued write: as kept, and on the run
+   * going on now, so its later records keep it.
+   */
+  keepIntent(into: Database, r: RunRecord, text: string): void {
+    into.run("UPDATE turn_run SET intent_record = ? WHERE user = ? AND id = ?", [text, r.user, r.id]);
+    const live = this.#running.get(key(r.user, r.turn));
+    if (live?.id === r.id) live.intentRecord = text;
+    r.intentRecord = text;
   }
 
   /** The continue's run that held its changes on `turn` (`RunRecord.held`), as it stands; null where none did. */

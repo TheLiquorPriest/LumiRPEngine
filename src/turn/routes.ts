@@ -198,6 +198,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
           status: run.status,
           target: run.target,
           held: run.held,
+          intentRecord: run.intentRecord,
           timings: momentsOf(run),
           usage: run.usage ?? NO_USAGE,
           reply: { text: run.reply, progress: [...run.progress] },

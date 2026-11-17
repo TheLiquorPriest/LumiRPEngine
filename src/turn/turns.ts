@@ -632,6 +632,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         settled: null,
         held: tag.kind === "continue" ? begun.id : null,
         mark: null,
+        intentRecord: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
@@ -1068,6 +1069,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         held: null,
         // What it records is the turn's, counted from marks taken as a continue's are, in the write that keeps it and holds it.
         mark: null,
+        intentRecord: null,
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
@@ -1265,10 +1267,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
     const path = this.#d.store.user(user).path(chat);
     const messages = path.map((e) => ({ id: e.message, hash: e.hash, hidden: e.hidden }));
-    // A continue whose tag named no message went on the newest reply on the path as RPE held it: its end is looked for there, so it is
-    // tied to the joined text as its end would have tied it.
-    const newestReply = path.findLast((e) => !e.user)?.message ?? null;
-    const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: r.target ?? (r.kind === "continue" ? newestReply : null) })) });
+    const at = new Map<string, string | null>();
+    for (const r of awaiting) at.set(r.id, r.target ?? (r.kind === "continue" ? await this.#continuedOn(reads, chat, r, path) : null));
+    const found = await reconcile(reads, { chat, messages, awaiting: awaiting.map((r) => ({ generation: r.generation ?? "", message: at.get(r.id) ?? null })) });
     for (const change of found) {
       if (change.kind !== "generation-ended") {
         this.changed(change);
@@ -1277,6 +1278,29 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       await this.#ended(user, change).catch((error: unknown) => this.#d.log.error("A generation's end could not be recorded; the chat's next turn looks again.", { chat, generation: change.generation, error: words(error) }));
     }
     await this.settled();
+  }
+
+  /**
+   * Where a continue whose tag named no message went, its end missed (plan §10.8, R-192): Lumiverse continued the chat's last message
+   * that is not the player's, or, where its caller named one of the player's, saved a new one. Neither is guessed: it is the newest of
+   * the messages that are not the player's, from the newest reply RPE held on, whose swipe the generation wrote ends with what the run
+   * released. Null where none does (it released nothing, or nothing of it was saved): its held turn is then dropped as an attempt.
+   */
+  async #continuedOn(reads: LumiverseReads, chat: string, run: RunRecord, path: readonly { message: string; user: boolean }[]): Promise<string | null> {
+    if (run.reply === "") return null;
+    const steps = await reads.path(chat);
+    if (steps === null) return null;
+    const newestReply = path.findLast((e) => !e.user)?.message ?? null;
+    const known = new Set(path.map((e) => e.message));
+    const candidates = steps.flatMap((s) => (s.role !== "user" && (s.id === newestReply || !known.has(s.id)) ? [s.id] : []));
+    if (candidates.length === 0) return null;
+    const read = new Map((await reads.messagesById(chat, candidates)).map((m) => [m.id, m]));
+    for (const id of candidates.toReversed()) {
+      const m = read.get(id);
+      const written = m === undefined ? null : writtenOf(run, m);
+      if (written != null && written.text.endsWith(run.reply)) return id;
+    }
+    return null;
   }
 
   /**
