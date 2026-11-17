@@ -5,7 +5,6 @@ format: lines
 no_chat: There is no chat {{id}} in the engine's records.
 no_turn: There is no turn {{id}} in this chat.
 no_world: The world this chat plays ({{id}}) is not to hand, so nothing can be read.
-turn_needed: This call belongs to no turn, so nothing can be recorded. Reading needs no turn.
 needs_field: This call needs {{field}}.
 needs: {{op}} needs {{fields}}.
 needs_any: This call needs at least one of {{fields}}.
