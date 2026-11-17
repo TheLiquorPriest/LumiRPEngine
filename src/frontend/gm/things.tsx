@@ -262,17 +262,16 @@ export function TidyCard(props: { finding: TidyFinding; names?: ReadonlyMap<stri
   );
 }
 
-/** Tidy up's run: how many it found, its cards, Show N left (each left one with Bring it back), and how many findings a run shows (within `bounds`, the setting's). */
-export function TidyList(props: { run: TidyRun; names: ReadonlyMap<string, string>; busy: boolean; showLeft: boolean; bounds: readonly [number, number]; onFix(fix: TidyFix): void; onLeave(finding: TidyFinding, left: boolean): void; onAsk?(finding: TidyFinding): void; onShowLeft(show: boolean): void; onLimit(limit: number): void; onOpen(id: EntityId): void }) {
+/** Tidy up's run: how many it found, its cards, Show N left (each left one with Bring it back), and how many findings a run shows (no fewer than `least`, the setting's; it has no most). */
+export function TidyList(props: { run: TidyRun; names: ReadonlyMap<string, string>; busy: boolean; showLeft: boolean; least: number; onFix(fix: TidyFix): void; onLeave(finding: TidyFinding, left: boolean): void; onAsk?(finding: TidyFinding): void; onShowLeft(show: boolean): void; onLimit(limit: number): void; onOpen(id: EntityId): void }) {
   const { run } = props;
-  const [min, max] = props.bounds;
   const ask = props.onAsk;
   const title = run.total === 0 ? "Nothing to tidy" : run.findings.length < run.total ? `${run.findings.length} of ${run.total} findings` : run.total === 1 ? "1 finding" : `${run.total} findings`;
   return (
     <div class="lre-stack" data-lre-tidy-run="">
       <Section title={title}>
         <span class="lre-small lre-muted">Things a turn left wrong, each with the one edit that sets it right. Each fix is a GM edit with its own Undo.</span>
-        <NumberStepper label="Findings per run" value={run.limit} min={min} max={max} integer disabled={props.busy} onChange={props.onLimit} />
+        <NumberStepper label="Findings per run" value={run.limit} min={props.least} integer disabled={props.busy} onChange={props.onLimit} />
       </Section>
       {run.findings.length === 0 ? (
         <Empty icon="check" title={run.left > 0 ? "Nothing else to tidy" : "Nothing to tidy"}>
@@ -414,7 +413,7 @@ function TidyPanel(props: { chatId: string; editor: BulkEditor; names: ReadonlyM
       ) : !shown ? (
         <Empty icon="hourglass">Looking through the things…</Empty>
       ) : (
-        <TidyList run={shown} names={props.names} busy={busy || editor.busy} showLeft={showLeft} bounds={editor.limits.tidyRun} onFix={(fix) => void editor.edit(fix.ops, fix.done)} onLeave={leave} onShowLeft={setShowLeft} onLimit={limit} onOpen={props.onOpen} />
+        <TidyList run={shown} names={props.names} busy={busy || editor.busy} showLeft={showLeft} least={editor.limits.tidyRunLeast} onFix={(fix) => void editor.edit(fix.ops, fix.done)} onLeave={leave} onShowLeft={setShowLeft} onLimit={limit} onOpen={props.onOpen} />
       )}
       {made.body?.made ? (
         <KeepList

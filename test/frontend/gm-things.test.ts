@@ -100,7 +100,7 @@ function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: BulkEditor
       sent.push({ ops: [...ops], done: done(ops.length) });
       return Promise.resolve({ applied: 1, of: 1 });
     },
-    limits: { editOps: 50, thingsMost: 64, tidyRun: [1, 500] },
+    limits: { editOps: 50, thingsMost: 64, tidyRunLeast: 1 },
     reloadKey: "",
     need: () => () => undefined,
   };
@@ -160,11 +160,12 @@ describe("Tidy up's cards", () => {
 
   test("a run: its count, findings per run, and Show N left, each left card with Bring it back and no Fix", () => {
     const calls: unknown[][] = [];
-    const props = { names, busy: false, bounds: [1, 500] as const, onFix: (fix: { label: string }) => calls.push(["fix", fix.label]), onLeave: (f: TidyFinding, left: boolean) => calls.push(["leave", f.key, left]), onAsk: (f: TidyFinding) => calls.push(["ask", f.key]), onShowLeft: (show: boolean) => calls.push(["show", show]), onLimit: (n: number) => calls.push(["limit", n]), onOpen: (id: string) => calls.push(["open", id]) };
+    const props = { names, busy: false, least: 1, onFix: (fix: { label: string }) => calls.push(["fix", fix.label]), onLeave: (f: TidyFinding, left: boolean) => calls.push(["leave", f.key, left]), onAsk: (f: TidyFinding) => calls.push(["ask", f.key]), onShowLeft: (show: boolean) => calls.push(["show", show]), onLimit: (n: number) => calls.push(["limit", n]), onOpen: (id: string) => calls.push(["open", id]) };
     const all = TidyList({ ...props, run: tidyRun(findings, new Set(), 50), showLeft: false });
     expect(find(all, Section)[0]?.title).toBe(findings.length === 1 ? "1 finding" : `${findings.length} findings`);
     const stepper = find(all, NumberStepper)[0];
-    expect(stepper).toMatchObject({ label: "Findings per run", value: 50, min: 1, max: 500 });
+    expect(stepper).toMatchObject({ label: "Findings per run", value: 50, min: 1 });
+    expect(stepper).not.toHaveProperty("max");
     (stepper?.onChange as (n: number) => void)(10);
     expect(calls).toEqual([["limit", 10]]);
 

@@ -29,7 +29,7 @@ import type { PlayMount } from "./play/mount";
 
 type Limits = BulkEditor["limits"];
 
-/** The bounds as RPE's settings give them for the chat: one edit's operations, one move's things, and a Tidy up run's least and most. */
+/** The bounds as RPE's settings give them for the chat: one edit's operations, one move's things, and the fewest a Tidy up run shows. */
 async function limitsOf(client: Pick<RpeClient, "call">, chat: string): Promise<Limits> {
   const read = await client.call("GET /api/v1/settings", {}, { query: { chat } });
   const of = (key: string) => read.settings.find((s) => s.key === key);
@@ -40,8 +40,7 @@ async function limitsOf(client: Pick<RpeClient, "call">, chat: string): Promise<
   };
   const takes = of("things.tidyRunMost")?.takes;
   const least = takes !== undefined && "least" in takes ? takes.least : 1;
-  const most = takes !== undefined && "most" in takes && typeof takes.most === "number" ? takes.most : whole("things.tidyRunMost");
-  return { editOps: whole("engine.editOps"), thingsMost: whole("taps.thingsMost"), tidyRun: [least, most] };
+  return { editOps: whole("engine.editOps"), thingsMost: whole("taps.thingsMost"), tidyRunLeast: least };
 }
 
 /** The browser over the kept App: the GM view's things parts, the editor every control sends through, and the notice with its Undo. */
