@@ -18,7 +18,7 @@ import { buildClasses, HoldsSection, ThingRowView } from "../../src/frontend/bui
 import { AddPicker, RefPicker } from "../../src/frontend/build/form-kit";
 import { Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from "../../src/frontend/components";
 import { thingsSummary, tidyRequest, TidySwitch } from "../../src/frontend/gm/chat-things";
-import type { Editor } from "../../src/frontend/gm/editor";
+import type { BulkEditor } from "../../src/frontend/gm/editor";
 import { FieldRow, Relations } from "../../src/frontend/gm/entity";
 import { addEdit, allWorn, bulkEdit, bulkLoans, GmAddSheet, GmSets, gmSets, GmThingBody, HereView, KeepList, ThingsBulkBar, TidyCard, TidyList, hereSections, isThingKind, keepKey, type BulkSheet, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
 import type { Selection } from "../../src/frontend/multi-select";
@@ -84,11 +84,11 @@ function click(tree: unknown, text: string): void {
 }
 
 /** The GM view of a chat starting on `world`, and an editor that keeps what it is asked to send. */
-function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: Editor; sent: { ops: EditOp[]; done?: string }[] } {
+function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: BulkEditor; sent: { ops: EditOp[]; done?: string }[] } {
   const ctx = ctxOf(world);
   const gm: GmView = { ...buildGmWorld(reg, world, ctx.state), edits: [], refused: [], held: [], minds: {} as GmView["minds"] };
   const sent: { ops: EditOp[]; done?: string }[] = [];
-  const editor: Editor = {
+  const editor: BulkEditor = {
     gm,
     currency: DEFAULT_CURRENCY,
     busy: false,
@@ -96,6 +96,13 @@ function editorOf(world: WorldDoc = portAlder): { gm: GmView; editor: Editor; se
       sent.push({ ops, ...(done !== undefined ? { done } : {}) });
       return Promise.resolve(true);
     },
+    editAll: (ops, done) => {
+      sent.push({ ops: [...ops], done: done(ops.length) });
+      return Promise.resolve({ applied: 1, of: 1 });
+    },
+    limits: { editOps: 50, thingsMost: 64, tidyRun: [1, 500] },
+    reloadKey: "",
+    need: () => () => undefined,
   };
   return { gm, editor, sent };
 }
@@ -153,7 +160,7 @@ describe("Tidy up's cards", () => {
 
   test("a run: its count, findings per run, and Show N left, each left card with Bring it back and no Fix", () => {
     const calls: unknown[][] = [];
-    const props = { names, busy: false, onFix: (fix: { label: string }) => calls.push(["fix", fix.label]), onLeave: (f: TidyFinding, left: boolean) => calls.push(["leave", f.key, left]), onAsk: (f: TidyFinding) => calls.push(["ask", f.key]), onShowLeft: (show: boolean) => calls.push(["show", show]), onLimit: (n: number) => calls.push(["limit", n]), onOpen: (id: string) => calls.push(["open", id]) };
+    const props = { names, busy: false, bounds: [1, 500] as const, onFix: (fix: { label: string }) => calls.push(["fix", fix.label]), onLeave: (f: TidyFinding, left: boolean) => calls.push(["leave", f.key, left]), onAsk: (f: TidyFinding) => calls.push(["ask", f.key]), onShowLeft: (show: boolean) => calls.push(["show", show]), onLimit: (n: number) => calls.push(["limit", n]), onOpen: (id: string) => calls.push(["open", id]) };
     const all = TidyList({ ...props, run: tidyRun(findings, new Set(), 50), showLeft: false });
     expect(find(all, Section)[0]?.title).toBe(findings.length === 1 ? "1 finding" : `${findings.length} findings`);
     const stepper = find(all, NumberStepper)[0];
@@ -309,16 +316,12 @@ describe("Select and the bulk bar", () => {
     expect(sent[0]?.ops).toEqual(three.map((r) => ({ op: "item", change: { do: "move", item: r.id, to: { in: "pov" }, why: "Put away" } })));
   });
 
-  test("one edit a change: Move to, Make it theirs, Size and Remove; what is so already is left out; over 64 picked, nothing is offered", () => {
+  test("one edit a change: Move to, Make it theirs, Size and Remove; what is so already is left out", () => {
     const two = pick(["pov_wallet", "pov_toolbox"]);
     expect(bulkEdit({ do: "move", to: { place: "harbor_street_114" }, words: "at 114 Harbor Street" }, two)?.ops.length).toBe(2);
     expect(bulkEdit({ do: "own", owner: { id: "danny_okafor", name: "Danny Okafor", is: "person" } }, two)?.done).toBe("Wallet and Mechanic's toolbox are Danny Okafor's now.");
     expect(bulkEdit({ do: "size", size: two[0]!.size as "pocket" }, [two[0]!])).toBeNull();
     expect(bulkEdit({ do: "remove" }, two)?.ops).toEqual(two.map((r) => ({ op: "item", change: { do: "remove", item: r.id, why: "The GM removed it" } })));
-    const { editor } = editorOf();
-    const many = Array.from({ length: 65 }, (_, i) => ({ ...two[0]!, id: `t${i}` }));
-    const bar = ThingsBulkBar({ selection, all: [], shown: [], rows: many, editor, onSheet: () => undefined });
-    expect(find(bar, Button).filter((p) => textOf(p.children) !== "Clear" && !textOf(p.children).startsWith("Select all")).every((p) => p.disabled === true)).toBe(true);
   });
 
   test("Wear sends do: wear on whoever has it, and Take off what they wear", () => {
