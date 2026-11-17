@@ -238,7 +238,7 @@ function horizonFact(deps: DoneEnoughDeps, user: string, chat: string): HorizonF
   const clock = clockRecorded(view.state);
   // The place of the scene, the people in it, and the things each of them has, as the tree holds them now.
   const place = scenePlaceOf(view);
-  const people = place === null ? [] : view.childrenOf(place).filter((ref) => ref.startsWith("entity:"));
+  const people = place === null ? [] : view.childrenOf(place).filter((ref) => view.isPerson(ref));
   const things = people.flatMap((person) => view.childrenOf(person));
   return {
     entries: entries.length,

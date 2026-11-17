@@ -588,6 +588,11 @@ export class TreeView {
     return this.nodes.get(ref)?.children ?? [];
   }
 
+  /** Whether `ref` is an entity of a person's kind (a group's, a thing's or a record's is not). */
+  isPerson(ref: string): boolean {
+    return this.nodes.get(ref)?.category === "person";
+  }
+
   /** A level's name in the data: null for the two levels the tree adds, a world with no name, and nothing called `ref`. */
   nameOf(ref: string): string | null {
     return this.nodes.get(ref)?.name ?? null;
