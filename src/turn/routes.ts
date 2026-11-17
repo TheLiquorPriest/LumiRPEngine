@@ -136,11 +136,11 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     if (row !== null && row.chat === chat && row.joined !== null) throw new JoinedTurnError(turn, row.joined);
   };
 
-  /** The turn of the chat as kept (its latest run); a 404 for a turn the chat does not have. */
+  /** The turn of the chat as kept (its latest run); a 404 for a turn the chat does not have, a run whose turn the store no longer holds among them. */
   const turnOf = (user: string, chat: string, turn: string): RunRecord => {
     notJoined(user, chat, turn);
     const r = turns.runs.record(user, turn);
-    if (r === null || r.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
+    if (r === null || r.chat !== chat || turns.store.user(user).turn(turn) === null) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     return r;
   };
 

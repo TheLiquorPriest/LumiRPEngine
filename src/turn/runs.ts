@@ -304,6 +304,14 @@ export function keepCarriedRun(db: Database, run: CarriedRun): void {
   ]);
 }
 
+/**
+ * Drops the run records a migration carried for a chat (`keepCarriedRun`), inside a queued write: a run of the migration that imports the
+ * chat again replaces its turns, so it drops the ones it carried before it keeps its own. A run RPE played is never among them.
+ */
+export function dropCarriedRuns(db: Database, user: string, chat: string): void {
+  db.run("DELETE FROM turn_run WHERE user = ? AND chat = ? AND session = ?", [user, chat, CARRIED_SESSION]);
+}
+
 const key = (user: string, id: string): string => `${user}\u0000${id}`;
 
 export class Runs {
@@ -479,10 +487,10 @@ export class Runs {
     return row === null ? null : recordOf(user, row);
   }
 
-  /** A chat's turns as kept, each as its latest run, newest first: `limit` of them, older than the turn `before` when one is named. */
+  /** A chat's turns as kept, each as its latest run, newest first: `limit` of them, older than the turn `before` when one is named. A run whose turn the store no longer holds is not one of them. */
   ofChatKept(user: string, chat: string, limit: number, before?: string): RunRecord[] {
     const from = before === undefined ? null : this.db.query<{ received: number | null }, [string, string, string]>("SELECT max(received) AS received FROM turn_run WHERE user = ? AND chat = ? AND turn = ?").get(user, chat, before);
-    const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid)))";
+    const latest = "NOT EXISTS (SELECT 1 FROM turn_run n WHERE n.user = r.user AND n.turn = r.turn AND (n.received > r.received OR (n.received = r.received AND n.rowid > r.rowid))) AND EXISTS (SELECT 1 FROM turn t WHERE t.user = r.user AND t.id = r.turn)";
     const rows =
       from === null || from.received === null
         ? this.db.query<RunRow, [string, string, number]>(`${RUN_ROWS} WHERE r.user = ? AND r.chat = ? AND ${latest} ORDER BY r.received DESC, r.rowid DESC LIMIT ?`).all(user, chat, limit)

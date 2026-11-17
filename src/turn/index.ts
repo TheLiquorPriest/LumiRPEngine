@@ -10,7 +10,7 @@ export { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf, 
 export { type CarriedRequest, carryRequest, dropLeftoverRequests } from "./requests";
 export { turnRoutes, type TurnRoutesDeps, WORLD_VIEW } from "./routes";
 export { type RunView, type TurnFileEntry } from "./shapes";
-export { type CarriedRun, keepCarriedRun, type Run, type RunRecord, Runs, type RunState } from "./runs";
+export { type CarriedRun, dropCarriedRuns, keepCarriedRun, type Run, type RunRecord, Runs, type RunState } from "./runs";
 export { passConnection, TURN_DEFAULTS, TURN_SETTINGS, type TurnSettings, turnSettings } from "./settings";
 export { namedStretches, type Stage, stageAt, stagesAt } from "./stage";
 export { type GenerationAt, type GenerationStart, generationStart } from "./start";
