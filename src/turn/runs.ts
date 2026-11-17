@@ -304,14 +304,6 @@ export function keepCarriedRun(db: Database, run: CarriedRun): void {
   ]);
 }
 
-/**
- * Drops the run records a migration carried for a chat (`keepCarriedRun`), inside a queued write: a run of the migration that imports the
- * chat again replaces its turns, so it drops the ones it carried before it keeps its own. A run RPE played is never among them.
- */
-export function dropCarriedRuns(db: Database, user: string, chat: string): void {
-  db.run("DELETE FROM turn_run WHERE user = ? AND chat = ? AND session = ?", [user, chat, CARRIED_SESSION]);
-}
-
 const key = (user: string, id: string): string => `${user}\u0000${id}`;
 
 export class Runs {
