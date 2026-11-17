@@ -80,6 +80,10 @@ export interface ExtSpindle {
     getGranted(): Promise<string[]>;
     onChanged(handler: (change: PermissionChange) => void): () => void;
   };
+  /** Lumiverse's own page of a user (`worker-runtime.ts:4509-4512`, `worker-host-presentation-api.ts:121-175`): no permission asked; a user's install reaches its own user alone. */
+  ui: {
+    closeDrawer(options?: { userId?: string }): Promise<void>;
+  };
   log: {
     info(message: string): void;
     warn(message: string): void;

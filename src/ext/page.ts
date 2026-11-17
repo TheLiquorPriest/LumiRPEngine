@@ -50,6 +50,8 @@ export interface PageRoad {
   unfollow(chat: string): Promise<void>;
   /** Every list of updates RPE sends this page, in order; `reset`: some were lost before it, so the page reads afresh. */
   onUpdates(handler: (updates: unknown[], reset: boolean) => void): () => void;
+  /** Asks Lumiverse to close its drawer: true once it did, false where it could not or no answer came within the request's wait. */
+  closeDrawer(): Promise<boolean>;
   onPermissions(handler: (missing: MissingPermission[]) => void): () => void;
   stop(): void;
 }
@@ -65,6 +67,7 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
   const starting: ((answer: StartAnswer) => void)[] = [];
   const followed = new Map<string, unknown>();
   const following = new Map<string, { resolve(): void; reject(error: Error): void }[]>();
+  const drawers = new Map<string, { resolve(closed: boolean): void; timer: unknown }>();
   const updates = new Set<(updates: unknown[], reset: boolean) => void>();
   const permissions = new Set<(missing: MissingPermission[]) => void>();
   let lastSeq: number | null = null;
@@ -141,6 +144,14 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
       case "permissions":
         for (const handler of permissions) handler(message.missing);
         return;
+      case "drawer": {
+        const w = drawers.get(message.id);
+        if (w === undefined) return;
+        drawers.delete(message.id);
+        timers.clearTimeout(w.timer);
+        w.resolve(message.closed);
+        return;
+      }
     }
   });
 
@@ -187,6 +198,17 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
       followed.delete(chat);
       await ask(chat, false);
     },
+    closeDrawer() {
+      const id = `d${++next}`;
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      const timer = timers.setTimeout(() => {
+        drawers.delete(id);
+        resolve(false);
+      }, settings.requestMs);
+      drawers.set(id, { resolve, timer });
+      channel.sendToBackend({ rpe: "drawer", id });
+      return promise;
+    },
     onUpdates(handler) {
       updates.add(handler);
       return () => updates.delete(handler);
@@ -204,6 +226,11 @@ export function pageRoad(channel: PageChannel, options: { timers?: Timers; setti
         w.reject(new Error("The page closed."));
       }
       waiting.clear();
+      for (const w of drawers.values()) {
+        timers.clearTimeout(w.timer);
+        w.resolve(false);
+      }
+      drawers.clear();
     },
   };
 }

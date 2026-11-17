@@ -15,7 +15,8 @@
 //   its relay socket and go to that page alone (`sendToFrontend` with its frontend session,
 //   `worker-host.ts:2129-2160`), never to every socket of the user, RPE's own among them;
 // - a page gone: Lumiverse says so (`FRONTEND_SESSION_CLOSED`, `ws/handler.ts:198-203`), and RPE stops
-//   following for it.
+//   following for it;
+// - a page's ask that Lumiverse's drawer close (`spindle.ui.closeDrawer`): answered to that page, closed or not.
 // Only the user RPE registered for is served: anyone else's page is told RPE does not belong to them.
 
 import { isRecord } from "../shared/json";
@@ -149,6 +150,17 @@ export function startPipe(deps: PipeDeps): Pipe {
     }
   }
 
+  /** Lumiverse's drawer closed for the page that asked: whether it closed is told to that page by the ask's id; why not, to the log. */
+  async function drawer(user: string, page: string, id: string): Promise<void> {
+    try {
+      await spindle.ui.closeDrawer({ userId: user });
+      toPage(user, page, { rpe: "drawer", id, closed: true });
+    } catch (error) {
+      deps.log(`Lumiverse's drawer was not closed for a page: ${words(error)}`);
+      toPage(user, page, { rpe: "drawer", id, closed: false });
+    }
+  }
+
   const offMessage = spindle.onFrontendMessage((payload, user, session) => {
     const fromRpe = readFromRpe(payload);
     if (fromRpe !== null) {
@@ -183,7 +195,8 @@ export function startPipe(deps: PipeDeps): Pipe {
     }
     const fromPage = readFromPage(payload);
     if (fromPage === null || session === undefined) return;
-    const work = fromPage.rpe === "start" ? start(user, session) : fromPage.rpe === "request" ? request(user, session, fromPage) : follow(user, session, fromPage.chat, fromPage.rpe === "follow");
+    const work =
+      fromPage.rpe === "start" ? start(user, session) : fromPage.rpe === "request" ? request(user, session, fromPage) : fromPage.rpe === "drawer" ? drawer(user, session, fromPage.id) : follow(user, session, fromPage.chat, fromPage.rpe === "follow");
     work.catch((error: unknown) => deps.log(`a page's message was not handled: ${words(error)}`));
   });
 

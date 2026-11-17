@@ -161,8 +161,8 @@ export type FromRpe = { rpe: "register"; registration: Registration } | ({ rpe: 
 /** The extension to RPE's relay socket: it took RPE's registration (saying its own build), or refused it and why; and what it is missing, each time that changes. */
 export type ToRpe = { rpe: "registered"; missing: MissingPermission[]; build?: string } | { rpe: "refused"; why: string; missing: MissingPermission[] } | { rpe: "permissions"; missing: MissingPermission[] };
 
-/** A page to the extension (`ctx.sendToBackend`). */
-export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | { rpe: "follow"; chat: string } | { rpe: "unfollow"; chat: string };
+/** A page to the extension (`ctx.sendToBackend`): among them, the page asks for Lumiverse's drawer to close, by an id it is answered by. */
+export type FromPage = { rpe: "start" } | ({ rpe: "request" } & PipeRequest) | { rpe: "follow"; chat: string } | { rpe: "unfollow"; chat: string } | { rpe: "drawer"; id: string };
 
 /** The extension to a page. */
 export type ToPage =
@@ -170,7 +170,8 @@ export type ToPage =
   | ({ rpe: "response" } & PipeResponse)
   | ({ rpe: "live" } & Omit<LiveFrame, "page">)
   | { rpe: "following"; chat: string; error?: string }
-  | { rpe: "permissions"; missing: MissingPermission[] };
+  | { rpe: "permissions"; missing: MissingPermission[] }
+  | { rpe: "drawer"; id: string; closed: boolean };
 
 /** What RPE's live route is asked: a page follows a chat, stops following it, or is gone. */
 export type LiveAsk = { page: string; chat: string; follow: boolean } | { page: string; gone: true };
@@ -276,6 +277,8 @@ export function readToPage(v: unknown): ToPage | null {
       const lacking = missingOf(v.missing);
       return lacking === null ? null : { rpe: "permissions", missing: lacking };
     }
+    case "drawer":
+      return str(v.id) && typeof v.closed === "boolean" ? { rpe: "drawer", id: v.id, closed: v.closed } : null;
     default:
       return null;
   }
@@ -295,6 +298,8 @@ export function readFromPage(v: unknown): FromPage | null {
     case "follow":
     case "unfollow":
       return str(v.chat) ? { rpe: v.rpe, chat: v.chat } : null;
+    case "drawer":
+      return str(v.id) ? { rpe: "drawer", id: v.id } : null;
     default:
       return null;
   }
