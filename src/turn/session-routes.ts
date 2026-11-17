@@ -1,5 +1,7 @@
 // The Sessions page's routes (plan §11, §4.4 "sessions"): a chat's sessions, a page at a time; one session with what its next turn
-// would carry and its compactions; the Author's scene closed by him, and that taken back; and a compaction asked for, and one undone.
+// would carry and its compactions; the Author's scene closed by him, and that taken back; a compaction asked for, and one undone; and
+// the session measurement's reports (§11: the script that plays one scene in each carry mode and counts what each costs and buys),
+// which the test-bed script sends and the page shows beside the mode in force. A report is kept whole as it came, and every one is kept.
 // Every route is a page's: it answers only for the user this RPE belongs to.
 //
 // Closing a scene is his change (§6.3 l.632, §10.10): the close is written in the story record as his own, placed after the chat's
@@ -90,8 +92,63 @@ const sessionTurnRow = shape.named(
   shape.object({ turn: shape.turnId(), n: nullable(shape.whole({ least: 1 })), at: N, runs: shape.list(T) }),
 );
 
+const measureFigures = shape.named(
+  "MeasureFigures",
+  "What a stretch of turns cost, as the measurement counts it from RPE's own record of each turn: tokens in, out and cached, the time to the reply's end and to the run's end (ms), and the model calls made.",
+  shape.object({ tokensIn: shape.whole({ least: 0 }), tokensOut: shape.whole({ least: 0 }), cached: shape.whole({ least: 0 }), replyMs: shape.whole({ least: 0 }), runMs: shape.whole({ least: 0 }), calls: shape.whole({ least: 0 }) }),
+);
+const measureTurn = shape.named(
+  "MeasureTurn",
+  "One turn of the measurement's script as played in a mode: its number in the script, and what it cost.",
+  shape.object({ n: shape.whole({ least: 1 }), figures: measureFigures }),
+);
+const measureDecision = shape.named(
+  "MeasureDecision",
+  "One decision the script plants in the scene, with the check of whether the scene honoured it: what was planted and in which turn, the question put to the judging connection and the turn it tested, the excerpt of the reply and of the Author's records it judged, whether it found the decision honoured, and the judge's own answer.",
+  shape.object({ name: T, planted: shape.whole({ least: 1 }), check: T, tested: shape.whole({ least: 1 }), evidence: T, honoured: shape.yesNo(), answer: T }),
+);
+const measureRepeat = shape.named(
+  "MeasureRepeat",
+  "A look-up an agent made again: the tool and its arguments as they were made, the turn that repeated it and the turn that made it first.",
+  shape.object({ tool: T, args: T, turn: shape.whole({ least: 1 }), first: shape.whole({ least: 1 }) }),
+);
+const measureMode = shape.named(
+  "MeasureMode",
+  "The script played in one carry mode: each turn's figures, their totals and medians, each planted decision with its check, and the look-ups made (calls of read tools) and the ones that repeated an earlier turn's, each named.",
+  shape.object({
+    mode: carryMode,
+    turns: shape.list(measureTurn),
+    totals: measureFigures,
+    medians: measureFigures,
+    decisions: shape.list(measureDecision),
+    lookups: shape.object({ total: shape.whole({ least: 0 }), repeated: shape.list(measureRepeat) }),
+  }),
+);
+const measurementReport = shape.named(
+  "MeasurementReport",
+  "A run of the session measurement: when it ran, the Author's connection and model, the judging connection and model, the script's hash, the three carry modes as played, and the recommendation of whoever ran it (blank until they write it; a report with none is kept and the page marks it as waiting for one).",
+  shape.object({
+    ran: shape.whole({ least: 0 }),
+    connection: T,
+    model: T,
+    judge: shape.object({ connection: T, model: T }),
+    script: T,
+    modes: shape.list(measureMode),
+    recommendation: T,
+  }),
+);
+const measurementKept = shape.named("MeasurementKept", "A report kept: the id RPE gave it and when it received it (ms).", shape.object({ id: T, at: shape.whole({ least: 0 }) }));
+const measurementRow = shape.named(
+  "MeasurementRow",
+  "A kept report in the list: its id, when RPE received it, when it ran, the connection and model it ran on, the judging connection, and whether its recommendation is written.",
+  shape.object({ id: T, at: shape.whole({ least: 0 }), ran: shape.whole({ least: 0 }), connection: T, model: T, judge: T, recommended: shape.yesNo() }),
+);
+const measurementRead = shape.named("MeasurementRead", "A kept report whole, as it was sent, with its id and when RPE received it.", shape.object({ id: T, at: shape.whole({ least: 0 }), report: measurementReport }));
+
 export const SESSIONS_PATH = "/api/v1/chats/:chat/sessions";
 export const SESSION_PATH = "/api/v1/chats/:chat/sessions/:session";
+export const MEASUREMENTS_PATH = "/api/v1/sessions/measurements";
+export const MEASUREMENT_PATH = "/api/v1/sessions/measurements/:id";
 
 export interface SessionRoutesDeps {
   turns: Turns;
@@ -267,6 +324,53 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
         const from = query.after === undefined ? 0 : all.findIndex((r) => r.turn === query.after) + 1;
         const items = all.slice(from, from + query.limit);
         return { items, next: from + items.length < all.length ? (items[items.length - 1]?.turn ?? null) : null };
+      },
+    }),
+    route({
+      method: "POST",
+      path: MEASUREMENTS_PATH,
+      access: "page",
+      group: "sessions",
+      does: "Keeps a report of the session measurement, whole as it was sent: the three carry modes as played (each turn's tokens, time and calls, totals and medians, each planted decision with its check and the judge's answer, the look-ups and the repeated ones), when and on what it ran, and the recommendation of whoever ran it (blank until they write it). Every report is kept; one that does not fit its type is refused. Nothing here changes a setting: the default carry mode changes only when he presses it on the Sessions page.",
+      body: measurementReport,
+      reply: measurementKept,
+      handle: async ({ user, body }) => {
+        const id = crypto.randomUUID();
+        const at = Date.now();
+        await writes.run(() => turns.store.db.query("INSERT INTO measurement (user, id, at, report) VALUES (?, ?, ?, ?)").run(user, id, at, JSON.stringify(body)), "a session measurement's report");
+        return { id, at };
+      },
+    }),
+    route({
+      method: "GET",
+      path: MEASUREMENTS_PATH,
+      access: "page",
+      group: "sessions",
+      does: "The kept reports of the session measurement, newest received first, a page at a time: each with when it ran, the connection and model it ran on, the judging connection and whether its recommendation is written. One report whole is read by its id.",
+      reply: shape.page(measurementRow),
+      paged: { sizes: () => ({ default: pageSize(), most: pageSize() * 10 }) },
+      handle: async ({ user, query }) => {
+        const rows = turns.store.db
+          .query<{ id: string; at: number; ran: number; connection: string; model: string; judge: string; recommendation: string }, [string]>(
+            "SELECT id, at, json_extract(report, '$.ran') AS ran, json_extract(report, '$.connection') AS connection, json_extract(report, '$.model') AS model, json_extract(report, '$.judge.connection') AS judge, json_extract(report, '$.recommendation') AS recommendation FROM measurement WHERE user = ? ORDER BY at DESC, id DESC",
+          )
+          .all(user);
+        const from = query.after === undefined ? 0 : rows.findIndex((r) => r.id === query.after) + 1;
+        const items = rows.slice(from, from + query.limit).map((r) => ({ id: r.id, at: r.at, ran: r.ran, connection: r.connection, model: r.model, judge: r.judge, recommended: r.recommendation.trim() !== "" }));
+        return { items, next: from + items.length < rows.length ? (items[items.length - 1]?.id ?? null) : null };
+      },
+    }),
+    route({
+      method: "GET",
+      path: MEASUREMENT_PATH,
+      access: "page",
+      group: "sessions",
+      does: "One kept report of the session measurement, whole as it was sent, with when RPE received it.",
+      reply: measurementRead,
+      handle: async ({ user, params }) => {
+        const row = turns.store.db.query<{ id: string; at: number; report: string }, [string, string]>("SELECT id, at, report FROM measurement WHERE user = ? AND id = ?").get(user, params.id);
+        if (row === null) throw new RouteError(404, `RPE holds no report ${params.id} of the session measurement.`);
+        return { id: row.id, at: row.at, report: JSON.parse(row.report) as Infer<typeof measurementReport> };
       },
     }),
   ] as const;

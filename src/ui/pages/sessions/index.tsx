@@ -12,6 +12,7 @@ import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, cut, when } from "../../words";
+import { MeasurementSection } from "./measurement";
 import { parentWords, SessionOpen } from "./open";
 import { replyOf } from "../../client";
 
@@ -69,6 +70,8 @@ export interface SessionsViewProps {
   onOpen(id: string | null): void;
   /** The open session, drawn. */
   children?: ComponentChildren;
+  /** Below the sessions: the session measurement (`measurement.tsx`), whichever session is open. */
+  measurement?: ComponentChildren;
 }
 
 /** Scenes newest first, then the other sessions grouped under the turn that started them. */
@@ -124,11 +127,12 @@ export function SessionsView(props: SessionsViewProps) {
         </div>
         {props.openId === null ? null : <div class="lre-stack rpe-open-session">{props.children}</div>}
       </div>
+      {props.measurement}
     </div>
   );
 }
 
-export function SessionsPage(props: { chat: string; at: readonly string[] | undefined }) {
+function ChatSessions(props: { chat: string; at: readonly string[] | undefined }) {
   const app = useApp();
   const { chat } = props;
   const [changed, setChanged] = useState<ReadonlyMap<string, SessionShown>>(new Map());
@@ -149,7 +153,7 @@ export function SessionsPage(props: { chat: string; at: readonly string[] | unde
   const open = openId === null ? null : (items.find((s) => s.id === openId) ?? null);
   const go = (id: string | null): void => app.go({ page: "sessions", chat, at: id === null ? [] : [id] });
   return (
-    <SessionsView sessions={items} scenes={scenes} openId={openId} loading={list.loading} problem={list.problem} onOpen={go}>
+    <SessionsView sessions={items} scenes={scenes} openId={openId} loading={list.loading} problem={list.problem} onOpen={go} measurement={<MeasurementSection chat={chat} />}>
       {open === null ? (
         <p class="lre-muted rpe-line">{list.loading || list.more ? "Reading the sessions…" : "That session is not on this chat."}</p>
       ) : (
@@ -165,4 +169,15 @@ export function SessionsPage(props: { chat: string; at: readonly string[] | unde
   );
 }
 
-export const entry: PageEntry = { id: "sessions", title: "Sessions", icon: "layers", shells: ["web", "drawer"], needsChat: true, often: false, order: 35, render: (route) => <SessionsPage chat={route.chat} at={route.at} /> };
+/** The page: a chat's sessions with the measurement below them, or with no chat open the measurement alone (its reports are the user's, not a chat's). */
+export function SessionsPage(props: { chat: string | null; at: readonly string[] | undefined }) {
+  if (props.chat !== null) return <ChatSessions chat={props.chat} at={props.at} />;
+  return (
+    <div class="lre-stack rpe-page" data-page="sessions">
+      <PageHeader title="Sessions" sub="Open a chat to see its sessions. The session measurement needs none." />
+      <MeasurementSection chat={null} />
+    </div>
+  );
+}
+
+export const entry: PageEntry = { id: "sessions", title: "Sessions", icon: "layers", shells: ["web", "drawer"], needsChat: false, withChat: true, often: false, order: 35, render: (route) => <SessionsPage chat={route.chat ?? null} at={route.at} /> };

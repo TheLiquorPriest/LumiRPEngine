@@ -98,6 +98,19 @@ const OWN_CSS = `
 .rpe-gauge-reserve{background:var(--lre-hairline)}
 .rpe-window[data-full=yes] .rpe-gauge-held{background:var(--lre-warn)}
 .rpe-open-session{min-width:0}
+.rpe-measure{container-type:inline-size;min-width:0}
+.rpe-measure-modes{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s3);min-width:0}
+.rpe-measure-mode{min-width:0;padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-lg)}
+.rpe-measure-title{margin:0;display:flex;align-items:center;flex-wrap:wrap;gap:var(--lre-s2);font-size:var(--lre-fs-lg)}
+.rpe-measure-repeats{margin:0;padding-left:1.2em;min-width:0}
+.rpe-measure-turns{max-width:100%;overflow-x:auto;overscroll-behavior:contain}
+.rpe-measure-table{border-collapse:collapse;font-size:var(--lre-fs-sm);width:max-content}
+.rpe-measure-table th,.rpe-measure-table td{padding:var(--lre-s1) var(--lre-s2);border-top:1px solid var(--lre-hairline);text-align:right;white-space:nowrap}
+.rpe-measure-table thead th{color:var(--lre-muted);font-weight:600}
+.rpe-measure-table tbody th{text-align:left}
+@container (min-width:900px){
+.rpe-measure-modes{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
 .rpe-beat{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lre-s2) var(--lre-s3);min-width:0}
 .rpe-beat>*{min-width:0}
 @media (min-width:1000px){

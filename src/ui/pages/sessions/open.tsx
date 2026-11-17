@@ -16,13 +16,7 @@ import { useSelect } from "../../store";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, num, when } from "../../words";
 import { RunUsage, windowOfModel } from "../usage";
-
-const CARRY_WORDS: Readonly<Record<CarryMode, { name: string; about: string }>> = {
-  continuing: { name: "Continuing", about: "what the Author did in its earlier turns, as it did it" },
-  records: { name: "Records", about: "the Author's own record of each earlier turn" },
-  nothing: { name: "Nothing", about: "only the summary the scene opened with" },
-};
-const CARRY_MODES: readonly CarryMode[] = ["continuing", "records", "nothing"];
+import { CARRY_MODES, CARRY_WORDS } from "./carry";
 
 const REASON_WORDS: Readonly<Record<NonNullable<CompactionShown["reason"]>, string>> = {
   "would-not-fit": "the next call would not fit the window",
