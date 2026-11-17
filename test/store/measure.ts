@@ -19,7 +19,9 @@ import type { WorldDoc } from "../../src/shared/world";
 import { applyEvent } from "../../src/engine/events";
 import { initialState } from "../../src/engine/world-state";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
-import { engine, goTo, hand, hashOf, inventedWorld, pay, POV, registry, say, tick, USER } from "./fixtures";
+import { timeDue } from "../../src/store/due";
+import { WORLD_STATE_DEFAULTS } from "../../src/store/world-state";
+import { engine, goTo, hand, hashOf, inventedWorld, pay, POV, registry, say, SHIPPED_PART, tick, USER } from "./fixtures";
 
 const RUNS = 9;
 
@@ -208,10 +210,13 @@ function treeMeasure(): void {
   console.log(`  ${whole.label}, the whole world printed: median ${ms(whole.median)}`);
   // The tree over each next state is made from the last one's, and its levels' words are kept with them: a print after a turn words
   // only the levels the turn reached. An ordinary turn (time passes, Wren moves, she pays, her knife goes in or out of her satchel),
-  // and one that also holds a pack's event (the world is copied whole, so each level is compared by what it holds).
-  for (const [label, extra] of [
-    ["an ordinary turn", []],
-    ["a turn with a pack's event", [{ type: "space.where", data: { entity: POV, zone: "by the door" } } as unknown as LedgerEvent]],
+  // one that also holds a pack's event (the world is copied whole, so each level is compared by what it holds), and an ordinary turn
+  // printed as `world_query` asks, each level saying what falls due under it in the time ahead.
+  const due = { due: timeDue(store), ahead: WORLD_STATE_DEFAULTS.dueAhead };
+  for (const [label, extra, reading] of [
+    ["an ordinary turn", [], undefined],
+    ["a turn with a pack's event", [{ type: "space.where", data: { entity: POV, zone: "by the door" } } as unknown as LedgerEvent], undefined],
+    ["an ordinary turn, with what falls due", [], due],
   ] as const) {
     const made: number[] = [];
     const printed: number[] = [];
@@ -223,7 +228,7 @@ function treeMeasure(): void {
       const t0 = performance.now();
       const next = store.viewOf(state);
       const t1 = performance.now();
-      say(next, "world", "full");
+      next.print("world", "full", SHIPPED_PART, reading);
       const t2 = performance.now();
       if (i >= 2) {
         made.push(t1 - t0);

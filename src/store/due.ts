@@ -81,10 +81,12 @@ function crossing(ctx: ReadContext, who: string, need: string, line: number, fro
   return hi;
 }
 
-/** Everything but the schedules' slots that falls due in `(from, to]` and concerns the part asked about: futures, needs, endings, fading. */
-function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeView, inside: (ref: string) => boolean, root: string | null, from: number, to: number): DueEntry[] {
+/**
+ * Everything but the schedules' slots that falls due in `(from, to]`: futures, arrivals, needs, endings, fading; each with the levels
+ * it concerns (a part of the tree lists it where one of them is in that part; none named, only a list of the whole world does).
+ */
+function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeView, from: number, to: number): { entry: DueEntry; refs: (string | null)[] }[] {
   const world = ctx.world;
-  const here = (...refs: (string | null)[]): boolean => root === null || refs.some((r) => r !== null && inside(r));
   /** The tree ref words name: an id, or a name of someone or a place. */
   const refOf = (words: string): string | null => {
     const said = words.trim().toLowerCase();
@@ -95,44 +97,42 @@ function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeV
     const place = Object.entries(world.places).find(([, p]) => p.name.trim().toLowerCase() === said);
     return place ? `place:${place[0]}` : null;
   };
-  const out: DueEntry[] = [];
+  const out: { entry: DueEntry; refs: (string | null)[] }[] = [];
   for (const f of futuresOf(store, state)) {
     if (!(f.due > from && f.due <= to)) continue;
     const refs = f.who.map(refOf);
     const where = f.place === null ? null : refOf(f.place);
-    if (!here(where, ...refs)) continue;
     const who = refs.flatMap((r) => (r !== null && r.startsWith("entity:") ? [r.slice("entity:".length)] : []));
-    out.push({ at: f.due, kind: "future", ...(where !== null ? { where } : {}), ...(who.length > 0 ? { who } : {}), what: f.text });
+    out.push({ entry: { at: f.due, kind: "future", ...(where !== null ? { where } : {}), ...(who.length > 0 ? { who } : {}), what: f.text }, refs: [where, ...refs] });
   }
   // A principal out of view whose recorded intention has a time in the span: who, from where, and where it means to be. Nothing is applied: what it did meanwhile is the Author's to say.
   for (const a of awayOf(store, state)) {
     if (!(a.until > from && a.until <= to)) continue;
     const to_ = a.nameRefs.find((r) => r.startsWith("place:")) ?? null;
     const comes = a.ref !== null ? [a.ref] : [];
-    if (!here(a.ref, to_, a.placeRef)) continue;
     const what: JsonValue = { character: a.name ?? a.character, ...(a.placeRef !== null ? { from: a.placeRef } : a.whereabouts !== null ? { from: a.whereabouts } : {}), ...(to_ !== null ? { to: to_ } : {}), ...(a.intention !== null ? { intention: a.intention } : {}) };
-    out.push({ at: a.until, kind: "arrival", ...(to_ !== null ? { where: to_ } : {}), ...(comes.length > 0 ? { who: comes.filter((r) => r.startsWith("entity:")).map((r) => r.slice("entity:".length)) } : {}), what });
+    out.push({ entry: { at: a.until, kind: "arrival", ...(to_ !== null ? { where: to_ } : {}), ...(comes.length > 0 ? { who: comes.filter((r) => r.startsWith("entity:")).map((r) => r.slice("entity:".length)) } : {}), what }, refs: [a.ref, to_, a.placeRef] });
   }
   const settings = needsSettingsOf(world);
   for (const [id, e] of Object.entries(state.world.entities)) {
     const ref = `entity:${id}`;
     // An effect recorded with an end (a loan, a grant, a permission), ending in the span.
     for (const r of e.relations) {
-      if (typeof r.until === "number" && r.until > from && r.until <= to && here(ref, `entity:${r.to}`)) out.push({ at: r.until, kind: "ending", who: [id], what: { relation: r.type, to: r.to } });
+      if (typeof r.until === "number" && r.until > from && r.until <= to) out.push({ entry: { at: r.until, kind: "ending", who: [id], what: { relation: r.type, to: r.to } }, refs: [ref, `entity:${r.to}`] });
     }
     // A need that rises with time, crossing the line it alerts at: the POV's, and anyone whose need was recorded.
-    if ((id === world.pov || isRecord(e.fields.needs)) && here(ref)) {
+    if (id === world.pov || isRecord(e.fields.needs)) {
       for (const need of NEED_IDS) {
         const tuned = settings[need];
         if (!tuned.on) continue;
         const at = crossing(ctx, id, need, tuned.alert, from, to);
-        if (at !== null) out.push({ at, kind: "need", who: [id], what: { need, line: tuned.alert } });
+        if (at !== null) out.push({ entry: { at, kind: "need", who: [id], what: { need, line: tuned.alert } }, refs: [ref] });
       }
     }
   }
   // Regard a world's half-life halves, where it sets one: listed with the pair; nothing is applied.
   for (const f of optionalQuery(ctx, "relationships.fading")?.(ctx, { from, to }) ?? []) {
-    if (here(`entity:${f.from}`, `entity:${f.to}`)) out.push({ at: f.at, kind: "fading", who: [f.from, f.to], what: { axis: f.axis, value: f.value, halved: f.halved } });
+    out.push({ entry: { at: f.at, kind: "fading", who: [f.from, f.to], what: { axis: f.axis, value: f.value, halved: f.halved } }, refs: [`entity:${f.from}`, `entity:${f.to}`] });
   }
   return out;
 }
@@ -177,10 +177,56 @@ export function timeDue(store: Store): DueSource {
         if (entry !== null) items.push({ at: i.at, ...entry });
       }
       // The rest of what falls due, each kind kept to the part asked about, merged in time order with the slots.
-      items.push(...otherDue(store, ctx, state, view, inside, root, span.from, span.to));
+      for (const o of otherDue(store, ctx, state, view, span.from, span.to)) if (root === null || o.refs.some((r) => r !== null && inside(r))) items.push(o.entry);
       items.sort((a, b) => a.at - b.at);
       const listed = items.slice(0, Math.max(0, most));
       return { items: listed, more: more === null ? null : more + (items.length - listed.length) };
+    },
+    under(state, span) {
+      const doc = store.env.worlds(state.world.revision);
+      if (!doc || span.to <= span.from) return () => null;
+      const ctx = store.env.registry.context(doc, state.world);
+      const world = ctx.world;
+      const view = store.viewOf(state);
+      // Each that falls due, with the levels it concerns (null: every one), how many, and in the order a listing breaks a tie of
+      // time in: each schedule's slot, by schedule and slot (its first start, and its run counted as `due` counts it), then the rest.
+      const all: { refs: (string | null)[] | null; at: number; kind: string; n: number | null }[] = [];
+      const calendar = chatWorld(ctx);
+      for (const schedule of chatSchedulesIn(ctx)) {
+        const who = scheduleOwners(store.env.registry, world, state.world, schedule);
+        schedule.slots.forEach((s, slot) => {
+          const { starts, more } = slotStarts(calendar, [schedule], span.from, span.to, 1, (_, i) => i === slot);
+          const first = starts[0];
+          if (first === undefined) return;
+          const place = schedule.target === "place" && typeof s.value === "string" && own(world.places, s.value) ? `place:${s.value}` : null;
+          all.push({ refs: who.length === 0 ? null : [...who.map((id) => `entity:${id}`), place], at: first.at, kind: schedule.target, n: more === null ? null : 1 + more });
+        });
+      }
+      for (const o of otherDue(store, ctx, state, view, span.from, span.to)) all.push({ refs: o.refs, at: o.entry.at, kind: o.entry.kind, n: 1 });
+      // Summed under each level each concerns and every level above it, the soonest kept (`due(state, span, level, 1)`, at once).
+      type Under = { n: number | null; at: number; rank: number; kind: string };
+      const join = (a: Under | undefined, b: Under): Under => {
+        if (a === undefined) return b;
+        const first = b.at < a.at || (b.at === a.at && b.rank < a.rank) ? b : a;
+        return { n: a.n === null || b.n === null ? null : a.n + b.n, at: first.at, rank: first.rank, kind: first.kind };
+      };
+      let everywhere: Under | undefined;
+      const byLevel = new Map<string, Under>();
+      all.forEach((d, rank) => {
+        const one: Under = { n: d.n, at: d.at, rank, kind: d.kind };
+        if (d.refs === null) {
+          everywhere = join(everywhere, one);
+          return;
+        }
+        const levels = new Set<string>();
+        for (const ref of d.refs) for (let r: string | null = ref; r !== null && !levels.has(r); r = view.parentOf(r)) levels.add(r);
+        for (const level of levels) byLevel.set(level, join(byLevel.get(level), one));
+      });
+      return (ref) => {
+        const mine = byLevel.get(ref);
+        const sum = mine === undefined ? everywhere : everywhere === undefined ? mine : join(mine, everywhere);
+        return sum === undefined ? null : { n: sum.n, at: sum.at, kind: sum.kind };
+      };
     },
   };
 }

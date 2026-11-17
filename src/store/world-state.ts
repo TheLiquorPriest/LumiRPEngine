@@ -127,9 +127,14 @@ export interface DueListing {
   more: number | null;
 }
 
+/** What falls due under each level of the tree: how many (null: more than are counted), and the soonest's time and kind; null for none. */
+export type DueUnder = (level: string) => { n: number | null; at: number; kind: string } | null;
+
 /** What time brings due for a span and a part of the tree, the soonest `most` of it (the engine tools' `DueList`). */
 export interface DueSource {
   due(state: StoreState, span: { from: number; to: number }, at: string | null, most: number): DueListing;
+  /** Every level's at once, as `due(state, span, level, 1)` gives it for each. Where a source gives none, each level is asked by `due`. */
+  under?(state: StoreState, span: { from: number; to: number }): DueUnder;
 }
 
 export interface WorldStateInput {

@@ -41,8 +41,8 @@ import { BLANK_REVISION, clockRecorded } from "./blank";
 import { settled, standing } from "./facts";
 import type { FoldEnv } from "./fold";
 import type { Fact, Mark, StoreState, Touched } from "./types";
-import { type Part, renderView, type View, type ViewLine } from "./words";
-import type { DueSource } from "./world-state";
+import { type Part, renderView, type View, type ViewLine, wordLine } from "./words";
+import type { DueSource, DueUnder } from "./world-state";
 
 /** What a reading of the tree passes in beyond the state: what time brings due, and how far ahead a reflection counts it. */
 export interface ViewReading {
@@ -273,10 +273,30 @@ interface Kept {
   stops: Stop[];
   /** Its lines worded, by the part that worded them. */
   words: Map<Part, string>;
+  /** The words of its lines after its own line, by part: what a reading's lines made from it say beside their own line (`keptWords`). */
+  after: Map<Part, string>;
+  /** For a reading's lines, the lines with none they were made from (`readKept`); null for those. */
+  plain: Kept | null;
   /** The last tree that found it current (`serial`). */
   seen: number;
   /** It with the levels below it a query shows, by how many levels further down the query goes (`Block`). */
   blocks: Map<number, Block>;
+}
+
+/** A level's kept lines worded by `part`, once; a reading's own line is worded beside the words its plain lines after it have. */
+function keptWords(k: Kept, part: Part): string {
+  const known = k.words.get(part);
+  if (known !== undefined) return known;
+  let text: string;
+  if (k.plain === null) text = renderView(k.lines, part);
+  else {
+    const rest = k.plain.after.get(part) ?? renderView(k.plain.lines.slice(1), part);
+    k.plain.after.set(part, rest);
+    const head = wordLine(part, k.lines[0] as ViewLine) ?? "";
+    text = head === "" ? rest : rest === "" ? head : `${head}\n${rest}`;
+  }
+  k.words.set(part, text);
+  return text;
 }
 
 /**
@@ -306,8 +326,7 @@ function linesOf(b: Block): ViewLine[] {
 function wordsOf(b: Block, part: Part): string {
   let text = b.words.get(part);
   if (text !== undefined) return text;
-  let own = b.own.words.get(part);
-  if (own === undefined) b.own.words.set(part, (own = renderView(b.own.lines, part)));
+  const own = keptWords(b.own, part);
   const texts = own === "" ? [] : [own];
   for (const c of b.children) {
     const t = wordsOf(c, part);
@@ -383,8 +402,10 @@ export class TreeView {
   private readonly serial = ++trees;
   /** Each level's lines kept, by its ref, a slot for each indent with its values and without (`keptOf`): shared with the tree this one was made from where nothing they read of other levels changed (`update`). */
   private readonly kept: Map<string, Kept[]>;
-  /** The same for each reading: this tree's own, as what falls due moves with the clock. */
+  /** For each reading, the lines of the levels something falls due under (`readKept`): this tree's own, as what falls due moves with the clock. */
   private readonly keptRead = new Map<DueSource, Map<number, Map<string, Kept[]>>>();
+  /** What falls due under every level, for each reading (`dueUnder`). */
+  private readonly dueRead = new Map<DueSource, Map<number, DueUnder>>();
   /** Each group's members' names, by the group (`members`). */
   private membersOf: Map<string, string[]> | null = null;
   /** What the game systems' values are read from in this state, and who carries a cash account: kept for the trees made from this one. */
@@ -766,11 +787,24 @@ export class TreeView {
     };
   }
 
-  /** What falls due under a level in the reading's time ahead: how many and the soonest; null without a due source, or with none due. */
+  /**
+   * What falls due under a level in the reading's time ahead: how many and the soonest; null without a due source, or with none due.
+   * A source that reads every level at once (`DueSource.under`) is read once for the tree and the reading.
+   */
   private dueUnder(ref: string): Reflection["due"] {
     if (this.reading === null) return null;
     const now = this.state.world.clock;
-    const listing = this.reading.due.due(this.state, { from: now, to: now + this.reading.ahead }, ref, 1);
+    const span = { from: now, to: now + this.reading.ahead };
+    const source = this.reading.due;
+    if (source.under !== undefined) {
+      let byAhead = this.dueRead.get(source);
+      if (!byAhead) this.dueRead.set(source, (byAhead = new Map()));
+      let under = byAhead.get(this.reading.ahead);
+      if (!under) byAhead.set(this.reading.ahead, (under = source.under(this.state, span)));
+      const found = under(ref);
+      return found === null ? null : { n: found.n, after: found.at - now, kind: found.kind };
+    }
+    const listing = source.due(this.state, span, ref, 1);
     const soonest = listing.items[0];
     if (soonest === undefined) return null;
     return { n: listing.more === null ? null : listing.items.length + listing.more, after: soonest.at - now, kind: soonest.kind };
@@ -1067,7 +1101,7 @@ export class TreeView {
       readPass(() => {
         if (shown === "all") return this.levelLines(node, depth, shown);
         const lines = [...this.keptOf(node, depth, shown, reading).lines];
-        if (reading === undefined) this.keepReads();
+        this.keepReads();
         return lines;
       }),
     );
@@ -1213,21 +1247,14 @@ export class TreeView {
 
   /**
    * A level's own lines at `indent` (its own line, with its own values or none), as kept (`Kept`): the kept ones where everything
-   * they were made from is the same in this tree, else made afresh and kept. A reading's are this tree's own.
+   * they were made from is the same in this tree, else made afresh and kept. With a reading, `readKept`'s.
    */
   private keptOf(node: Node, indent: number, shown: "own" | "none", reading: ViewReading | undefined): Kept {
-    let store = this.kept;
-    if (reading !== undefined) {
-      let byAhead = this.keptRead.get(reading.due);
-      if (!byAhead) this.keptRead.set(reading.due, (byAhead = new Map()));
-      let read = byAhead.get(reading.ahead);
-      if (!read) byAhead.set(reading.ahead, (read = new Map()));
-      store = read;
-    }
-    let slots = store.get(node.ref);
+    if (reading !== undefined) return this.readKept(node, indent, shown, reading);
+    let slots = this.kept.get(node.ref);
     const slot = indent * 2 + (shown === "own" ? 1 : 0);
     const was = slots?.[slot];
-    if (was !== undefined && (was.seen === this.serial || (reading === undefined && was.seen === this.madeFrom && this.changedSince()?.own.has(node.ref) === false))) {
+    if (was !== undefined && (was.seen === this.serial || (was.seen === this.madeFrom && this.changedSince()?.own.has(node.ref) === false))) {
       was.seen = this.serial;
       return was;
     }
@@ -1251,10 +1278,42 @@ export class TreeView {
     } finally {
       this.stopsSeen = outer;
     }
-    const made: Kept = { node, entity, marks, facts, note, reads, systems, lines, stops: [...stops.values()], words: new Map(), seen: this.serial, blocks: new Map() };
-    if (!slots) store.set(node.ref, (slots = []));
+    const made: Kept = { node, entity, marks, facts, note, reads, systems, lines, stops: [...stops.values()], words: new Map(), after: new Map(), plain: null, seen: this.serial, blocks: new Map() };
+    if (!slots) this.kept.set(node.ref, (slots = []));
     slots[slot] = made;
     return made;
+  }
+
+  /**
+   * A level's own lines with a reading: where nothing falls due under it they read as with none (`keptOf`'s); else its own line says
+   * what does, its other lines are those, and they are this tree's own, as what falls due moves with the clock.
+   */
+  private readKept(node: Node, indent: number, shown: "own" | "none", reading: ViewReading): Kept {
+    const plain = this.unread(() => this.keptOf(node, indent, shown, undefined));
+    if (this.dueUnder(node.ref) === null) return plain;
+    let byAhead = this.keptRead.get(reading.due);
+    if (!byAhead) this.keptRead.set(reading.due, (byAhead = new Map()));
+    let read = byAhead.get(reading.ahead);
+    if (!read) byAhead.set(reading.ahead, (read = new Map()));
+    let slots = read.get(node.ref);
+    const slot = indent * 2 + (shown === "own" ? 1 : 0);
+    const was = slots?.[slot];
+    if (was !== undefined) return was;
+    const made: Kept = { ...plain, lines: [this.levelLine(node, indent), ...plain.lines.slice(1)], words: new Map(), after: new Map(), plain, seen: this.serial, blocks: new Map() };
+    if (!slots) read.set(node.ref, (slots = []));
+    slots[slot] = made;
+    return made;
+  }
+
+  /** Runs `read` as with no reading: no reflection says what falls due. */
+  private unread<T>(read: () => T): T {
+    const reading = this.reading;
+    this.reading = null;
+    try {
+      return read();
+    } finally {
+      this.reading = reading;
+    }
   }
 
   /**
@@ -1263,6 +1322,8 @@ export class TreeView {
    * which the groups heading does not add to.
    */
   private blockOf(node: Node, indent: number, level: number, max: number, reading: ViewReading | undefined): Block {
+    // With a reading, a level nothing falls due under has nothing due below it either: its block reads as with none.
+    if (reading !== undefined && this.dueUnder(node.ref) === null) return this.unread(() => this.blockOf(node, indent, level, max, undefined));
     const heading = node.kind === "groups";
     const own = this.keptOf(node, indent, heading || level >= max ? "none" : "own", reading);
     const was = own.blocks.get(max - level);
@@ -1310,7 +1371,7 @@ export class TreeView {
           this.stopsSeen = null;
         }
         if (max > 0) for (const c of top.children) blocks.push(this.blockOf(this.nodes.get(c) as Node, 1, 1, max, reading));
-        if (reading === undefined) this.keepReads();
+        this.keepReads();
       }),
     );
     for (const b of blocks) for (const s of b.stops) if (!stops.has(s.place)) stops.set(s.place, s);
