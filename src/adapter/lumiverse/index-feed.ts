@@ -47,10 +47,11 @@ const namesText = (e: LvEntry): string => [e.comment, ...e.keys, ...e.secondaryK
 const namesId = (entry: string): string => `${entry}\u0000n`;
 const namesScope = (book: string): string => `${book}\u0000n`;
 
-/** One word a search of entries asks the index for: whole, or as the start of a word. */
+/** One word a search of entries asks the index for: whole, or as the start of a word; `names`: of the entries' names alone. */
 export interface EntryWord {
   text: string;
   prefix: boolean;
+  names?: true;
 }
 
 /** One place the index and Lumiverse's rows are compared, one at a time per chat or book. */
@@ -163,14 +164,18 @@ export class IndexFeed {
   }
 
   /**
-   * The entries of these books the index finds for any of `words`, each asked alone of the entries' names and of their whole texts, at most `limit`
-   * hits for each ask: the rows of those entries alone, in each book's order (plan §4.2 "No copy": a search reads only what the index found).
+   * The entries of these books the index finds for any of `words`, each asked alone of the entries' names and, but for a word of names
+   * alone, of their whole texts, at most `limit` hits for each ask: the rows of those entries alone, in each book's order (plan §4.2
+   * "No copy": a search reads only what the index found).
    */
   async foundEntries(books: readonly string[], words: readonly EntryWord[], limit: number): Promise<LvEntry[]> {
     const held = await Promise.all(books.map((b) => this.ensureBook(b)));
     const { index, user } = this.deps;
     const asks = books.flatMap((book) =>
-      words.flatMap((w) => [index.search("entries", user, w.text, { scope: namesScope(book), limit, prefix: w.prefix }), index.search("entries", user, w.text, { scope: book, limit, prefix: w.prefix })]),
+      words.flatMap((w) => [
+        index.search("entries", user, w.text, { scope: namesScope(book), limit, prefix: w.prefix }),
+        ...(w.names === true ? [] : [index.search("entries", user, w.text, { scope: book, limit, prefix: w.prefix })]),
+      ]),
     );
     const ids = new Set<string>();
     for (const hits of await Promise.all(asks)) for (const h of hits) ids.add(h.id.endsWith("\u0000n") ? h.id.slice(0, -2) : h.id);
