@@ -41,7 +41,8 @@ export const MIGRATE_SETTINGS: readonly Setting[] = [
   {
     key: "migration.page",
     default: 20,
-    takes: { type: "whole", least: 1, most: 1000 },
+    takes: { type: "whole", least: 1 },
+    advice: [{ above: 1000, says: "Over 1000 carried turns, each with what the old engine recorded, are read and drawn on one page." }],
     levels: ["global"],
     perConnection: false,
     name: "Carried turns per page",
@@ -51,7 +52,8 @@ export const MIGRATE_SETTINGS: readonly Setting[] = [
   {
     key: "migration.pageMost",
     default: 200,
-    takes: { type: "whole", least: 1, most: 5000 },
+    takes: { type: "whole", least: 1 },
+    advice: [{ above: 5000, says: "One request may ask for over 5000 carried turns, each read whole from the old records." }],
     levels: ["global"],
     perConnection: false,
     name: "Most carried turns a page may ask for",
