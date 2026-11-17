@@ -187,16 +187,16 @@ export function addDrop(drops: DropCounts, why: string, fields: Record<string, s
   else drops.set(key, { why, fields, count });
 }
 
-/** A reason in the words of the part's `dropped_<why>` line; its name and fields as they are where the part has no such line. */
-export function dropWords(say: Say, drop: Drop): string {
-  return say(`dropped_${drop.why}`, drop.fields) ?? [drop.why, ...Object.values(drop.fields)].join(" ");
+/** The part's line `line` filled with `fields`; where the part has no such line, its name and the fields' values, as data. */
+export function sayOr(say: Say, line: string, fields: Record<string, string | number> = {}): string {
+  return say(line, fields) ?? [line, ...Object.values(fields)].join(" ");
 }
 
 /** What a job's end says of the proposals dropped, in the part's `proposed_nothing` and `dropped_summary` lines; null when none was. */
 export function dropSummary(raw: number, kept: number, drops: DropCounts, say: Say): string | null {
   if (kept > 0 && drops.size === 0) return null;
   if (raw === 0) return say("proposed_nothing") ?? null;
-  const reasons = [...drops.values()].sort((a, b) => b.count - a.count).map((d) => `${d.count} ${dropWords(say, d)}`);
+  const reasons = [...drops.values()].sort((a, b) => b.count - a.count).map((d) => `${d.count} ${sayOr(say, `dropped_${d.why}`, d.fields)}`);
   return say("dropped_summary", { dropped: raw - kept, proposed: raw, reasons: reasons.join("; ") }) ?? JSON.stringify({ dropped: raw - kept, proposed: raw, reasons });
 }
 

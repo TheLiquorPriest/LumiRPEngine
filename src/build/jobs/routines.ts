@@ -34,7 +34,7 @@ import type { WorldState } from "../../engine/state";
 import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "../../engine/visibility";
 import { initialState, minutesBetween } from "../../engine/world-state";
 import { blockOnDay, routineIssues } from "../../packs/castlife/core/routines";
-import { addDrop, snake, type DropCounts } from "./checks";
+import { addDrop, type Say, sayOr, snake, type DropCounts } from "./checks";
 
 /** A job's input as the job reads it: whom it proposes for (absent, every one it may read), and where a second pass starts. */
 export interface RoutineJobInput {
@@ -432,26 +432,26 @@ function shortQuote(quote: string): string {
   return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 1))}…`;
 }
 
-/** A cited source checked against what the job reads: an entry or a field it may read, holding the quote. Why not, when it isn't. */
-function checkSource(scope: RoutineScope, raw: JsonValue | undefined): CheckedSource | string {
-  if (!isRecord(raw)) return "it cites no source";
+/** A cited source checked against what the job reads: an entry or a field it may read, holding the quote. Why not, when it isn't, in the words of Build's jobs part (`fix_<why>`). */
+function checkSource(scope: RoutineScope, raw: JsonValue | undefined, say: Say): CheckedSource | string {
+  if (!isRecord(raw)) return sayOr(say, "fix_no_source");
   const quote = typeof raw.quote === "string" ? raw.quote.trim() : "";
-  if (plainText(quote) === "") return "its source has no quote";
+  if (plainText(quote) === "") return sayOr(say, "fix_no_quote");
   const entry = typeof raw.lore === "string" ? raw.lore : raw.type === "lore" && typeof raw.entry === "string" ? raw.entry : null;
   if (entry !== null) {
     const def = own(scope.world.lore, entry);
-    if (!def || !scope.lore.has(entry)) return `its source "${entry}" isn't a lore entry it may cite`;
+    if (!def || !scope.lore.has(entry)) return sayOr(say, "fix_lore_not_citable", { entry });
     const text = `${def.title}\n${def.content}`;
-    if (!plainText(text).includes(plainText(quote))) return `its quote isn't in ${entry}: copy it word for word`;
+    if (!plainText(text).includes(plainText(quote))) return sayOr(say, "fix_quote_not_in_lore", { entry });
     return { source: { type: "lore", entry, quote: shortQuote(quote) }, key: entry, name: def.title || entry, text, refs: [...def.links] };
   }
   const entity = typeof raw.sheet === "string" ? raw.sheet : raw.type === "sheet" && typeof raw.entity === "string" ? raw.entity : null;
   const field = typeof raw.field === "string" ? raw.field : "";
-  if (entity === null) return 'its source is neither {"lore"} nor {"sheet", "field"}';
-  if (!(scope.people.has(entity) || scope.groups.has(entity))) return `its source "${entity}" isn't a person or group whose sheet it may cite`;
+  if (entity === null) return sayOr(say, "fix_source_shape");
+  if (!(scope.people.has(entity) || scope.groups.has(entity))) return sayOr(say, "fix_sheet_not_citable", { entity });
   const shown = sheetFields(scope, entity).find((f) => f.field === field);
-  if (!shown) return `${nameOf(scope, entity)}'s sheet has no field "${field}" to cite`;
-  if (!plainText(shown.text).includes(plainText(quote))) return `its quote isn't in ${nameOf(scope, entity)}'s ${field}: copy it word for word`;
+  if (!shown) return sayOr(say, "fix_no_sheet_field", { name: nameOf(scope, entity), field });
+  if (!plainText(shown.text).includes(plainText(quote))) return sayOr(say, "fix_quote_not_in_sheet", { name: nameOf(scope, entity), field });
   const value = own(scope.state.entities, entity)?.fields[field];
   const refs = (Array.isArray(value) ? value : [value]).filter((v): v is string => typeof v === "string" && readable(scope, v));
   return { source: { type: "sheet", entity, field, quote: shortQuote(quote) }, key: `${entity}.${field}`, name: `${nameOf(scope, entity)} · ${field}`, text: shown.text, refs };
@@ -521,62 +521,62 @@ function grounded(scope: RoutineScope, owner: EntityId, company: EntityId, sourc
 }
 
 /** Whether a label names someone (a person or group the job reads, but its owner and, for a group, its members) or a place the player can't see yet: what the player reads of a block. */
-function labelProblem(scope: RoutineScope, owner: EntityId, label: string): string | null {
+function labelProblem(scope: RoutineScope, owner: EntityId, label: string, say: Say): string | null {
   const mine = new Set([nameOf(scope, owner), ...(scope.groups.has(owner) ? membersRead(scope, owner).map((m) => nameOf(scope, m)) : [])]);
   const people = [...scope.people].map((id) => nameOf(scope, id)).filter((n) => !mine.has(n));
   const groups = [...scope.groups].map((id) => nameOf(scope, id)).filter((n) => !mine.has(n));
-  if (namesAny(label, people, groups, [...mine].join(" "))) return `its label "${label}" names someone: the player reads labels, so say who in its company`;
-  if (namesAny(label, [], scope.unseen)) return `its label "${label}" names a place the player can't know yet`;
+  if (namesAny(label, people, groups, [...mine].join(" "))) return sayOr(say, "fix_label_names_someone", { label });
+  if (namesAny(label, [], scope.unseen)) return sayOr(say, "fix_label_names_unseen_place", { label });
   return null;
 }
 
 /** A block's or schedule's place as given: a role, or a place the job may name. */
-function readPlace(scope: RoutineScope, raw: JsonValue | undefined, problems: string[]): RoutinePlace | undefined {
+function readPlace(scope: RoutineScope, raw: JsonValue | undefined, problems: string[], say: Say): RoutinePlace | undefined {
   if (raw === undefined || raw === null || raw === "") return undefined;
   const id = typeof raw === "string" ? raw : isRecord(raw) && typeof raw.place === "string" ? raw.place : null;
   if (id === null) {
-    problems.push('its place is "home", "work", "with" or a place id');
+    problems.push(sayOr(say, "fix_place_shape"));
     return undefined;
   }
   if (hasOwn(PLACE_ROLES, id)) return PLACE_ROLES[id];
   if (scope.places.has(id)) return { place: id };
   // A place the world doesn't have is the lint's to name (`routineIssues`); one it has but may not tell of is the job's.
-  if (hasOwn(scope.world.places, id)) problems.push(`its place ${id} isn't one the player may be told of`);
+  if (hasOwn(scope.world.places, id)) problems.push(sayOr(say, "fix_place_not_told", { place: id }));
   return { place: id };
 }
 
-/** One reply item checked against the draft, as one of `batch`'s owners' routine blocks or schedules. */
-function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "routine" | "schedule"; index: number; raw: JsonValue }): RoutineCandidate | null {
+/** One reply item checked against the draft, as one of `batch`'s owners' routine blocks or schedules; what is wrong with it in the words of Build's jobs part. */
+function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "routine" | "schedule"; index: number; raw: JsonValue }, say: Say): RoutineCandidate | null {
   if (!isRecord(item.raw)) return null;
   const raw = item.raw;
   const owner = str(raw.owner);
   const label = neutralizeMacros(str(raw.label)).replace(/\s+/g, " ").slice(0, 80);
   const activity = neutralizeMacros(str(raw.activity)).replace(/\s+/g, " ").slice(0, 40);
-  const c: RoutineCandidate = { type: item.type, owner, at: `${item.type === "routine" ? "routines" : "schedules"}[${item.index}]`, label: label || activity || "(no label)", confidence: typeof raw.confidence === "number" && Number.isFinite(raw.confidence) ? Math.min(1, Math.max(0, raw.confidence)) : 0.5, notes: typeof raw.note === "string" && raw.note.trim() !== "" ? [neutralizeMacros(raw.note.trim()).slice(0, 300)] : [], sources: [], fatal: [], problems: [], lint: [], leak: false };
-  if (!batch.owners.includes(owner)) c.fatal.push(`its owner ${owner === "" ? "is missing" : `"${owner}" isn't one of ${batch.owners.join(", ")}`}`);
-  if (label === "") c.fatal.push("it has no label");
-  if (activity === "") c.fatal.push("it has no activity");
+  const c: RoutineCandidate = { type: item.type, owner, at: `${item.type === "routine" ? "routines" : "schedules"}[${item.index}]`, label: label || activity || sayOr(say, "fix_unlabelled"), confidence: typeof raw.confidence === "number" && Number.isFinite(raw.confidence) ? Math.min(1, Math.max(0, raw.confidence)) : 0.5, notes: typeof raw.note === "string" && raw.note.trim() !== "" ? [neutralizeMacros(raw.note.trim()).slice(0, 300)] : [], sources: [], fatal: [], problems: [], lint: [], leak: false };
+  if (!batch.owners.includes(owner)) c.fatal.push(owner === "" ? sayOr(say, "fix_owner_missing") : sayOr(say, "fix_owner_not_in_pass", { owner, owners: batch.owners.join(", ") }));
+  if (label === "") c.fatal.push(sayOr(say, "fix_no_label"));
+  if (activity === "") c.fatal.push(sayOr(say, "fix_no_activity"));
   // Every cited source is checked; the first that holds is the one it rests on.
   const cited = Array.isArray(raw.sources) ? raw.sources : [raw.source];
   const why: string[] = [];
   for (const s of cited) {
-    const checked = checkSource(scope, s);
+    const checked = checkSource(scope, s, say);
     if (typeof checked === "string") why.push(checked);
     else if (!c.sources.some((x) => x.key === checked.key)) c.sources.push(checked);
   }
-  if (c.sources.length === 0) c.fatal.push(why[0] ?? "it cites no source");
+  if (c.sources.length === 0) c.fatal.push(why[0] ?? sayOr(say, "fix_no_source"));
   else if (why.length > 0) c.notes.push(`a source left out: ${why.join("; ")}`);
   if (label !== "" && batch.owners.includes(owner)) {
-    const named = labelProblem(scope, owner, label);
+    const named = labelProblem(scope, owner, label, say);
     if (named) c.problems.push(named);
   }
   const id = snake(str(raw.id) || label || activity);
   if (item.type === "routine") {
     const kind = ROUTINE_BLOCK_KINDS.find((k) => k === raw.kind);
-    const place = readPlace(scope, raw.place, c.problems);
+    const place = readPlace(scope, raw.place, c.problems, say);
     // The days as given: their shape is the block shape check's, the holidays they name the lint's.
     const days = isRecord(raw.days) ? (JSON.parse(JSON.stringify(raw.days)) as RoutineDays) : undefined;
-    const company = readCompany(scope, owner, raw.company, c);
+    const company = readCompany(scope, owner, raw.company, c, say);
     const block: RoutineBlock = {
       id: id || "block",
       label,
@@ -592,7 +592,7 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
       ...(company ? { company } : {}),
       ...(c.sources[0] ? { source: c.sources[0].source } : {}),
     };
-    if (!kind) c.fatal.push("its kind is fixed, flexible or optional");
+    if (!kind) c.fatal.push(sayOr(say, "fix_block_kind"));
     else for (const p of blockShapeProblems(block)) c.fatal.push(p);
     c.block = block;
     // What Build's lint will say of it as its own routine, for the repair call; `finishRoutines` asks again under its final id.
@@ -605,19 +605,19 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
     const given = str(raw.place);
     const resolved = given === "work" ? placeOf(scope, owner, "employer") : given === "home" ? placeOf(scope, owner, "home") : given;
     if (resolved && scope.places.has(resolved)) place = resolved;
-    else if (given !== "") c.problems.push(resolved && hasOwn(scope.world.places, resolved) ? `its place ${resolved} isn't one the player may be told of` : `its place ${given} isn't in the world`);
-    else c.problems.push("it names no place");
-    const recurrence = readRecurrence(scope, raw.recurrence, c.fatal);
+    else if (given !== "") c.problems.push(resolved && hasOwn(scope.world.places, resolved) ? sayOr(say, "fix_place_not_told", { place: resolved }) : sayOr(say, "fix_place_not_in_world", { place: given }));
+    else c.problems.push(sayOr(say, "fix_no_place"));
+    const recurrence = readRecurrence(scope, raw.recurrence, c.fatal, say);
     const start = hhmm(raw.start);
     const end = hhmm(raw.end);
     for (const [what, t] of [["start", start], ["end", end]] as const) {
       try {
         parseHHMM(t);
       } catch {
-        c.fatal.push(`its ${what} is an HH:MM time`);
+        c.fatal.push(sayOr(say, "fix_time", { what }));
       }
     }
-    if (start !== "" && start === end) c.fatal.push("its start and end are the same time");
+    if (start !== "" && start === end) c.fatal.push(sayOr(say, "fix_same_times"));
     c.schedule = { id: id || "schedule", label, activity, place, recurrence: recurrence ?? { every: "week" }, start, end };
   }
   c.leak = findLeaks(JSON.parse(JSON.stringify({ label, activity, quotes: c.sources.map((s) => s.source.quote ?? "") })) as JsonValue, scope.secrets).length > 0;
@@ -625,10 +625,10 @@ function checkItem(scope: RoutineScope, batch: RoutineBatch, item: { type: "rout
 }
 
 /** A block's company as given, checked: people the job reads who have a ground with its owner, or a group its owner belongs to. */
-function readCompany(scope: RoutineScope, owner: EntityId, raw: JsonValue | undefined, c: RoutineCandidate): RoutineCompany | undefined {
+function readCompany(scope: RoutineScope, owner: EntityId, raw: JsonValue | undefined, c: RoutineCandidate, say: Say): RoutineCompany | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!isRecord(raw)) {
-    c.problems.push('its company is {"ids"} or {"group"}');
+    c.problems.push(sayOr(say, "fix_company_shape"));
     return undefined;
   }
   const invite = raw.invite === true ? { invite: true } : {};
@@ -638,38 +638,38 @@ function readCompany(scope: RoutineScope, owner: EntityId, raw: JsonValue | unde
     for (const id of [...new Set(ids)]) {
       if (id === owner) continue;
       // An id the draft has but the job may not read (a secret person) is the job's to refuse; one it doesn't have at all, the lint's.
-      if (!scope.people.has(id) && (hasOwn(scope.state.entities, id) || hasOwn(scope.world.places, id))) c.problems.push(`its company "${id}" isn't a person in the world`);
-      else if (scope.people.has(id) && !grounded(scope, owner, id, c.sources)) c.problems.push(`${nameOf(scope, id)} (${id}) in its company has no tie to ${nameOf(scope, owner)}, and the cited text doesn't name them together`);
+      if (!scope.people.has(id) && (hasOwn(scope.state.entities, id) || hasOwn(scope.world.places, id))) c.problems.push(sayOr(say, "fix_company_not_person", { id }));
+      else if (scope.people.has(id) && !grounded(scope, owner, id, c.sources)) c.problems.push(sayOr(say, "fix_company_no_tie", { name: nameOf(scope, id), id, owner: nameOf(scope, owner) }));
       kept.push(id);
     }
     return kept.length > 0 ? { who: { ids: kept }, ...invite } : undefined;
   }
   const group = str(raw.group);
   if (group !== "") {
-    if (!scope.groups.has(group)) c.problems.push(`its company "${group}" isn't a group in the world`);
-    else if (group !== owner && !isMemberOf({ registry: scope.reg, world: scope.world, state: scope.state }, owner, group)) c.problems.push(`${nameOf(scope, owner)} doesn't belong to ${nameOf(scope, group)} (${group}), its company`);
+    if (!scope.groups.has(group)) c.problems.push(sayOr(say, "fix_company_not_group", { group }));
+    else if (group !== owner && !isMemberOf({ registry: scope.reg, world: scope.world, state: scope.state }, owner, group)) c.problems.push(sayOr(say, "fix_company_not_member", { owner: nameOf(scope, owner), name: nameOf(scope, group), group }));
     return { who: { memberOf: [group] }, ...invite };
   }
-  c.problems.push('its company names no one: {"ids": [...]} or {"group": "<id>"}');
+  c.problems.push(sayOr(say, "fix_company_none"));
   return undefined;
 }
 
-/** A schedule's recurrence as given; what doesn't read goes to `fatal`. */
-function readRecurrence(scope: RoutineScope, raw: JsonValue | undefined, fatal: string[]): Recurrence | null {
+/** A schedule's recurrence as given; what doesn't read goes to `fatal`, in the words of Build's jobs part. */
+function readRecurrence(scope: RoutineScope, raw: JsonValue | undefined, fatal: string[], say: Say): Recurrence | null {
   if (!isRecord(raw) || typeof raw.every !== "string" || !hasOwn(RECURRENCES, raw.every)) {
-    fatal.push('its recurrence is {"every": "day"|"week"|"month"|"year", …}');
+    fatal.push(sayOr(say, "fix_recurrence_shape"));
     return null;
   }
   const r: Recurrence = { every: raw.every as Recurrence["every"] };
   if (raw.weekdays !== undefined) {
     const w = ints(raw.weekdays, 0, 6);
     if (w && w.length > 0) r.weekdays = w;
-    else fatal.push("its weekdays are 0 (Sunday) to 6");
+    else fatal.push(sayOr(say, "fix_weekdays"));
   }
   if (raw.days !== undefined) {
     const d = ints(raw.days, -31, 31);
     if (d && d.length > 0 && !d.includes(0)) r.days = d;
-    else fatal.push("its days of the month are 1 to 31, or -1 to -31 from the end");
+    else fatal.push(sayOr(say, "fix_month_days"));
   }
   for (const key of ["from", "until"] as const) {
     const v = str(raw[key]);
@@ -678,7 +678,7 @@ function readRecurrence(scope: RoutineScope, raw: JsonValue | undefined, fatal: 
       dayIndexOfText(scope.cal, v);
       r[key] = v;
     } catch {
-      fatal.push(`its ${key} is a YYYY-MM-DD date`);
+      fatal.push(sayOr(say, "fix_date", { what: key }));
     }
   }
   if (raw.except !== undefined) {
@@ -686,22 +686,23 @@ function readRecurrence(scope: RoutineScope, raw: JsonValue | undefined, fatal: 
     const known = new Set(scope.cal.def.holidays.map((h) => h.id));
     if (ids && ids.every((id) => known.has(id))) {
       if (ids.length > 0) r.except = ids;
-    } else fatal.push("its except names holidays the calendar doesn't have");
+    } else fatal.push(sayOr(say, "fix_except"));
   }
   return r;
 }
 
 /**
  * A call's items checked against the draft as the pass's routines and schedules: each item with what keeps it out, what it is proposed
- * with, and what the agent can fix (answered to it, naming each item); or why the call can't be read at all.
+ * with, and what the agent can fix (answered to it, naming each item, in the words of Build's jobs part's `fix_` lines); or why the call
+ * can't be read at all.
  */
-export function checkRoutineReply(scope: RoutineScope, batch: RoutineBatch, reply: JsonValue | null): RoutineCheck {
+export function checkRoutineReply(scope: RoutineScope, batch: RoutineBatch, reply: JsonValue | null, say: Say): RoutineCheck {
   if (reply === null) return { problem: { why: "not_json", fields: {} }, candidates: [], fixable: [] };
   const items = itemsOf(reply);
   if (!items) return { problem: { why: "shape", fields: {} }, candidates: [], fixable: [] };
-  const candidates = items.flatMap((item) => checkItem(scope, batch, item) ?? []);
+  const candidates = items.flatMap((item) => checkItem(scope, batch, item, say) ?? []);
   if (items.length > 0 && candidates.length === 0) return { problem: { why: "none_readable", fields: { items: items.length } }, candidates: [], fixable: [] };
-  const fixable = candidates.filter((c) => !c.leak).flatMap((c) => [...c.fatal, ...c.problems, ...c.lint].map((p) => `${c.at} (${nameOf(scope, c.owner)}, "${c.label}"): ${p}`));
+  const fixable = candidates.filter((c) => !c.leak).flatMap((c) => [...c.fatal, ...c.problems, ...c.lint].map((problem) => sayOr(say, "fix_item", { at: c.at, name: nameOf(scope, c.owner), label: c.label, problem })));
   return { problem: null, candidates, fixable };
 }
 

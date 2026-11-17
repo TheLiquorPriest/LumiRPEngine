@@ -12,7 +12,7 @@ import { publicText } from "../../shared/secret-marks";
 import type { LoreEntryDef, WorldDoc } from "../../shared/world";
 import type { WorldService } from "../../worlds/service";
 import type { BuildBooks } from "../lore/books";
-import { addDrop, checkProposals, type DropCounts, dropSummary, dropWords, entryTitle, kindsGiven, type ProposalMode, readProposals, type Say } from "./checks";
+import { addDrop, checkProposals, type DropCounts, dropSummary, entryTitle, kindsGiven, type ProposalMode, readProposals, type Say, sayOr } from "./checks";
 import { JobError } from "./home";
 import { checkIndexProposals, keptText, readIndexProposals } from "./index-text";
 import type { JobLimits } from "./limits";
@@ -74,7 +74,7 @@ function stringsOf(v: JsonValue | undefined): string[] {
 
 /** Each reason's count in `after` beyond what `before` counted, in the words of its line: what one call added. */
 function droppedBy(before: DropCounts, after: DropCounts, say: Say): JsonObject[] {
-  return [...after].flatMap(([key, d]) => (d.count > (before.get(key)?.count ?? 0) ? [{ why: dropWords(say, d), count: d.count - (before.get(key)?.count ?? 0) }] : []));
+  return [...after].flatMap(([key, d]) => (d.count > (before.get(key)?.count ?? 0) ? [{ why: sayOr(say, `dropped_${d.why}`, d.fields), count: d.count - (before.get(key)?.count ?? 0) }] : []));
 }
 
 /**
@@ -285,9 +285,9 @@ const proposeRoutines: ModelKindDef = {
       given: routineGiven(scope, pass),
       fields: { people: pass.batch.owners.length },
       async propose(args, say) {
-        const check = checkRoutineReply(scope, pass.batch, args);
+        const check = checkRoutineReply(scope, pass.batch, args, say);
         candidates = laterOver(candidates, check.candidates);
-        return { answer: { ...(check.problem === null ? {} : { problem: say(`unusable_${check.problem.why}`, check.problem.fields) ?? check.problem.why }), read: check.candidates.length, toFix: check.fixable }, unusable: check.problem !== null };
+        return { answer: { ...(check.problem === null ? {} : { problem: sayOr(say, `unusable_${check.problem.why}`, check.problem.fields) }), read: check.candidates.length, toFix: check.fixable }, unusable: check.problem !== null };
       },
       proposals: () => finishRoutines(scope, candidates).slice(0, from.limits.proposals),
       end(_cut, say) {
