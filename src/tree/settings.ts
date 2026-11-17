@@ -64,7 +64,7 @@ export const TREE_SETTING_DEFS = {
     takes: { type: "whole", least: 0 },
     perConnection: false,
     name: "Turn folders kept whole",
-    about: "How many of a chat's newest turn folders keep everything; each older one keeps its turn.json, output and transcripts. The next turn's prompt is compared over the folders kept.",
+    about: "How many of a chat's newest turn folders keep everything; each older one keeps its turn.json, output, transcripts and trace.jsonl. The next turn's prompt is compared over the folders kept.",
     effect: "use",
     row: "Turn folders kept whole",
   },
