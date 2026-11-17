@@ -425,8 +425,12 @@ export class TreeView {
     });
     const from = made !== null && made.shares && prev !== undefined && prev.options === options ? prev : null;
     this.kept = from !== null ? from.kept : new Map();
-    this.madeFrom = from !== null ? from.serial : 0;
-    if (from !== null && made !== null) this.from = { state: from.state, notes: from.notes, carried: from.carried, taken: made.taken, moved: made.moved };
+    // Where `from` never told what changed since the tree it was made from, this one tells it from there: what either held anew.
+    const back = from !== null && from.since === undefined ? from.from : null;
+    this.madeFrom = from === null ? 0 : back !== null ? from.madeFrom : from.serial;
+    if (from !== null && made !== null) {
+      this.from = back !== null ? { ...back, taken: new Set([...back.taken, ...made.taken]), moved: [...back.moved, ...made.moved] } : { state: from.state, notes: from.notes, carried: from.carried, taken: made.taken, moved: made.moved };
+    }
   }
 
   /** The world as the chat plays it. */
