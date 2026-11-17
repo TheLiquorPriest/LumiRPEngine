@@ -458,6 +458,10 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       if (isRecord(f) && f.pinned === true) pin(null, `@global/${places.notes}/${path}`, ["main"]);
     }
   }
+  // Settings → Agents → Context's pins, by role, which today's build hands each role in every chat before the workspace's own.
+  const settings = json(await today.userView.read("settings.json"));
+  const roles = isRecord(settings) && isRecord(settings.agents) && isRecord(settings.agents.context) && isRecord(settings.agents.context.roles) ? settings.agents.context.roles : {};
+  const contextPins = Object.entries(roles).flatMap(([role, c]): [string, string[]][] => (isRecord(c) && Array.isArray(c.pins) ? [[role, c.pins.filter((p): p is string => typeof p === "string" && p.trim() !== "").map((p) => p.trim())]] : []));
   // Each chat's into its own notes folder, placed as RPE places the chat: by its name and its character's, as Lumiverse has them.
   for (const id of [...new Set([...history.carried, ...latest.keys(), ...learned.keys()])].sort()) {
     if (keeps(id)) {
@@ -490,8 +494,8 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       inWorkspace.add(f.path);
       if (f.pinned) pin(config, `${places.notes}/${f.path}`, ["main"]);
     }
-    // The workspace's pins manifest (`.pins.json`): each role's files, a chat's or a global `~/` one, pinned for that role.
-    for (const [role, files] of Object.entries(pinsManifest(heads?.files.find((f) => f.path === PINS_PATH)?.text ?? null))) {
+    // Settings → Agents → Context's pins and the workspace's pins manifest (`.pins.json`): each role's files, a chat's or a global `~/` one, pinned for that role.
+    for (const [role, files] of [...contextPins, ...Object.entries(pinsManifest(heads?.files.find((f) => f.path === PINS_PATH)?.text ?? null))]) {
       for (const path of files) {
         if (path.startsWith(GLOBAL_PREFIX)) pin(null, `@global/${places.notes}/${path}`, [role]);
         else if (inWorkspace.has(path)) pin(config, `${places.notes}/${path}`, [role]);
