@@ -227,8 +227,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   const registration = (): Registration | null => {
     const listening = app?.listening() ?? null;
     if (app === null || listening === null || key === null) return null;
-    const { questionMs, logChars } = settings().extension;
-    return { v: 1, base: listening.loopback, key, connections: [...app.config.lumiverse.connections], relay: relaySession, build: app.version, values: { questionMs, logChars } };
+    const { questionMs, logChars, whoseMs } = settings().extension;
+    return { v: 1, base: listening.loopback, key, connections: [...app.config.lumiverse.connections], relay: relaySession, build: app.version, values: { questionMs, logChars, whoseMs } };
   };
 
   function build(at: App, user: string, url: string, signIn: StoredSignIn | null): Lumiverse {
