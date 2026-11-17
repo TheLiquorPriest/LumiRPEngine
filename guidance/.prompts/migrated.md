@@ -1,5 +1,5 @@
 ---
-description: The layout of what the migration carried of a chat from the earlier build, given to the notice `migrated_chat` (in notices.md) as its `carried`, in the chat's first briefing on RPE. Which engine played it and how many turns its path holds, and how many of them it shares with the chat it was branched from; each character's mind files, attached word for word and not yet filed; what the story record held; where the notes are. Each part appears only when there is something in it. It lays facts out; it asks for nothing.
+description: The layout of what the migration carried of a chat from the earlier build, given to the notice `migrated_chat` (in notices.md) as its `carried`, in the chat's first briefing on RPE. Which engine played it and how many turns its path holds, and how many of them it shares with the chat it was branched from; each character's mind files, attached word for word and not yet filed, and that the notes the older minds pack kept of a character are on its record as well (which characters it kept notes of is not given here); what the story record held; where the notes are. Each part appears only when there is something in it. It lays facts out; it asks for nothing.
 ---
 {{#played}}
 It was played by the earlier build's {{played.engine}} engine; {{played.turns}} of its turns were carried, each with what it changed{{#played.shared}}, {{played.shared.turns}} of them shared with the chat it was branched from{{/played.shared}}.
@@ -13,6 +13,9 @@ Mind files from the earlier build, on each character's record word for word, not
 - {{name}}: {{files}}
 {{/characters.items}}
 {{/characters}}
+{{#played}}
+Where the earlier build's minds pack kept notes of a character (its summary, notes, commitments, what it witnessed, its last mind), they are on the character's record too, as `minds`, not yet filed.
+{{/played}}
 {{#story}}
 From the earlier build's story record: {{story.beats}} beat(s) and {{story.struck}} strike(s) on the timeline, {{story.futures}} draft(s) as proposed futures, {{story.castings}} casting(s) in the cast.
 {{/story}}
