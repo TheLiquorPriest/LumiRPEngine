@@ -10,6 +10,7 @@
 // who sells; every party's dashboard view takes the sections modules fill. `r.api` is the
 // foundation's money surface, the one way a module moves or reads money.
 
+import type { LineFields } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine, WorthLine } from "../../../shared/finance";
@@ -202,7 +203,8 @@ export interface FinanceApi {
   /** A posting of any number of lines with its journal lines, as one unit. */
   post(ctx: ReadContext, lines: PostingLine[], meta: PostMeta): LedgerEvent[] | Rejection;
   /** A payday, bill or decline note: a signal for the POV, a secret note in anyone else's record. */
-  note(ctx: ReadContext, who: EntityId, cls: "bill" | "decline", text: string): LedgerEvent[];
+  /** A signal for `who` worded by the line `line` of the history lines, filled with `fields`; none where the line is not said. */
+  note(ctx: ReadContext, who: EntityId, cls: "bill" | "decline", line: string, fields: LineFields): LedgerEvent[];
   money(ctx: ReadContext, cents: number): string;
   /** Splits an amount: fixed amounts first, then percentages of the rest; what's left to `rest`. */
   split(cents: number, splits: readonly FlowSplit[], rest: string): { to: string; cents: number }[];

@@ -8,6 +8,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { CLASS_TRAITS, FINANCE_EVENTS, SCORE_MAX, SCORE_MIN, creditTierOf, isAccountClass, isCredit, scoreBand, type AccountClass, type CreditApplication, type CreditEntry, type CreditReport, type CreditTier, type ScoreFactors } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatClock } from "../../../engine/calendar";
+import { say } from "../../../engine/lines";
 import { labelOf, numOf, objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { cycleOf, reject } from "./journal";
@@ -173,13 +174,13 @@ export function decide(ctx: ReadContext, person: EntityId, app: CreditApplicatio
   const apr = reports ? (def?.apr_pct ?? aprFor(ctx, cls, score, assumed)) : null;
   const tables = { apr, limit: CLASS_TRAITS[cls].revolving ? (productLimit ?? limitFor(ctx, cls, score, assumed)) : null };
   const declined = (reason: string): Decision => ({ approved: false, reason, apr: null, limit: null, cls, label, tables });
-  if (reports && !secured && (tier === "deep_subprime" || chargedOff)) return declined(chargedOff ? "a recent charge-off on their report" : "their credit score is too low");
+  if (reports && !secured && (tier === "deep_subprime" || chargedOff)) return declined(say(chargedOff ? "credit_why_charged_off" : "credit_why_score"));
   if (CLASS_TRAITS[cls].revolving) {
     const most = tables.limit ?? 0;
     return { approved: true, reason: "", apr, limit: Math.min(app.cents ?? most, most), cls, label, tables };
   }
   const most = productLimit ?? loanCeiling(ctx, score, assumed, secured ? app.secured_by : undefined);
-  if ((app.cents ?? 0) > most) return declined(`it's more than a lender would lend them (up to ${formatMoney(most, ctx.world.currency)})`);
+  if ((app.cents ?? 0) > most) return declined(say("credit_why_amount", { most: formatMoney(most, ctx.world.currency) }));
   return { approved: true, reason: "", apr, limit: null, cls, label, tables };
 }
 

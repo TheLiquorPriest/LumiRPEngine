@@ -21,7 +21,8 @@ import { depreciateMonth, depreciationDue } from "./depreciation";
 import { accrualOf, averageBalance, cycleOf, journalOf } from "./journal";
 import { balance, bankSide, holdersOf, productOf, statusOf, traitsOf } from "./model";
 import { noteOf, sweepNote } from "./notes";
-import { accountLevel, asUnit, isParty, posting, signal, toggles } from "./pay";
+import type { LineFields } from "../../../engine/lines";
+import { accountLevel, asUnit, isParty, posting, toggles, notice } from "./pay";
 import type { Run } from "./run";
 
 /** Statements close and deposit interest posts in the bank's morning batch; payments are due by the end of the due day. */
@@ -151,9 +152,9 @@ function money(ctx: ReadContext, cents: number): string {
 }
 
 /** Tells each holder who is a party: a signal for the POV, a private note for anyone else. */
-function tell(run: Run, account: EntityId, cls: "bill" | "decline", text: string, at: number): void {
+function tell(run: Run, account: EntityId, cls: "bill" | "decline", line: string, fields: LineFields, at: number): void {
   const holders = holdersOf(run.ctx.state, account).filter((h) => own(run.ctx.state.entities, h) && isParty(run.ctx, h));
-  run.emit(holders.map((h) => signal(cls, text, h, at)));
+  run.emit(holders.flatMap((h) => notice(cls, line, fields, h, at)));
 }
 
 function bankLines(account: EntityId, institution: string, cents: number): PostingLine[] {
@@ -268,7 +269,7 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
   const dueDom = numOf(own(ctx.state.entities, account)?.fields.due_day, NaN);
   const due = clockAt(cal, Number.isFinite(dueDom) ? nextMonthDay(cal, day, dueDom) : day + p.due_days, DUE_MINUTE);
   run.emit([{ type: FINANCE_EVENTS.statement, data: { account, closing: owed, interest, fees, minimum, due, apr, stage: prev?.stage ?? "current", grace, past_due: pastDue, lates: prev?.lates ?? 0, penalty: prev?.penalty === true, at, streak: prev?.streak ?? 0, ontime: prev?.ontime ?? 0, late30: prev?.late30 ?? 0, late60: prev?.late60 ?? 0, late90: prev?.late90 ?? 0 } }]);
-  if (owed > 0) tell(run, account, "bill", `${name} statement: ${money(ctx, owed)}${interest > 0 ? ` incl. ${money(ctx, interest)} interest` : ""}; minimum ${money(ctx, minimum)} due ${dateLabel(ctx, due)}.`, at);
+  if (owed > 0) tell(run, account, "bill", "card_statement", { name, owed: money(ctx, owed), ...(interest > 0 ? { interest: money(ctx, interest) } : {}), minimum: money(ctx, minimum), due: dateLabel(ctx, due) }, at);
 }
 
 /** A revolving account's statement day where statements don't run: the period's interest, and what it owes now kept for the next period. */
@@ -344,7 +345,7 @@ function remind(run: Run, account: EntityId): void {
   const cycle = cycleOf(ctx.state, account);
   if (!cycle) return;
   const left = cycle.minimum - cycle.paid;
-  if (left > 0) tell(run, account, "bill", `${labelOf(ctx, account)} payment of ${money(ctx, left)} is due today.`, cycle.due - (DUE_MINUTE - (9 * 60 + 30)));
+  if (left > 0) tell(run, account, "bill", "card_due_today", { name: labelOf(ctx, account), left: money(ctx, left) }, cycle.due - (DUE_MINUTE - (9 * 60 + 30)));
 }
 
 function creditEntries(ctx: ReadContext, account: EntityId, kind: "late" | "collections" | "charged_off" | "paid_off" | "on_time", at: number, days?: number): LedgerEvent[] {
@@ -363,7 +364,7 @@ function dueCheck(run: Run, account: EntityId, at: number): void {
     const lifted = cycle.penalty && streak >= 6;
     run.emit([{ type: FINANCE_EVENTS.delinquency, data: { account, stage: "current", past_due: 0, lates: streak >= 6 ? 0 : cycle.lates, penalty: cycle.penalty && !lifted, streak, ontime: (cycle.ontime ?? 0) + 1 } }]);
     if (statusOf(ctx.state, account) === "frozen" && cycle.stage !== "current") run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "open" } }]);
-    if (lifted) tell(run, account, "bill", `${name}: six payments on time; the penalty rate is lifted.`, at);
+    if (lifted) tell(run, account, "bill", "card_penalty_lifted", { name }, at);
     return;
   }
   const short = cycle.minimum - cycle.paid;
@@ -384,8 +385,7 @@ function dueCheck(run: Run, account: EntityId, at: number): void {
   if (stage === "90") run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "frozen" } }]);
   if (stage === "120") run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "collections" } }, ...creditEntries(ctx, account, "collections", at)]);
   if (stage === "charged_off") run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "charged_off" } }, ...creditEntries(ctx, account, "charged_off", at)]);
-  const what = stage === "late" ? "missed" : stage === "120" ? "sent to collections" : stage === "charged_off" ? "charged off" : stage === "collections" ? "still in collections" : `${stage} days late`;
-  tell(run, account, "decline", `${name} payment of ${money(ctx, short)} ${what}${fee > 0 ? `; a ${money(ctx, fee)} late fee was charged` : ""}${penalty && !cycle.penalty ? `; the penalty rate of ${p.penalty_apr_pct}% applies` : ""}.`, at);
+  tell(run, account, "decline", `card_payment_${stage}`, { name, short: money(ctx, short), days: stage, ...(fee > 0 ? { fee: money(ctx, fee) } : {}), ...(penalty && !cycle.penalty ? { penalty: p.penalty_apr_pct } : {}) }, at);
 }
 
 /** What a deposit account's interest comes to at `at`, read from the state as it stands: its APY on the average daily balance where that runs, else a month's on the balance. */

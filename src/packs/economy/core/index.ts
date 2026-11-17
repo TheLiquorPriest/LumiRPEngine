@@ -87,7 +87,7 @@ import {
   type PriceRef,
   worldProducts,
 } from "./model";
-import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, fundsAdvice, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod } from "./pay";
+import { accountLevel, asUnit, cardsOn, carriedCash, charge, claimCash, featureFor, fundsAdvice, isParty, isRejection, l1Move, loseWith, mayUse, move, namedSource, otherWay, overdraftRoom, paidFrom, payMethodOf, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PaidFrom, type PayMethod, notice } from "./pay";
 import { materializeMoney, MONEY_STEP_LEVEL, moneyStep, openAccounts, openingEvent, planStep } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
@@ -454,7 +454,7 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     mayUse: (ctx, party, account, side) => mayUse(ctx, party, account, side),
     pay: (ctx, p) => payWith(hooks, ctx, p),
     post: (ctx, lines, meta) => postWith(ctx, lines, meta),
-    note: (ctx, who, cls, text) => [signal(cls, text, who, ctx.state.clock)],
+    note: (ctx, who, cls, line, fields) => notice(cls, line, fields, who, ctx.state.clock),
     money: (ctx, cents) => formatMoney(cents, ctx.world.currency),
     split: (cents, splits, rest) => splitAmount(cents, splits, rest),
     occurrences: (ctx, schedule, from, to, start) => occurrences(chatWorld(ctx), schedule, from, to, start).map((o) => o.at),

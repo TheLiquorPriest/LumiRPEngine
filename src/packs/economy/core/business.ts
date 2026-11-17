@@ -342,8 +342,8 @@ function lateInvoices(slot: SlotInfo, ctx: ReadContext, api: FinanceApi): Ledger
     const amount = api.money(ctx, inv.left + fee);
     // A note to the player reads as the player sees; one to anyone else only reaches the GM, who sees everyone.
     const reader = (party: EntityId): EntityId | null => (party === ctx.world.pov ? party : null);
-    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${shownName(ctx, reader(inv.party), inv.business, "a business")} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
-    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? shownName(ctx, reader(o.party), inv.party, "a customer") : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
+    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", "invoice_late", { memo: inv.memo, business: shownName(ctx, reader(inv.party), inv.business, ""), days: daysLate, ...(daysLate === 1 ? { one: true } : {}), amount }));
+    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", "invoice_late_owner", { memo: inv.memo, customer: inv.party ? shownName(ctx, reader(o.party), inv.party, "") : inv.customer, days: daysLate, ...(daysLate === 1 ? { one: true } : {}), amount }));
   }
   return out;
 }

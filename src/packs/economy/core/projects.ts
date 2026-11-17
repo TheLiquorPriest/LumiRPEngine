@@ -548,8 +548,7 @@ function doDue(api: FinanceApi, run: Run, due: Due): boolean {
   if ("code" in paid) {
     if (r?.wait) return false;
     const side = ending ? "end" : "start";
-    const words = `${p.def.name}: ${s.name} can't ${side === "start" ? "start" : "finish"} until ${api.money(ctx, cents)} can be paid (${paid.reason}); it tries again as money comes in.`;
-    return run.emit(unitOf([{ type: PROJECT_EVENTS.step, data: { project: p.def.id, step: s.id, phase: "wait", at: due.at, cents, side } }, ...api.note(ctx, noteFor(ctx, p.def.org), "decline", words)], key)).length > 0;
+    return run.emit(unitOf([{ type: PROJECT_EVENTS.step, data: { project: p.def.id, step: s.id, phase: "wait", at: due.at, cents, side } }, ...api.note(ctx, noteFor(ctx, p.def.org), "decline", side === "start" ? "project_wait_start" : "project_wait_finish", { project: p.def.name, step: s.name, amount: api.money(ctx, cents), reason: paid.reason })], key)).length > 0;
   }
   const money = { paid: cents, built: paid.built, capex: paid.capex };
   if (!ending) {

@@ -23,7 +23,7 @@ import { actAs, asParam, mayAs, moneyWords } from "./acting";
 import { reject } from "./journal";
 import { availableOf, balance, holdersOf, statusOf, traitsOf } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { asUnit, depositAccount, isParty, posting, signal } from "./pay";
+import { asUnit, depositAccount, isParty, posting, notice } from "./pay";
 import { openingEvent } from "./process";
 import type { Run } from "./run";
 
@@ -145,11 +145,10 @@ export function sweepNote(run: Run, note: EntityId, at: number): void {
     run.emit(asUnit(posting([{ account: note, amount: -paid }, { account: into, amount: paid }], { memo: `${labelOf(ctx, loan)}: payment received`, kind: "payment", category: "lending", counterparty: lender, payer: borrower, at })));
   }
   if (owed > 0 || balance(run.ctx.state, note) > 0) return;
-  const text = `The loan of ${labelOf(ctx, borrower)} from ${labelOf(ctx, lender)} is paid off.`;
   run.emit([
     { type: FINANCE_EVENTS.status, data: { account: note, status: "paid_off" } },
     ...(statusOf(ctx.state, loan) === "paid_off" ? [] : [{ type: FINANCE_EVENTS.status, data: { account: loan, status: "paid_off" } } satisfies LedgerEvent]),
-    ...[...new Set([lender, borrower])].filter((p) => isParty(ctx, p)).map((p) => signal("bill", text, p, at)),
+    ...[...new Set([lender, borrower])].filter((p) => isParty(ctx, p)).flatMap((p) => notice("bill", "loan_paid_off", { borrower: labelOf(ctx, borrower), lender: labelOf(ctx, lender) }, p, at)),
   ]);
 }
 

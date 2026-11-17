@@ -12,6 +12,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import { formatMoney } from "../../../shared/world";
+import type { LineFields } from "../../../engine/lines";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";
@@ -176,7 +177,7 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
     const qty = qtyOf(lotsOf(ctx, holding));
     if (qty <= QTY_EPSILON) continue;
     const owners = holdingOwners(api, ctx.state, holding);
-    const notes = (text: string): LedgerEvent[] => owners.flatMap((o) => api.note(ctx, o.party, "bill", text));
+    const notes = (line: string, fields: LineFields): LedgerEvent[] => owners.flatMap((o) => api.note(ctx, o.party, "bill", line, fields));
     if (a.bond) {
       const cash = Math.round(qty * a.bond.face);
       const label = `${a.label} matured`;
@@ -186,7 +187,7 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
       const couponEvents = isRejection(paid) || !coupon ? [] : [...paid, ...(coupon.extra ?? [])];
       const couponCents = couponEvents.length > 0 && coupon ? coupon.cents : 0;
       const settled = settle(api, ctx, holding, { ...a, option: null }, qty, cash, label);
-      out.push(...(isRejection(settled) ? [] : unit([...couponEvents, ...settled, ...notes(`${a.label} matured: ${money(cash + couponCents)} paid out${couponCents > 0 ? `, its last coupon of ${money(couponCents)} with it` : ""}.`)])));
+      out.push(...(isRejection(settled) ? [] : unit([...couponEvents, ...settled, ...notes("bond_matured", { asset: a.label, paid: money(cash + couponCents), ...(couponCents > 0 ? { coupon: money(couponCents) } : {}) })])));
       continue;
     }
     if (!a.option) continue;
@@ -196,11 +197,11 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
       const label = `${a.label} exercised at expiry`;
       const settled = settle(api, ctx, holding, a, qty, value, label);
       if (!isRejection(settled)) {
-        out.push(...unit([...settled, ...notes(`${a.label} was exercised at expiry and settled for ${money(value)}.`)]));
+        out.push(...unit([...settled, ...notes("option_exercised", { asset: a.label, value: money(value) })]));
         continue;
       }
     }
-    out.push(...unit([lotsChange(ctx.state, holding, -qty, 0, "expire", `${a.label} expired`), ...notes(`${a.label} expired worthless.`)]));
+    out.push(...unit([lotsChange(ctx.state, holding, -qty, 0, "expire", `${a.label} expired`), ...notes("option_expired", { asset: a.label })]));
   }
   return out;
 }

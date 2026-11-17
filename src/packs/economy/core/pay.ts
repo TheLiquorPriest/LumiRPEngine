@@ -14,6 +14,7 @@ import { hashParts } from "../../../shared/hash";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
+import { type LineFields, say } from "../../../engine/lines";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { Advice, ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
@@ -1310,6 +1311,12 @@ export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { fr
 
 export function signal(cls: "bill" | "decline", text: string, who: EntityId, at: number): LedgerEvent {
   return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
+}
+
+/** A signal worded by the line `line` of the history lines (`guidance/.prompts/history-lines.md`) filled with `fields`; none where that line is not said. */
+export function notice(cls: "bill" | "decline", line: string, fields: LineFields, who: EntityId, at: number): LedgerEvent[] {
+  const text = say(line, fields);
+  return text === "" ? [] : [signal(cls, text, who, at)];
 }
 
 /**

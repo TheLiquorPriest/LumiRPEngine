@@ -24,7 +24,8 @@ import type { FinanceHooks, FlowPosting } from "./module";
 import type { MindPlan } from "../../../shared/minds";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { availableOf, balance, canSpend, classOf, holdersOf, ledgerHolders, moneyLevel, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
-import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
+import { say } from "../../../engine/lines";
+import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, toggles, type PayMethod, notice } from "./pay";
 import { Run } from "./run";
 
 export const DEFAULT_FLOW_MINUTE = 9 * 60;
@@ -630,11 +631,11 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       // A module's own posting can't take what was carried; it waits for an occurrence that can.
       const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
-      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}${provenance(ctx, flow.id)}.`, who, at)]);
+      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit(notice("bill", flowIsIncome(ctx, flow, who) ? "flow_received" : "flow_paid", { label: flow.label, amount: money(attempt.paid), ...provenance(ctx, flow.id) }, who, at));
       return { outcome: "paid", reason: null };
     }
   }
-  const reason = "code" in attempt ? attempt.reason : "the payment didn't go through";
+  const reason = "code" in attempt ? attempt.reason : say("flow_why_failed");
   const nsf = bounceFee(ctx, flow, cents, at, overdraft);
   switch (flow.shortfall) {
     case "partial": {
@@ -646,7 +647,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       if (paid && !("code" in paid) && run.emit(paid.events).length > 0) {
         const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
         run.emit([runEvent(flow, at, "partial", part, next, cents - part)]);
-        if (who) run.emit([signal("decline", `${flow.label}: only ${money(part)} of ${money(cents)} paid.`, who, at)]);
+        if (who) run.emit(notice("decline", "flow_partial", { label: flow.label, part: money(part), amount: money(cents) }, who, at));
         return { outcome: "partial", reason };
       }
       break;
@@ -658,7 +659,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
         const again = waiting ? { at: waiting.at, left: Math.max(waiting.left, left - 1), cents: waiting.cents + cents } : { at: at + Math.max(1, Math.round(flow.retry_days ?? 3)) * 1440, left: left - 1, cents };
         const next: FlowRunState = { done: before.done, missed: before.missed, retry: again, ...(before.deferred ? { deferred: 0 } : {}) };
         run.emit([...nsf, runEvent(flow, at, "retry", 0, next, cents)]);
-        if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) didn't go through; it will be tried again.`, who, at)]);
+        if (who) run.emit(notice("decline", "flow_retry", { label: flow.label, amount: money(cents) }, who, at));
         return { outcome: "retry", reason };
       }
       break;
@@ -670,7 +671,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
         if (!("code" in paid) && run.emit(paid.events).length > 0) {
           const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...pending, ended: ended(before.done + 1, before.missed) };
           run.emit([runEvent(flow, at, "fallback", cents, next)]);
-          if (who) run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, fallback)}.`, who, at)]);
+          if (who) run.emit(notice("bill", "flow_fallback", { label: flow.label, amount: money(cents), from: labelOf(ctx, fallback) }, who, at));
           return { outcome: "fallback", reason: null };
         }
       }
@@ -679,7 +680,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     case "defer": {
       const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, deferred: cents + (own_lines ? (before.deferred ?? 0) : 0), ended: ended(before.done, before.missed + 1) };
       run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
-      if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
+      if (who) run.emit(notice("decline", "flow_deferred", { label: flow.label, amount: money(cents) }, who, at));
       return { outcome: "deferred", reason };
     }
     default:
@@ -688,7 +689,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   const outcome = flow.shortfall === "skip" ? "skipped" : "declined";
   const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...pending, ended: ended(before.done, before.missed + 1) };
   run.emit([...nsf, runEvent(flow, at, outcome, 0, next, cents)]);
-  if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) was declined: ${reason}.`, who, at)]);
+  if (who) run.emit(notice("decline", "flow_declined", { label: flow.label, amount: money(cents), reason }, who, at));
   return { outcome, reason };
 }
 
@@ -703,9 +704,9 @@ function flowIsIncome(ctx: ReadContext, flow: Flow, who: EntityId): boolean {
  * off screen (an action done at once), or authored in the world (its definition, an Upgrade's among
  * them); "" for one the story made in play, which the story already told.
  */
-export function provenance(ctx: Pick<ReadContext, "world" | "state">, flow: EntityId): string {
-  if (own(ctx.state.entities, flow)?.fields[ORIGIN_FIELD] === OFFSTAGE_ORIGIN) return " (set up off screen)";
-  return own(ctx.world.entities, flow) ? " (set up in the world)" : "";
+export function provenance(ctx: Pick<ReadContext, "world" | "state">, flow: EntityId): { offscreen?: true; world?: true } {
+  if (own(ctx.state.entities, flow)?.fields[ORIGIN_FIELD] === OFFSTAGE_ORIGIN) return { offscreen: true };
+  return own(ctx.world.entities, flow) ? { world: true } : {};
 }
 
 /**

@@ -21,7 +21,7 @@ import type { OpenAccount } from "./module";
 import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
-import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, payeeAccount, posting, signal } from "./pay";
+import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, payeeAccount, posting, notice } from "./pay";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);
@@ -611,8 +611,8 @@ export function applyForCredit(ctx: ReadContext, who: EntityId, product: string,
   const made = creditApplication(ctx, who, { product, ...(cents !== undefined ? { cents } : {}), ...(term !== undefined ? { term_months: term } : {}), ...(securedBy ? { secured_by: securedBy } : {}) });
   if ("code" in made) return made;
   const d = made.decision;
-  const note = d.approved ? signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${d.limit ? ` with a ${money(ctx, d.limit)} limit` : ""}.`, who, ctx.state.clock) : signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock);
-  return [...made.events, note];
+  const note = d.approved ? notice("bill", "credit_approved", { product: d.label.toLowerCase(), apr: d.apr, ...(d.limit ? { limit: money(ctx, d.limit) } : {}) }, who, ctx.state.clock) : notice("decline", "credit_declined", { product: d.label.toLowerCase(), reason: d.reason }, who, ctx.state.clock);
+  return [...made.events, ...note];
 }
 
 /** A party's payment preferences, set by them: a list of tiers, or that list as JSON text (an action's parameters are scalars). */

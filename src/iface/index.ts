@@ -4,6 +4,7 @@
 
 export { engineTools, ENGINE_TOOLS, FIXED_TOOLS, ANSWERS_PART, answerLines } from "./tools";
 export { stateScan } from "./search";
+export { HISTORY_PART, historyLines, installHistoryLines } from "./history-lines";
 export { bestiaryOf, bestiaryRow, rulesetData, BESTIARY_TABLE, BESTIARY_COLUMNS, BESTIARY_SCHEMA, type BestiaryRow } from "./bestiary";
 export { OPERATIONS, OPERATION_NAMES } from "./apply";
 export { shippedTexts, SHIPPED_GUIDANCE, Lines, Template, toolText, type GuidanceFiles, type TextKind, type ToolText } from "./texts";
