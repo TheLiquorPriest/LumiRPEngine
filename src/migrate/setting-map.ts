@@ -47,7 +47,7 @@ const LUMIAH: Readonly<Record<string, Fate>> = {
   "core.cache.retention": { to: "calls.cacheRetention" },
   "core.cache.key": { none: "RPE asks a provider to cache by the call, with no key of the user's" },
   "core.connections.atOnce": { to: "throttles.atOnce" },
-  "core.connections.throttles": { none: "its throttles are named by the ids of Lumiverse's connections, and RPE's connections are its own" },
+  "core.connections.throttles": { none: "a throttle is carried to the connection of RPE's that the connection it names is (the same id, or the same provider, model and address); one set on a connection RPE holds none for has no connection to go to" },
   "core.connections.toolRefusalMinutes": { to: "calls.toolRefusalMinutes" },
   "core.prices": { none: "RPE keeps no money figures, so none of the user's prices" },
   "core.session.keepTurns": { to: "compaction.keepTurns" },

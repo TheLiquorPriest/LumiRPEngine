@@ -97,6 +97,20 @@ export function oneToolAtATime(own: Record<string, JsonValue>): Set<string> {
 /** LumiAH's history cutoff as it ships (`H/link/settings.ts:260`), for the part of it a user left as it was: the latest 40 messages kept. */
 const LUMIAH_HISTORY = { keep: "last", count: 40 } as const;
 
+/** The connection of RPE's that the connection of today's with this id is, or null where RPE holds none for it. */
+export type ConnectionOf = (id: string) => string | null;
+
+/** A throttle of today's on one connection (`core.connections.throttles.<connection>.<field>`), by its field, and RPE's setting of the same meaning for one connection. */
+const THROTTLE = /^core\.connections\.throttles\.([^.]+)\.(requestsPerMinute|tokensPerMinute|atOnce)$/;
+const throttleKey = (connection: string, field: string): string => `throttles.connections.${connection}.${field}`;
+
+/** The setting RPE declares for `key`: the one of that key, or the one whose key has a `<name>` where `key` has a name (a setting for one connection, or one definition, at a time). */
+function declaredFor<T extends { key: string }>(known: readonly T[], key: string): T | undefined {
+  const exact = known.find((d) => d.key === key);
+  if (exact !== undefined) return exact;
+  return known.find((d) => d.key.includes("<") && new RegExp(`^${d.key.split(/<[^>]*>/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^.]+")}$`).test(key));
+}
+
 /** A value for one of RPE's settings, from today's settings at `from`. */
 interface Put {
   from: string[];
@@ -112,9 +126,10 @@ interface Put {
  * RPE's documents (`migration_put`); with what was carried comes what this run put there, to be kept for
  * the next. `registry` is every setting RPE's areas and RPH declare, which takes each value as its own
  * reader takes it; without it only RPH's list and the update's are known, and a value for another key
- * is written as it is.
+ * is written as it is. `connection` says which connection of RPE's a connection of today's is (the one
+ * its settings of that connection are carried to); absent, none is.
  */
-export async function carrySettings(today: Today, items: readonly Item[], globalConfig: string, earlier: PutPrints, registry?: readonly Setting[]): Promise<{ carried: SettingsCarried; put: Map<string, string>; drop: Set<string> }> {
+export async function carrySettings(today: Today, items: readonly Item[], globalConfig: string, earlier: PutPrints, registry?: readonly Setting[], connection?: ConnectionOf): Promise<{ carried: SettingsCarried; put: Map<string, string>; drop: Set<string> }> {
   const known = registry ?? [...HARNESS_SETTINGS, ...UPDATE_SETTINGS];
   const keptInRpe: SettingsCarried["carried"] = [];
   const notCarried: NonNullable<SettingsCarried["notCarried"]> = [];
@@ -171,7 +186,13 @@ export async function carrySettings(today: Today, items: readonly Item[], global
       if (path.endsWith("keep")) history.keep = value;
       else history.count = value;
     } else if (path === "transport.connections.oneToolAtATime") out.carried.push({ from, to: SERIAL_TOOLS });
-    else settle(from, lumiahFate(path), value as JsonValue);
+    else if (THROTTLE.test(path)) {
+      // A throttle he set on a connection goes to the throttle of the connection of RPE's that one is (the same id, or the same provider, model and address); with none, it is named, as the model choices name that connection.
+      const [, id = "", field = ""] = THROTTLE.exec(path) ?? [];
+      const to = connection?.(id) ?? null;
+      if (to === null || to.includes(".")) notCarried.push({ from, to: throttleKey("<connection>", field), why: "RPE holds no connection for the one it is set on (listed with the model choices), so there is no connection to set it for" });
+      else puts.push({ from: [from], to: throttleKey(to, field), value: value as JsonValue });
+    } else settle(from, lumiahFate(path), value as JsonValue);
   }
   if (history.from.length > 0) {
     const kept = history.keep === "all" ? null : history.count;
@@ -211,7 +232,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     let text = before;
     for (const p of puts) {
       // As the app's registry declares the setting, the value as it takes it; and none, for a setting none holds where nothing sets it and no file may set `~` for: nothing is written, and RPE's own none holds.
-      const def = known.find((d) => d.key === p.to);
+      const def = declaredFor(known, p.to);
       let value: JsonValue | undefined = p.value;
       if (def === undefined && registry !== undefined) {
         for (const from of p.from) notCarried.push({ from, to: p.to, why: `RPE declares no setting ${p.to}` });

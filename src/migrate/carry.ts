@@ -134,9 +134,10 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const carriedConnections = runtime === null ? null : await carryConnections(port, user, runtime, today.runtime.files, serial, earlier);
   const connections = carriedConnections === null || "why" in carriedConnections ? carriedConnections : carriedConnections.carried;
   if (carriedConnections !== null && !("why" in carriedConnections)) keepPutPrints(db, user, carriedConnections.put, carriedConnections.drop);
-  const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier, input.settings);
+  // Each place today's settings and definitions name a connection, matched with the connections RPE now holds (the runtime's carried under their own ids) or, for one of Lumiverse's, with RPE's of the same provider and model; those with none are listed for him to pick.
+  const matcher = matcherOf(today.db.connectionProfiles(), connectionsOf(await port.loadConnections({ user })));
+  const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier, input.settings, (id) => matcher({ where: id, connection: id, model: null, to: null }).carried?.id ?? null);
   keepPutPrints(db, user, carriedSettings.put, carriedSettings.drop);
-  // Every place today's settings and definitions name a connection, matched with the connections RPE now holds (the runtime's carried under their own ids) or, for one of Lumiverse's, with RPE's of the same provider and model; those with none are listed.
   const readJson = async (path: string): Promise<unknown> => {
     try {
       return JSON.parse((await today.userView.read(path)) ?? "null") as unknown;
@@ -144,7 +145,6 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
       return null;
     }
   };
-  const matcher = matcherOf(today.db.connectionProfiles(), connectionsOf(await port.loadConnections({ user })));
   const choices = findChoices(await readJson("settings.json"), await readJson("harness/settings.json")).map(matcher);
   const listed = choices.filter((c) => c.carried === null);
   const settings = { ...carriedSettings.carried, lumiverseConnections: listed.map((c) => ({ setting: c.where, connection: c.connection })) };
