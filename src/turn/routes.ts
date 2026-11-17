@@ -26,7 +26,7 @@ import { toldOf, toldRows } from "./events";
 import { TURN_FILES } from "./folder";
 import type { Turns } from "./lane";
 import { turnRecordFields } from "./record";
-import type { RunRecord } from "./runs";
+import { CARRIED_SESSION, type RunRecord } from "./runs";
 import { turnSettings } from "./settings";
 import { givenRoutes } from "./given-routes";
 import { liveRoutes } from "./live-routes";
@@ -144,9 +144,10 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     return r;
   };
 
-  /** The scope a turn's folder is read in, and the folder in the agents' view; null for a turn that has none. */
+  /** The scope a turn's folder is read in, and the folder in the agents' view; null for a turn that has none (a carried turn's run, which RPE never played). */
   const folderOf = async (r: Pick<RunRecord, "user" | "chat" | "session" | "turn">): Promise<{ scope: Scope & { turn: string }; folder: string | null }> => {
     const scope = { user: r.user, chat: r.chat, session: r.session, turn: r.turn };
+    if (r.session === CARRIED_SESSION) return { scope, folder: null };
     return { scope, folder: (await turns.files.places(scope)).turn ?? null };
   };
 
@@ -286,7 +287,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     const r = turnOf(user, chat, turn);
     // Its runs' records, each kept in the folder it played in: a continue that joined this turn played in its own held turn's.
     const folders = new Set([r.turn, ...turns.runs.ofTurn(user, r.turn).flatMap((each) => (each.held !== null && each.held !== r.turn ? [each.held] : []))]);
-    const records = (await Promise.all([...folders].map((each) => turns.trace.records({ user, chat: r.chat, session: r.session, turn: each })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
+    const records = r.session === CARRIED_SESSION ? [] : (await Promise.all([...folders].map((each) => turns.trace.records({ user, chat: r.chat, session: r.session, turn: each })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
     const runs = byRun(records);
     const within = readFrom(r.turn, runs, run, from);
     // What went to the chat is the reply's: a Settle now run writes nothing there.

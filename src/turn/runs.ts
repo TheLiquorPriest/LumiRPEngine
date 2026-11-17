@@ -279,17 +279,21 @@ export interface CarriedRun {
   saved: string | null;
 }
 
+/** The session a carried turn's run names: none, as RPE played no run of it, so it has no folder of RPE's and no trace. */
+export const CARRIED_SESSION = "";
+
 /**
  * Keeps the run record of a turn a migration carried, so the first turn RPE plays after it is told its reply as it tells any: cut short,
  * or saved otherwise than released (`saved_differs`, plan §6.3, §10.8). Inside a queued write; one per turn, a second replaces it. It
- * names no session and no run of RPH's: RPE played no run of it.
+ * names no session (`CARRIED_SESSION`) and no run of RPH's: RPE played no run of it.
  */
 export function keepCarriedRun(db: Database, run: CarriedRun): void {
-  db.run("INSERT OR REPLACE INTO turn_run (user, id, turn, chat, session, kind, status, received, released, finished, ended, settled, reply, base, saved) VALUES (?, ?, ?, ?, '', 'new', 'released', ?, ?, ?, ?, ?, ?, '', ?)", [
+  db.run("INSERT OR REPLACE INTO turn_run (user, id, turn, chat, session, kind, status, received, released, finished, ended, settled, reply, base, saved) VALUES (?, ?, ?, ?, ?, 'new', 'released', ?, ?, ?, ?, ?, ?, '', ?)", [
     run.user,
     `carried-${run.turn}`,
     run.turn,
     run.chat,
+    CARRIED_SESSION,
     run.at,
     run.at,
     run.at,
@@ -486,9 +490,9 @@ export class Runs {
     return rows.map((r) => this.running(user, r.turn) ?? recordOf(user, r));
   }
 
-  /** The chats with a run, the most recently played first, with when their newest run began. */
+  /** The chats he played on RPE, the newest played first: a chat a migration carried and RPE has played no turn of is not among them. */
   chats(user: string): { chat: string; last: number }[] {
-    return this.db.query<{ chat: string; last: number }, [string]>("SELECT chat, max(received) AS last FROM turn_run WHERE user = ? GROUP BY chat ORDER BY last DESC").all(user);
+    return this.db.query<{ chat: string; last: number }, [string, string]>("SELECT chat, max(received) AS last FROM turn_run WHERE user = ? AND session <> ? GROUP BY chat ORDER BY last DESC").all(user, CARRIED_SESSION);
   }
 
   /**
