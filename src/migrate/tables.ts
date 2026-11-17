@@ -302,11 +302,22 @@ export function keepChat(db: Database, user: string, chat: string, run: string, 
   db.run("INSERT OR REPLACE INTO migration_chat (user, chat, run, source, outcome, marked) VALUES (?, ?, ?, ?, ?, ?)", [user, chat, run, source, outcome, marked ? 1 : 0]);
 }
 
-/** Forgets the chats a run removed from the store, and the records kept beside their turns. */
+/**
+ * Forgets the chats a run removed from the store, and the records kept beside their turns: the migration's own, and what a run put in the
+ * turn lane's tables for their turns (each carried turn's run record, his requests, chips and jobs), whose turns the store no longer holds.
+ * The lane's tables are there only where the run was given the lane.
+ */
 export function forgetChats(db: Database, user: string, chats: readonly string[]): void {
+  const there = (table: string): boolean => db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== null;
+  const lane = there("turn_run") && there("request") && there("chip") && there("job");
   for (const chat of chats) {
     db.run("DELETE FROM imported_record WHERE user = ? AND chat = ?", [user, chat]);
     db.run("DELETE FROM migration_chat WHERE user = ? AND chat = ?", [user, chat]);
+    if (!lane) continue;
+    db.run("DELETE FROM turn_run WHERE user = ? AND chat = ? AND session = '' AND id LIKE 'carried-%'", [user, chat]);
+    db.run("DELETE FROM chip WHERE user = ? AND chat = ? AND source = 'import'", [user, chat]);
+    db.run("DELETE FROM request WHERE user = ? AND chat = ? AND id LIKE 'carried:%'", [user, chat]);
+    db.run("DELETE FROM job WHERE user = ? AND chat = ? AND value IS NOT NULL AND json_extract(value, '$.carried') = 1", [user, chat]);
   }
 }
 
