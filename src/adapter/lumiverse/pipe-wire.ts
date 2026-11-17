@@ -56,8 +56,11 @@ export interface Registration {
   relay: string;
   /** RPE's build. */
   build: string;
-  /** The extension's values, RPE's settings (R-1): how long it waits for RPE's answer to its question, and how many characters of RPE's words it writes in its log. */
-  values: { questionMs: number; logChars: number };
+  /**
+   * The extension's values, RPE's settings (R-1): how long it waits for RPE's answer to its question, how many characters of RPE's
+   * words it writes in its log, and how long each read of whose chat a reply is waits (absent in a registration stored before RPE gave it).
+   */
+  values: { questionMs: number; logChars: number; whoseMs?: number };
 }
 
 /** What the extension asks RPE to confirm of a registration besides its key, which is the ask's bearer: the relay socket and the connections the extension would act on. */
@@ -193,8 +196,9 @@ function headersOf(v: unknown): Record<string, string> | null {
 /** A registration as RPE sends it and the extension keeps it, or null. */
 export function readRegistration(v: unknown): Registration | null {
   if (!isRecord(v) || v.v !== 1 || !str(v.base) || !str(v.key) || !Array.isArray(v.connections) || !v.connections.every(str) || !str(v.relay) || typeof v.build !== "string") return null;
-  if (!isRecord(v.values) || !count(v.values.questionMs) || !count(v.values.logChars)) return null;
-  return { v: 1, base: v.base, key: v.key, connections: [...v.connections], relay: v.relay, build: v.build, values: { questionMs: v.values.questionMs, logChars: v.values.logChars } };
+  if (!isRecord(v.values) || !count(v.values.questionMs) || !count(v.values.logChars) || (v.values.whoseMs !== undefined && !count(v.values.whoseMs))) return null;
+  const { questionMs, logChars, whoseMs } = v.values;
+  return { v: 1, base: v.base, key: v.key, connections: [...v.connections], relay: v.relay, build: v.build, values: { questionMs, logChars, ...(whoseMs !== undefined ? { whoseMs } : {}) } };
 }
 
 /** What the extension asks RPE to confirm, or null. */

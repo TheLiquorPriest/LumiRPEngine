@@ -13,7 +13,9 @@
 // Whose chat a reply is (N-3) does not hang on that file: a reply on a connection the registration held
 // in memory names is RPE's; else the connection's own record in Lumiverse tells, by RPE's mark in its
 // `metadata`, which RPE writes on every connection it takes (at install and at the swap). Only where
-// neither can be read is it not known.
+// neither can be read is it not known. Each of those reads is waited for up to RPE's setting
+// `lumiverse.extension.whoseWait`, given with the registration (`WHOSE_WAIT_MS` until one is held): a read
+// that does not answer in it has failed, and says so.
 
 import { CONFIRM_PATH, onLoopback, readConfirmed, readRegistration, REGISTRATION_FILE, rpeMarked, USER_HEADER, type ConfirmAsk, type Registration } from "../adapter/lumiverse/pipe-wire";
 import { isRecord } from "../shared/json";
@@ -33,6 +35,20 @@ export interface RegistrationDeps {
 }
 
 const words = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** How long each read of whose chat a reply is waits, until RPE's registration gives its own (`lumiverse.extension.whoseWait`). */
+export const WHOSE_WAIT_MS = 2_000;
+
+/** `read`, or a rejection saying it did not answer within `ms`. */
+async function within<T>(read: Promise<T>, ms: number): Promise<T> {
+  const late = Promise.withResolvers<never>();
+  const timer = setTimeout(() => late.reject(new Error(`it did not answer within ${ms / 1000} s`)), ms);
+  try {
+    return await Promise.race([read, late.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class Registrations {
   /** By user: the registration held; null where RPE never registered for them, or what was stored is not RPE's to trust. */
@@ -147,20 +163,22 @@ export class Registrations {
   /**
    * Whose chat a reply on this connection is: RPE's where the registration held in memory names the
    * connection, or the connection's own record carries RPE's mark; another's where neither says so. The
-   * registration is read from storage only where it is not held and the record cannot be read.
+   * registration is read from storage only where it is not held and the record cannot be read. Each read
+   * waits up to the registration's `whoseMs` (or `WHOSE_WAIT_MS` with none held), and one past it has failed.
    */
   async whose(connection: string, user: string): Promise<Whose> {
     const held = this.byUser.get(user);
     if (held?.connections.includes(connection) === true) return { rpe: true };
+    const waitMs = held?.values.whoseMs ?? WHOSE_WAIT_MS;
     let mark: string;
     try {
-      return { rpe: await this.marked(connection, user) };
+      return { rpe: await within(this.marked(connection, user), waitMs) };
     } catch (error) {
       mark = words(error);
     }
     if (held !== undefined) return { rpe: false };
     try {
-      return { rpe: (await this.of(user))?.connections.includes(connection) === true };
+      return { rpe: (await within(this.of(user), waitMs))?.connections.includes(connection) === true };
     } catch (error) {
       return { unknown: { registration: words(error), mark } };
     }
