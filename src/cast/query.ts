@@ -12,6 +12,7 @@ import { baseView, type CastCall, type CastReading, type CastToolSpec, growthOve
 import { perceptionView } from "./perceive";
 import { baseHistory, baseOf, bindingsOf, type CastItem, castingInForce, castingItemId, castOn, charactersOf, findCharacter, nameKey, type RowPart } from "./record";
 import { sourcesNow } from "./sources";
+import { towardOf } from "./refs";
 
 /** The parts a query can ask for, as the record's table names them. */
 export const QUERY_PARTS = ["sources", "base", "casting", "growth", "mind", "relationships", "knowledge", "history", "perceptions", "away"] as const;
@@ -99,7 +100,9 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (item !== undefined) data.casting = itemView(reading, item, true);
   }
 
-  const toward = typeof args.with === "string" ? nameKey(args.with) : null;
+  // A relationship is toward whoever it is by reference (a character, the world's person, or the name when it is neither), so a rename or a nickname finds it as the name written does.
+  const toward = typeof args.with === "string" && args.with.trim() !== "" ? towardOf(db, user, reading.chats, minds(call), args.with) : null;
+  const towardThem = (item: CastItem): boolean => toward === null || item.fields.toward === toward.ref || nameKey(String(item.fields.with ?? "")) === nameKey(toward.name);
   const skip = typeof args.skip === "number" ? args.skip : 0;
   const more: { count: number; part: string; skip: number }[] = [];
   for (const name of parts) {
@@ -107,7 +110,7 @@ async function query(args: JsonObject, call: CastCall): Promise<Reply> {
     if (rowPart === undefined) continue;
     const matches = reading.record
       .of(character.id, rowPart, history)
-      .filter((item) => (toward === null || rowPart !== "relationship" || nameKey(String(item.fields.with ?? "")) === toward) && says(item, words) && (rowPart !== "knowledge" || ask.fact === null || item.fields.secret === ask.fact));
+      .filter((item) => (rowPart !== "relationship" || towardThem(item)) && says(item, words) && (rowPart !== "knowledge" || ask.fact === null || item.fields.secret === ask.fact));
     const shown = matches.slice(skip, skip + call.settings.queryItems);
     data[name] = shown.map((item) => (rowPart === "perception" ? { ...perceptionView(reading, item), ...(history ? { history: itemView(reading, item, true).history ?? [] } : {}) } : { ...itemView(reading, item, history), ...(rowPart === "knowledge" ? { kept_in: "cast" } : {}) }));
     const rest = matches.length - skip - shown.length;
