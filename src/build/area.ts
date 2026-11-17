@@ -5,6 +5,7 @@
 
 import type { FilesPort, JobsApi } from "rp-harness/contract";
 import type { Area } from "../app";
+import type { WorldDoc } from "../shared/world";
 import { worldLimitsOf } from "../worlds/area";
 import { chatsRoutes } from "./chats-routes";
 import { buildRoutes } from "./routes";
@@ -16,14 +17,19 @@ import type { JobHome } from "./jobs/home";
 import { JOB_SETTINGS } from "./jobs/limits";
 import { ModelJobs } from "./jobs/model";
 import type { BuildBooks, BuildWrites } from "./lore/books";
+import { IndexEntries, type WorldIndex } from "./lore/index-entry";
 import { loreRoutes } from "./lore/routes";
 import { type ChatMessage, BuildLore } from "./lore/service";
 
-/** What Build takes of his books from the composition: his books read through the door, the lore's one recorded writer, and a chat's messages. */
+/**
+ * What Build takes of his books from the composition: his books read through the door, the lore's one recorded writer, a chat's messages,
+ * and the lore's index of the books a world reads.
+ */
 export interface BuildLoreTakes {
   books: BuildBooks;
   writes: BuildWrites;
   messages(user: string, chat: string): Promise<ChatMessage[]>;
+  index(user: string, world: WorldDoc): Promise<WorldIndex>;
 }
 
 /**
@@ -50,7 +56,7 @@ export function buildArea(takes: () => BuildTakes): Area {
       const { lore, rph, ...deps } = takes();
       at.routes.add("build", buildRoutes(new BuildService({ writes: at.writes, log: at.log, ...deps })));
       at.routes.add("worlds", [...worldsRoutes(deps.worlds, (await worldLimitsOf(at)).bodyBytes), ...chatsRoutes(deps.worlds)]);
-      at.routes.add("lore", loreRoutes(new BuildLore({ ...lore, worlds: deps.worlds, store: deps.store, db: at.db, queue: at.writes, log: at.log })));
+      at.routes.add("lore", loreRoutes(new BuildLore({ ...lore, worlds: deps.worlds, store: deps.store, db: at.db, queue: at.writes, log: at.log }), new IndexEntries({ db: at.db, queue: at.writes, worlds: deps.worlds, books: lore.books, writes: lore.writes, index: lore.index })));
       models = new ModelJobs({ rph, worlds: deps.worlds, books: lore.books, log: at.log, limits: () => jobLimitsOf(at) });
       jobs = await mountJobs(at, { store: deps.store, worlds: deps.worlds, more: models.runners() });
     },

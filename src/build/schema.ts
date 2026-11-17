@@ -10,10 +10,11 @@
 //               replace (`seed.ts`)
 //   build_job   each job Build ran or runs, with its status, progress, input and result (`jobs/schema.ts`)
 //   build_secrecy  each book a secrecy move was made on, with every move of it for Restore (`lore/schema.ts`)
+//   build_lore_index  the lore index entry Build wrote of each world, at its revision, with its text's hash (`lore/schema.ts`)
 
 import type { Migration } from "../app/migrations";
 import { JOB_MIGRATION } from "./jobs/schema";
-import { SECRECY_MIGRATION } from "./lore/schema";
+import { INDEX_ENTRY_MIGRATION, SECRECY_MIGRATION } from "./lore/schema";
 
 export const BUILD_MIGRATIONS: readonly Migration[] = [
   {
@@ -35,4 +36,5 @@ CREATE TABLE build_seed (
   },
   JOB_MIGRATION,
   SECRECY_MIGRATION,
+  INDEX_ENTRY_MIGRATION,
 ];

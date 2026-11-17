@@ -4039,6 +4039,26 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The lore index of the books a world reads, as its draft names them: the text an index entry holds, each book with how many entries it lists, and the entry written of it, if one is, with whether the index has changed since. */
+  "GET /api/v1/build/lore/index": {
+    params: Record<string, never>;
+    query: { world: string };
+    body: undefined;
+    reply: { index: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Writes the world's lore index as an entry, on his press: the entry written before, where it is still at the revision Build left it at (one changed in Lumiverse since is refused as a conflict), else a new entry of the book named. */
+  "POST /api/v1/build/lore/index": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: { world: string; book?: string };
+    reply: { index: JsonValue };
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Every pin of a world's draft (with `world`) or of the revision a chat plays (with `chat`), read now: by character, by place and by step, each with its entry's or book's title, where it comes from and whether it reads. */
   "GET /api/v1/build/lore/pins": {
     params: Record<string, never>;

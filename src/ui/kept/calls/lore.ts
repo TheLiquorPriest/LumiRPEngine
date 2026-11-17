@@ -1,21 +1,21 @@
 // Build's lore and secrecy tools on RPE's typed routes (plan §4.4, §14; PlanChatUI-B3 item 6): today's `lre.lore` (his books and their entries, pins,
-// LRE's fields and Make secret, Save to lore) and `lre.secrecy` (his books and where each move stands, its preview, Apply, Confirm and Restore) go to
-// the lore routes, and the answer comes back as today's result body. A write names the revision the page read the entry at; one on an entry that
-// changed since is the `conflict` a refusal is, and the page reads the book again. The lore index entry (`index`, `build`) is not served here: the lore
-// area's index belongs to a chat, and a world has none of its own to write into a book.
+// LRE's fields and Make secret, Save to lore, the world's lore index and its entry) and `lre.secrecy` (his books and where each move stands, its
+// preview, Apply, Confirm and Restore) go to the lore routes, and the answer comes back as today's result body. A write names the revision the page
+// read the entry at; one on an entry that changed since is the `conflict` a refusal is, and the page reads the book again. The index is the lore's
+// of the books the world reads, and its entry is written only on his press; the view carries whether the index changed since (`built.current`).
 
 import type { RequestBody } from "../../../frontend/registry";
 import type { JsonValue } from "../../../shared/json";
 import type { BookFieldsEdit } from "../../../shared/lore";
-import type { LoreBookEntryView, LoreBookView, LorePinsView, SecrecyBookPlan, SecrecyBookView } from "../../../shared/lore-views";
+import type { LoreBookEntryView, LoreBookView, LoreIndexView, LorePinsView, SecrecyBookPlan, SecrecyBookView } from "../../../shared/lore-views";
 import type { ResultBodies } from "../../../shared/protocol";
 import type { CallContext, CallFile, ServedBody } from "../client";
 import { Refusal } from "../client";
 
 type Of<T extends RequestBody["type"]> = Extract<RequestBody, { type: T }>;
 
-/** What the lore index entry says where it is asked for: it is a chat's, and a world has none. */
-const NO_WORLD_INDEX = "The lore index belongs to a chat: read and rebuild it from the chat's Lore page. A world has no index entry of its own to write into a book.";
+/** What the lore index's requests say where they name no world. */
+const NO_WORLD = "The lore index is a world's: name the world.";
 
 /** What a write that names no revision says: a write is checked against the revision the page read. */
 const NO_REVISION = "A write to a book's entry names the revision it read the entry at.";
@@ -43,8 +43,11 @@ async function lore(request: Of<"lre.lore">, ctx: CallContext): Promise<ResultBo
       return { entries: (await call("POST /api/v1/build/lore/books/:book/entries/:entry/mark", { book: request.bookId, entry: request.entryId }, { body: { change: request.change as unknown as JsonValue, revision: request.revision } })).entries as unknown as LoreBookEntryView[] };
     }
     case "index":
+      if (request.worldId === undefined) throw new Refusal("bad_request", NO_WORLD);
+      return { index: (await call("GET /api/v1/build/lore/index", {}, { query: { world: request.worldId } })).index as unknown as LoreIndexView };
     case "build":
-      throw new Refusal("unavailable", NO_WORLD_INDEX);
+      if (request.worldId === undefined) throw new Refusal("bad_request", NO_WORLD);
+      return { index: (await call("POST /api/v1/build/lore/index", {}, { body: { world: request.worldId, ...(request.bookId === undefined ? {} : { book: request.bookId }) } })).index as unknown as LoreIndexView };
     default:
       throw new Refusal("bad_request", "no such lore request");
   }

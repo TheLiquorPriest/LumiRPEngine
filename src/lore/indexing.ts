@@ -31,6 +31,7 @@ import type { LoreMap, LoreMapLine } from "./map";
 import { type OverlayRow, overlayNoted } from "./overlays";
 import type { HeldSecret } from "./secrets/character";
 import type { LoreBookListing, LorePath } from "./sources";
+import type { WorldDoc } from "../shared/world";
 
 /** Every fixed value of the index, each a setting with this default. */
 export const LORE_INDEX_DEFAULTS = Object.freeze({
@@ -366,6 +367,24 @@ export class LoreIndex {
     const held = this.rows(at.user, catalog);
     const bound = this.bindings(at, catalog);
     return catalog.map((entry) => joined(entry, held.get(placeOf(entry)), bound.get(entry.id)));
+  }
+
+  /**
+   * The index of the books a world reads, for no chat (Build's lore index): its readable text as `lines` word it (`loreIndexText`, as a
+   * chat's `LORE-INDEX.md` is), and each book with how many entries it lists. What an entry is bound to is a chat's, and is left out.
+   */
+  async ofWorld(user: string, world: WorldDoc, lines: LinesPart | undefined): Promise<{ text: string; books: { id: string; name: string; entries: number }[] }> {
+    const catalog = await this.deps.lore.worldCatalog(user, world);
+    const held = this.rows(user, catalog);
+    const entries = catalog.map((entry) => joined(entry, held.get(placeOf(entry)), undefined));
+    const books = new Map<string, { id: string; name: string; entries: number }>();
+    for (const e of entries) {
+      if (e.book === null) continue;
+      const book = books.get(e.book) ?? { id: e.book, name: e.source, entries: 0 };
+      book.entries += 1;
+      books.set(e.book, book);
+    }
+    return { text: loreIndexText(lines, entries), books: [...books.values()] };
   }
 
   /**

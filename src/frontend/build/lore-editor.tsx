@@ -157,30 +157,28 @@ export interface LoreIndexProps {
   /** The book picked to write the entry into ("" for none). */
   target: string;
   pickTarget(bookId: string): void;
-  /** Build an index entry, on the user's press: `lre.lore build` into `target`. */
+  /** Build an index entry, on the user's press: `lre.lore build` into `target`, or the entry written before. */
   build(): void;
-  openSettings(): void;
   busy: boolean;
 }
 
+/** The entry written of the index, as the lore routes give it: whether the index has changed since it was written. */
+type BuiltNow = NonNullable<LoreIndexView["built"]> & { current?: boolean };
+
 /**
- * The lore index of the world's books as Build shows it, without hooks: each book with how many of
- * its entries the index lists, the text an index entry would hold, and either the entry LRE keeps in
- * sync (Settings → Lore stops it) or a book picker and Build an index entry.
+ * The lore index of the world's books as Build shows it, without hooks: each book with how many of its entries the index lists, the text
+ * an index entry holds, and either the entry written of it (with Write it again once the index has changed since) or a book picker and
+ * Build an index entry. Nothing is written but on his press.
  */
 export function LoreIndexBody(props: LoreIndexProps) {
   const { view, busy } = props;
   const labels = bookLabels(props.books ?? []);
-  const built = view?.built ?? null;
-  const settings = (
-    <Button size="sm" variant="secondary" icon="sliders" onClick={props.openSettings}>
-      Open Settings → Lore
-    </Button>
-  );
+  const built = (view?.built ?? null) as BuiltNow | null;
+  const stale = built !== null && built.current === false;
   return (
-    <Section title="Lore index" aside={built ? <Badge tone="accent">Kept in sync</Badge> : undefined}>
+    <Section title="Lore index" aside={built ? <Badge tone={stale ? "warn" : "accent"}>{stale ? "Out of date" : "Written"}</Badge> : undefined}>
       <div class="lre-stack" data-lre-lore-index>
-        <span class="lre-small lre-muted">The agents find World Info entries by the short id each has here: one line per entry, with its title and what it holds. They ask for it with lore_index, or get it in their prompts when Settings → Lore says so.</span>
+        <span class="lre-small lre-muted">The index of the books this world reads: one line per entry, with its title and what the lore index says of it.</span>
         {view === null ? (
           <span class="lre-small lre-muted">Reading the index…</span>
         ) : (
@@ -192,7 +190,7 @@ export function LoreIndexBody(props: LoreIndexProps) {
                 ))}
               </List>
             ) : (
-              <span class="lre-small lre-muted">No book this world reads has an entry anyone may read.</span>
+              <span class="lre-small lre-muted">This world reads no book with an entry.</span>
             )}
             <details class="lre-form-lore-index-preview">
               <summary>What an index entry holds</summary>
@@ -203,15 +201,22 @@ export function LoreIndexBody(props: LoreIndexProps) {
           </>
         )}
         {built ? (
-          <Banner tone="info" actions={settings}>
-            <span data-lre-lore-index-built>
-              {built.worldId === props.worldId ? `${built.book} has this index as entry ${built.entryId}, which LumiRPEngine writes again whenever the index changes.` : `${built.book} has an index entry LumiRPEngine keeps in sync for another world (${built.worldId}). One is kept at a time: stop it before building one for this world.`} Stop it in Settings → Lore; the entry stays in its book.
-            </span>
+          <Banner
+            tone={stale ? "warn" : "info"}
+            actions={
+              stale ? (
+                <Button size="sm" variant="secondary" icon="refresh" disabled={busy} onClick={props.build}>
+                  Write it again
+                </Button>
+              ) : undefined
+            }
+          >
+            <span data-lre-lore-index-built>{stale ? `${built.book} has this index as entry ${built.entryId}, written before the books changed. Write it again to bring it up to date; nothing is written until you press.` : `${built.book} has this index as entry ${built.entryId}.`}</span>
           </Banner>
         ) : (
           <div class="lre-stack">
             <HostSelect label="Book to write the index entry into" value={props.target} placeholder="Pick one of your books" options={(props.books ?? []).map((b) => ({ value: b.id, label: labels[b.id] ?? b.name }))} disabled={busy} onChange={props.pickTarget} />
-            <span class="lre-small lre-muted">Writes one entry, always on and kept out of recursion, that lists every entry anyone may read. Nothing is written until you press Build.</span>
+            <span class="lre-small lre-muted">Writes one entry that lists every entry of the books this world reads. Nothing is written until you press Build.</span>
             <span>
               <Button variant="secondary" icon="plus" disabled={busy || props.target === "" || view === null} onClick={props.build}>
                 Build an index entry
@@ -249,7 +254,6 @@ function LoreIndexSection(props: { worldId: string }) {
           if (body?.index) setView(body.index);
         })
       }
-      openSettings={() => app.ui.update((ui) => ({ ...ui, mode: "settings", settings: { page: "lore" } }))}
     />
   );
 }

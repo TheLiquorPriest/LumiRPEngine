@@ -32,7 +32,7 @@ import type { EntityId } from "../shared/ids";
 import { hasOwn } from "../shared/json";
 import { bookLoreFieldsOf, engineWroteEntry, loreBooksOf, loreIsSecret, loreSourceOf, withoutOldSecrecy } from "../shared/lore";
 import { hasSecretMarks, publicText, unreadableMarks } from "../shared/secret-marks";
-import type { LoreEntryDef, StepPurpose } from "../shared/world";
+import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import type { LoreScope, LoreSettingsFor } from "./chat-settings";
 import { bookEntryId, type EntryNumbers, loreRefOf, worldEntryId } from "./ids";
 import { foldName, type KeyMatching, keysFound, LUMIVERSE_KEY_MATCHING } from "./keys";
@@ -599,6 +599,26 @@ export class Lore {
       // A thread that failed has told the log; the catalogue is made here, as it always was.
       return catalogueOf(input);
     }
+  }
+
+  /**
+   * The catalogue of the books a world reads, for no chat (Build's lore index, plan §9.1): the books its document lists and those an
+   * earlier build copied its entries from, each entry as `catalog` gives it, the engine's own left out. Read with the global settings.
+   */
+  async worldCatalog(user: string, world: WorldDoc): Promise<LoreCatalogEntry[]> {
+    const copied = Object.values(world.lore).flatMap((entry) => {
+      const source = loreSourceOf(entry.source);
+      return source.kind === "book" ? [source.bookId] : [];
+    });
+    const books = (await Promise.all([...new Set([...loreBooksOf(world), ...copied])].map((id) => this.books.book(user, id)))).filter((book): book is LoreBook => book !== null);
+    const rows = await Promise.all(books.map((book) => this.books.entries(user, book.id)));
+    const raw = books.flatMap((book, i) => (rows[i] ?? []).filter((row) => !engineWroteEntry(row.extensions)).map((row) => ({ book, row })));
+    const numbers = await this.numbers.of(user, raw.map((r) => r.row.id));
+    const entries = raw.flatMap(({ book, row }): CatalogueRow[] => {
+      const n = numbers.get(row.id);
+      return n === undefined ? [] : [{ kind: "book", n, book: { id: book.id, name: book.name }, row }];
+    });
+    return catalogueOf({ world: "", titleWords: this.settings.titleWords, entries });
   }
 
   /**

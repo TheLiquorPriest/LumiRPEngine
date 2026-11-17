@@ -270,7 +270,12 @@ export function startWeb(root: HTMLElement, options: WebOptions): () => void {
     gate,
     route,
     timers: deps.timers,
-    keptHost: () => webHost({ revokeMs: () => settings.values.get().downloadRevokeMs, connections: async () => (await client.call("GET /api/v1/connections", {})).connections.map((c) => ({ id: c.id, name: c.name, model: c.model ?? null })) }),
+    keptHost: () =>
+      webHost({
+        revokeMs: () => settings.values.get().downloadRevokeMs,
+        connections: async () => (await client.call("GET /api/v1/connections", {})).connections.map((c) => ({ id: c.id, name: c.name, model: c.model ?? null })),
+        worldBooks: async () => ((await client.call("GET /api/v1/build/lore/books", {})).books as unknown as { id: string; name: string }[]).map((b) => ({ id: b.id, name: b.name })),
+      }),
     go(next) {
       const hash = hashOf(next);
       if (location.hash === hash) onHash();

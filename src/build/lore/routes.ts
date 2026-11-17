@@ -6,6 +6,7 @@
 import { route, RouteError, shape } from "../../app";
 import type { BookFieldsEdit } from "../../shared/lore";
 import type { LoreMarkChange } from "../../shared/lore-views";
+import type { IndexEntries } from "./index-entry";
 import { markChangeOf } from "./marks";
 import type { BuildLore } from "./service";
 import { LoreError } from "./service";
@@ -18,6 +19,7 @@ const opt = shape.optional;
 export const LORE_BOOKS_PATH = "/api/v1/build/lore/books";
 export const LORE_PINS_PATH = "/api/v1/build/lore/pins";
 export const LORE_SAVE_PATH = "/api/v1/chats/:chat/lore/save";
+export const LORE_INDEX_PATH = "/api/v1/build/lore/index";
 export const SECRECY_BOOKS_PATH = "/api/v1/build/secrecy/books";
 
 const STATUS = { bad_request: 400, not_found: 404, conflict: 409, unavailable: 503 } as const;
@@ -33,7 +35,7 @@ async function guarded<A>(work: () => Promise<A>): Promise<A> {
 
 const entries = shape.named("BookEntries", "A book's entries in its order: each with its title, whether it is switched off, its length, the revision a write must name, LRE's fields, its secret marks and what starts like one that can't be read.", shape.json());
 
-export function loreRoutes(lore: BuildLore) {
+export function loreRoutes(lore: BuildLore, index: IndexEntries) {
   const step = (name: "apply" | "confirm" | "restore", does: string) =>
     route({
       method: "POST",
@@ -103,6 +105,26 @@ export function loreRoutes(lore: BuildLore) {
           if (query.world === undefined && query.chat === undefined) throw new LoreError("bad_request", "name the world or the chat");
           return { pins: (await lore.pins(user, query.world !== undefined ? { world: query.world } : { chat: query.chat ?? "" })) as never };
         }),
+    }),
+    route({
+      method: "GET",
+      path: LORE_INDEX_PATH,
+      access: "page",
+      group: "lore",
+      does: "The lore index of the books a world reads, as its draft names them: the text an index entry holds, each book with how many entries it lists, and the entry written of it, if one is, with whether the index has changed since.",
+      query: { world: field(T, "The world.") },
+      reply: shape.object({ index: field(shape.json(), "The index.") }),
+      handle: ({ query, user }) => guarded(async () => ({ index: (await index.view(user, query.world)) as never })),
+    }),
+    route({
+      method: "POST",
+      path: LORE_INDEX_PATH,
+      access: "page",
+      group: "lore",
+      does: "Writes the world's lore index as an entry, on his press: the entry written before, where it is still at the revision Build left it at (one changed in Lumiverse since is refused as a conflict), else a new entry of the book named.",
+      body: shape.object({ world: field(T, "The world."), book: opt(T, "The book a new entry goes into.") }),
+      reply: shape.object({ index: field(shape.json(), "The index as it stands after.") }),
+      handle: ({ body, user }) => guarded(async () => ({ index: (await index.write(user, body.world, body.book ?? "")) as never })),
     }),
     route({
       method: "POST",

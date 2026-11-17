@@ -69,6 +69,10 @@ export class FakeBooks implements BuildBooks, BuildWrites {
     Object.assign(e, { content: fields.content, comment: fields.comment, keys: fields.keys, ...(fields.disabled === undefined ? {} : { disabled: fields.disabled }), ...(fields.extensions === undefined ? {} : { extensions: structuredClone(fields.extensions) as JsonObject }) }, { revision: e.revision + 1 });
     return { written: { id: this.written.length } };
   }
+
+  async create(_user: string, book: string, fields: BookWrite) {
+    return { entry: this.put(book, { content: fields.content, comment: fields.comment, keys: fields.keys, disabled: fields.disabled ?? false, extensions: structuredClone(fields.extensions ?? {}) as JsonObject }), book };
+  }
 }
 
 /** The lore service over a bed and a set of books; `messages` is what Save to lore reads of a chat. */

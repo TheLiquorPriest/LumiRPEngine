@@ -1209,6 +1209,32 @@ Make secret and Make public on one entry, on his press, checked against the revi
 | Body | `{ change: JsonValue; revision: number }` |
 | Reply | `{ entries: BookEntries }` |
 
+### `GET /api/v1/build/lore/index`
+
+The lore index of the books a world reads, as its draft names them: the text an index entry holds, each book with how many entries it lists, and the entry written of it, if one is, with whether the index has changed since.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `world`: `string`, The world |
+| Body | none |
+| Reply | `{ index: JsonValue }` |
+
+### `POST /api/v1/build/lore/index`
+
+Writes the world's lore index as an entry, on his press: the entry written before, where it is still at the revision Build left it at (one changed in Lumiverse since is refused as a conflict), else a new entry of the book named.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | `{ world: string; book?: string }` |
+| Reply | `{ index: JsonValue }` |
+
 ### `GET /api/v1/build/lore/pins`
 
 Every pin of a world's draft (with `world`) or of the revision a chat plays (with `chat`), read now: by character, by place and by step, each with its entry's or book's title, where it comes from and whether it reads.

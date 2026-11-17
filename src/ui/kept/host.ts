@@ -25,6 +25,8 @@ export interface WebHostOptions {
   revokeMs(): number;
   /** The connections RPE lists (`GET /api/v1/connections`), for the model picker's choice of one; none where the page lists none. */
   connections?(): Promise<{ id: string; name: string; model: string | null }[]>;
+  /** His books as Build's pickers list them (`GET /api/v1/build/lore/books`); none where the page lists none. */
+  worldBooks?(): Promise<{ id: string; name: string }[]>;
 }
 
 /** Where a control is mounted: the element itself, or the one a selector names. */
@@ -184,7 +186,7 @@ export function webHost(options: WebHostOptions): KeptHost {
     drawer: createStore({ open: true }),
     components: PAGE_CONTROLS,
     confirm: async (title, message) => window.confirm(`${title}\n\n${message}`),
-    worldBooks: async () => [],
+    worldBooks: options.worldBooks ?? (async () => []),
     connections: options.connections ?? (async () => []),
     download(fileName, text) {
       const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));

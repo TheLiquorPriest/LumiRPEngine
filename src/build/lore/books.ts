@@ -44,6 +44,8 @@ export type WriteRefused = "changed" | "missing" | "draft";
 /** The one recorded writer over his books, revision-checked, each write kept with the entry before and after so it can be put back. */
 export interface BuildWrites {
   edit(user: string, entry: string, fields: BookWrite, revision: number): Promise<{ written: { id: number } } | { refused: WriteRefused }>;
+  /** A new entry in one of his books: where it was made. */
+  create(user: string, book: string, fields: BookWrite): Promise<{ entry: string; book: string }>;
 }
 
 /** An entry as the page shows it in a book's list, in the book's order. */
