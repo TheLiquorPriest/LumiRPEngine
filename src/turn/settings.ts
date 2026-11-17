@@ -9,7 +9,7 @@
 //                                and nothing in code does: with no level naming one, no turn is played
 //   carry: continuing            what a session carries between turns: continuing, records or nothing
 //   limits:
-//     previousRun: 20            seconds a turn waits for the run of the turn before it; then that run is stopped
+//     previousRun: ~             seconds a turn waits for the run of the turn before it, then stops it; none: until it ends
 //   chat:
 //     hiddenReadable: false      agents may read the messages the player hid from the prompt
 //   history:
@@ -70,8 +70,8 @@ export interface TurnSettings {
   /** The agent definition that leads a turn, as the config names it; null where no level does, and no turn is played. */
   lead: string | null;
   carry: Carry;
-  /** How long a turn waits for the previous turn's run, in milliseconds. */
-  previousRunMs: number;
+  /** How long a turn waits for the previous turn's run, in milliseconds; null: until it ends. */
+  previousRunMs: number | null;
   hiddenReadable: boolean;
   /** A turn that ends with no reply sends the Author's last plain text to Lumiverse in place of the error line (plan §10.7). */
   lastText: boolean;
@@ -137,8 +137,8 @@ export const TURN_DEFAULTS: Readonly<TurnSettings> = Object.freeze({
   lead: null,
   // Appendix D.1: continuing, until the session measurement says otherwise.
   carry: "continuing",
-  // Appendix D.1: 20 s, then stop it.
-  previousRunMs: 20_000,
+  // §2.1 point 4 (17 Nov): the next turn waits for the previous turn's run to end.
+  previousRunMs: null,
   // Appendix D.1: as today's setting, which is off.
   hiddenReadable: false,
   // Appendix D.1: "When the Author ends with no reply: a plain error line in Lumiverse".
@@ -205,11 +205,13 @@ const DEFS = {
   },
   previousRun: {
     key: "limits.previousRun",
-    default: TURN_DEFAULTS.previousRunMs / 1000,
+    default: null,
     takes: { type: "number", least: 0 },
+    orNone: true,
+    none: "until it ends",
     perConnection: false,
     name: "Wait for the previous run",
-    about: "Seconds a turn waits for the run of the turn before it; then that run is stopped.",
+    about: "Seconds a turn waits for the run of the turn before it; then that run is stopped. None: it waits until that run ends.",
     effect: "turn",
     row: "Wait for the previous turn's run",
   },
@@ -433,11 +435,12 @@ export const TURN_SETTINGS: readonly Setting[] = [...Object.values(DEFS).filter(
 /** The turn's settings for a scope, as its levels' config files set them over the defaults. */
 export async function turnSettings(files: FilesPort, scope: Scope, log: Log): Promise<TurnSettings> {
   const read = readConfig(await portTexts(files, scope), log, [...TURN_SETTINGS, DEFS.lead]);
+  const previousRun = read.value(DEFS.previousRun) as number | null;
   // Each value is one its setting takes, so it is of the type the setting's `takes` says.
   return {
     lead: read.value(DEFS.lead) as string | null,
     carry: read.value(DEFS.carry) as Carry,
-    previousRunMs: (read.value(DEFS.previousRun) as number) * 1000,
+    previousRunMs: previousRun === null ? null : previousRun * 1000,
     hiddenReadable: read.value(DEFS.hiddenReadable) as boolean,
     lastText: read.value(DEFS.lastText) as boolean,
     editedBudget: read.value(DEFS.editedBudget) as number | null,
