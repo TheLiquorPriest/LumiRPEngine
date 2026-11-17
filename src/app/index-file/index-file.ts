@@ -71,6 +71,11 @@ export class IndexFile {
     return await this.#workers.run("indexSearch", { path: this.#path, index, user, query, scope: options.scope ?? null, limit: options.limit, prefix: options.prefix === true });
   }
 
+  /** The id and revision of each of the user's texts in `index` within `scope` (a chat, a book): what a lane that feeds it from its source holds there. */
+  async held(index: IndexName, user: string, scope: string): Promise<{ id: string; revision: string }[]> {
+    return await this.#workers.run("indexHeld", { path: this.#path, index, user, scope });
+  }
+
   /** Makes an area's own table, by its own step; one standing with other columns is made again, empty (`made`), and the area feeds it again. */
   async table(table: TableDef): Promise<{ made: boolean }> {
     return await this.#writer.run("indexTable", { path: this.#path, table });

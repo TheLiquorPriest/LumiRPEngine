@@ -190,6 +190,12 @@ export const INDEX_TASKS = {
     return readerOf(input.path).query<IndexHit, Record<string, string | number>>(sql).all(params);
   },
 
+  /** On any thread: the id and revision of every text of the user's indexed within `scope`, so a lane that feeds it from its source can drop what its source no longer holds. */
+  indexHeld(input: { path: string; index: IndexName; user: string; scope: string }): { id: string; revision: string }[] {
+    const name = indexOf(input.index);
+    return readerOf(input.path).query<{ id: string; revision: string }, [string, string]>(`SELECT id, revision FROM "${name}_key" WHERE user = ? AND scope = ?`).all(input.user, input.scope);
+  },
+
   /** On the writer's thread: makes an area's own table, or makes it again, empty, where it stands with other columns; `made` when it was made. */
   indexTable(input: { path: string; table: TableDef }): { made: boolean } {
     const db = writerOf(input.path);

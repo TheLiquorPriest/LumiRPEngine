@@ -7,9 +7,9 @@
 // An entry is two texts of the index: the whole of it in its book's scope, and its names alone (its title, keys, secondary keys and LRE aliases) in
 // its book's names scope, so an entry a word names is found among many that only mention it.
 //
-// What the feed knows of what it has put is each chat's and book's id to revision, kept for the process's life. A process that starts again feeds a
-// chat whole once (the index leaves a text of the revision it holds as it is), and a message deleted while RPE was down is left in the index under
-// its old words, where every search leaves it out: its id is not on the chat's path.
+// What the feed knows of what it has put is each chat's and book's id to revision, kept for the process's life, and read back from the index file
+// the first time a chat or a book is fed after RPE starts: so a text of the revision the index holds is left as it is, and a message or an entry
+// deleted while RPE was not running is dropped from the index, not only left out of every search.
 
 import type { IndexDoc, IndexHit, IndexName } from "../../app/index-file/index-file";
 import { bookLoreFieldsOf } from "../../shared/lore";
@@ -21,6 +21,7 @@ export interface IndexPort {
   put(index: IndexName, user: string, docs: readonly IndexDoc[]): Promise<unknown>;
   drop(index: IndexName, user: string, ids: readonly string[]): Promise<unknown>;
   search(index: IndexName, user: string, query: string, options: { scope?: string | null; limit: number; prefix?: boolean }): Promise<IndexHit[]>;
+  held(index: IndexName, user: string, scope: string): Promise<{ id: string; revision: string }[]>;
 }
 
 export interface FeedDeps {
@@ -78,16 +79,22 @@ export class IndexFeed {
 
   constructor(private readonly deps: FeedDeps) {}
 
+  /** What the index holds within a chat's or a book's scope, as the feed knows it: from the index file itself, the first time after RPE started. */
+  async #had(known: ReadonlyMap<string, ReadonlyMap<string, string>>, index: IndexName, scope: string): Promise<ReadonlyMap<string, string>> {
+    return known.get(scope) ?? new Map((await this.deps.index.held(index, this.deps.user, scope)).map((h) => [h.id, h.revision] as const));
+  }
+
   /** The chat's messages brought up to date in the index: what was added or changed is put, what is gone is dropped. Null where the user has no such chat. */
   ensureChat(chat: string): Promise<LvStep[] | null> {
     return this.#serial.run(`chat\u0000${chat}`, async () => {
       const { reads, index, user } = this.deps;
       const path = await reads.path(chat);
+      // A chat deleted, while RPE ran or not: what the index holds of it goes.
       if (path === null) {
-        this.#chats.delete(chat);
+        await this.#forget(chat);
         return null;
       }
-      const had = this.#chats.get(chat) ?? new Map<string, string>();
+      const had = await this.#had(this.#chats, "messages", chat);
       const now = new Map(path.map((s) => [s.id, keyOf(s)] as const));
       const changed = path.filter((s) => had.get(s.id) !== now.get(s.id)).map((s) => s.id);
       const gone = [...had.keys()].filter((id) => !now.has(id));
@@ -125,12 +132,15 @@ export class IndexFeed {
 
   /** The chat's search entries let go of, for the Storage page's prune of a living chat's derived rows; the chat is fed again at its next search. */
   dropChat(chat: string): Promise<void> {
-    return this.#serial.run(`chat\u0000${chat}`, async () => {
-      const { reads, index, user } = this.deps;
-      const ids = new Set([...(this.#chats.get(chat)?.keys() ?? []), ...((await reads.path(chat))?.map((s) => s.id) ?? [])]);
-      this.#chats.delete(chat);
-      if (ids.size > 0) await index.drop("messages", user, [...ids]);
-    });
+    return this.#serial.run(`chat\u0000${chat}`, () => this.#forget(chat));
+  }
+
+  /** Every text the index holds of the chat dropped, and the feed's knowledge of it with them. */
+  async #forget(chat: string): Promise<void> {
+    const { index, user } = this.deps;
+    const ids = (await index.held("messages", user, chat)).map((h) => h.id);
+    this.#chats.delete(chat);
+    if (ids.length > 0) await index.drop("messages", user, ids);
   }
 
   /** The book's entries brought up to date in the index, and what they are: Lumiverse's own, in its order. */
@@ -138,7 +148,7 @@ export class IndexFeed {
     return this.#serial.run(`book\u0000${book}`, async () => {
       const { reads, index, user } = this.deps;
       const entries = await reads.entries(book);
-      const had = this.#books.get(book) ?? new Map<string, string>();
+      const had = await this.#had(this.#books, "entries", book);
       const now = new Map(entries.map((e) => [e.id, String(e.revision)] as const));
       const changed = entries.filter((e) => had.get(e.id) !== now.get(e.id));
       for (let at = 0; at < changed.length; at += STRETCH) {
