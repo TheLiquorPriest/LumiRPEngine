@@ -139,7 +139,9 @@ export function promptInterceptor(deps: PromptDeps): (messages: PromptMessageDTO
       // Without it Lumiverse takes the tag off and only says so in its own log (`worker-host.ts:1922-1931`).
       if (!deps.granted("generation_parameters")) throw new Stop("RPE stopped this reply rather than send it without RPE: its extension may not add to a reply's request. Grant RPE's extension the “generation_parameters” permission in Lumiverse.");
       const generation = deps.generations.take(ctx.user, ctx.chat, ctx.type);
-      if (generation === null) throw new Stop("RPE could not tell which generation this prompt belongs to, so it stopped the reply. Send it again.");
+      // A worker Lumiverse started again after the World Info stage heard no generation begin: nothing pairs this prompt (PlanAdapter-3 item 5).
+      if (generation === null)
+        throw new Stop("RPE stopped this reply: its extension could not pair this prompt with a generation it heard begin, as when Lumiverse started the extension again while the generation was under way. Send it again.");
       const handoff = deps.generations.handoffFor(ctx.user, ctx.chat, generation.id);
       const cut = handoff?.cut ?? null;
       const left = new Set(cut === null ? [] : historyCut(messages.map((m) => ({ history: m.__isChatHistory === true, index: typeof m.sourceIndexInChat === "number" ? m.sourceIndexInChat : null })), cut.keep));

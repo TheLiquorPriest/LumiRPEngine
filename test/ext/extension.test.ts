@@ -360,7 +360,7 @@ describe("the prompt interceptor's own faults, dry runs and permissions", () => 
   test("without generation the extension hears no generation start and asks nothing, so a reply on RPE's connection is stopped; the grant registers the question and the listener", async () => {
     const rig = await new Rig({ granted: ALL.filter((p) => p !== "generation") }).start();
     const stopped = await rig.generate("conn-rpe");
-    expect(stopped.error).toBe("RPE could not tell which generation this prompt belongs to, so it stopped the reply. Send it again.");
+    expect(stopped.error).toBe("RPE stopped this reply: its extension could not pair this prompt with a generation it heard begin, as when Lumiverse started the extension again while the generation was under way. Send it again.");
     expect(rig.questions).toHaveLength(0);
     await rig.grant("generation");
     const played = await rig.generate("conn-rpe");
