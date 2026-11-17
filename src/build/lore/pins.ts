@@ -11,6 +11,7 @@ import { parseSecretMarks, wholeEntrySecret } from "../../shared/secret-marks";
 import type { LorePin, WorldDoc } from "../../shared/world";
 import { bookEntryTitle } from "../../secrecy/book-lore";
 import { type BookEntry, type BuildBooks, engineWrote, listBooks } from "./books";
+import { say } from "../../engine/lines";
 
 /** What a set of pins names in his books, each read once: a book entry by its pin's key (null: gone, or in another book), a whole book's entries by its id (null: unread). */
 interface Read {
@@ -20,7 +21,7 @@ interface Read {
 
 async function readPinned(books: BuildBooks, pins: readonly LorePin[], user: UserId, said: (message: string) => void): Promise<Read> {
   const out: Read = { entries: new Map(), books: new Map() };
-  const unread = (what: string, error: unknown): void => said(`${what} wasn't read: ${error instanceof Error ? error.message : String(error)}`);
+  const unread = (what: string, error: unknown): void => said(say("lint_what_wasnt_read_error", { what: what, error: error instanceof Error ? error.message : String(error) }));
   await Promise.all(
     pins.map(async (pin) => {
       if ("lore" in pin) return;

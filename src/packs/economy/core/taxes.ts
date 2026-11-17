@@ -892,9 +892,9 @@ function sCorpIssues(world: WorldDoc, registry: Registry | undefined): LintIssue
         const beneficiaries = holding(he.fields);
         if ((he.fields.revocable === true && person(settlor)) || (beneficiaries.length > 0 && beneficiaries.every(person))) continue;
       }
-      out.push({ severity: "warning", code: "economy.scorp_holders", path, message: `${e.name} is an S corporation, but ${he.name} can't hold its shares: an S corporation's shareholders are people, eligible trusts (a grantor trust, or one whose beneficiaries are all people) and charities (501(c)(3) organizations). Make it a C corporation, or move ${he.name}'s share to someone who may hold it.` });
+      out.push({ severity: "warning", code: "economy.scorp_holders", path, message: say("lint_name_is_an_s_corporation_but_name2", { name: e.name, name2: he.name }) });
     }
-    if (holders.length > max) out.push({ severity: "warning", code: "economy.scorp_holders", path, message: `${e.name} is an S corporation with ${holders.length} shareholders: it may have at most ${max}.` });
+    if (holders.length > max) out.push({ severity: "warning", code: "economy.scorp_holders", path, message: say("lint_name_is_an_s_corporation_with_holderscount", { name: e.name, holdersCount: holders.length, max: max }) });
   }
   return out;
 }

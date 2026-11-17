@@ -571,13 +571,13 @@ export function registerHoldings(r: FinanceRegistry): void {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "holding") continue;
         const asset = strOf(e.fields.asset);
-        if (!own(assets, asset)) issues.push({ severity: "error" as const, code: "economy.holdings", message: `Holding ${e.name} names asset "${asset}", which the economy's assets don't list.`, path: `entities.${e.id}.fields.asset` });
+        if (!own(assets, asset)) issues.push({ severity: "error" as const, code: "economy.holdings", message: say("lint_holding_name_names_asset_asset_which_the", { name: e.name, asset: asset }), path: `entities.${e.id}.fields.asset` });
         const account = strOf(e.fields.account);
-        if (account !== "" && own(world.entities, account)?.kind !== "account") issues.push({ severity: "error" as const, code: "economy.holdings", message: `Holding ${e.name} sits in ${account}, which isn't an account.`, path: `entities.${e.id}.fields.account` });
-        if (account === "" && ownersIn(e.fields).length === 0) issues.push({ severity: "error" as const, code: "economy.holdings", message: `Holding ${e.name} sits in no account and has no owners.`, path: `entities.${e.id}.fields.owners` });
-        if (e.fields.lots !== undefined && !Array.isArray(e.fields.lots)) issues.push({ severity: "error" as const, code: "economy.holdings", message: `Holding ${e.name}'s lots are a list of {qty, cost, at}.`, path: `entities.${e.id}.fields.lots` });
+        if (account !== "" && own(world.entities, account)?.kind !== "account") issues.push({ severity: "error" as const, code: "economy.holdings", message: say("lint_holding_name_sits_in_account_which_isnt", { name: e.name, account: account }), path: `entities.${e.id}.fields.account` });
+        if (account === "" && ownersIn(e.fields).length === 0) issues.push({ severity: "error" as const, code: "economy.holdings", message: say("lint_holding_name_sits_in_no_account_and", { name: e.name }), path: `entities.${e.id}.fields.owners` });
+        if (e.fields.lots !== undefined && !Array.isArray(e.fields.lots)) issues.push({ severity: "error" as const, code: "economy.holdings", message: say("lint_holding_name_s_lots_are_a_list", { name: e.name }), path: `entities.${e.id}.fields.lots` });
         const route = strOf(e.fields.route);
-        if (route !== "" && route !== "reinvest" && own(world.entities, route)?.kind !== "account") issues.push({ severity: "warning" as const, code: "economy.holdings", message: `Holding ${e.name} routes its payouts to ${route}, which isn't an account; they go to its account instead.`, path: `entities.${e.id}.fields.route` });
+        if (route !== "" && route !== "reinvest" && own(world.entities, route)?.kind !== "account") issues.push({ severity: "warning" as const, code: "economy.holdings", message: say("lint_holding_name_routes_its_payouts_to_route", { name: e.name, route: route }), path: `entities.${e.id}.fields.route` });
       }
       return issues;
     },

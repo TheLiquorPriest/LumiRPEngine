@@ -37,6 +37,7 @@ import { placeOfEntity } from "./scope";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
 import { playerTrack } from "./visibility";
+import { say } from "./lines";
 
 /** How far up the place tree a marked place counts. */
 const PARENT_DEPTH = 32;
@@ -299,15 +300,15 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
   const raw: unknown = isRecord(world.ruleset) ? world.ruleset.adjudication : undefined;
   if (raw === undefined) return issues;
   const at = "ruleset.adjudication";
-  if (!isRecord(raw)) return [{ severity: "error", path: at, code: "adjudication", message: "How checks are decided must be an object with a preset." }];
+  if (!isRecord(raw)) return [{ severity: "error", path: at, code: "adjudication", message: say("lint_how_checks_are_decided_must_be_an") }];
   const policy = readAdjudication(raw);
-  if (!policy) return [{ severity: "error", path: `${at}.preset`, code: "adjudication", message: `"${String(raw.preset)}" isn't a preset: use narrative, balanced, crunchy or custom.` }];
+  if (!policy) return [{ severity: "error", path: `${at}.preset`, code: "adjudication", message: say("lint_preset_isnt_a_preset_use_narrative_balanced", { preset: String(raw.preset) }) }];
   const values = ["checks", "riskyAt", "trivialAt", "impossibleAt", "authority", "closeBy", "retry", "retryAfter"] as const;
   const described = ["weight", "max", "advantageAt"] as const;
   const description = isRecord(raw.description) ? raw.description : {};
   const read: [string, unknown, unknown][] = [...values.map((k): [string, unknown, unknown] => [k, raw[k], policy[k]]), ...described.map((k): [string, unknown, unknown] => [`description.${k}`, description[k], policy.description[k]])];
   for (const [key, given, plays] of read) {
-    if (given !== undefined && given !== plays) issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(plays)}.` });
+    if (given !== undefined && given !== plays) issues.push({ severity: "warning", path: `${at}.${key}`, code: "adjudication_value", message: say("lint_key_cant_be_given_it_plays_as", { key: key, given: JSON.stringify(given), plays: JSON.stringify(plays) }) });
   }
   // A preset named over values of its own: the values apply, so the name can't (DESIGN §11).
   const named = ADJUDICATION_PRESET_IDS.find((p): p is Exclude<AdjudicationPresetId, "custom"> => p === raw.preset && p !== "custom");
@@ -316,14 +317,14 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
     const changed = [...values.filter((k) => policy[k] !== preset[k]), ...described.filter((k) => policy.description[k] !== preset.description[k]).map((k) => `description.${k}`)];
     const listed = changed.length > 1 ? `${changed.slice(0, -1).join(", ")} and ${changed.at(-1) ?? ""}` : (changed[0] ?? "");
     const label = ADJUDICATION_PRESET_LABEL[named];
-    issues.push({ severity: "warning", path: `${at}.preset`, code: "adjudication_preset", message: `This names the ${label} preset but sets ${listed} its own way, so it plays as Custom with them. Name it custom to say so, or drop them to play ${label}.` });
+    issues.push({ severity: "warning", path: `${at}.preset`, code: "adjudication_preset", message: say("lint_this_names_the_label_preset_but_sets", { label: label, listed: listed }) });
   }
   if (policy.trivialAt !== null && policy.impossibleAt !== null && policy.trivialAt <= policy.impossibleAt) {
-    issues.push({ severity: "error", path: `${at}.trivialAt`, code: "adjudication", message: "A sure thing must start above too hard to try, or no check would ever roll." });
+    issues.push({ severity: "error", path: `${at}.trivialAt`, code: "adjudication", message: say("lint_a_sure_thing_must_start_above_too") });
   }
-  if (policy.checks === "risky" && policy.riskyAt <= 0) issues.push({ severity: "warning", path: `${at}.riskyAt`, code: "adjudication", message: "No check's chance is below 0, so no check ever rolls." });
+  if (policy.checks === "risky" && policy.riskyAt <= 0) issues.push({ severity: "warning", path: `${at}.riskyAt`, code: "adjudication", message: say("lint_no_checks_chance_is_below_0_so") });
   const marks = Object.values(world.actions).some((a) => a.adjudicate === true) || Object.values(world.places).some((p) => p.adjudicate === true) || Object.values(world.tracks).some((t) => t.adjudicate === true);
-  if (policy.checks === "marked" && !marks) issues.push({ severity: "warning", path: `${at}.checks`, code: "adjudication_unmarked", message: "Checks roll only for marked actions, places and tracks, and nothing is marked: no check will ever roll." });
+  if (policy.checks === "marked" && !marks) issues.push({ severity: "warning", path: `${at}.checks`, code: "adjudication_unmarked", message: say("lint_checks_roll_only_for_marked_actions_places") });
   // Every timing but `every`, a threshold and a retry rule read a check's success (a retry must tell a failure).
   const readsChance = policy.checks !== "every" || policy.trivialAt !== null || policy.impossibleAt !== null || policy.retry !== "free";
   // Each check the world defines (by id or inline in an action), read with the bands it rolls with. The
@@ -335,9 +336,9 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
   for (const [path, check] of checks) {
     const bands = checkBands(check, check.dc !== undefined || check.vs !== undefined ? 0 : null);
     const known = new Set(bands.map((b) => b.outcome));
-    for (const o of check.pass ?? []) if (!known.has(o)) issues.push({ severity: "warning", path: `${path}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
-    if (typeof check.auto === "string" && check.auto !== "" && !known.has(check.auto)) issues.push({ severity: "warning", path: `${path}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
-    if (readsChance && passOutcomes(check, bands).length === 0) issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
+    for (const o of check.pass ?? []) if (!known.has(o)) issues.push({ severity: "warning", path: `${path}.pass`, code: "adjudication_outcome", message: say("lint_o_counts_as_a_success_but_no", { o: o }) });
+    if (typeof check.auto === "string" && check.auto !== "" && !known.has(check.auto)) issues.push({ severity: "warning", path: `${path}.auto`, code: "adjudication_outcome", message: say("lint_an_unrolled_check_passes_as_auto_which", { auto: check.auto }) });
+    if (readsChance && passOutcomes(check, bands).length === 0) issues.push({ severity: "info", path, code: "adjudication_success", message: say("lint_this_check_names_no_success_no_success") });
   }
   return issues;
 }

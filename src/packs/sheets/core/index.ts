@@ -318,7 +318,7 @@ export const sheetsPack: PackDef = {
         for (const e of Object.values(world.entities)) {
           for (const s of stats) {
             const v = own(e.fields, s.id);
-            if (typeof v === "number" && (v < s.min || v > s.max)) issues.push({ severity: "warning" as const, code: "sheets.stat_range", message: `${e.name}'s ${s.label} ${v} is outside ${s.min}–${s.max}.`, path: `entities.${e.id}.fields.${s.id}` });
+            if (typeof v === "number" && (v < s.min || v > s.max)) issues.push({ severity: "warning" as const, code: "sheets.stat_range", message: say("lint_name_s_s_v_is_outside_min", { name: e.name, s: s.label, v: v, min: s.min, max: s.max }), path: `entities.${e.id}.fields.${s.id}` });
           }
         }
         return issues;

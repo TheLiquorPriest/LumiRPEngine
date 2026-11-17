@@ -185,8 +185,8 @@ export function registerNotes(r: FinanceRegistry): void {
         if (e.kind !== "account") continue;
         const note = strOf(e.fields.note);
         const loan = strOf(e.fields.loan);
-        if (note !== "" && own(world.entities, note)?.fields.loan !== e.id) issues.push({ severity: "error" as const, code: "economy.notes", message: `Account ${e.name}'s note "${note}" isn't a loan made to it.`, path: `entities.${e.id}.fields.note` });
-        if (strOf(e.fields.product) === "note" && own(world.entities, loan)?.fields.note !== e.id) issues.push({ severity: "error" as const, code: "economy.notes", message: `Loan made ${e.name} names no loan that owes it.`, path: `entities.${e.id}.fields.loan` });
+        if (note !== "" && own(world.entities, note)?.fields.loan !== e.id) issues.push({ severity: "error" as const, code: "economy.notes", message: say("lint_account_name_s_note_note_isnt_a", { name: e.name, note: note }), path: `entities.${e.id}.fields.note` });
+        if (strOf(e.fields.product) === "note" && own(world.entities, loan)?.fields.note !== e.id) issues.push({ severity: "error" as const, code: "economy.notes", message: say("lint_loan_made_name_names_no_loan_that", { name: e.name }), path: `entities.${e.id}.fields.loan` });
       }
       return issues;
     },

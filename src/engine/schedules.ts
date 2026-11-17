@@ -31,6 +31,7 @@ import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities, TRUST_KIND } from 
 import type { WorldState } from "./state";
 import { chatWorld, calendarIn } from "./holidays";
 import { initialState, minutesBetween } from "./world-state";
+import { say } from "./lines";
 
 export interface ScheduleInstant {
   at: number;
@@ -694,7 +695,7 @@ export function scheduleOverlaps(reg: Registry, world: WorldDoc): LintIssue[] {
       if (!clash) continue;
       const names = shared.map((id) => own(state.entities, id)?.name ?? id);
       const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
-      issues.push({ severity: "warning", path: `schedules.${b.schedule.id}`, code: "schedule_overlap", message: `${who} ${names.length === 1 ? "is" : "are"} double-booked: ${a.schedule.id} and ${b.schedule.id} both set ${a.schedule.target} at the same time, with the same precedence.` });
+      issues.push({ severity: "warning", path: `schedules.${b.schedule.id}`, code: "schedule_overlap", message: say("lint_who_isare_double_booked_id_and_id2", { who: who, id: a.schedule.id, id2: b.schedule.id, target: a.schedule.target, if_names: names.length === 1 }) });
     }
   }
   return issues;

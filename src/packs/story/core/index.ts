@@ -581,7 +581,7 @@ export const storyPack: PackDef = {
 
     r.lint({
       code: "story.leaky_label",
-      check: (world) => leakyLabels(world).map((l) => ({ severity: "error" as const, code: "story.leaky_label", message: `"${l.text}" gives away a secret ("${l.secret}").`, path: l.path })),
+      check: (world) => leakyLabels(world).map((l) => ({ severity: "error" as const, code: "story.leaky_label", message: say("lint_text_gives_away_a_secret_secret", { text: l.text, secret: l.secret }), path: l.path })),
     });
     // A warning: the id may never reach the player, as when they never act on what it names, but nothing here can tell.
     r.lint({
@@ -603,7 +603,7 @@ export const storyPack: PackDef = {
           effects.flatMap((spec, i) => {
             const track = spec.type === "story.answer" ? spec.args.track : undefined;
             if (typeof track !== "string" || !track.startsWith("=")) return [];
-            return [{ severity: "warning" as const, code: "story.answer_track", message: `This answer's track is a formula (${track}), but track takes a puzzle's own id as written, such as "p_safe": the puzzle the formula gives is answered even when the player can't see it. To let the player say which puzzle, pass their words as puzzle instead.`, path: `${path}.${i}.args.track` }];
+            return [{ severity: "warning" as const, code: "story.answer_track", message: say("lint_this_answers_track_is_a_formula_track", { track: track }), path: `${path}.${i}.args.track` }];
           }),
         ),
     });
@@ -621,7 +621,7 @@ export const storyPack: PackDef = {
           return {
             severity: "warning" as const,
             code: "story.unset_flag",
-            message: `${reads} the story flag${many ? "s" : ""} ${list}, but nothing in this world sets ${it}: no rule, action or stage effect does, and the GM view has no flag control. ${many ? "They keep their" : "It keeps its"} starting value for good, so ${so}. Set ${it} with a story.flag effect where the story makes ${it} true.`,
+            message: say("lint_reads_the_story_flags_list_but_nothing", { reads: reads, list: list, it: it, so: so, if_many: !!(many) }),
             path: u.path,
           };
         }),

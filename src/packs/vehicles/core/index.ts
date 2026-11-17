@@ -857,7 +857,7 @@ export const vehiclesPack: PackDef = {
         for (const e of Object.values(world.entities)) {
           if (e.kind !== "vehicle") continue;
           const cls = e.fields.class;
-          if (typeof cls !== "string" || (table && !own(table.rows, cls))) issues.push({ severity: "warning" as const, code: "vehicles.classes", message: `${e.name} has no known vehicle class; fuel and range can't be computed.`, path: `entities.${e.id}.fields.class` });
+          if (typeof cls !== "string" || (table && !own(table.rows, cls))) issues.push({ severity: "warning" as const, code: "vehicles.classes", message: say("lint_name_has_no_known_vehicle_class_fuel", { name: e.name }), path: `entities.${e.id}.fields.class` });
         }
         return issues;
       },

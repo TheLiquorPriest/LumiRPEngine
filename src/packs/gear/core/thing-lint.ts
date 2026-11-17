@@ -17,6 +17,7 @@ import type { Registry } from "../../../engine/registry-impl";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { holdsOf, isThing, sizeOf } from "../../../engine/things";
 import { initialState } from "../../../engine/world-state";
+import { say } from "../../../engine/lines";
 
 /** The issue codes the rule reports. */
 export const THING_LINT = { tooBig: "gear.too_big", twoPlaces: "gear.two_places", sizeUnknown: "gear.size_unknown" } as const;
@@ -64,7 +65,7 @@ function check(world: WorldDoc, registry: Registry): LintIssue[] {
     const place = typeof e.fields.place === "string" && e.fields.place !== "" ? e.fields.place : null;
     if (place !== null && holder !== null) {
       const fix: LintFix | undefined = own(world.places, place) ? { label: `Keep it at ${placeName(place)}`, ops: putAt(world, id, holder, place) } : undefined;
-      issues.push({ severity: "warning", code: THING_LINT.twoPlaces, path: `entities.${id}`, message: `${e.name} lies at ${placeName(place)} and is in ${own(world.entities, holder)?.name ?? holder} at once; play reads it at ${placeName(place)}.${fix ? ` Keep it there?` : ""}`, ...(fix ? { fix } : {}) });
+      issues.push({ severity: "warning", code: THING_LINT.twoPlaces, path: `entities.${id}`, message: say("lint_name_lies_at_place_and_is_in", { name: e.name, place: placeName(place), holder: own(world.entities, holder)?.name ?? holder, if_fix: !!(fix) }), ...(fix ? { fix } : {}) });
     } else if (holder !== null) {
       const h = own(ctx.state.entities, holder);
       const holds = holdsOf(ctx, holder);
@@ -74,10 +75,10 @@ function check(world: WorldDoc, registry: Registry): LintIssue[] {
         const fix: LintFix | undefined = to !== null ? { label: `Put it at ${placeName(to)}`, ops: putAt(world, id, holder, to) } : undefined;
         const big = size === "unknown" || size === "part" || size === "vehicle" ? null : size;
         const why = big === null ? `${e.name} is ${person ? "on" : "in"} ${h.name}: a vehicle goes only on another vehicle.` : person ? `${e.name} is on ${h.name}: too big to carry (${SIZE_LABELS[big]}; a person carries up to ${SIZE_LABELS[ceiling]}).` : `${e.name} is in ${h.name}: too big for it (${h.name} takes things up to ${SIZE_LABELS[holds]}).`;
-        issues.push({ severity: "warning", code: THING_LINT.tooBig, path: `entities.${id}`, message: `${why}${to !== null ? ` Put it at ${placeName(to)}?` : ""}`, ...(fix ? { fix } : {}) });
+        issues.push({ severity: "warning", code: THING_LINT.tooBig, path: `entities.${id}`, message: say("lint_why_put_it_at_placename", { why: why, placeName: to !== null ? placeName(to) : undefined, if_to: to !== null }), ...(fix ? { fix } : {}) });
       }
     }
-    if (size === "unknown") issues.push({ severity: "info", code: THING_LINT.sizeUnknown, path: `entities.${id}.fields.size`, message: `${e.name} has no size, and nothing gives one (its type, volume or category), so play treats it as portable. Give it a size on its page.` });
+    if (size === "unknown") issues.push({ severity: "info", code: THING_LINT.sizeUnknown, path: `entities.${id}.fields.size`, message: say("lint_name_has_no_size_and_nothing_gives", { name: e.name }) });
   }
   return issues;
 }

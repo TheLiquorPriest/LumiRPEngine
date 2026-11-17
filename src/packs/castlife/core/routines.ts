@@ -55,6 +55,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
 import { occasionOf, type Occasion } from "./occasions";
 import { bedPlace, homeOf, placeOfType, workPlace } from "./places";
+import { say } from "../../../engine/lines";
 
 /** The planner's option id prefix for a routine block: `routine:<block id>`. */
 export const ROUTINE_OPTION = "routine:";
@@ -511,13 +512,13 @@ export function routineIssues(world: WorldDoc, reg: Registry, id: string, value:
   if (routineShapeProblems(value).length > 0 || !isRecord(value)) {
     // A block's own problems at its path, so Build opens that block; the routine's at its root.
     const blocks = isRecord(value) && Array.isArray(value.blocks) ? value.blocks : [];
-    const top = routineShapeProblems(isRecord(value) && Array.isArray(value.blocks) ? { ...value, blocks: [] } : value).map((message) => ({ severity: "error" as const, code: ROUTINE_LINT.shape, message: `Routine ${id}: ${message}.`, path: at }));
+    const top = routineShapeProblems(isRecord(value) && Array.isArray(value.blocks) ? { ...value, blocks: [] } : value).map((message) => ({ severity: "error" as const, code: ROUTINE_LINT.shape, message: say("lint_routine_id_message", { id: id, message: message }), path: at }));
     const seen = new Set<string>();
     const each = blocks.flatMap((b, i) => {
       const blockId = isRecord(b) && typeof b.id === "string" ? b.id : "";
       const twice = blockId !== "" && seen.has(blockId) ? [`another block of this routine is ${blockId}`] : [];
       seen.add(blockId);
-      return [...blockShapeProblems(b, true), ...twice].map((message) => ({ severity: "error" as const, code: ROUTINE_LINT.shape, message: `Routine ${id}, block ${i + 1}: ${message}.`, path: `${at}.blocks.${i}` }));
+      return [...blockShapeProblems(b, true), ...twice].map((message) => ({ severity: "error" as const, code: ROUTINE_LINT.shape, message: say("lint_routine_id_block_i_message", { id: id, i: i + 1, message: message }), path: `${at}.blocks.${i}` }));
     });
     return [...top, ...each];
   }
@@ -526,37 +527,37 @@ export function routineIssues(world: WorldDoc, reg: Registry, id: string, value:
   const warn = (code: string, path: string, message: string): void => {
     issues.push({ severity: "warning", code, path, message });
   };
-  if (def.id !== id) warn(ROUTINE_LINT.shape, `${at}.id`, `Routine ${id} is saved under another id (${def.id}).`);
-  if (typeof def.owner === "string" && !own(world.entities, def.owner) && !kindDef(reg, world, def.owner)) warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${def.owner} is no entity, group or kind of the world.`);
-  else if (isRecord(def.owner)) for (const p of selectorProblems(reg, world, def.owner)) warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner ${p}.`);
-  if (def.owner !== undefined && scheduleOwners(reg, world, state, def).length === 0) warn(ROUTINE_LINT.owner, `${at}.owner`, `Routine ${id}'s owner matches nobody as a chat starts, so it applies to no one.`);
+  if (def.id !== id) warn(ROUTINE_LINT.shape, `${at}.id`, say("lint_routine_id_is_saved_under_another_id", { id: id, id2: def.id }));
+  if (typeof def.owner === "string" && !own(world.entities, def.owner) && !kindDef(reg, world, def.owner)) warn(ROUTINE_LINT.owner, `${at}.owner`, say("lint_routine_id_s_owner_owner_is_no", { id: id, owner: def.owner }));
+  else if (isRecord(def.owner)) for (const p of selectorProblems(reg, world, def.owner)) warn(ROUTINE_LINT.owner, `${at}.owner`, say("lint_routine_id_s_owner_p", { id: id, p: p }));
+  if (def.owner !== undefined && scheduleOwners(reg, world, state, def).length === 0) warn(ROUTINE_LINT.owner, `${at}.owner`, say("lint_routine_id_s_owner_matches_nobody_as", { id: id }));
   const holidays = new Set(world.calendar.holidays.map((h) => h.id));
   const scenes = new Set(Object.values(world.places).flatMap((p) => (p.sceneType ? [p.sceneType] : [])));
   def.blocks.forEach((entry, i) => {
     const path = `${at}.blocks.${i}`;
     const source = entry.source ?? def.source;
     // A World Info entry (`book:<bookId>/<entryId>`) is read live, from books the lint can't see: only the world's own lore is checked.
-    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on lore entry ${source.entry}, which the world doesn't have.`);
-    if (source?.type === "sheet" && !own(world.entities, source.entity)) warn(ROUTINE_LINT.source, `${path}.source`, `Routine ${id}, block ${entry.id}: rests on ${source.entity}'s sheet, who isn't in the world.`);
+    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) warn(ROUTINE_LINT.source, `${path}.source`, say("lint_routine_id_block_id2_rests_on_lore", { id: id, id2: entry.id, entry: source.entry }));
+    if (source?.type === "sheet" && !own(world.entities, source.entity)) warn(ROUTINE_LINT.source, `${path}.source`, say("lint_routine_id_block_id2_rests_on_entity", { id: id, id2: entry.id, entity: source.entity }));
     if (isOff(entry)) return;
     const b = entry;
     const name = `Routine ${id}, block ${b.id}`;
-    if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place)) warn(ROUTINE_LINT.place, `${path}.place`, `${name}: there's no place ${b.place.place}; it happens at home.`);
-    if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest)) warn(ROUTINE_LINT.place, `${path}.place`, `${name}: no place has the scene type ${b.place.nearest}; it happens at home.`);
-    if (b.place === "with" && !b.company && b.days?.birthday !== "friend") warn(ROUTINE_LINT.place, `${path}.place`, `${name}: happens with its company, but names none; it happens at home.`);
+    if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place)) warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_theres_no_place_place_it_happens", { name: name, place: b.place.place }));
+    if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest)) warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_no_place_has_the_scene_type", { name: name, nearest: b.place.nearest }));
+    if (b.place === "with" && !b.company && b.days?.birthday !== "friend") warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_happens_with_its_company_but_names", { name: name }));
     if (b.company && isRecord(b.company.who)) {
-      for (const p of selectorProblems(reg, world, b.company.who)) warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company ${p}.`);
-      if (selectEntities(reg, world, state, b.company.who).length === 0) warn(ROUTINE_LINT.company, `${path}.company`, `${name}: its company matches nobody as a chat starts.`);
+      for (const p of selectorProblems(reg, world, b.company.who)) warn(ROUTINE_LINT.company, `${path}.company`, say("lint_name_its_company_p", { name: name, p: p }));
+      if (selectEntities(reg, world, state, b.company.who).length === 0) warn(ROUTINE_LINT.company, `${path}.company`, say("lint_name_its_company_matches_nobody_as_a", { name: name }));
     }
-    for (const n of b.needs ?? []) if (!["hunger", "fatigue", "social", "fun"].includes(n)) warn(ROUTINE_LINT.need, `${path}.needs`, `${name}: there's no need ${n} (hunger, fatigue, social, fun).`);
-    for (const h of [...(b.days?.holidays ?? []), ...(b.days?.except ?? [])]) if (!holidays.has(h)) warn(ROUTINE_LINT.days, `${path}.days`, `${name}: the calendar has no holiday ${h}.`);
-    if (b.days?.weekdays?.length === 0) warn(ROUTINE_LINT.days, `${path}.days`, `${name}: lists no weekdays, so it's never on.`);
+    for (const n of b.needs ?? []) if (!["hunger", "fatigue", "social", "fun"].includes(n)) warn(ROUTINE_LINT.need, `${path}.needs`, say("lint_name_theres_no_need_n_hunger_fatigue", { name: name, n: n }));
+    for (const h of [...(b.days?.holidays ?? []), ...(b.days?.except ?? [])]) if (!holidays.has(h)) warn(ROUTINE_LINT.days, `${path}.days`, say("lint_name_the_calendar_has_no_holiday_h", { name: name, h: h }));
+    if (b.days?.weekdays?.length === 0) warn(ROUTINE_LINT.days, `${path}.days`, say("lint_name_lists_no_weekdays_so_its_never", { name: name }));
     if (b.window) {
       const span = windowSpan(b.window);
-      if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2) warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window and length run past the next day.`);
-      if (b.window.from === b.window.to) warn(ROUTINE_LINT.window, `${path}.window`, `${name}: its window opens and closes at ${b.window.from}, which reads as a whole day; give it a span.`);
+      if (span.to - span.from + b.minutes > MINUTES_PER_DAY * 2) warn(ROUTINE_LINT.window, `${path}.window`, say("lint_name_its_window_and_length_run_past", { name: name }));
+      if (b.window.from === b.window.to) warn(ROUTINE_LINT.window, `${path}.window`, say("lint_name_its_window_opens_and_closes_at", { name: name, from: b.window.from }));
     }
-    if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length) warn(ROUTINE_LINT.days, `${path}.perWeek`, `${name}: ${b.perWeek} times a week, but it's on only ${b.days.weekdays.length} weekdays.`);
+    if (b.perWeek !== undefined && b.days?.weekdays && b.perWeek > b.days.weekdays.length) warn(ROUTINE_LINT.days, `${path}.perWeek`, say("lint_name_perweek_times_a_week_but_its", { name: name, perWeek: b.perWeek, weekdaysCount: b.days.weekdays.length }));
   });
   return issues;
 }
@@ -576,19 +577,19 @@ export function routinesLint(world: WorldDoc, reg: Registry, state: Readonly<Wor
   const warn = (path: string, message: string): void => void issues.push({ severity: "warning", code: ROUTINE_LINT.settings, path: `routineSettings.${path}`, message });
   for (const [key, v] of Object.entries(settings)) {
     const allowed = own(known, key);
-    if (!allowed) warn(key, `Routine settings have no ${key}; it does nothing.`);
+    if (!allowed) warn(key, say("lint_routine_settings_have_no_key_it_does", { key: key }));
     else if (allowed === "switch") {
-      if (typeof v !== "boolean") warn(key, `Routine settings: ${key} is true or false; the default stands.`);
+      if (typeof v !== "boolean") warn(key, say("lint_routine_settings_key_is_true_or_false", { key: key }));
     } else if ("levels" in allowed) {
-      if (!isRecord(v)) warn(key, `Routine settings: ${key} give live, near, far and background each one of ${allowed.levels.join(", ")}; the defaults stand.`);
+      if (!isRecord(v)) warn(key, say("lint_routine_settings_key_give_live_near_far", { key: key, levels: allowed.levels.join(", ") }));
       else
         for (const [level, one] of Object.entries(v)) {
-          if (!FIDELITIES.some((f) => f === level)) warn(`${key}.${level}`, `Routine settings: ${key} have no ${level}; it does nothing.`);
-          else if (typeof one !== "string" || !allowed.levels.includes(one)) warn(`${key}.${level}`, `Routine settings: ${key}.${level} is ${allowed.levels.join(", ")}; the default stands.`);
+          if (!FIDELITIES.some((f) => f === level)) warn(`${key}.${level}`, say("lint_routine_settings_key_have_no_level_it", { key: key, level: level }));
+          else if (typeof one !== "string" || !allowed.levels.includes(one)) warn(`${key}.${level}`, say("lint_routine_settings_key_level_is_levels_the", { key: key, level: level, levels: allowed.levels.join(", ") }));
         }
-    } else if (typeof v !== "string" || !allowed.includes(v)) warn(key, `Routine settings: ${key} is ${allowed.join(", ")}; the default stands.`);
+    } else if (typeof v !== "string" || !allowed.includes(v)) warn(key, say("lint_routine_settings_key_is_allowed_the_default", { key: key, allowed: allowed.join(", ") }));
   }
-  if (Object.keys(raw).length > 0 && !world.packs.castlife) issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: "The world has routines but not the Cast life pack, which lives them." });
+  if (Object.keys(raw).length > 0 && !world.packs.castlife) issues.push({ severity: "warning", code: ROUTINE_LINT.pack, path: "routines", message: say("lint_the_world_has_routines_but_not_the") });
   // Equal precedence, the same block, the same person: the routine with the lower id wins.
   const routines = worldRoutines(world);
   const people = Object.keys(state.entities).sort();
@@ -604,7 +605,7 @@ export function routinesLint(world: WorldDoc, reg: Registry, state: Readonly<Wor
         if (first === undefined) seen.set(key, def.id);
         else if (first !== def.id && !told.has(`${first}:${def.id}:${b.id}`)) {
           told.add(`${first}:${def.id}:${b.id}`);
-          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: `Routines ${first} and ${def.id} both set ${b.id} for ${own(state.entities, who)?.name ?? who} at the same precedence; ${first} wins.` });
+          issues.push({ severity: "warning", code: ROUTINE_LINT.overlap, path: `routines.${def.id}`, message: say("lint_routines_first_and_id_both_set_id2", { first: first, id: def.id, id2: b.id, who: own(state.entities, who)?.name ?? who }) });
         }
       }
     }
@@ -620,16 +621,16 @@ export function schedulesLint(world: WorldDoc, reg: Registry, state: Readonly<Wo
   const issues: LintIssue[] = [];
   const time = /^([01]\d|2[0-4]):[0-5]\d$/;
   const sourceIssue = (source: ScheduleDef["source"], path: string, name: string): void => {
-    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on lore entry ${source.entry}, which the world doesn't have.` });
-    if (source?.type === "sheet" && !own(world.entities, source.entity)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: `${name} rests on ${source.entity}'s sheet, who isn't in the world.` });
+    if (source?.type === "lore" && wiFactIdOfLiveLore(source.entry) === null && !own(world.lore, source.entry)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: say("lint_name_rests_on_lore_entry_entry_which", { name: name, entry: source.entry }) });
+    if (source?.type === "sheet" && !own(world.entities, source.entity)) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleSource, path, message: say("lint_name_rests_on_entity_s_sheet_who", { name: name, entity: source.entity }) });
   };
   for (const s of allSchedules(reg, world)) {
     if (!own(world.schedules, s.id)) continue;
     const at = `schedules.${s.id}`;
-    if (s.owner !== undefined && scheduleOwners(reg, world, state, s).length === 0) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleOwner, path: `${at}.owner`, message: `Schedule ${s.id}'s owner matches nobody as a chat starts, so it moves no one.` });
+    if (s.owner !== undefined && scheduleOwners(reg, world, state, s).length === 0) issues.push({ severity: "warning", code: ROUTINE_LINT.scheduleOwner, path: `${at}.owner`, message: say("lint_schedule_id_s_owner_matches_nobody_as", { id: s.id }) });
     sourceIssue(s.source, `${at}.source`, `Schedule ${s.id}`);
     s.slots.forEach((slot, i) => {
-      if (!time.test(String(slot.start)) || !time.test(String(slot.end))) issues.push({ severity: "error", code: ROUTINE_LINT.scheduleSlot, path: `${at}.slots.${i}`, message: `Schedule ${s.id}, slot ${i + 1}: its times are HH:MM.` });
+      if (!time.test(String(slot.start)) || !time.test(String(slot.end))) issues.push({ severity: "error", code: ROUTINE_LINT.scheduleSlot, path: `${at}.slots.${i}`, message: say("lint_schedule_id_slot_i_its_times_are", { id: s.id, i: i + 1 }) });
       sourceIssue(slot.source, `${at}.slots.${i}.source`, `Schedule ${s.id}, slot ${i + 1}`);
     });
   }

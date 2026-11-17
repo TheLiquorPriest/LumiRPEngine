@@ -237,10 +237,10 @@ export function buildNeedsView(ctx: ReadContext): NeedsView | null {
 function needsIssues(world: WorldDoc): LintIssue[] {
   if (world.needs === undefined) return [];
   const problems = needsSettingsProblems(world.needs);
-  if (problems.length > 0) return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: `Needs settings: ${message}; the engine reads it as its default.`, path: "needs" }));
+  if (problems.length > 0) return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: say("lint_needs_settings_message_the_engine_reads_it", { message: message }), path: "needs" }));
   const tuning = needsSettingsOf(world);
   return NEED_IDS.flatMap((need): LintIssue[] =>
-    tuning[need].on && tuning[need].alert < tuning[need].tell ? [{ severity: "warning", code: "castlife.needs", message: `${NEED_WORDS[need].name}'s alert (${tuning[need].alert}) is below the point the narrator is told of it (${tuning[need].tell}): a skip may stop for it before the story ever mentions it.`, path: `needs.${need}` }] : [],
+    tuning[need].on && tuning[need].alert < tuning[need].tell ? [{ severity: "warning", code: "castlife.needs", message: say("lint_name_s_alert_alert_is_below_the", { name: NEED_WORDS[need].name, alert: tuning[need].alert, tell: tuning[need].tell }), path: `needs.${need}` }] : [],
   );
 }
 
@@ -1884,7 +1884,7 @@ export const castlifePack: PackDef = {
       check: (world) => {
         const cal = calendarOf(world);
         return Object.values(world.entities).flatMap((e) =>
-          e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(cal, e.fields.birthday) ? [] : [{ severity: "warning" as const, code: "castlife.birthday", message: `${e.name}'s birthday doesn't read as a date of the world's calendar: write it MM-DD, or YYYY-MM-DD with the year they were born.`, path: `entities.${e.id}.fields.birthday` }],
+          e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(cal, e.fields.birthday) ? [] : [{ severity: "warning" as const, code: "castlife.birthday", message: say("lint_name_s_birthday_doesnt_read_as_a", { name: e.name }), path: `entities.${e.id}.fields.birthday` }],
         );
       },
     });
@@ -1905,12 +1905,12 @@ export const castlifePack: PackDef = {
           for (let i = 0; i < dated.length; i++) {
             const a = dated[i];
             if (!a) continue;
-            for (const b of dated.slice(i + 1)) if ((!a.trip || !b.trip) && a.start < b.end && b.start < a.end) issues.push({ severity: "warning" as const, code: "castlife.double_booking", message: `${e.name} is double-booked: ${a.label} and ${b.label} overlap.`, path: b.path });
+            for (const b of dated.slice(i + 1)) if ((!a.trip || !b.trip) && a.start < b.end && b.start < a.end) issues.push({ severity: "warning" as const, code: "castlife.double_booking", message: say("lint_name_is_double_booked_label_and_b", { name: e.name, label: a.label, b: b.label }), path: b.path });
             if (a.trip) continue;
             for (const s of owned) {
               const edges = scheduleInstants(world, [s], a.start - MINUTES_PER_DAY, a.end + MINUTES_PER_DAY);
               const clash = edges.some((x) => x.edge === "start" && x.at < a.end && (edges.find((y) => y.edge === "end" && y.occurrence === x.occurrence)?.at ?? x.at) > a.start);
-              if (clash) issues.push({ severity: "warning" as const, code: "castlife.double_booking", message: `${e.name} is double-booked: ${a.label} falls in ${s.id}.`, path: a.path });
+              if (clash) issues.push({ severity: "warning" as const, code: "castlife.double_booking", message: say("lint_name_is_double_booked_label_falls_in", { name: e.name, label: a.label, id: s.id }), path: a.path });
             }
           }
         }

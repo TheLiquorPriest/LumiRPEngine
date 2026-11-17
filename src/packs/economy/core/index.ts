@@ -853,15 +853,15 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "account") continue;
         const owners = ownersIn(e.fields);
-        if (owners.length === 0) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name} has no owners.`, path: `entities.${e.id}.fields.owners` });
-        for (const [i, o] of owners.entries()) if (!isPartyDef(o.party)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name}'s owner "${o.party}" isn't someone in the world.`, path: `entities.${e.id}.fields.owners.${i}` });
-        if (Array.isArray(e.fields.owners)) for (const [i, o] of e.fields.owners.entries()) if (!isOwnerRole(objOf(o).role)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Account ${e.name}'s owner ${i + 1} has no role the engine knows; it reads as owner.`, path: `entities.${e.id}.fields.owners.${i}.role` });
+        if (owners.length === 0) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_account_name_has_no_owners", { name: e.name }), path: `entities.${e.id}.fields.owners` });
+        for (const [i, o] of owners.entries()) if (!isPartyDef(o.party)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_account_name_s_owner_party_isnt_someone", { name: e.name, party: o.party }), path: `entities.${e.id}.fields.owners.${i}` });
+        if (Array.isArray(e.fields.owners)) for (const [i, o] of e.fields.owners.entries()) if (!isOwnerRole(objOf(o).role)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: say("lint_account_name_s_owner_i_has_no", { name: e.name, i: i + 1 }), path: `entities.${e.id}.fields.owners.${i}.role` });
         const product = strOf(e.fields.product);
-        if (product !== "" && !own(products, product) && !isAccountClass(product)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name} names a product "${product}" that's neither the world's nor a class.`, path: `entities.${e.id}.fields.product` });
-        if (product === "" && strOf(e.fields.type) === "") issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name} has no product.`, path: `entities.${e.id}.fields.product` });
+        if (product !== "" && !own(products, product) && !isAccountClass(product)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_account_name_names_a_product_product_thats", { name: e.name, product: product }), path: `entities.${e.id}.fields.product` });
+        if (product === "" && strOf(e.fields.type) === "") issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_account_name_has_no_product", { name: e.name }), path: `entities.${e.id}.fields.product` });
         for (const field of ["autopay_from", "overdraft_link", "secured_by"]) {
           const v = strOf(e.fields[field]);
-          if (v !== "" && !own(world.entities, v)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Account ${e.name}'s ${field.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field}` });
+          if (v !== "" && !own(world.entities, v)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_account_name_s_field_names_v_which", { name: e.name, field: field.replace(/_/g, " "), v: v }), path: `entities.${e.id}.fields.${field}` });
         }
         // A loan's, a card's or a line's opening is what's owed, a negative amount: entered positive, it opens in credit, owes nothing and closes as paid off at its first bill.
         const productClass = objOf(own(products, product)).class;
@@ -869,45 +869,45 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
         const opening = e.fields.opening;
         if (cls !== undefined && CLASS_TRAITS[cls].liability && typeof opening === "number" && opening > 0) {
           const owed = formatMoney(opening, world.currency);
-          issues.push({ severity: "warning", code: "economy.accounts", message: `Account ${e.name} is a ${CLASS_TRAITS[cls].label.toLowerCase()} opened in credit by ${owed}: what's owed on it is a negative opening, so as written it owes nothing and closes as paid off at its first bill.`, path: `entities.${e.id}.fields.opening`, fix: { label: `Make it ${owed} owed`, ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "opening"]), value: -opening }] } });
+          issues.push({ severity: "warning", code: "economy.accounts", message: say("lint_account_name_is_a_cls_opened_in", { name: e.name, cls: CLASS_TRAITS[cls].label.toLowerCase(), owed: owed }), path: `entities.${e.id}.fields.opening`, fix: { label: `Make it ${owed} owed`, ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "opening"]), value: -opening }] } });
         }
         // How a loan is paid back, when its author says nothing of it: on its product's statement day, over its product's term, or all at its first bill where the product sets none.
-        if (cls !== undefined && CLASS_TRAITS[cls].installment && ["due_day", "payment", "months_left"].every((k) => e.fields[k] === undefined || e.fields[k] === "")) issues.push({ severity: "info", code: "economy.accounts", message: `Loan ${e.name} sets no due day, payment or months left: it bills on its product's statement day, paying it off over its product's term, or all at its first bill where the product sets no term.`, path: `entities.${e.id}.fields.due_day` });
+        if (cls !== undefined && CLASS_TRAITS[cls].installment && ["due_day", "payment", "months_left"].every((k) => e.fields[k] === undefined || e.fields[k] === "")) issues.push({ severity: "info", code: "economy.accounts", message: say("lint_loan_name_sets_no_due_day_payment", { name: e.name }), path: `entities.${e.id}.fields.due_day` });
       }
-      for (const [id, p] of Object.entries(products)) if (!isAccountClass(objOf(p).class)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Product ${id} has no class the engine knows.`, path: `packs.economy.config.products.${id}.class` });
-      for (const key of Object.keys(objOf(objOf(world.packs.economy?.config).features))) if (!(key in FEATURE_DEFS)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `There's no money feature "${key}"; the toggle does nothing.`, path: `packs.economy.config.features.${key}` });
+      for (const [id, p] of Object.entries(products)) if (!isAccountClass(objOf(p).class)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_product_id_has_no_class_the_engine", { id: id }), path: `packs.economy.config.products.${id}.class` });
+      for (const key of Object.keys(objOf(objOf(world.packs.economy?.config).features))) if (!(key in FEATURE_DEFS)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: say("lint_theres_no_money_feature_key_the_toggle", { key: key }), path: `packs.economy.config.features.${key}` });
       for (const e of Object.values(world.entities)) {
         if (e.kind === "card") {
           const account = own(world.entities, strOf(e.fields.account));
-          if (!account || account.kind !== "account") issues.push({ severity: "error" as const, code: "economy.accounts", message: `Card ${e.name} isn't on an account.`, path: `entities.${e.id}.fields.account` });
-          else if (!ownersIn(account.fields).some((o) => o.party === strOf(e.fields.holder))) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Card ${e.name}'s holder doesn't hold ${account.name}.`, path: `entities.${e.id}.fields.holder` });
+          if (!account || account.kind !== "account") issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_card_name_isnt_on_an_account", { name: e.name }), path: `entities.${e.id}.fields.account` });
+          else if (!ownersIn(account.fields).some((o) => o.party === strOf(e.fields.holder))) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_card_name_s_holder_doesnt_hold_name2", { name: e.name, name2: account.name }), path: `entities.${e.id}.fields.holder` });
           const item = strOf(e.fields.item);
-          if (item !== "" && !own(world.entities, item)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Card ${e.name}'s gear card "${item}" isn't in the world.`, path: `entities.${e.id}.fields.item` });
+          if (item !== "" && !own(world.entities, item)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_card_name_s_gear_card_item_isnt", { name: e.name, item: item }), path: `entities.${e.id}.fields.item` });
         }
         if (e.kind === "flow") {
-          for (const side of ["from", "to"]) if (strOf(e.fields[side]) === "") issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no "${side}".`, path: `entities.${e.id}.fields.${side}` });
+          for (const side of ["from", "to"]) if (strOf(e.fields[side]) === "") issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_flow_name_has_no_side", { name: e.name, side: side }), path: `entities.${e.id}.fields.${side}` });
           // A payer or payee that names no entity is an outside party by that name: money from or to nowhere when it was meant as an id.
           for (const side of ["from", "to"]) {
             const v = strOf(e.fields[side]);
-            if (ID_SHAPED.test(v) && !own(world.entities, v)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Flow ${e.name}'s ${side} "${v}" names no entity; it's read as an outside party by that name.`, path: `entities.${e.id}.fields.${side}` });
+            if (ID_SHAPED.test(v) && !own(world.entities, v)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: say("lint_flow_name_s_side_v_names_no", { name: e.name, side: side, v: v }), path: `entities.${e.id}.fields.${side}` });
           }
           // A revenue stream's model is its amount (the revenue module lints the model itself).
           const amount = ["amount_cents", "amount_formula", "amount_table", "amount_min", "amount_pct", "amount_due", "revenue"].some((k) => e.fields[k] !== undefined && e.fields[k] !== "");
-          if (!amount) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no amount.`, path: `entities.${e.id}.fields.amount_cents` });
-          if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === "")) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no schedule: give it "every" or "once".`, path: `entities.${e.id}.fields.every` });
+          if (!amount) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_flow_name_has_no_amount", { name: e.name }), path: `entities.${e.id}.fields.amount_cents` });
+          if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === "")) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_flow_name_has_no_schedule_give_it", { name: e.name }), path: `entities.${e.id}.fields.every` });
           const link = strOf(e.fields.link);
-          if (link !== "" && !own(world.entities, link)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} belongs to "${link}", which isn't in the world.`, path: `entities.${e.id}.fields.link` });
+          if (link !== "" && !own(world.entities, link)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_flow_name_belongs_to_link_which_isnt", { name: e.name, link: link }), path: `entities.${e.id}.fields.link` });
           // A fallback is drawn on when the payer can't pay: it must be in the world, never an outside name.
           const fallback = strOf(e.fields.fallback);
-          if (fallback !== "" && !own(world.entities, fallback)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name}'s fallback "${fallback}" isn't in the world; a fallback is an account of the payer's.`, path: `entities.${e.id}.fields.fallback` });
+          if (fallback !== "" && !own(world.entities, fallback)) issues.push({ severity: "error" as const, code: "economy.accounts", message: say("lint_flow_name_s_fallback_fallback_isnt_in", { name: e.name, fallback: fallback }), path: `entities.${e.id}.fields.fallback` });
         }
         if (e.kind === "job") {
           // An employer is a business, a place (the business there), or an outside employer named in words.
           const employer = strOf(e.fields.employer);
-          if (ID_SHAPED.test(employer) && !own(world.entities, employer) && !own(world.places, employer)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Job ${e.name}'s employer "${employer}" names no one and no place; it's read as an outside employer by that name.`, path: `entities.${e.id}.fields.employer` });
+          if (ID_SHAPED.test(employer) && !own(world.entities, employer) && !own(world.places, employer)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: say("lint_job_name_s_employer_employer_names_no", { name: e.name, employer: employer }), path: `entities.${e.id}.fields.employer` });
           // A title nobody is paid for (a director, a trustee) is Unpaid: a job at a rate of nothing still runs a payroll of $0 paydays.
           const tipped = numOf(e.fields.tips_per_hour) > 0 || (strOf(e.fields.basis) === "commission" && numOf(e.fields.commission_pct) > 0);
-          if (e.fields.rate === 0 && strOf(e.fields.pay_every) !== UNPAID && !tipped) issues.push({ severity: "info", code: "economy.accounts", message: `Job ${e.name} pays a rate of nothing, so it runs a payroll of empty paydays. Make it an unpaid title?`, path: `entities.${e.id}.fields.pay_every`, fix: { label: "Make it unpaid", ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "pay_every"]), value: UNPAID }] } });
+          if (e.fields.rate === 0 && strOf(e.fields.pay_every) !== UNPAID && !tipped) issues.push({ severity: "info", code: "economy.accounts", message: say("lint_job_name_pays_a_rate_of_nothing", { name: e.name }), path: `entities.${e.id}.fields.pay_every`, fix: { label: "Make it unpaid", ops: [{ op: "add", path: pointerOf(["entities", e.id, "fields", "pay_every"]), value: UNPAID }] } });
         }
       }
       return issues;
@@ -920,7 +920,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
       // The engine reads a fraction rounded and anything else not above zero as unset (`unpricedCap`).
       const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
-      return [{ severity: "warning" as const, code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
+      return [{ severity: "warning" as const, code: "economy.unpriced_cap", message: say("lint_the_narrated_price_cap_should_be_a", { currency: minorUnitPlural(world.currency), fallback: fallback }), path: "packs.economy.config.unpricedCap" }];
     },
   });
   r.lint({
@@ -930,7 +930,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
       // As with the narrated-price cap, the engine reads a fraction rounded and anything else not above zero as unset (`claimCap`).
       const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedClaimCap(world), world.currency)}`;
-      return [{ severity: "warning" as const, code: "economy.claim_cap", message: `The claim cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; a capped Make it real asks first above ${fallback}.`, path: "packs.economy.config.claimCap" }];
+      return [{ severity: "warning" as const, code: "economy.claim_cap", message: say("lint_the_claim_cap_should_be_a_whole", { currency: minorUnitPlural(world.currency), fallback: fallback }), path: "packs.economy.config.claimCap" }];
     },
   });
 }

@@ -20,6 +20,7 @@ import { kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
 import { playerKnows } from "./player-events";
 import { canSeePlace } from "./visibility";
+import { say } from "./lines";
 
 /** What relation lookups need from the registry; a fold's event types are the registry. */
 export interface RelationTypes {
@@ -202,7 +203,7 @@ export function relationIssues(reg: Registry, world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
   const err = (path: string, code: string, message: string): void => void issues.push({ severity: "error", path, code, message });
   for (const [id, def] of Object.entries(world.relations)) {
-    if (def.inverse && !relationDef(reg, world, def.inverse)) err(`relations.${id}.inverse`, "refs", `Relation ${def.label}'s inverse "${def.inverse}" isn't a relation type.`);
+    if (def.inverse && !relationDef(reg, world, def.inverse)) err(`relations.${id}.inverse`, "refs", say("lint_relation_def_s_inverse_inverse_isnt_a", { def: def.label, inverse: def.inverse }));
   }
   const nameOf = (id: EntityId): string => own(world.entities, id)?.name ?? own(world.places, id)?.name ?? id;
   for (const [id, e] of Object.entries(world.entities)) {
@@ -211,12 +212,12 @@ export function relationIssues(reg: Registry, world: WorldDoc): LintIssue[] {
       if (!def) continue;
       const target = own(world.entities, r.to);
       const path = `entities.${id}.relations`;
-      if (def.from !== "*" && !kindIs(reg, world, e.kind, def.from)) err(path, "relation_kind", `${e.name}'s “${def.label}” link needs ${kindPhrase(reg, world, def.from)} on ${e.name}'s side; ${e.name} is ${kindPhrase(reg, world, e.kind)}.`);
-      if (def.to !== "*" && (!target || !kindIs(reg, world, target.kind, def.to))) err(path, "relation_kind", `${e.name}'s “${def.label}” link to ${nameOf(r.to)} needs ${kindPhrase(reg, world, def.to)} at the other end; ${nameOf(r.to)} is ${target ? kindPhrase(reg, world, target.kind) : "a place"}.`);
+      if (def.from !== "*" && !kindIs(reg, world, e.kind, def.from)) err(path, "relation_kind", say("lint_name_s_def_link_needs_from_on", { name: e.name, def: def.label, from: kindPhrase(reg, world, def.from), kindPhrase: kindPhrase(reg, world, e.kind) }));
+      if (def.to !== "*" && (!target || !kindIs(reg, world, target.kind, def.to))) err(path, "relation_kind", say("lint_name_s_def_link_to_r_needs", { name: e.name, def: def.label, r: nameOf(r.to), def2: kindPhrase(reg, world, def.to), target: target ? kindPhrase(reg, world, target.kind) : undefined, if_target: !!(target) }));
       const back = counterpartOf(reg, world, r.type);
       if (!back || !target || (back === r.type && r.to === id) || target.relations.some((x) => x.type === back && x.to === id)) continue;
       const backLabel = relationDef(reg, world, back)?.label ?? back;
-      issues.push({ severity: "warning", path, code: "one_sided", message: `${e.name} is ${inline(def)} ${target.name}, but ${target.name} has no “${backLabel}” link back to ${e.name}; a chat adds it when it starts.` });
+      issues.push({ severity: "warning", path, code: "one_sided", message: say("lint_name_is_def_name2_but_name2_has", { name: e.name, def: inline(def), name2: target.name, backLabel: backLabel }) });
     }
   }
   // Cardinality over the relations a chat starts with: the authored ones, their missing sides added.

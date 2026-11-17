@@ -194,9 +194,9 @@ export function registerDepreciation(r: FinanceRegistry): void {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "property") continue;
         const f = e.fields;
-        if (numOf(f.capital_cost) > 0 && numOf(f.reserves) <= 0 && f.life_months !== undefined && !(numOf(f.life_months) >= 1)) issues.push({ severity: "warning" as const, code: "economy.depreciation", message: `Property ${e.name}'s useful life must be a month or more.`, path: `entities.${e.id}.fields.life_months` });
-        if (numOf(f.capital_cost) > 0 && numOf(f.life_months) >= 1 && numOf(f.reserves) <= 0 && monthOfDate(strOf(f.in_service)) === null) issues.push({ severity: "info" as const, code: "economy.depreciation", message: `Property ${e.name} has a cost and a life but no in-service date, so it never depreciates.`, path: `entities.${e.id}.fields.in_service` });
-        if (numOf(f.salvage) > 0 && numOf(f.salvage) >= basisOf(f)) issues.push({ severity: "warning" as const, code: "economy.depreciation", message: `Property ${e.name}'s salvage value is no less than its cost, so it never depreciates.`, path: `entities.${e.id}.fields.salvage` });
+        if (numOf(f.capital_cost) > 0 && numOf(f.reserves) <= 0 && f.life_months !== undefined && !(numOf(f.life_months) >= 1)) issues.push({ severity: "warning" as const, code: "economy.depreciation", message: say("lint_property_name_s_useful_life_must_be", { name: e.name }), path: `entities.${e.id}.fields.life_months` });
+        if (numOf(f.capital_cost) > 0 && numOf(f.life_months) >= 1 && numOf(f.reserves) <= 0 && monthOfDate(strOf(f.in_service)) === null) issues.push({ severity: "info" as const, code: "economy.depreciation", message: say("lint_property_name_has_a_cost_and_a", { name: e.name }), path: `entities.${e.id}.fields.in_service` });
+        if (numOf(f.salvage) > 0 && numOf(f.salvage) >= basisOf(f)) issues.push({ severity: "warning" as const, code: "economy.depreciation", message: say("lint_property_name_s_salvage_value_is_no", { name: e.name }), path: `entities.${e.id}.fields.salvage` });
       }
       return issues;
     },

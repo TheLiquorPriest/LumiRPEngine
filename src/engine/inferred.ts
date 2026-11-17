@@ -125,16 +125,16 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
   if (raw === undefined) return [];
   const at = "ruleset.inferred";
   const unset = "Until it does, inferred checks play as unset, by each chat's realism preset.";
-  if (!isRecord(raw)) return [{ severity: "error", path: at, code: "inferred", message: `Inferred checks must be an object with a mode. ${unset}` }];
+  if (!isRecord(raw)) return [{ severity: "error", path: at, code: "inferred", message: say("lint_inferred_checks_must_be_an_object_with", { unset: unset }) }];
   const policy = readInferred(raw);
-  if (!policy) return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: `${raw.mode === undefined ? "It names no mode" : `"${String(raw.mode)}" isn't a mode`}: use off, suggest or auto. ${unset}` }];
+  if (!policy) return [{ severity: "error", path: `${at}.mode`, code: "inferred", message: say("lint_it_names_no_mode_mode_isnt_a", { mode: String(raw.mode), unset: unset, if_mode: raw.mode === undefined }) }];
   const issues: LintIssue[] = [];
   const warn = (path: string, code: string, message: string): void => void issues.push({ severity: "warning", path: `${at}${path}`, code, message });
-  const plays = (key: string, given: unknown, value: unknown): void => warn(`.${key}`, "inferred_value", `${key} can't be ${JSON.stringify(given)}; it plays as ${JSON.stringify(value)}.`);
+  const plays = (key: string, given: unknown, value: unknown): void => warn(`.${key}`, "inferred_value", say("lint_key_cant_be_given_it_plays_as", { key: key, given: JSON.stringify(given), plays: JSON.stringify(value) }));
   const choices: [string, unknown, readonly string[], string][] = [["when", raw.when, INFER_WHENS, policy.when], ["who", raw.who, INFER_WHOS, policy.who], ["detail", raw.detail, INFER_DETAILS, policy.detail], ["others", raw.others, INFER_OTHERS, policy.others]];
   for (const [key, given, values, value] of choices) if (given !== undefined && !values.includes(String(given))) plays(key, given, value);
   const [lo, hi] = INFERRED_BOUNDS.most;
-  if (raw.most !== undefined && raw.most !== policy.most) warn(".most", "inferred_value", `Rolls a turn are a whole number from ${lo} to ${hi}: ${JSON.stringify(raw.most)} plays as ${policy.most}.`);
+  if (raw.most !== undefined && raw.most !== policy.most) warn(".most", "inferred_value", say("lint_rolls_a_turn_are_a_whole_number", { lo: lo, hi: hi, most: JSON.stringify(raw.most), most2: policy.most }));
   // Bands: each bound read alone first (an unknown one takes Grounded's), then the pair, which plays swapped.
   const ids = DIFFICULTY_BANDS.map((b) => b.id);
   const d = isRecord(raw.difficulty) ? raw.difficulty : {};
@@ -147,14 +147,14 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
   };
   const lowest = bound("lowest");
   const highest = bound("highest");
-  if (lowest > highest) warn(".difficulty", "inferred_difficulty", `The easiest band, ${DIFFICULTY_BANDS[lowest]?.label}, is above the hardest, ${DIFFICULTY_BANDS[highest]?.label}: they play swapped, from ${DIFFICULTY_BANDS[highest]?.label} to ${DIFFICULTY_BANDS[lowest]?.label}.`);
+  if (lowest > highest) warn(".difficulty", "inferred_difficulty", say("lint_the_easiest_band_lowest_is_above_the", { lowest: DIFFICULTY_BANDS[lowest]?.label, highest: DIFFICULTY_BANDS[highest]?.label }));
   // Skills: a list that isn't one plays as Grounded's; an entry that isn't an id is left out; and one
   // the sheet lacks (read with every skill action, whatever its requirements) is never rolled.
   if (raw.skills !== undefined && raw.skills !== null && !Array.isArray(raw.skills)) plays("skills", raw.skills, policy.skills);
   if (Array.isArray(raw.skills)) {
-    for (const s of raw.skills) if (typeof s !== "string" || s.trim() === "" || s.trim().length > INFERRED_BOUNDS.skillId) warn(".skills", "inferred_value", `${JSON.stringify(s)} isn't a skill's id, so it's left out.`);
+    for (const s of raw.skills) if (typeof s !== "string" || s.trim() === "" || s.trim().length > INFERRED_BOUNDS.skillId) warn(".skills", "inferred_value", say("lint_s_isnt_a_skills_id_so_its", { s: JSON.stringify(s) }));
     const sheet = new Set(skillSources(reg, world, initialState(world, "lint", reg), false).map((s) => s.id));
-    for (const id of policy.skills ?? []) if (!sheet.has(id)) warn(".skills", "inferred_skill", `"${id}" isn't a skill the world's sheet has, so no attempt rolls it.`);
+    for (const id of policy.skills ?? []) if (!sheet.has(id)) warn(".skills", "inferred_skill", say("lint_id_isnt_a_skill_the_worlds_sheet", { id: id }));
   }
   // Guidance: what the narrator is told after a result, filled by `inferredOutcome`'s placeholders.
   if (raw.guidance !== undefined && !isRecord(raw.guidance)) plays("guidance", raw.guidance, policy.guidance);
@@ -167,7 +167,7 @@ export function lintInferred(world: WorldDoc, reg: Registry): LintIssue[] {
       continue;
     }
     const text = given.replace(/\s+/g, " ").trim();
-    if (text.length > INFERRED_BOUNDS.guidance) warn(`.guidance.${key}`, "inferred_value", `A guidance line holds at most ${INFERRED_BOUNDS.guidance} characters; this one's ${text.length} are cut there.`);
+    if (text.length > INFERRED_BOUNDS.guidance) warn(`.guidance.${key}`, "inferred_value", say("lint_a_guidance_line_holds_at_most_guidance", { guidance: INFERRED_BOUNDS.guidance, textCount: text.length }));
     for (const [, name] of text.matchAll(/\{([^{}]*)\}/g)) if (!GUIDANCE_PLACEHOLDERS.has(name ?? "")) warn(`.guidance.${key}`, "inferred_guidance", `{${name}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.`);
   }
   return issues;

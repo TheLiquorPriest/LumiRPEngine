@@ -176,7 +176,7 @@ export const calendarPack: PackDef = {
           dayIndexOf(calendarOf(world), 2000, 1, 1);
           return [];
         } catch (e) {
-          return [{ severity: "error", code: "calendar.epoch", message: e instanceof Error ? e.message : "bad calendar", path: "calendar" }];
+          return [{ severity: "error", code: "calendar.epoch", message: e instanceof Error ? e.message : say("lint_bad_calendar"), path: "calendar" }];
         }
       },
     });
@@ -190,12 +190,12 @@ export const calendarPack: PackDef = {
               try {
                 parseHHMM(t);
               } catch {
-                issues.push({ severity: "error" as const, code: "calendar.schedule_times", message: `Schedule ${s.id} has a bad time "${t}" (use HH:MM).`, path: `schedules.${s.id}` });
+                issues.push({ severity: "error" as const, code: "calendar.schedule_times", message: say("lint_schedule_id_has_a_bad_time_t", { id: s.id, t: t }), path: `schedules.${s.id}` });
               }
             }
           }
           for (const wd of s.recurrence.weekdays ?? []) {
-            if (wd < 0 || wd > 6) issues.push({ severity: "error" as const, code: "calendar.schedule_times", message: `Schedule ${s.id} names weekday ${wd}; weekdays are 0 (Sunday) to 6.`, path: `schedules.${s.id}` });
+            if (wd < 0 || wd > 6) issues.push({ severity: "error" as const, code: "calendar.schedule_times", message: say("lint_schedule_id_names_weekday_wd_weekdays_are", { id: s.id, wd: wd }), path: `schedules.${s.id}` });
           }
         }
         return issues;
@@ -207,7 +207,7 @@ export const calendarPack: PackDef = {
         const agents = Object.values(world.entities).filter((e) => e.id !== world.pov && agentOf(world, e)).length;
         const min = ((agents + 1) * shortestSlot(calendarOf(world))) / MINUTES_PER_DAY;
         return world.time.unitCap.agentDays < min
-          ? [{ severity: "error", code: "calendar.unit_cap", message: `The timelapse unit cap (${world.time.unitCap.agentDays} agent-days) is smaller than one schedule step for the ${agents} people who live their own day plus the POV (${min.toFixed(2)}).`, path: "time.unitCap" }]
+          ? [{ severity: "error", code: "calendar.unit_cap", message: say("lint_the_timelapse_unit_cap_agentdays_agent_days", { agentDays: world.time.unitCap.agentDays, agents: agents, min: min.toFixed(2) }), path: "time.unitCap" }]
           : [];
       },
     });

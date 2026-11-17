@@ -750,9 +750,9 @@ export function registerRevenue(r: FinanceRegistry): void {
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "flow" || e.fields.revenue === undefined || e.fields.revenue === null) continue;
         const path = `entities.${e.id}.fields.revenue`;
-        for (const problem of revenueProblems(e.fields.revenue)) issues.push({ severity: "error" as const, code: "economy.revenue", message: `Stream ${e.name} ${problem}.`, path });
+        for (const problem of revenueProblems(e.fields.revenue)) issues.push({ severity: "error" as const, code: "economy.revenue", message: say("lint_stream_name_problem", { name: e.name, problem: problem }), path });
         const model = revenueOf(e.fields.revenue);
-        if (model?.type === "royalty" && e.fields.every !== "month") issues.push({ severity: "warning" as const, code: "economy.revenue", message: `Stream ${e.name} is a royalty, which pays once a month (each month's first payment pays the production of ${model.lag_months ?? 0} months before); set it to every month.`, path: `entities.${e.id}.fields.every` });
+        if (model?.type === "royalty" && e.fields.every !== "month") issues.push({ severity: "warning" as const, code: "economy.revenue", message: say("lint_stream_name_is_a_royalty_which_pays", { name: e.name, lag_months: model.lag_months ?? 0 }), path: `entities.${e.id}.fields.every` });
       }
       return issues;
     },

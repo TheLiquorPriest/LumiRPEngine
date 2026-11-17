@@ -1036,23 +1036,23 @@ export function lintProjects(world: WorldDoc): LintIssue[] {
     const path = `entities.${id}`;
     const f = e.fields;
     const org = strOf(f.org);
-    if (org === "" || !own(world.entities, org)) issues.push({ severity: "error", code: "economy.project_org", message: `${e.name} names no party that runs it${org !== "" ? ` (there's no ${org})` : ""}.`, path: `${path}.fields.org` });
+    if (org === "" || !own(world.entities, org)) issues.push({ severity: "error", code: "economy.project_org", message: say("lint_name_names_no_party_that_runs_it", { name: e.name, org: org, if_org: org !== "" }), path: `${path}.fields.org` });
     const raw = Array.isArray(f.steps) ? f.steps : [];
     const steps = stepsIn(f.steps);
-    if (steps.length === 0) issues.push({ severity: "error", code: "economy.project_steps", message: `${e.name} has no steps it can run.`, path: `${path}.fields.steps` });
-    else if (steps.length < raw.length) issues.push({ severity: "warning", code: "economy.project_steps", message: `${raw.length - steps.length} of ${e.name}'s steps don't read (each needs an id, a name, whole days or business days, not both) or repeat an id; they're left out.`, path: `${path}.fields.steps` });
+    if (steps.length === 0) issues.push({ severity: "error", code: "economy.project_steps", message: say("lint_name_has_no_steps_it_can_run", { name: e.name }), path: `${path}.fields.steps` });
+    else if (steps.length < raw.length) issues.push({ severity: "warning", code: "economy.project_steps", message: say("lint_stepscount_of_name_s_steps_dont_read", { stepsCount: raw.length - steps.length, name: e.name }), path: `${path}.fields.steps` });
     const ids = new Set(steps.map((s) => s.id));
-    for (const s of steps) for (const a of s.after ?? []) if (!ids.has(a)) issues.push({ severity: "warning", code: "economy.project_after", message: `${e.name}: ${s.name} comes after "${a}", which isn't one of its steps; it doesn't wait for it.`, path: `${path}.fields.steps` });
-    if (steps.length > 0 && !stepOrder(steps)) issues.push({ severity: "error", code: "economy.project_ring", message: `${e.name}'s steps wait on each other in a ring, so none of them can start.`, path: `${path}.fields.steps` });
+    for (const s of steps) for (const a of s.after ?? []) if (!ids.has(a)) issues.push({ severity: "warning", code: "economy.project_after", message: say("lint_name_name2_comes_after_a_which_isnt", { name: e.name, name2: s.name, a: a }), path: `${path}.fields.steps` });
+    if (steps.length > 0 && !stepOrder(steps)) issues.push({ severity: "error", code: "economy.project_ring", message: say("lint_name_s_steps_wait_on_each_other", { name: e.name }), path: `${path}.fields.steps` });
     const making = steps.some((s) => (s.unlocks ?? []).some((u) => "make" in u));
-    if (!making && steps.some((s) => s.capitalize === true)) issues.push({ severity: "info", code: "economy.project_capitalize", message: `${e.name} capitalizes steps but makes nothing, so their costs are expensed.`, path: `${path}.fields.steps` });
+    if (!making && steps.some((s) => s.capitalize === true)) issues.push({ severity: "info", code: "economy.project_capitalize", message: say("lint_name_capitalizes_steps_but_makes_nothing_so", { name: e.name }), path: `${path}.fields.steps` });
     for (const s of steps)
       for (const u of s.unlocks ?? []) {
-        if ("flow" in u && own(world.entities, u.flow)?.kind !== "flow") issues.push({ severity: "warning", code: "economy.project_unlock", message: `${e.name}: ${s.name} starts the flow ${u.flow}, which the world doesn't have.`, path: `${path}.fields.steps` });
-        if ("set" in u && u.set.entity !== "org" && u.set.entity !== "made" && !own(world.entities, u.set.entity)) issues.push({ severity: "warning", code: "economy.project_unlock", message: `${e.name}: ${s.name} sets a field of ${u.set.entity}, which the world doesn't have.`, path: `${path}.fields.steps` });
+        if ("flow" in u && own(world.entities, u.flow)?.kind !== "flow") issues.push({ severity: "warning", code: "economy.project_unlock", message: say("lint_name_name2_starts_the_flow_flow_which", { name: e.name, name2: s.name, flow: u.flow }), path: `${path}.fields.steps` });
+        if ("set" in u && u.set.entity !== "org" && u.set.entity !== "made" && !own(world.entities, u.set.entity)) issues.push({ severity: "warning", code: "economy.project_unlock", message: say("lint_name_name2_sets_a_field_of_entity", { name: e.name, name2: s.name, entity: u.set.entity }), path: `${path}.fields.steps` });
       }
     const template = strOf(f.template);
-    if (template !== "" && !own(tables, template)) issues.push({ severity: "info", code: "economy.project_template", message: `${e.name} names the template ${template}, which the world's project templates don't have; its own steps run.`, path: `${path}.fields.template` });
+    if (template !== "" && !own(tables, template)) issues.push({ severity: "info", code: "economy.project_template", message: say("lint_name_names_the_template_template_which_the", { name: e.name, template: template }), path: `${path}.fields.template` });
   }
   return issues;
 }

@@ -808,17 +808,17 @@ export function registerBusiness(r: FinanceRegistry): void {
       const issues: LintIssue[] = [];
       for (const e of Object.values(world.entities)) {
         if (e.kind === INVOICE_KIND) {
-          if (typeof e.fields.business !== "string" || own(world.entities, e.fields.business)?.kind !== "business") issues.push({ severity: "error" as const, code: "economy.business", message: `Invoice ${e.name} isn't from a business.`, path: `entities.${e.id}.fields.business` });
-          if (typeof e.fields.customer !== "string" || e.fields.customer === "") issues.push({ severity: "error" as const, code: "economy.business", message: `Invoice ${e.name} bills nobody.`, path: `entities.${e.id}.fields.customer` });
-          if (!(typeof e.fields.cents === "number" && e.fields.cents > 0)) issues.push({ severity: "error" as const, code: "economy.business", message: `Invoice ${e.name} needs an amount.`, path: `entities.${e.id}.fields.cents` });
+          if (typeof e.fields.business !== "string" || own(world.entities, e.fields.business)?.kind !== "business") issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_invoice_name_isnt_from_a_business", { name: e.name }), path: `entities.${e.id}.fields.business` });
+          if (typeof e.fields.customer !== "string" || e.fields.customer === "") issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_invoice_name_bills_nobody", { name: e.name }), path: `entities.${e.id}.fields.customer` });
+          if (!(typeof e.fields.cents === "number" && e.fields.cents > 0)) issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_invoice_name_needs_an_amount", { name: e.name }), path: `entities.${e.id}.fields.cents` });
         }
         if (e.kind !== "business") continue;
         const places = e.fields.places;
-        if (Array.isArray(places)) for (const p of places) if (typeof p !== "string" || !own(world.places, p)) issues.push({ severity: "error" as const, code: "economy.business", message: `${e.name} trades at a place that doesn't exist: ${String(p)}.`, path: `entities.${e.id}.fields.places` });
+        if (Array.isArray(places)) for (const p of places) if (typeof p !== "string" || !own(world.places, p)) issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_name_trades_at_a_place_that_doesnt", { name: e.name, p: String(p) }), path: `entities.${e.id}.fields.places` });
         const operating = e.fields.operating_account;
-        if (typeof operating === "string" && operating !== "" && !own(world.entities, operating)) issues.push({ severity: "error" as const, code: "economy.business", message: `${e.name}'s operating account doesn't exist.`, path: `entities.${e.id}.fields.operating_account` });
+        if (typeof operating === "string" && operating !== "" && !own(world.entities, operating)) issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_name_s_operating_account_doesnt_exist", { name: e.name }), path: `entities.${e.id}.fields.operating_account` });
         const margin = e.fields.margin_pct;
-        if (margin !== undefined && !(typeof margin === "number" && margin >= 0 && margin <= 100)) issues.push({ severity: "error" as const, code: "economy.business", message: `${e.name}'s margin must be a percentage from 0 to 100.`, path: `entities.${e.id}.fields.margin_pct` });
+        if (margin !== undefined && !(typeof margin === "number" && margin >= 0 && margin <= 100)) issues.push({ severity: "error" as const, code: "economy.business", message: say("lint_name_s_margin_must_be_a_percentage", { name: e.name }), path: `entities.${e.id}.fields.margin_pct` });
       }
       issues.push(...noAccountIssues(world, registry));
       return issues;
@@ -854,7 +854,7 @@ function noAccountIssues(world: WorldDoc, registry: Registry | undefined): LintI
     for (let n = 2; own(world.entities, account); n++) account = `${id}_checking_${n}`;
     const def: EntityDef = { id: account, kind: "account", name: `${e.name} checking`, tier: "background", fields: { owners: [{ party: id, role: "owner" }], product: DEFAULT_ACCOUNT_PRODUCT[company ? "business" : trust ? "trust" : "group"], opening: 0 }, relations: [] };
     const why = company ? "its takings leave the world and its payroll is paid from nowhere" : trust ? "what it holds and pays out has nowhere to be" : "its payroll is paid from nowhere";
-    out.push({ severity: "warning", code: NO_ACCOUNT_LINT, path: `entities.${id}`, message: `${e.name} holds no bank account, so ${why}. Open one for it?`, fix: { label: `Open ${def.name}`, ops: [{ op: "add", path: pointerOf(["entities", account]), value: def as unknown as JsonValue }] } });
+    out.push({ severity: "warning", code: NO_ACCOUNT_LINT, path: `entities.${id}`, message: say("lint_name_holds_no_bank_account_so_why", { name: e.name, why: why }), fix: { label: `Open ${def.name}`, ops: [{ op: "add", path: pointerOf(["entities", account]), value: def as unknown as JsonValue }] } });
   }
   return out;
 }

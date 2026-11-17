@@ -1066,7 +1066,7 @@ export const gearPack: PackDef = {
         const issues = [];
         const table = world.tables["gear.kits"];
         for (const e of Object.values(world.entities)) {
-          if (typeof e.fields.kit === "string" && table && !own(table.rows, e.fields.kit)) issues.push({ severity: "error" as const, code: "gear.kits", message: `${e.name} names an unknown kit ${e.fields.kit}.`, path: `entities.${e.id}.fields.kit` });
+          if (typeof e.fields.kit === "string" && table && !own(table.rows, e.fields.kit)) issues.push({ severity: "error" as const, code: "gear.kits", message: say("lint_name_names_an_unknown_kit_kit", { name: e.name, kit: e.fields.kit }), path: `entities.${e.id}.fields.kit` });
         }
         return issues;
       },
@@ -1085,7 +1085,7 @@ export const gearPack: PackDef = {
             severity: "warning" as const,
             code: "gear.holders",
             path: `kinds.${kind}`,
-            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) holds things in this world (${why}) but isn't a container, a vehicle or a person, so a transfer, a gift or a GM's Put inside into it is refused. Set its Extends to container, or to a kind built on one.`,
+            message: say("lint_kind_kinds_kind_holds_things_in_this", { kinds: own(world.kinds, kind)?.label ?? kind, kind: kind, why: why }),
           }));
       },
     });
@@ -1103,7 +1103,7 @@ export const gearPack: PackDef = {
             severity: "warning" as const,
             code: "gear.contents",
             path: `kinds.${kind}`,
-            message: `Kind ${own(world.kinds, kind)?.label ?? kind} (${kind}) is moved in this world (${why}) but isn't built on Item (nor is it a person, a vehicle or a cash account), so nothing can take it, give it or put it in anything: Take never offers it, and a transfer, a gift or a GM's Put inside of it is refused. Set its Extends to item, or to a kind built on one.`,
+            message: say("lint_kind_kinds_kind_is_moved_in_this", { kinds: own(world.kinds, kind)?.label ?? kind, kind: kind, why: why }),
           }));
       },
     });

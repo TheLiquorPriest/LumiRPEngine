@@ -269,9 +269,9 @@ function entryLint(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
   for (const [id, p] of Object.entries(world.places)) {
     const entry = p.fields.entry;
-    if (entry !== undefined && !isAudience(entry)) issues.push({ severity: "warning", code: "entry_unknown", message: `${p.name}'s entry is ${JSON.stringify(entry)}, not one of ${AUDIENCES.join(", ")}: it is read as unset.`, path: `places.${id}.fields.entry` });
+    if (entry !== undefined && !isAudience(entry)) issues.push({ severity: "warning", code: "entry_unknown", message: say("lint_name_s_entry_is_entry_not_one", { name: p.name, entry: JSON.stringify(entry), aUDIENCES: AUDIENCES.join(", ") }), path: `places.${id}.fields.entry` });
     const keys = p.fields.keys;
-    if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === "string" && k.trim() !== ""))) issues.push({ severity: "warning", code: "keys_shape", message: `${p.name}'s keys aren't a list of item ids or item types, so no one carries one.`, path: `places.${id}.fields.keys` });
+    if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === "string" && k.trim() !== ""))) issues.push({ severity: "warning", code: "keys_shape", message: say("lint_name_s_keys_arent_a_list_of", { name: p.name }), path: `places.${id}.fields.keys` });
   }
   return issues;
 }

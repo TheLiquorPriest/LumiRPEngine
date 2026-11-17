@@ -404,7 +404,7 @@ export const relationshipsPack: PackDef = {
         for (const e of Object.values(world.entities)) {
           for (const rel of e.relations) {
             if (rel.type !== "regard") continue;
-            for (const k of Object.keys(rel.fields ?? {})) if (k !== "t" && k !== "history" && !axes.includes(k)) issues.push({ severity: "warning" as const, code: "relationships.axes", message: `${e.name}'s regard toward ${rel.to} names an unknown axis ${k}.`, path: `entities.${e.id}.relations` });
+            for (const k of Object.keys(rel.fields ?? {})) if (k !== "t" && k !== "history" && !axes.includes(k)) issues.push({ severity: "warning" as const, code: "relationships.axes", message: say("lint_name_s_regard_toward_rel_names_an", { name: e.name, rel: rel.to, k: k }), path: `entities.${e.id}.relations` });
           }
         }
         return issues;

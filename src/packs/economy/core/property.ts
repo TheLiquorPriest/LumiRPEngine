@@ -1125,24 +1125,24 @@ export function registerProperty(r: FinanceRegistry): void {
         if (e.kind !== "property") continue;
         const path = `entities.${e.id}.fields`;
         const place = strOf(e.fields.place);
-        if (place !== "" && !own(world.places, place)) issues.push({ severity: "error" as const, code: "economy.property", message: `Property ${e.name} is at "${place}", which isn't a place.`, path: `${path}.place` });
-        if (!(numOf(e.fields.value) > 0)) issues.push({ severity: "warning" as const, code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path}.value` });
-        for (const o of ownersIn(e.fields)) if (!own(world.entities, o.party)) issues.push({ severity: "error" as const, code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path}.owners` });
+        if (place !== "" && !own(world.places, place)) issues.push({ severity: "error" as const, code: "economy.property", message: say("lint_property_name_is_at_place_which_isnt", { name: e.name, place: place }), path: `${path}.place` });
+        if (!(numOf(e.fields.value) > 0)) issues.push({ severity: "warning" as const, code: "economy.property", message: say("lint_property_name_has_no_value_so_it", { name: e.name }), path: `${path}.value` });
+        for (const o of ownersIn(e.fields)) if (!own(world.entities, o.party)) issues.push({ severity: "error" as const, code: "economy.property", message: say("lint_property_name_names_owner_party_who_isnt", { name: e.name, party: o.party }), path: `${path}.owners` });
         const mortgage = strOf(e.fields.mortgage);
         if (mortgage !== "") {
           const loan = own(world.entities, mortgage);
-          if (loan?.kind !== "account") issues.push({ severity: "error" as const, code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path}.mortgage` });
-          else if (strOf(loan.fields.secured_by) !== e.id) issues.push({ severity: "warning" as const, code: "economy.property", message: `Property ${e.name}'s mortgage ${loan.name} isn't secured by it (its secured_by names ${strOf(loan.fields.secured_by) || "nothing"}).`, path: `entities.${mortgage}.fields.secured_by` });
+          if (loan?.kind !== "account") issues.push({ severity: "error" as const, code: "economy.property", message: say("lint_property_name_s_mortgage_mortgage_isnt_an", { name: e.name, mortgage: mortgage }), path: `${path}.mortgage` });
+          else if (strOf(loan.fields.secured_by) !== e.id) issues.push({ severity: "warning" as const, code: "economy.property", message: say("lint_property_name_s_mortgage_name2_isnt_secured", { name: e.name, name2: loan.name, secured_by: strOf(loan.fields.secured_by) }), path: `entities.${mortgage}.fields.secured_by` });
         }
-        if (e.fields.managed === true && !(numOf(e.fields.market_rent) > 0)) issues.push({ severity: "warning" as const, code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path}.market_rent` });
+        if (e.fields.managed === true && !(numOf(e.fields.market_rent) > 0)) issues.push({ severity: "warning" as const, code: "economy.property", message: say("lint_property_name_is_let_to_outside_tenants", { name: e.name }), path: `${path}.market_rent` });
         const rentTo = strOf(e.fields.rent_to);
-        if (rentTo !== "" && own(world.entities, rentTo)?.kind !== "account") issues.push({ severity: "warning" as const, code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path}.rent_to` });
+        if (rentTo !== "" && own(world.entities, rentTo)?.kind !== "account") issues.push({ severity: "warning" as const, code: "economy.property", message: say("lint_property_name_s_rent_goes_to_rentto", { name: e.name, rentTo: rentTo }), path: `${path}.rent_to` });
       }
       for (const e of Object.values(world.entities)) {
         if (e.kind !== "flow" || e.fields.flow_kind !== "rent" || typeof e.fields.link !== "string" || e.fields.link === "") continue;
         if (own(world.entities, e.fields.link)?.kind !== "property") continue;
         const property = own(world.entities, e.fields.link);
-        if (property && clockOfDate(world, e.fields.end as JsonValue) === null && e.fields.end !== undefined) issues.push({ severity: "warning" as const, code: "economy.property", message: `Lease ${e.name} on ${property.name} has an end that isn't a date (YYYY-MM-DD).`, path: `entities.${e.id}.fields.end` });
+        if (property && clockOfDate(world, e.fields.end as JsonValue) === null && e.fields.end !== undefined) issues.push({ severity: "warning" as const, code: "economy.property", message: say("lint_lease_name_on_name2_has_an_end", { name: e.name, name2: property.name }), path: `entities.${e.id}.fields.end` });
       }
       return issues;
     },

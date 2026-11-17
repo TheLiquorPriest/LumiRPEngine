@@ -12,6 +12,7 @@ import type { JobProposal } from "../../shared/jobs";
 import { MAP_SCHEMA, mapProblems, readMap, type MapProblem } from "../../shared/maps";
 import { pathText } from "../../shared/schema-check";
 import type { MapDoc, WorldDoc } from "../../shared/world";
+import { say } from "../../engine/lines";
 
 const MAP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -62,7 +63,7 @@ export interface MapAnswer {
 
 /** A proposed map read as the requested one: its id and place set, checked against the schema and the map lint on `world`. */
 export function readMapAnswer(world: WorldDoc, request: MapRequest, reply: JsonValue | null): MapAnswer {
-  if (!isRecord(reply)) return { value: reply, map: null, problems: [{ severity: "error", path: [], code: "map_shape", message: "should be one map object" }] };
+  if (!isRecord(reply)) return { value: reply, map: null, problems: [{ severity: "error", path: [], code: "map_shape", message: say("lint_should_be_one_map_object") }] };
   // A model sometimes wraps the map: {"map": {...}}.
   const raw = isRecord(reply.map) && reply.scope === undefined && reply.layout === undefined && reply.places === undefined ? reply.map : reply;
   const value: JsonObject = { ...raw, id: request.mapId, scope: request.scope };

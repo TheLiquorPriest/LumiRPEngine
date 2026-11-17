@@ -495,12 +495,12 @@ export function registerListing(r: FinanceRegistry): void {
         const path = `entities.${e.id}.fields.listing`;
         const listing = listingIn(e.fields);
         if (!listing) {
-          issues.push({ severity: "error" as const, code: "economy.listing", message: `${e.name}'s listing needs its asset and its float, a whole number of units.`, path });
+          issues.push({ severity: "error" as const, code: "economy.listing", message: say("lint_name_s_listing_needs_its_asset_and", { name: e.name }), path });
           continue;
         }
-        if (!ownersIn(e.fields).some((o) => ROLE_RIGHTS[o.role].worth && (o.units ?? 0) > 0)) issues.push({ severity: "error" as const, code: "economy.listing", message: `${e.name} is listed, so its owners hold their shares in units.`, path: `entities.${e.id}.fields.owners` });
-        if (strOf(e.fields.structure, "llc") !== "c_corp") issues.push({ severity: "warning" as const, code: "economy.listing", message: `${e.name} is listed but isn't a C corporation; only a C corporation lists in play.`, path: `entities.${e.id}.fields.structure` });
-        if (own(configAssets(world), listing.asset)) issues.push({ severity: "error" as const, code: "economy.listing", message: `${e.name} trades as ${listing.asset}, which is one of the world's own assets.`, path });
+        if (!ownersIn(e.fields).some((o) => ROLE_RIGHTS[o.role].worth && (o.units ?? 0) > 0)) issues.push({ severity: "error" as const, code: "economy.listing", message: say("lint_name_is_listed_so_its_owners_hold", { name: e.name }), path: `entities.${e.id}.fields.owners` });
+        if (strOf(e.fields.structure, "llc") !== "c_corp") issues.push({ severity: "warning" as const, code: "economy.listing", message: say("lint_name_is_listed_but_isnt_a_c", { name: e.name }), path: `entities.${e.id}.fields.structure` });
+        if (own(configAssets(world), listing.asset)) issues.push({ severity: "error" as const, code: "economy.listing", message: say("lint_name_trades_as_asset_which_is_one", { name: e.name, asset: listing.asset }), path });
       }
       return issues;
     },

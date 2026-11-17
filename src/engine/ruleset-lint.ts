@@ -18,6 +18,7 @@ import { rulesetFloor, type Registry } from "./registry-impl";
 import { levelFor, progressionApplies, thresholdsOf } from "./ruleset";
 import { fieldDef, kindFields, objects } from "./scope";
 import { own } from "./pack-kit";
+import { say } from "./lines";
 
 /** A formula in the world document; `effectArg` when it is a `=` formula in an effect's arguments, the only place `roll()` may go. */
 export interface ExprSite {
@@ -170,19 +171,19 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     }
     for (const call of calls) {
       if (EFFECT_ONLY_FUNCTIONS.includes(call.name) && !site.effectArg) {
-        err(site.path, "roll_outside_effect", `${call.name}() works only in an effect's arguments (a "=" formula there). Here it would make shown odds and what the engine reads change on their own, so it reads as nothing.`);
+        err(site.path, "roll_outside_effect", say("lint_name_is_for_an_effects_arguments", { name: call.name }));
       }
       if (call.name !== "table" && call.name !== "table_step") continue;
       const [id, key, column] = call.args;
       if (typeof id !== "string") continue;
       const columns = columnsOf(world, id);
       if (!columns) {
-        err(site.path, "table_ref", `${call.name}() reads the data table "${id}", which this world doesn't have.`);
+        err(site.path, "table_ref", say("lint_name_reads_the_data_table_id_which", { name: call.name, id: id }));
         continue;
       }
-      if (typeof column === "string" && !columns.has(column)) err(site.path, "table_column", `The data table "${id}" has no column "${column}".`);
+      if (typeof column === "string" && !columns.has(column)) err(site.path, "table_column", say("lint_the_data_table_id_has_no_column", { id: id, column: column }));
       const rows = own(world.tables, id)?.rows;
-      if (call.name === "table" && (typeof key === "string" || typeof key === "number") && isRecord(rows) && !own(rows, String(key))) warn(site.path, "table_row", `The data table "${id}" has no row "${key}"; the read gives nothing.`);
+      if (call.name === "table" && (typeof key === "string" || typeof key === "number") && isRecord(rows) && !own(rows, String(key))) warn(site.path, "table_row", say("lint_the_data_table_id_has_no_row", { id: id, key: key }));
     }
   }
 
@@ -193,29 +194,29 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
       natural = naturalDie(parseDice(check.dice)) !== null;
       diceDistribution(check.dice);
     } catch (e) {
-      err(`${path}.dice`, "dice", `"${String(check.dice)}" can't be rolled with exact odds: ${e instanceof Error ? e.message : String(e)}`);
+      err(`${path}.dice`, "dice", say("lint_dice_cant_be_rolled_with_exact_odds", { dice: String(check.dice), message: e instanceof Error ? e.message : String(e) }));
       return;
     }
     for (const site of checkSites(path, check)) {
       try {
         compile(site.expr);
       } catch (e) {
-        err(site.path, "types", `This formula doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+        err(site.path, "types", say("lint_this_formula_doesnt_parse_message", { message: e instanceof Error ? e.message : String(e) }));
       }
     }
     const bands = Array.isArray(check.bands) ? check.bands : [];
-    if (!natural && bands.some((b) => b.natural)) err(`${path}.bands`, "natural_band", `Natural bands read one kept die, but "${check.dice}" doesn't start with one (use d20, 2d20kh1 or 2d20kl1).`);
-    if (!natural && check.advantage !== undefined) err(`${path}.advantage`, "advantage", `Advantage adds a natural die, but "${check.dice}" doesn't start with one (use d20, d100, 2d20kh1…).`);
+    if (!natural && bands.some((b) => b.natural)) err(`${path}.bands`, "natural_band", say("lint_natural_bands_read_one_kept_die_but", { dice: check.dice }));
+    if (!natural && check.advantage !== undefined) err(`${path}.advantage`, "advantage", say("lint_advantage_adds_a_natural_die_but_dice", { dice: check.dice }));
     const hasDc = check.dc !== undefined || check.vs !== undefined;
-    if (!hasDc && bands.some((b) => b.margin)) err(`${path}.bands`, "margin_band", "Margin bands measure from a DC, and this check has neither a dc nor an opponent.");
-    if (bands.length === 0 && !hasDc) warn(`${path}.bands`, "no_bands", "With no bands and no DC every roll reads none.");
+    if (!hasDc && bands.some((b) => b.margin)) err(`${path}.bands`, "margin_band", say("lint_margin_bands_measure_from_a_dc_and"));
+    if (bands.length === 0 && !hasDc) warn(`${path}.bands`, "no_bands", say("lint_with_no_bands_and_no_dc_every"));
     const vs = check.vs;
     if (!vs) return;
-    if ([vs.check, vs.modifier, vs.passive].filter((x) => x !== undefined).length > 1) err(`${path}.vs`, "vs", "An opponent rolls a check, rolls this check's dice with a modifier, or has a passive score: give one of check, modifier and passive.");
-    if (vs.check !== undefined && !own(world.checks, vs.check)) err(`${path}.vs.check`, "refs", `The opponent's check "${vs.check}" doesn't exist.`);
-    if (vs.passive !== undefined && check.dc !== undefined) warn(`${path}.dc`, "dc_passive", "The opponent's passive score is the DC, so dc is never read.");
+    if ([vs.check, vs.modifier, vs.passive].filter((x) => x !== undefined).length > 1) err(`${path}.vs`, "vs", say("lint_an_opponent_rolls_a_check_rolls_this"));
+    if (vs.check !== undefined && !own(world.checks, vs.check)) err(`${path}.vs.check`, "refs", say("lint_the_opponents_check_check_doesnt_exist", { check: vs.check }));
+    if (vs.passive !== undefined && check.dc !== undefined) warn(`${path}.dc`, "dc_passive", say("lint_the_opponents_passive_score_is_the_dc"));
     const who = vs.who ?? "target";
-    if (opponents && !opponents.includes(who)) err(`${path}.vs.who`, "vs_who", `The opponent is "${who}", which isn't one of this action's people (${opponents.length > 0 ? opponents.join(", ") : "it names none"}).`);
+    if (opponents && !opponents.includes(who)) err(`${path}.vs.who`, "vs_who", say("lint_the_opponent_is_who_which_isnt_one", { who: who, opponents: opponents.join(", "), if_opponents: opponents.length > 0 }));
   };
   for (const [id, c] of Object.entries(world.checks)) lintCheck(`checks.${id}`, c, null);
   for (const [id, a] of Object.entries(world.actions)) {
@@ -223,8 +224,8 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     if (typeof a.check === "object" && a.check !== null) lintCheck(`actions.${id}.check`, a.check, opponents);
     else if (typeof a.check === "string") {
       const named = own(world.checks, a.check);
-      if (!named) err(`actions.${id}.check`, "refs", `"${a.label}" rolls the check "${a.check}", which doesn't exist.`);
-      else if (named.vs && !opponents.includes(named.vs.who ?? "target")) err(`actions.${id}.check`, "vs_who", `"${a.label}" rolls an opposed check against "${named.vs.who ?? "target"}", which isn't one of its people.`);
+      if (!named) err(`actions.${id}.check`, "refs", say("lint_label_rolls_the_check_check_which_doesnt", { label: a.label, check: a.check }));
+      else if (named.vs && !opponents.includes(named.vs.who ?? "target")) err(`actions.${id}.check`, "vs_who", say("lint_label_rolls_an_opposed_check_against_who", { label: a.label, who: named.vs.who }));
     }
   }
   for (const { path, effects } of effectLists(world)) {
@@ -232,11 +233,11 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
       const at = `${path}.${i}.args`;
       if (spec.type === "check") {
         const c = spec.args?.check;
-        if (typeof c === "string" && !c.startsWith("=") && !own(world.checks, c)) err(`${at}.check`, "refs", `This check effect rolls "${c}", which doesn't exist.`);
+        if (typeof c === "string" && !c.startsWith("=") && !own(world.checks, c)) err(`${at}.check`, "refs", say("lint_this_check_effect_rolls_c_which_doesnt", { c: c }));
         if (isRecord(c)) lintCheck(`${at}.check`, c as unknown as CheckDef, ["target"]);
-        if (!isRecord(spec.args?.outcomes)) warn(`${at}.outcomes`, "no_outcomes", "This check effect has no outcomes, so its roll changes nothing.");
+        if (!isRecord(spec.args?.outcomes)) warn(`${at}.outcomes`, "no_outcomes", say("lint_this_check_effect_has_no_outcomes_so"));
       }
-      if (spec.type === "award" && typeof spec.args?.progression === "string" && !own(world.ruleset?.progression ?? {}, spec.args.progression)) err(`${at}.progression`, "refs", `This award names the progression "${spec.args.progression}", which the ruleset doesn't define.`);
+      if (spec.type === "award" && typeof spec.args?.progression === "string" && !own(world.ruleset?.progression ?? {}, spec.args.progression)) err(`${at}.progression`, "refs", say("lint_this_award_names_the_progression_progression_which", { progression: spec.args.progression }));
     });
   }
 
@@ -246,19 +247,19 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
       if (f.pool === undefined) continue;
       const at = `kinds.${id}.fields.${name}.pool`;
       if (!isRecord(f.pool) || typeof f.pool.max !== "string" || f.pool.max.trim() === "") {
-        err(at, "pool", `${k.label}'s ${f.label ?? name} pool needs a max: a field or a formula.`);
+        err(at, "pool", say("lint_label_s_name_pool_needs_a_max", { label: k.label, name: f.label ?? name }));
         continue;
       }
-      if (f.type !== "number") err(at, "pool", `${k.label}'s ${f.label ?? name} is a pool, so it must be a number field.`);
-      if (f.pool.max === name) err(`${at}.max`, "pool", `${k.label}'s ${f.label ?? name} can't be its own max.`);
+      if (f.type !== "number") err(at, "pool", say("lint_label_s_name_is_a_pool_so", { label: k.label, name: f.label ?? name }));
+      if (f.pool.max === name) err(`${at}.max`, "pool", say("lint_label_s_name_cant_be_its_own", { label: k.label, name: f.label ?? name }));
       const named = own(kindFields(reg, world, id), f.pool.max);
-      if (named && named.type !== "number") err(`${at}.max`, "pool", `${k.label}'s ${f.label ?? name} takes its max from ${f.pool.max}, which isn't a number field.`);
+      if (named && named.type !== "number") err(`${at}.max`, "pool", say("lint_label_s_name_takes_its_max_from", { label: k.label, name: f.label ?? name, max: f.pool.max }));
       for (const [key, expr] of [["max", named ? undefined : f.pool.max], ["recover", f.pool.recover]] as const) {
         if (typeof expr !== "string") continue;
         try {
           compile(expr);
         } catch (e) {
-          err(`${at}.${key}`, "types", `This formula doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+          err(`${at}.${key}`, "types", say("lint_this_formula_doesnt_parse_message", { message: e instanceof Error ? e.message : String(e) }));
         }
       }
     }
@@ -276,120 +277,120 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     fightPaths.push(`actions.${id}.`);
     if (typeof a.check === "string") fightPaths.push(`checks.${a.check}.`);
     if (!isRecord(c) || !isRecord(c.cost)) {
-      err(at, "combat", `"${a.label}" is a combat action, so it needs a cost: budget → how many, {} when it's free.`);
+      err(at, "combat", say("lint_label_is_a_combat_action_so_it", { label: a.label }));
       continue;
     }
-    if (combat === undefined) warn(at, "combat", `"${a.label}" is a combat action, but this world's ruleset has no combat, so it's never offered.`);
+    if (combat === undefined) warn(at, "combat", say("lint_label_is_a_combat_action_but_this", { label: a.label }));
     for (const [budget, n] of Object.entries(c.cost)) {
-      if (typeof n !== "number" || !Number.isInteger(n) || n < 0) err(`${at}.cost.${budget}`, "combat", "A cost is a whole number of a budget, 0 or more.");
-      else if (budgets && !own(budgets, budget)) err(`${at}.cost.${budget}`, "refs", `"${a.label}" spends "${budget}", which the action economy doesn't have.`);
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 0) err(`${at}.cost.${budget}`, "combat", say("lint_a_cost_is_a_whole_number_of"));
+      else if (budgets && !own(budgets, budget)) err(`${at}.cost.${budget}`, "refs", say("lint_label_spends_budget_which_the_action_economy", { label: a.label, budget: budget }));
     }
-    if (c.role !== undefined && c.role !== "attack" && c.role !== "defend") err(`${at}.role`, "combat", "A combat action's role is attack or defend.");
-    if (c.start !== undefined && typeof c.start !== "boolean") err(`${at}.start`, "combat", "Whether it starts a fight is yes or no.");
+    if (c.role !== undefined && c.role !== "attack" && c.role !== "defend") err(`${at}.role`, "combat", say("lint_a_combat_actions_role_is_attack_or"));
+    if (c.start !== undefined && typeof c.start !== "boolean") err(`${at}.start`, "combat", say("lint_whether_it_starts_a_fight_is_yes"));
   }
   if (isRecord(combat)) {
     const init = combat.initiative;
     if (typeof init === "string") {
       fightPaths.push(`checks.${init}.`);
-      if (!own(world.checks, init)) err("ruleset.combat.initiative", "refs", `The initiative check "${init}" doesn't exist.`);
+      if (!own(world.checks, init)) err("ruleset.combat.initiative", "refs", say("lint_the_initiative_check_init_doesnt_exist", { init: init }));
     } else if (isRecord(init) && typeof init.dice === "string") lintCheck("ruleset.combat.initiative", init as unknown as CheckDef, []);
-    else err("ruleset.combat.initiative", "combat", "A fight needs an initiative check: a check's id, or a check of its own.");
-    if (!budgets || Object.keys(budgets).length === 0) err("ruleset.combat.economy", "combat", "A fight needs an action economy: at least one budget, such as action.");
+    else err("ruleset.combat.initiative", "combat", say("lint_a_fight_needs_an_initiative_check_a"));
+    if (!budgets || Object.keys(budgets).length === 0) err("ruleset.combat.economy", "combat", say("lint_a_fight_needs_an_action_economy_at"));
     for (const [id, b] of Object.entries(budgets ?? {})) {
       const at = `ruleset.combat.economy.${id}`;
       if (!isRecord(b)) {
-        err(at, "combat", "A budget has a label, a count and when it refills.");
+        err(at, "combat", say("lint_a_budget_has_a_label_a_count"));
         continue;
       }
-      if (typeof b.label !== "string" || b.label.trim() === "") warn(`${at}.label`, "combat", "A budget needs a label: the palette and the Encounter card show it.");
-      if (b.per !== undefined && b.per !== "turn" && b.per !== "round") err(`${at}.per`, "combat", "A budget refills each turn or each round.");
-      if (b.count !== undefined && typeof b.count !== "string" && !(typeof b.count === "number" && b.count >= 0)) err(`${at}.count`, "combat", "A budget's count is a number of 0 or more, or a formula.");
+      if (typeof b.label !== "string" || b.label.trim() === "") warn(`${at}.label`, "combat", say("lint_a_budget_needs_a_label_the_palette"));
+      if (b.per !== undefined && b.per !== "turn" && b.per !== "round") err(`${at}.per`, "combat", say("lint_a_budget_refills_each_turn_or_each"));
+      if (b.count !== undefined && typeof b.count !== "string" && !(typeof b.count === "number" && b.count >= 0)) err(`${at}.count`, "combat", say("lint_a_budgets_count_is_a_number_of"));
     }
     const pov = own(world.entities, world.pov);
     const hp = typeof combat.hp === "string" && combat.hp !== "" ? combat.hp : null;
     const hpDef = hp && pov ? fieldDef(reg, world, pov.kind, hp) : undefined;
-    if (!hp) err("ruleset.combat.hp", "combat", "A fight needs the HP field: a pool on the kind of those who fight.");
-    else if (pov && !hpDef) err("ruleset.combat.hp", "combat", `The point of view's kind has no field ${hp}.`);
-    else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", `${hp} isn't a pool, so damage has no floor and HP shows no max.`);
-    if (combat.stalemate !== undefined && !(typeof combat.stalemate === "number" && Number.isInteger(combat.stalemate) && combat.stalemate >= 0)) err("ruleset.combat.stalemate", "combat", "A stalemate is a whole number of rounds, 0 or more: that many rounds in a row with no attack and no one hurt end a fight, and 0 never does.");
-    if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", "The POV's turn ends once it's spent, or only on End turn (manual).");
-    if (combat.adjudicate !== undefined && combat.adjudicate !== "dice" && combat.adjudicate !== "policy") err("ruleset.combat.adjudicate", "combat", "A fight's checks are settled by the dice, or by the adjudication policy (policy).");
+    if (!hp) err("ruleset.combat.hp", "combat", say("lint_a_fight_needs_the_hp_field_a"));
+    else if (pov && !hpDef) err("ruleset.combat.hp", "combat", say("lint_the_point_of_views_kind_has_no", { hp: hp }));
+    else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", say("lint_hp_isnt_a_pool_so_damage_has", { hp: hp }));
+    if (combat.stalemate !== undefined && !(typeof combat.stalemate === "number" && Number.isInteger(combat.stalemate) && combat.stalemate >= 0)) err("ruleset.combat.stalemate", "combat", say("lint_a_stalemate_is_a_whole_number_of"));
+    if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", say("lint_the_povs_turn_ends_once_its_spent"));
+    if (combat.adjudicate !== undefined && combat.adjudicate !== "dice" && combat.adjudicate !== "policy") err("ruleset.combat.adjudicate", "combat", say("lint_a_fights_checks_are_settled_by_the"));
     if (combat.adjudicate === "policy") {
       // The player's same attack comes round every round; a new round counts as a change, but not as a new scene (DESIGN §11).
       const policy = readAdjudication(isRecord(world.ruleset) ? world.ruleset.adjudication : undefined) ?? defaultAdjudication();
-      if (policy.retry === "once") warn("ruleset.combat.adjudicate", "combat", "Fights follow the policy, and its retry rule refuses the same attack after a miss until a new scene: a missed attack can't be tried again in the same fight.");
+      if (policy.retry === "once") warn("ruleset.combat.adjudicate", "combat", say("lint_fights_follow_the_policy_and_its_retry"));
     }
-    if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact") err("ruleset.combat.showHp", "combat", "Others' HP shows as wounds or as exact numbers.");
-    if (combat.wounds !== undefined && (!Array.isArray(combat.wounds) || combat.wounds.some((b) => !isRecord(b) || typeof b.label !== "string"))) err("ruleset.combat.wounds", "combat", "Wounds are bands with labels over the HP left, in percent.");
+    if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact") err("ruleset.combat.showHp", "combat", say("lint_others_hp_shows_as_wounds_or_as"));
+    if (combat.wounds !== undefined && (!Array.isArray(combat.wounds) || combat.wounds.some((b) => !isRecord(b) || typeof b.label !== "string"))) err("ruleset.combat.wounds", "combat", say("lint_wounds_are_bands_with_labels_over_the"));
     const sites = exprSites(world);
     for (const site of sites) {
       if (!site.path.startsWith("ruleset.combat.") || site.path.startsWith("ruleset.combat.initiative")) continue;
       try {
         compile(site.expr);
       } catch (e) {
-        err(site.path, "types", `This formula doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+        err(site.path, "types", say("lint_this_formula_doesnt_parse_message", { message: e instanceof Error ? e.message : String(e) }));
       }
     }
     const statMods = sites.some((s) => fightPaths.some((p) => s.path.startsWith(p)) && /\b(stat_mod|condition_mod)\s*\(/.test(s.expr));
-    if (statMods && rulesetFloor(world, "sheets", world.realism.levels.sheets) < 3) info("ruleset.minLevels.sheets", "level_floor", "This world's fights read stat modifiers, which are 0 below Sheets 3: a Sheets 3 floor makes them count under any realism.");
-  } else if (combat !== undefined) err("ruleset.combat", "combat", "Combat must be an object.");
+    if (statMods && rulesetFloor(world, "sheets", world.realism.levels.sheets) < 3) info("ruleset.minLevels.sheets", "level_floor", say("lint_this_worlds_fights_read_stat_modifiers_which"));
+  } else if (combat !== undefined) err("ruleset.combat", "combat", say("lint_combat_must_be_an_object"));
 
   // The ruleset container (DESIGN §11), its adjudication policy first: the sheet's checks below may end early.
   const rs: unknown = world.ruleset;
   if (rs === undefined) return issues;
   issues.push(...lintAdjudication(world), ...lintInferred(world, reg));
   if (!isRecord(rs)) {
-    err("ruleset", "ruleset", "The ruleset must be an object.");
+    err("ruleset", "ruleset", say("lint_the_ruleset_must_be_an_object"));
     return issues;
   }
   const floors = rs.minLevels;
   if (floors !== undefined) {
-    if (!isRecord(floors)) err("ruleset.minLevels", "ruleset", "Level floors must be an object of domain levels.");
+    if (!isRecord(floors)) err("ruleset.minLevels", "ruleset", say("lint_level_floors_must_be_an_object_of"));
     else {
       for (const [domain, level] of Object.entries(floors)) {
         const known = DOMAINS.find((d) => d === domain);
-        if (!known) err(`ruleset.minLevels.${domain}`, "ruleset", `"${domain}" isn't a realism domain.`);
-        else if (typeof level !== "number" || !Number.isInteger(level) || level < 0 || level > 4) err(`ruleset.minLevels.${domain}`, "ruleset", "A level floor is a whole number from 0 to 4.");
-        else if (world.realism.levels[known] < level) info(`ruleset.minLevels.${domain}`, "level_floor", `The realism defaults put ${domain} at ${world.realism.levels[known]}; this ruleset plays it at ${level}.`);
+        if (!known) err(`ruleset.minLevels.${domain}`, "ruleset", say("lint_domain_isnt_a_realism_domain", { domain: domain }));
+        else if (typeof level !== "number" || !Number.isInteger(level) || level < 0 || level > 4) err(`ruleset.minLevels.${domain}`, "ruleset", say("lint_a_level_floor_is_a_whole_number"));
+        else if (world.realism.levels[known] < level) info(`ruleset.minLevels.${domain}`, "level_floor", say("lint_the_realism_defaults_put_domain_at_known", { domain: domain, known: world.realism.levels[known], level: level }));
       }
     }
   }
   const progression = rs.progression;
-  if (progression !== undefined && !isRecord(progression)) err("ruleset.progression", "ruleset", "Progressions must be an object keyed by id.");
+  if (progression !== undefined && !isRecord(progression)) err("ruleset.progression", "ruleset", say("lint_progressions_must_be_an_object_keyed_by"));
   else if (progression !== undefined) {
     const allKinds = [...new Set([...Object.keys(world.kinds), ...reg.kinds.keys()])];
     for (const [id, raw] of Object.entries(progression)) {
       const at = `ruleset.progression.${id}`;
       if (!isRecord(raw) || typeof raw.xpField !== "string" || typeof raw.levelField !== "string" || raw.xpField === "" || raw.levelField === "") {
-        err(at, "progression", "A progression needs an XP field and a level field.");
+        err(at, "progression", say("lint_a_progression_needs_an_xp_field_and"));
         continue;
       }
       const p = raw as unknown as ProgressionDef;
-      if (typeof p.label !== "string" || p.label.trim() === "") warn(`${at}.label`, "progression", "A progression needs a label: the sheet and the Journal show it.");
-      if (p.xpField === p.levelField) err(at, "progression", "XP and the level need two different fields.");
-      if (p.kind !== undefined && !own(world.kinds, p.kind) && !reg.kinds.has(p.kind)) err(`${at}.kind`, "refs", `The kind "${p.kind}" doesn't exist.`);
+      if (typeof p.label !== "string" || p.label.trim() === "") warn(`${at}.label`, "progression", say("lint_a_progression_needs_a_label_the_sheet"));
+      if (p.xpField === p.levelField) err(at, "progression", say("lint_xp_and_the_level_need_two_different"));
+      if (p.kind !== undefined && !own(world.kinds, p.kind) && !reg.kinds.has(p.kind)) err(`${at}.kind`, "refs", say("lint_the_kind_kind_doesnt_exist", { kind: p.kind }));
       const kinds = p.kind !== undefined ? [p.kind] : allKinds.filter((k) => fieldDef(reg, world, k, p.xpField) && fieldDef(reg, world, k, p.levelField));
-      if (p.kind === undefined && kinds.length === 0) warn(at, "progression", `No kind has both ${p.xpField} and ${p.levelField}, so this progression applies to no one.`);
+      if (p.kind === undefined && kinds.length === 0) warn(at, "progression", say("lint_no_kind_has_both_xpfield_and_levelfield", { xpField: p.xpField, levelField: p.levelField }));
       for (const k of p.kind !== undefined && (own(world.kinds, p.kind) || reg.kinds.has(p.kind)) ? kinds : []) {
         for (const [key, field] of [["xpField", p.xpField], ["levelField", p.levelField]] as const) {
           const def = fieldDef(reg, world, k, field);
-          if (!def) err(`${at}.${key}`, "progression", `The kind ${k} has no field ${field}.`);
-          else if (def.type !== "number") err(`${at}.${key}`, "progression", `${field} must be a number field.`);
-          else if (def.derived !== undefined) err(`${at}.${key}`, "progression", `${field} is derived, so the engine can't set it.`);
+          if (!def) err(`${at}.${key}`, "progression", say("lint_the_kind_k_has_no_field_field", { k: k, field: field }));
+          else if (def.type !== "number") err(`${at}.${key}`, "progression", say("lint_field_must_be_a_number_field", { field: field }));
+          else if (def.derived !== undefined) err(`${at}.${key}`, "progression", say("lint_field_is_derived_so_the_engine_cant", { field: field }));
         }
       }
       const t = p.thresholds;
       if (Array.isArray(t)) {
-        if (t.length === 0 || t.some((x) => typeof x !== "number" || !Number.isFinite(x))) err(`${at}.thresholds`, "thresholds", "Thresholds are a list of XP amounts, one per level from level 1.");
+        if (t.length === 0 || t.some((x) => typeof x !== "number" || !Number.isFinite(x))) err(`${at}.thresholds`, "thresholds", say("lint_thresholds_are_a_list_of_xp_amounts"));
       } else if (isRecord(t) && typeof t.table === "string" && typeof t.column === "string") {
         const columns = columnsOf(world, t.table);
-        if (!columns) err(`${at}.thresholds`, "table_ref", `The data table "${t.table}" doesn't exist.`);
-        else if (!columns.has(t.column)) err(`${at}.thresholds`, "table_column", `The data table "${t.table}" has no column "${t.column}".`);
-      } else err(`${at}.thresholds`, "thresholds", "Thresholds are a list of XP amounts, or a data table and column.");
+        if (!columns) err(`${at}.thresholds`, "table_ref", say("lint_the_data_table_table_doesnt_exist", { table: t.table }));
+        else if (!columns.has(t.column)) err(`${at}.thresholds`, "table_column", say("lint_the_data_table_id_has_no_column", { id: t.table, column: t.column }));
+      } else err(`${at}.thresholds`, "thresholds", say("lint_thresholds_are_a_list_of_xp_amounts_2"));
       const list = thresholdsOf(world, p);
-      if (list.some((x, i) => i > 0 && x < (list[i - 1] ?? x))) err(`${at}.thresholds`, "thresholds", "Thresholds must rise level by level.");
-      if (p.maxLevel !== undefined && (typeof p.maxLevel !== "number" || !Number.isInteger(p.maxLevel) || p.maxLevel < 1)) err(`${at}.maxLevel`, "progression", "The top level is a whole number of at least 1.");
-      if (p.onLevel !== undefined && !Array.isArray(p.onLevel)) err(`${at}.onLevel`, "progression", "onLevel is a list of effects.");
+      if (list.some((x, i) => i > 0 && x < (list[i - 1] ?? x))) err(`${at}.thresholds`, "thresholds", say("lint_thresholds_must_rise_level_by_level"));
+      if (p.maxLevel !== undefined && (typeof p.maxLevel !== "number" || !Number.isInteger(p.maxLevel) || p.maxLevel < 1)) err(`${at}.maxLevel`, "progression", say("lint_the_top_level_is_a_whole_number"));
+      if (p.onLevel !== undefined && !Array.isArray(p.onLevel)) err(`${at}.onLevel`, "progression", say("lint_onlevel_is_a_list_of_effects"));
       // A level follows its XP: one authored otherwise moves to its XP's level when that XP next changes.
       const name = typeof p.label === "string" && p.label.trim() !== "" ? p.label : "Level";
       for (const [eid, e] of Object.entries(world.entities)) {
@@ -405,14 +406,14 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
         if (level === reached) continue;
         const xpLabel = fieldDef(reg, world, e.kind, p.xpField)?.label ?? p.xpField;
         const needs = list[level - 1];
-        warn(`entities.${eid}.fields.${p.levelField}`, "progression_level", `${e.name} is at ${name} ${level}, but ${xp} ${xpLabel} reaches ${name} ${reached}. The level follows ${xpLabel}, so it becomes ${name} ${reached} when their ${xpLabel} next changes: ${needs !== undefined ? `give them ${needs} ${xpLabel} for ${name} ${level}, or ` : ""}set the level to ${reached}.`);
+        warn(`entities.${eid}.fields.${p.levelField}`, "progression_level", say("lint_name_is_at_name2_level_but_xp", { name: e.name, name2: name, level: level, xp: xp, xpLabel: xpLabel, reached: reached, needs: needs, if_needs: needs !== undefined }));
       }
     }
   }
   const sheet = rs.sheet;
   if (sheet !== undefined) {
     if (!isRecord(sheet) || !Array.isArray(sheet.sections)) {
-      err("ruleset.sheet", "sheet", "A sheet is a list of sections.");
+      err("ruleset.sheet", "sheet", say("lint_a_sheet_is_a_list_of_sections"));
       return issues;
     }
     const pov = own(world.entities, world.pov);
@@ -421,28 +422,28 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     sheet.sections.forEach((s, i) => {
       const at = `ruleset.sheet.sections.${i}`;
       if (!isRecord(s) || typeof s.id !== "string" || s.id === "" || !Array.isArray(s.rows)) {
-        err(at, "sheet", "A section needs an id and a list of rows.");
+        err(at, "sheet", say("lint_a_section_needs_an_id_and_a"));
         return;
       }
-      if (seen.has(s.id)) err(`${at}.id`, "sheet", `Two sections share the id "${s.id}".`);
+      if (seen.has(s.id)) err(`${at}.id`, "sheet", say("lint_two_sections_share_the_id_id", { id: s.id }));
       seen.add(s.id);
-      if (typeof s.label !== "string" || s.label.trim() === "") warn(`${at}.label`, "sheet", "A section needs a label to show as its title.");
+      if (typeof s.label !== "string" || s.label.trim() === "") warn(`${at}.label`, "sheet", say("lint_a_section_needs_a_label_to_show"));
       s.rows.forEach((row, j) => {
         const rat = `${at}.rows.${j}`;
         const keys = isRecord(row) ? ["field", "formula", "pool", "progression"].filter((k) => typeof row[k] === "string") : [];
         if (!isRecord(row) || keys.length !== 1) {
-          err(rat, "sheet", "A row shows one thing: a field, a formula, a pool or a progression.");
+          err(rat, "sheet", say("lint_a_row_shows_one_thing_a_field"));
           return;
         }
-        if (typeof row.field === "string" && !own(povFields, row.field)) warn(rat, "sheet", `The point of view's kind has no field ${row.field}.`);
-        if (typeof row.pool === "string" && !own(povFields, row.pool)?.pool) warn(rat, "sheet", `${row.pool} isn't a pool on the point of view's kind.`);
-        if (typeof row.progression === "string" && !(isRecord(progression) && own(progression, row.progression))) err(rat, "refs", `The progression "${row.progression}" doesn't exist.`);
+        if (typeof row.field === "string" && !own(povFields, row.field)) warn(rat, "sheet", say("lint_the_point_of_views_kind_has_no", { hp: row.field }));
+        if (typeof row.pool === "string" && !own(povFields, row.pool)?.pool) warn(rat, "sheet", say("lint_pool_isnt_a_pool_on_the_point", { pool: row.pool }));
+        if (typeof row.progression === "string" && !(isRecord(progression) && own(progression, row.progression))) err(rat, "refs", say("lint_the_progression_progression_doesnt_exist", { progression: row.progression }));
         if (typeof row.formula === "string") {
-          if (typeof row.label !== "string" || row.label.trim() === "") err(`${rat}.label`, "sheet", "A formula row needs a label.");
+          if (typeof row.label !== "string" || row.label.trim() === "") err(`${rat}.label`, "sheet", say("lint_a_formula_row_needs_a_label"));
           try {
             compile(row.formula);
           } catch (e) {
-            err(`${rat}.formula`, "types", `This formula doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+            err(`${rat}.formula`, "types", say("lint_this_formula_doesnt_parse_message", { message: e instanceof Error ? e.message : String(e) }));
           }
         }
       });

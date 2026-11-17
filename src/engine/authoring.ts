@@ -35,6 +35,7 @@ import { typedIntent } from "./typed-intent";
 import { migrateMoney } from "./money-migrate";
 import { MINDS_SLOT } from "../shared/minds";
 import { sourceOf } from "./feed";
+import { say } from "./lines";
 
 // ---------------------------------------------------------------- documents
 
@@ -142,27 +143,27 @@ export function shapeIssues(doc: unknown): LintIssue[] {
   const err = (path: string, message: string): void => {
     issues.push({ severity: "error", path, code: "shape", message });
   };
-  if (!isRecord(doc)) return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
+  if (!isRecord(doc)) return [{ severity: "error", path: "", code: "shape", message: say("lint_not_a_json_object") }];
   const collection = (key: string): void => {
     const value = doc[key];
-    if (!isRecord(value)) return err(key, `${key} must be an object`);
-    for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, `each of ${key} must be an object`);
+    if (!isRecord(value)) return err(key, say("lint_key_must_be_an_object", { key: key }));
+    for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, say("lint_each_of_key_must_be_an_object", { key: key }));
   };
-  if (doc.format !== WORLD_FORMAT) err("format", `format must be ${WORLD_FORMAT}`);
-  if (typeof doc.id !== "string" || doc.id === "") err("id", "the world needs an id");
-  if (typeof doc.name !== "string") err("name", "the world needs a name");
-  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", "engineVersion must be text");
-  if (typeof doc.pov !== "string") err("pov", "the world needs a POV entity id");
+  if (doc.format !== WORLD_FORMAT) err("format", say("lint_format_must_be_world_format", { wORLD_FORMAT: WORLD_FORMAT }));
+  if (typeof doc.id !== "string" || doc.id === "") err("id", say("lint_the_world_needs_an_id"));
+  if (typeof doc.name !== "string") err("name", say("lint_the_world_needs_a_name"));
+  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", say("lint_engineversion_must_be_text"));
+  if (typeof doc.pov !== "string") err("pov", say("lint_the_world_needs_a_pov_entity_id"));
   for (const key of COLLECTIONS) collection(key);
   for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined) collection(key);
-  for (const key of PARTS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
-  for (const key of OPTIONAL_PARTS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
-  if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
-  if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
-  if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
-  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
-  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", "spawnCap must be a number");
-  for (const key of ["placeCap", "placesPerTurn"] as const) if (doc[key] !== undefined && typeof doc[key] !== "number") err(key, `${key} must be a number`);
+  for (const key of PARTS) if (!isRecord(doc[key])) err(key, say("lint_key_must_be_an_object", { key: key }));
+  for (const key of OPTIONAL_PARTS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, say("lint_key_must_be_an_object", { key: key }));
+  if (!Array.isArray(doc.suppressed)) err("suppressed", say("lint_suppressed_must_be_a_list"));
+  if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", say("lint_seedmode_must_be_fresh_or_same_roll"));
+  if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", say("lint_lenientpricing_must_be_true_or_false"));
+  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", say("lint_spawntier_must_be_a_tier_id"));
+  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", say("lint_spawncap_must_be_a_number"));
+  for (const key of ["placeCap", "placesPerTurn"] as const) if (doc[key] !== undefined && typeof doc[key] !== "number") err(key, say("lint_key_must_be_a_number", { key: key }));
   // The world's own life states, when it has any: an object of objects, as a collection is.
   if (doc.lifeStates !== undefined) collection("lifeStates");
   return issues;
@@ -274,7 +275,7 @@ function softLocks(id: string, action: ActionDef): LintIssue[] {
     const story = readsStory(expr);
     const hides = story && identifiers(expr).every((name) => !hasOwn(action.params, name));
     if (isHardLock(req) || /^\s*not\b/.test(expr) || hides || !(story || keyed)) return [];
-    return [{ severity: "info", path: `actions.${id}.requires.${i}`, code: "soft_lock", message: `"${action.label}" reads like a lock, but this requirement isn't marked hard: a typed attempt that misses it plays as plain roleplay, and the reply can tell it working. Mark it a hard lock if the attempt should fail instead.` }];
+    return [{ severity: "info", path: `actions.${id}.requires.${i}`, code: "soft_lock", message: say("lint_action_reads_like_a_lock_but_this", { action: action.label }) }];
   });
 }
 
@@ -284,28 +285,28 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   const err = (path: string, code: string, message: string): void => {
     issues.push({ severity: "error", path, code, message });
   };
-  if (world.format !== WORLD_FORMAT) err("format", "format", `format must be ${WORLD_FORMAT}`);
-  if (!world.entities[world.pov]) err("pov", "missing_pov", `the POV entity "${world.pov}" does not exist`);
-  if (!world.places[world.start.place]) err("start.place", "missing_place", `the start place "${world.start.place}" does not exist`);
+  if (world.format !== WORLD_FORMAT) err("format", "format", say("lint_format_must_be_world_format", { wORLD_FORMAT: WORLD_FORMAT }));
+  if (!world.entities[world.pov]) err("pov", "missing_pov", say("lint_the_pov_entity_pov_does_not_exist", { pov: world.pov }));
+  if (!world.places[world.start.place]) err("start.place", "missing_place", say("lint_the_start_place_place_does_not_exist", { place: world.start.place }));
   const c = world.currency;
-  if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6) err("currency.decimals", "currency", "decimals must be a whole number from 0 to 6");
-  if (c.format.trim() === "") err("currency.format", "currency", "the currency needs a display format");
+  if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6) err("currency.decimals", "currency", say("lint_decimals_must_be_a_whole_number_from"));
+  if (c.format.trim() === "") err("currency.format", "currency", say("lint_the_currency_needs_a_display_format"));
   for (const [id, e] of Object.entries(world.entities)) {
-    if (e.id !== id) err(`entities.${id}.id`, "id_mismatch", "the id must match its key");
-    if (!world.kinds[e.kind] && !registry.kinds.has(e.kind)) err(`entities.${id}.kind`, "unknown_kind", `unknown kind "${e.kind}"`);
+    if (e.id !== id) err(`entities.${id}.id`, "id_mismatch", say("lint_the_id_must_match_its_key"));
+    if (!world.kinds[e.kind] && !registry.kinds.has(e.kind)) err(`entities.${id}.kind`, "unknown_kind", say("lint_unknown_kind_kind", { kind: e.kind }));
   }
   for (const [id, p] of Object.entries(world.places)) {
-    if (p.parent && !world.places[p.parent]) err(`places.${id}.parent`, "missing_place", `unknown parent place "${p.parent}"`);
+    if (p.parent && !world.places[p.parent]) err(`places.${id}.parent`, "missing_place", say("lint_unknown_parent_place_parent", { parent: p.parent }));
   }
   for (const [id, r] of Object.entries(world.routes)) {
-    if (!world.places[r.from]) err(`routes.${id}.from`, "missing_place", `unknown place "${r.from}"`);
-    if (!world.places[r.to]) err(`routes.${id}.to`, "missing_place", `unknown place "${r.to}"`);
+    if (!world.places[r.from]) err(`routes.${id}.from`, "missing_place", say("lint_unknown_place_from", { from: r.from }));
+    if (!world.places[r.to]) err(`routes.${id}.to`, "missing_place", say("lint_unknown_place_from", { from: r.to }));
   }
   const warn = (path: string, code: string, message: string): void => {
     issues.push({ severity: "warning", path, code, message });
   };
   for (const [id, a] of Object.entries(world.actions)) {
-    if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default")) warn(`actions.${id}.check`, "no_check", `"${a.label}" has outcomes other than default but no check, so only "default" ever applies`);
+    if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default")) warn(`actions.${id}.check`, "no_check", say("lint_label_has_outcomes_other_than_default_but", { label: a.label }));
     issues.push(...softLocks(id, a));
   }
   issues.push(...lintLore(world));
@@ -321,13 +322,13 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     const path = `sectionTemplates.${id}`;
     const label = DEFAULT_SECTIONS[id]?.label ?? id;
     if (typeof text !== "string") {
-      err(path, "section_template", `the wording of "${label}" must be text`);
+      err(path, "section_template", say("lint_the_wording_of_label_must_be_text", { label: label }));
       continue;
     }
     const problem = hasOwn(DEFAULT_SECTIONS, id) ? sectionTemplateProblem(text) : `there is no built-in section "${id}"`;
     if (problem !== null) err(path, "section_template", `"${label}": ${problem}`);
     if (macroHazards(text, ["{{lines}}"]).length > 0) err(path, "section_macro", `"${label}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values`);
-    if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id)) warn(path, "section_template_unused", `"${label}" is the world's own section, so its own template is used and this wording isn't`);
+    if (hasOwn(DEFAULT_SECTIONS, id) && !builtIn.has(id)) warn(path, "section_template_unused", say("lint_label_is_the_worlds_own_section_so", { label: label }));
   }
   // A section only the engine's renderers (its own slot's, or its `include`'s) or the turn itself
   // fill: one neither feeds is skipped every turn, without a word (DESIGN §6, §6.11).
@@ -335,20 +336,20 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, s] of Object.entries(world.sections)) {
     const feed = readSectionFeed(Object.fromEntries(SECTION_FEED_KEYS.flatMap((k) => (s[k] !== undefined ? [[k, s[k]]] : []))));
     if (!feed) {
-      err(`sections.${id}`, "section_feed", `"${s.label}": enabled is on or off, maxTokens and maxLines are whole numbers from 1, include is a list of sources, scope is player, scene or gm`);
+      err(`sections.${id}`, "section_feed", say("lint_s_enabled_is_on_or_off_maxtokens", { s: s.label }));
       continue;
     }
-    for (const source of feed.include ?? []) if (!sources.has(source)) warn(`sections.${id}.include`, "section_source", `"${s.label}" includes "${source}", which no pack renders`);
+    for (const source of feed.include ?? []) if (!sources.has(source)) warn(`sections.${id}.include`, "section_source", say("lint_s_includes_source_which_no_pack_renders", { s: s.label, source: source }));
     const fed = feed.include ? feed.include.some((source) => sources.has(source)) : registry.renderers.some((r) => r.slot === id);
-    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed) warn(`sections.${id}`, "section_unfed", `"${s.label}" has nothing to fill it: no pack renders a section with the id "${id}"${feed.include ? " or one it includes" : ""}, so it never goes in`);
+    if (!hasOwn(TURN_FED_SECTIONS, id) && !fed) warn(`sections.${id}`, "section_unfed", say("lint_s_has_nothing_to_fill_it_no", { s: s.label, id: id, if_include: !!(feed.include) }));
   }
   // World step templates (DESIGN §5.2): an output their purpose uses, known signals, engine placeholders
   // (with those only some steps are given), and some text. A blank minds template is the minds lint's.
   for (const [id, t] of Object.entries(world.steps)) {
-    if (t.id !== id) err(`steps.${id}.id`, "id_mismatch", "the id must match its key");
-    if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output)) warn(`steps.${id}.output`, "step_output", `a ${t.purpose} template can't produce ${t.output}; it would never run`);
-    for (const s of t.signals) if (!knownSignal(s)) warn(`steps.${id}.signals`, "unknown_signal", `unknown signal "${s}"`);
-    if (t.template.trim() === "" && !(MIND_PURPOSES as readonly string[]).includes(t.purpose)) warn(`steps.${id}.template`, "step_blank", `this ${t.purpose} template is blank: it takes the place of the built-in instructions with none`);
+    if (t.id !== id) err(`steps.${id}.id`, "id_mismatch", say("lint_the_id_must_match_its_key"));
+    if (!(STEP_OUTPUTS[t.purpose] ?? []).includes(t.output)) warn(`steps.${id}.output`, "step_output", say("lint_a_purpose_template_cant_produce_output_it", { purpose: t.purpose, output: t.output }));
+    for (const s of t.signals) if (!knownSignal(s)) warn(`steps.${id}.signals`, "unknown_signal", say("lint_unknown_signal_s", { s: s }));
+    if (t.template.trim() === "" && !(MIND_PURPOSES as readonly string[]).includes(t.purpose)) warn(`steps.${id}.template`, "step_blank", say("lint_this_purpose_template_is_blank_it_takes", { purpose: t.purpose }));
     const known: readonly string[] = [...STEP_PLACEHOLDERS, ...(PURPOSE_PLACEHOLDERS[t.purpose] ?? [])];
     for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!known.includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder for a ${t.purpose} step; it renders empty`);
   }

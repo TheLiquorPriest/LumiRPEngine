@@ -18,6 +18,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { thingIndex, typeRowOf } from "../../../engine/thing-index";
 import { namesThing } from "../../../engine/thing-resolve";
 import { carriedBy } from "./model";
+import { say } from "../../../engine/lines";
 
 /** The name a thing of a type row is made with: the row's name before its qualifier ("Key set (house, car fob, keyring)" makes a Key set). */
 export function carryName(row: TableRow, type: string): string {
@@ -63,7 +64,7 @@ export function carryProblems(world: WorldDoc): LintIssue[] {
   for (const [i, rule] of rules.entries()) {
     for (const type of isRecord(rule) && Array.isArray(rule.types) ? rule.types : []) {
       if (typeof type !== "string" || CARRY_TABLES.some((table) => own(world.tables[table]?.rows ?? {}, type) !== undefined)) continue;
-      issues.push({ severity: "warning", code: "gear.carry", path: `packs.gear.config.carry.${i}.types`, message: `Everyday carry names ${type}, which no catalog of this world has (gear items, containers or the price catalog), so no one is made one.` });
+      issues.push({ severity: "warning", code: "gear.carry", path: `packs.gear.config.carry.${i}.types`, message: say("lint_everyday_carry_names_type_which_no_catalog", { type: type }) });
     }
   }
   return issues;

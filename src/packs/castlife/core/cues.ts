@@ -16,6 +16,7 @@ import { optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { currentStage } from "../../../engine/tracks";
 import { loreGateReader, namesAny, ownersCue, trackKeepsSecret, visibilityOf } from "../../../engine/visibility";
+import { say } from "../../../engine/lines";
 
 /**
  * The cues the narrator may play for `who` now, in order: their own, then the current stage's cue of
@@ -120,32 +121,32 @@ export function cueIssues(world: WorldDoc): LintIssue[] {
     if (e.cues === undefined) continue;
     const at = `entities.${e.id}.cues`;
     if (!Array.isArray(e.cues)) {
-      issue("error", at, `${e.name}'s cues should be a list.`);
+      issue("error", at, say("lint_name_s_cues_should_be_a_list", { name: e.name }));
       continue;
     }
-    if (e.cues.length > 0 && !personKind(world, e.kind)) issue("warning", at, `${e.name} isn't a person, so its cues never show: the Stance section tells people.`);
+    if (e.cues.length > 0 && !personKind(world, e.kind)) issue("warning", at, say("lint_name_isnt_a_person_so_its_cues", { name: e.name }));
     e.cues.forEach((raw: unknown, i) => {
       const path = `${at}.${i}`;
       const text = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
-      if (text === "") return issue("error", `${path}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
+      if (text === "") return issue("error", `${path}.text`, say("lint_a_cue_of_name_s_has_no", { name: e.name }));
       const cue = readCue(raw);
-      if (!cue) return issue("error", path, `${e.name}'s cue "${text}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
+      if (!cue) return issue("error", path, say("lint_name_s_cue_text_needs_exactly_one", { name: e.name, text: text }));
       const { kind, id } = cue.secret;
       if (kind === "lore") {
         const entry = own(world.lore, id);
-        if (!entry) issue("error", `${path}.lore`, `${e.name}'s cue "${text}" is for lore "${id}", which this world doesn't have.`);
-        else if (!loreIsSecret(entry)) issue("warning", `${path}.lore`, `${e.name}'s cue "${text}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
+        if (!entry) issue("error", `${path}.lore`, say("lint_name_s_cue_text_is_for_lore", { name: e.name, text: text, id: id }));
+        else if (!loreIsSecret(entry)) issue("warning", `${path}.lore`, say("lint_name_s_cue_text_is_for_title", { name: e.name, text: text, title: entry.title }));
       } else if (kind === "track") {
         const track = own(world.tracks, id);
-        if (!track) issue("error", `${path}.track`, `${e.name}'s cue "${text}" is for track "${id}", which this world doesn't have.`);
-        else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth)) issue("warning", `${path}.track`, `${e.name}'s cue "${text}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
+        if (!track) issue("error", `${path}.track`, say("lint_name_s_cue_text_is_for_track", { name: e.name, text: text, id: id }));
+        else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth)) issue("warning", `${path}.track`, say("lint_name_s_cue_text_is_for_track_2", { name: e.name, text: text, track: track.label }));
       }
       const lower = text.toLowerCase();
       const secret = secrets.find((s) => s.trim() !== "" && lower.includes(s.toLowerCase()));
       // A cue that gives its secret away is the error to fix; what else it names can wait for that.
       const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text)) : undefined;
-      if (secret !== undefined) issue("error", `${path}.text`, `${e.name}'s cue "${text}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
-      else if (named) issue("warning", `${path}.text`, `${e.name}'s cue "${text}" names "${named.name}", which the player may not know; it is left out while they don't.`);
+      if (secret !== undefined) issue("error", `${path}.text`, say("lint_name_s_cue_text_gives_away_a", { name: e.name, text: text, secret: secret }));
+      else if (named) issue("warning", `${path}.text`, say("lint_name_s_cue_text_names_name2_which", { name: e.name, text: text, name2: named.name }));
     });
   }
   for (const t of Object.values(world.tracks)) {
@@ -162,8 +163,8 @@ export function cueIssues(world: WorldDoc): LintIssue[] {
       const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
       if (!named) continue;
       const path = `tracks.${t.id}.stages.${stage}.cue`;
-      if (named.secret) issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
-      else issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+      if (named.secret) issue("error", path, say("lint_the_cue_of_t_at_s_gives", { t: t.label, s: s.label, name: named.name }));
+      else issue("warning", path, say("lint_the_cue_of_t_at_s_names", { t: t.label, s: s.label, name: named.name, name2: owner.name }));
     }
   }
   return issues;

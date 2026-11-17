@@ -14,6 +14,7 @@ import { hasOwn, isRecord, safeKey } from "./json";
 import type { LintIssue } from "./lint";
 import { checkSchema, pathText, type JsonPath, type Schema } from "./schema-check";
 import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, TravelTuning, WorldDoc } from "./world";
+import { say } from "../engine/lines";
 
 export const MAP_FORMAT = "lre-map-v1";
 
@@ -424,36 +425,36 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
     out.set(key, problems);
     if (!map) continue;
     const err = (path: JsonPath, code: string, message: string): void => void problems.push({ severity: "error", path, code, message });
-    if (map.id !== key) err(["id"], "map_id", `the id should be "${key}", the map's key in the world`);
+    if (map.id !== key) err(["id"], "map_id", say("lint_the_id_should_be_key_the_maps", { key: key }));
     const ids = (map.places ?? []).map((p) => p.id);
     const scope = hasOwn(doc.places, map.scope) ? doc.places[map.scope] : undefined;
-    if (!scope) err(["scope"], "map_scope", `there's no place "${map.scope}" for the map to draw`);
-    else if (ids.includes(map.scope)) err(["scope"], "map_scope", `"${map.scope}" is one of this map's own places; a map draws the inside of another place`);
+    if (!scope) err(["scope"], "map_scope", say("lint_theres_no_place_scope_for_the_map", { scope: map.scope }));
+    else if (ids.includes(map.scope)) err(["scope"], "map_scope", say("lint_scope_is_one_of_this_maps_own", { scope: map.scope }));
     const placed = scope !== undefined && !ids.includes(map.scope);
     // Places: ids new to the world, `opens` naming the map of their inside.
     const seen = new Set<string>();
     (map.places ?? []).forEach((p, i) => {
-      if (seen.has(p.id)) err(["places", i, "id"], "map_place", `"${p.id}" is listed twice`);
+      if (seen.has(p.id)) err(["places", i, "id"], "map_place", say("lint_id_is_listed_twice", { id: p.id }));
       else {
         const made = hasOwn(doc.places, p.id) ? doc.places[p.id] : undefined;
-        if (placed && made && made.map !== key) err(["places", i, "id"], "map_place", made.map ? `the map "${made.map}" already has a place "${p.id}"` : `the world already has a place "${p.id}" (${made.name}); give this one another id`);
+        if (placed && made && made.map !== key) err(["places", i, "id"], "map_place", made.map ? say("lint_the_map_made_already_has_a_place", { made: made.map, id: p.id }) : say("lint_the_world_already_has_a_place_id", { id: p.id, name: made.name }));
       }
       seen.add(p.id);
       if (p.opens !== undefined) {
         const inner = hasOwn(maps, p.opens) ? maps[p.opens] : undefined;
-        if (!isRecord(inner)) err(["places", i, "opens"], "map_opens", `there's no map "${p.opens}"`);
-        else if (inner.scope !== p.id) err(["places", i, "opens"], "map_opens", `the map "${p.opens}" draws "${String(inner.scope)}", not "${p.id}"`);
+        if (!isRecord(inner)) err(["places", i, "opens"], "map_opens", say("lint_theres_no_map_opens", { opens: p.opens }));
+        else if (inner.scope !== p.id) err(["places", i, "opens"], "map_opens", say("lint_the_map_opens_draws_scope_not_id", { opens: p.opens, scope: String(inner.scope), id: p.id }));
       }
     });
     if (map.layout) {
       const { rows, width, height } = layoutOf(map);
       rows.forEach((row, y) => {
-        if (row.length !== width) err(["layout", y], "map_layout", `row ${y + 1} is ${row.length} wide; every row needs the widest's width, ${width}`);
+        if (row.length !== width) err(["layout", y], "map_layout", say("lint_row_y_is_rowcount_wide_every_row", { y: y + 1, rowCount: row.length, width: width }));
       });
-      if (map.size && (map.size[0] !== width || map.size[1] !== height)) err(["size"], "map_layout", `the layout is ${width} × ${height}, not ${map.size[0]} × ${map.size[1]}`);
+      if (map.size && (map.size[0] !== width || map.size[1] !== height)) err(["size"], "map_layout", say("lint_the_layout_is_width_height_not_size", { width: width, height: height, size: map.size[0], size2: map.size[1] }));
       const unknown = new Map<string, number>();
       rows.forEach((row, y) => row.forEach((ch) => (cellOf(map, ch) || unknown.has(ch) ? undefined : unknown.set(ch, y))));
-      for (const [ch, y] of unknown) err(["layout", y], "map_legend", `"${ch}" isn't in the legend: add it, or use # (wall), . (floor), + (door) or a space`);
+      for (const [ch, y] of unknown) err(["layout", y], "map_legend", say("lint_ch_isnt_in_the_legend_add_it", { ch: ch }));
       // A thing in the legend is one the world has, lying free, on one cell of one map.
       const lying = new Map<string, number>();
       rows.forEach((row) =>
@@ -464,15 +465,15 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
       );
       for (const [ch, cell] of Object.entries(map.legend ?? {})) {
         if (typeof cell !== "object") continue;
-        if ("place" in cell && cell.place !== undefined && !ids.includes(cell.place)) err(["legend", ch], "map_legend", `"${cell.place}" isn't one of this map's places`);
+        if ("place" in cell && cell.place !== undefined && !ids.includes(cell.place)) err(["legend", ch], "map_legend", say("lint_place_isnt_one_of_this_maps_places", { place: cell.place }));
         if (!("item" in cell)) continue;
         const thing = hasOwn(world.entities, cell.item) ? world.entities[cell.item] : undefined;
         const drawn = lying.get(cell.item) ?? 0;
         const other = Object.values(doc.grids).find((g) => g.map !== key && g.items !== undefined && hasOwn(g.items, cell.item));
-        if (!thing) err(["legend", ch, "item"], "map_item", `there's no "${cell.item}" in the world to lie here`);
-        else if (thing.relations.some((r) => r.type === "in")) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} starts inside something, so it won't lie on the map` });
-        else if (drawn > 1) err(["legend", ch, "item"], "map_item", `${thing.name} is drawn on ${drawn} cells; a thing lies on one`);
-        else if (drawn > 0 && other) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
+        if (!thing) err(["legend", ch, "item"], "map_item", say("lint_theres_no_item_in_the_world_to", { item: cell.item }));
+        else if (thing.relations.some((r) => r.type === "in")) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: say("lint_name_starts_inside_something_so_it_wont", { name: thing.name }) });
+        else if (drawn > 1) err(["legend", ch, "item"], "map_item", say("lint_name_is_drawn_on_drawn_cells_a", { name: thing.name, drawn: drawn }));
+        else if (drawn > 0 && other) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: say("lint_name_already_lies_on_the_map_id", { name: thing.name, id: other.map ?? other.id }) });
       }
       // A room door sits on its room's edge: one that touches none of the room's area is a room of a
       // single doorway, which is never what was meant.
@@ -485,40 +486,40 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
           const cell = cellOf(map, ch);
           if (typeof cell !== "object" || !("door" in cell) || !ids.includes(cell.place)) return;
           const beside = [roomOf(x - 1, y), roomOf(x + 1, y), roomOf(x, y - 1), roomOf(x, y + 1)];
-          if (!beside.includes(cell.place)) problems.push({ severity: "warning", path: ["layout", y], code: "map_door", message: `The door of ${placeName(cell.place)} at [${x}, ${y}] touches none of its room: put it on the room's edge` });
+          if (!beside.includes(cell.place)) problems.push({ severity: "warning", path: ["layout", y], code: "map_door", message: say("lint_the_door_of_place_at_x_y", { place: placeName(cell.place), x: x, y: y }) });
         }),
       );
       (map.places ?? []).forEach((p, i) => {
-        if (p.at && (p.at[0] >= width || p.at[1] >= height)) err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} × ${height} layout`);
+        if (p.at && (p.at[0] >= width || p.at[1] >= height)) err(["places", i, "at"], "map_place", say("lint_at_at2_is_outside_the_width_height", { at: p.at[0], at2: p.at[1], width: width, height: height }));
       });
       if (placed && scope) {
         const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
-        if (grid && grid.map !== key) err(["id"], "map_grid", `the world already has a grid "${key}"; give the map another id`);
+        if (grid && grid.map !== key) err(["id"], "map_grid", say("lint_the_world_already_has_a_grid_key", { key: key }));
         else if (scope.grid !== key) {
           const other = scope.grid !== undefined && hasOwn(doc.grids, scope.grid) ? doc.grids[scope.grid]?.map : undefined;
-          err(["scope"], "map_grid", other ? `the map "${other}" already draws ${scope.name}'s grid` : `${scope.name} already has the grid "${scope.grid ?? ""}"; take it off the place for this map to draw its grid`);
+          err(["scope"], "map_grid", other ? say("lint_the_map_other_already_draws_name_s", { other: other, name: scope.name }) : say("lint_name_already_has_the_grid_grid_take", { name: scope.name, grid: scope.grid ?? "" }));
         }
         const apart = mapSettingsOf(world).grid.movement && (map.links ?? []).length === 0 ? apartOnFloor(doc, key).map(placeName) : [];
         const listed = apart.length <= 1 ? apart.join("") : `${apart.slice(0, -1).join(", ")} and ${apart.at(-1) ?? ""}`;
-        if (apart.length > 0) problems.push({ severity: "warning", path: ["layout"], code: "map_floor_apart", message: `With the grid system on, people walk ${scope.name}'s floor plan, and no door or open floor joins ${listed} to the rest: add a door (+), or give the map links.` });
+        if (apart.length > 0) problems.push({ severity: "warning", path: ["layout"], code: "map_floor_apart", message: say("lint_with_the_grid_system_on_people_walk", { name: scope.name, listed: listed }) });
       }
     } else if (map.size) {
       const [w, h] = map.size;
       (map.places ?? []).forEach((p, i) => {
-        if (p.at && (p.at[0] > w || p.at[1] > h)) err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${w} × ${h} map`);
+        if (p.at && (p.at[0] > w || p.at[1] > h)) err(["places", i, "at"], "map_place", say("lint_at_at2_is_outside_the_w_h", { at: p.at[0], at2: p.at[1], w: w, h: h }));
       });
     }
     // Links: places that exist, and every place inside the scope linked or none.
     (map.links ?? []).forEach((l, i) => {
-      if (l.from === l.to) err(["links", i], "map_link", "a link joins two different places");
-      for (const end of ["from", "to"] as const) if (!hasOwn(doc.places, l[end])) err(["links", i, end], "map_link", `there's no place "${l[end]}"`);
+      if (l.from === l.to) err(["links", i], "map_link", say("lint_a_link_joins_two_different_places"));
+      for (const end of ["from", "to"] as const) if (!hasOwn(doc.places, l[end])) err(["links", i, end], "map_link", say("lint_theres_no_place_end", { end: l[end] }));
       const route = hasOwn(doc.routes, linkRouteId(key, l.from, l.to)) ? doc.routes[linkRouteId(key, l.from, l.to)] : undefined;
-      if (route && route.map !== key) err(["links", i], "map_link", `the world already has a route "${route.id}"`);
+      if (route && route.map !== key) err(["links", i], "map_link", say("lint_the_world_already_has_a_route_id", { id: route.id }));
     });
     if (placed && scope) {
       const cut = cutOff(doc, map).map(placeName);
       const listed = cut.length <= 1 ? cut.join("") : `${cut.slice(0, -1).join(", ")} and ${cut.at(-1) ?? ""}`;
-      if (cut.length > 0) problems.push({ severity: "warning", path: ["links"], code: "map_partial_links", message: `With links, ${scope.name}'s places join only where they're linked, and nothing links ${listed} to the rest: link ${cut.length === 1 ? "it" : "them"} too, or take the links out.` });
+      if (cut.length > 0) problems.push({ severity: "warning", path: ["links"], code: "map_partial_links", message: say("lint_with_links_name_s_places_join_only", { name: scope.name, listed: listed, if_cut: cut.length === 1 }) });
     }
   }
   return out;

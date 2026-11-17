@@ -42,6 +42,7 @@ import type { HostPort } from "../shared/host";
 import { hostBacking, type WorldBacking } from "./backing";
 import { WORLD_LIMIT_DEFAULTS, type WorldLimits } from "./limits";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
+import { say } from "../engine/lines";
 
 interface Draft {
   base: RevisionId | null;
@@ -598,9 +599,9 @@ export class WorldStore {
       const op = ops[index];
       return new WorldError("bad_request", op ? new PatchError(index, message, op).message : message);
     };
-    if (!isRecord(after)) throw refusal([], "the patch must leave a world document");
+    if (!isRecord(after)) throw refusal([], say("lint_the_patch_must_leave_a_world_document"));
     const was = before as unknown as Record<string, unknown>;
-    for (const part of PATCH_PROTECTED) if (!jsonEqual(was[part], after[part])) throw refusal([part], `a patch can't change /${part}`);
+    for (const part of PATCH_PROTECTED) if (!jsonEqual(was[part], after[part])) throw refusal([part], say("lint_a_patch_cant_change_part", { part: part }));
     const items: string[] = [];
     for (const name of Object.keys(WORLD_COLLECTIONS)) {
       const old = was[name];
@@ -613,15 +614,15 @@ export class WorldStore {
         if (from === undefined && hasOwn(next, id)) next[id] = keyed(name as WorldCollection, id, next[id]);
         const to = hasOwn(next, id) ? next[id] : undefined;
         if (jsonEqual(from, to)) continue;
-        if (isRecord(from) && typeof from.map === "string") throw refusal([name, id], `${name} ${id} is drawn by the map ${from.map}; edit it there`);
-        if (name !== "maps" && isRecord(to) && to.map !== undefined) throw refusal([name, id], "only a map marks what it draws (map)");
+        if (isRecord(from) && typeof from.map === "string") throw refusal([name, id], say("lint_name_id_is_drawn_by_the_map", { name: name, id: id, from: from.map }));
+        if (name !== "maps" && isRecord(to) && to.map !== undefined) throw refusal([name, id], say("lint_only_a_map_marks_what_it_draws"));
         if (name === "routines" && to !== undefined) {
           const problem = routineProblem(id, to);
           if (problem !== null) throw refusal([name, id], problem);
         }
         // Build's editors and the engine's lookups take only these ids, so an item under any other couldn't be edited or found.
         const length = id.length;
-        if (to !== undefined && !safeKey(id)) throw refusal([name, id], `${name} ids are 1 to 200 characters long; this one is ${length}`);
+        if (to !== undefined && !safeKey(id)) throw refusal([name, id], say("lint_name_ids_are_1_to_200_characters", { name: name, length: length }));
         items.push(`${name} ${id}`);
       }
     }
@@ -690,7 +691,7 @@ export class WorldStore {
 
 /** The macros in a world from outside (an imported file), as warnings to review before playing it. */
 export function macroReview(world: WorldDoc): LintIssue[] {
-  return macrosIn(world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: `Review this macro before playing: ${m.macro}` }));
+  return macrosIn(world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: say("lint_review_this_macro_before_playing_macro", { macro: m.macro }) }));
 }
 
 /**

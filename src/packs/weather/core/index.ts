@@ -440,8 +440,8 @@ export const weatherPack: PackDef = {
           const c = parseClimate(objOf(raw));
           const key = strOf(objOf(raw).id, strOf(objOf(raw).region));
           const covered = c.seasons.flatMap((s) => s.months);
-          for (let m = 1; m <= 12; m++) if (covered.filter((x) => x === m).length !== 1) issues.push({ severity: "warning" as const, code: "weather.climates", message: `Climate ${key}: month ${m} is covered ${covered.filter((x) => x === m).length} times.`, path: `packs.weather.config.climates.${key}` });
-          for (const s of c.seasons) for (const id of Object.keys(s.weights)) if (!c.states.some((x) => x.id === id)) issues.push({ severity: "error" as const, code: "weather.climates", message: `Climate ${key}, ${s.label}: unknown state ${id}.`, path: `packs.weather.config.climates.${key}` });
+          for (let m = 1; m <= 12; m++) if (covered.filter((x) => x === m).length !== 1) issues.push({ severity: "warning" as const, code: "weather.climates", message: say("lint_climate_key_month_m_is_covered_coveredcount", { key: key, m: m, coveredCount: covered.filter((x) => x === m).length }), path: `packs.weather.config.climates.${key}` });
+          for (const s of c.seasons) for (const id of Object.keys(s.weights)) if (!c.states.some((x) => x.id === id)) issues.push({ severity: "error" as const, code: "weather.climates", message: say("lint_climate_key_s_unknown_state_id", { key: key, s: s.label, id: id }), path: `packs.weather.config.climates.${key}` });
         }
         return issues;
       },

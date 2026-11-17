@@ -673,18 +673,18 @@ export function registerMarkets(r: FinanceRegistry): void {
         const path = `packs.economy.config.assets.${id}`;
         const def = readAssetDef(raw);
         if (!def) {
-          issues.push({ severity: "error" as const, code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path });
+          issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_asset_id_needs_a_class_asset_classes", { id: id, aSSET_CLASSES: ASSET_CLASSES.join(", ") }), path });
           continue;
         }
         if (def.class === "option") {
-          if (!def.underlying || !own(configAssets(world), def.underlying)) issues.push({ severity: "error" as const, code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path}.underlying` });
-          if (!(typeof def.strike === "number" && def.strike > 0)) issues.push({ severity: "error" as const, code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path}.strike` });
-          if (clockOfDate(world, def.expiry) === null) issues.push({ severity: "error" as const, code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path}.expiry` });
-          if (def.right !== "call" && def.right !== "put") issues.push({ severity: "error" as const, code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path}.right` });
+          if (!def.underlying || !own(configAssets(world), def.underlying)) issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_option_id_names_no_underlying_asset_the", { id: def.label || id }), path: `${path}.underlying` });
+          if (!(typeof def.strike === "number" && def.strike > 0)) issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_option_id_needs_a_strike_above_zero", { id: def.label || id }), path: `${path}.strike` });
+          if (clockOfDate(world, def.expiry) === null) issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_option_id_needs_an_expiry_date_yyyy", { id: def.label || id }), path: `${path}.expiry` });
+          if (def.right !== "call" && def.right !== "put") issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_option_id_is_a_call_or_a", { id: def.label || id }), path: `${path}.right` });
         }
-        if (def.class === "bond" && def.face !== undefined && clockOfDate(world, def.maturity) === null) issues.push({ severity: "error" as const, code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path}.maturity` });
-        if (def.model !== undefined && !isRecord(own(investingRows(books), def.model))) issues.push({ severity: "warning" as const, code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path}.model` });
-        if (def.price !== undefined && !(def.price > 0)) issues.push({ severity: "error" as const, code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path}.price` });
+        if (def.class === "bond" && def.face !== undefined && clockOfDate(world, def.maturity) === null) issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_bond_id_has_a_face_value_but", { id: def.label || id }), path: `${path}.maturity` });
+        if (def.model !== undefined && !isRecord(own(investingRows(books), def.model))) issues.push({ severity: "warning" as const, code: "economy.assets", message: say("lint_asset_id_follows_model_which_the_finance", { id: def.label || id, model: def.model }), path: `${path}.model` });
+        if (def.price !== undefined && !(def.price > 0)) issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_asset_id_needs_a_price_above_zero", { id: def.label || id }), path: `${path}.price` });
       }
       return issues;
     },
