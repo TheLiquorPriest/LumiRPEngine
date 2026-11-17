@@ -542,4 +542,13 @@ CREATE TABLE chip (
 CREATE INDEX chip_turn ON chip (user, chat, turn);
 `,
   },
+  {
+    version: 22,
+    name: "the session measurement's reports",
+    // `measurement`: one report of the session measurement (`session-routes.ts`), as one JSON text, by its id and when it was made.
+    sql: `
+CREATE TABLE measurement (user TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL, PRIMARY KEY (user, id));
+CREATE INDEX measurement_at ON measurement (user, at);
+`,
+  },
 ];
