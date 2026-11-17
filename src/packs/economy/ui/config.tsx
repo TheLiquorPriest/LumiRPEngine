@@ -19,6 +19,7 @@ import { hasOwn, isRecord } from "../../../shared/json";
 import { ACCOUNT_CLASSES, ASSET_CLASSES, CLASS_TRAITS, DEPRECIATION_LABELS, FEATURE_DEFS, FINANCE_FEATURES, isAccountClass, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
 import type { LintIssue } from "../../../shared/lint";
 import { formatMoneyInput } from "../../../shared/money";
+import { REVENUE_ADJUST_DEFAULTS } from "../../../shared/revenue";
 import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { Button, IconButton, IdText, Seg, type SegOption } from "../../../frontend/components";
 import { FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "../../../frontend/build/form-kit";
@@ -697,6 +698,40 @@ function Books(props: PackConfigProps) {
   );
 }
 
+const REVENUE_ADJUST_FIELDS: readonly { key: keyof typeof REVENUE_ADJUST_DEFAULTS; label: string; hint: string; min: number }[] = [
+  { key: "factorMin", label: "Lowest factor", hint: "An adjustment that takes a stream below this share of its payment is made, and the agent is told.", min: 0 },
+  { key: "factorMax", label: "Highest factor", hint: "An adjustment that takes a stream above this many times its payment is made, and the agent is told.", min: 0 },
+  { key: "days", label: "Longest adjustment, in days", hint: "One that lasts longer is made, and the agent is told.", min: 1 },
+  { key: "inForce", label: "Adjustments in force at once", hint: "A stream that has this many already takes one more, and the agent is told.", min: 1 },
+];
+
+/** The figures an agent's adjustment of a revenue stream is advised against (`packs.economy.config.revenueAdjust`); nothing is held to them. */
+function RevenueAdjustments(props: PackConfigProps) {
+  const set = isRecord(props.config.revenueAdjust) ? props.config.revenueAdjust : {};
+  return (
+    <FormGroup title="Revenue adjustments">
+      {REVENUE_ADJUST_FIELDS.map((f) => (
+        <NumberInput
+          key={f.key}
+          label={f.label}
+          value={set[f.key]}
+          min={f.min}
+          optional
+          placeholder={String(REVENUE_ADJUST_DEFAULTS[f.key])}
+          hint={`${f.hint} Empty uses ${REVENUE_ADJUST_DEFAULTS[f.key]}.`}
+          issues={lintAt(props.lint, `${CONFIG}.revenueAdjust.${f.key}`)}
+          onChange={(value) => {
+            const next: JsonObject = { ...set };
+            if (value === undefined) delete next[f.key];
+            else next[f.key] = value;
+            props.onChange(Object.keys(next).length > 0 ? { ...props.config, revenueAdjust: next } : withKey(props.config, "revenueAdjust", undefined));
+          }}
+        />
+      ))}
+    </FormGroup>
+  );
+}
+
 export function EconomyConfig(props: PackConfigProps) {
   const currency = props.world.currency;
   const calendar = props.world.calendar;
@@ -707,6 +742,7 @@ export function EconomyConfig(props: PackConfigProps) {
       <Taxes {...props} />
       <Shares {...props} />
       <Books {...props} />
+      <RevenueAdjustments {...props} />
       <CashRule {...props} />
       <FeatureToggles {...props} />
       <Definitions

@@ -353,7 +353,7 @@ export function StreamForm(props: { world: WorldDoc; draft: RevenueStreamDraft; 
         <ScheduleFields draft={draft} setFields={setFields} />
       </Section>
       <Section title="In play">
-        <ToggleField label="The agents may adjust it" help="Within bounds: a factor of 0.25 to 4 or one period's amount, for up to 31 days, at most four at once; what the story says asks you first." checked={m.ai === "bounded"} onChange={(on) => set({ ai: on ? "bounded" : undefined })} />
+        <ToggleField label="The agents may adjust it" help="Within the figures set under Revenue adjustments in this pack's config: a factor, or up to one period's amount, for so many days, so many at once. An adjustment past them (or one to a stream left off) is made all the same, and the agent is told; what the story says asks you first." checked={m.ai === "bounded"} onChange={(on) => set({ ai: on ? "bounded" : undefined })} />
       </Section>
       {problems.length > 0 ? (
         <Section title="To fix">

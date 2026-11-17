@@ -16,7 +16,7 @@ import type { EntityId } from "./ids";
 export const REVENUE_TYPES = ["product", "catalog", "royalty", "fees", "custom"] as const;
 export type RevenueType = (typeof REVENUE_TYPES)[number];
 
-/** Whether the agents may adjust a stream in play (`economy.revenue_adjust`): never (the default), or within the bounds. */
+/** Whether the agents may adjust a stream in play (`economy.revenue_adjust`): off (the default), or bounded, where an adjustment past the world's figures is made and said (`adjustAdvice`). */
 export const REVENUE_AI = ["off", "bounded"] as const;
 export type RevenueAi = (typeof REVENUE_AI)[number];
 
@@ -135,9 +135,9 @@ export interface RevenueMonth {
 /** An adjustment in force on a stream (`economy.revenue_adjust`). */
 export interface RevenueAdjustmentView {
   id: string;
-  /** A factor on each occurrence's amount, 0.25 to 4. */
+  /** A factor on each occurrence's amount. */
   factor?: number;
-  /** Minor units added to (or, negative, taken from) each occurrence, at most one period's amount. */
+  /** Minor units added to (or, negative, taken from) each occurrence. */
   cents?: number;
   from: number;
   until: number;
@@ -495,8 +495,8 @@ export const REVENUE_TEMPLATES: Readonly<Record<RevenueTemplateId, RevenueTempla
   },
 };
 
-/** The bounds on an adjustment the agents make in play. */
-export const REVENUE_ADJUST = {
+/** The figures an adjustment the agents make in play is advised against, where the world's `packs.economy.config.revenueAdjust` gives none: nothing is held to them. */
+export const REVENUE_ADJUST_DEFAULTS = {
   factorMin: 0.25,
   factorMax: 4,
   days: 31,

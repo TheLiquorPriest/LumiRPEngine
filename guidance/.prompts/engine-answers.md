@@ -208,6 +208,11 @@ wants_levels: an object of domain: level, a whole number from 0 to 4, or null fo
 org_change_takes: Operation {{n}} ({{op}}): change cannot be read, you sent {{value}}.{{^do}} It is an object whose do is one of: {{dos}}, with the fields that change takes.{{/do}}{{#do}} A {{do}} names {{takes}}.{{#missing}} Not given: {{missing}}.{{/missing}}{{/do}}
 unknown_job: Operation {{n}} ({{op}}): there is no job called {{name}}.{{#jobs}} The jobs are: {{jobs}}.{{/jobs}}
 plan_full: Operation {{n}} ({{op}}): the plan already holds {{most}} open {{what}}, which is as many as this world's rules keep; it was kept all the same.
+revenue_not_open: Operation {{n}} ({{op}}): the author of {{stream}} left the agents off it; the adjustment was made all the same.
+revenue_factor: Operation {{n}} ({{op}}): a factor of {{factor}} on {{stream}} is outside {{least}} to {{most}}, which this world's rules allow an agent; the adjustment was made all the same.
+revenue_amount: Operation {{n}} ({{op}}): {{amount}} on each payment of {{stream}} is more than one payment's {{period}}, which this world's rules allow an agent; the adjustment was made all the same.
+revenue_days: Operation {{n}} ({{op}}): an adjustment of {{stream}} lasting {{days}} days is longer than the {{most}} this world's rules allow an agent; it was made all the same.
+revenue_crowded: Operation {{n}} ({{op}}): {{stream}} has {{most}} adjustments in force already, which is as many as this world's rules allow an agent; this one was made all the same.
 not_voter: Operation {{n}} ({{op}}): {{who}} has no vote on it; the vote was kept beside the others and counts for nothing.
 closed: Operation {{n}} ({{op}}): that {{what}} was closed already{{#who}}, so {{who}}'s word was kept beside what was decided, which stands{{/who}}.
 not_its_place: Operation {{n}} ({{op}}): {{place}} is not one of {{org}}'s places; the change was kept all the same.

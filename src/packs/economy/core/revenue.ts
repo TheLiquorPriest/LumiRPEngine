@@ -17,7 +17,7 @@ import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger
 import type { Flow } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import {
-  REVENUE_ADJUST,
+  REVENUE_ADJUST_DEFAULTS,
   REVENUE_CATEGORIES,
   REVENUE_MONTHS_KEPT,
   REVENUE_PROVIDER,
@@ -45,7 +45,7 @@ import { chatWorld } from "../../../engine/holidays";
 import { createEnv, evalNumber, type EnvVars } from "../../../engine/expr";
 import { placesOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { Advice, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
@@ -428,22 +428,48 @@ export interface AdjustArgs {
   reason: string;
 }
 
-/** Why an adjustment can't be made now (null: it can), in the bounds' words. */
-export function adjustRefusal(api: FinanceApi, ctx: ReadContext, a: AdjustArgs): Rejection | null {
-  const stream = streamOf(ctx, a.stream);
-  if (!stream) return reject("no_stream", `${a.stream || "That"} isn't a revenue stream`);
-  const name = labelOf(ctx, a.stream);
-  if (stream.model.ai !== "bounded") return reject("not_open", `${name} isn't open to adjustment in play: its author left the agents off it`);
+/** The figures an adjustment is advised against: the world's own (`packs.economy.config.revenueAdjust`), these where it gives none. Nothing is held to them. */
+export function adjustBoundsOf(world: Pick<WorldDoc, "packs">): { factorMin: number; factorMax: number; days: number; inForce: number } {
+  const raw = objOf(objOf(world.packs.economy?.config).revenueAdjust);
+  const figure = (v: JsonValue | undefined, fallback: number, least: number): number => (typeof v === "number" && Number.isFinite(v) && v >= least ? v : fallback);
+  return {
+    factorMin: figure(raw.factorMin, REVENUE_ADJUST_DEFAULTS.factorMin, 0),
+    factorMax: figure(raw.factorMax, REVENUE_ADJUST_DEFAULTS.factorMax, 0),
+    days: figure(raw.days, REVENUE_ADJUST_DEFAULTS.days, 1),
+    inForce: figure(raw.inForce, REVENUE_ADJUST_DEFAULTS.inForce, 1),
+  };
+}
+
+/** Why an adjustment can't be made at all (null: it can): what has no meaning, never what is only past a figure (`adjustAdvice`). */
+export function adjustRefusal(ctx: ReadContext, a: AdjustArgs): Rejection | null {
+  if (!streamOf(ctx, a.stream)) return reject("no_stream", `${a.stream || "That"} isn't a revenue stream`);
   if ((a.factor === undefined) === (a.cents === undefined)) return reject("bad_amount", "an adjustment is either a factor or an amount, one of them");
-  if (a.factor !== undefined && !(a.factor >= REVENUE_ADJUST.factorMin && a.factor <= REVENUE_ADJUST.factorMax)) return reject("out_of_bounds", `a factor is between ${REVENUE_ADJUST.factorMin} and ${REVENUE_ADJUST.factorMax}`);
+  if (a.factor !== undefined && !(a.factor >= 0)) return reject("bad_amount", "a factor is a number, nothing or more");
+  if (a.cents !== undefined && (!Number.isInteger(a.cents) || a.cents === 0)) return reject("bad_amount", "an amount is a whole number other than nothing, in or out");
+  if (a.days !== undefined && (!Number.isInteger(a.days) || a.days < 1)) return reject("bad_amount", "an adjustment lasts a whole number of days, one or more");
+  if (a.reason.trim() === "") return reject("no_reason", "an adjustment says why: the GM's reason, or what the story said");
+  return null;
+}
+
+/**
+ * What an adjustment that is made goes past, or null: the stream's author left the agents off it; its factor is outside the world's
+ * figures; its amount is more than one period's; it lasts longer than they say; or the stream has as many in force already. The first
+ * that holds is said, and the adjustment is made all the same.
+ */
+export function adjustAdvice(api: FinanceApi, ctx: ReadContext, a: AdjustArgs & { from: number }): Advice | null {
+  const stream = streamOf(ctx, a.stream);
+  if (!stream) return null;
+  const name = labelOf(ctx, a.stream);
+  const bounds = adjustBoundsOf(ctx.world);
+  if (stream.model.ai !== "bounded") return { code: "revenue_not_open", values: { stream: name } };
+  if (a.factor !== undefined && !(a.factor >= bounds.factorMin && a.factor <= bounds.factorMax)) return { code: "revenue_factor", values: { stream: name, factor: a.factor, least: bounds.factorMin, most: bounds.factorMax } };
   if (a.cents !== undefined) {
     const period = periodAmount(api, ctx, stream);
-    if (!Number.isInteger(a.cents) || a.cents === 0 || Math.abs(a.cents) > period) return reject("out_of_bounds", `an amount is at most one period's, ${formatMoney(period, ctx.world.currency)}, in or out`);
+    if (Math.abs(a.cents) > period) return { code: "revenue_amount", values: { stream: name, amount: formatMoney(Math.abs(a.cents), ctx.world.currency), period: formatMoney(period, ctx.world.currency) } };
   }
   const days = a.days ?? 7;
-  if (!Number.isInteger(days) || days < 1 || days > REVENUE_ADJUST.days) return reject("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
-  if (inForce(ctx.state, a.stream, ctx.state.clock).length >= REVENUE_ADJUST.inForce) return reject("too_many", `${name} has ${REVENUE_ADJUST.inForce} adjustments in force already`);
-  if (a.reason.trim() === "") return reject("no_reason", "an adjustment says why: the GM's reason, or what the story said");
+  if (days > bounds.days) return { code: "revenue_days", values: { stream: name, days, most: bounds.days } };
+  if (inForce(ctx.state, a.stream, a.from).length >= bounds.inForce) return { code: "revenue_crowded", values: { stream: name, most: bounds.inForce } };
   return null;
 }
 
@@ -456,16 +482,21 @@ function adjustArgs(a: Record<string, JsonValue>): AdjustArgs {
 }
 
 /** `economy.revenue_adjusted`: an adjustment in force from `from` to `until`, kept beside those still to end. */
-const ADJUSTED: EventTypeDef<PackEvent> = {
+function adjustedEvent(api: FinanceApi): EventTypeDef<PackEvent> {
+  return {
   type: ADJUSTED_EVENT,
   validate: (e, ctx) => {
-    const stream = strOf(e.data.stream);
-    if (revenueOf(own(ctx.state.entities, stream)?.fields.revenue)?.ai !== "bounded") return reject("not_open", "that stream isn't open to adjustment in play");
+    if (streamOf(ctx, strOf(e.data.stream)) === null) return reject("no_stream", "that isn't a revenue stream");
     const from = numOf(e.data.from, NaN);
     const until = numOf(e.data.until, NaN);
-    if (!(until > from) || until - from > REVENUE_ADJUST.days * 1440) return reject("out_of_bounds", `an adjustment lasts 1 to ${REVENUE_ADJUST.days} days`);
-    if (inForce(ctx.state, stream, from).length >= REVENUE_ADJUST.inForce) return reject("too_many", `a stream has at most ${REVENUE_ADJUST.inForce} adjustments in force`);
-    return null;
+    return until > from ? null : reject("bad_amount", "an adjustment ends after it starts");
+  },
+  advise: (e, ctx) => {
+    const from = numOf(e.data.from, NaN);
+    const until = numOf(e.data.until, NaN);
+    const factor = typeof e.data.factor === "number" ? e.data.factor : undefined;
+    const cents = typeof e.data.cents === "number" ? e.data.cents : undefined;
+    return adjustAdvice(api, ctx, { stream: strOf(e.data.stream), reason: strOf(e.data.reason), from, days: (until - from) / 1440, ...(factor !== undefined ? { factor } : {}), ...(cents !== undefined ? { cents } : {}) });
   },
   apply: (e, state) => {
     const stream = strOf(e.data.stream);
@@ -474,7 +505,8 @@ const ADJUSTED: EventTypeDef<PackEvent> = {
     all[stream] = [...live, { ...e.data }] as unknown as JsonValue;
   },
   describe: (e, ctx) => `${labelOf(ctx, strOf(e.data.stream))}: ${typeof e.data.factor === "number" ? `×${e.data.factor} a payment` : `${formatMoney(numOf(e.data.cents), ctx.world.currency)} on each payment`} until ${dateText(ctx.world, numOf(e.data.until))}${e.data.reason ? ` (${strOf(e.data.reason)})` : ""}`,
-};
+  };
+}
 
 // ---------------------------------------------------------------- posting an occurrence
 
@@ -678,14 +710,14 @@ export function registerRevenue(r: FinanceRegistry): void {
   r.fields("flow", FLOW_FIELDS);
   r.amount(REVENUE_PROVIDER, (ctx, flow, at, rng) => streamPosting(r.api, ctx, flow, at, rng));
   r.core.event(RECORD);
-  r.core.event(ADJUSTED);
+  r.core.event(adjustedEvent(r.api));
   r.core.effect({
     type: ADJUST_EFFECT,
     args: ["stream", "factor?", "cents?", "days?", "reason", "by?", "story?"],
     gm: true,
     resolve: (a, ctx) => {
       const args = adjustArgs(a);
-      const refused = adjustRefusal(r.api, ctx, args);
+      const refused = adjustRefusal(ctx, args);
       if (refused) return refused;
       const from = ctx.state.clock;
       const until = from + (args.days ?? 7) * 1440;
@@ -699,7 +731,7 @@ export function registerRevenue(r: FinanceRegistry): void {
     boundField: "money",
     validate: (p, ctx) => {
       if (strOf(p.said).trim() === "") return reject("no_quote", "a revenue change quotes what the story said");
-      return adjustRefusal(r.api, ctx, adjustArgs(p));
+      return adjustRefusal(ctx, adjustArgs(p));
     },
     toEffects: (p) => {
       const a = adjustArgs(p);
