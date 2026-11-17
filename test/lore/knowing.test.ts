@@ -129,6 +129,9 @@ describe("who may know a world entry", () => {
     expect(ids(await lore.searchAs(AT, "tobin", { text: "beacon" }))).toEqual([lamp?.id ?? ""]);
     // A twin of an entry already read, and one switched off, are no one's lore.
     expect((await lore.searchAs(AT, "tobin", { text: "rumor" })).length).toBe(0);
+    // Named for the character (bound to it, or attached for it), an entry switched off is read as the character may know it.
+    const off = (await db.numbers.of(USER, ["entry-off"])).get("entry-off");
+    expect((await lore.readAs(AT, "tobin", [`e-${off}`]))[0]?.text).toBe("A rumor that the lamp keeper drinks.");
   });
 
   test("a holder made through perceive reads the world secret before its gate holds, once the holding counts", async () => {

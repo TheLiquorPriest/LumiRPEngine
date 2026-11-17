@@ -456,6 +456,8 @@ export class Lore {
   private async entries(at: LoreAt, ids: readonly string[], plays?: string): Promise<LoreEntry[]> {
     const s = await this.settingsOf(at);
     const refs = await Promise.all(ids.map((id) => this.numbers.refOf(at.user, id)));
+    // The book entries a reader names are the ones bound to a character or attached for it: read as it may know them, switched off or not.
+    const named = new Set(refs.flatMap((ref) => (ref?.kind === "book" ? [this.numbers.entry(at.user, ref.n)] : [])).filter((id): id is string => id !== null));
     const world = plays !== undefined || refs.some((ref) => ref !== null) ? this.worlds.at(at.user, at.chat, at.turn) : null;
     const as = plays === undefined || world === null ? undefined : this.personIn(at, world, plays)?.id;
     if (plays !== undefined && as === undefined) return [];
@@ -495,7 +497,7 @@ export class Lore {
         if (as !== undefined) {
           if (world === null) continue;
           holders ??= new HoldersAt(world);
-          bookReads ??= this.bookReads(at, world, s, as, holders);
+          bookReads ??= this.bookReads(at, world, s, as, holders, undefined, named);
           const text = (await bookReads).bookText(row);
           if (text !== null) out.push(bookEntry(ref.n, row, book, bookTitle(row, s.lore.titleWords, text), { text, secrets: [] }));
           continue;
@@ -707,9 +709,9 @@ export class Lore {
    * mark held back as its fields and text say, and who holds what at the point `world` stands at (`CharacterReads`). `only` reads those rows
    * alone (a search's, through the index) in place of every entry of the books.
    */
-  private async bookReads(at: LoreAt, world: WorldAt, s: Chosen, who: EntityId, holders: HoldersAt, only?: readonly LoreBookEntry[]): Promise<CharacterReads> {
+  private async bookReads(at: LoreAt, world: WorldAt, s: Chosen, who: EntityId, holders: HoldersAt, only?: readonly LoreBookEntry[], named?: ReadonlySet<string>): Promise<CharacterReads> {
     const rows = only ?? (await Promise.all((await this.booksOf(at, world, s.books)).map((book) => this.books.entries(at.user, book.id)))).flat();
-    return new CharacterReads(world, await worldWithBooks(world.world, rows, (id) => this.books.entry(at.user, id)), who, holders);
+    return new CharacterReads(world, await worldWithBooks(world.world, rows, (id) => this.books.entry(at.user, id), named), who, holders);
   }
 
   /**

@@ -21,17 +21,20 @@ import type { HoldersAt } from "./holders";
 /** How today's code reads lore as a character: as the minds read it (`backend/minds-context.ts:519,528`). */
 export const AS_CHARACTER: StepPurpose = "mind";
 
-/** A book entry as the secrecy's lore reads it (`booksAsLore`). */
-function hostEntry(row: LoreBookEntry): HostBookEntry {
-  return { id: row.id, bookId: row.book, comment: row.comment, content: row.content, keys: row.keys, secondaryKeys: row.secondaryKeys, disabled: row.disabled, constant: row.constant, position: 0, depth: 0, role: null, order: 0, extensions: row.extensions };
+/** A book entry as the secrecy's lore reads it (`booksAsLore`); an entry named for the character, switched off or not, is read as one that is on. */
+function hostEntry(row: LoreBookEntry, named?: ReadonlySet<string>): HostBookEntry {
+  return { id: row.id, bookId: row.book, comment: row.comment, content: row.content, keys: row.keys, secondaryKeys: row.secondaryKeys, disabled: row.disabled && named?.has(row.id) !== true, constant: row.constant, position: 0, depth: 0, role: null, order: 0, extensions: row.extensions };
 }
 
-/** The world with the lore of the books' entries beside its own, as today's live lore has it: each entry and each mark held back as its fields and text say, a copy as secret as its original. */
-export async function worldWithBooks(world: WorldDoc, rows: readonly LoreBookEntry[], entry: (id: string) => Promise<LoreBookEntry | null>): Promise<WorldDoc> {
-  const live = entriesRead(rows.map(hostEntry));
+/**
+ * The world with the lore of the books' entries beside its own, as today's live lore has it: each entry and each mark held back as its fields and text say, a copy as secret as its original.
+ * An entry switched off is no one's lore, unless it is one a reader names (`named`, the entries bound to a character or attached for it): the switch keeps it from the prompt, and does not keep it from the character it was given to.
+ */
+export async function worldWithBooks(world: WorldDoc, rows: readonly LoreBookEntry[], entry: (id: string) => Promise<LoreBookEntry | null>, named?: ReadonlySet<string>): Promise<WorldDoc> {
+  const live = entriesRead(rows.map((row) => hostEntry(row, named)));
   const originals = await copiedOriginals(async (id) => {
     const row = await entry(id);
-    return row === null ? null : hostEntry(row);
+    return row === null ? null : hostEntry(row, named);
   }, live);
   return booksAsLore(world, live, originals).world;
 }
@@ -81,7 +84,7 @@ export class CharacterReads {
    * What the character may read of a book entry's text, null where it may read none: a public entry as written, each mark of it in place
    * where the character holds it and left out where it does not; an entry that is one secret, as the secret, to its holders alone; an entry
    * with no text of its own that is only marks, the marks the character holds. The entries of today's rule only: one that holds no lore
-   * (switched off, empty, the engine's own, a twin of a text read already) is read by no one.
+   * (empty, the engine's own, a twin of a text read already, or switched off and not named for the character, `worldWithBooks`) is read by no one.
    */
   bookText(row: LoreBookEntry): string | null {
     const id = bookLoreId(row.book, row.id);
