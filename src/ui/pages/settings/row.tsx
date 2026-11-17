@@ -9,7 +9,7 @@ import type { LayerLevel, LoreBooks, SettingView } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
 import { Icon } from "../../icons";
 import { SettingControl } from "./controls";
-import { adviceFor, type ChangeLevel, isChanged, levelFor, SET_AT_WORDS, shippedValue, startingValue, valueWords, wayBack } from "./model";
+import { adviceFor, type ChangeLevel, isChanged, LEVEL_ORDER, levelFor, SET_AT_WORDS, shippedValue, startingValue, valueWords, wayBack } from "./model";
 
 export interface RowActions {
   /** Writes `key` at `level`: a value, or `~` with `none`. */
@@ -47,6 +47,8 @@ export function SettingRow(props: SettingRowProps) {
   const changed = isChanged(s);
   const advice = adviceFor(s.advice, draft === undefined ? s.value : draft);
   const onlyHere = props.level === "chat" && level !== "chat";
+  // A nearer level's own value stands over a change made at a farther one: the row says so beside the control.
+  const nearer = !s.joined && s.from !== null && LEVEL_ORDER.indexOf(s.from) > LEVEL_ORDER.indexOf(level) ? s.from : null;
   return (
     <li class={props.opened === true ? "rpe-set-row rpe-opened" : "rpe-set-row"} data-setting={s.key} data-changed={changed ? "" : undefined}>
       <div class="rpe-set-head">
@@ -59,6 +61,7 @@ export function SettingRow(props: SettingRowProps) {
       <div class="rpe-set-control" key={`${s.key}:${level}:${JSON.stringify(start)}`}>
         <SettingControl setting={s} start={start} busy={busy} onWrite={(value) => props.onWrite(s.key, level, value, false)} onNone={() => props.onWrite(s.key, level, null, true)} onDraft={setDraft} choices={props.choices} books={props.books} />
       </div>
+      {nearer === null ? null : <p class="rpe-meta">{`It is set ${SET_AT_WORDS[nearer]}, which stands over a change ${SET_AT_WORDS[level]}.`}</p>}
       {advice.map((line) => (
         <p key={line} class="rpe-set-advice" role="note">
           <Icon name="alert" size={14} /> {line}

@@ -290,7 +290,8 @@ export function SettingsPage(props: { chat: string | null; at?: readonly string[
   const app = useApp();
   const { chat } = props;
   const { shown, actions } = useSettings(chat);
-  const [level, setLevel] = useState<ChangeLevel>(chat === null ? "global" : "chat");
+  // A change is for every chat until he chooses this chat alone.
+  const [level, setLevel] = useState<ChangeLevel>("global");
   const [query, setQuery] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
   const [section, setSection] = useState<string | null>(null);
@@ -300,7 +301,7 @@ export function SettingsPage(props: { chat: string | null; at?: readonly string[
   const definitions = useRead(() => app.client.call("GET /api/v1/agents", {}, { query: chat === null ? {} : { chat } }).then((got) => got.agents.map((a) => a.name)), [chat]);
   // His books are the choice `lore.books` is made from; with no chat open there are none to choose among.
   const books = useRead(chat === null ? null : () => app.client.call("GET /api/v1/chats/:chat/lore/books", { chat }), [chat]);
-  useEffect(() => setLevel(chat === null ? "global" : "chat"), [chat]);
+  useEffect(() => setLevel("global"), [chat]);
   // The setting the address names is brought into view once the settings are read.
   useEffect(() => {
     if (openKey === null || shown.reply === null) return;

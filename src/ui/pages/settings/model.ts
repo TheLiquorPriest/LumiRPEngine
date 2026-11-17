@@ -72,10 +72,18 @@ export function levelFor(s: SettingView, wanted: ChangeLevel): LayerLevel {
   return s.levels.includes("global") ? "global" : (s.levels[0] ?? "global");
 }
 
-/** What a change starts from at a level: for one every level of which applies, that level's own list; else the value in force. */
+/** The levels of the agents' tree, farthest first: a nearer one's value stands over a farther one's. */
+export const LEVEL_ORDER: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
+
+/**
+ * What a change starts from at a level: for one every level of which applies, that level's own list; else what holds at that level,
+ * the nearer levels left out (the value in force where the level that decides it is that one or farther).
+ */
 export function startingValue(s: SettingView, level: LayerLevel): JsonValue {
-  if (!s.joined) return s.value;
-  return s.set.find((at) => at.level === level)?.value ?? (s.takes.type === "table" ? {} : []);
+  if (s.joined) return s.set.find((at) => at.level === level)?.value ?? (s.takes.type === "table" ? {} : []);
+  const upTo = LEVEL_ORDER.indexOf(level);
+  if (s.from === null || LEVEL_ORDER.indexOf(s.from) <= upTo) return s.value;
+  return s.set.filter((at) => LEVEL_ORDER.indexOf(at.level) <= upTo).at(-1)?.value ?? s.default;
 }
 
 /**

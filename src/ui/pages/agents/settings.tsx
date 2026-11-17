@@ -32,7 +32,8 @@ export interface AgentSettingsProps extends RowActions {
 
 export function AgentSettings(props: AgentSettingsProps) {
   const { agent, shown } = props;
-  const [level, setLevel] = useState<ChangeLevel>(props.chat === null ? "global" : "chat");
+  // A change is for every chat until he chooses this chat alone.
+  const [level, setLevel] = useState<ChangeLevel>("global");
   const mine = (shown.reply?.settings ?? []).filter((s) => s.setFor?.kind === "definition" && s.setFor.key === agent.name);
   const groups = [...new Set(mine.map((s) => s.group))];
   return (
