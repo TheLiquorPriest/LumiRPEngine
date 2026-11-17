@@ -89,7 +89,6 @@ export const ROW: Readonly<Record<RowId, Row>> = Object.fromEntries(ROWS.map((r)
  * only: where a run can't land its things, the gate refuses the run.
  */
 export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
-  "build-jobs": "the jobs lane",
   "panel-requests": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",
   "assistant-threads": "the pages lane",
   "chips-staged": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",

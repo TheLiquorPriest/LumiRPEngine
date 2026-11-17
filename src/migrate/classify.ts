@@ -68,7 +68,7 @@ const STORAGE_RULES: readonly Rule[] = [
   rule("agents\\.json", "mcp-clients"), // agents.ts:53,516: outside harnesses' check-ins
   rule("agent-acceptance\\.json", "logs"), // agents/provider.ts:380,560: acceptance runs
   rule("jobs\\.json", "build-jobs"), // jobs.ts:38,303
-  rule("lore-ids\\.json", "build-jobs"), // lore-ids.ts:34,92
+  rule("lore-ids\\.json", "build-jobs", "archived", "today's lore index ids (a prefix and a number of his settings) name entries RPE numbers its own way (e- and w-), so nothing of RPE's reads them"), // lore-ids.ts:34,92
   rule("lore-tools\\.json", "logs"), // lore-steps.ts:440,474: connections that refused lore tools
   rule("call-meter\\.json", "logs"), // steps.ts:59,124
   rule("diagnostics\\.log", "logs"), // spindle-host.ts:285,440

@@ -33,6 +33,7 @@ import type { Today } from "./today";
 import { carryWorlds, type WorldsCarried } from "./worlds";
 import { carryTurnThings, type TurnThingsCarried } from "./turn-things";
 import { carryJobs, type JobsCarried, type KeepCarriedJob } from "./history-things";
+import { type BuildCarried, carryBuildThings } from "./build-things";
 
 export interface CarryInput {
   today: Today;
@@ -77,6 +78,8 @@ export interface CarriedReport {
   turnThings: TurnThingsCarried & { jobs: JobsCarried };
   /** Each chat's own choices put into its `RPE.yml`; null where no file tree was given. */
   chatSettings: ChatSettingsCarried | null;
+  /** Build's jobs and their proposals, and the secrecy page's undo copies, in Build's tables. */
+  build: BuildCarried;
 }
 
 /** What the chats' import carried, and where it now is. */
@@ -171,6 +174,9 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const old = await attachTexts(today, db, user, chats);
   const turnThings = await carryTurnThings({ today, db, s, chats, now });
   const jobs = await carryJobs({ today, items: report.items, db, user, chats: new Set(chats), keep: input.keepJob });
+  // Build's jobs with their proposals to review, and the secrecy page's undo copies, where Build keeps them.
+  const build = await carryBuildThings({ today, report, db, user, earlier });
+  keepPutPrints(db, user, build.put);
   const [mindsFound, storyFound] = (["mind-files", "story-record"] as const).map((row) => report.rows.find((r) => r.row === row)?.inside?.count ?? 0);
   const files = new Set(minds.characters.flatMap((c) => c.files.map((f) => `${c.character}\u0000${f}`))).size;
   const characters = new Set(minds.characters.map((c) => c.character)).size;
@@ -207,6 +213,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     "panel-requests": turnThings.tables ? `The turn lane's request table: ${turnThings.requests} request(s) of the ${report.rows.find((r) => r.row === "panel-requests")?.count.found ?? 0} found, each on the turn that answered it, as the request he made${turnThings.requestsUnplaced.length > 0 ? `; ${turnThings.requestsUnplaced.length} on a message whose reply has no turn here are in the backup only` : ""}` : "This run was not given the turn lane's tables: in the backup only",
     "chips-staged": turnThings.tables ? `The turn lane's chip table: ${turnThings.chips} stored chip(s) and review card(s), each on its turn as today's build kept it, its items and statuses with it${turnThings.chipsLoose > 0 ? ` (${turnThings.chipsLoose} on no turn, their message having none)` : ""}; ${turnThings.staged} change(s) staged for his next message waiting as held requests that go with it` : "This run was not given the turn lane's tables: in the backup only",
     "approvals-jobs": turnThings.tables ? `Approvals: the turn lane's chip table, ${turnThings.approvals} tool(s) he approved for a chat, each on the turn running then, as history. Jobs: ${jobs.written ? `${jobs.carried} in the job history marked carried, with task, report and transcript${jobs.unfinished > 0 ? `, ${jobs.unfinished} that had not finished as cancelled` : ""}${jobs.left > 0 ? `; ${jobs.left} of chats not carried or no job in the backup only` : ""}` : "in the backup only: this run was not given the turn lane's writer of a carried job"}` : "This run was not given the turn lane's tables: in the backup only",
+    "build-jobs": `Build's own tables: ${build.carried.jobs} job(s) ended with what they had, their proposals still to review${build.carried.interrupted > 0 ? ` (${build.carried.interrupted} cut off while running, as interrupted)` : ""}, and ${build.carried.secrecy} secrecy undo cop(ies) as their books', so Restore still puts a book back${build.carried.keptInRpe > 0 ? `; ${build.carried.keptInRpe} you changed or removed in RPE since a run put them stand as you left them` : ""}${build.carried.unreadable > 0 ? `; ${build.carried.unreadable} file(s) that do not read are listed under what could not be read and archived` : ""}; today's lore index ids are archived, as RPE numbers lore entries its own way`,
   };
   if (connections !== null && !("why" in connections)) landed.connections = `RPH's two documents, through the models port: ${connections.connections.length} connection(s) in RPE-global.yml's models; ${connections.keys} key(s), ${connections.signins} sign-in(s) and ${connections.headerValues} header value(s) in the secrets file and nowhere else`;
   if (tree !== null && ownFiles !== null) {
@@ -221,5 +228,5 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
     landed["agents-workspace"] = `As notes: the agents engine's chat workspace in ${inChat} (${ownFiles.workspace} file(s)), each turn's writes and removals among its versions, and its global workspace in the global notes folder (${ownFiles.global} file(s))${alone}`;
     if (pinned !== null) landed.pins = `${landed.pins ?? "Inside the world documents they pin, carried with them"}; and the files pinned in today's build as pins in \`pins:\` of the level's config, each for the agent it is handed to at the start of each run: ${pinned.carried.carried} written${pinned.carried.removed > 0 ? `, ${pinned.carried.removed} taken out that today's side no longer pins` : ""}${pinned.carried.takenOut > 0 ? `, ${pinned.carried.takenOut} not put again, taken out in RPE` : ""}${pinned.carried.forAuthor.length > 0 ? `; ${pinned.carried.forAuthor.length} pinned for the Author, the role they were for having no agent in RPE` : ""}${pinned.carried.forOwn.length > 0 ? `; ${pinned.carried.forOwn.length} for his own definitions, which are carried switched off` : ""}`;
   }
-  return { landed, carried: { worlds, settings, modelChoices: choices, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, turnThings: { ...turnThings, jobs }, chatSettings: chatSettings?.carried ?? null } };
+  return { landed, carried: { worlds, settings, modelChoices: choices, connections, ownFiles, pins: pinned?.carried ?? null, minds, story, turnThings: { ...turnThings, jobs }, chatSettings: chatSettings?.carried ?? null, build: build.carried } };
 }
