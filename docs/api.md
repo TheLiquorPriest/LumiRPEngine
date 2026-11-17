@@ -2555,19 +2555,6 @@ Writes one setting into one level's config file, as the user would write it, and
 
 ## Worlds
 
-### `POST /api/v1/build`
-
-Tunnel for the previous build's messages: Build's page sends one of today's messages as it sends it to the extension's backend, and is answered with today's answer and the pushes the request caused.
-
-| | |
-|---|---|
-| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
-| Params | none |
-| Query | none |
-| Body | [`FrontendToBackend`](#frontendtobackend) |
-| Reply | [`BuildTunnelReply`](#buildtunnelreply) |
-
 ### `GET /api/v1/build/jobs`
 
 The user's jobs for a world, oldest first, each with its status, progress and result.
@@ -4051,19 +4038,10 @@ export interface BuildsStatus {
   /** Every build known is the running one, and the file on disk starts. */
   agree: boolean;
   restart: RestartState;
+  /** The newest update this process heard of; null before any. */
+  update: UpdateProgress | null;
   /** All of it in a sentence or two, as `rpe status` prints it. */
   words: string;
-}
-```
-
-### `BuildTunnelReply`
-
-Today's answer to the message, and the pushes the request caused.
-
-```ts
-export interface BuildTunnelReply {
-  result: ResultMessage | ErrorMessage;
-  pushes: DraftChanged[];
 }
 ```
 
@@ -9266,6 +9244,34 @@ export interface UndoReply {
 }
 ```
 
+### `UpdateProgress`
+
+The newest update this process heard of, stage by stage from its arrival to the restart onto it.
+
+```ts
+export interface UpdateProgress {
+  /** The build it brings, once its check said it. */
+  build: string | null;
+  stages: UpdateStage[];
+}
+```
+
+### `UpdateStage`
+
+One stage an update reached: its arrival (the extension's word with the hash stated, or the app file on disk found changed), its check (every file against that hash, or the file asked its build), its start (for real on a scratch copy of RPE's data), or the restart onto it; under way, passed, or where the update stopped, and why.
+
+```ts
+export interface UpdateStage {
+  stage: "arrived" | "checked" | "started" | "restart";
+  /** Under way, passed, or where the update stopped. */
+  state: "going" | "done" | "refused";
+  /** When it began, in milliseconds since 1970. */
+  at: number;
+  /** Why the update stopped here; null where it did not. */
+  why: string | null;
+}
+```
+
 ### `Usage`
 
 Model calls and their tokens: sent (cached ones included), read from and written to the cache, written, and of those the reasoning.
@@ -9588,30 +9594,6 @@ export interface WorldRevisionNote {
   note?: string;
 }
 ```
-
-### `DraftChanged`
-
-The previous build's push that a world's working copy changed: `{ lre: 1, type: "lre.draft.changed", worldId, version, stored, base }`.
-
-Carried as the previous build wrote it: the type `DraftChanged` of `src/shared/protocol.ts`.
-
-### `ErrorMessage`
-
-The previous build's answer to a request that could not be done: `{ lre: 1, type: "lre.error", reqId, code, message }`.
-
-Carried as the previous build wrote it: the type `ErrorMessage` of `src/shared/protocol.ts`.
-
-### `FrontendToBackend`
-
-One of the previous build's requests, as a page of it sends it: `{ lre: 1, type, reqId, … }`, the rest of it by its `type`.
-
-Carried as the previous build wrote it: the type `FrontendToBackend` of `src/shared/protocol.ts`.
-
-### `ResultMessage`
-
-The previous build's answer to a request that was done: `{ lre: 1, type: "lre.result", reqId, request, body }`.
-
-Carried as the previous build wrote it: the type `ResultMessage` of `src/shared/protocol.ts`.
 
 ### `StateView`
 

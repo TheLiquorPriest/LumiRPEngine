@@ -4,7 +4,6 @@
 // the MCP server. Do not edit it: a route's declaration is where a type changes, and `bun run api`
 // writes this again. The reference for people is docs/api.md, written beside it.
 
-import type { DraftChanged, ErrorMessage, FrontendToBackend, ResultMessage } from "../protocol";
 import type { StateView } from "../state-view";
 
 /** Any JSON value. */
@@ -259,12 +258,6 @@ export interface BuildsStatus {
   update: UpdateProgress | null;
   /** All of it in a sentence or two, as `rpe status` prints it. */
   words: string;
-}
-
-/** Today's answer to the message, and the pushes the request caused. */
-export interface BuildTunnelReply {
-  result: ResultMessage | ErrorMessage;
-  pushes: DraftChanged[];
 }
 
 /** The turns and jobs running now. */
@@ -3965,16 +3958,6 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: BootstrapBatchAsk;
     reply: BootstrapBatchReply;
-    paged: false;
-    long: false;
-    joined: false;
-  };
-  /** Tunnel for the previous build's messages: Build's page sends one of today's messages as it sends it to the extension's backend, and is answered with today's answer and the pushes the request caused. */
-  "POST /api/v1/build": {
-    params: Record<string, never>;
-    query: Record<string, never>;
-    body: FrontendToBackend;
-    reply: BuildTunnelReply;
     paged: false;
     long: false;
     joined: false;

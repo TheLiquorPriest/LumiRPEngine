@@ -93,11 +93,11 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.world`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unmaterialized`, `engine.world`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
 
 ### Relation types
 
-Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.
+Built in: `in`, `on`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.
 
 ### Proposals
 
@@ -196,6 +196,10 @@ Version 1 · realism domain `calendar` · requires none.
 - `is_weekend()`
 - `minutes_until(at)`
 - `weekday_name()`
+
+### Events
+
+Its own: `calendar.holiday`.
 
 ### Proposals
 
@@ -298,10 +302,11 @@ Version 1 · realism domain none · requires none.
 
 | Effect | Arguments |
 |---|---|
-| `combat.end` | `winner?` |
+| `combat.end` | `winner?`, `fight?` |
 | `combat.end_turn` | `who?` |
+| `combat.join` | `fight`, `with?`, `foes?`, `order?`, `roll_initiative?` |
 | `combat.spend` | `who?`, `cost` |
-| `combat.start` | `foes?` |
+| `combat.start` | `with?`, `foes?`, `at?`, `order?`, `roll_initiative?` |
 
 ### Formula functions
 
@@ -324,11 +329,17 @@ Version 1 · realism domain none · requires none.
 
 ### Events
 
-Its own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.
+Its own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.join`, `combat.spend`, `combat.start`, `combat.turn`.
 
 ### Panels and slots
 
 Panels: `combat.encounter`. Slots it writes: none.
+
+### Data tables
+
+| Table | Label | Schema | Columns | Default rows |
+|---|---|---|---|---|
+| `combat.bestiary` | Bestiary | `lre-table/combat.bestiary/v1` | name (text), kind (text), tier (text, optional), fields (json), carries (list, optional), description (text, optional) | 0 |
 
 ## Economy pack (`economy`)
 
@@ -586,7 +597,7 @@ Extends `group`.
 | Effect | Arguments |
 |---|---|
 | `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |
-| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `details?`, `finance?`, `down?`, `term_months?` |
+| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `new?`, `details?`, `finance?`, `down?`, `term_months?` |
 | `economy.card_replace` | `card`, `who?`, `by?` |
 | `economy.card_state` | `card`, `state`, `who?`, `by?` |
 | `economy.cash_rule` | `atm` |
@@ -596,7 +607,7 @@ Extends `group`.
 | `economy.delist` | `business`, `price?`, `party?`, `by?` |
 | `economy.deposit` | `account`, `cents`, `who?`, `by?` |
 | `economy.distribute` | `business`, `cents?`, `by?` |
-| `economy.donate` | `to`, `cents`, `from?`, `method?`, `by?` |
+| `economy.donate` | `to`, `cents`, `from?`, `method?`, `memo?`, `by?` |
 | `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |
 | `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |
 | `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |
@@ -619,7 +630,7 @@ Extends `group`.
 | `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
 | `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |
-| `economy.open_account` | `party`, `product?`, `name?` |
+| `economy.open_account` | `party`, `product`, `name?`, `due_day?`, `statement_day?`, `autopay_from?` |
 | `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
 | `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |
 | `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |
@@ -1155,7 +1166,7 @@ No fields of its own.
 
 | Effect | Arguments |
 |---|---|
-| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |
+| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?`, `asGiven?` |
 | `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |
 
 ### Formula functions
@@ -1303,6 +1314,7 @@ Extends `thing`.
 | Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
 |---|---|---|---|---|---|---|---|
 | `in` | In | `*` | `*` | many_one |  |  | none |
+| `on` | On | `*` | `*` | many_one |  |  | none |
 | `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |
 
 ### Effects
@@ -1339,7 +1351,7 @@ Extends `thing`.
 
 ### Events
 
-Its own: `space.door`, `space.place`, `space.pos`, `space.route`, `space.shape`, `space.squares`.
+Its own: `space.door`, `space.place`, `space.pos`, `space.route`, `space.shape`, `space.squares`, `space.where`.
 
 ### Proposals
 
@@ -1403,6 +1415,7 @@ Extends `container`.
 |---|---|---|---|---|---|---|---|
 | `class` | Vehicle class | text |  |  |  |  |  |
 | `colour` | Colour | text |  |  |  |  |  |
+| `driver` | Driver | ref |  |  |  |  |  |
 | `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
 | `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |
 | `home` | Home base | ref |  |  |  |  | live from vehicles 3 |
@@ -1423,6 +1436,8 @@ Extends `container`.
 | `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |
 | `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |
 | `vehicles.service` | `vehicle`, `payer?`, `repair?` |
+| `vehicles.take` | `vehicle`, `to`, `driver?`, `riders?`, `park?`, `fuel_pct?`, `miles?`, `hours?` |
+| `vehicles.upkeep` | `vehicle`, `fuel_pct?`, `status?`, `condition?`, `serviced?`, `payer?`, `cents?`, `memo?`, `category?` |
 
 ### Formula functions
 
