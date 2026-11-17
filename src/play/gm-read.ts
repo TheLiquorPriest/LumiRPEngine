@@ -9,6 +9,7 @@
 import { route, RouteError, shape } from "../app";
 import { buildGmRoster, buildGmWorldPart, type GmPick, type GmWorldPart, gmWorldPartCount } from "../engine/gm-view";
 import { authorLines } from "../engine/player-events";
+import { withHistoryLines } from "../iface";
 import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import { gmThingExtras, gmThingsList, keepPlaces, keepThings, madePlaceViews, madeThings, type PathEvent } from "../engine/thing-gm";
@@ -153,8 +154,8 @@ export function gmPart(store: Store, user: string, chat: string, ask: GmPartQuer
   return { ...answer, key };
 }
 
-/** What the GM reads take from the play area: the store, the chat's settings, and the writer of a chat's setting (Leave it). */
-export type GmReadDeps = Pick<PlayDeps, "store" | "settings" | "writeChatSetting">;
+/** What the GM reads take from the play area: the store, the chat's settings and guidance files (the history lines his edits are worded in), and the writer of a chat's setting (Leave it). */
+export type GmReadDeps = Pick<PlayDeps, "store" | "settings" | "texts" | "writeChatSetting">;
 
 /** The leave list's key, as `things.tidyLeft` is written. */
 const TIDY_LEFT = "things.tidyLeft";
@@ -193,9 +194,10 @@ export function gmRoutes(deps: GmReadDeps) {
         bytes: shape.optional(T, "`true`: the outline tells each part's bytes."),
       },
       reply: answer,
-      handle: ({ user, params, query }) => {
+      handle: async ({ user, params, query }) => {
         const ask: GmPartQuery = { part: params.part, ...(query.id ? { id: query.id } : {}), ...(query.ids ? { ids: query.ids.split(",") } : {}), ...(query.kind ? { kind: query.kind } : {}), ...(query.bytes === "true" ? { bytes: true } : {}) };
-        return gmPart(store, user, params.chat, ask, query.since || null) as unknown as JsonValue;
+        // His edits are worded in the chat's own copy of the history lines.
+        return (await withHistoryLines(deps.texts(user, params.chat), () => gmPart(store, user, params.chat, ask, query.since || null))) as unknown as JsonValue;
       },
     }),
     route({

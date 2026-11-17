@@ -98,7 +98,7 @@ export function makeBed(): Bed {
   const lumiverse = () => {
     throw new Error("The play bed has no Lumiverse to put a message in.");
   };
-  const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
+  const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, texts: () => shippedTexts(), turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log("debug"), info: log("info"), warn: log("warn"), error: log("error") } });
   const [stateRoute] = playRoutes(service);
   const call = { query: new URLSearchParams(), request: new Request("http://rpe.test/"), signal: new AbortController().signal };
 

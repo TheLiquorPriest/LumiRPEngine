@@ -58,6 +58,7 @@ import { type DueRead, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
+import { type GuidanceFiles, withHistoryLines } from "../iface";
 import { journalNotes } from "./journal";
 import { chipsOf, meterOf, pendingOf } from "./panel-reads";
 import type { TapSettings } from "./settings";
@@ -96,6 +97,8 @@ export interface PlayDeps {
   live: Pick<LiveHub, "publish" | "follow">;
   /** The guidance folder whose `.prompts/` holds this area's words. */
   guidance: string;
+  /** The guidance files in force for a chat, whose history lines (`.prompts/history-lines.md`, the nearest level's) the engine's lines of the chat are worded in. */
+  texts(user: string, chat: string): Pick<GuidanceFiles, "read">;
   /** Whether a turn of the user's chat runs now. */
   turning(user: string, chat: string): boolean;
   /** The chat's settings the taps and reads take. */
@@ -261,7 +264,7 @@ export class PlayService {
     if (turn !== null && row?.joined != null) throw new JoinedTurnError(turn, row.joined);
     const { taps, map } = await this.deps.settings(user, chat);
     const keys = (await this.part()).keys;
-    const journal = journalNotes(this.deps.store, user, chat, taps.journalMost, (code) => own(keys, code) ?? code);
+    const journal = await withHistoryLines(this.deps.texts(user, chat), () => journalNotes(this.deps.store, user, chat, taps.journalMost, (code) => own(keys, code) ?? code));
     const turning = this.deps.turning(user, chat);
     const { db } = this.deps;
     const knowledge = { ...taps.choices, chat: { ...taps.choices.chat, ...(taps.tidy.on === null ? {} : { tidy: taps.tidy.on }) } };

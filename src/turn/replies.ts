@@ -1,11 +1,11 @@
 // The line under each reply (plan §14 l.1565, PlanChatUI-3 items 1, 5, 7): for the messages a page asks (the rows Lumiverse has
 // mounted), by the swipe Lumiverse shows, the turn tied to it, the world's date and time at the turn's end and where his character
 // was, what each lane of the turn did (how many changes took effect, and the lines a person reads: the engine's worded as his
-// character knows them, the story's each beat the turn wrote), and the turn's marks. A reply no turn is tied to was made without RPE
-// (§6.3); a carried one names the engine that played it (§15.2). A continue's held turn joined to the turn it extended is answered in
-// the joined form the store's refusal names, with the line of the turn it joined. His own messages, and ids the chat's path does not
-// hold, are left out. A read only. It lives with the turn rather than in `src/play/` as PlanChatUI-3 names it: the turn's marks are
-// the turn lane's, which the panels' zone may not import.
+// character knows them, in the chat's own copy of the history lines; the story's, each beat the turn wrote), and the
+// turn's marks. A reply no turn is tied to was made without RPE (§6.3); a carried one names the engine that played it (§15.2). A
+// continue's held turn joined to the turn it extended is answered in the joined form the store's refusal names, with the line of the
+// turn it joined. His own messages, and ids the chat's path does not hold, are left out. A read only. It lives with the turn rather
+// than in `src/play/` as PlanChatUI-3 names it: the turn's marks are the turn lane's, which the panels' zone may not import.
 
 import { type Infer, route, shape } from "../app";
 import { playerLines } from "../engine/player-events";
@@ -14,7 +14,10 @@ import { isRecord } from "../shared/json";
 import { JoinedTurnError, ownerPlaceOf, timeOf, type UserStore } from "../store";
 import { eventOf } from "../store/fold";
 import { STORY_OPS } from "../story/fold";
+import { withHistoryLines } from "../iface";
 import type { Turns } from "./lane";
+import { guidanceTexts } from "./texts";
+import { NO_SESSION } from "./turns";
 
 const T = shape.text();
 
@@ -95,7 +98,7 @@ export function replyLines(turns: Pick<Turns, "store" | "marks">, user: string, 
   return out;
 }
 
-export function replyRoutes(turns: Pick<Turns, "store" | "marks">) {
+export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "files" | "env">) {
   return [
     route({
       method: "GET",
@@ -105,7 +108,11 @@ export function replyRoutes(turns: Pick<Turns, "store" | "marks">) {
       does: "The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.",
       query: { ids: shape.field(T, "The messages' ids, comma-separated: the rows the page has mounted.") },
       reply: repliesReply,
-      handle: ({ user, params, query }) => ({ replies: replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== "")) }),
+      // The engine's lines are worded in the chat's own copy of the history lines, the nearest level's.
+      handle: ({ user, params, query }) =>
+        withHistoryLines(guidanceTexts(turns.files, { user, chat: params.chat, session: NO_SESSION }, turns.env.log), () => ({
+          replies: replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== "")),
+        })),
     }),
   ] as const;
 }

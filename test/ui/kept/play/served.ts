@@ -64,7 +64,7 @@ export function servedRpe(): ServedRpe {
   const lane = new Database(":memory:");
   migrateStore(lane);
   for (const step of HARNESS_MIGRATIONS) lane.run(step.sql);
-  const play = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, db: lane, guidance: GUIDANCE, turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, writeChatSetting: async () => {}, log: bed.log }));
+  const play = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, db: lane, guidance: GUIDANCE, texts: () => shippedTexts(), turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, writeChatSetting: async () => {}, log: bed.log }));
   worlds.push(...(play as unknown as typeof worlds));
 
   const serve = async (key: string, params: Record<string, string>, body: unknown, query: Record<string, string>): Promise<unknown> => {
