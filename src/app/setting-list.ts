@@ -1,11 +1,17 @@
 // The settings registry (plan §5.4 "Config", §14, Appendix D.1): every value RPE and RPH read is a
 // setting, declared once by the area that reads it, in that area's own list: its key as a config file
-// writes it, its default, what it takes, the levels it is read from, whether it is set per connection,
-// when a change to it takes effect, what the Settings page calls it, one line on what it does, and its
-// row of Appendix D.1 where it has one. The app gathers every area's list into one registry
-// (`App.settings`); the readers read each value through it (`config-read.ts`), and the Settings routes
-// show and write every setting from it, so a setting added to a list is read, shown and written with
-// nothing else changed.
+// writes it, its default, what it takes, the levels it is read from, whether it is set per connection
+// or per agent definition, when a change to it takes effect, what the Settings page calls it, one line
+// on what it does, the advice the page gives beside a value past what is usual, and its row of
+// Appendix D.1 where it has one. The app gathers every area's list into one registry (`App.settings`);
+// the readers read each value through it (`config-read.ts`), and the Settings routes show and write
+// every setting from it, so a setting added to a list is read, shown and written with nothing else
+// changed. The page finds each in a section and a group of plain words (`groupOf`), and shows a
+// number with the unit its key ends with (`unitOf`).
+//
+// No hard cap (plan §2.1 point 5): what a setting takes is bounded only where a value beyond the bound
+// has no meaning at all (a count below zero); every other bound is advice, a line the page shows
+// beside the control while the value passes it, and the value is taken.
 //
 // RPH's own list and the declaration it uses (`SettingDef`, `SettingTakes`) are RPH's
 // (`rp-harness/helpers`, `rp-harness/contract`). A key RPH declares is listed from RPH's list alone,
@@ -24,6 +30,22 @@ export { mergedConfig } from "rp-harness/helpers";
 
 /** Where a per-connection setting's key names the connection, by its name or its id. */
 export const CONNECTION_PART = "<connection>";
+
+/** Where a setting set per agent definition names the definition, by its name (`sampling.<definition>.temperature`). */
+export const DEFINITION_PART = "<definition>";
+
+/** Whether a part of a key is where a connection or a definition is named. */
+export function isNamedPart(part: string): boolean {
+  return part === CONNECTION_PART || part === DEFINITION_PART;
+}
+
+/** What a setting is set for one of at a time: a connection, an agent definition; null for neither. */
+export type SetFor = "connection" | "definition";
+
+export function setFor(def: Pick<SettingDef, "key" | "perConnection">): SetFor | null {
+  if (def.perConnection) return "connection";
+  return def.key.split(".").includes(DEFINITION_PART) ? "definition" : null;
+}
 
 export type Mapping = { [key: string]: JsonValue };
 
@@ -57,8 +79,24 @@ export type Effect = "use" | "turn" | "start";
 /** Each moment as the Settings page and the docs word it. */
 export const EFFECT_WORDS: Readonly<Record<Effect, string>> = Object.freeze({ use: "at its next use", turn: "from the next turn", start: "from RPE's next start" });
 
-/** A setting as any list declares it, RPH's or RPE's: what the readers and the checks need. */
-export type Declared = Omit<SettingDef, "takes"> & { readonly takes: Takes };
+/**
+ * A line the Settings page shows beside a setting's control while its value is below `below` or above
+ * `above`, saying what such a value does; the value is taken all the same (plan §2.1 point 5). Words for
+ * the owner, never sent to a model. RPH's `SettingDef` carries the same shape from its next head (pin).
+ */
+export interface Advice {
+  readonly below?: number;
+  readonly above?: number;
+  readonly says: string;
+}
+
+/**
+ * A setting as any list declares it, RPH's or RPE's: what the readers and the checks need, its advice,
+ * and `unset`: what holds where no level sets it, in a page's words, where that is not what `~` means
+ * (`none`): a definition's own value for a setting set per agent. Both are RPH's `SettingDef`'s from
+ * its next head (pin).
+ */
+export type Declared = Omit<SettingDef, "takes"> & { readonly takes: Takes; readonly advice?: readonly Advice[]; readonly unset?: string };
 
 /** A setting of the registry: declared with its words, when it takes effect and its row of Appendix D.1. */
 export interface Setting extends Omit<Declared, "name" | "about"> {
@@ -110,45 +148,178 @@ export function harnessSettings(list: readonly SettingDef[] = RPH_SETTINGS): Set
   });
 }
 
+// ---------------------------------------------------------------- how the page shows it
+
+/** The sections of the Settings page, in order, each with one line on what is in it. */
+export const SECTIONS: readonly { readonly title: string; readonly about: string }[] = [
+  { title: "Agents", about: "What each agent thinks at and may spend, its tools, and how its sessions are kept and compacted." },
+  { title: "Turns and replies", about: "What a turn reads and tells the Author, how the reply is written and shown, and what is kept of a turn." },
+  { title: "Connections and model calls", about: "Each connection's own values, how a model call is made, tried again and throttled." },
+  { title: "Jobs", about: "Jobs and the bootstrap: how many run, and what they may spend." },
+  { title: "Story and characters", about: "The story record, the characters' memories, places, quests and the world state the Author is given." },
+  { title: "Lore and secrets", about: "How the lore is searched, indexed and given, and who knows what." },
+  { title: "The world and play", about: "The world store, the engine's tools, maps, panels and things." },
+  { title: "Build", about: "Build's jobs and the worlds it edits." },
+  { title: "Files and storage", about: "The agents' files, which are in force, notes, suggestions and what is kept on disk." },
+  { title: "Pages", about: "How these pages wait, read and show." },
+  { title: "Lumiverse", about: "The door to Lumiverse: its sign-in, sockets, reads and relay." },
+  { title: "Server and service", about: "The server, sign-in and tokens, the database, the command line, the service and updates." },
+  { title: "Migration", about: "What the migration from the earlier build carries." },
+  { title: "Other", about: "Settings no section names yet." },
+];
+
+/** Each key's first part: the group the page shows it in, and that group's section. */
+const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>> = {
+  agents: ["Effort and limits, for each agent", "Agents"],
+  sampling: ["Sampling, for each agent", "Agents"],
+  limits: ["Limits on a turn's work", "Agents"],
+  compaction: ["Compaction", "Agents"],
+  sessions: ["Sessions", "Agents"],
+  carry: ["Sessions", "Agents"],
+  tools: ["Tools", "Agents"],
+  results: ["Tools", "Agents"],
+  gap: ["Tools", "Agents"],
+  mcp: ["MCP servers", "Agents"],
+  hooks: ["Hooks", "Agents"],
+  rules: ["Rules", "Agents"],
+  usage: ["Usage", "Agents"],
+  lead: ["The turn", "Turns and replies"],
+  passConnection: ["The turn", "Turns and replies"],
+  requests: ["The turn", "Turns and replies"],
+  chat: ["The chat's history", "Turns and replies"],
+  history: ["The chat's history", "Turns and replies"],
+  since: ["What the briefing tells of changes", "Turns and replies"],
+  reply: ["The reply", "Turns and replies"],
+  progress: ["The reply", "Turns and replies"],
+  permissions: ["Write permissions", "Turns and replies"],
+  trace: ["What is kept of a turn", "Turns and replies"],
+  prompt: ["What is kept of a turn", "Turns and replies"],
+  live: ["What you see while a turn runs", "Turns and replies"],
+  turns: ["Lists of turns", "Turns and replies"],
+  calls: ["Model calls", "Connections and model calls"],
+  throttles: ["Calls at once", "Connections and model calls"],
+  tokens: ["Counting tokens", "Connections and model calls"],
+  embedding: ["Embeddings", "Connections and model calls"],
+  web: ["Web search", "Connections and model calls"],
+  jobs: ["Jobs", "Jobs"],
+  bootstrap: ["Bootstrap", "Jobs"],
+  story: ["The story record", "Story and characters"],
+  cast: ["Characters and their memories", "Story and characters"],
+  places: ["Places", "Story and characters"],
+  space: ["Places", "Story and characters"],
+  quests: ["Quests", "Story and characters"],
+  worldState: ["The world state in the briefing", "Story and characters"],
+  lore: ["Lore", "Lore and secrets"],
+  secrets: ["Secrets", "Lore and secrets"],
+  store: ["The world store", "The world and play"],
+  engine: ["The engine's tools", "The world and play"],
+  map: ["Maps", "The world and play"],
+  taps: ["Panels", "The world and play"],
+  things: ["Things", "The world and play"],
+  build: ["Build's jobs", "Build"],
+  worlds: ["Worlds", "Build"],
+  retention: ["Turn folders", "Files and storage"],
+  files: ["The agents' files", "Files and storage"],
+  notes: ["Notes", "Files and storage"],
+  off: ["The files in force", "Files and storage"],
+  layered: ["The files in force", "Files and storage"],
+  added: ["The files in force", "Files and storage"],
+  instructions: ["The files in force", "Files and storage"],
+  pins: ["The files in force", "Files and storage"],
+  suggestions: ["Suggestions", "Files and storage"],
+  storage: ["Storage", "Files and storage"],
+  pages: ["The pages", "Pages"],
+  lumiverse: ["The door to Lumiverse", "Lumiverse"],
+  update: ["Updates", "Server and service"],
+  server: ["The server", "Server and service"],
+  auth: ["Sign-in and tokens", "Server and service"],
+  liveSocket: ["The live socket", "Server and service"],
+  database: ["The database", "Server and service"],
+  index: ["The database", "Server and service"],
+  commandLine: ["The command line", "Server and service"],
+  service: ["The service", "Server and service"],
+  switches: ["Switches", "Server and service"],
+  workers: ["Worker threads", "Server and service"],
+  backup: ["Backups", "Server and service"],
+  migration: ["The migration", "Migration"],
+};
+
+/** The group every setting set per connection is shown in, one row for each connection. */
+export const EACH_CONNECTION = "For each connection";
+
+/** The section and group a setting is shown in: one set per connection with every other, as one table; else by its key's first part. */
+export function groupOf(def: Pick<SettingDef, "key" | "perConnection">): { section: string; group: string } {
+  if (def.perConnection) return { section: "Connections and model calls", group: EACH_CONNECTION };
+  const first = def.key.split(".")[0] ?? def.key;
+  const found = GROUPS[first];
+  return found === undefined ? { section: "Other", group: first } : { section: found[1], group: found[0] };
+}
+
+/** The units a number's key may end with (the key convention), and each as the page names it. */
+const UNITS: readonly (readonly [suffix: string, unit: string])[] = [
+  ["Ms", "ms"],
+  ["Seconds", "seconds"],
+  ["Minutes", "minutes"],
+  ["Hours", "hours"],
+  ["Days", "days"],
+  ["Bytes", "bytes"],
+  ["KiB", "KiB"],
+  ["MiB", "MiB"],
+  ["Chars", "characters"],
+  ["Tokens", "tokens"],
+  ["Words", "words"],
+  ["Lines", "lines"],
+  ["Feet", "feet"],
+];
+
+/** The unit a number setting is in, from the end of its key (`pages.probeMs`, `limits.turn.seconds`); null for a count, which its name says, and for anything not a number. */
+export function unitOf(def: Pick<Declared, "key" | "takes">): string | null {
+  const t = def.takes.type === "table" ? def.takes.of : def.takes;
+  if (t.type !== "whole" && t.type !== "number") return null;
+  const last = def.key.split(".").at(-1) ?? "";
+  return UNITS.find(([suffix]) => last === suffix.toLowerCase() || (last.length > suffix.length && last.endsWith(suffix)))?.[1] ?? null;
+}
+
 // ---------------------------------------------------------------- keys and paths
 
-/** A setting's key with a connection's name or id in place of `<connection>`; the key itself for one that is not per connection. */
-export function keyFor(def: Declared, connection?: string): string {
-  return def.perConnection && connection !== undefined ? def.key.replace(CONNECTION_PART, connection) : def.key;
+/** A setting's key with a connection's or a definition's name in place of `<connection>` or `<definition>`; the key itself where it names neither, or no name is given. */
+export function keyFor(def: Declared, name?: string): string {
+  return pathOf(def, name).join(".");
 }
 
-/** A setting's key as the path of mappings a config file holds it at. A connection's name stays whole, dots and all. */
-export function pathOf(def: Declared, connection?: string): string[] {
-  return def.key.split(".").map((part) => (part === CONNECTION_PART && connection !== undefined ? connection : part));
+/** A setting's key as the path of mappings a config file holds it at. A connection's or a definition's name stays whole, dots and all. */
+export function pathOf(def: Declared, name?: string): string[] {
+  const named = setFor(def) !== null && name !== undefined;
+  return def.key.split(".").map((part) => (named && isNamedPart(part) ? name : part));
 }
 
-/** The keys before and after `<connection>` in a per-connection setting's key. */
-function aroundConnection(def: Declared): { before: string[]; after: string[] } {
+/** The keys before and after the part that names a connection or a definition, in the key of a setting set for one at a time. */
+function aroundName(def: Declared): { before: string[]; after: string[] } {
   const parts = def.key.split(".");
-  const at = parts.indexOf(CONNECTION_PART);
+  const at = parts.findIndex(isNamedPart);
   return { before: parts.slice(0, at), after: parts.slice(at + 1) };
 }
 
-/** The setting a key as a file writes it names, and the connection it names; null for a key no setting of `defs` has. */
-export function settingOfKey<D extends Declared>(defs: readonly D[], key: string): { def: D; connection?: string } | null {
+/** The setting a key as a file writes it names, and the connection or definition it names; null for a key no setting of `defs` has. */
+export function settingOfKey<D extends Declared>(defs: readonly D[], key: string): { def: D; name?: string } | null {
   for (const def of defs) {
-    if (!def.perConnection) {
+    if (setFor(def) === null) {
       if (def.key === key) return { def };
       continue;
     }
-    const { before, after } = aroundConnection(def);
+    const { before, after } = aroundName(def);
     const head = before.length === 0 ? "" : `${before.join(".")}.`;
     const tail = after.length === 0 ? "" : `.${after.join(".")}`;
-    if (key.length > head.length + tail.length && key.startsWith(head) && key.endsWith(tail)) return { def, connection: key.slice(head.length, key.length - tail.length) };
+    if (key.length > head.length + tail.length && key.startsWith(head) && key.endsWith(tail)) return { def, name: key.slice(head.length, key.length - tail.length) };
   }
   return null;
 }
 
-/** The connections a config names for a per-connection setting, by the names or ids it writes. */
-export function connectionsNamed(config: Mapping, def: Declared): string[] {
+/** The connections or definitions a config sets a setting for, by the names (or a connection's ids) it writes. */
+export function namesSet(config: Mapping, def: Declared): string[] {
   let at: JsonValue | undefined = config;
-  for (const part of aroundConnection(def).before) at = isMapping(at) ? at[part] : undefined;
-  return isMapping(at) ? Object.keys(at) : [];
+  for (const part of aroundName(def).before) at = isMapping(at) ? at[part] : undefined;
+  return isMapping(at) ? Object.keys(at).filter((name) => decidesAt(config, pathOf(def, name))) : [];
 }
 
 /** What a config holds at `path`: undefined where nothing is set. With `short`, a value that is no mapping just above the last key is that key's. */

@@ -7,7 +7,7 @@ import type { SettingView } from "../../../shared/api";
 export function settingMatches(s: SettingView, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter((w) => w !== "");
   if (words.length === 0) return true;
-  const hay = `${s.key} ${s.name} ${s.about} ${s.takesWords} ${s.connection?.name ?? ""}`.toLowerCase();
+  const hay = `${s.key} ${s.name} ${s.about} ${s.takesWords} ${s.setFor?.name ?? ""}`.toLowerCase();
   return words.every((w) => hay.includes(w));
 }
 
@@ -16,8 +16,8 @@ export function changedFromDefault(s: SettingView): boolean {
   return s.from !== null && JSON.stringify(s.value) !== JSON.stringify(s.default);
 }
 
-/** The group a setting is shown in: under its connection for one set per connection, else by the first part of its key. */
+/** The group a setting is shown in: under its connection or agent for one set for one at a time, else its own. */
 export function groupTitle(s: SettingView): string {
-  if (s.connection === undefined) return s.key.split(".")[0] ?? s.key;
-  return s.connection === null ? "Names no connection there is now" : `Connection: ${s.connection.name}`;
+  if (s.setFor === undefined) return s.group;
+  return s.setFor.known ? `${s.setFor.kind === "connection" ? "Connection" : "Agent"}: ${s.setFor.name}` : `Names no ${s.setFor.kind === "connection" ? "connection" : "agent"} there is now`;
 }

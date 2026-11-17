@@ -1048,7 +1048,7 @@ Keeps the chat's map of a place in the world: its map as the chat plays it, with
 
 ### `POST /api/v1/chats/:chat/maps/:place/moves`
 
-Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to.
+Drags someone or something to a square of the grid of a place: his own change, applied at once on the chat's line, with an Undo, told to the Author at the next turn unless he says not to. Dropped on the area of another room of the place, it is in that room (at the room's entrance when the room has a grid of its own); one that lies on or in something is taken off it and stands on the square.
 
 | | |
 |---|---|
@@ -2542,7 +2542,7 @@ Sets the web search provider web_search asks, or takes it away; a key follows th
 
 ### `GET /api/v1/settings`
 
-Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect and what it does.
+Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect, what it does and where the page shows it; one set per connection or per agent once for each.
 
 | | |
 |---|---|
@@ -3666,6 +3666,18 @@ A page opens `/api/v1/live` as a WebSocket, offering the protocol `rpe.live`. A 
 ## Types
 
 Every type a route, a live kind or the live socket's messages name, as the generated types write it. `JsonValue` is any JSON value.
+
+### `Advice`
+
+A line the Settings page shows beside a setting's control while its value is below `below` or above `above`, saying what such a value does; the value is taken all the same.
+
+```ts
+export interface Advice {
+  below?: number;
+  above?: number;
+  says: string;
+}
+```
 
 ### `AgentRef`
 
@@ -7885,13 +7897,27 @@ export interface SessionUncompactAsk {
 }
 ```
 
+### `SetFor`
+
+What a setting set for one connection or one agent at a time is set for here: a connection or an agent definition, the name or id its key writes, the name the page shows, and whether one is in force now by that name.
+
+```ts
+export interface SetFor {
+  kind: "connection" | "definition";
+  key: string;
+  name: string;
+  known: boolean;
+}
+```
+
 ### `SettingsReply`
 
-Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.
+Each section of the page in order with one line on it; each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.
 
 ```ts
 export interface SettingsReply {
   chat: string | null;
+  sections: { title: string; about: string }[];
   files: ({ level: LayerLevel; file: string; problem: string | null })[];
   settings: SettingView[];
   facts: InstallFact[];
@@ -7926,12 +7952,20 @@ A setting as the Settings page shows it.
 
 ```ts
 export interface SettingView {
-  /** As a config file writes it; a per-connection setting's names the connection. */
+  /** As a config file writes it; one set for a connection or an agent names it. */
   key: string;
+  /** The key as declared, with `<connection>` or `<definition>` where it names one: the same for every connection's or agent's. */
+  pattern: string;
   /** What the page calls it. */
   name: string;
   /** One line on what it does. */
   about: string;
+  /** The section of the page it is shown in. */
+  section: string;
+  /** The group within its section, in plain words. */
+  group: string;
+  /** The unit a number is in (ms, seconds, bytes, tokens…), from the end of its key; null for a count and for anything not a number. */
+  unit: string | null;
   /** When a change to it is in force. */
   effect: Effect;
   /** The same, in words: at its next use, from the next turn, from RPE's next start. */
@@ -7954,12 +7988,16 @@ export interface SettingView {
   takesWords: string;
   /** What no value means, where the default is none or `~` may be set. */
   none: string | null;
+  /** What holds where no level sets it, where that is not what `~` means: a definition's own value for one set per agent. */
+  unset: string | null;
   /** `~` may be set (`none: true` in a write). */
   orNone: boolean;
   /** The levels it may be set at here. */
   levels: LayerLevel[];
-  /** For a per-connection setting, the connection it names; null for a name or id no connection has now. */
-  connection?: { id: string; name: string } | null;
+  /** For one set per connection or per agent, the connection or definition this one is for. */
+  setFor?: SetFor;
+  /** The lines the page shows while a value passes what is usual. */
+  advice: Advice[];
   /** A value a file sets that the setting does not take, and why: the default holds in its place. */
   passed: { value: JsonValue; why: string } | null;
 }
@@ -8666,7 +8704,7 @@ One typed system's view at a level, as the system keeps it, named as the source:
 
 ```ts
 export interface SystemShown {
-  /** The system that keeps it: economy, gear, orgs, calendar, weather, vehicles or sheets. */
+  /** The system that keeps it: economy, gear, orgs, calendar, weather, vehicles, combat or sheets. */
   system: string;
   title: string;
   sections: { title: string; rows: SystemRowShown[] }[];

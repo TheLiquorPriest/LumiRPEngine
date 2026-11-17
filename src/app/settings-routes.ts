@@ -1,8 +1,10 @@
 // The Settings page's routes (plan §14: "both config files as forms… every limit editable"; §5.2,
-// §5.4 "Config"): every setting of the registry (`App.settings`, every area's list and RPH's), with
-// the value in force for a chat, its default, the level and file it comes from, what each level sets,
-// when a change takes effect and one line on what it does; and a value written into the config file of
-// one level, as the user would write it.
+// §5.4 "Config"; §2.1 point 5): every setting of the registry (`App.settings`, every area's list and
+// RPH's), with the value in force for a chat, its default, the level and file it comes from, what each
+// level sets, when a change takes effect, one line on what it does, the section and group the page
+// finds it in, a number's unit and the advice the page gives beside a value past what is usual; a
+// setting set per connection once for each connection, and one set per agent once for each definition
+// in force; and a value written into the config file of one level, as the user would write it.
 //
 // The levels are those of the agents' tree that have a config file, farthest first: the shipped
 // `RPE-global.yml`, the user's own, and the chat's `RPE.yml`. They are read by the one reader of the
@@ -18,7 +20,7 @@ import type { InstallFact } from "./config";
 import { diskTexts, type LevelFile, readConfig } from "./config-read";
 import { oneFileAtATime, readText, writeWhole } from "./disk";
 import { type Exactly, type Holds, type Infer, type Mutually, route, RouteError, shape } from "./routes";
-import { type Effect, EFFECT_WORDS, isMapping, keyFor, type Mapping, pathOf, type Setting, settingOfKey, type Takes, takenValue, takesWords, valueAt } from "./setting-list";
+import { type Advice, type Effect, EFFECT_WORDS, groupOf, isMapping, keyFor, type Mapping, pathOf, SECTIONS, type Setting, setFor, settingOfKey, type Takes, takenValue, takesWords, unitOf, valueAt } from "./setting-list";
 import { LayoutRefused, withKeyAt, yamlMapping } from "./yaml";
 
 export const SETTINGS_PATH = "/api/v1/settings";
@@ -33,6 +35,8 @@ export interface SettingsDeps {
   levels(chat: string | null, make?: boolean): Promise<LevelFile[]>;
   /** The model layer's connections, for the settings set per connection. */
   connections(): Promise<{ id: string; name: string }[]>;
+  /** The names of the agent definitions in force for a chat (null: as a new chat takes them), for the settings set per agent. */
+  definitions(user: string, chat: string | null): Promise<string[]>;
   /** The install's facts, as config.json and the environment give them: listed, never written here. */
   facts(): InstallFact[];
 }
@@ -67,13 +71,30 @@ type LevelMirrored = Holds<Exactly<Infer<typeof layerLevel>, LayerLevel>>;
 type TakesMirrored = Holds<Mutually<Infer<typeof takes>, Written<Takes>>>;
 type EffectMirrored = Holds<Exactly<Infer<typeof effect>, Effect>>;
 
+const advice = shape.named(
+  "Advice",
+  "A line the Settings page shows beside a setting's control while its value is below `below` or above `above`, saying what such a value does; the value is taken all the same.",
+  shape.object({ below: shape.optional(shape.number()), above: shape.optional(shape.number()), says: T }),
+);
+type AdviceMirrored = Holds<Mutually<Infer<typeof advice>, Written<Advice>>>;
+
+const setForView = shape.named(
+  "SetFor",
+  "What a setting set for one connection or one agent at a time is set for here: a connection or an agent definition, the name or id its key writes, the name the page shows, and whether one is in force now by that name.",
+  shape.object({ kind: shape.oneOf("connection", "definition"), key: T, name: T, known: shape.yesNo() }),
+);
+
 const settingView = shape.named(
   "SettingView",
   "A setting as the Settings page shows it.",
   shape.object({
-    key: shape.field(T, "As a config file writes it; a per-connection setting's names the connection."),
+    key: shape.field(T, "As a config file writes it; one set for a connection or an agent names it."),
+    pattern: shape.field(T, "The key as declared, with `<connection>` or `<definition>` where it names one: the same for every connection's or agent's."),
     name: shape.field(T, "What the page calls it."),
     about: shape.field(T, "One line on what it does."),
+    section: shape.field(T, "The section of the page it is shown in."),
+    group: shape.field(T, "The group within its section, in plain words."),
+    unit: shape.field(shape.nullable(T), "The unit a number is in (ms, seconds, bytes, tokens…), from the end of its key; null for a count and for anything not a number."),
     effect: shape.field(effect, "When a change to it is in force."),
     effectWords: shape.field(T, "The same, in words: at its next use, from the next turn, from RPE's next start."),
     row: shape.field(shape.nullable(T), "Its row of Appendix D.1; null for a value beyond D.1, listed for the owner's approval."),
@@ -86,9 +107,11 @@ const settingView = shape.named(
     takes,
     takesWords: shape.field(T, "What it takes, in words."),
     none: shape.field(shape.nullable(T), "What no value means, where the default is none or `~` may be set."),
+    unset: shape.field(shape.nullable(T), "What holds where no level sets it, where that is not what `~` means: a definition's own value for one set per agent."),
     orNone: shape.field(shape.yesNo(), "`~` may be set (`none: true` in a write)."),
     levels: shape.field(shape.list(layerLevel), "The levels it may be set at here."),
-    connection: shape.optional(shape.nullable(shape.object({ id: T, name: T })), "For a per-connection setting, the connection it names; null for a name or id no connection has now."),
+    setFor: shape.optional(setForView, "For one set per connection or per agent, the connection or definition this one is for."),
+    advice: shape.field(shape.list(advice), "The lines the page shows while a value passes what is usual."),
     passed: shape.field(shape.nullable(shape.object({ value: shape.json(), why: T })), "A value a file sets that the setting does not take, and why: the default holds in its place."),
   }),
 );
@@ -103,8 +126,14 @@ type FactMirrored = Holds<Exactly<Infer<typeof installFact>, InstallFact>>;
 
 const settingsReply = shape.named(
   "SettingsReply",
-  "Each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.",
-  shape.object({ chat: shape.nullable(T), files: shape.list(shape.object({ level: layerLevel, file: T, problem: shape.nullable(T) })), settings: shape.list(settingView), facts: shape.list(installFact) }),
+  "Each section of the page in order with one line on it; each level's config file, farthest first, with what is wrong with one that cannot be read (its settings are then passed over); every setting; and the install's facts.",
+  shape.object({
+    chat: shape.nullable(T),
+    sections: shape.list(shape.object({ title: T, about: T })),
+    files: shape.list(shape.object({ level: layerLevel, file: T, problem: shape.nullable(T) })),
+    settings: shape.list(settingView),
+    facts: shape.list(installFact),
+  }),
 );
 export type SettingsReply = Infer<typeof settingsReply>;
 
@@ -115,21 +144,27 @@ const settingsWrite = shape.named(
 );
 export type SettingsWrite = Infer<typeof settingsWrite>;
 
-/** Every setting as the levels' files stand now. */
-async function settingsNow(deps: SettingsDeps, chat: string | null): Promise<SettingsReply> {
+/** Every setting as the levels' files stand now, for a chat's levels (null: those every chat shares). */
+async function settingsNow(deps: SettingsDeps, user: string, chat: string | null): Promise<SettingsReply> {
   const files = await deps.levels(chat);
   // A page's read logs nothing: what it finds is in the reply.
   const read = readConfig(await diskTexts(files), null, deps.settings);
-  const connections = await deps.connections();
+  const [connections, definitions] = await Promise.all([deps.connections(), deps.definitions(user, chat)]);
   const settings: SettingView[] = [];
   for (const def of deps.settings) {
-    const view = (connection?: string, named?: { id: string; name: string } | null): SettingView => {
-      const deciding = read.deciding(def, connection);
-      const { value, passed } = read.read(def, connection);
+    const { section, group } = groupOf(def);
+    const view = (named?: Infer<typeof setForView>): SettingView => {
+      const name = named?.key;
+      const deciding = read.deciding(def, name);
+      const { value, passed } = read.read(def, name);
       return {
-        key: keyFor(def, connection),
+        key: keyFor(def, name),
+        pattern: def.key,
         name: def.name,
         about: def.about,
+        section,
+        group,
+        unit: unitOf(def),
         effect: def.effect,
         effectWords: EFFECT_WORDS[def.effect],
         row: def.row ?? null,
@@ -137,34 +172,41 @@ async function settingsNow(deps: SettingsDeps, chat: string | null): Promise<Set
         default: def.default,
         from: deciding?.level ?? null,
         file: deciding?.file ?? null,
-        set: read.setAt(def, connection).map((s) => ({ level: s.level, file: s.file, value: s.value })),
+        set: read.setAt(def, name).map((s) => ({ level: s.level, file: s.file, value: s.value })),
         joined: def.joined === true,
         takes: def.takes as Written<Takes>,
         takesWords: takesWords(def),
         none: def.none ?? null,
+        unset: def.unset ?? null,
         orNone: def.orNone === true,
         levels: read
           .levelsOf(def)
           .filter((l) => l.level !== "shipped")
           .map((l) => l.level),
-        ...(named !== undefined ? { connection: named } : {}),
+        ...(named !== undefined ? { setFor: named } : {}),
+        advice: (def.advice ?? []).map((a) => ({ ...a })),
         passed,
       };
     };
-    if (!def.perConnection) {
-      settings.push(view());
-      continue;
+    const kind = setFor(def);
+    const named = new Set(kind === null ? [] : read.named(def));
+    if (kind === null) settings.push(view());
+    else if (kind === "connection") {
+      // Each connection under each name or id a file sets it by, or by its id where none does; then the names no connection has.
+      for (const c of connections) {
+        const keys = [c.id, c.name].filter((key) => named.has(key));
+        for (const key of keys.length === 0 ? [c.id] : keys) settings.push(view({ kind, key, name: c.name, known: true }));
+      }
+      const known = new Set(connections.flatMap((c) => [c.id, c.name]));
+      for (const key of [...named].filter((key) => !known.has(key)).sort()) settings.push(view({ kind, key, name: key, known: false }));
+    } else {
+      // Each definition in force, by its name; then the names a file sets it for that no definition in force has.
+      for (const d of definitions) settings.push(view({ kind, key: d, name: d, known: true }));
+      const known = new Set(definitions);
+      for (const key of [...named].filter((key) => !known.has(key)).sort()) settings.push(view({ kind, key, name: key, known: false }));
     }
-    // Each connection under each name or id a file sets it by, or by its id where none does; then the names no connection has.
-    const named = new Set(read.named(def));
-    for (const c of connections) {
-      const keys = [c.id, c.name].filter((key) => named.has(key));
-      for (const key of keys.length === 0 ? [c.id] : keys) settings.push(view(key, c));
-    }
-    const known = new Set(connections.flatMap((c) => [c.id, c.name]));
-    for (const key of [...named].filter((key) => !known.has(key)).sort()) settings.push(view(key, null));
   }
-  return { chat, files: read.levels.map((l) => ({ level: l.level, file: l.file, problem: l.problem })), settings, facts: deps.facts() };
+  return { chat, sections: SECTIONS.map((s) => ({ ...s })), files: read.levels.map((l) => ({ level: l.level, file: l.file, problem: l.problem })), settings, facts: deps.facts() };
 }
 
 /**
@@ -179,7 +221,7 @@ export async function writeSetting(deps: Pick<SettingsDeps, "settings" | "levels
   if (body.level === "chat" && body.chat === null) throw new RouteError(400, 'Name the chat whose level this is: "chat": "<its id>".');
   const found = settingOfKey(deps.settings, body.key);
   if (found === null) throw new RouteError(400, `RPE reads no setting "${body.key}".`);
-  const { def, connection } = found;
+  const { def, name } = found;
   if (def.levels !== undefined && !def.levels.includes(body.level)) throw new RouteError(400, `${body.key} is read from the ${def.levels.filter((l) => l !== "shipped").join(" and ")} level alone.`);
   let value: JsonValue | undefined;
   if (body.none) {
@@ -200,7 +242,7 @@ export async function writeSetting(deps: Pick<SettingsDeps, "settings" | "levels
     } catch (error) {
       throw new RouteError(409, error instanceof Error ? error.message : String(error));
     }
-    const full = pathOf(def, connection);
+    const full = pathOf(def, name);
     const parent = full.slice(0, -1);
     let path = full;
     let written = value;
@@ -236,10 +278,10 @@ export function settingsRoutes(deps: SettingsDeps) {
       path: SETTINGS_PATH,
       access: "page",
       group: "settings",
-      does: "Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect and what it does.",
+      does: "Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect, what it does and where the page shows it; one set per connection or per agent once for each.",
       query: { chat: shape.optional(T, "The chat whose levels are read; left out or empty, the levels every chat shares.") },
       reply: settingsReply,
-      handle: ({ query }) => settingsNow(deps, query.chat || null),
+      handle: ({ user, query }) => settingsNow(deps, user, query.chat || null),
     }),
     route({
       method: "PUT",
@@ -249,9 +291,9 @@ export function settingsRoutes(deps: SettingsDeps) {
       does: "Writes one setting into one level's config file, as the user would write it, and answers every setting as it then stands.",
       body: settingsWrite,
       reply: settingsReply,
-      handle: async ({ body }) => {
+      handle: async ({ user, body }) => {
         await writeSetting(deps, body);
-        return await settingsNow(deps, body.chat ?? null);
+        return await settingsNow(deps, user, body.chat ?? null);
       },
     }),
   ] as const;

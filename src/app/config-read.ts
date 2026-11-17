@@ -16,7 +16,7 @@
 import { readFileSync } from "node:fs";
 import type { FilesPort, JsonValue, LayerLevel, Log, Scope } from "rp-harness/contract";
 import { readText } from "./disk";
-import { connectionsNamed, type Declared, decidesAt, isMapping, type Mapping, mergedConfig, type NumberSettings, pathOf, type SettingRead, takenValue } from "./setting-list";
+import { type Declared, decidesAt, isMapping, isNamedPart, type Mapping, mergedConfig, namesSet, type NumberSettings, pathOf, type SettingRead, takenValue } from "./setting-list";
 import { yamlMapping } from "./yaml";
 
 /** One level's config file as a reader is given it: its level, its name in the agents' view (`@global/RPE-global.yml`, `RPE.yml`), and its text; null where there is none. */
@@ -119,9 +119,9 @@ export class ConfigRead {
     });
   }
 
-  /** The names or ids a per-connection setting is set under, in the levels it is read from. */
+  /** The connections (by name or id) or the definitions a setting set for one at a time is set for, in the levels it is read from. */
   named(def: Declared): string[] {
-    return [...new Set(this.levelsOf(def).flatMap((l) => connectionsNamed(l.config, def)))];
+    return [...new Set(this.levelsOf(def).flatMap((l) => namesSet(l.config, def)))];
   }
 
   /**
@@ -236,12 +236,12 @@ export class ConfigRead {
   }
 }
 
-/** Each value a config sets at a key's path, with the key it is set at: one for each connection it names, where the path has `<connection>`. */
+/** Each value a config sets at a key's path, with the key it is set at: one for each connection or definition it names, where the path has `<connection>` or `<definition>`. */
 function valueAtPattern(config: JsonValue, parts: readonly string[], key: readonly string[] = []): { key: string; value: JsonValue }[] {
   if (parts.length === 0) return [{ key: key.join("."), value: config }];
   if (!isMapping(config)) return [];
   const [part, ...rest] = parts as [string, ...string[]];
-  return (part === "<connection>" ? Object.keys(config) : [part]).flatMap((name) => {
+  return (isNamedPart(part) ? Object.keys(config) : [part]).flatMap((name) => {
     const next = config[name];
     return next === undefined ? [] : valueAtPattern(next, rest, [...key, name]);
   });
