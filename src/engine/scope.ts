@@ -33,6 +33,7 @@ import type { BandDef, FieldDef, KindDef, PoolDef, WorldDoc } from "../shared/wo
 import { EFFECT_ONLY_FUNCTIONS } from "../shared/world";
 import { calendarOf, clockAt, dateAt, dayPartAt, holidaysOn, nextTimeOfDay, parseHHMM } from "./calendar";
 import { DiceError, rollDice } from "./dice";
+import { calendarIn } from "./holidays";
 import type { EnvVars, ExprEnv, Value } from "./expr";
 import { compile, ExprError, MATH_FUNCTIONS, runProgram } from "./expr";
 import type { ReadContext } from "./registry";
@@ -524,7 +525,7 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
       case "days":
         return num(a0) * 1440;
       case "holiday": {
-        const cal = calendarOf(world);
+        const cal = calendarIn(ctx);
         return holidaysOn(cal, dateAt(cal, now).dayIndex)[0]?.label ?? "";
       }
       case "count_at": {

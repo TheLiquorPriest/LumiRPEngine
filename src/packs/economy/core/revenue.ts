@@ -41,6 +41,7 @@ import {
 } from "../../../shared/revenue";
 import { formatMoney, type FieldDef, type WorldDoc } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOf, type Calendar } from "../../../engine/calendar";
+import { chatWorld } from "../../../engine/holidays";
 import { createEnv, evalNumber, type EnvVars } from "../../../engine/expr";
 import { placesOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
@@ -128,7 +129,7 @@ export interface StreamReader {
 /** The engine's reading: formulas in the full scope at the occurrence's instant, with `self` the earner; assets at their market price then. */
 export function engineReader(ctx: ReadContext, earner: EntityId): StreamReader {
   return {
-    world: ctx.world,
+    world: chatWorld(ctx),
     formula: (src, at, vars) => evalNumber(src.replace(/^=/, ""), scopeEnv({ reg: ctx.registry, ctx, bindings: { self: earner }, vars, at }), 0),
     assetPrice: (asset, at) => quoteOf(ctx, asset, at),
     rows: (table) => (ctx.tables.get(table)?.rows as JsonObject | undefined) ?? objOf(own(ctx.world.tables, table)?.rows),
@@ -293,7 +294,7 @@ export function streamMonths(rd: StreamReader, stream: Stream, from: number, cou
     const row: ProjectedMonth = { month, cents: 0, net: 0, units: 0 };
     if (flow.status === "active") {
       let royaltyPaid = model.type === "royalty" && paid(month);
-      for (const o of occurrences({ world: rd.world }, flow.schedule, lo, hi - 1, flow.start, flow.end)) {
+      for (const o of occurrences(rd.world, flow.schedule, lo, hi - 1, flow.start, flow.end)) {
         if (royaltyPaid) break;
         const e = earnedAt(rd, flow, model, o.at);
         if (!e) continue;
@@ -414,7 +415,7 @@ function inForce(state: Readonly<WorldState>, stream: EntityId, at: number): Adj
 function periodAmount(api: FinanceApi, ctx: ReadContext, stream: Stream): number {
   const earner = earnerOf(api, ctx, stream.flow);
   if (!earner) return 0;
-  const next = occurrences(ctx, stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end)[0];
+  const next = occurrences(chatWorld(ctx), stream.flow.schedule, ctx.state.clock, ctx.state.clock + 62 * 1440, stream.flow.start, stream.flow.end)[0];
   return next ? (earnedAt(engineReader(ctx, earner), stream.flow, stream.model, next.at)?.cents ?? 0) : 0;
 }
 

@@ -21,7 +21,7 @@ import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
 import { mutableSlice, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import { buildCalendarView } from "./view";
-import { CALENDAR_PACK, dateRuleOf, holidaysOf } from "./holidays";
+import { CALENDAR_PACK, calendarIn, dateRuleOf, holidaysOf } from "../../../engine/holidays";
 import dst from "./tables/modern-us/dst.json";
 import holidays from "./tables/modern-us/holidays.json";
 import observances from "./tables/modern-us/observances.json";
@@ -113,9 +113,9 @@ export const calendarPack: PackDef = {
       return wd === 0 || wd === 6;
     });
     r.formula("is_day_off", (ctx) => {
-      const cal = calendarOf(ctx.world);
+      const cal = calendarIn(ctx);
       const d = dateAt(cal, ctx.state.clock);
-      if (ctx.levelOf(ctx.world.pov, "calendar") >= 4 && holidaysOn(cal, d.dayIndex, holidaysOf(ctx)).some((h) => h.dayOff)) return true;
+      if (ctx.levelOf(ctx.world.pov, "calendar") >= 4 && holidaysOn(cal, d.dayIndex).some((h) => h.dayOff)) return true;
       return d.weekday === 0 || d.weekday === 6;
     });
     r.formula("minutes_until", (ctx, at) => {
@@ -143,13 +143,13 @@ export const calendarPack: PackDef = {
       render(ctx) {
         const level = ctx.levelOf(ctx.world.pov, "calendar");
         if (level === 0) return [];
-        const cal = calendarOf(ctx.world);
+        const cal = calendarIn(ctx);
         const place = placeOfEntity(ctx.state, ctx.world.pov);
         const offset = sceneOffset(ctx.world, ctx.state.clock, place, level);
         const part = dayPartAt(cal, ctx.state.clock + offset).label;
         const lines = [level === 1 ? `Time: ${part}.` : `Time: ${formatClock(cal, ctx.state.clock, offset)} (${part.toLowerCase()}).`];
         if (level >= 4) {
-          const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex, holidaysOf(ctx));
+          const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex);
           if (today.length > 0) lines.push(`Today is ${today.map((h) => h.label).join(" and ")}.`);
         }
         if (clockPaused(ctx.world, ctx.state)) lines.push("The clock is paused for this scene.");

@@ -18,7 +18,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import { personThings, thingPage } from "../engine/thing-view";
 import { isThing } from "../engine/things";
 import { canSeeField, couldSeeEntity, canSeePlace } from "../engine/visibility";
-import { holidaysOf } from "../packs/calendar/core/holidays";
+import { calendarIn } from "../engine/holidays";
 import { isParty } from "../packs/economy/core/pay";
 import { ownersOf } from "../packs/economy/core/model";
 import { buildOrgsGm } from "../packs/orgs/core/gm";
@@ -294,10 +294,10 @@ function orgs(r: Read): SectionOut[] {
 
 /** The holidays that fall on a day, and the next one coming (a year ahead at most). */
 function holidaysAround(ctx: ReadContext, dayIndex: number): { today: string[]; next: { label: string; day: number } | null } {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const today: string[] = [];
   let next: { label: string; day: number } | null = null;
-  for (const h of holidaysOf(ctx)) {
+  for (const h of cal.def.holidays) {
     const day = holidayDay(cal, h, dayIndex);
     if (day === dayIndex) today.push(h.label);
     const ahead = day !== null && day > dayIndex ? day : holidayDay(cal, h, dayIndex + 366);
@@ -309,7 +309,7 @@ function holidaysAround(ctx: ReadContext, dayIndex: number): { today: string[]; 
 function calendar(r: Read): SectionOut[] {
   const { ctx, level } = r;
   if ((level.kind !== "world" && level.kind !== "place") || !clockRecorded(r.stored)) return [];
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const offset = level.kind === "place" ? placeOffset(ctx.world, ctx.state.clock, level.id) : 0;
   const now = ctx.state.clock + offset;
   const day = dateAt(cal, now).dayIndex;

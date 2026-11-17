@@ -5,7 +5,8 @@
 
 import type { JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
-import { calendarOf, clockAt, dateAt, holidaysOn, type CalDate, type Calendar } from "../../../engine/calendar";
+import { clockAt, dateAt, holidaysOn, type CalDate, type Calendar } from "../../../engine/calendar";
+import { calendarIn } from "../../../engine/holidays";
 import { isGone, kindIs } from "../../../engine/scope";
 import { acts as lifeActs } from "../../../engine/life";
 import { optionalQuery, own } from "../../../engine/pack-kit";
@@ -62,7 +63,7 @@ export function birthdayOn(cal: Calendar, v: JsonValue | undefined, date: CalDat
 
 /** The occasion of `who`'s day (`day` a day index), from the state as it stands, with the holidays as Calendar 4 shows them. */
 export function occasionOf(ctx: ReadContext, who: EntityId, day: number): Occasion {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const date = dateAt(cal, clockAt(cal, day, 0));
   const weekend = date.weekday === 0 || date.weekday === 6;
   const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];

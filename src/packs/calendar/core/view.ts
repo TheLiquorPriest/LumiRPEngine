@@ -3,10 +3,10 @@
 // what is coming up for the POV.
 
 import type { ReadContext } from "../../../engine/registry";
-import { calendarOf, dateAt, dayPartAt, formatClock, holidayDay, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
+import { dateAt, dayPartAt, formatClock, holidayDay, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
 import { allSchedules, nextStartFor, scheduleOwners } from "../../../engine/schedules";
 import { placeOfEntity } from "../../../engine/scope";
-import { holidaysOf } from "./holidays";
+import { calendarIn } from "../../../engine/holidays";
 
 export interface CalendarView {
   level: number;
@@ -21,7 +21,7 @@ export interface CalendarView {
 /** Holidays within the next 30 days and the POV's commitments within the next 2 days. */
 export function buildCalendarView(ctx: ReadContext): CalendarView {
   const reg = ctx.registry;
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const level = ctx.levelOf(ctx.world.pov, "calendar");
   const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, placeOfEntity(ctx.state, ctx.world.pov)) : 0;
   const now = ctx.state.clock + offset;
@@ -29,7 +29,7 @@ export function buildCalendarView(ctx: ReadContext): CalendarView {
   const upcoming: CalendarView["upcoming"] = [];
   const holidays: string[] = [];
   if (level >= 4) {
-    for (const h of holidaysOf(ctx)) {
+    for (const h of cal.def.holidays) {
       const day = holidayDay(cal, h, d.dayIndex);
       const next = day !== null && day >= d.dayIndex ? day : holidayDay(cal, h, d.dayIndex + 366);
       if (next === null) continue;

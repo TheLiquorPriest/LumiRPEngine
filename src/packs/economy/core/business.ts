@@ -16,6 +16,7 @@ import { pointerOf } from "../../../shared/json-patch";
 import type { LintIssue } from "../../../shared/lint";
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOf, formatClock, MINUTES_PER_DAY } from "../../../engine/calendar";
+import { chatWorld } from "../../../engine/holidays";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import { passMemo } from "../../../engine/read-pass";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
@@ -161,7 +162,7 @@ function walkInFlow(ctx: ReadContext, api: FinanceApi, business: EntityId): Flow
   const daily = numOf(own(ctx.state.entities, business)?.fields.daily_sales);
   const deposit = operatingAccount(api, ctx, business);
   if (daily <= 0 || !deposit) return null;
-  const closed = ctx.world.calendar.holidays.filter((h) => h.dayOff).map((h) => h.id);
+  const closed = chatWorld(ctx).calendar.holidays.filter((h) => h.dayOff).map((h) => h.id);
   return { id: `walkin:${business}`, label: "Walk-in takings", kind: "income", from: "Walk-in customers", to: deposit, amount: { provider: "walk_in_sales", args: { business } }, schedule: { every: "week", weekdays: tradingDays(ctx.state, business), at: CLOSING, roll: "none", ...(closed.length > 0 ? { except: closed } : {}) }, shortfall: "skip", category: "sales", link: business, status: "active", source: "business" };
 }
 

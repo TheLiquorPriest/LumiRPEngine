@@ -9,6 +9,7 @@ import type { EntityId } from "../../../shared/ids";
 import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, isCorrection, ownersIn, payeeKey, ROLE_RIGHTS, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type InterestView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, dateAt, formatClock, monthName, weekdayName } from "../../../engine/calendar";
+import { chatWorld } from "../../../engine/holidays";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
@@ -403,7 +404,7 @@ function flowTouches(ctx: ReadContext, viewer: Viewer, f: Flow, party: EntityId)
 function nextOf(ctx: ReadContext, f: Flow, horizon: number): number | null {
   const from = ctx.state.clock;
   const retry = flowRunOf(ctx.state, f.id).retry;
-  const first = occurrences(ctx, f.schedule, from, from + horizon, f.start, f.end)[0];
+  const first = occurrences(chatWorld(ctx), f.schedule, from, from + horizon, f.start, f.end)[0];
   const candidates = [first?.at, retry?.at].filter((x): x is number => typeof x === "number" && x > from);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }

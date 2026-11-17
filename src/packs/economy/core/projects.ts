@@ -29,7 +29,8 @@ import type { LintIssue } from "../../../shared/lint";
 import { COST_WHEN_WORDS, costParts, isProjectStatus, lengthWords, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_EVENTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_NOTE, PROJECT_STATUS_WORDS, PROJECTS_SECTION, PROJECTS_TABLE, stepCost, stepDays, stepOrder, stepsIn, type ProjectDef, type ProjectRun, type ProjectStatus, type ProjectStep, type ProjectTemplateView, type ProjectUnlock, type ProjectView, type ProjectsView, type StepNote, type StepRun, type StepState, type StepView } from "../../../shared/projects";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import type { ActionDef, EntityDef, FieldDef, ParamDef, WorldDoc } from "../../../shared/world";
-import { calendarOf, clockAt, clockOfLocal, dateAt, formatStamp, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
+import { clockAt, clockOfLocal, dateAt, formatStamp, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
+import { calendarIn } from "../../../engine/holidays";
 import { mayAct, membersOfOrg, orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
@@ -113,7 +114,7 @@ export function projectOf(ctx: Pick<ReadContext, "world" | "state">, id: EntityI
   };
   const run = projectRunOf(ctx.state, id);
   const status = isProjectStatus(run.status) ? run.status : def.status;
-  const started = typeof run.started === "number" ? run.started : def.status === "active" ? authoredStart(calendarOf(ctx.world), def.start) : null;
+  const started = typeof run.started === "number" ? run.started : def.status === "active" ? authoredStart(calendarIn(ctx), def.start) : null;
   return { def, run, status, started };
 }
 
@@ -439,7 +440,7 @@ interface Unlocked {
  * the first taking the odd cents, so together they take it once.
  */
 function unlocksAt(ctx: ReadContext, p: Project, s: ProjectStep, at: number, paid: Paid): Unlocked {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const day = dayText(cal, at);
   const out: Unlocked = { units: [], made: [], took: null };
   const taken = new Set<string>();
@@ -538,7 +539,7 @@ function doDue(api: FinanceApi, run: Run, due: Due): boolean {
   if (!p) return false;
   const s = due.step;
   const r = p.run.steps[s.id];
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const ending = due.kind === "end" || (due.kind === "retry" && r?.wait?.side === "end");
   const parts = costParts(s, stepCost(s));
   const cents = ending ? parts.end + (r?.extra ?? 0) : parts.start;
@@ -705,7 +706,7 @@ function pauseEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
   if (p.status !== "active") return { code: "bad_status", reason: statusWords(p) };
   const no = refusal(ctx, by, p.def.org);
   if (no) return no;
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const at = ctx.state.clock;
   const left: JsonObject = {};
   for (const s of p.def.steps) {
@@ -724,7 +725,7 @@ function resumeEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEv
   const by = strOf(args.by);
   const no = refusal(ctx, by, p.def.org);
   if (no) return no;
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const at = ctx.state.clock;
   const ends: JsonObject = {};
   for (const s of p.def.steps) {
@@ -788,7 +789,7 @@ function noteEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEven
   const days = numOf(args.days);
   const cents = numOf(args.cents);
   const r = p.run.steps[s.id];
-  const end = typeof r?.end === "number" && p.status === "active" ? addWork(calendarOf(ctx.world), r.end, days * MINUTES_PER_DAY, s.business_days !== undefined) : undefined;
+  const end = typeof r?.end === "number" && p.status === "active" ? addWork(calendarIn(ctx), r.end, days * MINUTES_PER_DAY, s.business_days !== undefined) : undefined;
   const text = strOf(args.text).trim().slice(0, NOTE_TEXT_MAX);
   const by = strOf(args.by);
   if (run.emit([{ type: PROJECT_EVENTS.note, data: { project: p.def.id, step: s.id, at: ctx.state.clock, days, cents, text, source, ...(end !== undefined ? { end } : {}) } }]).length === 0) return { code: "bad_note", reason: `${p.def.name} can't take the note` };
@@ -865,7 +866,7 @@ function unlockWords(ctx: ReadContext, u: ProjectUnlock, viewer: EntityId | null
 }
 
 function stepView(api: FinanceApi, ctx: ReadContext, p: Project, s: ProjectStep, now: number, viewer: EntityId | null): StepView {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const r = p.run.steps[s.id];
   const day = dayOf(cal, p, s, now);
   const done = doneAt(p, s);
@@ -899,9 +900,9 @@ function stepView(api: FinanceApi, ctx: ReadContext, p: Project, s: ProjectStep,
 /** What the step under way, or the one waiting, says in a line: "Drilling: day 12 of 30", "Drilling: waiting for $12,000.00 to start". */
 function nowWords(api: FinanceApi, ctx: ReadContext, p: Project, now: number): string | null {
   if (p.status === "planned") return "Not started";
-  if (p.status === "active" && p.started !== null && p.started > now) return `Starts ${formatStamp(calendarOf(ctx.world), p.started)}`;
+  if (p.status === "active" && p.started !== null && p.started > now) return `Starts ${formatStamp(calendarIn(ctx), p.started)}`;
   if (!isLive(p.status)) return null;
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const waiting = p.def.steps.find((s) => p.run.steps[s.id]?.wait && doneAt(p, s) === null);
   const w = waiting ? p.run.steps[waiting.id]?.wait : undefined;
   if (waiting && w) return `${waiting.name}: waiting for ${api.money(ctx, w.cents)} to ${w.side === "end" ? "finish" : "start"}`;
@@ -920,7 +921,7 @@ function mayRun(ctx: ReadContext, viewer: EntityId | null, org: EntityId): boole
 }
 
 export function projectView(api: FinanceApi, ctx: ReadContext, p: Project, viewer: EntityId | null): ProjectView {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const now = ctx.state.clock;
   const steps = p.def.steps.map((s) => stepView(api, ctx, p, s, now, viewer));
   const cost = steps.reduce((n, s) => n + s.cost, 0);
@@ -1007,7 +1008,7 @@ function povFollows(ctx: ReadContext, org: EntityId): boolean {
  */
 export function projectNarratorLines(api: FinanceApi, ctx: ReadContext): string[] {
   const out: string[] = [];
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const now = ctx.state.clock;
   for (const id of projectIds(ctx.state)) {
     const p = projectOf(ctx, id);
@@ -1145,7 +1146,7 @@ export function registerProjects(r: FinanceRegistry): void {
   r.view((ctx, party) => {
     const alerts: { tone: "warn"; text: string; account?: EntityId }[] = [];
     const upcoming: { at: string; clock: number; label: string; cents: number; flow: null; account: EntityId | null }[] = [];
-    const cal = calendarOf(ctx.world);
+    const cal = calendarIn(ctx);
     for (const id of projectIds(ctx.state, party)) {
       const p = projectOf(ctx, id);
       if (!p || !isLive(p.status)) continue;

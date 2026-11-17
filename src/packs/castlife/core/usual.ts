@@ -11,6 +11,7 @@ import type { JsonObject } from "../../../shared/json";
 import { routineSettingsOf, type RoutineBlock, type RoutineDays } from "../../../shared/routines";
 import type { Recurrence } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayPartAt, formatHHMM, MINUTES_PER_DAY, parseHHMM, recursOn, weekdayName, type Calendar } from "../../../engine/calendar";
+import { calendarIn } from "../../../engine/holidays";
 import { povLife } from "../../../engine/life";
 import { own } from "../../../engine/pack-kit";
 import { hiddenNameCheck } from "../../../engine/player-events";
@@ -97,7 +98,7 @@ function blockClause(cal: Calendar, day: number, block: RoutineBlock): { text: s
  */
 export function usualRoutine(ctx: ReadContext, who: EntityId, read: { place: (place: string) => string | null; activity: boolean }): UsualClause[] {
   const { registry: reg, world, state } = ctx;
-  const cal = calendarOf(world);
+  const cal = calendarIn(ctx);
   const now = dateAt(cal, state.clock);
   const day = now.dayIndex;
   const out: UsualClause[] = [];

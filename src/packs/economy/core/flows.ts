@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, FLOW_KINDS, FLOW_SHORTFALLS, featureOn, type Flow, type FlowAmount, type FlowKind, type FlowOutcome, type FlowRunState, type FlowSchedule, type FlowShortfall, type FlowSplit } from "../../../shared/finance";
-import { formatMoney } from "../../../shared/world";
+import { formatMoney, type WorldDoc } from "../../../shared/world";
 import { OFFSTAGE_ORIGIN, ORIGIN_FIELD } from "../../../shared/offstage";
 import { REVENUE_PROVIDER, revenueOf } from "../../../shared/revenue";
 import { calendarOf, clockAt, clockOfLocal, dateAt, dayIndexOfText, holidaysOn, parseHHMM, type Calendar } from "../../../engine/calendar";
@@ -99,11 +99,11 @@ export interface Occurrence {
 /**
  * The instants a schedule falls due in `(from, to]`: the nominal days it falls on between `start`
  * and `end`, holidays it skips left out, each rolled off a weekend or holiday when it says so, at its
- * time of day. Intervals count from `start` (the calendar's epoch without one).
+ * time of day. Intervals count from `start` (the calendar's epoch without one). The world is the chat's (`chatWorld`), so the holidays are the ones the story left.
  */
-export function occurrences(ctx: Pick<ReadContext, "world">, s: FlowSchedule, from: number, to: number, start?: string, end?: string): Occurrence[] {
+export function occurrences(world: WorldDoc, s: FlowSchedule, from: number, to: number, start?: string, end?: string): Occurrence[] {
   if (to <= from) return [];
-  const cal = calendarOf(ctx.world);
+  const cal = calendarOf(world);
   if (s.once !== undefined && s.once !== "") {
     let at: number | null = null;
     if (typeof s.once === "number") at = s.once;

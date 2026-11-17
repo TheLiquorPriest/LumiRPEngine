@@ -41,6 +41,7 @@ import {
 } from "../../../shared/routines";
 import type { ScheduleDef, WorldDoc } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, holidaysOn, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
+import { calendarIn } from "../../../engine/holidays";
 import { acts } from "../../../engine/life";
 import { objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { FixedBlock, PlanBlock, PlanOption } from "../../../engine/plan-day";
@@ -249,7 +250,7 @@ export function activeBlocks(ctx: Pick<ReadContext, "registry" | "world" | "stat
 function daysHold(ctx: ReadContext, block: RoutineBlock, day: number, occasion: Occasion): boolean {
   const d = block.days;
   if (!d) return true;
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const date = dateAt(cal, clockAt(cal, day, 0));
   if (d.weekdays && !d.weekdays.includes(date.weekday)) return false;
   if (d.off === "only" && !occasion.dayOff) return false;

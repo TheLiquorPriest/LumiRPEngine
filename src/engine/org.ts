@@ -14,6 +14,7 @@ import type { JsonValue } from "../shared/json";
 import { ACTS_FOR, CONTROL_DEPTH, CONTROL_KEEPS, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, trusteesDecideIn, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
 import { PARTY_KIND, PARTY_RELATION, partyTierOf } from "../shared/party";
 import { calendarOf, dateAt, dayIndexOfText, holidaysOn, monthName, parseHHMM, placeOffset } from "./calendar";
+import { calendarIn } from "./holidays";
 import { acts } from "./life";
 import { labelOf, numOf, objOf, optionalQuery, own, sliceOf } from "./pack-kit";
 import { passMemo } from "./read-pass";
@@ -724,7 +725,7 @@ export function hoursOf(ctx: OrgContext, business: EntityId): { open: number; cl
  * that isn't a day-off holiday. Hours that close after midnight belong to the day they opened.
  */
 export function trading(ctx: OrgContext, business: EntityId, clock: number): boolean {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const localClock = clock + placeOffset(ctx.world, clock, placesOf(ctx, business)[0] ?? null);
   const local = dateAt(cal, localClock);
   const days = tradingDays(ctx.state, business);

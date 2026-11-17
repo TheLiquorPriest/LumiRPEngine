@@ -6,6 +6,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { MoneySummary } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, formatClock } from "../../../engine/calendar";
+import { chatWorld } from "../../../engine/holidays";
 import { numOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { FinanceHooks } from "./module";
@@ -61,7 +62,7 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
       const fromMine = f.from === who || (own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, who)?.worth === true);
       const toMine = f.to === who || (own(ctx.state.entities, f.to)?.kind === "account" && rightsOf(ctx.state, f.to, who)?.worth === true);
       if (fromMine === toMine) continue;
-      const next = occurrences(ctx, f.schedule, now, now + 14 * DAY, f.start, f.end)[0];
+      const next = occurrences(chatWorld(ctx), f.schedule, now, now + 14 * DAY, f.start, f.end)[0];
       if (!next) continue;
       const amount = "provider" in f.amount ? null : occurrenceAmount(hooks, ctx, f, next.at, createRng(`summary:${f.id}`), flowRunOf(ctx.state, f.id).deferred ?? 0);
       const cents = amount && !("code" in amount) ? amount.cents : 0;

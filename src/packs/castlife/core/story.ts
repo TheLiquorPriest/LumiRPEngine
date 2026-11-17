@@ -22,6 +22,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { BASIC_BLOCKS, isOff, ROUTINE_EVENTS, type ChatScheduleChange, type RoutineBlock, type RoutineBlockId, type RoutineDays, type RoutineEntry, type RoutinePlace } from "../../../shared/routines";
 import type { EffectSpec, ScheduleDef, ScheduleSlot } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, MINUTES_PER_DAY, parseHHMM, recursOn } from "../../../engine/calendar";
+import { calendarIn } from "../../../engine/holidays";
 import { acts } from "../../../engine/life";
 import { objOf, own } from "../../../engine/pack-kit";
 import { povMayKnow } from "../../../engine/player-events";
@@ -167,7 +168,7 @@ function blockSpans(ctx: ReadContext, block: RoutineBlock, days: readonly number
 
 /** A schedule's slots on the days around `days` (the day before and after too, for slots and blocks that run past midnight), with the slot each span is. */
 function slotSpans(ctx: ReadContext, schedule: ScheduleDef, days: readonly number[]): { span: Span; slot: ScheduleSlot }[] {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const out: { span: Span; slot: ScheduleSlot }[] = [];
   for (const d of new Set(days.flatMap((x) => [x - 1, x, x + 1]))) {
     if (!recursOn(cal, schedule.recurrence, d)) continue;
@@ -313,7 +314,7 @@ function startChange(ctx: ReadContext, who: EntityId, p: JsonObject): StoryChang
  * week isn't the reply's to end. A private block isn't the story's to end: the reply can't know of it.
  */
 function stopChange(ctx: ReadContext, who: EntityId, p: JsonObject): StoryChange | Rejection {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const words = wordsOf(cleanLabel(p.label));
   const where = placeOf(ctx, p.place);
   if (where === null && text(p.place) !== "") return refuse("there's no such place");

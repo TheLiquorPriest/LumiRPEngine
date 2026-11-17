@@ -28,7 +28,7 @@ import type { LintIssue } from "../../../shared/lint";
 import type { OrgMember } from "../../../shared/org";
 import { formatMoney } from "../../../shared/world";
 import { minorUnitPlural } from "../../../shared/money";
-import { calendarOf } from "../../../engine/calendar";
+import { calendarIn, chatWorld } from "../../../engine/holidays";
 import { isMaterialized } from "../../../engine/materialize";
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, FeedLine, PackDef, ReadContext, Rejection } from "../../../engine/registry";
@@ -457,8 +457,8 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
     note: (ctx, who, cls, text) => [signal(cls, text, who, ctx.state.clock)],
     money: (ctx, cents) => formatMoney(cents, ctx.world.currency),
     split: (cents, splits, rest) => splitAmount(cents, splits, rest),
-    occurrences: (ctx, schedule, from, to, start) => occurrences(ctx, schedule, from, to, start).map((o) => o.at),
-    businessDay: (ctx, day, roll) => businessDay(calendarOf(ctx.world), day, roll),
+    occurrences: (ctx, schedule, from, to, start) => occurrences(chatWorld(ctx), schedule, from, to, start).map((o) => o.at),
+    businessDay: (ctx, day, roll) => businessDay(calendarIn(ctx), day, roll),
     flows: (ctx) => allFlows(hooks, ctx),
     openAccount: (ctx, spec) => openAccount(ctx, spec),
     applyCredit: (ctx, who, app) => {

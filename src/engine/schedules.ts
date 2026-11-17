@@ -29,6 +29,7 @@ import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
 import { relocate } from "./relocate";
 import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities, TRUST_KIND } from "./selector";
 import type { WorldState } from "./state";
+import { chatWorld, calendarIn } from "./holidays";
 import { initialState, minutesBetween } from "./world-state";
 
 export interface ScheduleInstant {
@@ -465,7 +466,7 @@ function runningRivals(reg: Registry, ctx: ReadContext, schedule: ScheduleDef, r
     if (s.id === schedule.id || s.target !== schedule.target) continue;
     const r = ownerRank(reg, ctx.world, ctx.state, s);
     if (r === null || r === rank) continue;
-    const active = activeSlot(ctx.world, s, at);
+    const active = activeSlot(chatWorld(ctx), s, at);
     if (active) out.push({ schedule: s, rank: r, owners: new Set(scheduleOwners(reg, ctx.world, ctx.state, s)), domain: scheduleDomain(reg, s), slot: active.slot, occurrence: active.occurrence });
   }
   return out;
@@ -485,7 +486,7 @@ export function overriddenAt(reg: Registry, ctx: ReadContext, schedule: Schedule
 
 /** The value a schedule last set at an edge it gave way at: the slot of it handing over here, if fixed; else rest. */
 function valueBefore(reg: Registry, ctx: ReadContext, instant: ScheduleInstant, entity: EntityId): JsonValue | null {
-  const cal = calendarOf(ctx.world);
+  const cal = calendarIn(ctx);
   const s = instant.schedule;
   for (const [i, slot] of s.slots.entries()) {
     if (i === instant.slot) continue;
@@ -520,7 +521,7 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
   const domain = scheduleDomain(reg, schedule);
   const slot = schedule.slots[instant.slot];
   if (!slot) return out;
-  const startsHere = instant.edge === "end" && handedOver(ctx.world, instant);
+  const startsHere = instant.edge === "end" && handedOver(chatWorld(ctx), instant);
   const rank = ownerRank(reg, ctx.world, ctx.state, schedule);
   const rivals = rank === null ? [] : runningRivals(reg, ctx, schedule, rank, instant.at);
   const yields = optionalQuery(ctx, "castlife.yields");
@@ -597,7 +598,7 @@ export function activeSlot(world: WorldDoc, schedule: ScheduleDef, clock: number
 
 /** The next slot start of a schedule for `entity` after `clock` that no more specific schedule overrides, within `horizonDays`, or null. */
 export function nextStartFor(reg: Registry, ctx: ReadContext, schedule: ScheduleDef, entity: EntityId, clock: number, horizonDays = 14): { at: number; slot: ScheduleSlot } | null {
-  for (const i of scheduleInstants(ctx.world, [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
+  for (const i of scheduleInstants(chatWorld(ctx), [schedule], clock, clock + horizonDays * MINUTES_PER_DAY)) {
     const slot = schedule.slots[i.slot];
     if (i.edge === "start" && slot && !overriddenAt(reg, ctx, schedule, entity, i.at)) return { at: i.at, slot };
   }

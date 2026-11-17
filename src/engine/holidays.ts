@@ -2,12 +2,12 @@
 // story has taken off, with those it changed and those it added over them (`calendar.holiday` events,
 // kept in the pack's slice by the holiday's id). A day off or a named day is a holiday, `dayOff` or not.
 
-import type { JsonObject, JsonValue } from "../../../shared/json";
-import { isRecord } from "../../../shared/json";
-import type { DateRule, HolidayDef } from "../../../shared/world";
-import { calendarOf } from "../../../engine/calendar";
-import { objOf, own, sliceOf } from "../../../engine/pack-kit";
-import type { ReadContext } from "../../../engine/registry";
+import type { JsonObject, JsonValue } from "../shared/json";
+import { isRecord } from "../shared/json";
+import type { DateRule, HolidayDef, WorldDoc } from "../shared/world";
+import { type Calendar, calendarOf } from "./calendar";
+import { objOf, own, sliceOf } from "./pack-kit";
+import type { ReadContext } from "./registry";
 
 export const CALENDAR_PACK = "calendar";
 
@@ -53,7 +53,7 @@ export function holidaysOf(ctx: Pick<ReadContext, "world" | "state">): HolidayDe
   const kept = keptHolidays(ctx.state);
   const out: HolidayDef[] = [];
   const seen = new Set<string>();
-  for (const h of calendarOf(ctx.world).def.holidays) {
+  for (const h of ctx.world.calendar.holidays) {
     seen.add(h.id);
     const k = own(kept, h.id);
     if (isRecord(k) && k.removed === true) continue;
@@ -65,4 +65,28 @@ export function holidaysOf(ctx: Pick<ReadContext, "world" | "state">): HolidayDe
     if (typeof k.label === "string" && k.label !== "" && rule !== null) out.push({ id, label: k.label, rule, dayOff: k.dayOff === true });
   }
   return out;
+}
+
+const derived = new WeakMap<WorldDoc, WeakMap<JsonObject, WorldDoc>>();
+
+/**
+ * The world as this chat has it: the pinned document, its calendar holding the holidays as the story
+ * changed them (`holidaysOf`). Everything that reads a day against the calendar (a routine's days, a
+ * schedule's `except`, a business's trading days, a formula's `holiday`) takes the world from here, so
+ * a holiday moved, added or taken off in play is the holiday it reads. The pinned document itself when
+ * the story has touched none.
+ */
+export function chatWorld(ctx: Pick<ReadContext, "world" | "state">): WorldDoc {
+  const kept = keptHolidays(ctx.state);
+  if (Object.keys(kept).length === 0) return ctx.world;
+  let byKept = derived.get(ctx.world);
+  if (!byKept) derived.set(ctx.world, (byKept = new WeakMap()));
+  let doc = byKept.get(kept);
+  if (!doc) byKept.set(kept, (doc = { ...ctx.world, calendar: { ...ctx.world.calendar, holidays: holidaysOf(ctx) } }));
+  return doc;
+}
+
+/** The calendar of `chatWorld`: dates and holidays as this chat has them. */
+export function calendarIn(ctx: Pick<ReadContext, "world" | "state">): Calendar {
+  return calendarOf(chatWorld(ctx));
 }

@@ -12,6 +12,7 @@ import { calendarOf, clockAt, dateAt, MINUTES_PER_DAY } from "../../../engine/ca
 import type { FixedBlock } from "../../../engine/plan-day";
 import { numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
+import { chatWorld } from "../../../engine/holidays";
 import { activeSlot, chatSchedulesIn, ownerRank, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { routineSettingsOf } from "../../../shared/routines";
 import { homeOf, workPlace } from "./places";
@@ -100,7 +101,7 @@ function personPlaceFor(ctx: ReadContext, who: EntityId, at: number): PlaceId | 
   for (const s of chatSchedulesIn(ctx)) {
     if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who) || scheduleOff(ctx.state, who, s.id, at)) continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const a = activeSlot(ctx.world, s, at);
+    const a = activeSlot(chatWorld(ctx), s, at);
     if (a && typeof a.slot.value === "string" && (!best || rank < best.rank)) best = { rank, place: a.slot.value };
   }
   return best?.place ?? null;
@@ -124,7 +125,7 @@ function authored(ctx: ReadContext, who: EntityId, start: number, end: number): 
   for (const s of chatSchedulesIn(ctx)) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who)) continue;
     const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
+    const edges = scheduleInstants(chatWorld(ctx), [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
     for (const e of edges) {
       if (e.edge !== "start" || scheduleOff(ctx.state, who, s.id, e.at)) continue;
       const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);

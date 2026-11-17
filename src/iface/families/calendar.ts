@@ -5,8 +5,8 @@
 // calendar is never edited.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
-import { calendarOf, dateAt, holidayDay } from "../../engine/calendar";
-import { holidaysOf, dateRuleOf } from "../../packs/calendar/core/holidays";
+import { dateAt, holidayDay } from "../../engine/calendar";
+import { calendarIn, dateRuleOf, holidaysOf } from "../../engine/holidays";
 import type { DateRule, HolidayDef } from "../../shared/world";
 import { TEXT, YES_NO } from "../kit";
 import { notAs, textArg, type OpContext, type Unread } from "../ops";
@@ -46,7 +46,7 @@ const calendar = readTool({
   required: [],
   example: { holiday: "Harvest Day" },
   read(r, args, reply) {
-    const cal = calendarOf(r.world);
+    const cal = calendarIn(r.ctx);
     const today = dateAt(cal, r.ctx.state.clock).dayIndex;
     const all = holidaysOf(r.ctx);
     const said = textArg(args, "holiday");

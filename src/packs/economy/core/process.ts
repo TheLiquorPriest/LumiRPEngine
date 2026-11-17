@@ -10,6 +10,7 @@ import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { FINANCE_EVENTS, featureOn } from "../../../shared/finance";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import type { EntityDef } from "../../../shared/world";
+import { chatWorld } from "../../../engine/holidays";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
 import { readPass } from "../../../engine/read-pass";
@@ -100,7 +101,7 @@ export function moneyStep(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext,
     if (!featureOn(level, "flows", toggles(ctx.world))) continue;
     const run = flowRunOf(ctx.state, flow.id);
     if (run.ended) continue;
-    for (const o of occurrences(ctx, flow.schedule, slot.start, slot.end, flow.start, flow.end)) tasks.push({ at: o.at, rank: 3, key: `flow:${flow.id}:${o.day}`, run: (r) => runOccurrence(hooks, r, flow, o.at, rng(`flow:${flow.id}:${o.at}`), false) });
+    for (const o of occurrences(chatWorld(ctx), flow.schedule, slot.start, slot.end, flow.start, flow.end)) tasks.push({ at: o.at, rank: 3, key: `flow:${flow.id}:${o.day}`, run: (r) => runOccurrence(hooks, r, flow, o.at, rng(`flow:${flow.id}:${o.at}`), false) });
     if (run.retry && run.retry.at > slot.start && run.retry.at <= slot.end) {
       const at = run.retry.at;
       tasks.push({ at, rank: 3, key: `retry:${flow.id}`, run: (r) => runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), true) });

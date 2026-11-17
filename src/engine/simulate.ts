@@ -39,6 +39,7 @@ import type { WorldDoc } from "../shared/world";
 import { stepTracks, type TrackChange } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working, type WorkingMark } from "./working";
+import { chatWorld } from "./holidays";
 import { minutesBetween } from "./world-state";
 import { clampUnitCap } from "./time-limits";
 
@@ -258,7 +259,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const since = ranTo(w.state);
   // The chat's own versions of schedules step with the world's (DESIGN §8, `schedule_override`).
   const schedules = chatSchedulesIn(w.ctx);
-  const instants = scheduleInstants(w.world, schedules, since, to);
+  const instants = scheduleInstants(chatWorld(w.ctx), schedules, since, to);
   const slots = slotsEnding(cal, since, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
