@@ -209,8 +209,6 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       step = "keeping what was carried of each chat";
       const notes = layout ? layout.notes : null;
       for (const c of report.imports) if (c.outcome === "imported" || c.outcome === "replaced") keepCarried(db, sources.userId, c.chatId, chatCarried({ report, db, s, chat: c.chatId, notes }));
-      // The report holds no name a chat holds (Carry-16): each character is named by RPE's own id of it from here on; the briefing above took the names it tells.
-      for (const c of report.carried.minds.characters) c.name = c.character;
       // The store keeps the worlds the run carried, which Build and play read: what today's side changed since a run put it is followed where RPE's copy is still the run's, and what he changed or removed in RPE stays (R-79).
       step = "keeping the worlds the chats play";
       const kept = followWorlds(db, s.worlds, sources.userId);

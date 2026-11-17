@@ -31,8 +31,8 @@ export interface MindsCarried {
   unlisted: number;
   /** The cast's rows written: each version on the turn that first held it on its path, and each removal. */
   rows: number;
-  /** Each character a file was attached to: its chat, the cast's id and name, today's entity, and the files. */
-  characters: { chat: string; character: string; name: string; entity: string; files: string[] }[];
+  /** Each character a file was attached to: its chat, the cast's id (the report holds no name), today's entity, and the files. */
+  characters: { chat: string; character: string; entity: string; files: string[] }[];
   /**
    * The rest of the versions the rehearsal counts in today's areas (every area document of every chat,
    * whatever its fate), by why this run put them on no record. Of the chats it imported: in areas no
@@ -126,7 +126,7 @@ export async function carryMinds(input: { db: Database; store: Store; s: UserSto
         const version = attachFile(db, { user: s.id, turn: turn.id, by: MIGRATION_WRITER, agent: null, now: input.now }, person.id, mind.file, change.now.text);
         writes.push({ character: person.id, part: "mind", item, value: { kind: "imported", file: mind.file, version, entity: mind.entity, filed: false } });
         const key = `${turn.chat}\u0000${person.id}`;
-        const entry = characters.get(key) ?? { chat: turn.chat, character: person.id, name: person.name, entity: mind.entity, files: [] };
+        const entry = characters.get(key) ?? { chat: turn.chat, character: person.id, entity: mind.entity, files: [] };
         if (!entry.files.includes(mind.file)) entry.files.push(mind.file);
         characters.set(key, entry);
       }

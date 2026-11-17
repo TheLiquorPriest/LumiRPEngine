@@ -76,9 +76,9 @@ describe("what today's build recorded beside each turn", () => {
     const minds = report.carried?.minds;
     expect(minds?.versions).toBe(report.rows.find((r) => r.row === "mind-files")?.inside?.count);
     expect(minds).toMatchObject({ unlisted: 0, untied: 0, shared: 0, gone: 0, apart: [] });
-    expect(minds?.characters.map((c) => [c.name, c.entity, c.files])).toEqual([
-      [PEOPLE.ada.name, "e-ada", ["core.md", "memory.md"]],
-      [PEOPLE.bo.name, "e-bo", ["profile.md"]],
+    expect(minds?.characters.map((c) => [c.entity, c.files])).toEqual([
+      ["e-ada", ["core.md", "memory.md"]],
+      ["e-bo", ["profile.md"]],
     ]);
     const text = reportText(report);
     const what = report.rows.find((r) => r.row === "mind-files")?.what ?? "";

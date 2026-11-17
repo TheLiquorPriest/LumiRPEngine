@@ -57,14 +57,15 @@ describe("what his characters perceived", () => {
       const at = (hour: number) => ({ data, env: fixture.named, tree, now: () => new Date(`2026-11-14T${String(hour).padStart(2, "0")}:00:00.000Z`) });
       expect((await migrate(fixture.sources, at(9))).ran).toBe(true);
       // In RPE, before the chat is played: Bo, whom today's side never pinned, is pinned a principal.
-      look(data, (db, s) => {
+      const boId = look(data, (db, s) => {
         const bo = findCharacter(db, USER, chatLine(s, CHAT.harness), PEOPLE.bo.name);
         if (bo === null) throw new Error("Bo has no character");
         pinCasting(db, USER, bo.id, "principal");
+        return bo.id;
       });
       const second = await migrate(fixture.sources, at(10));
       expect(second.ran).toBe(true);
-      expect(second.report.carried?.story.pinsKept).toEqual([{ chat: CHAT.harness, character: PEOPLE.bo.name, standing: "principal" }]);
+      expect(second.report.carried?.story.pinsKept).toEqual([{ chat: CHAT.harness, character: boId, standing: "principal" }]);
       look(data, (db, s) => {
         const line = chatLine(s, CHAT.harness);
         expect(findCharacter(db, USER, line, PEOPLE.bo.name)?.pinned).toBe("principal");

@@ -286,7 +286,7 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
       const now = findCharacter(db, s.id, line, character)?.pinned ?? null;
       const was = input.earlier.get(what);
       if (now !== wanted && (was === undefined ? now !== null : hashJson(now) !== was)) {
-        out.pinsKept.push({ chat, character: findCharacter(db, s.id, line, character)?.name ?? character, standing: now });
+        out.pinsKept.push({ chat, character, standing: now });
         continue;
       }
       if (now !== wanted) pinCasting(db, s.id, character, wanted);
