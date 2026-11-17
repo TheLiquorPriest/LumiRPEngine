@@ -46,9 +46,11 @@ export interface AreaOp {
   touches?(value: JsonValue): readonly AreaPart[];
   /**
    * The operations that undo it, in order, given its value and the slice just before it applied and now; null when it has no reverse.
-   * Whether a part was written since is the store's to say (by the marks): this is asked only when nothing was.
+   * Whether a part was written since is the store's to say (by the marks) for the parts `touches` names: this is asked only when nothing
+   * was. An area that keeps its own record of which write set what (and so declares no parts) answers `"changed_since"` when a later
+   * write set a field this one set, whatever its value is now.
    */
-  undo?(value: JsonValue, before: Readonly<JsonObject>, now: Readonly<JsonObject>): { op: string; value: JsonValue }[] | null;
+  undo?(value: JsonValue, before: Readonly<JsonObject>, now: Readonly<JsonObject>): { op: string; value: JsonValue }[] | null | "changed_since";
 }
 
 /** An area as it registers with the store. */

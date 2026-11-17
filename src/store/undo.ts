@@ -225,6 +225,7 @@ function writtenSince(c: ChangeRow, parts: readonly { ref: string; part: string 
 function reverseArea(c: ChangeRow, area: { id: string; name: string; def: AreaOp; initial: JsonObject }, before: StoreState, now: StoreState): ChangeInput[] | Report {
   if (writtenSince(c, area.def.touches?.(c.value) ?? [], now)) return leftOf("changed_since", c);
   const inputs = area.def.undo?.(c.value, before.areas?.[area.id] ?? area.initial, now.areas?.[area.id] ?? area.initial) ?? null;
+  if (inputs === "changed_since") return leftOf("changed_since", c);
   if (inputs === null) return leftOf("not_reversible", c);
   return inputs.map((i) => ({ lane: c.lane, op: `${area.id}.${i.op}`, value: i.value, precision: c.precision, standing: c.standing }));
 }

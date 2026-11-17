@@ -211,4 +211,25 @@ describe("a character's record", () => {
     expect([pinIn(CHAT), pinIn("chat-b")]).toEqual(["supporting", null]);
     expect(baseHistory(t.db, USER, bram, "chat-b").map((v) => v.text)).toEqual(["Wants a quiet life.", "Wants to leave."]);
   });
+
+  test("undoing a write is changed since once a later turn wrote one of its fields, though it wrote the same words; a field nobody wrote since is taken back", async () => {
+    const t = await openTable();
+    const bram = await cast(t, "Bram Holloway");
+    const one = await t.begin();
+    const [made] = await t.write(one, [{ character: bram, part: "mind", item: null, value: { text: "He knows.", kind: "hiding" } }]);
+    await t.tie(one);
+    const two = await t.begin();
+    await t.write(two, [{ character: bram, part: "mind", item: made?.item ?? "", value: { text: "He knows." } }]);
+    await t.tie(two);
+    const change = t.s.changes(one.id).find((c) => c.op === "cast.write")?.id ?? 0;
+    expect(await t.writes.run(() => t.s.undo(change))).toEqual({ changes: [], left: [{ code: "changed_since", values: { change, op: "cast.write" } }] });
+    const three = await t.begin();
+    const [other] = await t.write(three, [{ character: bram, part: "mind", item: null, value: { text: "He hides." } }]);
+    await t.tie(three);
+    const four = await t.begin();
+    await t.write(four, [{ character: bram, part: "mind", item: other?.item ?? "", value: { kind: "wary" } }]);
+    await t.tie(four);
+    const first = t.s.changes(three.id).find((c) => c.op === "cast.write")?.id ?? 0;
+    expect((await t.writes.run(() => t.s.undo(first))).left).toEqual([]);
+  });
 });

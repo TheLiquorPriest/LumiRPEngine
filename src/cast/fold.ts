@@ -12,7 +12,6 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import { jsonEqual } from "../shared/json-patch";
 import type { AreaChange, AreaOp, AreaOutcome, StoreArea } from "../store";
 
 /** The area's name: its operations are `cast.<op>`. */
@@ -142,27 +141,34 @@ function apply(slice: Readonly<JsonObject>, change: AreaChange): AreaOutcome {
   return { slice: after as unknown as JsonObject, ...(reports.length > 0 ? { reports } : {}) };
 }
 
-/** What undoing a write takes: the fields it set put back as they stood, those the item had none of taken away; an item it made is struck. Null when a later write changed what it set. */
-function undo(value: JsonValue, before: Readonly<JsonObject>, now: Readonly<JsonObject>): { op: string; value: JsonValue }[] | null {
+/**
+ * What undoing a write takes: the fields it set put back as they stood, those the item had none of taken away; an item it made is struck.
+ * Changed since, as the store says it, when a later write set or took away a field this one did, whatever its value is now: the item's
+ * rows are the record of which write set what, the write's own row sitting right after the rows the item had just before it.
+ */
+function undo(value: JsonValue, before: Readonly<JsonObject>, now: Readonly<JsonObject>): { op: string; value: JsonValue }[] | null | "changed_since" {
   const v = value as unknown as WriteValue;
   const was = (before as unknown as CastSlice).items[v.character]?.[v.item];
   const is = (now as unknown as CastSlice).items[v.character]?.[v.item];
   if (is === undefined) return null;
-  const nowOf = fieldsOf(is.rows);
-  // What the write set must stand as it left it: a field written since is not this change's to take back.
-  for (const [field, set] of Object.entries(v.value)) if (!jsonEqual(field === "drop" ? nowOf.dropped : nowOf.fields[field], set)) return null;
+  const first = was?.rows.length ?? 0;
+  const mine = is.rows[first];
+  const set = mine?.value ?? v.value;
+  const away = mine?.unset ?? v.unset ?? [];
+  const wrote = new Set([...Object.keys(set), ...away]);
+  if (is.rows.slice(first + 1).some((row) => Object.keys(row.value).some((f) => wrote.has(f)) || (row.unset ?? []).some((f) => wrote.has(f)))) return "changed_since";
   const same = { character: v.character, part: v.part, item: v.item, agent: v.agent ?? null };
   if (was === undefined) return [{ op: WRITE_OP, value: { ...same, value: { drop: true } } }];
   const beforeOf = fieldsOf(was.rows);
   const restore: JsonObject = {};
   const unset: string[] = [];
-  for (const field of Object.keys(v.value)) {
+  for (const field of Object.keys(set)) {
     if (field === "drop") restore.drop = beforeOf.dropped;
     else if (Object.hasOwn(beforeOf.fields, field)) restore[field] = beforeOf.fields[field] as JsonValue;
     else unset.push(field);
   }
   // What it took away stands again.
-  for (const field of v.unset ?? []) if (Object.hasOwn(beforeOf.fields, field)) restore[field] = beforeOf.fields[field] as JsonValue;
+  for (const field of away) if (Object.hasOwn(beforeOf.fields, field)) restore[field] = beforeOf.fields[field] as JsonValue;
   return [{ op: WRITE_OP, value: { ...same, value: restore, ...(unset.length > 0 ? { unset } : {}) } }];
 }
 
