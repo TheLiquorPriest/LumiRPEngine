@@ -24,7 +24,7 @@ import { tierBand, tierLabel } from "../shared/tiers";
 import { formatMoney, trackOwner, type WorldDoc } from "../shared/world";
 import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calendar";
 import { setEntryOf } from "../engine/org";
-import { optionalQuery, own } from "../engine/pack-kit";
+import { objOf, optionalQuery, own, sliceOf } from "../engine/pack-kit";
 import { readPass } from "../engine/read-pass";
 import type { ReadContext } from "../engine/registry";
 import type { EntityState } from "../engine/state";
@@ -41,7 +41,7 @@ import { BLANK_REVISION, clockRecorded } from "./blank";
 import { settled, standing } from "./facts";
 import type { FoldEnv } from "./fold";
 import type { Fact, Mark, StoreState, Touched } from "./types";
-import type { View, ViewLine } from "./words";
+import { type Part, renderView, type View, type ViewLine } from "./words";
 import type { DueSource } from "./world-state";
 
 /** What a reading of the tree passes in beyond the state: what time brings due, and how far ahead a reflection counts it. */
@@ -248,22 +248,154 @@ function valueFields(v: ValueLine, facts: number): JsonObject {
   return out;
 }
 
+/** A place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
+type Stop = { place: string; at: string };
+
+/**
+ * A level's own lines as a query shows them at one indent (its own line, with its own values or none), kept so that a later query,
+ * or the tree made from this one over the next state, uses them, and their words, again rather than making and wording them afresh
+ * (PlanStore-S2 item 5). They are used only while everything they were made from is the same: the level as the tree holds it, its
+ * entity, the marks and facts on it, an agent's line on it, and what the game systems give it there (read again and compared). The
+ * world, the store's settings, and every entity's name, kind and groups are the same for every tree that shares them (`update`),
+ * and a reading's are its tree's alone: a reader is never shown a kept line a fresh query would not give.
+ */
+interface Kept {
+  node: Node;
+  entity: EntityState | undefined;
+  marks: Record<string, Mark> | undefined;
+  facts: Fact[] | undefined;
+  note: string | null;
+  /** What the game systems gave its values (`systemLines`); null for a level shown without them. */
+  systems: ValueLine[] | null;
+  /** The parts of the state they were read from, where the store knows them (`systemReads`). */
+  reads: unknown[] | null;
+  lines: ViewLine[];
+  stops: Stop[];
+  /** Its lines worded, by the part that worded them. */
+  words: Map<Part, string>;
+  /** The last tree that found it current (`serial`). */
+  seen: number;
+  /** It with the levels below it a query shows, by how many levels further down the query goes (`Block`). */
+  blocks: Map<number, Block>;
+}
+
+/**
+ * A level's kept lines with the blocks of the levels below it that a query shows, in the tree's order: what a query gives of that
+ * part of the tree, as data and worded, kept while it is made of the same kept lines.
+ */
+interface Block {
+  own: Kept;
+  children: Block[];
+  stops: Stop[];
+  /** The last tree that found every level in it current. */
+  seen: number;
+  lines: ViewLine[] | null;
+  words: Map<Part, string>;
+}
+
+/** A block's lines in order. */
+function linesOf(b: Block): ViewLine[] {
+  if (b.lines !== null) return b.lines;
+  const out = [...b.own.lines];
+  for (const c of b.children) for (const line of linesOf(c)) out.push(line);
+  b.lines = out;
+  return out;
+}
+
+/** A block worded by `part`: each level's lines worded once, and the block's words kept with it. */
+function wordsOf(b: Block, part: Part): string {
+  let text = b.words.get(part);
+  if (text !== undefined) return text;
+  let own = b.own.words.get(part);
+  if (own === undefined) b.own.words.set(part, (own = renderView(b.own.lines, part)));
+  const texts = own === "" ? [] : [own];
+  for (const c of b.children) {
+    const t = wordsOf(c, part);
+    if (t !== "") texts.push(t);
+  }
+  text = texts.join("\n");
+  b.words.set(part, text);
+  return text;
+}
+
+/** Whether two levels' values from the game systems are the same lines. */
+function sameValues(a: readonly ValueLine[] | null, b: readonly ValueLine[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] as ValueLine;
+    const y = b[i] as ValueLine;
+    if (x.key !== y.key || x.value !== y.value || x.mark !== y.mark || x.paused !== y.paused || x.from?.system !== y.from?.system || x.from?.ref !== y.from?.ref || x.from?.name !== y.from?.name) return false;
+  }
+  return true;
+}
+
+/** An entity's name, kind and the groups it belongs to: what the lines of other levels read of it. */
+function seenByOthers(a: EntityState, b: EntityState): boolean {
+  if (a.name !== b.name || a.kind !== b.kind) return false;
+  const groups = (e: EntityState): string => e.relations.flatMap((r) => (r.type === "member_of" ? [r.to] : [])).join("\u0000");
+  return groups(a) === groups(b);
+}
+
+/**
+ * What the game systems' values are read from in a tree's state (`systemParts`), and the persons and groups there that carry a cash
+ * account (`coinParties`): kept beside the tree for the trees made from it (`changedSince`).
+ */
+interface Carried {
+  parts: { orgs: unknown; where: Record<string, unknown>; weather: number } | null;
+  coin: Set<string> | null;
+}
+
+/** What a tree made from another needs of that one to tell what may read differently in it (`changedSince`), until it has. */
+interface Since {
+  state: StoreState;
+  notes: ReadonlyMap<string, string>;
+  carried: Carried;
+  taken: ReadonlySet<string>;
+  moved: readonly string[];
+}
+
+/** A tree made from another's (`update`): whether it shares that one's kept lines, the levels it holds anew, and the things whose data changed. */
+interface Updated {
+  shares: boolean;
+  taken: Set<string>;
+  moved: string[];
+}
+
+/** Each tree's number, by which a kept level knows the last tree that found it current. */
+let trees = 0;
+
 export class TreeView {
   private readonly nodes = new Map<string, Node>();
   private readonly doc: WorldDoc;
   /** Agents' own lines by the level each names now. */
   private readonly notes = new Map<string, string>();
   private readonly ctx: ReadContext;
-  /** While a query runs: each place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
-  private stopsSeen: Map<string, { place: string; at: string }> | null = null;
+  /** While a query or a level's lines are made: each place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
+  private stopsSeen: Map<string, Stop> | null = null;
   /** While a reading that passed one runs: what time brings due, for the reflections. */
   private reading: ViewReading | null = null;
   /** The story's open threads with the levels each names, read once (`threads`). */
   private openThreads: { id: string; refs: string[]; fields: JsonObject }[] | null = null;
-  /** Each query with no reading, answered once (`query`). */
-  private readonly asked = new Map<string, ViewLine[]>();
   /** Whether a chain of holders looped and a level was put elsewhere to break it: a tree made from this one is built afresh. */
   private loopsBroken = false;
+  /** This tree's number (`Kept.seen`). */
+  private readonly serial = ++trees;
+  /** Each level's lines kept, by its ref, a slot for each indent with its values and without (`keptOf`): shared with the tree this one was made from where nothing they read of other levels changed (`update`). */
+  private readonly kept: Map<string, Kept[]>;
+  /** The same for each reading: this tree's own, as what falls due moves with the clock. */
+  private readonly keptRead = new Map<DueSource, Map<number, Map<string, Kept[]>>>();
+  /** Each group's members' names, by the group (`members`). */
+  private membersOf: Map<string, string[]> | null = null;
+  /** What the game systems' values are read from in this state, and who carries a cash account: kept for the trees made from this one. */
+  private readonly carried: Carried = { parts: null, coin: null };
+  /** The tree this one was made from where it shares its kept lines (0: none), and what telling what changed since needs of it (`changedSince`), until told. */
+  private readonly madeFrom: number;
+  private from: Since | null = null;
+  /** What may read differently here than in the tree this one was made from (`changedSince`): undefined until asked, null where nothing tells. */
+  private since: { own: Set<string>; under: Set<string> } | null | undefined;
+  /** What `same` found of each part a kept level was made from, set beside this tree's. */
+  private readonly sameAs = new WeakMap<object, { now: unknown; equal: boolean }>();
 
   /**
    * `prev`, a tree over a state this one was folded from, lets the tree be made from it where the world's places are the same (`update`):
@@ -282,13 +414,19 @@ export class TreeView {
     const same = was !== undefined && was.revision === state.world.revision && madePlacesOf(was) === madePlacesOf(state.world) && chatDraftOf(was) === chatDraftOf(state.world);
     // The world as this chat plays it: its own places and those play made or changed (`prev`'s, where those are the same).
     this.doc = same && prev !== undefined ? prev.doc : this.ctx.world;
-    readPass(() => {
-      if (same && prev !== undefined && this.update(prev)) this.readNotes();
+    const made = readPass((): Updated | null => {
+      const updated = same && prev !== undefined ? this.update(prev) : null;
+      if (updated !== null) this.readNotes();
       else {
         this.nodes.clear();
         this.build();
       }
+      return updated;
     });
+    const from = made !== null && made.shares && prev !== undefined && prev.options === options ? prev : null;
+    this.kept = from !== null ? from.kept : new Map();
+    this.madeFrom = from !== null ? from.serial : 0;
+    if (from !== null && made !== null) this.from = { state: from.state, notes: from.notes, carried: from.carried, taken: made.taken, moved: made.moved };
   }
 
   /** The world as the chat plays it. */
@@ -501,14 +639,18 @@ export class TreeView {
   /**
    * The tree over this state made from `prev`'s, the tree over a state this one was folded from (PlanStore-S2 item 5): the levels
    * nothing changed are `prev`'s own; each thing that changed is placed again, and every level above where it was and where it is, or
-   * whose own last change moved, is summed again. False, with nothing kept, where a thing's presence, kind or being gone changed, a
-   * level the tree adds emptied, or a chain of holders loops: the tree is built afresh, as it gives the same.
+   * whose own last change moved, is summed again. Null, with nothing kept, where a thing's presence, kind or being gone changed, a
+   * level the tree adds emptied, or a chain of holders loops: the tree is built afresh, as it gives the same. `shares` where no thing
+   * that changed changed its name, its kind or its groups, which the lines of other levels read: the levels' kept lines are `prev`'s.
+   * `taken`: the levels this tree holds anew; `moved`: the things whose data changed.
    */
-  private update(prev: TreeView): boolean {
+  private update(prev: TreeView): Updated | null {
     const before = prev.state.world.entities;
     const now = this.state.world.entities;
     const ids = Object.keys(now);
-    if (prev.loopsBroken || ids.length !== Object.keys(before).length) return false;
+    if (prev.loopsBroken || ids.length !== Object.keys(before).length) return null;
+    let shares = true;
+    const moved: string[] = [];
     for (const [ref, node] of prev.nodes) this.nodes.set(ref, node);
     // A level is `prev`'s until this tree writes it: copied then, once.
     const mine = new Set<string>();
@@ -524,18 +666,25 @@ export class TreeView {
     const sorted = new Set<string>();
     for (const id of ids) {
       const e = now[id] as EntityState;
+      // An entity a pack's event copied with the rest of the world, holding what it held, is unchanged (and `same` knows it).
       if (e === before[id]) continue;
+      if (Bun.deepEquals(e, before[id], true)) {
+        this.sameAs.set(before[id] as EntityState, { now: e, equal: true });
+        continue;
+      }
       const ref = `entity:${id}`;
       const was = prev.nodes.get(ref);
       const category = this.categoryOf(e);
-      if (was === undefined || was.category !== category || was.gone !== isGone(this.state.world, id)) return false;
+      if (was === undefined || was.category !== category || was.gone !== isGone(this.state.world, id)) return null;
+      if (shares && !seenByOthers(e, before[id] as EntityState)) shares = false;
+      moved.push(id);
       const parent = this.entityParent(e, category);
-      if (!this.nodes.has(parent)) return false;
+      if (!this.nodes.has(parent)) return null;
       const node = take(ref);
       if (node.parent !== parent) {
         const from = take(node.parent as string);
         from.children = from.children.filter((c) => c !== ref);
-        if (from.children.length === 0 && (from.kind === "groups" || from.kind === "elsewhere")) return false;
+        if (from.children.length === 0 && (from.kind === "groups" || from.kind === "elsewhere")) return null;
         dirty.add(from.ref);
         take(parent).children.push(ref);
         sorted.add(parent);
@@ -561,13 +710,13 @@ export class TreeView {
       for (const r of chain.reverse()) depth.set(r, ++d);
       return depth.get(ref) as number;
     };
-    for (const ref of dirty) if (depthOf(ref) < 0) return false;
+    for (const ref of dirty) if (depthOf(ref) < 0) return null;
     const up = new Set<string>();
     for (const ref of dirty) for (let at: string | null = ref; at !== null && !up.has(at); at = this.nodes.get(at)?.parent ?? null) up.add(at);
     for (const ref of [...up].sort((a, b) => (depth.get(b) ?? 0) - (depth.get(a) ?? 0))) this.sumUp(take(ref));
     const opens = this.opensOf();
     for (const [ref, node] of this.nodes) if (node.open !== (opens.get(ref) ?? 0)) take(ref).open = opens.get(ref) ?? 0;
-    return true;
+    return { shares, taken: mine, moved };
   }
 
   /** The tree ref `at` names: `world`, `groups`, `elsewhere`, `place:<id>`, `entity:<id>`, or a bare id (a place before an entity). */
@@ -718,11 +867,46 @@ export class TreeView {
    * balance once the account is open (until then its opening amount, the world's own value, which no
    * change wrote), so it is that account's posting mark, with the least exact precision of any posting.
    */
-  private coinMark(who: string): { mark?: Mark } {
-    const account = cashAccount(this.ctx, who);
-    if (account === null || !isOpened(this.state.world, account, openerOf(this.state.world, account))) return {};
+  private coinMark(account: string): { mark?: Mark } {
+    if (!isOpened(this.state.world, account, openerOf(this.state.world, account))) return {};
     const mark = this.state.marks[`entity:${account}`]?.posted;
     return mark ? { mark } : {};
+  }
+
+  /**
+   * What the game systems keep their own way, for an entity: where play said it is within its place besides its square, which the
+   * place's map shows (a named zone, words, or both); a person's or a group's coin; and what its own account has posted.
+   */
+  private entitySystems(node: Node): ValueLine[] {
+    const out: ValueLine[] = [];
+    const where = whereOf(this.state.world, node.id);
+    if (where?.zone !== undefined) out.push({ key: "zone", value: where.zone, from: { system: "space" } });
+    if (where?.words !== undefined) out.push({ key: "position", value: where.words, from: { system: "space" } });
+    if (node.category === "person" || node.category === "group") {
+      // The coin a person or a group carries is the cash account they carry (`economy.carried_cash`): none, no coin.
+      const account = cashAccount(this.ctx, node.id);
+      const cash = account === null ? null : (optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null);
+      if (account !== null && cash !== null) out.push({ key: "coin", value: formatMoney(cash, this.doc.currency), from: { system: "economy" }, ...this.coinMark(account) });
+    }
+    const posted = this.state.world.accounts[node.id];
+    const mark = this.state.marks[node.ref]?.posted;
+    if (posted !== undefined) out.push({ key: "posted", value: formatMoney(posted, this.doc.currency), from: { system: "economy" }, ...(mark ? { mark } : {}) });
+    return out;
+  }
+
+  /** Each group's members' names, by the group: read once for the tree. */
+  private members(): Map<string, string[]> {
+    if (this.membersOf !== null) return this.membersOf;
+    const out = new Map<string, string[]>();
+    for (const m of Object.values(this.state.world.entities)) {
+      for (const g of new Set(m.relations.flatMap((r) => (r.type === "member_of" ? [r.to] : [])))) {
+        const names = out.get(g);
+        if (names) names.push(m.name);
+        else out.set(g, [m.name]);
+      }
+    }
+    this.membersOf = out;
+    return out;
   }
 
   /** A level's values: system values first, then its own, then (with `inherited`) what it takes from the levels above it. */
@@ -768,16 +952,7 @@ export class TreeView {
       const e = this.state.world.entities[node.id] as EntityState;
       lines.push({ key: "tier", value: tierLabel(doc, e.tier), ...(marks.tier ? { mark: marks.tier } : {}) });
       if (e.life !== undefined) lines.push({ key: "life", value: e.life, ...(marks.life ? { mark: marks.life } : {}) });
-      // Where play said it is within its place besides its square, which the place's map shows: a named zone, words, or both.
-      const where = whereOf(this.state.world, node.id);
-      if (where?.zone !== undefined) lines.push({ key: "zone", value: where.zone, from: { system: "space" } });
-      if (where?.words !== undefined) lines.push({ key: "position", value: where.words, from: { system: "space" } });
-      if (node.category === "person" || node.category === "group") {
-        const cash = optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null;
-        if (cash !== null) lines.push({ key: "coin", value: formatMoney(cash, doc.currency), from: { system: "economy" }, ...this.coinMark(node.id) });
-      }
-      const posted = this.state.world.accounts[node.id];
-      if (posted !== undefined) lines.push({ key: "posted", value: formatMoney(posted, doc.currency), from: { system: "economy" }, ...(marks.posted ? { mark: marks.posted } : {}) });
+      lines.push(...this.entitySystems(node));
       ownFields = e.fields;
       const rels = new Map<string, string[]>();
       for (const r of e.relations) {
@@ -787,10 +962,7 @@ export class TreeView {
       }
       for (const [type, targets] of rels) lines.push({ key: type, value: targets.join(", "), ...(marks[type] ? { mark: marks[type] } : {}) });
       if (node.category === "group") {
-        const members = Object.entries(this.state.world.entities)
-          .filter(([, m]) => m.relations.some((r) => r.type === "member_of" && r.to === node.id))
-          .map(([, m]) => m.name)
-          .sort();
+        const members = [...(this.members().get(node.id) ?? [])].sort();
         if (members.length > 0) lines.push({ key: "members", value: members.join(", ") });
       }
       if (inherited) above = this.aboveOf(node);
@@ -887,7 +1059,14 @@ export class TreeView {
     const ref = this.resolve(at);
     const node = ref === null ? undefined : this.nodes.get(ref);
     if (!node) return null;
-    return this.withReading(reading, () => readPass(() => this.levelLines(node, depth, shown)));
+    return this.withReading(reading, () =>
+      readPass(() => {
+        if (shown === "all") return this.levelLines(node, depth, shown);
+        const lines = [...this.keptOf(node, depth, shown, reading).lines];
+        if (reading === undefined) this.keepReads();
+        return lines;
+      }),
+    );
   }
 
   /** Runs `read` with the reading's due source (none: no reflection says anything of due). */
@@ -901,43 +1080,282 @@ export class TreeView {
   }
 
   /**
+   * What the game systems give a level shown with its own values, read afresh: whether they are what its kept lines were made from.
+   * For the world, every value it shows, its time among them.
+   */
+  private systemLines(node: Node): ValueLine[] {
+    if (node.kind === "world") return this.valuesOf(node, false);
+    if (node.kind === "entity") return this.entitySystems(node);
+    if (node.kind !== "place") return [];
+    // Read only: the level's own lines say where its chain up stopped.
+    const outer = this.stopsSeen;
+    this.stopsSeen = null;
+    try {
+      return this.placeSystems(node.id, false);
+    } finally {
+      this.stopsSeen = outer;
+    }
+  }
+
+  /** The orgs' slice, the space slice's `where` record and how far the player's character sees the weather, in this state: read once. */
+  private systemParts(): NonNullable<Carried["parts"]> {
+    const world = this.state.world;
+    this.carried.parts ??= { orgs: sliceOf(world, "orgs"), where: objOf(sliceOf(world, "space").where), weather: this.ctx.levelOf(this.ctx.world.pov, "weather") };
+    return this.carried.parts;
+  }
+
+  /**
+   * The parts of the state a level's values from the game systems are read from, where the store knows them: for a place, the orgs'
+   * slice (its entry: `setEntryOf` reads that and the world), how far the player's character sees the weather, and its region with
+   * the region's entity (its weather: `weather.sky` reads those and the world; which region is a place's stays while every entity's
+   * kind does, `update`); for an entity that is not a person or a group, where play says it is (the space slice's `where` record:
+   * `whereOf`) and its account's posted total. Where these hold what they held (`readsHold`), so do its values; null where the
+   * values are read afresh each time (a person's or a group's coin, the world's time).
+   */
+  private systemReads(node: Node): unknown[] | null {
+    const parts = this.systemParts();
+    if (node.kind === "place") {
+      const region = regionOf(this.ctx, node.id);
+      return [parts.orgs, parts.weather, region, own(this.state.world.entities, region ?? "")];
+    }
+    if (node.kind === "entity" && node.category !== "person" && node.category !== "group") return [own(parts.where, node.id), this.state.world.accounts[node.id]];
+    return null;
+  }
+
+  /** Whether what a kept level's values were read from (`systemReads`) holds in this tree what it held. */
+  private readsHold(before: readonly unknown[], node: Node): boolean {
+    const parts = this.systemParts();
+    if (node.kind === "place") return this.same(before[0], parts.orgs) && before[1] === parts.weather && this.same(before[3], own(this.state.world.entities, (before[2] as string | null) ?? ""));
+    return this.same(before[0], own(parts.where, node.id)) && before[1] === this.state.world.accounts[node.id];
+  }
+
+  /**
+   * Whether `was`, a part of the state a kept level was made from, holds what `now`, the same part of this tree's state, holds: the
+   * same, or (an object a pack's event copied with the rest of the world) equal to it, which is asked once for each in a tree.
+   */
+  private same(was: unknown, now: unknown): boolean {
+    if (was === now) return true;
+    if (typeof was !== "object" || was === null || typeof now !== "object" || now === null) return false;
+    const asked = this.sameAs.get(was);
+    if (asked !== undefined && asked.now === now) return asked.equal;
+    const equal = Bun.deepEquals(was, now, true);
+    this.sameAs.set(was, { now, equal });
+    return equal;
+  }
+
+  /** Whether the game systems give a kept level's values what they gave it: what they read holds what it held, or else what they give, read afresh. */
+  private systemsHold(was: Kept, node: Node): boolean {
+    if (was.reads !== null && this.readsHold(was.reads, node)) return true;
+    if (!sameValues(was.systems, this.systemLines(node))) return false;
+    was.reads = this.systemReads(node);
+    return true;
+  }
+
+  /** Keeps what the game systems' values were read from in this state, and who carries a cash account, so a tree made from this one tells what changed since (`changedSince`). */
+  private keepReads(): void {
+    this.systemParts();
+    this.coinParties();
+  }
+
+  /** The persons and groups that carry a cash account, whose coin a line shows (`entitySystems`): read once for the tree. */
+  private coinParties(): Set<string> {
+    if (this.carried.coin !== null) return this.carried.coin;
+    const out = new Set<string>();
+    for (const node of this.nodes.values()) if ((node.category === "person" || node.category === "group") && cashAccount(this.ctx, node.id) !== null) out.add(node.id);
+    this.carried.coin = out;
+    return out;
+  }
+
+  /**
+   * What may read differently in this tree than in the one it was made from (`madeFrom`), so that a level that one found current and
+   * nothing here names is current here too: the levels this tree holds anew (`update`); those whose marks, facts or agent's line
+   * changed; each place, where the orgs' slice, how far the player's character sees the weather or a region's entity changed; each
+   * thing where play says it is, or whose posted total, changed; each person or group that carries a cash account here or there; and
+   * the world. `under`: those and every level above them. Null where that tree's reads were never kept (`Carried`), or none was.
+   */
+  private changedSince(): { own: Set<string>; under: Set<string> } | null {
+    if (this.since !== undefined) return this.since;
+    const from = this.from;
+    this.from = null;
+    const was = from?.carried;
+    if (from === null || was?.parts == null || was.coin === null) {
+      this.since = null;
+      return null;
+    }
+    const changed = new Set<string>(from.taken);
+    changed.add("world");
+    // Each key of two records whose values differ (`deep`: as `same` tells), as the level it names.
+    const differ = (now: Readonly<Record<string, unknown>>, before: Readonly<Record<string, unknown>>, prefix: "" | "entity:", deep: boolean): void => {
+      if (now === before) return;
+      for (const key in now) if (deep ? !this.same(before[key], now[key]) : before[key] !== now[key]) changed.add(prefix + key);
+      for (const key in before) if (!Object.hasOwn(now, key)) changed.add(prefix + key);
+    };
+    differ(this.state.marks, from.state.marks, "", false);
+    differ(this.state.facts, from.state.facts, "", false);
+    for (const [ref, text] of this.notes) if (from.notes.get(ref) !== text) changed.add(ref);
+    for (const ref of from.notes.keys()) if (!this.notes.has(ref)) changed.add(ref);
+    const parts = this.systemParts();
+    const regions = from.moved.some((id) => kindIs(this.env.registry, this.doc, (this.state.world.entities[id] as EntityState).kind, "region"));
+    if (regions || was.parts.weather !== parts.weather || !this.same(was.parts.orgs, parts.orgs)) for (const node of this.nodes.values()) if (node.kind === "place") changed.add(node.ref);
+    if (!this.same(was.parts.where, parts.where)) differ(parts.where, was.parts.where, "entity:", true);
+    differ(this.state.world.accounts, from.state.world.accounts, "entity:", false);
+    for (const id of was.coin) changed.add(`entity:${id}`);
+    for (const id of this.coinParties()) changed.add(`entity:${id}`);
+    const under = new Set<string>();
+    for (const ref of changed) for (let at: string | null = ref; at !== null && !under.has(at); at = this.nodes.get(at)?.parent ?? null) under.add(at);
+    this.since = { own: changed, under };
+    return this.since;
+  }
+
+  /**
+   * A level's own lines at `indent` (its own line, with its own values or none), as kept (`Kept`): the kept ones where everything
+   * they were made from is the same in this tree, else made afresh and kept. A reading's are this tree's own.
+   */
+  private keptOf(node: Node, indent: number, shown: "own" | "none", reading: ViewReading | undefined): Kept {
+    let store = this.kept;
+    if (reading !== undefined) {
+      let byAhead = this.keptRead.get(reading.due);
+      if (!byAhead) this.keptRead.set(reading.due, (byAhead = new Map()));
+      let read = byAhead.get(reading.ahead);
+      if (!read) byAhead.set(reading.ahead, (read = new Map()));
+      store = read;
+    }
+    let slots = store.get(node.ref);
+    const slot = indent * 2 + (shown === "own" ? 1 : 0);
+    const was = slots?.[slot];
+    if (was !== undefined && (was.seen === this.serial || (reading === undefined && was.seen === this.madeFrom && this.changedSince()?.own.has(node.ref) === false))) {
+      was.seen = this.serial;
+      return was;
+    }
+    const entity = node.kind === "entity" ? this.state.world.entities[node.id] : undefined;
+    const marks = this.state.marks[node.ref];
+    const facts = this.state.facts[node.ref];
+    const note = this.notes.get(node.ref) ?? null;
+    if (was !== undefined && was.node === node && this.same(was.entity, entity) && was.marks === marks && was.facts === facts && was.note === note && (shown === "none" || this.systemsHold(was, node))) {
+      was.entity = entity;
+      was.seen = this.serial;
+      return was;
+    }
+    const reads = shown === "own" ? this.systemReads(node) : null;
+    const systems = shown === "own" ? this.systemLines(node) : null;
+    const outer = this.stopsSeen;
+    const stops = new Map<string, Stop>();
+    this.stopsSeen = stops;
+    let lines: ViewLine[];
+    try {
+      lines = this.levelLines(node, indent, shown);
+    } finally {
+      this.stopsSeen = outer;
+    }
+    const made: Kept = { node, entity, marks, facts, note, reads, systems, lines, stops: [...stops.values()], words: new Map(), seen: this.serial, blocks: new Map() };
+    if (!slots) store.set(node.ref, (slots = []));
+    slots[slot] = made;
+    return made;
+  }
+
+  /**
+   * A level below a query's point and the levels below it the query shows (`Block`): the kept block where every level in it is
+   * current in this tree, else made again of the levels' kept lines and blocks. `level` is how many levels down the query has gone,
+   * which the groups heading does not add to.
+   */
+  private blockOf(node: Node, indent: number, level: number, max: number, reading: ViewReading | undefined): Block {
+    const heading = node.kind === "groups";
+    const own = this.keptOf(node, indent, heading || level >= max ? "none" : "own", reading);
+    const was = own.blocks.get(max - level);
+    if (was !== undefined && (was.seen === this.serial || (reading === undefined && was.seen === this.madeFrom && this.changedSince()?.under.has(node.ref) === false))) {
+      was.seen = this.serial;
+      return was;
+    }
+    const below = level >= max && !heading ? [] : node.children;
+    // The kept block holds while each block below is the one it was made of; a new list is made only from the first that is not.
+    let children: Block[] | null = was !== undefined && was.children.length === below.length ? null : [];
+    for (let i = 0; i < below.length; i++) {
+      const b = this.blockOf(this.nodes.get(below[i] as string) as Node, indent + 1, heading ? level : level + 1, max, reading);
+      if (children === null) {
+        if (b === was?.children[i]) continue;
+        children = was?.children.slice(0, i) ?? [];
+      }
+      children.push(b);
+    }
+    if (children === null && was !== undefined) {
+      was.seen = this.serial;
+      return was;
+    }
+    const kids = children ?? [];
+    const made: Block = { own, children: kids, stops: [...own.stops, ...kids.flatMap((c) => c.stops)], seen: this.serial, lines: null, words: new Map() };
+    own.blocks.set(max - level, made);
+    return made;
+  }
+
+  /**
+   * A query's lines in three runs: the query point's own (with its values and what it inherits), made afresh; the blocks of the
+   * levels below it; and the lines that say where a chain of places, or an engine walk, stopped.
+   */
+  private gather(ref: string, depth: number | "full", reading: ViewReading | undefined): { own: ViewLine[]; blocks: Block[]; tail: ViewLine[] } {
+    const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
+    const stops = new Map<string, Stop>();
+    let mine: ViewLine[] = [];
+    const blocks: Block[] = [];
+    this.withReading(reading, () =>
+      readPass(() => {
+        const top = this.nodes.get(ref) as Node;
+        this.stopsSeen = stops;
+        try {
+          mine = this.levelLines(top, 0, "all");
+        } finally {
+          this.stopsSeen = null;
+        }
+        if (max > 0) for (const c of top.children) blocks.push(this.blockOf(this.nodes.get(c) as Node, 1, 1, max, reading));
+        if (reading === undefined) this.keepReads();
+      }),
+    );
+    for (const b of blocks) for (const s of b.stops) if (!stops.has(s.place)) stops.set(s.place, s);
+    const tail: ViewLine[] = [];
+    for (const s of stops.values()) tail.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });
+    for (const cut of walkCuts(this.state.world, this.doc)) tail.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
+    return { own: mine, blocks, tail };
+  }
+
+  /**
    * The tree at `at`, to `depth` levels below it (`full`: all of them): the level itself with its
    * values (and what it inherits), each level above the depth with its values and its levels, and
    * each level at the depth as its own line. The groups level is a heading: the groups in it stand
    * at its own depth, so the world at depth 1 has a line for each region and each group. Null when
    * nothing in the tree is called `at`. An engine walk cut short by its setting in this state or its
    * world adds a line saying where it stopped. With a reading, each reflection says what falls due
-   * under its level in the time ahead. A query with no reading is answered once per tree, and again from memory.
+   * under its level in the time ahead. The levels below the point are kept (`Block`): a query again,
+   * or after a change, makes only the levels it reached.
    */
   query(at: string, depth: number | "full", reading?: ViewReading): View | null {
     const ref = this.resolve(at);
     if (ref === null) return null;
-    const max = depth === "full" ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(depth));
-    const key = reading === undefined ? `${ref}\n${max}` : null;
-    const asked = key === null ? undefined : this.asked.get(key);
-    if (asked !== undefined) return { lines: [...asked] };
-    const lines: ViewLine[] = [];
-    this.stopsSeen = new Map();
-    this.withReading(reading, () =>
-      readPass(() => {
-        // `indent` is how far in a line stands; `level` how many levels down the query has gone, which the groups heading does not add to.
-        const walk = (r: string, indent: number, level: number): void => {
-          const node = this.nodes.get(r) as Node;
-          const heading = node.kind === "groups" && level > 0;
-          const atCut = level > 0 && level >= max && !heading;
-          lines.push(...this.levelLines(node, indent, atCut ? "none" : level === 0 ? "all" : heading ? "none" : "own"));
-          if (level >= max && !heading) return;
-          for (const c of node.children) walk(c, indent + 1, heading ? level : level + 1);
-        };
-        walk(ref, 0, 0);
-      }),
-    );
-    const stops = this.stopsSeen;
-    this.stopsSeen = null;
-    for (const s of stops.values()) lines.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });
-    for (const cut of walkCuts(this.state.world, this.doc)) lines.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
-    if (key !== null) this.asked.set(key, lines);
-    return { lines: [...lines] };
+    const { own: mine, blocks, tail } = this.gather(ref, depth, reading);
+    const lines = [...mine];
+    for (const b of blocks) for (const line of linesOf(b)) lines.push(line);
+    lines.push(...tail);
+    return { lines };
+  }
+
+  /**
+   * The query worded by `part`: what `renderView` gives of `query(at, depth, reading)`, each level below the query point worded
+   * once and kept with its lines, so a query after a change words only the levels the change reached (PlanStore-S2 item 5). `own`
+   * gives the query point's own lines as its caller shows them (a place's record added, `withPlaceLines`). Null when nothing in
+   * the tree is called `at`.
+   */
+  print(at: string, depth: number | "full", part: Part, reading?: ViewReading, own?: (lines: ViewLine[]) => ViewLine[]): string | null {
+    const ref = this.resolve(at);
+    if (ref === null) return null;
+    const { own: mine, blocks, tail } = this.gather(ref, depth, reading);
+    const texts: string[] = [];
+    const first = renderView(own ? own(mine) : mine, part);
+    if (first !== "") texts.push(first);
+    for (const b of blocks) {
+      const text = wordsOf(b, part);
+      if (text !== "") texts.push(text);
+    }
+    const last = renderView(tail, part);
+    if (last !== "") texts.push(last);
+    return texts.join("\n");
   }
 
   /** The horizon as the Author left it (`horizonOf`), each entry with the level it names now (null: none) and the depth it is shown at. */

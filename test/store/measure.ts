@@ -181,6 +181,10 @@ function treeMeasure(): void {
   const tb = performance.now();
   const view = store.viewOf(folded.state);
   const build = performance.now() - tb;
+  // The first whole print over a tree built afresh (as after a restart): every level made and worded once.
+  const tc = performance.now();
+  say(view, "world", "full");
+  const cold = performance.now() - tc;
   const queries: [string, number | "full"][] = [
     ["world", 1],
     ["region_2", 1],
@@ -192,7 +196,7 @@ function treeMeasure(): void {
     ["group_3", 0],
     ["world", 3],
   ];
-  console.log(`\nThe tree over ${entities} entities and ${Object.keys(world.places).length} places: built in ${ms(build)} (once per state, kept with it)`);
+  console.log(`\nThe tree over ${entities} entities and ${Object.keys(world.places).length} places: built in ${ms(build)} (once per state, kept with it); the whole world first printed over it in ${ms(cold)}`);
   for (const [at, depth] of queries) {
     let out = "";
     const r = time(`query(${at}, ${depth}), worded by the shipped part`, () => {
@@ -202,6 +206,32 @@ function treeMeasure(): void {
   }
   const whole = time("query(world, full), worded by the shipped part", () => say(view, "world", "full"));
   console.log(`  ${whole.label}, the whole world printed: median ${ms(whole.median)}`);
+  // The tree over each next state is made from the last one's, and its levels' words are kept with them: a print after a turn words
+  // only the levels the turn reached. An ordinary turn (time passes, Wren moves, she pays, her knife goes in or out of her satchel),
+  // and one that also holds a pack's event (the world is copied whole, so each level is compared by what it holds).
+  for (const [label, extra] of [
+    ["an ordinary turn", []],
+    ["a turn with a pack's event", [{ type: "space.where", data: { entity: POV, zone: "by the door" } } as unknown as LedgerEvent]],
+  ] as const) {
+    const made: number[] = [];
+    const printed: number[] = [];
+    for (let i = 0; i < RUNS + 2; i++) {
+      const turn = s.beginTurn({ chat: "c", kind: "normal" });
+      s.addChanges(turn.id, engine(tick(3), goTo(POV, i % 2 === 0 ? "room_0_0_0_0" : "room_0_0_0_1"), pay("acct_wren", 10, `Turn ${i}`), ...(i % 2 === 0 ? hand("knife", "satchel", POV) : hand("knife", POV, "satchel")), ...extra));
+      s.tieTurn(turn.id, { message: `${label} ${i}`, hash: hashOf(`${label} ${i}.`), date: i + 2 });
+      const state = s.headState("c").state;
+      const t0 = performance.now();
+      const next = store.viewOf(state);
+      const t1 = performance.now();
+      say(next, "world", "full");
+      const t2 = performance.now();
+      if (i >= 2) {
+        made.push(t1 - t0);
+        printed.push(t2 - t1);
+      }
+    }
+    console.log(`  after ${label}: its tree made from the last one's in ${ms(median(made))}; the whole world then printed in a median of ${ms(median(printed))}, best ${ms(Math.min(...printed))}`);
+  }
   store.close();
 }
 

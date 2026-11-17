@@ -103,8 +103,16 @@ export interface Part {
   body: Template;
 }
 
-/** Reads a part's text. A header or a template that cannot be read is refused, saying where. */
+/** Each part read, by its text, while anything holds it: a text read again is the same part, so what was worded with it is worded once (`TreeView.print`). */
+const partsRead = new Map<string, WeakRef<Part>>();
+const partLetGo = new FinalizationRegistry<string>((text) => {
+  if (partsRead.get(text)?.deref() === undefined) partsRead.delete(text);
+});
+
+/** Reads a part's text. A header or a template that cannot be read is refused, saying where. The same text gives the same part. */
 export function readPart(text: string, what = "the prompt part"): Part {
+  const known = partsRead.get(text)?.deref();
+  if (known !== undefined) return known;
   const all = (text.startsWith("\uFEFF") ? text.slice(1) : text).replace(/\r\n?/g, "\n").split("\n");
   let header: Record<string, unknown> = {};
   let body = all;
@@ -125,7 +133,10 @@ export function readPart(text: string, what = "the prompt part"): Part {
   if (isObject(header.lines)) for (const [name, said] of Object.entries(header.lines)) if (typeof said === "string") lines.set(name, Template.parse(said, `${what} (lines: ${name})`));
   const keys: Record<string, string> = {};
   if (isObject(header.keys)) for (const [code, said] of Object.entries(header.keys)) if (typeof said === "string") keys[code] = said;
-  return { header, lines, keys, body: Template.parse(body.join("\n"), what) };
+  const part: Part = { header, lines, keys, body: Template.parse(body.join("\n"), what) };
+  partsRead.set(text, new WeakRef(part));
+  partLetGo.register(part, text);
+  return part;
 }
 
 // ---------------------------------------------------------------- views as data
