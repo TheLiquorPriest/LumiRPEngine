@@ -58,7 +58,7 @@ export function pieceProblem(ctx: ReadContext, who: EntityId, item: EntityId): s
   if (!e || isGone(ctx.state, item) || !isThing(ctx, item)) return "is gone";
   if (e.fields.lost === true) return "is lost";
   const has = possessorOf(ctx, item);
-  if (has !== null && has !== who) return `is with ${labelOf(ctx, has)}`;
+  if (has !== null && has !== who) return say("why_is_with_has", { has: labelOf(ctx, has) });
   if (accessFor(ctx, who, item).use === null) return say("why_isnt_yours_to_use");
   return reachOf(ctx, who, item).reach === "away" ? say("why_isnt_with_you_or_close_by") : null;
 }

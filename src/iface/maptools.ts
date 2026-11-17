@@ -49,6 +49,7 @@ import { keepWhere, makeThing, moveTo, noSoft, putOnSupport, putThing } from "./
 import { type Found, isFound, type Reading } from "./reading";
 import { PROVENANCE_PROPERTIES, type Provenance, provenanceData, provenanceOf } from "./source";
 import { textOf } from "./texts";
+import { say as engineSay } from "../engine/lines";
 
 const FAMILY = "map";
 
@@ -553,7 +554,7 @@ function placePiece(o: OpContext, at: Found, p: PieceAsk, why: string, out: Json
     if (kept !== null) {
       const failed = bring(room);
       if (failed) return failed;
-      const words = p.near ? [`near ${o.reading.nameOf(p.near.id)}`] : [];
+      const words = p.near ? [engineSay("eng_near_id", { id: o.reading.nameOf(p.near.id) })] : [];
       const stays = keepWhere(o, id, { ...noSoft(), words, ...(p.zone !== undefined ? { zone: p.zone } : {}) });
       if (stays) return stays;
       flush();

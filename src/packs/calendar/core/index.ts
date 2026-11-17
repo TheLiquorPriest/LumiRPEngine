@@ -20,7 +20,7 @@ import type { PackDef } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
 import { mutableSlice, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
-import { say } from "../../../engine/lines";
+import { listOf, say } from "../../../engine/lines";
 import { buildCalendarView } from "./view";
 import { CALENDAR_PACK, calendarIn, dateRuleOf, holidaysOf } from "../../../engine/holidays";
 import dst from "./tables/modern-us/dst.json";
@@ -151,7 +151,7 @@ export const calendarPack: PackDef = {
         const lines = [level === 1 ? say("feed_time_part", { part: part }) : say("feed_time_offset_part", { offset: formatClock(cal, ctx.state.clock, offset), part: part.toLowerCase() })];
         if (level >= 4) {
           const today = holidaysOn(cal, dateAt(cal, ctx.state.clock + offset).dayIndex);
-          if (today.length > 0) lines.push(`Today is ${today.map((h) => h.label).join(" and ")}.`);
+          if (today.length > 0) lines.push(say("feed_today_is_holidays", { holidays: listOf(today.map((h) => h.label)) }));
         }
         if (clockPaused(ctx.world, ctx.state)) lines.push(say("feed_the_clock_is_paused_for_this_scene"));
         return lines;

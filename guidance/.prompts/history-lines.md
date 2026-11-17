@@ -2669,3 +2669,17 @@ lint_the_id_id_gives_away_a_secret: The id "{{id}}" gives away a secret ({{secre
 lint_label_may_use_only_lines_any_other: "{{label}}" may use only {{lines}}; any other macro, control character or <user>/<char>/<bot> would act beside engine values
 lint_open_name_close_isnt_an_engine_placeholder: {{open}}{{name}}{{close}} isn't an engine placeholder for a {{purpose}} step; it renders empty
 lint_open_name_close_isnt_a_placeholder_who_skill: {{open}}{{name}}{{close}} isn't a placeholder ({who}, {skill}, {attempt} or {against}), so the narrator is told it as written.
+eng_close_closing: close {{closing}}
+eng_near_id: near {{id}}
+eng_scope_unreadable_missing_id: scope unreadable: {{missing}} {{id}}
+feed_intends_intent: Intends: {{intent}}.
+feed_left_is_due_due: ; {{left}} is due {{due}}
+feed_left_is_past_due: ; {{left}} is past due
+feed_money_band: Money: {{band}}.
+feed_mood_mood: Mood: {{mood}}.
+feed_reactions_reactions: Reactions: {{reactions}}.
+feed_shows_depiction: Shows: {{depiction}}.
+feed_today_is_holidays: Today is {{holidays}}.
+fight_current_of_max_left:  ({{current}}{{#if_max}} of {{max}}{{/if_max}} left)
+fight_round_round: Round {{round}}.
+why_is_with_has: is with {{has}}

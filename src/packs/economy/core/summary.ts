@@ -23,7 +23,7 @@ const DAY = 1440;
 export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityId): MoneySummary {
   const level = ctx.levelOf(who, "money");
   const band = level >= 1 ? wealthOf(hooks, ctx, who) : null;
-  if (level < 2 || accountsOf(ctx, who).length === 0) return { lines: band ? [`Money: ${band}.`] : [], band, spendable: null, pressing: [] };
+  if (level < 2 || accountsOf(ctx, who).length === 0) return { lines: band ? [say("feed_money_band", { band: band })] : [], band, spendable: null, pressing: [] };
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   const cal = calendarOf(ctx.world);
   const day = (at: number): string => formatClock(cal, at).split(",")[0] ?? "";
@@ -50,7 +50,7 @@ export function moneySummary(hooks: FinanceHooks, ctx: ReadContext, who: EntityI
     const left = cycle ? cycle.minimum - cycle.paid : 0;
     let line = `${name} owes ${money(owed)}`;
     if (cycle && left > 0) {
-      line += cycle.stage !== "current" ? `; ${money(left)} is past due` : `; ${money(left)} is due ${day(cycle.due)}`;
+      line += cycle.stage !== "current" ? say("feed_left_is_past_due", { left: money(left) }) : say("feed_left_is_due_due", { left: money(left), due: day(cycle.due) });
       if (cycle.due - now <= 14 * DAY || cycle.stage !== "current") pressing.push({ label: name, cents: left, at: day(cycle.due) });
     }
     if (statusOf(ctx.state, id) !== "open") line += ` (${statusOf(ctx.state, id).replace(/_/g, " ")})`;

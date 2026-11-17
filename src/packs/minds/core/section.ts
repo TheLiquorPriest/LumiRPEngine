@@ -65,10 +65,10 @@ export function mindLines(ctx: ReadContext): MindLine[] {
     const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";
     if (secrecy === "full") {
       const parts = [say("feed_name_s_mind_monologue", { name: name, monologue: clause(m.monologue) })];
-      if (m.intent !== "") parts.push(`Intends: ${clause(m.intent)}.`);
-      if (m.reactions.length > 0) parts.push(`Reactions: ${m.reactions.map(clause).join("; ")}.`);
-      if (m.mood) parts.push(`Mood: ${clause(m.mood)}.`);
-      if (m.depiction !== "") parts.push(`Shows: ${clause(m.depiction)}.`);
+      if (m.intent !== "") parts.push(say("feed_intends_intent", { intent: clause(m.intent) }));
+      if (m.reactions.length > 0) parts.push(say("feed_reactions_reactions", { reactions: m.reactions.map(clause).join("; ") }));
+      if (m.mood) parts.push(say("feed_mood_mood", { mood: clause(m.mood) }));
+      if (m.depiction !== "") parts.push(say("feed_shows_depiction", { depiction: clause(m.depiction) }));
       if (m.interrupt) parts.push(say("feed_interrupts_the_skip_interrupt", { interrupt: clause(m.interrupt) }));
       out.push({ entity: id, name, line: parts.join(" "), ...(m.reason === "kept" ? { kept: true as const } : {}) });
       continue;

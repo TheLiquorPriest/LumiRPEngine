@@ -21,6 +21,7 @@ import type { TreeView } from "../store/view";
 import { JoinedTurnError, type StoreState, type TurnRow } from "../store/types";
 import type { Call, EngineDeps, IfaceSettings, Reply } from "./kit";
 import { type Lines, textOf } from "./texts";
+import { say } from "../engine/lines";
 
 /** What a name is wanted as. */
 export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track" | "quest" | "party" | "organization";
@@ -60,7 +61,7 @@ export type Unreadable = { missing: "chat" | "turn"; id: string; exist: string[]
 /** A scope found unreadable after a reading was made (a turn joined to another in between): thrown to the tool wrapper, which tells it as the fact. */
 export class ScopeError extends Error {
   constructor(readonly why: Unreadable) {
-    super(`scope unreadable: ${why.missing} ${why.id}`);
+    super(say("eng_scope_unreadable_missing_id", { missing: why.missing, id: why.id }));
     this.name = "ScopeError";
   }
 }

@@ -602,7 +602,7 @@ function writeParts(o: OpContext, id: string, name: string, opened: boolean): Un
   if (isUnread(shown)) return shown;
   if (shown !== undefined) add("show", "show", { shown });
   const closing = textArg(o.args, "close");
-  if (closing !== undefined) add("close", closing === "reopen" ? "reopen" : `close ${closing}`, { outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
+  if (closing !== undefined) add("close", closing === "reopen" ? "reopen" : say("eng_close_closing", { closing: closing }), { outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
   for (const [op, value] of plan) writeQuest(o, op, value);
   if (parts.length > 0) o.reply.line("quest_written", { n: o.n, op: o.op, what: `${name} [${id}]`, parts: textOf(parts) });
   return undefined;

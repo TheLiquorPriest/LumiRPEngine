@@ -33,6 +33,7 @@ import { nearestOf, type Found, type Want } from "./reading";
 import { PROVENANCE_PROPERTIES } from "./source";
 import { textOf } from "./texts";
 import { timeArg } from "./ops-time";
+import { say } from "../engine/lines";
 
 /** How a thing passed from one person to another, as the skill says it, to today's handover bases. */
 export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hold", lent: "loan", returned: "return", given: "gift", sold: "sale", traded: "trade", stolen: "theft" };
@@ -146,7 +147,7 @@ function placeOnMap(o: OpContext, who: EntityId, place: string | null, args: Jso
   if (place === null) {
     if (square !== undefined) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["at"] } };
     if (zone !== undefined) soft.zone = zone;
-    if (near !== undefined) soft.words.push(`near ${o.reading.nameOf(near.id)}`);
+    if (near !== undefined) soft.words.push(say("eng_near_id", { id: o.reading.nameOf(near.id) }));
     return undefined;
   }
   const grid = o.call.deps.grid;

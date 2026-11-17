@@ -210,7 +210,7 @@ class FightLines {
         continue;
       }
       const verb = (now < was ? "lose" : "gain") + (id === ctx.world.pov ? "" : "s");
-      const left = seen ? ` (${seen.current}${seen.max !== null ? ` of ${seen.max}` : ""} left)` : "";
+      const left = seen ? say("fight_current_of_max_left", { current: seen.current, max: seen.max, if_max: seen.max !== null }) : "";
       this.push(`${capital(who)} ${verb} ${Math.abs(now - was)} ${hpName(ctx, this.rules)}${left}.`);
     }
   }
@@ -320,7 +320,7 @@ function advance(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): voi
   if (!enc || !next || record(w, [next], rng.seed).length === 0) return;
   lines.happened = true;
   const now = encounterOf(w.state);
-  if (now && now.round > enc.round && !stalled(w, rules, rng.fork("calm"), lines) && now.order[now.turn]?.id !== w.world.pov) lines.push(`Round ${now.round}.`);
+  if (now && now.round > enc.round && !stalled(w, rules, rng.fork("calm"), lines) && now.order[now.turn]?.id !== w.world.pov) lines.push(say("fight_round_round", { round: now.round }));
 }
 
 /** One option of a participant's turn: an action and the participant it targets, with its odds. */
