@@ -459,8 +459,9 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     }
   }
   // Settings → Agents → Context's pins, by role, which today's build hands each role in every chat before the workspace's own.
-  const settings = json(await today.userView.read("settings.json"));
-  const roles = isRecord(settings) && isRecord(settings.agents) && isRecord(settings.agents.context) && isRecord(settings.agents.context.roles) ? settings.agents.context.roles : {};
+  const engineSettings = json(await today.userView.read("settings.json"));
+  const context = isRecord(engineSettings) && isRecord(engineSettings.agents) ? engineSettings.agents.context : null;
+  const roles = isRecord(context) && isRecord(context.roles) ? context.roles : {};
   const contextPins = Object.entries(roles).flatMap(([role, c]): [string, string[]][] => (isRecord(c) && Array.isArray(c.pins) ? [[role, c.pins.filter((p): p is string => typeof p === "string" && p.trim() !== "").map((p) => p.trim())]] : []));
   // Each chat's into its own notes folder, placed as RPE places the chat: by its name and its character's, as Lumiverse has them.
   for (const id of [...new Set([...history.carried, ...latest.keys(), ...learned.keys()])].sort()) {
