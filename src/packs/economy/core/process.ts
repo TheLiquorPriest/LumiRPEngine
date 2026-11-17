@@ -11,6 +11,7 @@ import { FINANCE_EVENTS, featureOn } from "../../../shared/finance";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import type { EntityDef } from "../../../shared/world";
 import { chatWorld } from "../../../engine/holidays";
+import { say } from "../../../engine/lines";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
 import { readPass } from "../../../engine/read-pass";
@@ -144,7 +145,7 @@ function planTasks(hooks: FinanceHooks, slot: SlotInfo, ctx: ReadContext, rng: (
         run: (r) => {
           const ran = runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), false);
           const paid = ran?.outcome === "paid";
-          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan.id, status: paid ? "done" : "dropped", at, reason: paid ? null : (ran?.reason ?? "the payment didn't go through") } }]);
+          r.emit([{ type: MINDS_EVENTS.plan, data: { entity, plan: plan.id, status: paid ? "done" : "dropped", at, reason: paid ? null : (ran?.reason ?? say("flow_why_failed")) } }]);
         },
       },
     ];
