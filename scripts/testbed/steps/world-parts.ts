@@ -202,19 +202,33 @@ export function secondRevision(): Op[] {
   ];
 }
 
-/** Where the third revision's adopted entry points: the book's entry carrying an earlier build's secrecy fields (`book` step). */
+/** Where the adopted entry points: the book's entry carrying an earlier build's secrecy fields (`book` step). */
 export interface LegacyEntryRef {
   bookId: string;
   legacyEntryId: string;
 }
 
 /**
- * The third revision: the parts the starter and the first two revisions leave empty. No chat is
- * upgraded to it, so every chat already played keeps the prompt it played with. Each value is one
- * the world's own lint takes without an error (on `main`, `src/engine/authoring.ts:160-165` for the
- * caps and `suppressed`, `:312-346` for sections and their wording, `:347-355` for step templates).
+ * The world file Build's Import is given (`lumirpengine import <file>`, on `main`
+ * `src/backend/worlds.ts:664-669`): the first revision as exported, holding one adopted entry's
+ * source in `suppressed`. No patch may change that part (`PATCH_PROTECTED`, `worlds.ts:83-87`,
+ * `:594`), so a world holds it only when it arrives in a world file, as one from an earlier build
+ * does (`suppressed`, a retired design the format keeps: `src/shared/world.ts:1324-1325`).
  */
-export function thirdRevision(book: LegacyEntryRef): Op[] {
+export function withAdoptedEntry(exported: unknown, book: LegacyEntryRef): { [key: string]: unknown } {
+  if (exported === null || typeof exported !== "object" || !("world" in exported)) throw new Error("the exported world file holds no world document");
+  const world = exported.world;
+  if (world === null || typeof world !== "object" || Array.isArray(world)) throw new Error("the exported world file holds no world document");
+  return { ...exported, world: { ...world, suppressed: [{ bookId: book.bookId, entryId: book.legacyEntryId }] } };
+}
+
+/**
+ * The third revision: the parts the starter, the first revision and its import leave empty. No chat
+ * is upgraded to it, so every chat already played keeps the prompt it played with. Each value is
+ * one the world's own lint takes without an error (on `main`, `src/engine/authoring.ts:164-165` for
+ * the caps, `:312-346` for sections and their wording, `:347-355` for step templates).
+ */
+export function thirdRevision(): Op[] {
   return [
     // A section of the world's own with a pack-rendered id, so its lines have a source (`section_unfed`, authoring.ts:343).
     {
@@ -225,10 +239,11 @@ export function thirdRevision(book: LegacyEntryRef): Op[] {
     // The world's wording of a built-in section it still has without listing it (`builtInSectionsOf` keeps Minds once it lists its own).
     { op: "add", path: "/sectionTemplates", value: { minds: "What each person in Port Alder has on their mind, each scoped to what that person knows.\n{{lines}}" } },
     { op: "add", path: "/steps/harbor_brief", value: { id: "harbor_brief", purpose: "brief", template: "Keep the brief to the docks, the shop and the people the player character can see; name each as the world names them.", output: "text", signals: [] } },
-    // An adopted entry's source, a retired design the format keeps (on `main`, `src/shared/world.ts:1324-1325`).
-    { op: "add", path: "/suppressed/-", value: { bookId: book.bookId, entryId: book.legacyEntryId } },
     { op: "add", path: "/spawnCap", value: 30 },
     { op: "add", path: "/placeCap", value: 40 },
     { op: "add", path: "/placesPerTurn", value: 3 },
+    // The world's own tidy-up switch, a world-level setting a chat's own choice stands over: on unless
+    // a world says otherwise (on `main`, `src/shared/things.ts:512,599,678`, read at `src/backend/view.ts:349`).
+    { op: "add", path: "/packs/gear/config/tidy", value: { auto: false } },
   ];
 }

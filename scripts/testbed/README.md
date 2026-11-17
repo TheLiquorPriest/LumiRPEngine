@@ -56,22 +56,34 @@ Then the instance user's play, in this order:
 | `settings` | Model choices naming the Lumiverse connection (the agents engine's main agent, the GM assistant); location, regard and handed things set to ask first. |
 | `own` | An agent (`tide_reader`) and a skill (`harbor_round`) of the user's own, an edited harness text (`main.system`), an edited engine text (`harness.guidance.name`), and `~/GUIDANCE.md`. |
 | `book` | A World Info book with an entry holding two secret marks (both known only to Dale Whitcomb), the engine's own fields on that entry, and an entry with an earlier build's secrecy fields moved by Build's Secrecy page (its backup is in `secrecy/`). |
-| `world` | A world from the modern starter with the `modern` ruleset profile and invented parts: a map in 100 m squares (a town block), lore of its own (one held only by Dale, one behind a gate, one known by), a lore index, pins and books, a club, a quest, a vehicle, money, a routine, needs, minds and the rest; committed. Then its lore index entry built into the book, and a Check world job. |
+| `world` | A world from the modern starter with the `modern` ruleset profile and invented parts: a map in 100 m squares (a town block), lore of its own (one held only by Dale, one behind a gate, one known by), a lore index, pins and books, a club, a quest, a vehicle, money, a routine, needs, minds and the rest; committed. Then Build's Export of it, the file given one adopted entry in `suppressed` (a part no patch may change), and Build's Import of that file: the imported world is the test world from then on, the first kept beside it. Then its lore index entry built into the book, and a Check world job. |
 | `chats` | A character card and a chat on each engine: classic, agents, harness. |
 | `classic` | Two turns, a second swipe of the first reply, a palette tap staged and taken by the next message, ✎ fixes, a GM edit, a confirm chip answered, a money move done at once off screen, a player-claims marker, the player's character told one of the book's two secrets, a GM assistant thread, and the first reply's swipe flipped back. |
 | `agents` | A typed turn and a panel action played at once; a GM edit and its Undo; the last reply's text edited; the first message edited and Keep pressed; files in the agents engine's workspace, learned area and global workspace; the first reply deleted with turns after it; review cards, one change applied and one left waiting; a later message edited and Discard pressed (tombstones). |
-| `revision` | A second world revision with the classic chat upgraded to it; then, after the classic chat's turns, the revision that fills the parts that change how the classic pipeline plays (the world's own section, the wording of a built-in one, a step template, an adopted entry, the caps), to which no chat is upgraded; then a draft left standing (a reply saved as lore). The read-back names which chats play which revision. |
+| `revision` | A second world revision with the classic chat upgraded to it; then, after the classic chat's turns, the revision that fills the parts that change how the classic pipeline plays (the world's own section, the wording of a built-in one, a step template, the caps), to which no chat is upgraded; then a draft left standing (a reply saved as lore). The read-back names which chats play which revision. |
 | `pause` | A branch of the classic chat with a turn of its own, and the classic chat paused on keep-or-discard and left so, with a ✎ fix sent while it waits. |
 | `leftovers` | A world chat with a staged tap, deleted in Lumiverse (its `runs/<chat>/` stays), and the one file no row names, `testbed-unclassified.txt`, at the top of the engine's per-user storage. From here on, the run checks after every step that the file is still there. |
 | `harness` | The story prepared (cast, cores, notebook), turns with the jobs after them (the principals' own mind files), one review-card change applied and the rest left, a GM assistant thread in a side session, and a palette tap left staged. |
 
-The steps that fill the rest of §15.2's stores by play run where `make-instance.ts` places them (`lib/instance/stores.ts`). Then what is planted, after all play (`lib/instance/planted.ts`): a damaged file today's reader then sets aside itself (`.corrupt-<ms>`) and a `.tmp`; item 4's two cases in a chat of their own that nothing opens after them; the depth engine's kinds; and a line against a turn's decisions on a harness reply's record. Last, the read-back.
+The steps that fill the rest of §15.2's stores by play come after `harness`, in the order `lib/instance/stores.ts` gives (among them: a reply stopped with Lumiverse's own stop route, a reply whose generation fails because the instance user's runtime is stopped mid-reply and started again, the extension restarted mid-reply, and an invented preset made active for today's RPEngine blocks, the earlier one put back after). On the classic and agents engines a turn can stop on a question about a thing the player's words name; the player answers each with Add and presses Regenerate, as the page's player does (`lib/instance/claims.ts`). Then what is planted, after all play (`lib/instance/planted.ts`, `lib/instance/planted-harness.ts`): a damaged file today's reader then sets aside itself (`.corrupt-<ms>`) and a `.tmp`; item 4's two cases in a chat of their own that nothing opens after them; the depth engine's kinds; a line against a turn's decisions on a harness reply's record; the reasons for a reply with no turn played that play cannot make; search vectors; a harness `session.json`; a chat's story choice and `database.json`. Whatever is planted over a file or a record the extension may hold in memory is planted with the extension switched off (Lumiverse's Disable) and on again after. Last, the read-back.
 
 All of it is invented; the world starts from the engine's own shipped starter.
 
+### What depends on the model, and the values the script fixes
+
+A row that only a model's answer can fill is made in this order (READINGS R-201), each only when the one before has failed on the bed: by play with settings a user of today's build sets; by play again, pressing Retry on the failed turn's flag (its Regenerate) as its user would; planted last, with the extension off, in the shape today's code writes it, and named in the read-back as planted with the reason. The pending compaction rollback is such a row: its chat (`stores-kept`) plays on "Main agent decides" with no stage of the main agent's own, so the main agent's one send is the final review, whose session compacts.
+
+| Value | Where | What |
+|---|---|---|
+| `KEPT_REGENERATES` = 3 | `lib/instance/stores.ts` | Presses of Retry on a failed kept turn before play is given up on (R-201 (b)). |
+| `KEPT_AGENTS` | `lib/instance/stores.ts` | The kept chat's settings: pipeline `main`, every stage `auto`, Smart persistence on, compaction past 1 token keeping 0 turns. |
+| 4 s | `lib/instance/claims.ts` | How often the player looks for a claim question during a reply. |
+| 1536M, swap 0, OOM 1000 | the bed's unit for each run | The run's memory cap; killed first under pressure. |
+| install 15 min, `up` 10 min, `down` 3 min, linked 3 min | `lib/instance/setup-lumiverse.ts`, `setup-runtime.ts` | The set-up's waits. |
+
 ## The read-back, the second run and the golden copy
 
-`report.ts` reads every part of the world document (every part today's build declares, the optional ones included) and every row of §15.2 by today's build's own reads as the instance's user, and goes to disk only where no read of today's build reaches a store, saying so row by row. It never opens the chat that holds item 4's planted cases through the engine, whose reader would set them aside. Each row says how it was made (play, set-up or planted) and how it was read; ids are kept under `ids` and what the model chose under `played`, which `compare.ts` sets aside and asks only to be there.
+`report.ts` reads every part of the world document (every part today's build declares, the optional ones included) and every row of §15.2 by today's build's own reads as the instance's user, and goes to disk only where no read of today's build reaches a store, saying so row by row. It never opens the chat that holds item 4's planted cases through the engine, whose reader would set them aside. Each row says how it was made (play, set-up or planted) and how it was read; ids are kept under `ids` and what the model chose under `played`, which `compare.ts` sets aside and asks only to be there, printing each such field as compared for presence only. A row that waits on another package (the browser preferences, set by the live driver in its own profile) is listed with `WAITS`, not failed. Beside `report.json` it writes `report.sha256` and `report.record.json`: `{checksum, waiting, passes}`, the fields a golden copy keeps.
 
 Made twice from nothing: make a second empty Lumiverse from the same checkout (the bed's own script), give it a data folder, runtime home, instance folder, ports and runtime names of its own, run `make-instance.ts` there, and compare the two `report.json`. Remove the second Lumiverse, its runtime units and folders once compared.
 
@@ -82,10 +94,10 @@ export BED_ROOT=<the instance's root> BED_MARK=<its mark file> RUNTIME_HOME="$LR
 export BED_SKIP="<its checkout> <its caches> <this folder's copy> <its logs>"
 export BED_UNITS="<the instance user's runtime unit> <the second user's runtime unit> <its Lumiverse unit>"
 bash golden.sh take <archive>.tar.zst
-cp "$LRE_INSTANCE_DIR/report.sha256" <archive>.tar.zst.report.sha256     # the read-back's checksum, kept beside the copy
+cp "$LRE_INSTANCE_DIR/report.record.json" <archive>.tar.zst.record.json   # its checksum, the rows still waiting, whether the rest passed
 
 bash golden.sh restore <archive>.tar.zst
-bun report.ts --expect "$(cat <archive>.tar.zst.report.sha256)"            # the same instance: exits 1 on any other checksum
+bun report.ts --expect "$(jq -r .checksum <archive>.tar.zst.record.json)"   # the same instance: exits 1 on any other checksum
 ```
 
 The floor test and `recheck.ts` below read the command line's sign-in from `$LRE_INSTANCE_DIR/config/lumirpengine/credentials.json` (`lib/lumiverse.ts`). For them, sign today's command line in there once: `XDG_CONFIG_HOME="$LRE_INSTANCE_DIR/config" LUMIVERSE_PASSWORD=… bun "$LRE_DATA_DIR/extensions/lumi_rp_engine/repo/dist/lumirpengine.js" login --url "$LRE_HOST_URL" --username <user>`.
@@ -127,4 +139,17 @@ For checking a build after fixes: one line, a continue of its reply and two swip
 ```sh
 bun recheck.ts edit <chat>          # before a cutover: appends one sentence to the newest reply in Lumiverse
 bun recheck.ts play <chat> [line]   # on RPE: a line, a continue, two swipes
+```
+
+## The owner's road on the instance (`road.ts`)
+
+`docs/migration.md` has the owner switch the installed extension's branch, approve its permissions and, going back, switch it off and on again, in Lumiverse's Extensions page; and play a message in a migrated chat. `road.ts` makes those same requests as the instance's user (it reads no RPE code and none of RPE's data), with the instance scripts' environment above (`LRE_HOST_URL`, `LRE_RUNTIME_HOME`, `LRE_OWNER_*`) and the sign-in today's command line saved for the owner.
+
+```sh
+bun road.ts ext                        # the extension: branch, status, the permissions it asks for and those granted
+bun road.ts switch <branch>            # Switch branch (the extension's storage is kept)
+bun road.ts approve                    # approve every permission the build asks for that is not granted yet
+bun road.ts offon                      # switch the extension off, then on again
+bun road.ts chats                      # the user's chats
+bun road.ts say [--connection <name>] <chat> <line…>   # a message as the player, Send (on that connection, as choosing it for the chat does), and the reply waited for
 ```

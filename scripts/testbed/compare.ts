@@ -8,14 +8,17 @@
 // when there is none.
 
 import { readFileSync } from "node:fs";
-import { compareReports } from "./lib/instance/compare-core";
+import { compareReports, presenceOnly } from "./lib/instance/compare-core";
 
 const [first, second] = process.argv.slice(2);
 if (first === undefined || second === undefined) {
   console.error("usage: bun compare.ts <first report.json> <second report.json>");
   process.exit(2);
 }
-const differences = compareReports(JSON.parse(readFileSync(first, "utf8")), JSON.parse(readFileSync(second, "utf8")));
+const firstDoc: unknown = JSON.parse(readFileSync(first, "utf8"));
+const secondDoc: unknown = JSON.parse(readFileSync(second, "utf8"));
+for (const field of presenceOnly(firstDoc, secondDoc)) console.log(`compared for presence only (the model chose it): ${field}`);
+const differences = compareReports(firstDoc, secondDoc);
 for (const line of differences) console.log(line);
 console.log(differences.length === 0 ? "the same, ids aside" : `${differences.length} difference(s)`);
 process.exit(differences.length === 0 ? 0 : 1);

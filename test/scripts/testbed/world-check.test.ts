@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { emptyParts, partSizes, revisionNumbers, unknownParts, WORLD_PARTS } from "../../../scripts/testbed/lib/instance/world-check";
-import { thirdRevision } from "../../../scripts/testbed/steps/world-parts";
+import { thirdRevision, withAdoptedEntry } from "../../../scripts/testbed/steps/world-parts";
 
 type Doc = { [part: string]: unknown };
 
@@ -26,7 +26,7 @@ function apply(doc: Doc, ops: { op: string; path: string; value: unknown }[]): D
 function beforeLastParts(): Doc {
   const doc: Doc = {};
   for (const part of WORLD_PARTS) doc[part] = { one: 1 };
-  Object.assign(doc, { format: "lre-world-v1", id: "w_0000000000000001", name: "Invented harbour", seedMode: "fresh", lenientPricing: false, pov: "pov" });
+  Object.assign(doc, { format: "lre-world-v1", id: "w_0000000000000001", name: "Invented harbour", seedMode: "fresh", lenientPricing: false, pov: "pov", packs: { gear: { version: 1, config: {} } } });
   doc.sections = {};
   doc.steps = {};
   doc.suppressed = [];
@@ -40,15 +40,26 @@ describe("a world with every part filled", () => {
     expect(empty.sort()).toEqual(["placeCap", "placesPerTurn", "sectionTemplates", "sections", "spawnCap", "steps", "suppressed"].sort());
   });
 
-  test("the last revision fills every part the earlier ones left empty", () => {
-    const filled = apply(beforeLastParts(), thirdRevision({ bookId: "book-invented", legacyEntryId: "entry-invented" }));
+  /** The first revision as Build's Import makes it a world, its file given the adopted entry, then the last revision. */
+  function madeAsTheStepsMakeIt(): Doc {
+    const file = withAdoptedEntry({ format: "lre-world-export-v1", world: beforeLastParts() }, { bookId: "book-invented", legacyEntryId: "entry-invented" });
+    if (!isDoc(file.world)) throw new Error("the import file lost its world");
+    return apply(file.world, thirdRevision());
+  }
+
+  test("the import and the last revision fill every part the earlier ones left empty", () => {
+    const filled = madeAsTheStepsMakeIt();
     expect(emptyParts(filled)).toEqual([]);
-    expect(partSizes(filled).suppressed).toBe(1);
+    expect(filled.suppressed).toEqual([{ bookId: "book-invented", entryId: "entry-invented" }]);
     expect(unknownParts(filled)).toEqual([]);
   });
 
+  test("without the import's adopted entry, suppressed is the one part left empty", () => {
+    expect(emptyParts(apply(beforeLastParts(), thirdRevision()))).toEqual(["suppressed"]);
+  });
+
   test("a switch set to off and a count are values; a blank name is not", () => {
-    const doc = apply(beforeLastParts(), thirdRevision({ bookId: "b", legacyEntryId: "e" }));
+    const doc = madeAsTheStepsMakeIt();
     doc.name = "";
     expect(emptyParts(doc)).toEqual(["name"]);
     expect(partSizes(doc).lenientPricing).toBe(1);

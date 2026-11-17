@@ -25,6 +25,7 @@ import { say } from "../record";
 import type { Ctx, Step } from "../context";
 import { userStorage } from "../env";
 import { chatOf, newWorldChat } from "../../steps/chats";
+import { withExtensionOff } from "./planted-harness";
 
 /** One planted thing as the record names it (the read-back's `Planted`, `rows.ts`). */
 export interface PlantedRecord {
@@ -80,14 +81,17 @@ export const readerWrites: Step = {
     const chatId = await stagedChat(ctx, "reader-cases", "Port Alder test · reader cases");
     await ctx.log.once("planted:reader-writes", async () => {
       const journalRel = `runs/${chatId}/journal.json`;
-      const journal = readObject(ctx, journalRel);
-      const run = journal.run;
-      if (!isObject(run) || typeof run.runSeed !== "string") throw new Error(`the reader-cases chat's journal names no run seed: ${journalRel}`);
-      // The same journal stamped with another run's seed: `decodeJournal` resets it as "from another run of this chat".
-      plant(ctx, journalRel, JSON.stringify({ ...journal, run: { ...run, runSeed: `${run.runSeed}-an-earlier-run` } }));
-      // A chips file cut off mid-list: `chips.ts:77` reads it through `readStoredJson`, which sets it aside.
       const chipsRel = `runs/${chatId}/chips.json`;
-      plant(ctx, chipsRel, '[{"id":"confirm:an-earlier-turn","kind":"confirm","label":"Dale hands');
+      // With the extension off, the journal it may still hold from the staged tap can't be written over the planted one.
+      await withExtensionOff(ctx, "planted", async () => {
+        const journal = readObject(ctx, journalRel);
+        const run = journal.run;
+        if (!isObject(run) || typeof run.runSeed !== "string") throw new Error(`the reader-cases chat's journal names no run seed: ${journalRel}`);
+        // The same journal stamped with another run's seed: `decodeJournal` resets it as "from another run of this chat".
+        plant(ctx, journalRel, JSON.stringify({ ...journal, run: { ...run, runSeed: `${run.runSeed}-an-earlier-run` } }));
+        // A chips file cut off mid-list: `chips.ts:77` reads it through `readStoredJson`, which sets it aside.
+        plant(ctx, chipsRel, '[{"id":"confirm:an-earlier-turn","kind":"confirm","label":"Dale hands');
+      });
       record(ctx, "reader-writes", [
         { row: "reader-writes", kind: "journal from another run of the chat", made: "planted", where: "storage", path: journalRel },
         { row: "reader-writes", kind: "damaged file today's reader would set aside", made: "planted", where: "storage", path: chipsRel },
@@ -104,9 +108,11 @@ export const setAside: Step = {
     const chatId = await newWorldChat(ctx, "set-aside", "Port Alder test · set-aside leftover");
     await ctx.log.once("planted:set-aside", async () => {
       const dir = `runs/${chatId}`;
-      // Written before anything of the engine's has read the chat's staged action, so its cache is cold
-      // (`staged.ts:39-47` keeps what it read per user and chat) and the page's read goes to the file.
-      plant(ctx, `${dir}/staged.json`, '{"action":"go","request":{"to":"alder');
+      // Written with the extension off, so whatever its cache already holds of the chat's staged action
+      // goes with its worker (`staged.ts:39-47` keeps what it read per user and chat; making the chat
+      // and attaching its world has the running extension read it: the bed's first run found no copy
+      // set aside), and the page's first read after Enable goes to the file.
+      await withExtensionOff(ctx, "planted", async () => plant(ctx, `${dir}/staged.json`, '{"action":"go","request":{"to":"alder'));
       await ctx.player.state(chatId);
       const aside = readdirSync(join(userStorage(ctx.env, ctx.userId), dir)).filter((f) => f.startsWith("staged.json.corrupt-"));
       if (aside.length !== 1) throw new Error(`today's reader set aside ${aside.length} copies of the damaged staged.json in ${dir}, where one was expected`);
@@ -130,7 +136,7 @@ export const depthKinds: Step = {
     const chatId = await chatOf(ctx, "classic");
     const markChat = await chatOf(ctx, "agents");
     if (chatId === null || markChat === null) throw new Error("the chats step must run first");
-    await ctx.log.once("planted:depth-files", async () => {
+    await ctx.log.once("planted:depth", async () => {
       const run = `runs/${chatId}`;
       const files: [string, string, unknown][] = [
         ["depth/day-spend.json", "day's spend", { v: 1, day: DEPTH_DAY, tokens: 18450 }],
@@ -145,22 +151,27 @@ export const depthKinds: Step = {
         [`${run}/bootstrap/spool/00000.json`, "bootstrap of the chat: the spool of messages", { v: 1, messages: [{ id: "m-invented-1", text: "Monday comes in grey and cool off the lake." }] }],
         [`${run}/bootstrap/jobs/survey.json`, "bootstrap of the chat: a job's recorded answer", { v: 1, answer: "Jordan works at Alder Automotive and walks to the marina before shifts." }],
       ];
-      for (const [rel, , value] of files) plant(ctx, rel, JSON.stringify(value));
+      // With the extension off, a change of the agents chat's metadata reaches no handler of today's that could write its preferences again.
+      await withExtensionOff(ctx, "planted", async () => {
+        for (const [rel, , value] of files) plant(ctx, rel, JSON.stringify(value));
+        const chat = await ctx.host.chat(markChat);
+        const own = chat.metadata?.lumi_rp_engine;
+        if (own === null || typeof own !== "object" || Array.isArray(own)) throw new Error("the agents chat holds no engine metadata to mark");
+        const prefs = "prefs" in own && own.prefs !== null && typeof own.prefs === "object" ? own.prefs : {};
+        // Lumiverse's own partial merge of a chat's metadata, one top-level key replaced (Lumiverse `src/routes/chats.routes.ts:470-500`).
+        await ctx.host.call("PATCH", `/api/v1/chats/${markChat}/metadata`, { lumi_rp_engine: { ...own, prefs: { ...prefs, engineFrom: "default" } } });
+      });
       record(ctx, "depth-files", files.map(([rel, kind]) => ({ row: "depth" as const, kind, made: "planted" as const, where: "storage" as const, path: rel })));
-    });
-    await ctx.log.once("planted:depth-mark", async () => {
-      const chat = await ctx.host.chat(markChat);
-      const own = chat.metadata?.lumi_rp_engine;
-      if (own === null || typeof own !== "object" || Array.isArray(own)) throw new Error("the agents chat holds no engine metadata to mark");
-      const prefs = "prefs" in own && own.prefs !== null && typeof own.prefs === "object" ? own.prefs : {};
-      // Lumiverse's own partial merge of a chat's metadata, one top-level key replaced (Lumiverse `src/routes/chats.routes.ts:470-500`).
-      await ctx.host.call("PATCH", `/api/v1/chats/${markChat}/metadata`, { lumi_rp_engine: { ...own, prefs: { ...prefs, engineFrom: "default" } } });
       record(ctx, "depth-mark", { row: "depth", kind: "a chat's mark that its engine came from the default", made: "planted", where: "chat-metadata", path: "lumi_rp_engine.prefs.engineFrom", chat: "chat:agents" });
     });
   },
 };
 
-/** A line against its turn's decisions on the harness chat's last reply, in its record in the journal and in the reply's metadata. */
+/**
+ * A line against its turn's decisions on a harness reply's record, in its record in the journal and in the reply's metadata: on the
+ * newest reply of the harness chat whose record is in one piece. A long turn's record is split in chunks over the message's metadata
+ * (`lumi_rp_engine:<n>`, the record's key then holding only the chunks' count and hash), and a split record is not planted on.
+ */
 export const departures: Step = {
   name: "departures",
   makes: "a line against its turn's decisions on a harness reply's record (planted: nothing on today's build writes one)",
@@ -170,25 +181,35 @@ export const departures: Step = {
     await ctx.log.once("planted:departures", async () => {
       const line = "The reply has Dale lock the marina office at eight; the turn had him lock it at nine.";
       const messages = await ctx.host.messages(chatId);
-      const reply = messages.filter((m) => !m.is_user && m.extra?.spindle_metadata !== undefined).at(-1);
+      const inOnePiece = (m: (typeof messages)[number]): boolean => {
+        const own = m.extra?.spindle_metadata;
+        const record = isObject(own) ? own.lumi_rp_engine : undefined;
+        return !m.is_user && isObject(record) && isObject(record.swipes);
+      };
+      const reply = messages.filter(inOnePiece).at(-1);
       const meta = reply?.extra?.spindle_metadata;
       const ledger = isObject(meta) ? meta.lumi_rp_engine : undefined;
-      if (reply === undefined || !isObject(meta) || !isObject(ledger) || !isObject(ledger.swipes)) throw new Error("the harness chat's last reply holds no record in one piece to plant on (a record split in chunks is not planted on)");
+      if (reply === undefined || !isObject(meta) || !isObject(ledger) || !isObject(ledger.swipes)) throw new Error("no reply of the harness chat holds a record in one piece to plant on (a record split in chunks is not planted on)");
       const swipe = String(reply.swipe_id);
+      const metaSwipes: JsonObject = ledger.swipes;
       const withLine = (swipes: JsonObject): JsonObject => {
         const rec = swipes[swipe];
         if (!isObject(rec) || !isObject(rec.harness)) throw new Error(`the harness reply's swipe ${swipe} holds no harness record`);
         return { ...swipes, [swipe]: { ...rec, harness: { ...rec.harness, departures: [line] } } };
       };
-      // The journal first, the authority (`ledger-io.ts` keeps each message's ledger under `messages`), then the reply's metadata, its mirror.
+      // The journal first, the authority (`ledger-io.ts` keeps each message's ledger under `messages`),
+      // then the reply's metadata, its mirror, both with the extension off: a running one re-asserts the
+      // journal it holds over the message at the edit's event (`ledger-io.ts:2655-2686`, `journal.ts:217-225`).
       const journalRel = `runs/${chatId}/journal.json`;
-      const journal = readObject(ctx, journalRel);
-      const entries = journal.messages;
-      const entry = isObject(entries) ? entries[reply.id] : undefined;
-      const kept = isObject(entry) ? entry.ledger : undefined;
-      if (!isObject(entries) || !isObject(entry) || !isObject(kept) || !isObject(kept.swipes)) throw new Error(`the harness chat's journal holds no ledger for its last reply`);
-      plant(ctx, journalRel, JSON.stringify({ ...journal, messages: { ...entries, [reply.id]: { ...entry, ledger: { ...kept, swipes: withLine(kept.swipes) } } } }));
-      await ctx.host.call("PUT", `/api/v1/chats/${chatId}/messages/${reply.id}`, { extra: { ...reply.extra, spindle_metadata: { ...meta, lumi_rp_engine: { ...ledger, swipes: withLine(ledger.swipes) } } } });
+      await withExtensionOff(ctx, "planted", async () => {
+        const journal = readObject(ctx, journalRel);
+        const entries = journal.messages;
+        const entry = isObject(entries) ? entries[reply.id] : undefined;
+        const kept = isObject(entry) ? entry.ledger : undefined;
+        if (!isObject(entries) || !isObject(entry) || !isObject(kept) || !isObject(kept.swipes)) throw new Error(`the harness chat's journal holds no ledger for its last reply`);
+        plant(ctx, journalRel, JSON.stringify({ ...journal, messages: { ...entries, [reply.id]: { ...entry, ledger: { ...kept, swipes: withLine(kept.swipes) } } } }));
+        await ctx.host.call("PUT", `/api/v1/chats/${chatId}/messages/${reply.id}`, { extra: { ...reply.extra, spindle_metadata: { ...meta, lumi_rp_engine: { ...ledger, swipes: withLine(metaSwipes) } } } });
+      });
       record(ctx, "departures", { row: "departures", kind: "a line against its turn's decisions, on a harness reply's record", made: "planted", where: "message-metadata", chat: "chat:harness", path: `${reply.id}:${swipe}` });
       say(`  planted a departure line on reply ${reply.id} swipe ${swipe}`);
     });

@@ -64,8 +64,12 @@ const POLL_MS = 3_000;
 const OOM_SCORE = 1000;
 /** The drop-in's file, in the unit's own `.d` folder. */
 const DROP_IN = "test-instance.conf";
-/** Bun's caches: the script runs with them out of the account's home, and so must every unit it makes. */
-const BUN_CACHES = ["BUN_INSTALL_CACHE_DIR", "BUN_RUNTIME_TRANSPILER_CACHE_PATH"] as const;
+/**
+ * The caches a runtime might fill: Bun's own, and any program's download cache under
+ * `XDG_CACHE_HOME`. The script runs with them out of the account's home, and so must every unit it
+ * makes: nothing it starts writes outside the bed's own folder but the unit links.
+ */
+const BUN_CACHES = ["BUN_INSTALL_CACHE_DIR", "BUN_RUNTIME_TRANSPILER_CACHE_PATH", "XDG_CACHE_HOME"] as const;
 
 /** A runtime's name, as `lumiah up --name` takes it (LumiAH link/contract.ts:97). */
 const RUNTIME_NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/;

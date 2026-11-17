@@ -15,7 +15,7 @@ import { ownerContext } from "./lib/instance/context";
 import { readInstanceEnv } from "./lib/instance/env";
 import { unnamedFilePresent } from "./lib/instance/planted";
 import { readBack, writeReport } from "./lib/instance/readback";
-import { failures } from "./lib/instance/report-doc";
+import { failures, waiting } from "./lib/instance/report-doc";
 
 const args = process.argv.slice(2);
 const expectAt = args.indexOf("--expect");
@@ -36,9 +36,10 @@ try {
     code = there ? 0 : 1;
   } else {
     const doc = await readBack(ctx, env);
-    const sum = writeReport(env, doc);
+    const { checksum: sum } = writeReport(env, doc);
     const failed = failures(doc);
     for (const line of failed) console.error(`FAIL ${line}`);
+    for (const line of waiting(doc)) console.log(`WAITS ${line}`);
     console.log(`rows read back: ${Object.keys(doc.rows).length}; world parts: ${Object.keys(doc.world.parts).length}, empty: ${doc.world.empty.length}; revisions: ${doc.world.revisions}`);
     console.log(`checksum ${sum}`);
     if (failed.length > 0) code = 1;

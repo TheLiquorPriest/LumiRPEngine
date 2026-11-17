@@ -41,6 +41,7 @@ interface Connection {
   provider: string;
   model: string;
   has_api_key: boolean;
+  is_default: boolean;
 }
 
 /** Every connection of the user's, paged by 200 as the Connections page pages them (frontend/src/api/listAllConnections.ts:3-19; src/routes/connections.routes.ts:44-53). */
@@ -62,7 +63,7 @@ async function listConnections(host: Lumiverse): Promise<Connection[]> {
  * Lumiverse asks for nothing but a name and a provider (src/routes/connections.routes.ts:55-61), and
  * keeps a key only when one is given (src/services/connections.service.ts:459-489).
  */
-async function ensureConnection(s: SetupCtx, host: Lumiverse, want: { state: string; name: string; provider: string; model: string; key: string | null }): Promise<void> {
+async function ensureConnection(s: SetupCtx, host: Lumiverse, want: { state: string; name: string; provider: string; model: string; key: string | null; isDefault: boolean }): Promise<void> {
   const named = (await listConnections(host)).filter((c) => c.name === want.name);
   if (named.length > 1) throw new Error(`the owner has ${named.length} Lumiverse connections named "${want.name}"`);
   let found = named[0];
@@ -72,8 +73,16 @@ async function ensureConnection(s: SetupCtx, host: Lumiverse, want: { state: str
     }
     say(`  the connection "${want.name}" stands from an earlier run`);
   } else {
-    found = await host.call<Connection>("POST", "/api/v1/connections", { name: want.name, provider: want.provider, ...(want.key !== null ? { api_key: want.key } : {}), model: want.model, is_default: false, metadata: {} });
-    s.log.log({ step: "connection", action: "created", kind: "Lumiverse connection (connection_profiles; a key in the secrets table)", id: found.id, name: found.name, detail: { provider: want.provider, model: want.model, key: want.key !== null } });
+    found = await host.call<Connection>("POST", "/api/v1/connections", { name: want.name, provider: want.provider, ...(want.key !== null ? { api_key: want.key } : {}), model: want.model, is_default: want.isDefault, metadata: {} });
+    s.log.log({ step: "connection", action: "created", kind: "Lumiverse connection (connection_profiles; a key in the secrets table)", id: found.id, name: found.name, detail: { provider: want.provider, model: want.model, key: want.key !== null, default: want.isDefault } });
+  }
+  // The extension's own model calls name no connection, and Lumiverse then takes the user's default
+  // (`resolveConnection`, Lumiverse src/services/generation/connection-resolution.ts:94-101): with
+  // none, every helper call of the classic engine fails "No connection profile found", as the bed's
+  // first run showed. The owner ticks "default" on the connection they play on.
+  if (want.isDefault && !found.is_default) {
+    found = await host.call<Connection>("PUT", `/api/v1/connections/${found.id}`, { is_default: true });
+    s.log.log({ step: "connection", action: "changed", kind: "Lumiverse connection made the default (connection_profiles is_default)", id: found.id, name: found.name });
   }
   s.log.set(want.state, found.id);
 }
@@ -87,9 +96,9 @@ export const connection: SetupStep = {
     const offered = (await host.call<{ providers: { id: string }[] }>("GET", "/api/v1/providers")).providers.map((p) => p.id);
     const unmatched = s.env.provider === UNMATCHED_PROVIDERS[0] ? UNMATCHED_PROVIDERS[1] : UNMATCHED_PROVIDERS[0];
     for (const provider of [s.env.provider, unmatched]) if (!offered.includes(provider)) throw new Error(`Lumiverse offers no provider "${provider}" (it offers ${offered.join(", ")})`);
-    await ensureConnection(s, host, { state: "connection:main", name: s.env.connectionName, provider: s.env.provider, model: s.env.model, key: s.env.providerKey });
+    await ensureConnection(s, host, { state: "connection:main", name: s.env.connectionName, provider: s.env.provider, model: s.env.model, key: s.env.providerKey, isDefault: true });
     // No key: Lumiverse requires none to save a connection of any provider; only a call on it would need one, and fail without (src/services/connections.service.ts:467-471, :657-665).
-    await ensureConnection(s, host, { state: "connection:unmatched", name: UNMATCHED_NAME, provider: unmatched, model: UNMATCHED_MODEL, key: null });
+    await ensureConnection(s, host, { state: "connection:unmatched", name: UNMATCHED_NAME, provider: unmatched, model: UNMATCHED_MODEL, key: null, isDefault: false });
   },
 };
 

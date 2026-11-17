@@ -16,8 +16,9 @@ import { otherContext, ownerContext } from "./lib/instance/context";
 import { readInstanceEnv } from "./lib/instance/env";
 import { OTHER_STEPS } from "./lib/instance/other";
 import { PLANTED_STEPS, unnamedFilePresent } from "./lib/instance/planted";
+import { PLANTED_HARNESS_STEPS } from "./lib/instance/planted-harness";
 import { readBack, writeReport } from "./lib/instance/readback";
-import { failures } from "./lib/instance/report-doc";
+import { failures, waiting } from "./lib/instance/report-doc";
 import { SETUP_STEPS, setupContext } from "./lib/instance/setup";
 import { STORE_STEP_AFTER, STORE_STEPS } from "./lib/instance/stores";
 import { agents } from "./steps/agents";
@@ -42,7 +43,9 @@ const order: Step[] = [checkin, settings, own, book, world, chats, classic, agen
 const misplaced = STORE_STEPS.filter((s, i) => STORE_STEP_AFTER[s.name] !== (i === 0 ? harness.name : STORE_STEPS[i - 1]?.name));
 if (misplaced.length > 0) throw new Error(`store steps out of their order: ${misplaced.map((s) => s.name).join(", ")}`);
 
-const names = [...SETUP_STEPS.map((s) => s.name), ...OTHER_STEPS.map((s) => s.name), ...order.map((s) => s.name), ...PLANTED_STEPS.map((s) => s.name)];
+/** What today's build cannot make by play, planted after all play: the lead's plants, then the harness's documents (`planted-harness.ts`), whose last switches the extension off and on. */
+const planted: Step[] = [...PLANTED_STEPS, ...PLANTED_HARNESS_STEPS];
+const names = [...SETUP_STEPS.map((s) => s.name), ...OTHER_STEPS.map((s) => s.name), ...order.map((s) => s.name), ...planted.map((s) => s.name)];
 const asked = process.argv.slice(2);
 const unknown = asked.filter((name) => !names.includes(name));
 if (unknown.length > 0) {
@@ -81,7 +84,7 @@ function unnamedStillThere(ctx: Ctx, after: string): void {
   say(`  the file no row names is there after ${after}`);
 }
 
-const ownerSteps = [...order, ...PLANTED_STEPS];
+const ownerSteps = [...order, ...planted];
 let code = 0;
 if (ownerSteps.some((s) => wanted(s.name)) || asked.length === 0) {
   const ctx = await ownerContext(env, log);
@@ -96,9 +99,10 @@ if (ownerSteps.some((s) => wanted(s.name)) || asked.length === 0) {
     if (asked.length === 0) {
       say("the read-back");
       const doc = await readBack(ctx, env);
-      const sum = writeReport(env, doc);
+      const { checksum: sum } = writeReport(env, doc);
       const failed = failures(doc);
       for (const line of failed) console.error(`FAIL ${line}`);
+      for (const line of waiting(doc)) console.log(`WAITS ${line}`);
       say(`read back ${Object.keys(doc.rows).length} rows; checksum ${sum}`);
       if (failed.length > 0) code = 1;
     }

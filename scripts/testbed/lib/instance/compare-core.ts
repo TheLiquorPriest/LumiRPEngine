@@ -71,3 +71,29 @@ export function compareReports(first: Value, second: Value): string[] {
   compareValue(first, second, "", out);
   return out;
 }
+
+function collectPresence(value: Value, path: string, out: Set<string>): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => collectPresence(item, `${path}[${i}]`, out));
+    return;
+  }
+  if (!isObject(value)) return;
+  const played = PLAYED in value;
+  for (const [key, inner] of Object.entries(value)) {
+    if (key === IDS) continue;
+    const at = path === "" ? key : `${path}.${key}`;
+    if (key === PLAYED) {
+      if (isObject(inner)) for (const name of Object.keys(inner)) out.add(`${at}.${name}`);
+      else out.add(at);
+    } else if (key === "found" && played) out.add(`${at} (above zero)`);
+    else collectPresence(inner, at, out);
+  }
+}
+
+/** Every field the comparison asks only to be there on both sides (what the model chose), sorted: printed beside the result. */
+export function presenceOnly(first: Value, second: Value): string[] {
+  const out = new Set<string>();
+  collectPresence(first, "", out);
+  collectPresence(second, "", out);
+  return [...out].sort();
+}

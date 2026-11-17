@@ -6,11 +6,11 @@
 // `revision` step later makes a second revision, then, after the classic chat's turns, the one that
 // fills the parts this one leaves empty (`thirdRevision`), and leaves a draft standing.
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ctx, Step } from "../lib/context";
 import { say } from "../lib/record";
-import { worldParts } from "./world-parts";
+import { withAdoptedEntry, worldParts } from "./world-parts";
 
 export const WORLD_NAME = "Port Alder test instance";
 const TEMPLATE = "modern_slice_of_life";
@@ -46,7 +46,7 @@ export const world: Step = {
     const bookId = ctx.log.get<string>("bookId");
     const entryId = ctx.log.get<string>("entryId");
     if (bookId === undefined || entryId === undefined) throw new Error("the book step must run first");
-    const worldId = await worldIdOf(ctx, true);
+    let worldId = await worldIdOf(ctx, true);
     const head = await ctx.socket.lre<{ world?: { maps?: { [id: string]: unknown } } }>("lre.world", { op: "get", worldId });
     if (head.world?.maps?.harbor_blocks === undefined) {
       const draft = await ctx.socket.lre<{ draft: { maps?: { [id: string]: unknown } }; stored: boolean; version: number }>("lre.editor", { op: "get", worldId, base: null });
@@ -64,6 +64,26 @@ export const world: Step = {
       const committed = await ctx.cli.run<{ revision?: string; head?: string }>(["commit", worldId, "--note", "Test instance: the starter with every part filled"]);
       ctx.log.log({ step: "world", action: "changed", kind: "world revision (commit)", id: worldId, detail: { revision: committed.revision ?? committed.head ?? null } });
     } else say("the test world's parts are in its head already");
+
+    // The one part no patch may change, `suppressed`, arrives as it does from an earlier build: in a
+    // world file. Build's Export, the file given its adopted entry, and Build's Import, which makes it
+    // a world of its own (`withAdoptedEntry`). The imported world is the test world from here on; the
+    // first stays, a world of the instance's with every part but that one, recorded as `world:first`.
+    await ctx.log.once("world:import", async () => {
+      const legacyEntryId = ctx.log.get<string>("legacyEntryId");
+      if (legacyEntryId === undefined) throw new Error("the book step must run first");
+      const exportFile = join(ctx.env.instanceDir, "world-export.json");
+      await ctx.cli.run(["export", worldId, "--out", exportFile]);
+      const importFile = join(ctx.env.instanceDir, "world-import.json");
+      writeFileSync(importFile, JSON.stringify(withAdoptedEntry(JSON.parse(readFileSync(exportFile, "utf8")), { bookId, legacyEntryId })), { mode: 0o600 });
+      const made = await ctx.cli.run<{ worldId?: string; world?: { id?: string } } | string>(["import", importFile]);
+      const id = typeof made === "string" ? /w_[0-9a-f]{16}/.exec(made)?.[0] : (made.worldId ?? made.world?.id);
+      if (id === undefined || id === worldId) throw new Error(`the CLI's import named no new world: ${JSON.stringify(made).slice(0, 300)}`);
+      ctx.log.set("world:first", worldId);
+      ctx.log.set("worldId", id);
+      ctx.log.log({ step: "world", action: "created", kind: "world (Build's Import of the first, its file holding an adopted entry in suppressed)", id, name: WORLD_NAME, detail: { from: worldId } });
+    });
+    worldId = ctx.log.get<string>("worldId") ?? worldId;
 
     // Build → Lore: the lore index as an entry of the player's book, kept in sync by the engine.
     const index = await ctx.socket.lre<{ index?: { built: { entry?: string } | null } }>("lre.lore", { op: "index", worldId });

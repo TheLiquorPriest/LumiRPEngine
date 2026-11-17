@@ -16,11 +16,14 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Ctx, Step } from "../context";
 import { guard, IDENTIFIER, userStorage } from "../env";
+import { HttpError, type Message } from "../lumiverse";
 import type { Json } from "../record";
 import { say } from "../record";
+import type { HostEvent } from "../socket";
 import { cardOf, PLAYER } from "../../steps/chats";
 import { worldIdOf } from "../../steps/world";
-import { ledgerOf } from "./rows";
+import { isRecord } from "./json";
+import { ledgerOf, type StoredLedger } from "./rows";
 
 /** How long a turn's engine run, a reply, a job or an extension restart is waited for (as `lib/play.ts` waits a turn). */
 const WAIT_MS = 30 * 60_000;
@@ -86,9 +89,8 @@ async function viewOf(ctx: Ctx, id: string): Promise<{ view: View; activity: { s
 interface Settings {
   modelUse: { steps: { [purpose: string]: { enabled?: boolean; route?: { connectionId?: string | null } } | undefined } };
   narrator: { knowledge: string; secrets: string };
-  tidy: { findings: number };
   minds: { knowledge: { enabled: boolean; threshold: number } };
-  agents: { persist: { on: boolean }; compaction: { atTokens: number; keepTurns: number } };
+  agents: { pipeline: { mode: string }; main: { stages: { [stage: string]: string } }; persist: { on: boolean }; compaction: { atTokens: number; keepTurns: number } };
 }
 
 /** Settings → its pages' patch, through the CLI's `settings-set` as `steps/settings.ts` sends it, then Settings read back. */
@@ -104,27 +106,26 @@ async function patchSettings(ctx: Ctx, patch: { [key: string]: Json }): Promise<
 export const USER_SETTINGS = {
   // The narrator's view of secrets (Settings → Narrator): today's default is scene and marked (`src/shared/settings.ts:489`).
   narrator: { knowledge: "pov", secrets: "omit" },
-  // How many Tidy up findings one run shows: 50 by default, 1 to 500 (`src/shared/settings.ts:703-705`).
-  tidy: { findings: 20 },
   // Knowledge tracking on, with its threshold: on and 0.7 by default (`src/shared/minds.ts:434-437,469`).
   minds: { knowledge: { enabled: true, threshold: 0.6 } },
 } as const;
 
 /**
- * Settings changed at the user's level (Settings → Narrator, GM → Things → Tidy up, Settings → Minds →
- * Knowledge). After `harness`: the narrator's view and the knowledge threshold change how a later
- * turn is told and recorded, and the play steps must play as before.
+ * Settings changed at the user's level (Settings → Narrator, Settings → Minds → Knowledge). The
+ * tidy-up is not among them: `settings-set` knows no user setting `tidy` (seen on the bed: "there is
+ * no setting tidy"); its switch and what it leaves alone are a chat's (`stores-kept`,
+ * `stores-tidy-left`). After `harness`: the narrator's view and the knowledge threshold change how a
+ * later turn is told and recorded, and the play steps must play as before.
  */
 export const storesUserSettings: Step = {
   name: "stores-user-settings",
-  makes: "the user's own narrator view of secrets, Tidy up's findings and the knowledge threshold (settings.json)",
+  makes: "the user's own narrator view of secrets and the knowledge threshold (settings.json)",
   async run(ctx) {
     await ctx.log.once("stores:user-settings", async () => {
       const after = await patchSettings(ctx, USER_SETTINGS as unknown as { [key: string]: Json });
-      const took = after.narrator.knowledge === USER_SETTINGS.narrator.knowledge && after.narrator.secrets === USER_SETTINGS.narrator.secrets && after.tidy.findings === USER_SETTINGS.tidy.findings && after.minds.knowledge.enabled && after.minds.knowledge.threshold === USER_SETTINGS.minds.knowledge.threshold;
-      if (!took) throw new Error(`the user's settings didn't take: ${JSON.stringify({ narrator: after.narrator, tidy: after.tidy, knowledge: after.minds.knowledge })}`);
+      const took = after.narrator.knowledge === USER_SETTINGS.narrator.knowledge && after.narrator.secrets === USER_SETTINGS.narrator.secrets && after.minds.knowledge.enabled && after.minds.knowledge.threshold === USER_SETTINGS.minds.knowledge.threshold;
+      if (!took) throw new Error(`the user's settings didn't take: ${JSON.stringify({ narrator: after.narrator, knowledge: after.minds.knowledge })}`);
       ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "narrator", detail: after.narrator });
-      ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "tidy.findings", detail: after.tidy.findings });
       ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "minds.knowledge", detail: after.minds.knowledge });
     });
   },
@@ -136,7 +137,7 @@ export const storesUserSettings: Step = {
  * (`src/backend/jobs.ts:488`), and no step starts a Build job that calls a model (the world step's
  * Check world needs none, `steps/world.ts:74`); Brief is off unless saved on (`src/shared/settings.ts:
  * 154-159`; the Standard preset has no Brief step, `src/backend/settings-store.ts:91-102`). The time
- * skip's step is off in the Standard preset and runs only on a timelapse (`settings-store.ts:99`),
+ * skip's step is off in the Standard preset and runs only on a timelapse (`settings-store.ts:100`),
  * which no step plays. A saved route replaces the preset's whole (`settings-store.ts:414-421`).
  */
 export const storesModels: Step = {
@@ -173,13 +174,74 @@ const KEPT_NAME = "Port Alder test · agents, kept";
 export const KEPT_CHOICES = { knowledge: true, narrator: { knowledge: "pov", secrets: "marked" }, tidy: false } as const;
 /** How its map shows (GM's map, `lre.map`): the world's own is knowledge (`steps/world-parts.ts`). */
 export const KEPT_MAP = "fog";
-/** The agents engine's settings that make a compaction and a kept scene on this chat's turns: Smart persistence on (off by default, `src/shared/agent-settings.ts:418-419`), and a compaction past the first token keeping no turn whole (32,000 and 3 by default, `:425`; at least 1 and 0, `:563-565`). */
-export const KEPT_AGENTS = { agents: { persist: { on: true }, compaction: { atTokens: 1, keepTurns: 0 } } } as const;
+/**
+ * The agents engine's settings that make a compaction and a kept scene on this chat's turns, each one
+ * a user of today's build sets in Settings → Agents (R-201 (a)). The session a compaction folds is the
+ * main agent's, and the main agent runs in a turn only when the pipeline is "Main agent decides" (on
+ * `main`, `src/backend/agents/orchestrator.ts:277-283`); on the fixed pipeline, today's default
+ * (`src/shared/agent-settings.ts:411`), it works the final review alone with no session
+ * (`main-agent.ts:629-634`, `orchestrator.ts:629`): the bed's first run of this step played three
+ * turns with no compaction. On "Main agent decides" with every stage its own (the default,
+ * `src/shared/agent-pipeline.ts:24-26`), the allowed model ended stage 5 without committing it and
+ * the turn failed (`main-agent.ts:127,432-435`; the bed's `make-a8`). So no stage is the main
+ * agent's here, the smallest set: each runs on its own (`agent-pipeline.ts:14-15`), and the main
+ * agent's one send is the final review (on by default, `agent-settings.ts:417`), which reads the
+ * session prepared, and compacted, before it (`main-agent.ts:463`), keeps its send in that session
+ * (`:480-481`), and fails no turn when it doesn't commit (its own `onFail`, `send` by default). With
+ * them: Smart persistence on (off by default, `agent-settings.ts:418-419`), and a compaction past the
+ * first token keeping no turn whole (32,000 and 3 by default, `:425`; at least 1 and 0, `:563-565`).
+ */
+export const KEPT_AGENTS = {
+  agents: {
+    pipeline: { mode: "main" },
+    main: { stages: { intent: "auto", prepare: "auto", beats: "auto", read: "auto", memory: "auto" } },
+    persist: { on: true },
+    compaction: { atTokens: 1, keepTurns: 0 },
+  },
+} as const;
+/** R-201 (b): how many times the player presses a failed kept turn's Retry (the engine-failed flag's Regenerate) before play is given up on. */
+export const KEPT_REGENERATES = 3;
 const KEPT_TURNS = [
   "Before work I walk down to the marina and ask Dale whether the Harbor Watch logbook needs signing tonight.",
   "I sign the logbook, thank Dale and walk up Harbor Street towards Alder Automotive.",
   "On the way I stop at the Bluebird and buy a coffee to take to the shop.",
 ];
+
+/** How the player's turn says the engine failed it (`lib/play.ts:99`): the failure its user sees on the turn's flag. */
+const ENGINE_FAILED = /the engine says/;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * One kept turn, played; when the engine fails it, the player presses the failed turn's flag's Retry,
+ * which starts Regenerate as the flag says (`Player.retry`, `lib/play.ts:141-156`), as its user does,
+ * up to `KEPT_REGENERATES` presses (R-201 (b)). Each press is in the instance's log; a failure of
+ * anything but the engine's is not pressed on.
+ */
+async function keptTurn(ctx: Ctx, id: string, text: string): Promise<void> {
+  let failed: string;
+  try {
+    await ctx.player.turn(id, PLAYER, text);
+    return;
+  } catch (error) {
+    failed = errorText(error);
+    if (!ENGINE_FAILED.test(failed)) throw error;
+  }
+  for (let press = 1; press <= KEPT_REGENERATES; press++) {
+    ctx.log.log({ step: "stores", action: "played", kind: "Retry pressed on a failed turn (R-201 (b))", id, detail: { press, failed } });
+    say(`  the turn failed (${failed}): Retry, press ${press} of ${KEPT_REGENERATES}`);
+    try {
+      await ctx.player.retry(id);
+      return;
+    } catch (error) {
+      failed = errorText(error);
+      if (!ENGINE_FAILED.test(failed)) throw error;
+    }
+  }
+  throw new Error(`the kept turn failed after ${KEPT_REGENERATES} presses of Retry: ${failed}`);
+}
 
 /**
  * One agents-engine chat of its own, after the agents step (its turns play under the compaction and
@@ -206,10 +268,13 @@ export const storesKept: Step = {
       if (shown.display !== KEPT_MAP) throw new Error(`the map display didn't take: ${JSON.stringify(shown)}`);
       ctx.log.log({ step: "stores", action: "changed", kind: "map display (runs/<chat>/prefs.json)", id, detail: { display: KEPT_MAP } });
     });
-    await ctx.log.once("stores:kept:settings", async () => {
+    await ctx.log.once("stores:kept:stages", async () => {
       const after = await patchSettings(ctx, KEPT_AGENTS as unknown as { [key: string]: Json });
       const want = KEPT_AGENTS.agents.compaction;
-      if (!after.agents.persist.on || after.agents.compaction.atTokens !== want.atTokens || after.agents.compaction.keepTurns !== want.keepTurns) throw new Error(`the agents engine's settings didn't take: ${JSON.stringify(after.agents)}`);
+      const stages = Object.entries(KEPT_AGENTS.agents.main.stages).every(([stage, mode]) => after.agents.main.stages[stage] === mode);
+      if (after.agents.pipeline.mode !== KEPT_AGENTS.agents.pipeline.mode || !stages || !after.agents.persist.on || after.agents.compaction.atTokens !== want.atTokens || after.agents.compaction.keepTurns !== want.keepTurns) throw new Error(`the agents engine's settings didn't take: ${JSON.stringify(after.agents)}`);
+      ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "agents.pipeline.mode", detail: after.agents.pipeline.mode });
+      ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "agents.main.stages", detail: after.agents.main.stages });
       ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "agents.persist.on", detail: true });
       ctx.log.log({ step: "stores", action: "changed", kind: "settings (settings.json)", id: "agents.compaction", detail: want });
     });
@@ -219,7 +284,7 @@ export const storesKept: Step = {
       await ctx.player.show(id);
       for (const text of KEPT_TURNS) {
         if ((await rollback()) !== "none") break;
-        await ctx.player.turn(id, PLAYER, text);
+        await keptTurn(ctx, id, text);
       }
       const now = await rollback();
       if (now === "none") throw new Error(`no compaction to roll back after ${KEPT_TURNS.length} turns`);
@@ -348,7 +413,7 @@ const CUT_TURN = "I walk along the breakwater to watch the evening boats come in
 async function draftEvents(ctx: Ctx, id: string): Promise<number> {
   let n = 0;
   for (const m of await ctx.host.messages(id)) {
-    const ledger = ledgerOf((m.extra as { spindle_metadata?: { [key: string]: unknown } } | undefined)?.spindle_metadata);
+    const ledger = messageLedger(m);
     for (const rec of Object.values(ledger?.swipes ?? {})) n += [...(rec.events ?? []), ...(rec.post ?? []).flatMap((p) => p.events ?? [])].filter((e) => e.type === "engine.world").length;
   }
   return n;
@@ -430,17 +495,200 @@ export const storesOwnPlaces: Step = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------
+// Replies whose turn the play cut short: stopped from Lumiverse, the runtime stopped under it, the
+// extension restarted under it. Each is a harness chat of its own, after every other harness turn.
+
 /**
- * A reply that stands with no turn played. Today's build records why on the reply's record
- * (`Rec.harness.unplayed`, `src/shared/ledger.ts:444-449`) only on a reply that holds text
- * (`src/engine/ledger/journal.ts:1528-1531`). The one reason play makes: the engine restarted while
- * the reply was written (`src/backend/ledger-io.ts:712`): a harness turn's reply streaming when the
- * extension is restarted from Lumiverse's own extension page (`POST /api/v1/spindle/:id/restart`,
- * Lumiverse `src/routes/spindle.routes.ts:422-447`). The new backend holds no turn for the
- * generation; at its end (`ledger-io.ts:914`, `:1660-1666`) or at the chat's next opening
- * (`ledger-io.ts:2284-2306`) the reply is marked, and the chat says so (`unplayed:<message>:<swipe>`,
- * `src/backend/view.ts:782-786` on main). It runs last of all: a restart drops what the backend holds
- * in memory (prepared turns, review gates, running jobs).
+ * Whether a token of the reply's own text reached this page since `since`: Lumiverse's stream event
+ * (`src/ws/events.ts:36`), whose `type` is "reasoning" for a token of the thinking block, where
+ * LumiAH's progress lines go, and absent for the reply's text (`src/services/generate.service.ts:
+ * 3341-3350,3373-3380`). Only a reply that holds text can carry today's mark of no turn played
+ * (`src/engine/ledger/journal.ts:1528-1531` on RPE's main).
+ */
+function textStreamed(ctx: Ctx, id: string, since: number): boolean {
+  return ctx.socket.events.some((e) => e.at >= since && e.event === "STREAM_TOKEN_RECEIVED" && e.payload.chatId === id && e.payload.type === undefined && typeof e.payload.token === "string" && e.payload.token !== "");
+}
+
+/** The chat's generation's end heard since `since`: Lumiverse's `GENERATION_ENDED` or `GENERATION_STOPPED`. */
+function endOf(ctx: Ctx, id: string, since: number): HostEvent | undefined {
+  return ctx.socket.events.find((e) => e.at >= since && (e.event === "GENERATION_ENDED" || e.event === "GENERATION_STOPPED") && e.payload.chatId === id);
+}
+
+/** The player's message and Send, as the page sends them, then a wait for the reply's own text to stream; when it began. */
+async function streamingTurn(ctx: Ctx, id: string, text: string): Promise<number> {
+  await ctx.player.show(id);
+  // Stream tokens go only to a socket that said which chat it shows (`lib/socket.ts`, `focus`).
+  ctx.socket.focus(id);
+  const since = Date.now();
+  const user = await ctx.host.send(id, PLAYER, text);
+  ctx.log.log({ step: "stores", action: "created", kind: "message", id: user.id, detail: { chatId: id, user: true } });
+  await ctx.host.generate(id, "normal", ctx.connectionId);
+  while (!textStreamed(ctx, id, since)) {
+    if (endOf(ctx, id, since) !== undefined) throw new Error("the reply ended before any of its text streamed: a later run plays the turn again");
+    if (Date.now() - since > WAIT_MS) throw new Error("no text of the reply streamed");
+    await Bun.sleep(100);
+  }
+  return since;
+}
+
+async function endedSince(ctx: Ctx, id: string, since: number): Promise<HostEvent> {
+  for (;;) {
+    const end = endOf(ctx, id, since);
+    if (end !== undefined) return end;
+    if (Date.now() - since > WAIT_MS) throw new Error("the reply never ended");
+    await Bun.sleep(500);
+  }
+}
+
+/** A message's engine ledger, from its metadata bag (`spindle_metadata`). */
+function messageLedger(m: Message): StoredLedger | null {
+  const bag = m.extra?.spindle_metadata;
+  return ledgerOf(isRecord(bag) ? bag : undefined);
+}
+
+/** The reply a turn left (the chat's last message of the model's) and its record on the shown swipe, through Lumiverse's own read of the messages. */
+async function lastReply(ctx: Ctx, id: string): Promise<{ id: string; swipe: number; status: string | null; turns: number; unplayed: string | null }> {
+  const reply = (await ctx.host.messages(id)).filter((m) => !m.is_user).at(-1);
+  if (reply === undefined) throw new Error("the chat holds no reply");
+  const rec = messageLedger(reply)?.swipes[String(reply.swipe_id)];
+  return { id: reply.id, swipe: reply.swipe_id, status: rec?.status ?? null, turns: (rec?.harness?.turns ?? []).length, unplayed: rec?.harness?.unplayed ?? null };
+}
+
+const STOPPED = "stopped";
+const STOPPED_NAME = "Port Alder test · harness, stopped";
+const STOPPED_TURN = "I walk out along the fuel dock and ask Dale what the weather looks like for tomorrow's boats.";
+
+/**
+ * A harness reply stopped from Lumiverse once some of its text streamed (Lumiverse's own stop,
+ * `POST /api/v1/generate/stop`, `src/routes/generate.routes.ts:45-65`, which saves the text so far,
+ * `src/services/generate.service.ts:3565-3640,4502-4535`). Today's build keeps such a reply as a
+ * stopped turn, not as one with no turn played: with text in the stop, the turn commits as stopped
+ * (RPE `src/backend/ledger-io.ts:1566-1580`), LumiAH's own record of it standing, since its run was
+ * stopped with something released (`src/backend/harness/extension.ts:1162`). The step keeps what
+ * today's build made of it (`stores:stopped`); the reason "stopped" of a reply with no turn played
+ * is planted (`planted-harness.ts`).
+ */
+export const storesStopped: Step = {
+  name: "stores-stopped",
+  makes: "a harness reply stopped from Lumiverse once its text streamed (today's build keeps it as a stopped turn)",
+  async run(ctx) {
+    await ctx.log.once("stores:stopped:chat", async () => {
+      await storesChat(ctx, STOPPED, STOPPED_NAME, "harness");
+    });
+    if (ctx.log.get<Json>("stores:stopped") !== undefined) return;
+    const id = chatId(ctx, STOPPED);
+    const since = await streamingTurn(ctx, id, STOPPED_TURN);
+    await ctx.host.call("POST", "/api/v1/generate/stop", { chat_id: id });
+    ctx.log.log({ step: "stores", action: "changed", kind: "reply stopped from Lumiverse once its text streamed", id, detail: { chatId: id } });
+    await endedSince(ctx, id, since);
+    await ctx.player.quiet(id);
+    await settleJobs(ctx, id);
+    const reply = await lastReply(ctx, id);
+    const record = reply.unplayed !== null ? "unplayed" : reply.status === "stopped" && reply.turns > 0 ? "stopped turn" : reply.status === null ? "none" : "turn";
+    ctx.log.set("stores:stopped", { chat: `stores:chat:${STOPPED}`, message: reply.id, swipe: reply.swipe, record });
+    ctx.log.log({ step: "stores", action: "created", kind: `reply stopped from Lumiverse: ${record}`, id: reply.id, detail: { chatId: id, status: reply.status } });
+  },
+};
+
+/** Where the system keeps its own programs: systemctl is taken from there and never through PATH, as today's runtime takes it (LumiAH `src/runtime/update/programs.ts:1-4`). */
+const SYSTEM_FOLDERS = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+/**
+ * A systemctl call's limit. A runtime asked to stop while a reply of its own runs is not always gone
+ * at once: its unit's own wait is systemd's 90 s (`TimeoutStopSec`), after which systemd ends it, seen
+ * on the bed at the step `stores-gen-failed`, where a limit of one minute ended the call and the run.
+ */
+const SYSTEMCTL_MS = 150_000;
+/** How long the owner's runtime is given to link again after it starts: it reconnects with waits doubling up to thirty seconds (LumiAH `src/link/settings.ts:236-237`). */
+const LINK_MS = 3 * 60_000;
+
+/** `systemctl --user` on a unit the instance's set-up made, reaching the account's own service manager by XDG_RUNTIME_DIR, else `/run/user/<uid>` (LumiAH `src/runtime/update/service.ts:54-58`). */
+async function systemctl(args: string[]): Promise<void> {
+  const program = SYSTEM_FOLDERS.map((folder) => join(folder, "systemctl")).find((path) => existsSync(path));
+  if (program === undefined) throw new Error(`systemctl isn't in ${SYSTEM_FOLDERS.join(", ")}`);
+  const uid = process.getuid?.();
+  const runtimeDir = process.env.XDG_RUNTIME_DIR ?? (uid !== undefined ? `/run/user/${uid}` : undefined);
+  const proc = Bun.spawn([program, "--user", ...args], { env: { ...process.env, ...(runtimeDir !== undefined ? { XDG_RUNTIME_DIR: runtimeDir } : {}) }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  // Only the process this step started is ever ended.
+  const timer = setTimeout(() => proc.kill(), SYSTEMCTL_MS);
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  clearTimeout(timer);
+  if (code !== 0) throw new Error(`systemctl --user ${args.join(" ")} failed (${code}): ${`${err}\n${out}`.trim().slice(0, 400)}`);
+}
+
+/** The owner's runtime as the set-up recorded it (`runtime:owner`: its name and the unit `lumiah up --systemd` made). */
+export function ownerRuntime(ctx: Pick<Ctx, "log">): { name: string; unit: string } {
+  const value = ctx.log.get<Json>("runtime:owner");
+  const runtime = value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  if (typeof runtime.name !== "string" || typeof runtime.unit !== "string" || runtime.unit === "") throw new Error("runtime:owner isn't recorded with its unit: the set-up's runtimes step runs first");
+  return { name: runtime.name, unit: runtime.unit };
+}
+
+/** Waits until the harness's Runtime page shows the owner's runtime linked (`lah.hello`'s `runtime.relays`, LumiAH `src/shared/ui.ts:268-307,725-747`); a request the backend can't answer yet is asked again. */
+export async function waitLinked(ctx: Ctx): Promise<void> {
+  const { name } = ownerRuntime(ctx);
+  for (const began = Date.now(); ; await Bun.sleep(POLL_MS)) {
+    const hello = await ctx.socket.lah<{ runtime: { relays: { name: string; link: string }[] } }>("lah.hello", {}).catch(() => null);
+    if (hello?.runtime.relays.some((r) => r.name === name && r.link === "linked") === true) return;
+    if (Date.now() - began > LINK_MS) throw new Error(`the runtime ${name} isn't linked ${LINK_MS / 1000} s after it started`);
+  }
+}
+
+const FAILED = "failed";
+const FAILED_NAME = "Port Alder test · harness, generation failed";
+const FAILED_TURN = "I help Dale haul the fuel dock's spare fenders into the shed before the wind picks up.";
+
+/**
+ * A harness reply whose generation failed: the owner's runtime unit stopped once some of the reply's
+ * text streamed, and started again after. On stop, today's runtime ends every request under way with
+ * an error chunk ("The runtime is restarting…", LumiAH `src/runtime/cli.ts:830,892-896`,
+ * `src/runtime/runtime.ts:484-489`, `src/runtime/relay.ts:133-140`, `src/runtime/sse.ts:173-178`);
+ * Lumiverse takes it as the provider's error (`src/llm/provider-sse.ts:11-20`), saves the text so far
+ * and ends the generation with that error, with no retry (`src/services/generate.service.ts:3766,
+ * 4536-4580`); RPE marks the reply "the reply's generation failed: …", the generation's error coming
+ * before anything of the run (`src/backend/ledger-io.ts:1554,1609,1639-1647`). Only the instance's
+ * own unit is stopped and started; no provider is touched.
+ */
+export const storesGenFailed: Step = {
+  name: "stores-gen-failed",
+  makes: "a harness reply whose generation failed when the owner's runtime unit stopped under it (started again after)",
+  async run(ctx) {
+    await ctx.log.once("stores:failed:chat", async () => {
+      await storesChat(ctx, FAILED, FAILED_NAME, "harness");
+    });
+    if (ctx.log.get<Json>("stores:gen-failed") !== undefined) return;
+    const id = chatId(ctx, FAILED);
+    const { unit } = ownerRuntime(ctx);
+    const since = await streamingTurn(ctx, id, FAILED_TURN);
+    let end: HostEvent;
+    try {
+      await systemctl(["stop", unit]);
+      ctx.log.log({ step: "stores", action: "changed", kind: "owner's runtime unit stopped while a reply streamed", id: unit, detail: { chatId: id } });
+      end = await endedSince(ctx, id, since);
+    } finally {
+      await systemctl(["start", unit]);
+      ctx.log.log({ step: "stores", action: "changed", kind: "owner's runtime unit started again", id: unit });
+    }
+    if (end.event !== "GENERATION_ENDED" || typeof end.payload.error !== "string") throw new Error("the reply ended before the runtime stopped: no error reached it, so a later run plays the turn again");
+    await waitLinked(ctx);
+    let mark: { id: string } | undefined;
+    for (const until = Date.now() + 120_000; mark === undefined && Date.now() < until; await Bun.sleep(2000)) mark = (await viewOf(ctx, id)).view.chips.find((c) => c.id.startsWith("unplayed:"));
+    if (mark === undefined) throw new Error("the reply whose generation failed holds no mark that no turn was played");
+    const [, messageId, swipe] = mark.id.split(":");
+    ctx.log.set("stores:gen-failed", { chat: `stores:chat:${FAILED}`, message: messageId ?? "", swipe: Number(swipe) });
+    ctx.log.log({ step: "stores", action: "created", kind: "reply standing with no turn played: its generation failed (Rec.harness.unplayed)", id: messageId ?? mark.id, detail: { chatId: id } });
+  },
+};
+
+/**
+ * A reply that stands with no turn played because the engine restarted while it was written
+ * (`src/backend/ledger-io.ts:712`): the extension restarted from Lumiverse's own extension page
+ * (`POST /api/v1/spindle/:id/restart`, Lumiverse `src/routes/spindle.routes.ts:422-447`) once some of
+ * a harness reply's text streamed. The new backend holds no turn for the generation; at its end
+ * (`ledger-io.ts:914,1660-1666`) or at the chat's next opening (`ledger-io.ts:2284-2306`) the reply,
+ * which holds text (`src/engine/ledger/journal.ts:1528-1546`), is marked, and the chat says so
+ * (`unplayed:<message>:<swipe>`, `src/backend/view.ts:782-786` on main). It runs after every other
+ * harness turn: a restart drops what the backend holds in memory (prepared turns, review gates, jobs).
  */
 export const storesCutShort: Step = {
   name: "stores-cut-short",
@@ -448,30 +696,14 @@ export const storesCutShort: Step = {
   async run(ctx) {
     if (ctx.log.get<Json>("stores:unplayed") !== undefined) return;
     const id = chatId(ctx, CUT);
-    await ctx.player.show(id);
-    ctx.socket.focus(id);
-    const from = ctx.socket.events.length;
-    const heard = (event: string): boolean => ctx.socket.events.slice(from).some((e) => e.event === event && e.payload.chatId === id);
-    const user = await ctx.host.send(id, PLAYER, CUT_TURN);
-    ctx.log.log({ step: "stores", action: "created", kind: "message", id: user.id, detail: { chatId: id, user: true } });
-    await ctx.host.generate(id, "normal", ctx.connectionId);
-    const began = Date.now();
-    // Lumiverse's own event of a token of the reply's stream (Lumiverse `src/ws/events.ts:36`): the reply is being written.
-    while (!heard("STREAM_TOKEN_RECEIVED")) {
-      if (heard("GENERATION_ENDED") || heard("GENERATION_STOPPED")) throw new Error("the reply ended before any of it streamed");
-      if (Date.now() - began > WAIT_MS) throw new Error("no reply streamed");
-      await Bun.sleep(200);
-    }
+    const since = await streamingTurn(ctx, id, CUT_TURN);
     await ctx.host.call("POST", `/api/v1/spindle/${ctx.extensionId}/restart`, {});
     ctx.log.log({ step: "stores", action: "changed", kind: "extension restarted while a reply streamed", id: ctx.extensionId, detail: { chatId: id } });
     while ((await ctx.host.extension(IDENTIFIER)).status !== "running") {
-      if (Date.now() - began > WAIT_MS) throw new Error("the extension didn't come back");
+      if (Date.now() - since > WAIT_MS) throw new Error("the extension didn't come back");
       await Bun.sleep(1000);
     }
-    while (!heard("GENERATION_ENDED") && !heard("GENERATION_STOPPED")) {
-      if (Date.now() - began > WAIT_MS) throw new Error("the reply never ended");
-      await Bun.sleep(1000);
-    }
+    await endedSince(ctx, id, since);
     // The page opens the chat again, as a page does after a restart: restart recovery closes what the old backend left open.
     await ctx.socket.lre("lre.hello", { chatId: id, viewing: true });
     let mark: { id: string } | undefined;
@@ -517,7 +749,99 @@ export const storesTidyLeft: Step = {
   },
 };
 
-/** Each store step and the step it runs after: all after `harness`, the play steps' last; the restart last of all. */
+// ---------------------------------------------------------------------------------------------
+// Preset blocks: an invented preset made active through Lumiverse's own routes, given today's
+// RPEngine blocks, and the active preset put back.
+
+/** The setting Lumiverse keeps the active preset under (`src/services/presets.service.ts:212`; `src/services/preset-profiles.service.ts:461-473`). */
+const ACTIVE_PRESET = "activeLoomPresetId";
+
+/**
+ * The invented preset, as Lumiverse's own Loom builder sends a new one (`provider: "loom"`,
+ * frontend `src/lib/loom/service.ts:550-579`; `POST /api/v1/presets` needs a name and a provider,
+ * `src/routes/presets.routes.ts:95-100`): one block of the user's own, in the stored shape RPE
+ * writes its blocks in (RPE `src/backend/spindle-host.ts:928-932` on main), holding the reference
+ * to the engine's narrator outlet that today's build routes a section to (`src/backend/preset-binding.ts:37`).
+ */
+export const PRESET = {
+  name: "Port Alder test preset",
+  provider: "loom",
+  parameters: {},
+  prompts: {},
+  metadata: { description: "An invented preset for the migration's test instance." },
+  prompt_order: [
+    {
+      id: "5c1e9a40-3b7d-4f2a-9e6c-0d8b7a6f5e41",
+      name: "Port Alder narration",
+      content: "Tell Port Alder plainly and warmly, a few short paragraphs at a time.\n\n{{outlet::lre_narrator}}",
+      role: "system",
+      enabled: true,
+      position: "pre_history",
+      depth: 0,
+      marker: null,
+      isLocked: false,
+      color: null,
+      injectionTrigger: [],
+      group: null,
+      categoryMode: null,
+    },
+  ],
+};
+
+/**
+ * The RPEngine blocks in a preset, by play: the invented preset made (`POST /api/v1/presets`) and
+ * made the active one (`PUT /api/v1/settings/activeLoomPresetId`, `src/routes/settings.routes.ts:
+ * 61-71`), then Settings → Preset's Add RPEngine blocks (`lre.preset {op: "add"}`, RPE
+ * `src/backend/dispatch.ts:882-887`, `src/backend/runtime.ts:4195-4209`), which adds the guidance
+ * blocks the active preset lacks, switched off, under an "RPEngine" category (`src/backend/
+ * preset-binding.ts:25-31,195-208`). Then the active preset as it was before is put back: the earlier
+ * one by the same route, or none by deleting the setting (`src/routes/settings.routes.ts:73-79`).
+ * Last of all play: the active preset decides what the classic chat generates with.
+ */
+export const storesPreset: Step = {
+  name: "stores-preset",
+  makes: "an invented preset given today's RPEngine blocks (Settings → Preset), the earlier active preset put back",
+  async run(ctx) {
+    await ctx.log.once("stores:preset", async () => {
+      // The active preset before this step, kept before anything changes: a run stopped midway leaves the invented one active, and its rerun puts back this one.
+      const kept = ctx.log.get<Json>("stores:preset:previous");
+      let previous: string | null = typeof kept === "string" ? kept : null;
+      if (kept === undefined) {
+        try {
+          const setting = await ctx.host.call<{ value?: unknown }>("GET", `/api/v1/settings/${ACTIVE_PRESET}`);
+          previous = typeof setting.value === "string" && setting.value !== "" ? setting.value : null;
+        } catch (error) {
+          if (!(error instanceof HttpError && error.status === 404)) throw error;
+        }
+        ctx.log.set("stores:preset:previous", previous);
+      }
+      const listed = await ctx.host.call<unknown>("GET", "/api/v1/presets?limit=200");
+      const page: unknown[] = Array.isArray(listed) ? listed : isRecord(listed) && Array.isArray(listed.data) ? listed.data : [];
+      const known = page.find((p) => isRecord(p) && p.name === PRESET.name && typeof p.id === "string");
+      let presetId = isRecord(known) && typeof known.id === "string" ? known.id : undefined;
+      if (presetId === undefined) {
+        presetId = (await ctx.host.call<{ id: string }>("POST", "/api/v1/presets", PRESET)).id;
+        ctx.log.log({ step: "stores", action: "created", kind: "preset (Lumiverse)", id: presetId, name: PRESET.name });
+      }
+      await ctx.host.call("PUT", `/api/v1/settings/${ACTIVE_PRESET}`, { value: presetId });
+      ctx.log.log({ step: "stores", action: "changed", kind: "active preset (Lumiverse setting activeLoomPresetId)", id: presetId });
+      try {
+        const { card } = await ctx.socket.lre<{ card: { preset: { id: string } | null; blocks: { target: string; state: string }[] } }>("lre.preset", { op: "add" });
+        if (card.preset?.id !== presetId) throw new Error(`Settings → Preset added the blocks to ${card.preset?.id ?? "no preset"}, not the invented one`);
+        const missing = card.blocks.filter((b) => b.state === "missing").map((b) => b.target);
+        if (missing.length > 0) throw new Error(`the preset still lacks the blocks of ${missing.join(", ")}`);
+        ctx.log.log({ step: "stores", action: "changed", kind: "RPEngine blocks added to the active preset (lre.preset add)", id: presetId, detail: { blocks: card.blocks.length } });
+      } finally {
+        if (previous !== null) await ctx.host.call("PUT", `/api/v1/settings/${ACTIVE_PRESET}`, { value: previous });
+        else await ctx.host.call("DELETE", `/api/v1/settings/${ACTIVE_PRESET}`);
+        ctx.log.log({ step: "stores", action: "changed", kind: "active preset put back (Lumiverse setting activeLoomPresetId)", id: previous ?? "none" });
+      }
+      ctx.log.set("stores:preset", { id: presetId, previous });
+    });
+  },
+};
+
+/** Each store step and the step it runs after: all after `harness`, the play steps' last; the turns cut short after every other harness turn, the extension's restart after the runtime's, the preset last of all play. */
 export const STORE_STEP_AFTER: Readonly<Record<string, string>> = {
   "stores-user-settings": "harness",
   "stores-models": "stores-user-settings",
@@ -526,8 +850,11 @@ export const STORE_STEP_AFTER: Readonly<Record<string, string>> = {
   "stores-harness-pages": "stores-held",
   "stores-own-places": "stores-harness-pages",
   "stores-tidy-left": "stores-own-places",
-  "stores-cut-short": "stores-tidy-left",
+  "stores-stopped": "stores-tidy-left",
+  "stores-gen-failed": "stores-stopped",
+  "stores-cut-short": "stores-gen-failed",
+  "stores-preset": "stores-cut-short",
 };
 
 /** In the order they run. */
-export const STORE_STEPS: Step[] = [storesUserSettings, storesModels, storesKept, storesHeld, storesHarnessPages, storesOwnPlaces, storesTidyLeft, storesCutShort];
+export const STORE_STEPS: Step[] = [storesUserSettings, storesModels, storesKept, storesHeld, storesHarnessPages, storesOwnPlaces, storesTidyLeft, storesStopped, storesGenFailed, storesCutShort, storesPreset];

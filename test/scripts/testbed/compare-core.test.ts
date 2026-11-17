@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { compareReports } from "../../../scripts/testbed/lib/instance/compare-core";
+import { compareReports, presenceOnly } from "../../../scripts/testbed/lib/instance/compare-core";
 
 function run(ids: string, overrides: { [row: string]: unknown } = {}) {
   return {
     run: { build: "abc1234", lumiverse: "a70f4ed", ids: { owner: `owner-${ids}`, other: `other-${ids}` } },
-    world: { revisions: 3, played: { classic: 2, harness: 1 }, ids: { worldId: `w_${ids}`, head: `rev-${ids}` } },
+    world: { revisions: 3, chatRevision: { classic: 2, harness: 1 }, ids: { worldId: `w_${ids}`, head: `rev-${ids}` } },
     rows: {
       journal: { via: "lre.state.get", found: 3, facts: { paused: true, held: 1 }, ids: [`chat-${ids}`] },
       minds: { via: "lah.ws.list", found: 4, facts: { principal: true }, played: { files: 4, cast: ["Dale", "Marcus"] }, ids: [`chat-${ids}`] },
@@ -44,5 +44,11 @@ describe("two runs from nothing compared item by item", () => {
     const { journal: _left, ...rest } = run("two").rows;
     const second = { ...run("two"), rows: rest };
     expect(compareReports(first, second)).toEqual(['rows.journal: {"via":"lre.state.get","found":3,"facts":{"paused":true,"held":1},"ids":["chat-one"]} in the first, nothing in the second']);
+  });
+});
+
+describe("what the comparison says it compared for presence only", () => {
+  test("names each field the model chose, and the counts beside them, and nothing the script made or any id", () => {
+    expect(presenceOnly(run("one"), run("two"))).toEqual(["rows.minds.found (above zero)", "rows.minds.played.cast", "rows.minds.played.files"]);
   });
 });

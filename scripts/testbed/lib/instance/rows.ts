@@ -17,6 +17,10 @@
 // another run (`src/backend/ledger-io.ts:2533-2541`, `:367`) and a read of its chips sets the damaged
 // file aside (`src/backend/chips.ts:77`, `src/backend/stored-json.ts:17-31`), which is item 4's to
 // rehearse. So no read here names that chat except Lumiverse's own, and no loop runs over chat keys.
+//
+// Some of what a row reads was planted, because today's build can't make it by play (`planted.ts`,
+// `planted-harness.ts`, each recording `planted:<name>`): such a row says in its facts which of what
+// it read was planted and which was made by play.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -49,9 +53,9 @@ export interface Row {
   read(ctx: Ctx, env: InstanceEnv): Promise<RowRead>;
 }
 
-/** What the lead's planting steps record under `planted:<name>` (one item or an array). */
+/** What the planting steps record under `planted:<name>` (one item or an array): `planted.ts`, `planted-harness.ts`. */
 export interface Planted {
-  row: "depth" | "leftovers" | "unnamed" | "reader-writes" | "departures";
+  row: "depth" | "leftovers" | "unnamed" | "reader-writes" | "departures" | "unplayed" | "vectors-caches-snapshots" | "sessions" | "engine-switch" | "mirror";
   /** A short stable label. */
   kind: string;
   made: "play" | "planted";
@@ -111,11 +115,13 @@ export function ledgerOf(bag: { [key: string]: unknown } | undefined): StoredLed
  * The chats today's own reads may name: the play steps' and the store steps'. Never `chat:reader-cases`
  * (see the head of this file), nor `chat:set-aside`, whose leftovers are read on disk.
  */
-const PLAYED = ["chat:classic", "chat:agents", "chat:harness", "chat:branch", "stores:chat:kept", "stores:chat:held", "stores:chat:cut"] as const;
+const PLAYED = ["chat:classic", "chat:agents", "chat:harness", "chat:branch", "stores:chat:kept", "stores:chat:held", "stores:chat:stopped", "stores:chat:failed", "stores:chat:cut"] as const;
 /** The harness's chats among them. */
-const HARNESS_CHATS = ["chat:harness", "stores:chat:cut"] as const;
+const HARNESS_CHATS = ["chat:harness", "stores:chat:stopped", "stores:chat:failed", "stores:chat:cut"] as const;
+/** The harness chat no step plays, holding what `planted-harness.ts` planted: read only by the rows it plants for. */
+const PLANTED_CHAT = "chat:unplayed";
 /** Every chat key the run records, for Lumiverse's own reads and for naming an id by its key. */
-const ALL_CHATS = [...PLAYED, "chat:deleted", "chat:reader-cases", "chat:set-aside"] as const;
+const ALL_CHATS = [...PLAYED, PLANTED_CHAT, "chat:deleted", "chat:reader-cases", "chat:set-aside"] as const;
 
 /** A recorded id: a string, or a record holding one as `id`. */
 function idOf(ctx: Ctx, key: string): string | undefined {
@@ -141,6 +147,36 @@ function planted(ctx: Ctx, name: string): Planted[] {
   const v = ctx.log.get<Json>(`planted:${name}`);
   if (v === undefined || v === null) return [];
   return (Array.isArray(v) ? v : [v]) as unknown as Planted[];
+}
+
+/**
+ * Why a reply stands with no turn played, by today's own words for it: the engine's (`src/backend/
+ * ledger-io.ts:712-713,1554,1583,1665`) and the harness's (`src/shared/harness-texts.ts:625-628`,
+ * rendered at `src/backend/harness/extension.ts:1170`). Those are texts a user may change in
+ * Settings; a changed one reads "other".
+ */
+function reasonKind(why: string): string {
+  const added = "; that is only what a Continue added to it, the rest of it was played";
+  const base = why.endsWith(added) ? why.slice(0, -added.length) : why;
+  const stopped = base.endsWith(", and the reply was stopped") ? ", stopped" : "";
+  const kind = base.startsWith("the engine restarted while this reply was being written")
+    ? `restarted${stopped}`
+    : base.startsWith("the engine wasn't running when this reply was started")
+      ? `unheard${stopped}`
+      : base.startsWith("the reply's generation failed")
+        ? "generation failed"
+        : base === "the reply came back empty"
+          ? "came back empty"
+          : base === "the reply was stopped"
+            ? "stopped"
+            : base.startsWith("the harness's run was stopped")
+              ? "run stopped"
+              : base.startsWith("the harness's run failed")
+                ? "run failed"
+                : base.startsWith("no run of the harness began")
+                  ? "no run"
+                  : "other";
+  return base === why ? kind : `${kind} (what a Continue added)`;
 }
 
 const owner = (ctx: Ctx, env: InstanceEnv): string => userStorage(env, ctx.userId);
@@ -304,13 +340,20 @@ export const ROWS: Row[] = [
       const on: { [key: string]: Json } = {};
       // LumiAH's switch for a chat (`LumiAH extension/backend/switch.ts:162-178`), which writes nothing.
       for (const [key, chatId] of chatsOf(ctx, HARNESS_CHATS)) on[key] = (await ctx.socket.lah<{ chat: { on: boolean } }>("lah.chat.get", { chatId })).chat.on;
-      // The story choice: `lah.chat.story.get` also asks RPE's claim hook (LumiAH `switch.ts:204-218`), not shown to change nothing.
+      // Every chat's story choice, on disk; `planted-harness.ts` planted the one of the chat no step plays (`planted:story`).
       const stored = record(json(join(owner(ctx, env), "harness", "chats.json")));
-      const story = Object.keys(record(stored.story)).map((id) => keyOf(ctx, id, ALL_CHATS)).sort();
+      const plantedStory = new Set(planted(ctx, "story").map((p) => p.chat ?? ""));
+      const story = Object.keys(record(stored.story))
+        .map((id) => keyOf(ctx, id, ALL_CHATS))
+        .sort()
+        .map((key) => ({ chat: key, made: plantedStory.has(key) ? "planted" : "play" }));
+      // The planted one also as Harness → This chat reads it (`lah.chat.story.get`, LumiAH `switch.ts:204-218`): chats.json, the story setting and RPE's claim, which reads the chat's head and choices (`src/backend/harness/extension.ts:745-839`). Asked of that chat alone, which no play reads.
+      const plantedId = idOf(ctx, PLANTED_CHAT);
+      const chosen = plantedId === undefined ? null : (await ctx.socket.lah<{ story: { chosen: Json } }>("lah.chat.story.get", { chatId: plantedId })).story.chosen;
       return {
-        via: "lre.chat.knowledge, lah.chat.get; disk: harness/chats.json for the story choice",
+        via: "lre.chat.knowledge, lah.chat.get, lah.chat.story.get (the planted chat); disk: harness/chats.json for every story choice",
         found: Object.keys(engines).length + Object.keys(on).length + story.length,
-        facts: { engines, harnessOn: on, storyChoices: story, switchedOn: Object.keys(record(stored.on)).map((id) => keyOf(ctx, id, ALL_CHATS)).sort() },
+        facts: { engines, harnessOn: on, storyChoices: story, plantedChoice: chosen, switchedOn: Object.keys(record(stored.on)).map((id) => keyOf(ctx, id, ALL_CHATS)).sort() },
       };
     },
   },
@@ -424,16 +467,33 @@ export const ROWS: Row[] = [
     today: "A reply that stands with no turn played, and why (stopped, failed, restarted) (the harness engine's record on the reply)",
     made: "play",
     async read(ctx) {
+      // `planted-harness.ts` planted the run's stop and its failure in the chat no step plays (`planted:unplayed`); every other mark was made by play (`stores.ts`: the runtime stopped under a reply, the extension restarted under one).
+      const plantedMarks = new Set(planted(ctx, "unplayed").map((p) => `${p.chat ?? ""} ${p.path}`));
       const reasons: Json[] = [];
+      const texts: Json[] = [];
+      const shown: { [key: string]: Json } = {};
       const ids: Json[] = [];
-      for (const [key, chatId] of chatsOf(ctx, HARNESS_CHATS)) {
+      for (const [key, chatId] of chatsOf(ctx, [...HARNESS_CHATS, PLANTED_CHAT])) {
         for (const { message, swipe, rec } of await recordsOf(ctx, chatId)) {
-          if (typeof rec.harness?.unplayed !== "string") continue;
-          reasons.push({ chat: key, why: rec.harness.unplayed, onTurn: (rec.harness.turns ?? []).length > 0 });
-          ids.push(`${message.id}:${swipe}`);
+          const why = rec.harness?.unplayed;
+          if (typeof why !== "string") continue;
+          const at = `${message.id}:${swipe}`;
+          reasons.push({ chat: key, reason: reasonKind(why), onTurn: (rec.harness?.turns ?? []).length > 0, made: plantedMarks.has(`${key} ${at}`) ? "planted" : "play" });
+          texts.push({ chat: key, why });
+          ids.push(at);
         }
+        // Today's own view of the chat names each mark (`unplayed:<message>:<swipe>`, `src/backend/view.ts:782-786`).
+        const { view } = await ctx.socket.lre<{ view: { chips: { id: string }[] } }>("lre.state.get", { chatId });
+        const marks = view.chips.filter((c) => c.id.startsWith("unplayed:")).length;
+        if (marks > 0) shown[key] = marks;
       }
-      return { via: "GET /api/v1/chats/:id/messages (Rec.harness.unplayed)", found: reasons.length, facts: reasons, ids };
+      // Lumiverse's stop once the reply's text streamed, by play: today's build keeps it as a stopped turn, no mark (`stores.ts`, `storesStopped`).
+      const stop = record(ctx.log.get<Json>("stores:stopped"));
+      const stopChat = idOf(ctx, "stores:chat:stopped");
+      const stopRec = stopChat === undefined ? undefined : (await recordsOf(ctx, stopChat)).find((r) => r.message.id === stop.message && r.swipe === String(stop.swipe))?.rec;
+      const stopRoute = stopRec === undefined ? null : { status: stopRec.status ?? null, onTurn: (stopRec.harness?.turns ?? []).length > 0, unplayed: typeof stopRec.harness?.unplayed === "string" };
+      // The reasons' words carry Lumiverse's error for a failed generation: kept beside the facts, compared only for being there.
+      return { via: "GET /api/v1/chats/:id/messages (Rec.harness.unplayed), lre.state.get (its chips)", found: reasons.length, facts: { reasons, shown, stopRoute }, played: { texts }, ids };
     },
   },
   {
@@ -578,7 +638,13 @@ export const ROWS: Row[] = [
       }
       // Both blob stores, whose files no request lists (`src/backend/agents/blobs.ts:27`; LumiAH `extension/backend/reads.ts:24-27`).
       const blobs = { agents: files(join(owner(ctx, env), "agents", "blobs")).length, harness: files(join(owner(ctx, env), "harness", "blobs")).length };
-      return { via: "GET /api/v1/chats/:id/messages; disk: agents/blobs and harness/blobs (no request lists a blob store)", found: found + blobs.agents + blobs.harness, facts: { chats: Object.keys(played).sort() }, played: { ...played, blobs } };
+      // The harness's session documents (`harness/docs/chats/<chat>/session.json`, LumiAH `core/sessions.ts:361-373`), on disk: Harness → Sessions' read first has the runtime send what it saved (LumiAH `core/sessions.ts:97-107,135`), a write. Only Summarize writes one; `planted-harness.ts` planted the planted chat's (`planted:session`).
+      const chatDocs = join(owner(ctx, env), "harness", "docs", "chats");
+      const plantedSessions = new Set(planted(ctx, "session").map((p) => p.path));
+      const harnessSessions = files(chatDocs)
+        .filter((f) => f.endsWith("/session.json"))
+        .map((f) => ({ chat: keyOf(ctx, decodeURIComponent(f.split("/")[0] ?? ""), ALL_CHATS), compactAsked: typeof record(json(join(chatDocs, f))).compactAsked === "number", made: plantedSessions.has(`harness/docs/chats/${f}`) ? "planted" : "play" }));
+      return { via: "GET /api/v1/chats/:id/messages; disk: agents/blobs and harness/blobs (no request lists a blob store), harness/docs/chats/<chat>/session.json", found: found + blobs.agents + blobs.harness + harnessSessions.length, facts: { chats: Object.keys(played).sort(), harnessSessions }, played: { ...played, blobs } };
     },
   },
   {
@@ -651,10 +717,10 @@ export const ROWS: Row[] = [
     today: "Your settings: settings.json, chat prefs, runs/<chat>/prefs.json, LumiAH's settings.json and story.json",
     made: "play",
     async read(ctx, env) {
-      const { settings } = await ctx.socket.lre<{ settings: { narrator: Json; tidy: { findings: number }; minds: { knowledge: { enabled: boolean; threshold: number } }; agents: { persist: { on: boolean }; compaction: { atTokens: number; keepTurns: number } } } }>("lre.settings.get", {});
+      const { settings } = await ctx.socket.lre<{ settings: { narrator: Json; minds: { knowledge: { enabled: boolean; threshold: number } }; agents: { pipeline: { mode: string }; main: { stages: Json }; persist: { on: boolean }; compaction: { atTokens: number; keepTurns: number } } } }>("lre.settings.get", {});
       const kept = idOf(ctx, "stores:chat:kept") ?? "";
       const chat = await ctx.socket.lre<Json>("lre.chat.knowledge", { chatId: kept });
-      const world = await ctx.socket.lre<{ world: { narrator?: Json; mapSettings?: Json; minds?: { thresholds?: Json } } }>("lre.world", { op: "get", worldId: idOf(ctx, "worldId") ?? "" });
+      const world = await ctx.socket.lre<{ world: { narrator?: Json; mapSettings?: Json; minds?: { thresholds?: Json }; packs?: { gear?: { config?: { tidy?: Json } } } } }>("lre.world", { op: "get", worldId: idOf(ctx, "worldId") ?? "" });
       // A chat's map display and what Tidy up leaves: `lre.map` and `lre.things leave` only write them (`dispatch.ts:837-842`, `:273-276`), and no request reads the file back.
       const prefs = chatsOf(ctx, PLAYED).flatMap(([key, chatId]) => {
         const p = record(json(join(owner(ctx, env), "runs", chatId, "prefs.json")));
@@ -665,7 +731,8 @@ export const ROWS: Row[] = [
       return {
         via: "lre.settings.get, lre.chat.knowledge, lre.world get; disk: runs/<chat>/prefs.json and harness/settings.json",
         found: 1 + 1 + 1 + prefs.length + (Object.keys(harness).length > 0 ? 1 : 0),
-        facts: { user: { narrator: settings.narrator, tidy: settings.tidy.findings, knowledge: settings.minds.knowledge, persist: settings.agents.persist.on, compaction: settings.agents.compaction }, chat: chat, world: { narrator: world.world.narrator ?? null, mapSettings: world.world.mapSettings ?? null, thresholds: world.world.minds?.thresholds ?? null }, prefs: prefs.sort((a, b) => a.chat.localeCompare(b.chat)), harnessRows: list(harness.own).map((r) => (record(r).path as Json) ?? null) },
+        // The user's level has no tidy-up setting in today's build (the read-back's note `userTidy`); the world's own switch is read here.
+        facts: { user: { narrator: settings.narrator, knowledge: settings.minds.knowledge, pipeline: settings.agents.pipeline.mode, stages: settings.agents.main.stages, persist: settings.agents.persist.on, compaction: settings.agents.compaction }, chat: chat, world: { narrator: world.world.narrator ?? null, mapSettings: world.world.mapSettings ?? null, thresholds: world.world.minds?.thresholds ?? null, tidy: world.world.packs?.gear?.config?.tidy ?? null }, prefs: prefs.sort((a, b) => a.chat.localeCompare(b.chat)), harnessRows: list(harness.own).map((r) => (record(r).path as Json) ?? null) },
       };
     },
   },
@@ -803,12 +870,13 @@ export const ROWS: Row[] = [
     today: "Which runtime held the working copy; the chat copy's own state (mirror-holder.json, mirror.json, database.json)",
     made: "setup",
     async read(ctx, env) {
-      // No page request reads mirror-holder.json or docs/mirror.json (LumiAH `extension/backend/mirror.ts`, `runtime/store/index.ts:688`); database.json only the operator's chat-data read, which needs a relay.
+      // No page request reads mirror-holder.json or docs/mirror.json (LumiAH `extension/backend/mirror.ts`, `runtime/store/index.ts:688`); database.json only the operator's chat-data read, which needs a relay. `planted-harness.ts` planted database.json where today's build hadn't written it (`planted:database`).
       const h = join(owner(ctx, env), "harness");
       const holder = record(record(json(join(h, "mirror-holder.json"))).holder);
       const mirror = json(join(h, "docs", "mirror.json"));
       const database = json(join(h, "database.json"));
-      return { via: "disk: harness/mirror-holder.json, harness/docs/mirror.json, harness/database.json (no page request reads them)", found: (Object.keys(holder).length > 0 ? 1 : 0) + (mirror !== null ? 1 : 0) + (database !== null ? 1 : 0), facts: { held: Object.keys(holder).length > 0, mirror: mirror !== null, database: database === null ? null : ((record(database).on as Json) ?? null) } };
+      const databaseMade = database === null ? null : planted(ctx, "database").some((p) => p.path === "harness/database.json") ? "planted" : "play";
+      return { via: "disk: harness/mirror-holder.json, harness/docs/mirror.json, harness/database.json (no page request reads them)", found: (Object.keys(holder).length > 0 ? 1 : 0) + (mirror !== null ? 1 : 0) + (database !== null ? 1 : 0), facts: { held: Object.keys(holder).length > 0, mirror: mirror !== null, database: database === null ? null : ((record(database).on as Json) ?? null), databaseMade } };
     },
   },
   {
@@ -863,8 +931,30 @@ export const ROWS: Row[] = [
       // A chat's fold snapshots: read only as its ledger opens (`src/backend/ledger-io.ts:2543`). LumiAH's recall: `chats/<c>/recall.json` and `recall/` (LumiAH `core/recall/recall.ts:60`, `meaning.ts:215-217`).
       const snapshots = chatsOf(ctx, PLAYED).filter(([, chatId]) => existsSync(join(owner(ctx, env), "runs", chatId, "snapshots.json"))).map(([key]) => key);
       const docs = join(owner(ctx, env), "harness", "docs");
-      const recall = files(join(docs, "recall")).length + files(join(docs, "chats")).filter((f) => f.endsWith("/recall.json")).length;
-      return { via: "disk: runs/<chat>/snapshots.json and harness/docs recall files (no request returns either)", found: snapshots.length + recall, facts: { snapshots: snapshots.sort() }, played: { recall } };
+      // `planted-harness.ts` planted the search vectors and the count of what was embedded (`planted:vectors`): play makes none with meaning search off and no embedding connection (LumiAH `core/recall/meaning.ts:653-669`).
+      const plantedRecall = new Set(planted(ctx, "vectors").map((p) => p.path));
+      const recallFiles = files(join(docs, "recall"));
+      // `vectors/<space>/<chat|book>/<owner>/<xx>.json` holding `{v, dims, vectors}` (LumiAH `meaning.ts:304-332,408-424`).
+      const vectors = recallFiles
+        .filter((f) => f.startsWith("vectors/"))
+        .map((f) => {
+          const [, space, area, ownerKey] = f.split("/");
+          return { space: space ?? "", area: area ?? "", chat: area === "chat" ? keyOf(ctx, decodeURIComponent(ownerKey ?? ""), ALL_CHATS) : null, vectors: Object.keys(record(record(json(join(docs, "recall", f))).vectors)).length, made: plantedRecall.has(`harness/docs/recall/${f}`) ? "planted" : "play" };
+        });
+      const embeddedRel = "harness/docs/recall/embedded.json";
+      const embeddedDoc = json(join(docs, "recall", "embedded.json"));
+      const embeddedTexts = record(record(embeddedDoc).all).texts;
+      const embedded = embeddedDoc === null ? null : { texts: typeof embeddedTexts === "number" ? embeddedTexts : null, made: plantedRecall.has(embeddedRel) ? "planted" : "play" };
+      // Today's own read of what was embedded, on the planted chat: Harness → Lore (`lah.lore.get`), whose count is the one `recall/embedded.json` keeps and which, with no embedding connection, reads no vector and writes none (LumiAH `meaning.ts:653-712`).
+      const plantedId = idOf(ctx, PLANTED_CHAT);
+      const lore = plantedId === undefined ? null : (await ctx.socket.lah<{ embedding: { connection: unknown; all: { texts: number } } }>("lah.lore.get", { chatId: plantedId })).embedding;
+      const recall = recallFiles.filter((f) => !plantedRecall.has(`harness/docs/recall/${f}`)).length + files(join(docs, "chats")).filter((f) => f.endsWith("/recall.json")).length;
+      return {
+        via: "lah.lore.get (the planted chat); disk: runs/<chat>/snapshots.json and harness/docs recall files (no request returns them)",
+        found: snapshots.length + recall + vectors.length + (embedded !== null ? 1 : 0),
+        facts: { snapshots: snapshots.sort(), vectors, embedded, lore: lore === null ? null : { connection: lore.connection !== null, embedded: lore.all.texts } },
+        played: { recall },
+      };
     },
   },
   {
@@ -1001,13 +1091,32 @@ export const ROWS: Row[] = [
     today: "Preset blocks named RPEngine · <step> and {{outlet::lre_…}} references (Lumiverse presets)",
     made: "play",
     async read(ctx): Promise<RowRead> {
-      // Settings → Preset's card (`dispatch.ts:882-887`; `src/backend/runtime.ts:4195-4209`): refused when Lumiverse names no active preset.
+      // The invented preset `stores.ts` made and gave today's blocks by play (`stores:preset`), as Lumiverse keeps it (`GET /api/v1/presets/:id`, Lumiverse `src/routes/presets.routes.ts:139`): the blocks named `RPEngine · <step>` under the "RPEngine" category (`src/backend/preset-binding.ts:25-31,195-208`; stored as `spliceBlocks` writes them, `src/backend/spindle-host.ts:928-932`) and each outlet its blocks name.
+      const made = record(ctx.log.get<Json>("stores:preset"));
+      const presetId = typeof made.id === "string" ? made.id : null;
+      let invented: Json = null;
+      let inventedFound = 0;
+      if (presetId !== null) {
+        const preset = record(await ctx.host.call<unknown>("GET", `/api/v1/presets/${presetId}`));
+        const order = list(typeof preset.prompt_order === "string" ? JSON.parse(preset.prompt_order) : preset.prompt_order).map(record);
+        const ours = order.filter((b) => String(b.name ?? "").startsWith("RPEngine · "));
+        const blocks = ours.map((b) => String(b.name).slice("RPEngine · ".length)).sort();
+        inventedFound = blocks.length;
+        invented = {
+          category: order.some((b) => b.marker === "category" && String(b.name ?? "").trim() === "RPEngine"),
+          blocks,
+          switchedOn: ours.filter((b) => b.enabled === true).length,
+          outlets: [...new Set(order.flatMap((b) => [...String(b.content ?? "").matchAll(/\{\{outlet::([^}]+)\}\}/g)].map((m) => m[1] ?? "")))].sort(),
+          wasActive: made.previous === null ? "none" : "another",
+        };
+      }
+      // Settings → Preset's card of the active preset, the one active before the invented one was put back (`dispatch.ts:882-887`; `src/backend/runtime.ts:4195-4209`): refused when Lumiverse names no active preset.
       try {
         const { card } = await ctx.socket.lre<{ card: { preset: { name: string } | null; outlets: { outlet: string }[]; blocks: { target: string; state: string }[] } }>("lre.preset", { op: "get" });
         const blocks = card.blocks.filter((b) => b.state !== "missing");
-        return { via: "lre.preset get", found: blocks.length + card.outlets.length, facts: { preset: card.preset !== null, blocks: blocks.map((b) => ({ target: b.target, state: b.state })), outlets: card.outlets.map((o) => o.outlet).sort() } };
+        return { via: "GET /api/v1/presets/:id (the invented preset), lre.preset get", found: inventedFound + blocks.length + card.outlets.length, facts: { invented, preset: card.preset !== null, blocks: blocks.map((b) => ({ target: b.target, state: b.state })), outlets: card.outlets.map((o) => o.outlet).sort() }, ids: { preset: presetId } };
       } catch (error) {
-        return { via: "lre.preset get", found: 0, facts: { preset: false, refused: error instanceof Error ? error.message : String(error) } };
+        return { via: "GET /api/v1/presets/:id (the invented preset), lre.preset get", found: inventedFound, facts: { invented, preset: false, refused: error instanceof Error ? error.message : String(error) }, ids: { preset: presetId } };
       }
     },
   },

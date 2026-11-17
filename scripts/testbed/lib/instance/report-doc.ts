@@ -23,6 +23,8 @@ export interface RowReport {
   error?: string;
   /** Why this row holds nothing on today's build by its own definition (RPE's own registration exists only once the new extension has run), or absent. */
   absentBy?: string;
+  /** What another package must do before this row can hold anything (the browser's preferences wait for the live driver's profile), or absent. Listed, not failed. */
+  waitsFor?: string;
 }
 
 export interface ReportDoc {
@@ -32,6 +34,8 @@ export interface ReportDoc {
     lumiverse: string | null;
     ids: { owner: string | null; other: string | null };
   };
+  /** Facts about the instance the rows do not hold, each with the code that makes it so. */
+  notes: { [key: string]: string };
   world: {
     /** Entries in each part of the head revision's document (1 for a value, 0 for nothing). */
     parts: { [part: string]: number };
@@ -40,7 +44,7 @@ export interface ReportDoc {
     unknown: string[];
     /** How many revisions the world's history holds, and which one each chat plays (its number there; 0: not in the history). */
     revisions: number;
-    played: { [chat: string]: number };
+    chatRevision: { [chat: string]: number };
     draft: boolean;
     ids: Json;
   };
@@ -53,12 +57,17 @@ export function failures(doc: ReportDoc): string[] {
   for (const part of doc.world.empty) out.push(`the world's part "${part}" holds nothing`);
   for (const part of doc.world.unknown) out.push(`the world holds a part "${part}" the report does not know: add it to WORLD_PARTS`);
   if (doc.world.revisions === 0) out.push("the world's history holds no revision");
-  for (const [chat, n] of Object.entries(doc.world.played)) if (n === 0) out.push(`the chat "${chat}" plays a revision the world's history does not hold`);
+  for (const [chat, n] of Object.entries(doc.world.chatRevision)) if (n === 0) out.push(`the chat "${chat}" plays a revision the world's history does not hold`);
   for (const [id, row] of Object.entries(doc.rows)) {
     if (row.error !== undefined) out.push(`row "${id}": the read failed: ${row.error}`);
-    else if (row.found === 0 && row.absentBy === undefined) out.push(`row "${id}" (${row.today}): nothing read back`);
+    else if (row.found === 0 && row.absentBy === undefined && row.waitsFor === undefined) out.push(`row "${id}" (${row.today}): nothing read back`);
   }
   return out;
+}
+
+/** The rows that wait on another package, one line each: listed beside the read-back and in the golden copy's record. */
+export function waiting(doc: ReportDoc): string[] {
+  return Object.entries(doc.rows).flatMap(([id, row]) => (row.waitsFor !== undefined && row.found === 0 ? [`row "${id}" (${row.today}) waits for ${row.waitsFor}`] : []));
 }
 
 /** The document as one canonical text: keys sorted at every depth, no spacing, so the same instance gives the same bytes. */

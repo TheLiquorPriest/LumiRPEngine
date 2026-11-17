@@ -9,7 +9,7 @@ import { Cli, CliError } from "../cli";
 import type { Ctx } from "../context";
 import { cliPath, IDENTIFIER } from "../env";
 import { Lumiverse } from "../lumiverse";
-import { Player } from "../play";
+import { ClaimingPlayer } from "./claims";
 import type { RunLog } from "../record";
 import { EngineSocket } from "../socket";
 import { cliConfigHome, credentialsFile, type InstanceEnv, type Who } from "./env";
@@ -74,7 +74,7 @@ export async function ownerContext(env: InstanceEnv, log: RunLog): Promise<Ctx &
   const connection = connections.find((c) => c.name === env.connectionName);
   if (connection === undefined) throw new Error(`the instance's user has no Lumiverse connection named "${env.connectionName}"`);
   const socket = await EngineSocket.open(host, extensionId, { page: true });
-  return { env, host, socket, player: new Player(socket, host, log, connection.id), cli: new UserCli(env, "owner"), log, userId, extensionId, connectionId: connection.id };
+  return { env, host, socket, player: new ClaimingPlayer(socket, host, log, connection.id), cli: new UserCli(env, "owner"), log, userId, extensionId, connectionId: connection.id };
 }
 
 /** The second user's context: a widget session (it never takes a page's place) and its own command line. */
