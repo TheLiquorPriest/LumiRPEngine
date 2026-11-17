@@ -107,13 +107,27 @@ export function insertKey(db: Database, user: string, kind: KeyKind, now: number
 /**
  * Puts in force for `user` the key today's build gave its connection in Lumiverse, which RPE takes at
  * the swap (plan §15.2) so that connection goes on working as it is, and which every connection that
- * reaches today's runtime holds (R-109). RPE holds it only as its SHA-256; its last four characters
- * were never known. It is the one key that opens the provider endpoint: RPE's own earlier key stops
- * with it. Runs inside a transaction.
+ * reaches today's runtime holds (R-109), paired with the model names those connections name (`models`,
+ * added to any it was paired with before): the key opens a request for those models alone. RPE holds it
+ * only as its SHA-256; its last four characters were never known. It is the one key that opens the
+ * provider endpoint: RPE's own earlier key stops with it. Runs inside a transaction.
  */
-export function takeKeyHash(db: Database, user: string, hash: string, now: number): void {
+export function takeKeyHash(db: Database, user: string, hash: string, models: readonly string[], now: number): void {
   db.run("DELETE FROM provider_key WHERE user = ? AND taken = 0 AND hash <> ?", [user, hash]);
-  db.run("INSERT OR IGNORE INTO provider_key (user, hash, last4, made, taken) VALUES (?, ?, '', ?, 1)", [user, hash, now]);
+  const before = db.query<{ models: string | null }, [string, string]>("SELECT models FROM provider_key WHERE user = ? AND hash = ?").get(user, hash);
+  const paired = JSON.stringify([...new Set([...modelsOf(before?.models ?? null), ...models])]);
+  db.run("INSERT INTO provider_key (user, hash, last4, made, taken, models) VALUES (?, ?, '', ?, 1, ?) ON CONFLICT (hash) DO UPDATE SET models = excluded.models", [user, hash, now, paired]);
+}
+
+/** A provider key's paired model names as its row keeps them (a JSON list); none where it names none. */
+function modelsOf(kept: string | null): string[] {
+  if (kept === null) return [];
+  try {
+    const list: unknown = JSON.parse(kept);
+    return Array.isArray(list) ? list.filter((m): m is string => typeof m === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Whether `user`'s provider key is the one taken from today's connection at the swap. */
@@ -185,6 +199,22 @@ export class Auth {
     if (kind === "provider") return (this.deps.db.query<{ n: number }, [string, string]>("SELECT count(*) AS n FROM provider_key WHERE user = ? AND hash = ?").get(this.deps.owner, hash)?.n ?? 0) > 0;
     const row = this.deps.db.query<{ expires: number | null }, [string, string, string]>("SELECT expires FROM page_token WHERE user = ? AND hash = ? AND kind = ?").get(this.deps.owner, hash, kind);
     return row !== null && (row.expires === null || row.expires > this.deps.now());
+  }
+
+  /**
+   * The model names the provider key `presented` opens a request for (R-109: each connection that is RPE's is answered under its own
+   * model name, with its own key), or null where it is no provider key of this RPE's: for a key taken at the swap, those its row pairs
+   * it with; for RPE's own key (or one taken before a row named any), the ones `configured` lists that no other key is paired with.
+   */
+  providerModels(presented: string | null, configured: readonly string[]): string[] | null {
+    if (presented === null || presented === "") return null;
+    const hash = secretHash(presented);
+    const rows = this.deps.db.query<{ hash: string; models: string | null }, [string]>("SELECT hash, models FROM provider_key WHERE user = ?").all(this.deps.owner);
+    const row = rows.find((r) => r.hash === hash);
+    if (row === undefined) return null;
+    if (row.models !== null) return modelsOf(row.models);
+    const paired = new Set(rows.flatMap((r) => modelsOf(r.models)));
+    return configured.filter((m) => !paired.has(m));
   }
 
   /**

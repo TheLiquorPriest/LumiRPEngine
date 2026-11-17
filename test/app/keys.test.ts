@@ -55,7 +55,7 @@ describe("keys", () => {
     }
 
     const app = await bed.open();
-    expect(app.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual(["app 3"]);
+    expect(app.migrated.applied.map((m) => `${m.area} ${m.version}`)).toEqual(["app 3", "app 4"]);
     for (const key of [keys.provider, keys.today]) expect(app.auth.holds("provider", key)).toBe(true);
     expect(app.auth.holds("provider", keys.retiredProvider)).toBe(false);
     expect(app.auth.holds("extension", keys.extension)).toBe(true);
@@ -130,7 +130,7 @@ describe("keys", () => {
     const models = (key: string): Promise<number> => fetch(`${server.url}/v1/models`, { headers: { authorization: `Bearer ${key}` } }).then((r) => r.status);
     expect(await models(own)).toBe(200);
     // The swap takes the key today's connections hold: RPE's own earlier key stops with it, and it is the one key.
-    await app.writes.run((db) => takeKeyHash(db, OWNER, secretHash(todays), app.now()));
+    await app.writes.run((db) => takeKeyHash(db, OWNER, secretHash(todays), ["rpe"], app.now()));
     expect(await models(todays)).toBe(200);
     expect(await models(own)).toBe(401);
     expect(app.db.query("SELECT taken FROM provider_key").all()).toEqual([{ taken: 1 }]);
@@ -149,7 +149,7 @@ describe("keys", () => {
       db.close();
     }
     const app = await bed.open();
-    await app.writes.run((db2) => takeKeyHash(db2, OWNER, secretHash("lumiah-key-of-todays-connection"), app.now()));
+    await app.writes.run((db2) => takeKeyHash(db2, OWNER, secretHash("lumiah-key-of-todays-connection"), ["rpe"], app.now()));
     for (const argv of [["key", "provider"], ["key", "provider", "all"]]) {
       const refused = await rpe(argv);
       expect(refused.code).toBe(1);

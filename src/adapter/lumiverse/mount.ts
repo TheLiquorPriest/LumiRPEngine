@@ -326,8 +326,8 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
     liveKinds: [EXTENSION_KIND],
     async mount(at) {
       app = at;
-      // Every connection that is RPE's is let in by its own key (RPE's own, or one taken at the swap) and answered under its own model name (R-109).
-      const providerKey = (request: Request): boolean => at.auth.holds("provider", bearerOf(request));
+      // Every connection that is RPE's is let in by its own key (RPE's own, or one taken at the swap), for the models that key is paired with, and answered under its own model name (R-109).
+      const keyModels = (request: Request): string[] | null => at.auth.providerModels(bearerOf(request), rpeModels());
       const { url, user } = at.config.lumiverse;
       if (url !== null && user !== null) {
         const p = build(at, user, url, storedSignIn(await at.secrets.read("lumiverse")));
@@ -336,7 +336,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           user,
           provider: providerEndpoint({
             user,
-            allowed: providerKey,
+            keyModels,
             window: lanes.window,
             start: lanes.start,
             reads: promptReads(p.reads),
@@ -350,7 +350,6 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
             feedback: createFeedback({ reads: p.reads, replaced: lanes.replaced }),
             heard,
             untaggedWhileAwaited: () => settings().untaggedWhileAwaited,
-            modelNames: rpeModels,
             turns: lanes.turns,
             clock: deps.clock,
             commentMs: () => settings().commentMs,
@@ -369,7 +368,7 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
           answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers",
           raw: (request, call) => (handlers === null ? notSetUp() : handlers.provider(request, call)),
         }),
-        rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers, as the connection in Lumiverse lists them.", answers: "an OpenAI model list", raw: modelsEndpoint({ allowed: providerKey, modelNames: rpeModels }) }),
+        rawRoute({ method: "GET", path: "/v1/models", access: "provider", group: "provider", does: "The models the provider endpoint offers to the request's key: those of the connections in Lumiverse that hold it.", answers: "an OpenAI model list", raw: modelsEndpoint({ keyModels }) }),
         route({ method: "GET", path: EXTENSION_STATUS_PATH, access: "page", group: "service", does: "How RPE's extension in Lumiverse last said it stands with RPE.", reply: extensionStatusReply, handle: extension }),
         route({
           method: "GET",

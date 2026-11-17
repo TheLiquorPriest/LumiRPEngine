@@ -30,10 +30,10 @@ import { runningServer, takeLock, withWriter, type WriterContext } from "./write
  * where today's runtime listened, every connection in Lumiverse that reached it (`connections`, which
  * are all RPE's now, each answered under the model name it names, so each is added to
  * `lumiverse.models`), the model name today's loopback names where there is one, and the hash of the
- * key those connections hold. The model names are what tell that RPE answers on today's connections
- * rather than on one of its own (`rpe down`). Resolves to what puts RPE's config back as it was; a key
- * hash taken stays, since only today's connections hold that key, and it reaches RPE only where today's
- * runtime answered.
+ * key those connections hold, paired with their model names and the loopback's (the key opens those).
+ * The model names are what tell that RPE answers on today's connections rather than on one of its own
+ * (`rpe down`). Resolves to what puts RPE's config back as it was; a key hash taken stays, since only
+ * today's connections hold that key, and it reaches RPE only where today's runtime answered.
  */
 export async function takeOver(ctx: WriterContext, current: AppConfig, loopback: Loopback | null, ids: readonly string[], taken: readonly TakenConnection[]): Promise<() => Promise<void>> {
   const before = await readText(ctx.paths.config);
@@ -42,7 +42,7 @@ export async function takeOver(ctx: WriterContext, current: AppConfig, loopback:
   const hash = loopback?.keyHash ?? null;
   await withWriter(ctx, async (ops) => {
     await ops.saveLumiverse({ set: { connections: [...ids], ...(models.length === current.lumiverse.models.length ? {} : { models }) }, ...(loopback === null ? {} : { listens: { address: loopback.at.address, port: loopback.at.port } }) });
-    if (hash !== null) await ops.takeKey(hash);
+    if (hash !== null && loopback !== null) await ops.takeKey(hash, [...new Set([...taken.map((c) => c.model), loopback.model])]);
   });
   return async () => {
     // RPE's service is stopped by now (the undo runs the later steps first); the config is put back as the one writer.

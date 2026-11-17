@@ -52,7 +52,11 @@ export const keyMade = shape.named(
     ends: shape.field(shape.nullable(shape.number()), "When it runs out, epoch milliseconds; null: it has no end."),
   }),
 );
-export const takenKeyAsk = shape.named("TakenKeyAsk", "The hash of the provider key today's connection holds, which RPE takes over at the swap.", shape.object({ hash: shape.field(shape.text({ blank: false }), "The key's SHA-256, in hex.") }));
+export const takenKeyAsk = shape.named(
+  "TakenKeyAsk",
+  "The hash of the provider key today's connections hold, which RPE takes over at the swap, with the model names those connections name, which the key opens.",
+  shape.object({ hash: shape.field(shape.text({ blank: false }), "The key's SHA-256, in hex."), models: shape.field(shape.list(T), "The model names of the connections that hold the key.") }),
+);
 export const switchAsk = shape.named(
   "SwitchAsk",
   "Switch the named thing on or off, for the user it names.",
@@ -125,7 +129,7 @@ export interface CommandSink {
 /** What the command line asks to have written: the same calls whether the server writes them or the command does. */
 export interface CommandOps {
   makeKey(ask: KeyAsk): Promise<KeyMade>;
-  takeKey(hash: string): Promise<void>;
+  takeKey(hash: string, models: readonly string[]): Promise<void>;
   setSwitch(name: string, state: "on" | "off", user?: string): Promise<Switched>;
   saveLumiverse(save: LumiverseSave): Promise<void>;
   status(): Promise<CommandStatus>;
@@ -161,10 +165,10 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
         return { kind: ask.kind, key: made.key, made: made.made, ends: made.ends };
       });
     },
-    async takeKey(hash) {
+    async takeKey(hash, models) {
       if (!/^[0-9a-f]{64}$/.test(hash)) throw new CommandRefused("A key's hash is 64 hexadecimal characters.");
       const user = ownerOf(sink);
-      await sink.run((db) => takeKeyHash(db, user, hash, sink.now()));
+      await sink.run((db) => takeKeyHash(db, user, hash, models, sink.now()));
     },
     async setSwitch(name, state, whose) {
       const user = whose ?? ownerOf(sink);
@@ -219,7 +223,7 @@ export function commandRoutes(sink: CommandSink, builds: () => Promise<string | 
   const ops = commandOps(sink, builds);
   return [
     route({ method: "POST", path: COMMAND_PATHS.keys, access: "command", group: "service", does: "Makes a new key of a kind, which retires the one before it; shown this once.", body: keyAsk, reply: keyMade, handle: ({ body }) => asked(ops.makeKey(body)) }),
-    route({ method: "POST", path: COMMAND_PATHS.takenKeys, access: "command", group: "service", does: "Takes over the provider key today's connection holds, by its hash alone.", body: takenKeyAsk, reply: shape.nothing(), handle: ({ body }) => asked(ops.takeKey(body.hash)) }),
+    route({ method: "POST", path: COMMAND_PATHS.takenKeys, access: "command", group: "service", does: "Takes over the provider key today's connections hold, by its hash alone, paired with their model names.", body: takenKeyAsk, reply: shape.nothing(), handle: ({ body }) => asked(ops.takeKey(body.hash, body.models)) }),
     route({ method: "PUT", path: COMMAND_PATHS.switches, access: "command", group: "service", does: "Switches a thing that runs a command or calls out on or off: the one road to it.", body: switchAsk, reply: switched, handle: ({ params, body }) => asked(ops.setSwitch(params.name, body.state, body.user)) }),
     route({ method: "PUT", path: COMMAND_PATHS.lumiverse, access: "command", group: "service", does: "Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block.", body: lumiverseSave, reply: shape.nothing(), handle: ({ body }) => asked(ops.saveLumiverse(body)) }),
     route({ method: "GET", path: COMMAND_PATHS.status, access: "command", group: "service", does: "The keys in force, the switches and the builds, for `rpe status`.", reply: commandStatus, handle: () => ops.status() }),

@@ -1,8 +1,9 @@
 // The provider endpoint Lumiverse calls on RPE's connections (STANDALONE-PLAN §4.2, §4.4): `POST
 // /v1/chat/completions` and `GET /v1/models`. Every connection in Lumiverse that is RPE's is answered,
-// each under its own model name and with its own key (§15.2 l.1625, READINGS R-109): a request with
-// the key of any of them is let in, the model list names every one's model, and each answer names the
-// model its request named. A request with no tag (a title, a summary, a quiet call, another
+// each under its own model name and with its own key (§15.2 l.1625, READINGS R-109): a request is let in
+// by a key one of them holds, for a model that key's connections name; the model list names the models
+// the request's key opens; and each answer names the model its request named. A request with no tag (a
+// title, a summary, a quiet call, another
 // extension's) is passed on as it came, at every moment, to the model set for such requests, through
 // RPH's model layer: RPE never calls a model itself, and adds, cuts and changes nothing in it (READINGS
 // R-100); keeping an unplayed chat reply out is the extension's work. A tagged chat reply is read, its
@@ -68,8 +69,11 @@ export interface OwnerPass {
 export interface ProviderDeps {
   /** The Lumiverse user this RPE plays for. */
   user: string;
-  /** Whether the request carries the key of a connection that is RPE's: RPE's own provider key, or one taken with a connection at the swap (R-109). */
-  allowed(request: Request): boolean | Promise<boolean>;
+  /**
+   * The model names the request's key opens: the key of a connection that is RPE's (RPE's own provider key, or one taken with
+   * connections at the swap, R-109), paired with those connections' models; null where the key is none of RPE's.
+   */
+  keyModels(request: Request): readonly string[] | null | Promise<readonly string[] | null>;
   window: HistoryWindow;
   /** Where the coming turn starts on a path, from RPE's own state: the turn a reply follows, for the window it makes on receipt. */
   start: TurnStarts;
@@ -95,8 +99,6 @@ export interface ProviderDeps {
   heard: Pick<HeardGenerations, "tagged" | "untagged">;
   /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
   untaggedWhileAwaited(): "pass" | "fail";
-  /** The model names `GET /v1/models` lists: every one RPE's connections in Lumiverse name, each answered under its own (R-109). */
-  modelNames(): string[];
   turns: TurnPlayer;
   clock: Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
   /** How long a stream may send nothing at all before a comment line, read at each reply (the door's settings); `COMMENT_MS` when not given. */
@@ -135,7 +137,8 @@ export interface EndpointCall {
 export function providerEndpoint(deps: ProviderDeps): (request: Request, call: EndpointCall) => Promise<Response> {
   return async (request, call) => {
     if (request.method !== "POST") return error(405, "Chat completions are asked for with POST.");
-    if (!(await deps.allowed(request))) return error(401, "This connection's key is not RPE's.");
+    const models = await deps.keyModels(request);
+    if (models === null) return error(401, "This connection's key is not RPE's.");
     let body: unknown;
     try {
       body = await call.json();
@@ -143,6 +146,8 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
       return error(400, "The request is not JSON.");
     }
     if (!isRecord(body)) return error(400, "The request is not a chat completion.");
+    // A key opens the models of the connections that hold it, and no other connection's (R-109).
+    if (typeof body.model === "string" && !models.includes(body.model)) return error(401, `This connection's key is not the one RPE pairs with the model ${body.model}.`);
     if (body.stream !== true) call.untimed();
     const now = deps.clock.now();
     const read = readTag(body);
@@ -224,12 +229,13 @@ function passThrough(deps: ProviderDeps, body: JsonObject, signal: AbortSignal, 
   return body.stream === true ? streamedReply(run, meta, signal, { clock: deps.clock, turn: false, ...(deps.commentMs !== undefined ? { commentMs: deps.commentMs() } : {}) }) : wholeReply(run, meta, signal);
 }
 
-/** `GET /v1/models`: the model names of every connection that is RPE's, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */
-export function modelsEndpoint(deps: Pick<ProviderDeps, "allowed" | "modelNames">): (request: Request) => Promise<Response> {
+/** `GET /v1/models`: the model names the request's key opens, as an OpenAI-compatible list (Lumiverse reads `data[].id`, `openai-compatible.ts:324-334`). */
+export function modelsEndpoint(deps: Pick<ProviderDeps, "keyModels">): (request: Request) => Promise<Response> {
   return async (request) => {
     if (request.method !== "GET") return error(405, "The model list is asked for with GET.");
-    if (!(await deps.allowed(request))) return error(401, "This connection's key is not RPE's.");
-    const data = deps.modelNames().map((id) => ({ id, object: "model", created: 0, owned_by: "rpe" }));
+    const models = await deps.keyModels(request);
+    if (models === null) return error(401, "This connection's key is not RPE's.");
+    const data = models.map((id) => ({ id, object: "model", created: 0, owned_by: "rpe" }));
     return new Response(JSON.stringify({ object: "list", data }), { status: 200, headers: { "content-type": "application/json" } });
   };
 }

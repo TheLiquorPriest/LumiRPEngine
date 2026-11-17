@@ -39,7 +39,7 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
   const clock = options.clock ?? new FakeClock();
   const deps: ProviderDeps = {
     user: "user-a",
-    allowed: (r) => r.headers.get("authorization") === "Bearer rpe_key",
+    keyModels: (r) => (r.headers.get("authorization") === "Bearer rpe_key" ? ["rpe"] : null),
     window: async () => null,
     start: async ({ path }) => ({ messages: path.map((s) => ({ ...s, hidden: false })), at: null, known: true }),
     // Every tag here carries RPE's own verdict, so nothing is checked.
@@ -62,7 +62,6 @@ function endpoint(play: TurnPlayer["play"], options: { passed?: PassRequest[]; c
     holdMs: () => 540_000,
     heard: { tagged: async () => [], untagged: () => false },
     untaggedWhileAwaited: () => "pass",
-    modelNames: () => ["rpe"],
     turns: { play },
     clock,
   };
@@ -126,7 +125,7 @@ describe("the provider endpoint", () => {
   });
 
   test("the model list names the models RPE's connection may name, behind the provider key", async () => {
-    const list = modelsEndpoint({ allowed: (r) => r.headers.get("authorization") === "Bearer rpe_key", modelNames: () => ["rpe", "rpe-two"] });
+    const list = modelsEndpoint({ keyModels: (r) => (r.headers.get("authorization") === "Bearer rpe_key" ? ["rpe", "rpe-two"] : null) });
     const res = await list(new Request("http://rpe/v1/models", { headers: { authorization: "Bearer rpe_key" } }));
     expect(((await res.json()) as { data: { id: string }[] }).data.map((m) => m.id)).toEqual(["rpe", "rpe-two"]);
     expect((await list(new Request("http://rpe/v1/models", { headers: { authorization: "Bearer other" } }))).status).toBe(401);

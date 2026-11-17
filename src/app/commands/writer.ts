@@ -92,8 +92,8 @@ export function socketOps(call: SocketCall): CommandOps {
     async makeKey(ask) {
       return readAs(keyMade, await call("POST", COMMAND_PATHS.keys, ask), "a new key");
     },
-    async takeKey(hash) {
-      await call("POST", COMMAND_PATHS.takenKeys, { hash });
+    async takeKey(hash, models) {
+      await call("POST", COMMAND_PATHS.takenKeys, { hash, models });
     },
     async setSwitch(name, state, user) {
       return readAs(switched, await call("PUT", COMMAND_PATHS.switches.replace(":name", encodeURIComponent(name)), { state, ...(user === undefined ? {} : { user }) }), "the switch");
