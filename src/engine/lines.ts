@@ -18,12 +18,13 @@ export interface LineSource {
 }
 
 let installed: LineSource | null = null;
-let current: LineSource | null = null;
+/** The chat's own source while `withLines` runs (null there: the chat's copy is off, and nothing is said); undefined outside it. */
+let current: LineSource | null | undefined;
 
 /** The source the application's lines come from, until another is given (null: none, and nothing is said). */
 export function useLines(source: LineSource | null): void {
   installed = source;
-  current = null;
+  current = undefined;
 }
 
 /** Runs `work` (synchronously) with `source` as the lines' source, as the chat's own copy of the file reads; the one in use comes back after. */
@@ -39,7 +40,7 @@ export function withLines<T>(source: LineSource | null, work: () => T): T {
 
 /** The line `name` filled with `fields`; the empty text where there is none. */
 export function say(name: string, fields?: LineFields): string {
-  return (current ?? installed)?.line(name, fields) ?? "";
+  return (current === undefined ? installed : current)?.line(name, fields) ?? "";
 }
 
 /** Words joined as a list is read ("a", "a and b", "a, b and c"): the one connecting word is the line `list_and`'s, the commas are the code's. */
