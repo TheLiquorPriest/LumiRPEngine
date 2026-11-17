@@ -113,7 +113,7 @@ const OWN_CSS = `
 .rpe-web{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--lre-surface)}
 .rpe-web-top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:var(--lre-s2) var(--lre-s3);padding:calc(var(--lre-s2) + env(safe-area-inset-top,0px)) var(--lre-s4) var(--lre-s2);background:var(--lre-bar-bg);border-bottom:1px solid var(--lre-hairline);min-width:0}
 .rpe-web-brand{flex:none;font-weight:700;font-size:var(--lre-fs-lg);letter-spacing:.02em}
-.rpe-web-nav{position:relative;flex:none;display:flex;gap:var(--lre-s1)}
+.rpe-web-nav{position:relative;flex:0 1 auto;min-width:0;display:flex;flex-wrap:wrap;gap:var(--lre-s1)}
 .rpe-web-nav>button{display:inline-flex;align-items:center;gap:var(--lre-s1);min-height:var(--lre-tap);padding:0 var(--lre-s2);border:0;border-radius:var(--lre-r-lg);background:transparent;color:var(--lre-muted);font-weight:500;white-space:nowrap;transition:background-color var(--lre-fast),color var(--lre-fast)}
 .rpe-web-nav>button:hover:not(:disabled){background:var(--lre-hover);color:var(--lre-fg)}
 .rpe-web-nav>button[aria-current=page]{background:var(--lre-accent-soft);color:var(--lre-accent-text);font-weight:600}
