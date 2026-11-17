@@ -64,6 +64,8 @@ export interface LoreBookListing {
 export interface LoreIndexWord {
   text: string;
   prefix: boolean;
+  /** Ask of the entries' names alone, not of their texts (a word the ranking leaves out, asked to find an entry named by such words alone). */
+  names?: true;
 }
 
 /** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */

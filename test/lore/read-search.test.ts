@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type LoreBookEntry, type LoreIndexWord } from "../../src/lore/sources";
 import { Lore, LORE_DEFAULTS, LORE_INDEX_DEFAULTS, type LoreChatSettings } from "../../src/lore/index";
 import { ATLAS, CARD, CHAT, coastEntries, dbFile, type LoreDb, loreDb, Shelf, SONGS, startingWorlds, Tags, USER, W } from "./fixtures";
 
@@ -121,5 +122,27 @@ describe("one reader over the books and the world", () => {
     // Tobin may not know the drowned crown: it is left out of what is found by meaning, as of a read.
     expect((await meant.searchAs(AT, "tobin", { text: "darkness at sea" })).map((h) => h.id)).toEqual([lamp?.id ?? "", W.tithe_law]);
     expect(asked.length).toBeGreaterThan(0);
+  });
+});
+
+/** A shelf with a search index of its own, as the door keeps one: the rows of the entries that hold any word asked of their names, or of their names and texts. */
+class IndexedShelf extends Shelf {
+  async found(user: string, books: readonly string[], words: readonly LoreIndexWord[], limit: number): Promise<LoreBookEntry[]> {
+    const rows = (this.users.get(user)?.entries ?? []).filter((e) => books.includes(e.book));
+    return rows.filter((e) => words.some((w) => [e.comment, ...e.keys, ...(w.names === true ? [] : [e.content])].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w.text))).slice(0, limit);
+  }
+}
+
+describe("a search through the index", () => {
+  test("an entry named only by words the ranking leaves out is still found by its name said whole", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rpe-lore-read-"));
+    const { file, backups } = dbFile(dir);
+    const db = loreDb(file, backups);
+    const shelf = new IndexedShelf();
+    shelf.users.get(USER)?.entries.push({ id: "entry-them", book: ATLAS.id, comment: "Them", content: "The creatures of the deep marsh, never named aloud.", keys: ["them"], secondaryKeys: [], disabled: false, constant: false, vectorized: false, extensions: {}, revision: 1 });
+    const lore = new Lore({ books: shelf, worlds: startingWorlds(), turns: new Tags(), numbers: db.numbers });
+    expect((await lore.search(AT, { text: "tell me about them" })).map((h) => h.title)).toEqual(["Them"]);
+    await db.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

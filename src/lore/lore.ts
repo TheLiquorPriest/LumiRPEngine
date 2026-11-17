@@ -292,6 +292,15 @@ function bookActivation(row: LoreBookEntry): LoreActivation[] {
   return [...(row.keys.some((k) => k.trim() !== "") ? (["keyword"] as const) : []), ...(row.vectorized ? (["vector"] as const) : [])];
 }
 
+/** The words of a text as a search reads them: lowercase letters and digits, each run of anything else a break. */
+function plainWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(" ")
+    .filter((w) => w !== "");
+}
+
 /** What the catalogue is made from: each entry of the chat's lore with its number, as it is held. Plain data, so a thread may be handed it. */
 export interface CatalogueInput {
   /** The chat's world's id; '' for none. */
@@ -669,7 +678,16 @@ export class Lore {
     const books = new Set(read.map((b) => b.id));
     const words = [...new Set(wordsOf(text, s.limits))].map((w): LoreIndexWord => ({ text: w, prefix: w.length >= STEM_FROM }));
     const found = words.length === 0 || books.size === 0 || this.books.found === undefined ? [] : await this.books.found(at.user, [...books], words, s.lore.searchCandidates);
-    const have = new Set(found.map((r) => r.id));
+    // An entry named only by words the ranking leaves out (a stop word, one shorter than the shortest) is found by its name said whole, as the search matches a name: the index is asked of the names alone for the query's own words of that kind, and one of which none of its names is made of them alone is let go.
+    const left = (w: string): boolean => w.length < s.limits.minTerm || s.limits.stopWords.includes(w);
+    const bare = [...new Set(plainWords(text).filter(left))].map((w): LoreIndexWord => ({ text: w, prefix: false, names: true }));
+    const named = (row: LoreBookEntry): boolean =>
+      [row.comment, ...row.keys, ...row.secondaryKeys, ...(bookLoreFieldsOf(row.extensions)?.aliases ?? [])].some((name) => {
+        const said = plainWords(name);
+        return said.length > 0 && said.join(" ").length >= s.limits.minTerm && said.every(left);
+      });
+    const barely = bare.length === 0 || books.size === 0 || this.books.found === undefined ? [] : (await this.books.found(at.user, [...books], bare, s.lore.searchCandidates)).filter(named);
+    const have = new Set([...found, ...barely].map((r) => r.id));
     // The table names a book entry `book:<book>/<entry>`, or one of its marks with `#n` after it.
     const led = new Map<string, string>();
     for (const id of world === null ? [] : tableLeads(world.world, text, s.limits)) {
@@ -680,7 +698,7 @@ export class Lore {
       const row = await this.books.entry(at.user, entry);
       return row !== null && row.book === book ? [row] : [];
     }));
-    const rows = [...found, ...more.flat()];
+    const rows = [...found, ...barely.filter((r) => !found.some((f) => f.id === r.id)), ...more.flat()];
     return read.map((b) => rows.filter((r) => r.book === b.id));
   }
 
