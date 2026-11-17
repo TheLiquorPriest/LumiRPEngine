@@ -615,7 +615,12 @@ export const vehiclesPack: PackDef = {
       const start = startOf(ctx, v, from);
       return (start ? tripFor(ctx, v, start, String(to ?? "")) : null)?.minutes ?? 0;
     });
-    r.formula("fuel_pct", (ctx, vehicle) => numOf(own(ctx.state.entities, String(vehicle ?? ""))?.fields.fuel_pct, 100));
+    // The tank as recorded: null where nobody recorded it, which is no figure (a rule's `fuel_pct(v) >= 90` does not hold of it).
+    r.formula("fuel_pct", (ctx, vehicle) => {
+      const fuel = own(ctx.state.entities, String(vehicle ?? ""))?.fields.fuel_pct;
+      return typeof fuel === "number" ? fuel : null;
+    });
+    r.formula("burns_fuel", (ctx, vehicle) => burnsFuel(ctx, String(vehicle ?? "")));
 
     r.effect({
       type: "vehicles.drive",
@@ -679,15 +684,18 @@ export const vehiclesPack: PackDef = {
         const e = own(ctx.state.entities, v);
         if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (ownerLevel(ctx, v) < 2) return [];
-        const fuel = numOf(e.fields.fuel_pct, 100);
-        const wanted = Math.min(100 - fuel, numOf(args.pct, 100 - fuel));
+        // The fill is what the recorded tank lacks (or the amount asked, if less). With no level recorded it is the amount asked, else a full tank: only a full tank is then a level to record.
+        const recorded = typeof e.fields.fuel_pct === "number" ? e.fields.fuel_pct : null;
+        const asked = typeof args.pct === "number" ? args.pct : null;
+        const wanted = recorded !== null ? Math.min(100 - recorded, asked ?? 100 - recorded) : Math.min(100, asked ?? 100);
         if (wanted <= 0) return reject("full", `${e.name} is full`);
         const product = fuelProduct(ctx, v);
         const qty = Math.round(((wanted / 100) * product.capacity) * 100) / 100;
         const cents = product.catalog !== null ? priceOf(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
         const paid = charge(ctx, payer, cents, `Fuel for ${e.name} (${qty} ${product.unit})`, "fuel");
         if (!Array.isArray(paid)) return paid;
-        return [...paid, bump(ctx.state, v, "fuel_pct", wanted, fuel)];
+        if (recorded !== null) return [...paid, bump(ctx.state, v, "fuel_pct", wanted, recorded)];
+        return asked === null ? [...paid, { type: "set", entity: v, field: "fuel_pct", value: 100 }] : paid;
       },
     });
     r.effect({
@@ -704,7 +712,8 @@ export const vehiclesPack: PackDef = {
         const paid = charge(ctx, payer, cents, `${repair ? "Repair" : "Service"}: ${e.name}`, "vehicle_services");
         if (!Array.isArray(paid)) return paid;
         const out: LedgerEvent[] = [...paid, { type: "set", entity: v, field: "status", value: "ok" }];
-        if (ownerLevel(ctx, v) >= 4) out.push({ type: "set", entity: v, field: "last_service", value: usage(ctx, v) });
+        // A service marks the miles or hours it was done at, where they are recorded.
+        if (ownerLevel(ctx, v) >= 4 && (typeof e.fields.odometer_mi === "number" || typeof e.fields.engine_hours === "number")) out.push({ type: "set", entity: v, field: "last_service", value: usage(ctx, v) });
         const condition = e.fields.condition;
         if (typeof condition === "number" && condition < 90) out.push(bump(ctx.state, v, "condition", Math.min(15, 90 - condition), condition));
         return out;
@@ -750,7 +759,7 @@ export const vehiclesPack: PackDef = {
       lexicon: ["drive to", "drive over to", "take the truck", "take the car", "sail to", "ride to", "fly to", "fly the plane to"],
       observable: "drives off",
     });
-    r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
+    r.action({ id: "refuel", label: "Refuel", description: "Fill up a vehicle's tank, or charge it.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "burns_fuel(vehicle)", "fuel_pct(vehicle) < 100"], outcomes: { default: [{ type: "vehicles.refuel", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "10", lexicon: ["refuel", "fill up", "gas up", "charge the car"], observable: "fills up the tank" });
     r.action({ id: "service_vehicle", label: "Service", description: "Have a vehicle serviced: an oil change, a tune-up.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self" } }] }, duration: "60", lexicon: ["service", "oil change", "tune up"], observable: "gets the vehicle serviced" });
     r.action({ id: "repair_vehicle", label: "Repair", description: "Have a damaged or broken-down vehicle repaired.", pack: "vehicles", params: { vehicle: { type: "ref", ref: "vehicle" } }, requires: ["place(vehicle) == here", "vehicle.status != 'ok'"], outcomes: { default: [{ type: "vehicles.service", args: { vehicle: "vehicle", payer: "self", repair: true } }] }, duration: "180", lexicon: ["repair", "fix the truck", "fix the car", "get it towed"], observable: "gets the vehicle repaired" });
 
