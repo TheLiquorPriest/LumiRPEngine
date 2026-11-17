@@ -1358,9 +1358,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The previous turn's run: a new turn waits for it up to the limit, with a progress line, then stops it where it stands. Gives the
-   * runs that were still going at the limit, so the Author can be told; null when Lumiverse stopped this request during the wait, which
-   * then leaves the previous run going.
+   * The previous turn's run: a new turn waits for it, up to the limit where one is set (none by default: until it ends), with a
+   * progress line, then stops it where it stands. Gives the runs that were still going at the limit, so the Author can be told; null
+   * when Lumiverse stopped this request during the wait, which then leaves the previous run going.
    */
   async #previous(user: string, chat: string, settings: TurnSettings, progress: LinesPart | undefined, out: ReplyStream, signal: AbortSignal): Promise<RunRecord[] | null> {
     const before = this.#d.runs.ofChat(user, chat);
@@ -1370,11 +1370,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const going = new Set<Run>(before);
     for (const r of before) void r.over.then(() => going.delete(r));
     const late = Promise.withResolvers<void>();
-    const timer = this.#d.clock.setTimeout(late.resolve, settings.previousRunMs);
+    const timer = settings.previousRunMs === null ? undefined : this.#d.clock.setTimeout(late.resolve, settings.previousRunMs);
     try {
       if (!(await unlessAborted(Promise.race([Promise.all(before.map((r) => r.over)), late.promise]), signal))) return null;
     } finally {
-      this.#d.clock.clearTimeout(timer);
+      if (timer !== undefined) this.#d.clock.clearTimeout(timer);
     }
     const stopped = [...going];
     const limit = new Error(await turnErrorWords(this.#d.files, { user, chat }, "previous_run_limit"));
