@@ -4,6 +4,7 @@
 // fix. The last map it proposed comes back as the job's one proposal, which Build previews and applies on his press. Moved from the
 // previous extension's `map-job.ts`; its prompt and example are the agent's definition now.
 
+import { type Say, sayOr } from "./checks";
 import type { MapId, PlaceId } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
@@ -70,12 +71,13 @@ export function readMapAnswer(world: WorldDoc, request: MapRequest, reply: JsonV
   return { value, map: readMap(value).map, problems };
 }
 
-export function problemLines(problems: readonly MapProblem[]): string {
-  return problems.map((p) => `- ${p.path.length > 0 ? `${pathText(p.path)}: ` : ""}${p.message}`).join("\n");
+/** The map lint's problems, a line of Build's jobs part each (`map_problem`), the lint's own message in it. */
+export function problemLines(problems: readonly MapProblem[], say: Say): string {
+  return problems.map((p) => sayOr(say, "map_problem", { ...(p.path.length > 0 ? { at: pathText(p.path) } : {}), message: p.message })).join("\n");
 }
 
 /** The map as a proposal: ticked when it has no errors (lint warnings lower it a little), with what's left to fix in its note. */
-export function mapProposal(request: MapRequest, answer: MapAnswer & { map: MapDoc }): JobProposal {
+export function mapProposal(request: MapRequest, answer: MapAnswer & { map: MapDoc }, say: Say): JobProposal {
   const errors = answer.problems.filter((p) => p.severity === "error");
   const confidence = errors.length > 0 ? 0.4 : answer.problems.length > 0 ? 0.75 : 0.9;
   return {
@@ -86,6 +88,6 @@ export function mapProposal(request: MapRequest, answer: MapAnswer & { map: MapD
     source: "Described",
     confidence,
     pack: "space",
-    ...(answer.problems.length > 0 ? { note: `Check before you commit:\n${problemLines(answer.problems)}` } : {}),
+    ...(answer.problems.length > 0 ? { note: `${sayOr(say, "map_check")}\n${problemLines(answer.problems, say)}` } : {}),
   };
 }

@@ -36,7 +36,7 @@ export interface KindRun {
   /** One call of `world_propose`, checked against the draft as it stands now; what it made is kept. What it says is in the words of `say`. */
   propose(args: JsonObject, say: Say): Promise<Proposed>;
   /** The proposals so far, checked, as the review shows them. */
-  proposals(): JobProposal[];
+  proposals(say: Say): JobProposal[];
   /** What the job ends with; `cut`: its agent stopped at one of RPH's limits. */
   end(cut: boolean, say: Say): { result: JobResult; notes: string[] };
 }
@@ -210,7 +210,7 @@ const indexText: ModelKindDef = {
         const drops: DropCounts = new Map();
         const proposals = checkIndexProposals(last, raw, from.limits.proposals, drops);
         const said = dropSummary(raw.length, proposals.length, drops, say);
-        const notes = [...(cut > 0 ? [`The last ${cut.toLocaleString("en-US")} characters of the text were past build.index.chars and were not read; index them in another job.`] : []), ...(said === null ? [] : [said])];
+        const notes = [...(cut > 0 ? [sayOr(say, "index_cut", { cut: cut.toLocaleString("en-US") })] : []), ...(said === null ? [] : [said])];
         return { result: { proposals }, notes };
       },
     };
@@ -231,19 +231,19 @@ const describeMap: ModelKindDef = {
     return {
       given: mapGiven(draft, request),
       fields: { place: request.scope, map: request.mapId },
-      async propose(args) {
+      async propose(args, say) {
         const doc = await from.worlds.worlds.working(from.world, from.user);
         const answer = readMapAnswer(doc, request, args.map ?? null);
         const errors = answer.problems.filter((p) => p.severity === "error");
         // The last map that reads stands; the problems it has are the agent's to fix.
         if (answer.map !== null) best = { ...answer, map: answer.map };
-        return { answer: { map: answer.map !== null, errors: problemLines(errors), warnings: problemLines(answer.problems.filter((p) => p.severity !== "error")) }, unusable: answer.map === null };
+        return { answer: { map: answer.map !== null, errors: problemLines(errors, say), warnings: problemLines(answer.problems.filter((p) => p.severity !== "error"), say) }, unusable: answer.map === null };
       },
-      proposals: () => (best === null ? [] : [mapProposal(request, best)]),
-      end() {
+      proposals: (say) => (best === null ? [] : [mapProposal(request, best, say)]),
+      end(_cut, say) {
         if (best === null) throw new Error("the job's agent proposed no map that reads");
         const errors = best.problems.some((p) => p.severity === "error");
-        return { result: { proposals: [mapProposal(request, best)] }, notes: errors ? ["The map still has problems; its note lists them, and it starts unticked."] : [] };
+        return { result: { proposals: [mapProposal(request, best, say)] }, notes: errors ? [sayOr(say, "map_still_problems")] : [] };
       },
     };
   },

@@ -174,7 +174,7 @@ export class ModelJobs {
     if (live === null) return { content: [{ type: "text", text: lines?.line("propose_no_job") ?? JSON.stringify({ proposed: false }) }], error: true };
     const { answer, unusable } = await live.run.propose(objectOf(args), (line, fields) => lines?.line(line, fields));
     live.calls += 1;
-    const proposals = live.run.proposals();
+    const proposals = live.run.proposals((line, fields) => lines?.line(line, fields));
     live.job.report(1 - 1 / (live.calls + 1), { proposals });
     const said = lines?.line(unusable ? "propose_unusable" : "propose_kept", { standing: proposals.length });
     return { content: [...(said === undefined ? [] : [{ type: "text" as const, text: said }]), { type: "text", text: JSON.stringify(answer) }], ...(unusable ? { error: true as const } : {}) };
@@ -209,7 +209,7 @@ export class ModelJobs {
         await Bun.sleep(this.deps.pollMs ?? 1000);
         if (job.signal.aborted) {
           await rph.jobs.cancel(job.user, id).catch((error: unknown) => log.warn("A Build job's RPH job could not be cancelled.", { job: id, error: error instanceof Error ? error.message : String(error) }));
-          return { result: { proposals: run.proposals() } };
+          return { result: { proposals: run.proposals((line, fields) => lines?.line(line, fields)) } };
         }
         now = await rph.jobs.get(job.user, id);
       }
