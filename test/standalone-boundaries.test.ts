@@ -60,7 +60,8 @@ const RULES: Record<Zone, Rule> = {
   turn: { zones: ["app", "adapter", "store", "tree", "lore", "iface", "cast", "story"], carried: PURE, harness: true },
   ui: { zones: [], carried: ["shared", "frontend"], sandboxed: true },
   ext: { zones: ["adapter", "secrecy"], carried: ["shared", "backend"], sandboxed: true },
-  build: { zones: ["app", "store", "worlds"], carried: [...PURE, "backend"] },
+  // Build's model jobs hold the world family's reads (iface); its lore tools read the secret marks of his books (secrecy).
+  build: { zones: ["app", "store", "worlds", "iface", "secrecy"], carried: [...PURE, "backend"] },
   // The panels' state and taps stand on the pure engine, the packs and the store's own areas: nothing of today's build (PlanSwap-6).
   play: { zones: ["app", "store", "iface"], carried: PURE },
   // His worlds behind one world service over the store: today's world store moves here (PlanSwap-5), the service beside it (PlanChatUI-B1).

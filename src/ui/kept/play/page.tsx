@@ -105,7 +105,8 @@ export function PlayPage(props: { chat: string }) {
   useEffect(() => {
     const at = root.current;
     if (at === null) return undefined;
-    return mountPlay(at, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build" }), open: app.go });
+    // Build opens on the chat the page is for, so it marks the world this chat plays and offers Attach to it.
+    return mountPlay(at, { client: app.client, chat: props.chat, host: app.keptHost(), timers: app.timers, settings: () => settings.values.get(), openBuild: () => app.go({ page: "build", chat: props.chat }), open: app.go });
   }, [props.chat]);
   return <div ref={root} class="rpe-play" />;
 }
