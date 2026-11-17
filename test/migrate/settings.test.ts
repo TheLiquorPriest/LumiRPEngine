@@ -57,7 +57,7 @@ async function changeToday(fixture: Fixture, own: readonly { path: string[]; val
   // The runtime's tuning: a time in milliseconds, one the old link kept, and one RPE's stop has no wait for.
   const config = join(fixture.sources.runtime?.configDir ?? "", `${RUNTIME}.json`);
   const doc = JSON.parse(await readFile(config, "utf8")) as { runtime: Record<string, unknown> };
-  doc.runtime.tuning = { buildStartMs: 90_000, commentMs: 5_000, progressMs: 45_000, stallMs: 5_000, stopGraceMs: 1_000 };
+  doc.runtime.tuning = { buildStartMs: 90_000, commentMs: 8_000, progressMs: 45_000, stallMs: 5_000, stopGraceMs: 1_000 };
   await writeFile(config, JSON.stringify(doc));
 }
 
@@ -87,7 +87,7 @@ describe("today's settings into RPE's config", () => {
       const report = await run(fixture, data, 9);
 
       // In RPE-global.yml: each value as RPE's setting takes it; milliseconds as seconds; every message kept as ~; today's update choice as RPE's.
-      const carriedKeys = { "chat.hiddenReadable": true, "limits.turn.tokensIn": 300_000, "limits.turn.tokensOut": 20_000, "limits.turn.toolRounds": 30, "limits.turn.time": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "limits.turn.agentsAtOnce": 2, "limits.cachedWeight": 0.2, "results.clip": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.tokensPerDay": 5_000_000, "jobs.run.tokensIn": 400_000, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true, "service.memory": "1G", "secrets.tracked": true, "secrets.threshold": 0.5, "secrets.narrator.knowledge": "pov", "secrets.narrator.secrets": "omit", "lore.books": ["book-a"], "update.versionWait": 90, "lumiverse.stream.comment": 5, "progress.silence": 45 };
+      const carriedKeys = { "chat.hiddenReadable": true, "limits.turn.tokensIn": 300_000, "limits.turn.tokensOut": 20_000, "limits.turn.toolRounds": 30, "limits.turn.time": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "limits.turn.agentsAtOnce": 2, "limits.cachedWeight": 0.2, "results.clip": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.tokensPerDay": 5_000_000, "jobs.run.tokensIn": 400_000, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true, "service.memory": "1G", "secrets.tracked": true, "secrets.threshold": 0.5, "secrets.narrator.knowledge": "pov", "secrets.narrator.secrets": "omit", "lore.books": ["book-a"], "update.versionWait": 90, "lumiverse.stream.comment": 8, "progress.silence": 45 };
       for (const [key, value] of Object.entries(carriedKeys)) expect({ key, value: await setIn(data, key) }).toEqual({ key, value });
       for (const key of ["limits.turn.calls", "jobs.run.calls", "jobs.run.time", "progress.show"]) expect({ key, value: await setIn(data, key) }).toEqual({ key, value: undefined });
 
