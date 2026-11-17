@@ -147,10 +147,16 @@ describe("migrations", () => {
     } finally {
       db.close();
     }
-    // An RPE that belongs to another user is not this database's: it is refused, and nothing is written.
-    const before = await Bun.file(bed.paths.database).bytes();
-    await expect(bed.open({ config: { lumiverse: { url: null, user: "user-other" } }, areas: areas([STORE_1], [CAST_1]) })).rejects.toThrow(`This database was brought up for the Lumiverse user ${OWNER}, and this RPE belongs to user-other`);
-    expect(await Bun.file(bed.paths.database).bytes()).toEqual(before);
+    // An RPE that comes to belong to another user opens the same database: nothing runs again, and each row stays its user's.
+    const other = await bed.open({ config: { lumiverse: { url: null, user: "user-other" } }, areas: areas([STORE_1], [CAST_1]) });
+    await other.close();
+    const after = new Database(bed.paths.database);
+    try {
+      expect(after.query<{ user: string }, []>("SELECT DISTINCT user FROM migration").all()).toEqual([{ user: OWNER }]);
+      expect(after.query<{ user: string }, []>("SELECT DISTINCT user FROM meta ORDER BY user").all()).toEqual([{ user: "user-other" }, { user: OWNER }]);
+    } finally {
+      after.close();
+    }
   });
 
   test("an older database's rows hold the install's user as soon as the step that adds the column has run", async () => {

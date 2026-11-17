@@ -178,10 +178,14 @@ export async function pruneCopies(backups: string, kept: number, log: Log): Prom
   return removed;
 }
 
-/** What has run for `user`, by area. */
-export function appliedMigrations(db: Database, user: string): Map<string, Set<number>> {
+/**
+ * What has run on this file, by area, whoever's install ran it: the tables are the file's, one set for every user, so a database
+ * brought up for one user and opened for another runs nothing again (P14: each row stays its user's). Each row names its user.
+ */
+export function appliedMigrations(db: Database): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>();
-  for (const row of rowsOf<{ area: string; version: number }>(db, "migration", "area, version", user)) {
+  const rows = columnsOf(db, "migration").size === 0 ? [] : db.query<{ area: string; version: number }, []>("SELECT area, version FROM migration").all();
+  for (const row of rows) {
     let versions = out.get(row.area);
     if (versions === undefined) out.set(row.area, (versions = new Set()));
     versions.add(row.version);
@@ -194,16 +198,13 @@ export function appliedMigrations(db: Database, user: string): Map<string, Set<n
  * its own; one that fails is rolled back, stops the run, and throws, so the file is as it was before
  * it. Before the first migration a new version brings to a file that already holds tables, the file
  * is copied whole into `backups`. A file a newer build has brought further than these migrations go
- * is refused, as is a migration numbered below one that has already run, and a file brought up for
- * another user. With no user named it refuses before it writes anything.
+ * is refused, as is a migration numbered below one that has already run. With no user named it
+ * refuses before it writes anything; each row it writes names the user.
  */
 export function migrate(db: Database, migrations: Migrations, options: MigrateOptions): MigrationOutcome {
   const user = options.user;
   if (user === null || user === "") throw new MigrationError(NO_OWNER);
-  const applied = appliedMigrations(db, user);
-  // A file whose runner's rows are another user's alone is his: one RPE serves one user.
-  const other = applied.size === 0 && columnsOf(db, "migration").has("user") ? db.query<{ user: string }, []>("SELECT user FROM migration LIMIT 1").get() : null;
-  if (other !== null) throw new MigrationError(`This database was brought up for the Lumiverse user ${other.user}, and this RPE belongs to ${user}: one RPE serves one user. Nothing was written.`);
+  const applied = appliedMigrations(db);
   for (const area of migrations.areas()) {
     const ran = applied.get(area);
     if (ran === undefined) continue;

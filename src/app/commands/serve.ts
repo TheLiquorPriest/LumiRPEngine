@@ -2,7 +2,7 @@
 
 import { lineLog, openApp } from "../app";
 import { copyUpdate, isInstalledCopy, recordedSource } from "../app-copy";
-import { currentKeys } from "../auth";
+import { currentKeys, NO_OWNER } from "../auth";
 import type { CliIO, CliOptions } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { accountSystemctl, rpeServiceOf } from "../up";
@@ -22,9 +22,11 @@ async function runByService(paths: DataPaths, io: CliIO): Promise<boolean> {
 /**
  * RPE in the foreground. It holds the data folder's lock for as long as it runs: it is the one writer,
  * and a command that changes something asks it, on its socket. A command that holds the lock when it
- * starts (one that is writing with RPE stopped) is waited for, and the wait is said.
+ * starts (one that is writing with RPE stopped) is waited for, and the wait is said. Before the install names its user nothing is
+ * written, not even the lock, which would make the data folder (R-179).
  */
 export async function serveCommand(paths: DataPaths, config: AppConfig, io: CliIO, options: CliOptions): Promise<number> {
+  if (config.lumiverse.user === null || config.lumiverse.user === "") throw new Error(NO_OWNER);
   const lock = await takeLock({ paths, config, io, version: options.version, what: "rpe serve" });
   try {
     return await serving(paths, config, io, options);

@@ -52,8 +52,7 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
   const db = new Database(paths.database, { readonly: true });
   try {
     const user = config.lumiverse.user;
-    // Before the install names a user there is none whose tables to read.
-    const applied = user === null ? new Map<string, Set<number>>() : appliedMigrations(db, user);
+    const applied = appliedMigrations(db);
     const tables = [...applied].map(([area, versions]) => `${area} ${Math.max(...versions)}`).join(", ");
     io.out(`Database: ${(statSync(paths.database).size / 1048576).toFixed(1)} MiB; tables at ${tables === "" ? "none" : tables}`);
     if (user === null || !(applied.get("app")?.has(1) ?? false)) return 0;
