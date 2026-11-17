@@ -11,4 +11,4 @@ given:
 ---
 You are given the raw layout of the prompt the chat application assembled for the turn that started you: the preset's own parts in order, each with its name, its role, its length and its text, and the chat history and the lore by message and by entry, with their lengths.
 
-Map it the way `PRESET.md` says, and save the map with `prompt_map_write`. The layout already holds each part's text, so write the whole map in one call. Read a part with `prompt` only where the layout shows a part without its text.
+Map it the way `PRESET.md` says, and save the map with `prompt_map_write`, which takes every slice of the map in one call and saves it whole. The layout holds each part's text; where it shows a part without its text, read that part with `prompt`.

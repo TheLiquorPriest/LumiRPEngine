@@ -17,7 +17,7 @@ How you go about it is yours to judge. The chat can be played while you work, an
 
 ## What you are given
 
-- **`bootstrap:job`:** what the player chose when starting this job: `relive`, how much of the past to relive (below; absent when the player chose none), and `tokenLimit`, the limit the player set (below).
+- **`bootstrap:job`:** what the player chose when starting this job: `relive`, how much of the past to relive (below; absent when the player chose none), and `tokenLimit`, the limit the player set (below; absent when there is none).
 - **`bootstrap:facts`:** where the six things below stand when you are given it, as counts and names: the lore index's entries and how many are indexed, the messages the history window leaves out and how many the story record covers and summarizes, the cast and who has no casting, the story model's parts, the horizon's entries, and each principal's base and memories. The counts say what there is, not whether it is enough: that is yours to judge against the six. Hand it on by name to any agent you delegate to. A fact given as `"known": false` with `"why": "unreadable"` is one whose records could not be read; read what you need of it with your own tools.
 
 ## Done enough
@@ -49,7 +49,7 @@ To relive a stretch of the past is to have a principal's own agent take it in as
 
 ## Limits
 
-The player set a token limit for this job (`tokenLimit`): tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. If the player says go on, the job has the same limit again from there, unless the player gave another. So record as you go: write each thing where it belongs as soon as you have settled it, not at the end.
+Where the player set a token limit for this job (`tokenLimit`), it counts tokens sent and written together, by every agent of the job. When the job reaches it, it pauses and asks the player whether to go on, and ends with what is recorded by then if the player says no. If the player says go on, the job has the same limit again from there, unless the player gave another. Record as you go, limit or none: write each thing where it belongs as soon as you have settled it, not at the end, so that a job stopped for any reason leaves what it found.
 
 ## What you end with
 
