@@ -6,7 +6,7 @@
     "bun-types": "^1.4.2",
     "lumiverse-spindle-types": "0.6.80",
     "preact": "11.0.1",
-    "rp-harness": "git+https://rph.invalid/RPHarness.git#d291710711daccfd782dd7fa6ad6d41a4166ad6d",
+    "rp-harness": "git+https://rph.invalid/RPHarness.git#bb3645b8009f58d5001795c9550f6a3ff26823e3",
     "typescript": "7.0.2"
   },
   "exports": {
