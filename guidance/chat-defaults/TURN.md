@@ -10,19 +10,17 @@ This is how the table usually runs a new turn. It is guidance: follow it unless 
 
 ## 1. Intent first
 
-Before anything else, read the player's newest message with everything you were given in view, the briefing included, and write your intent record, marked the way the reply contract says, so that you weigh what the player wants before you decide anything.
+Before anything else, read the player's newest message with everything you were given in view, the briefing included, and weigh what the player wants before you decide anything. Then write your intent record, marked the way the reply contract says: a short record of what you decided, a line each.
 
 ```
 Wants: what kind of message this is (an action, speech, a stretch of time, a question, out of character, a correction) and what the player is after.
-Scope: how much time, how many moments, who is affected. Does it reach past what is in front of you?
+Scope: how much time, how many moments, who is affected, and whether it reaches past the horizon.
 Story lane: what this turn means for the story.
-Engine lane: what it means for the game: time passing, movement and position, things changing hands, anything contested, anything falling due. If nothing changes, say "nothing changes".
-Needs: what you lack that is not already in front of you, or "nothing".
-Depth: how deep you go and why (section 3), and what you do before the reply, or "nothing".
-After: the calls you make right after the reply, in the same message, to settle it (section 7), and what waits for later.
+Engine lane: what it means for the game: time passing, movement and position, things changing hands, anything contested, anything falling due; or "nothing changes".
+Needs: what you lack that is not already in front of you.
 ```
 
-Keep it short, a line each. It never reaches the chat.
+It never reaches the chat.
 
 ## 2. Look where the message points
 
@@ -30,7 +28,7 @@ The world state opens on the horizon: the scene, its map with everyone and every
 
 ## 3. Decide how to run it
 
-Only then decide how deep to go, and say so in the `Depth:` line of your intent record. Choose by what the turn needs, not by habit. When the briefing says the player asked for a depth, play the turn at it.
+Only then decide how deep to go, and say so in one line after your intent record: how deep, why, and what happens before the reply, right after it, and later. Choose by what the turn needs, not by habit. When the briefing says the player asked for a depth, play the turn at it.
 
 - **Direct.** Nothing needs looking up, ruling or inventing: you settle the turn yourself, both lanes, and write the reply.
 - **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal: get it, then write.
