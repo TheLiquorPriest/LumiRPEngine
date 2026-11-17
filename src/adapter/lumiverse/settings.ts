@@ -27,6 +27,7 @@
 //     question: { body: 8192 }           KiB the extension's question may carry
 //     extension:                         the light extension's values, sent with RPE's registration and the page's start facts
 //       questionWait: 3                  seconds the extension waits for RPE's answer, and RPE works it out in
+//       whoseWait: 2                     seconds the extension waits for each read of whether a reply's chat is RPE's
 //       logChars: 200                    characters of RPE's words the extension writes in its log
 //       requestWait: 35                  seconds a page's request through the extension waits for its answer
 //       followRenewal: 20                seconds between a page's renewals of a chat's follow
@@ -48,6 +49,7 @@ import { COMMENT_MS } from "./stream";
 import { STORE_HITS } from "./stores";
 import { WHOLE_HOLD_MS } from "./provider";
 import { PAGE_ROAD_DEFAULTS } from "../../ext/page";
+import { WHOSE_WAIT_MS } from "../../ext/registration";
 
 /** The door's limits, as its parts use them. */
 export interface LumiverseSettings {
@@ -60,8 +62,8 @@ export interface LumiverseSettings {
   wholeHoldMs: number;
   relay: RelaySettings;
   questionBytes: number;
-  /** The light extension's values (group "Lumiverse ▸ extension"): sent with RPE's registration (`questionMs`, `logChars`) and the page's start facts (`requestMs`, `renewMs`). */
-  extension: { questionMs: number; logChars: number; requestMs: number; renewMs: number };
+  /** The light extension's values (group "Lumiverse ▸ extension"): sent with RPE's registration (`questionMs`, `logChars`, `whoseMs`) and the page's start facts (`requestMs`, `renewMs`). */
+  extension: { questionMs: number; logChars: number; whoseMs: number; requestMs: number; renewMs: number };
   search: ChatSearchSettings;
   stores: { hits: number };
   untaggedWhileAwaited: "pass" | "fail";
@@ -128,6 +130,7 @@ export const LUMIVERSE_SETTING_DEFS = {
   wholeHold: setting("reply.hold", WHOLE_HOLD_MS / S, { type: "number", least: 1 }, "Whole reply hold", "Seconds after a reply asked for whole arrives at which its turn stops with what it has; Lumiverse ends a generation that has had no text for ten minutes, and nothing reaches it while a whole reply is written.", "use", [{ above: SILENT_GENERATION_S - 1, says: "Lumiverse ends a generation with no text for ten minutes: a turn still writing then loses its reply whole." }]),
   questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
   questionWait: { ...setting("extension.questionWait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1 }, "Question wait", "Seconds the extension waits for RPE's answer to its question before a generation, and RPE works it out in; a half not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives.", "use", [{ above: INTERCEPTOR_S - 1, says: "Lumiverse gives the extension ten seconds before it goes on without its answer: the generation starts with every marked secret kept out." }]), row: "How long the extension waits for RPE's answer before a generation" },
+  whoseWait: setting("extension.whoseWait", WHOSE_WAIT_MS / S, { type: "number", least: 0.001 }, "Whose-chat read wait", "Seconds the extension waits for each read that tells whether a reply's chat is RPE's (its stored registration, the connection's own record); a read that does not answer in them has failed, and where both fail that generation is stopped with a line and the failure recorded.", "use", [{ above: INTERCEPTOR_S / 2, says: "Lumiverse gives the extension ten seconds before it goes on without it, and two reads of this wait and the question's come before a generation." }]),
   logChars: setting("extension.logChars", EXTENSION_LOG_CHARS, { type: "whole", least: 0 }, "Extension log words", "Characters of RPE's words the extension writes in Lumiverse's log when RPE refuses its question."),
   requestWait: setting("extension.requestWait", PAGE_ROAD_DEFAULTS.requestMs / S, { type: "number", least: 1 }, "Page request wait", "Seconds a page's request through the extension waits for its answer; Lumiverse's proxy gives up after its own 30."),
   followRenewal: setting("extension.followRenewal", PAGE_ROAD_DEFAULTS.renewMs / S, { type: "number", least: 1 }, "Page follow renewal", "Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease."),
@@ -168,7 +171,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     wholeHoldMs: v.wholeHold * S,
     relay: { flushMs: v.flush * S, frameChars: v.frame * KIB, leaseMs: v.lease * S, holdChars: v.hold * KIB, retryMs: v.relayRetry * S },
     questionBytes: v.questionBody * KIB,
-    extension: { questionMs: v.questionWait * S, logChars: v.logChars, requestMs: v.requestWait * S, renewMs: v.followRenewal * S },
+    extension: { questionMs: v.questionWait * S, logChars: v.logChars, whoseMs: v.whoseWait * S, requestMs: v.requestWait * S, renewMs: v.followRenewal * S },
     search: { limit: v.searchHits, snippetChars: v.searchSnippet },
     stores: { hits: v.storeHits },
     untaggedWhileAwaited: read.value(UNTAGGED_WHILE_AWAITED) === "fail" ? "fail" : "pass",
