@@ -388,12 +388,13 @@ function lateOf(ctx: ReadContext, item: { status: PlanStatus; at: number; window
   return false;
 }
 
-const SOURCE_WORDS: Readonly<Record<PlanSource, string>> = { player: "from your message", reply: "from the story", gm: "by the GM", play: "on the plan" };
+/** Where a plan item came from, as a phrase (the lines `feed_source_*`). */
+const sourceWords = (source: PlanSource): string => say(`feed_source_${source}`);
 
 /** Who set an item, when and from where, in words. */
 function setWords(ctx: ReadContext, viewer: EntityId | null, item: { by?: EntityId; at: number; source: PlanSource }): string {
-  const who = item.by === undefined ? null : item.by === viewer ? "you" : refFor(ctx, viewer, item.by).name;
-  return `Set${who ? ` by ${who}` : ""} ${formatClock(calendarOf(ctx.world), item.at)}, ${SOURCE_WORDS[item.source]}`;
+  const who = item.by === undefined ? null : item.by === viewer ? say("feed_you_lower") : refFor(ctx, viewer, item.by).name;
+  return say("feed_set_words", { ...(who ? { who } : {}), when: formatClock(calendarOf(ctx.world), item.at), source: sourceWords(item.source) });
 }
 
 function placeWords(ctx: ReadContext, where: string | undefined): string | null {
@@ -491,19 +492,14 @@ function plansNaming(ctx: ReadContext, who: EntityId): { org: EntityId; orders: 
 
 /** The words for a team: who else it is for, and who leads. */
 function teamWords(ctx: ReadContext, viewer: EntityId | null, o: PlanOrder, self: EntityId | null): string {
-  const name = (id: EntityId): string => (id === self ? "you" : id === ctx.world.pov ? "the player character" : refFor(ctx, viewer, id).name);
+  const name = (id: EntityId): string => (id === self ? "you" : id === ctx.world.pov ? say("feed_the_player_character") : refFor(ctx, viewer, id).name);
   const others = o.to.filter((id) => id !== self);
-  const lead = o.lead === undefined ? "" : o.lead === self ? "; you lead" : `; ${name(o.lead)} leads`;
-  return others.length > 0 ? `with ${others.map(name).join(", ")}${lead}` : lead.replace(/^; /, "");
+  const lead = o.lead === undefined ? "" : o.lead === self ? say("feed_you_lead") : say("feed_lead_leads", { lead: name(o.lead) });
+  return others.length > 0 ? say("feed_with_others_lead", { others: others.map(name).join(", "), lead: lead }) : lead.replace(/^; /, "");
 }
 
-/** How someone in the party takes the leader's orders, by tier (§12 item 5's defaults). */
-const TIER_FRAMES: Readonly<Record<PartyTier, string>> = {
-  core: "You treat it as binding: carry it out as yourself; if you object, say so in the scene, then do it.",
-  companion: "Weigh it in character: you may take it on or refuse, and say so in the scene.",
-  hired: "It's part of the work you're paid for: get it done.",
-  ally: "It's a favour asked of you: you may agree to it or not.",
-};
+/** How someone in the party takes the leader's orders, by tier (§12 item 5's defaults), as the lines `feed_tier_frame_*` say. */
+const tierFrame = (tier: PartyTier): string => say(`feed_tier_frame_${tier}`);
 
 /**
  * What a mind is told of the plans that name them (assess-party §6.2): each order asked of them, with
@@ -518,9 +514,9 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
     const isParty = orgTypeOf(ctx, org) === "party" || (orgTypeOf(ctx, org) === null && org === partyIdOf(ctx).id);
     const leader = isParty ? (orgTypeOf(ctx, org) === null ? ctx.world.pov : partyLeader(ctx, org)) : null;
     const tier = leader === null ? null : partyTierIn(own(ctx.state.entities, who)?.relations, leader);
-    const orgName = orgTypeOf(ctx, org) === null ? "the party" : (own(ctx.state.entities, org)?.name ?? org);
+    const orgName = orgTypeOf(ctx, org) === null ? say("feed_the_party") : (own(ctx.state.entities, org)?.name ?? org);
     for (const o of orders) {
-      const giver = o.by === undefined ? "the GM" : o.by === ctx.world.pov ? `${own(ctx.state.entities, o.by)?.name ?? o.by} (the player character)` : (own(ctx.state.entities, o.by)?.name ?? o.by);
+      const giver = o.by === undefined ? say("feed_the_gm") : o.by === ctx.world.pov ? say("feed_o_the_player_character", { o: own(ctx.state.entities, o.by)?.name ?? o.by }) : (own(ctx.state.entities, o.by)?.name ?? o.by);
       const team = teamWords(ctx, null, o, who);
       const goal = o.goal === undefined ? undefined : goals.find((g) => g.id === o.goal);
       const parts = [
@@ -528,9 +524,9 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
         team !== "" ? `(${team})` : "",
         o.where !== undefined ? `at ${labelOf(ctx, o.where)}` : "",
         o.when !== undefined ? `by ${formatClock(cal, o.when)}` : "standing",
-        `— ${PLAN_STATUS_WORDS[o.status].toLowerCase()}${lateOf(ctx, o) ? ", and late" : ""}.`,
+        say("feed_status_and_late", { status: PLAN_STATUS_WORDS[o.status].toLowerCase(), if_o: !!(lateOf(ctx, o)) }),
         goal ? say("feed_it_serves_the_goal_text", { text: goal.text }) : "",
-        tier ? TIER_FRAMES[tier] : say("feed_carry_it_out_as_part_of_your"),
+        tier ? tierFrame(tier) : say("feed_carry_it_out_as_part_of_your"),
       ];
       out.push(`- ${parts.filter((p) => p !== "").join(" ")}`);
     }
@@ -569,7 +565,7 @@ export function planNarratorLines(ctx: ReadContext): string[] {
     const orgName = orgTypeOf(ctx, org) === null ? say("feed_your_party") : (own(ctx.state.entities, org)?.name ?? org);
     out.push(say("feed_orgname_the_plan_and_the_orders_given", { orgName: orgName }));
     const set = (x: PlanGoal | PlanOrder): string => say("feed_set_by_the_gm_by_name_cal", { name: x.by !== undefined ? name(x.by) : undefined, cal: formatClock(cal, x.at), if_by: x.by === undefined, if_lateOf: !!(lateOf(ctx, x)) });
-    const latest = (x: PlanGoal | PlanOrder): string => (x.last && x.last.note !== "" ? say("feed_latest_note_last_source", { note: x.last.said ?? x.last.note, last: formatClock(cal, x.last.at), source: SOURCE_WORDS[x.last.source] }) : "");
+    const latest = (x: PlanGoal | PlanOrder): string => (x.last && x.last.note !== "" ? say("feed_latest_note_last_source", { note: x.last.said ?? x.last.note, last: formatClock(cal, x.last.at), source: sourceWords(x.last.source) }) : "");
     // The planner's marker (`orgs.lived`) says only what the day as laid says, never that it is done.
     const orderLine = (o: PlanOrder): string => say("feed_o_lead_leads_text_at_where_by", { o: o.to.map(name).join(", "), lead: o.lead ? name(o.lead) : undefined, text: o.text, where: o.where ? labelOf(ctx, o.where) : undefined, when: o.when !== undefined ? formatClock(cal, o.when) : undefined, status: PLAN_STATUS_WORDS[o.status], o2: set(o), o3: latest(o), if_lead: !!(o.lead), if_where: !!(o.where), if_when: o.when !== undefined, if_lived: o.lived !== undefined });
     for (const g of goals) {
@@ -744,7 +740,7 @@ export function agendaLabel(view: Pick<ReadContext, "registry" | "world" | "stat
   if (agendaAsks(p)) {
     const who = strOf(p.who).trim();
     const e = own(state.entities, who);
-    const name = e ? (who === world.pov || canSeeEntity(registry, world, state, world.pov, who) ? e.name : "Someone") : who || "Someone";
+    const name = e ? (who === world.pov || canSeeEntity(registry, world, state, world.pov, who) ? e.name : say("feed_someone")) : who || say("feed_someone");
     return say("feed_add_to_the_plan_name_offer", { name: name, offer: strOf(p.offer).trim() });
   }
   const id = strOf(p.id);
@@ -761,13 +757,13 @@ export function agendaLabel(view: Pick<ReadContext, "registry" | "world" | "stat
  */
 export function planExtractLines(ctx: ReadContext): string[] {
   const pov = ctx.world.pov;
-  const name = (id: EntityId): string => (id === pov ? "the player character" : refFor(ctx, pov, id).name);
+  const name = (id: EntityId): string => (id === pov ? say("feed_the_player_character") : refFor(ctx, pov, id).name);
   const out: string[] = [];
   for (const org of Object.keys(objOf(sliceOf(ctx.state, "orgs").plan)).sort()) {
     if (!planned(ctx, org) || !peopleIn(ctx, org).includes(pov)) continue;
     const plan = planOf(ctx.state, org);
-    const orgName = `${orgTypeOf(ctx, org) === null ? "your party" : (own(ctx.state.entities, org)?.name ?? org)} (${org})`;
-    for (const g of plan.goals.filter((x) => isPlanStatusLive(x.status))) out.push(`- [${g.id}] ${orgName}, goal: ${g.text} (${PLAN_STATUS_WORDS[g.status].toLowerCase()})`);
+    const orgName = say("feed_your_party_org_org2", { org: own(ctx.state.entities, org)?.name ?? org, org2: org, if_org: orgTypeOf(ctx, org) === null });
+    for (const g of plan.goals.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_goal_text_status", { id: g.id, orgName: orgName, text: g.text, status: PLAN_STATUS_WORDS[g.status].toLowerCase() }));
     for (const o of plan.orders.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_order_for_o_text_status", { id: o.id, orgName: orgName, o: o.to.map(name).join(", "), text: o.text, status: PLAN_STATUS_WORDS[o.status].toLowerCase() }));
   }
   return out;

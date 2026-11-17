@@ -2555,3 +2555,39 @@ why_isnt_with_you_or_close_by: isn't with you or close by
 eng_rule_cascade_stopped_at_its_cap_of: Rule cascade stopped at its cap of {{cap}}.
 eng_nothing_better_to_do: nothing better to do
 why_a_spawns_class_is_facet_values: a spawn's class is facet → values
+feed_fact: {{who}} {{verb}}: {{text}}
+feed_id_org_org2_motion_put_by_m: - [{{id}}] {{org}} ({{org2}}), motion{{#if_m}} put by {{m}}{{/if_m}}: {{text}} (open until {{closes}}; voters: {{voters}}{{#if_yet}}; not yet voted: {{yet}}{{/if_yet}})
+feed_id_orgname_goal_text_status: - [{{id}}] {{orgName}}, goal: {{text}} ({{status}})
+feed_lead_leads: ; {{lead}} leads
+feed_name_worked_on_text: {{name}} worked on: {{text}}
+feed_o_the_player_character: {{o}} (the player character)
+feed_set_words: Set{{#who}} by {{who}}{{/who}} {{when}}, {{source}}
+feed_someone: Someone
+feed_status_and_late: — {{status}}{{#if_o}}, and late{{/if_o}}.
+feed_the_gm: the GM
+feed_the_party: the party
+feed_the_player_character: the player character
+feed_with_others_lead: with {{others}}{{lead}}
+feed_you: You
+feed_you_lead: ; you lead
+feed_you_lower: you
+feed_your_party_org_org2: {{#if_org}}your party{{/if_org}}{{^if_org}}{{org}}{{/if_org}} ({{org2}})
+feed_source_player: from your message
+feed_source_reply: from the story
+feed_source_gm: by the GM
+feed_source_play: on the plan
+feed_tier_frame_core: You treat it as binding: carry it out as yourself; if you object, say so in the scene, then do it.
+feed_tier_frame_companion: Weigh it in character: you may take it on or refuse, and say so in the scene.
+feed_tier_frame_hired: It's part of the work you're paid for: get it done.
+feed_tier_frame_ally: It's a favour asked of you: you may agree to it or not.
+feed_fact_for: {{#you}}vote for{{/you}}{{^you}}votes for{{/you}}
+feed_fact_against: {{#you}}vote against{{/you}}{{^you}}votes against{{/you}}
+feed_fact_abstain: {{#you}}abstain{{/you}}{{^you}}abstains{{/you}}
+feed_fact_approve: {{#you}}approve{{/you}}{{^you}}approves{{/you}}
+feed_fact_deny: {{#you}}deny{{/you}}{{^you}}denies{{/you}}
+feed_fact_withdraw: {{#you}}withdraw the request{{/you}}{{^you}}withdraws the request{{/you}}
+feed_fact_vote: {{#you}}vote{{/you}}{{^you}}votes{{/you}}
+feed_fact_answer: {{#you}}answer{{/you}}{{^you}}answers{{/you}}
+org_motion_ended_passed: carried
+org_motion_ended_failed: failed
+org_motion_ended_withdrawn: was withdrawn

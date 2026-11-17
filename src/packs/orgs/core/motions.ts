@@ -185,7 +185,8 @@ function when(ctx: ReadContext, clock: number): string {
   return formatStamp(calendarOf(ctx.world), clock);
 }
 
-const END_WORDS: Readonly<Record<Exclude<MotionStatus, "open">, string>> = { passed: "carried", failed: "failed", withdrawn: "was withdrawn" };
+/** How a closed motion ended, as a phrase (the lines `org_motion_ended_*`). */
+const endWords = (status: Exclude<MotionStatus, "open">): string => say(`org_motion_ended_${status}`);
 
 // ---------------------------------------------------------------- settling and carrying out
 
@@ -269,7 +270,7 @@ export function openMotion(ctx: ReadContext, rng: Rng, o: { org: EntityId; by: E
 function motionAt(ctx: ReadContext, org: EntityId, id: string): Motion | Rejection {
   const m = motionsOf(ctx.state, org).find((x) => x.id === id);
   if (!m) return refuse("missing_motion", say("why_org_has_no_motion_id", { org: labelOf(ctx, org), id: id }));
-  return m.status === "open" ? m : refuse("closed", say("why_that_motion_status_already", { status: END_WORDS[m.status] }));
+  return m.status === "open" ? m : refuse("closed", say("why_that_motion_status_already", { status: endWords(m.status) }));
 }
 
 function isRejection(v: unknown): v is Rejection {
@@ -555,7 +556,7 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx) => {
       const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
       const status = str(e, "status") as Exclude<MotionStatus, "open">;
-      return say("org_motion_end", { org: labelOf(ctx, str(e, "org")), ended: END_WORDS[status] ?? say("org_motion_closed"), ...(status === "withdrawn" ? {} : { why: str(e, "why") }), ...(m ? { text: m.text } : {}) });
+      return say("org_motion_end", { org: labelOf(ctx, str(e, "org")), ended: (status === "passed" || status === "failed" || status === "withdrawn" ? endWords(status) : "") || say("org_motion_closed"), ...(status === "withdrawn" ? {} : { why: str(e, "why") }), ...(m ? { text: m.text } : {}) });
     },
   },
 ];

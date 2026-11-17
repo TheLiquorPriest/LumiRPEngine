@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { isPlanStatusLive, ORDER_PRIORITY, type OrderPlan, type PlanGoal, type PlanOrder } from "../../../shared/org-feed";
 import { partyTierIn } from "../../../shared/party";
-import { listOf } from "../../../engine/lines";
+import { say, listOf } from "../../../engine/lines";
 import { calendarOf, clockAt, dateAt, dayIndexOfText, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { numOf, objOf, optionalQuery, own, sliceOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, ProcessDef, ReadContext, SlotInfo } from "../../../engine/registry";
@@ -147,7 +147,7 @@ export function ordersWorked(ctx: ReadContext, from: number, to: number): string
   }
   return orders.flatMap((o) => {
     const who = o.to.filter((p) => laid.get(p)?.has(orderPlanId(org, o.id)) === true);
-    return who.length > 0 ? [`${listOf(who.map((p) => refFor(ctx, pov, p).name))} worked on: ${o.text}`] : [];
+    return who.length > 0 ? [say("feed_name_worked_on_text", { name: listOf(who.map((p) => refFor(ctx, pov, p).name)), text: o.text })] : [];
   });
 }
 

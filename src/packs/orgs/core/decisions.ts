@@ -233,7 +233,7 @@ export function decisionNarratorLines(ctx: ReadContext): string[] {
  */
 export function decisionExtractLines(ctx: ReadContext, read: { votes: boolean; answers: boolean }): string[] {
   const pov = ctx.world.pov;
-  const name = (id: EntityId): string => (id === pov ? "the player character" : refFor(ctx, pov, id).name);
+  const name = (id: EntityId): string => (id === pov ? say("feed_the_player_character") : refFor(ctx, pov, id).name);
   const cal = calendarOf(ctx.world);
   const out: string[] = [];
   for (const org of read.votes ? orgsWithMotions(ctx.state) : []) {
@@ -241,7 +241,7 @@ export function decisionExtractLines(ctx: ReadContext, read: { votes: boolean; a
       if (m.status !== "open" || ctx.state.clock > m.closes || !povIn(ctx, m)) continue;
       const voters = Object.keys(m.electorate);
       const yet = voters.filter((v) => m.votes[v] === undefined || m.votes[v]?.how === "rule");
-      out.push(`- [${m.id}] ${labelOf(ctx, org)} (${org}), motion${m.by !== "" ? ` put by ${name(m.by)}` : ""}: ${m.text} (open until ${formatStamp(cal, m.closes)}; voters: ${voters.map(name).join(", ")}${yet.length > 0 ? `; not yet voted: ${yet.map(name).join(", ")}` : ""})`);
+      out.push(say("feed_id_org_org2_motion_put_by_m", { id: m.id, org: labelOf(ctx, org), org2: org, m: name(m.by), text: m.text, closes: formatStamp(cal, m.closes), voters: voters.map(name).join(", "), yet: yet.map(name).join(", "), if_m: m.by !== "", if_yet: yet.length > 0 }));
     }
   }
   for (const org of read.answers ? orgsWithRequests(ctx.state) : []) {
@@ -310,9 +310,6 @@ export const VOTE_CHANNEL = decisionChannel("vote", DECISION_EFFECTS.vote, voteA
 /** The reply's approval channel: an answer to a waiting request for approval, as the story tells it. */
 export const APPROVAL_CHANNEL = decisionChannel("approval", DECISION_EFFECTS.answer, answerArgs, answerEvents);
 
-/** The words of a vote or an answer on a chip, as the player character's own (`you`) and as someone else's. */
-const FACT_VERBS: Readonly<Record<string, readonly [string, string]>> = { for: ["vote for", "votes for"], against: ["vote against", "votes against"], abstain: ["abstain", "abstains"], approve: ["approve", "approves"], deny: ["deny", "denies"], withdraw: ["withdraw the request", "withdraws the request"] };
-
 /**
  * A reply's vote or approval fact as its chip reads it: "Danny Okafor votes for: Issue 100 units …",
  * "Marcus Delgado approves: Paid Priya Nair $600.00". Only names the player character may know.
@@ -322,12 +319,13 @@ export function decisionLabel(view: Pick<ReadContext, "registry" | "world" | "st
   const said = strOf(p.who).trim();
   const you = said === world.pov;
   const e = own(state.entities, said);
-  const who = you ? "You" : e ? (canSeeEntity(registry, world, state, world.pov, said) ? e.name : "Someone") : said || "Someone";
+  const who = you ? say("feed_you") : e ? (canSeeEntity(registry, world, state, world.pov, said) ? e.name : say("feed_someone")) : said || say("feed_someone");
   const vote = p.type === "vote";
   const id = strOf(vote ? p.motion : p.request);
   const text = (vote ? orgsWithMotions(state).flatMap((o) => motionsOf(state, o)) : orgsWithRequests(state).flatMap((o) => requestsOf(state, o))).find((x) => x.id === id)?.text ?? id;
-  const verbs = FACT_VERBS[strOf(vote ? p.vote : p.answer).trim().toLowerCase()] ?? (vote ? ["vote", "votes"] : ["answer", "answers"]);
-  return `${who} ${verbs[you ? 0 : 1]}: ${text}`;
+  // The verb of a vote or an answer, as the player character's own (`you`) and as someone else's: the lines `feed_fact_*`, else the plain vote or answer.
+  const verb = say(`feed_fact_${strOf(vote ? p.vote : p.answer).trim().toLowerCase()}`, { you }) || say(vote ? "feed_fact_vote" : "feed_fact_answer", { you });
+  return say("feed_fact", { who, verb, text });
 }
 
 /** The Decisions section, the narrator's `decisions` source and the reply's vote and approval channels; the alerts and Your organizations take theirs through `feed.ts`. */
