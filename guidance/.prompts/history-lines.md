@@ -378,3 +378,32 @@ depreciation_of: Depreciation of {{asset}} for {{month}}
 cash_rule_world: Cash follows the world's rule again
 cash_rule_machine: In this chat, cash needs a machine or a branch
 cash_rule_free: In this chat, cash needs no machine
+plan_goal: Plan: {{text}}
+plan_order: Order: {{text}}
+plan_status: Plan: {{id}} {{status}}
+plan_due_day: Plan: {{id}} should be done by the day as laid
+org_entry_audience: {{place}}: {{what}}
+org_entry_world: {{place}}: entry as the world has it
+org_entry_keys: {{place}}: keys changed
+org_trespass: {{#name}}{{name}}{{/name}}{{^name}}Someone{{/name}} entered {{#place}}{{place}}{{/place}}{{^place}}a place{{/place}} without leave
+org_request_bare: A request for approval
+org_request_asked: {{by}} asked {{approver}} to approve, for {{org}}: {{text}} ({{why}}).
+org_request_approved: {{who}} approved{{#text}} the request: {{text}}{{/text}}{{^text}} a request{{/text}}.
+org_request_denied: {{who}} denied{{#text}} the request: {{text}}{{/text}}{{^text}} a request{{/text}}.
+org_request_withdrew: {{who}} withdrew{{#text}} the request: {{text}}{{/text}}{{^text}} a request{{/text}}.
+org_the_gm: The GM
+org_motion_bare: A motion
+org_motion_put: {{by}} put to a vote at {{org}}: {{text}}. It closes {{closes}}.
+org_vote: {{who}} {{#you}}vote{{/you}}{{^you}}votes{{/you}} {{vote}}{{#text}}: {{text}}{{/text}}.
+org_abstain: {{who}} {{#you}}abstain{{/you}}{{^you}}abstains{{/you}}{{#text}}: {{text}}{{/text}}.
+org_motion_end: At {{org}}, the motion {{ended}}{{#why}} ({{why}}){{/why}}{{#text}}: {{text}}{{/text}}.
+org_motion_closed: closed
+org_config_world: Orgs: {{key}} follows the world's setting
+org_config_off: Orgs: {{key}} off in this chat
+org_config_on: Orgs: {{key}} on in this chat
+org_spent: {{who}} spent {{amount}} for {{org}}
+need_eased: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} eased
+need_rose: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} rose
+castlife_decided: decided {{choice}}
+castlife_skip: skip planned for {{plans}}{{#note}} ({{note}}){{/note}}
+story_flag: flag {{name}}

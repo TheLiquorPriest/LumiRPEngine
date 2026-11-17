@@ -9,6 +9,7 @@
 // GM → Places shows the same for every place, with whose it is (`orgs.place_entry`). Who may enter
 // is `engine/entry.ts`'s, pure; this pack keeps the records.
 
+import { say } from "../../../engine/lines";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -166,7 +167,7 @@ const ENTRY_EVENT: EventTypeDef<PackEvent> = {
   },
   describe: (e, ctx) => {
     const entry = e.data.entry;
-    return `${labelOf(ctx, str(e, "place"))}: ${isAudience(entry) ? ENTRY_WORDS[entry].toLowerCase() : entry === null ? "entry as the world has it" : "keys changed"}`;
+    return say(isAudience(entry) ? "org_entry_audience" : entry === null ? "org_entry_world" : "org_entry_keys", { place: labelOf(ctx, str(e, "place")), ...(isAudience(entry) ? { what: ENTRY_WORDS[entry].toLowerCase() } : {}) });
   },
 };
 
@@ -195,9 +196,9 @@ const TRESPASS_EVENT: EventTypeDef<PackEvent> = {
   describe: (e, ctx, viewer) => {
     const who = str(e, "entity");
     const place = str(e, "place");
-    const where = viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? labelOf(ctx, place) : "a place";
-    const name = who === viewer ? "You" : viewer === undefined || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, who) ? labelOf(ctx, who) : "Someone";
-    return `${name} entered ${where} without leave`;
+    const where = viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place) ? labelOf(ctx, place) : null;
+    const name = who === viewer ? "You" : viewer === undefined || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, who) ? labelOf(ctx, who) : null;
+    return say("org_trespass", { ...(name !== null ? { name } : {}), ...(where !== null ? { place: where } : {}) });
   },
 };
 

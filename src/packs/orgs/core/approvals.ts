@@ -11,6 +11,7 @@
 // read when asked. Approving and denying play as turns; the GM answers for anyone, and the reply's
 // `approval` fact records an answer the story tells. Bookkeeping in `packs.orgs.asks`.
 
+import { say } from "../../../engine/lines";
 import { ownersIn } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
@@ -288,9 +289,9 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
     },
     describe: (e, ctx, viewer) => {
       const r = requestIn(e.data.request);
-      if (!r) return "A request for approval";
+      if (!r) return say("org_request_bare");
       const by = nameFor(ctx, viewer, r.by);
-      return `${by.charAt(0).toUpperCase()}${by.slice(1)} asked ${nameFor(ctx, viewer, r.approvers[0] ?? "")} to approve, for ${labelOf(ctx, str(e, "org"))}: ${r.text} (${r.why}).`;
+      return say("org_request_asked", { by: `${by.charAt(0).toUpperCase()}${by.slice(1)}`, approver: nameFor(ctx, viewer, r.approvers[0] ?? ""), org: labelOf(ctx, str(e, "org")), text: r.text, why: r.why });
     },
   },
   {
@@ -323,7 +324,7 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
       const r = requestsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
       const status = str(e, "status");
       const who = nameFor(ctx, viewer, str(e, "by") || (status === "withdrawn" ? (r?.by ?? "") : ""));
-      return `${who.charAt(0).toUpperCase()}${who.slice(1)} ${status === "approved" ? "approved" : status === "denied" ? "denied" : "withdrew"}${r ? ` the request: ${r.text}` : " a request"}.`;
+      return say(status === "approved" ? "org_request_approved" : status === "denied" ? "org_request_denied" : "org_request_withdrew", { who: `${who.charAt(0).toUpperCase()}${who.slice(1)}`, ...(r ? { text: r.text } : {}) });
     },
   },
 ];

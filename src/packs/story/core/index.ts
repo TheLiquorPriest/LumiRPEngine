@@ -4,6 +4,7 @@
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
+import { say } from "../../../engine/lines";
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, isRecord, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -521,7 +522,7 @@ export const storyPack: PackDef = {
         const s = mutableSlice(state, "story");
         s.flags = { ...objOf(s.flags), [strOf(e.data.name)]: e.data.value ?? true };
       },
-      describe: (e) => `flag ${strOf(e.data.name)}`,
+      describe: (e) => say("story_flag", { name: strOf(e.data.name) }),
     });
     r.query("story.flag", (ctx, name) => flagValue(ctx, name));
     r.formula("flag", (ctx, name) => {

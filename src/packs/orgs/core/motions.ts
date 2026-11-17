@@ -13,6 +13,7 @@
 // settled it; an act that can't be carried out then fails it. Every record is bookkeeping in
 // `packs.orgs.motions`, worded to the player character where they put it or vote.
 
+import { say } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
@@ -493,9 +494,9 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     },
     describe: (e, ctx, viewer) => {
       const m = motionIn(e.data.motion);
-      if (!m) return "A motion";
-      const by = m.by === "" ? "The GM" : nameFor(ctx, viewer, m.by);
-      return `${by.charAt(0).toUpperCase()}${by.slice(1)} put to a vote at ${labelOf(ctx, str(e, "org"))}: ${m.text}. It closes ${when(ctx, m.closes)}.`;
+      if (!m) return say("org_motion_bare");
+      const by = m.by === "" ? say("org_the_gm") : nameFor(ctx, viewer, m.by);
+      return say("org_motion_put", { by: `${by.charAt(0).toUpperCase()}${by.slice(1)}`, org: labelOf(ctx, str(e, "org")), text: m.text, closes: when(ctx, m.closes) });
     },
   },
   {
@@ -532,8 +533,7 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
       const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
       const who = nameFor(ctx, viewer, str(e, "who"));
       const vote = isVote(e.data.vote) ? e.data.vote : "abstain";
-      const did = vote === "abstain" ? (who === "you" ? "abstain" : "abstains") : `vote${who === "you" ? "" : "s"} ${vote}`;
-      return `${who.charAt(0).toUpperCase()}${who.slice(1)} ${did}${m ? `: ${m.text}` : ""}.`;
+      return say(vote === "abstain" ? "org_abstain" : "org_vote", { who: `${who.charAt(0).toUpperCase()}${who.slice(1)}`, ...(who === "you" ? { you: true } : {}), vote, ...(m ? { text: m.text } : {}) });
     },
   },
   {
@@ -555,7 +555,7 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx) => {
       const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
       const status = str(e, "status") as Exclude<MotionStatus, "open">;
-      return `At ${labelOf(ctx, str(e, "org"))}, the motion ${END_WORDS[status] ?? "closed"}${status === "withdrawn" ? "" : ` (${str(e, "why")})`}${m ? `: ${m.text}` : ""}.`;
+      return say("org_motion_end", { org: labelOf(ctx, str(e, "org")), ended: END_WORDS[status] ?? say("org_motion_closed"), ...(status === "withdrawn" ? {} : { why: str(e, "why") }), ...(m ? { text: m.text } : {}) });
     },
   },
 ];

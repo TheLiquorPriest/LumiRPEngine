@@ -1231,8 +1231,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) => {
       if (e.data.lived === true) return "";
       const who = strOf(e.data.entity);
-      const whose = viewer !== undefined && who === viewer ? "Your" : `${own(ctx.state.entities, who)?.name ?? who}'s`;
-      return `${whose} ${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`;
+      return say(numOf(e.data.delta) < 0 ? "need_eased" : "need_rose", { ...(viewer !== undefined && who === viewer ? { you: true } : { name: own(ctx.state.entities, who)?.name ?? who }), need: strOf(e.data.need).replace(/_/g, " ") });
     },
   },
   {
@@ -1241,7 +1240,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "castlife", "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
-    describe: (e) => `decided ${strOf(e.data.choice)}`,
+    describe: (e) => say("castlife_decided", { choice: strOf(e.data.choice) }),
   },
   {
     type: "castlife.invitation",
@@ -1302,7 +1301,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
     },
     // The GM's line only: what someone did in a skip is no player's news.
-    describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `skip planned for ${Array.isArray(e.data.plans) ? e.data.plans.length : 0}${typeof e.data.note === "string" ? ` (${e.data.note})` : ""}`),
+    describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("castlife_skip", { plans: Array.isArray(e.data.plans) ? e.data.plans.length : 0, ...(typeof e.data.note === "string" ? { note: e.data.note } : {}) })),
   },
   {
     // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.

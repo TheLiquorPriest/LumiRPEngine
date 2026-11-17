@@ -10,6 +10,7 @@
 // narrator shows only what messages and time cover; core members treat orders as binding and may
 // object in words; companions weigh them; the hired take them as their job; allies as favours.
 
+import { say } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -137,7 +138,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       const plan = planOf(state, org);
       writePlan(state, org, { goals: upsert(plan.goals, goal), orders: plan.orders });
     },
-    describe: (e) => `Plan: ${strOf(objOf(e.data.goal).text)}`,
+    describe: (e) => say("plan_goal", { text: strOf(objOf(e.data.goal).text) }),
   },
   {
     // An order given or changed, whole: the plan keeps every closed order.
@@ -161,7 +162,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       const plan = planOf(state, org);
       writePlan(state, org, { goals: plan.goals, orders: upsert(plan.orders, order) });
     },
-    describe: (e) => `Order: ${strOf(objOf(e.data.order).text)}`,
+    describe: (e) => say("plan_order", { text: strOf(objOf(e.data.order).text) }),
   },
   {
     // A goal or an order moved along: its status and the latest word on it.
@@ -189,7 +190,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       };
       writePlan(state, org, { goals: plan.goals.map(move), orders: plan.orders.map(order) });
     },
-    describe: (e) => `Plan: ${strOf(e.data.id)} ${PLAN_STATUS_WORDS[isPlanStatus(e.data.status) ? e.data.status : "open"].toLowerCase()}`,
+    describe: (e) => say("plan_status", { id: strOf(e.data.id), status: PLAN_STATUS_WORDS[isPlanStatus(e.data.status) ? e.data.status : "open"].toLowerCase() }),
   },
   {
     // The day planner's marker (`orgs.orders`): every block it laid for an order has ended, at `at`. It closes nothing.
@@ -203,7 +204,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       const plan = planOf(state, org);
       writePlan(state, org, { goals: plan.goals, orders: plan.orders.map((o) => (o.id === id ? { ...o, lived: at } : o)) });
     },
-    describe: (e) => `Plan: ${strOf(e.data.id)} should be done by the day as laid`,
+    describe: (e) => say("plan_due_day", { id: strOf(e.data.id) }),
   },
 ];
 

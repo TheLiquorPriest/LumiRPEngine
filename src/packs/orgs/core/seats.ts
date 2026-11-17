@@ -162,7 +162,7 @@ export const ORGS_CONFIG_EVENT: EventTypeDef<PackEvent> = {
     if (e.data.value === null || e.data.value === undefined) delete config[key];
     else config[key] = e.data.value;
   },
-  describe: (e) => (e.data.value === null ? `Orgs: ${strOf(e.data.key)} follows the world's setting` : `Orgs: ${strOf(e.data.key)} ${e.data.value === false ? "off" : "on"} in this chat`),
+  describe: (e) => say(e.data.value === null ? "org_config_world" : e.data.value === false ? "org_config_off" : "org_config_on", { key: strOf(e.data.key) }),
 };
 
 /** The GM's switch for succession in this chat (GM → This chat): on, off, or (none) as the world sets it. */

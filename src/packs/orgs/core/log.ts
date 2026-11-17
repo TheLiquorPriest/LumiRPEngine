@@ -5,6 +5,7 @@
 // makes a History line; `orgsActed` makes what an act for an organization records beside its
 // effects, one unit with them (the `orgs.acted` service the economy calls).
 
+import { say } from "../../../engine/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -106,6 +107,6 @@ export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
       org[str(e, "who")] = months;
       spent[str(e, "org")] = org;
     },
-    describe: (e, ctx) => `${labelOf(ctx, str(e, "who"))} spent ${formatMoney(Math.round(numOf(e.data.cents)), ctx.world.currency)} for ${labelOf(ctx, str(e, "org"))}`,
+    describe: (e, ctx) => say("org_spent", { who: labelOf(ctx, str(e, "who")), amount: formatMoney(Math.round(numOf(e.data.cents)), ctx.world.currency), org: labelOf(ctx, str(e, "org")) }),
   },
 ];
