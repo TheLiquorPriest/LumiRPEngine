@@ -5,8 +5,8 @@
 // and its text is left out, of a read and of a search, unless the chat's setting lets agents read
 // hidden messages (§4.2, "Hidden messages"). A message Lumiverse's own memory stands in for with a
 // summary is marked as such (§4.2: "The turn's files mark a summary as a summary"). A message the chat's story choice (`story.from`,
-// R-176) leaves out of the story is marked `story: false`: with the replies alone as the story, his own messages; as Lumiverse has it,
-// the same while its Sovereign Hand is on, and none while it is off or unsaid.
+// R-176) leaves out of the story is marked `story: false`: with the replies alone as the story, every message that is not a reply (his
+// own, and a system message an extension added); as Lumiverse has it, the same while its Sovereign Hand is on, and none while it is off or unsaid.
 //
 // A message's place on the path counts from 0 at the chat's first message, in Lumiverse's order; it is
 // not Lumiverse's `index_in_chat`, which keeps a gap where a message was deleted.
@@ -106,8 +106,8 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     return scope.chat;
   };
 
-  /** Whether the chat's story choice leaves his own messages out of the story: the replies alone, by the chat's setting or by Lumiverse's Sovereign Hand switched on (`sovereignHand.enabled`, the user's Lumiverse setting). */
-  async function playerOutside(chat: string): Promise<boolean> {
+  /** Whether the chat's story is the replies alone: by the chat's setting, or by Lumiverse's Sovereign Hand switched on (`sovereignHand.enabled`, the user's Lumiverse setting). */
+  async function repliesAlone(chat: string): Promise<boolean> {
     const from = await deps.storyFrom(chat);
     if (from !== "lumiverse") return from === "replies";
     const hand = (await deps.reads.setting("sovereignHand"))?.value;
@@ -122,7 +122,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     ...(!m.hidden || readable ? { text: m.text } : {}),
     ...(m.hidden ? { hidden: true as const } : {}),
     ...(summarized.has(m.id) ? { summarized: true as const } : {}),
-    ...(outside && m.role === "user" ? { story: false as const } : {}),
+    ...(outside && m.role !== "assistant" ? { story: false as const } : {}),
     at: m.sentAt,
   });
 
@@ -146,7 +146,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
       const chat = own(scope);
       const from = Math.max(0, Math.floor(range.from));
       if (range.to <= from) return [];
-      const [messages, readable, summarized, outside] = await Promise.all([deps.reads.messages(chat, { from, to: range.to }), deps.hiddenReadable(chat), deps.summarized(chat), playerOutside(chat)]);
+      const [messages, readable, summarized, outside] = await Promise.all([deps.reads.messages(chat, { from, to: range.to }), deps.hiddenReadable(chat), deps.summarized(chat), repliesAlone(chat)]);
       return messages.map((m, i) => shown(m, from + i, readable, summarized, outside));
     },
     async search(scope, query: ChatQuery): Promise<ChatHit[]> {
@@ -183,11 +183,11 @@ export function createChatReads(deps: ChatDeps): ChatReads {
         })
         .slice(0, limit - word.length);
       const hits = [...word.map((h) => ({ ...h, how: "words" as const })), ...near.map((h) => ({ ...h, how: "meaning" as const }))];
-      const [read, outside] = await Promise.all([deps.reads.messagesById(chat, hits.map((h) => h.id)), playerOutside(chat)]);
+      const [read, outside] = await Promise.all([deps.reads.messagesById(chat, hits.map((h) => h.id)), repliesAlone(chat)]);
       const texts = new Map(read.map((m) => [m.id, m] as const));
       return hits.flatMap(({ id, i, how }): ChatHit[] => {
         const m = texts.get(id);
-        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how, ...(outside && m.role === "user" ? { story: false as const } : {}) }];
+        return m === undefined ? [] : [{ id, index: i, role: m.role, name: m.name, snippet: snippetOf(m.text, how === "words" ? (matchAt(m.text, wanted) ?? 0) : 0, settings.snippetChars), how, ...(outside && m.role !== "assistant" ? { story: false as const } : {}) }];
       });
     },
     async position(scope, id): Promise<number | undefined> {
@@ -204,7 +204,7 @@ export function createChatReads(deps: ChatDeps): ChatReads {
     },
     async find(scope, id): Promise<ChatMessage | null> {
       const chat = own(scope);
-      const [path, found, readable, summarized, outside] = await Promise.all([deps.reads.path(chat), deps.reads.messagesById(chat, [id]), deps.hiddenReadable(chat), deps.summarized(chat), playerOutside(chat)]);
+      const [path, found, readable, summarized, outside] = await Promise.all([deps.reads.path(chat), deps.reads.messagesById(chat, [id]), deps.hiddenReadable(chat), deps.summarized(chat), repliesAlone(chat)]);
       const message = found[0];
       const index = path?.findIndex((s) => s.id === id) ?? -1;
       return message === undefined || index < 0 ? null : shown(message, index, readable, summarized, outside);
