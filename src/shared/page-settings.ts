@@ -7,7 +7,7 @@
 // Until the page has them it uses the defaults below, and for the start wait, which governs the wait
 // for the very facts that carry the group, the value RPE last gave it, kept by the browser (ui-settings).
 
-/** A line the Settings page shows while a value is below `below` or above `above`; the value is taken all the same (plan §2.1 point 5). The registry's `Advice`. */
+/** A line the Settings page shows while a value is below `below` or above `above`; the value is taken all the same (plan §2.1 point 5). RPH's `SettingAdvice`. */
 export interface PageAdvice {
   readonly below?: number;
   readonly above?: number;

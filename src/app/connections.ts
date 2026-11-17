@@ -162,15 +162,20 @@ const N = shape.number();
 const opt = shape.optional;
 const auth = shape.named("ConnectionAuth", "How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing.", shape.oneOf("key", "signin", "none"));
 const effort = shape.named("Effort", "How hard a model reasons on a call.", shape.oneOf("off", "minimal", "low", "medium", "high", "xhigh", "max"));
-const limitsEntry = shape.named("ModelLimitsEntry", "A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures.", shape.object({ contextWindow: opt(N), maxTokens: opt(N), pictures: opt(shape.yesNo()) }));
+const limitsEntry = shape.named(
+  "ModelLimitsEntry",
+  "A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures, audio and video.",
+  shape.object({ contextWindow: opt(N), maxTokens: opt(N), pictures: opt(shape.yesNo()), audio: opt(shape.yesNo()), video: opt(shape.yesNo()) }),
+);
 const figureFrom = shape.oneOf("user", "pi", "connection");
 const limit = shape.named("ModelLimit", "One limit of a model, in tokens, and where it came from.", shape.object({ tokens: N, from: figureFrom }));
 const pictures = shape.named("ModelPictures", "Whether a model takes pictures, and where that came from.", shape.object({ takes: shape.yesNo(), from: figureFrom }));
+const media = shape.named("ModelMedia", "Whether a model takes audio, or video, and where that came from: pi's catalogue says neither, so the user's entry or the connection's server.", shape.object({ takes: shape.yesNo(), from: shape.oneOf("user", "connection") }));
 const figure = shape.named("ModelFigure", "A figure of a model the Connections page asks for where nobody has given it.", shape.oneOf("contextWindow", "maxTokens", "pictures"));
 const limits = shape.named(
   "ModelLimits",
-  "A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; and the figures nobody has given, in the order the page asks for them.",
-  shape.object({ contextWindow: shape.nullable(limit), maxTokens: shape.nullable(limit), pictures: shape.nullable(pictures), asked: shape.list(figure) }),
+  "A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; whether it takes audio and video, the user's entry else the server's report, never asked for (a request passed through that carries one the model is said to take none of is refused); and the figures nobody has given, in the order the page asks for them.",
+  shape.object({ contextWindow: shape.nullable(limit), maxTokens: shape.nullable(limit), pictures: shape.nullable(pictures), audio: shape.nullable(media), video: shape.nullable(media), asked: shape.list(figure) }),
 );
 /** A connection as the layer shows it, but for its key. */
 const viewFields = {

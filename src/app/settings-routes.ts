@@ -20,7 +20,7 @@ import type { InstallFact } from "./config";
 import { diskTexts, type LevelFile, readConfig } from "./config-read";
 import { oneFileAtATime, readText, writeWhole } from "./disk";
 import { type Exactly, type Holds, type Infer, type Mutually, route, RouteError, shape } from "./routes";
-import { type Advice, type Effect, EFFECT_WORDS, groupOf, isMapping, keyFor, type Mapping, pathOf, SECTIONS, type Setting, setFor, settingOfKey, type Takes, takenValue, takesWords, unitOf, valueAt } from "./setting-list";
+import { type Effect, EFFECT_WORDS, groupOf, isMapping, keyFor, type Mapping, pathOf, SECTIONS, type Setting, type SettingAdvice, setFor, settingOfKey, type Takes, takenValue, takesWords, unitOf, valueAt } from "./setting-list";
 import { LayoutRefused, withKeyAt, yamlMapping } from "./yaml";
 
 export const SETTINGS_PATH = "/api/v1/settings";
@@ -45,10 +45,10 @@ const T = shape.text();
 const layerLevel = shape.named("LayerLevel", "A level of the agents' tree: what ships, the user's own, a character's, a chat's.", shape.oneOf("shipped", "global", "character", "chat"));
 const rphTakes = shape.named(
   "SettingTakes",
-  "One of RPH's shapes of a value: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.",
+  "One of RPH's shapes of a value: a whole number, at least `least` and at most `most` where it has one; a number, at least `least` where it has one and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.",
   shape.union(
     shape.object({ type: shape.literal("whole"), least: shape.number(), most: shape.optional(shape.number()) }),
-    shape.object({ type: shape.literal("number"), least: shape.number(), most: shape.optional(shape.number()) }),
+    shape.object({ type: shape.literal("number"), least: shape.optional(shape.number()), most: shape.optional(shape.number()) }),
     shape.object({ type: shape.literal("oneOf"), values: shape.list(T, { readonly: true }) }),
     shape.object({ type: shape.literal("yesNo") }),
     shape.object({ type: shape.literal("text") }),
@@ -76,7 +76,7 @@ const advice = shape.named(
   "A line the Settings page shows beside a setting's control while its value is below `below` or above `above`, saying what such a value does; the value is taken all the same.",
   shape.object({ below: shape.optional(shape.number()), above: shape.optional(shape.number()), says: T }),
 );
-type AdviceMirrored = Holds<Mutually<Infer<typeof advice>, Written<Advice>>>;
+type AdviceMirrored = Holds<Mutually<Infer<typeof advice>, Written<SettingAdvice>>>;
 
 const setForView = shape.named(
   "SetFor",

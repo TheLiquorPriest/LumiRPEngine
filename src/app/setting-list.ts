@@ -25,7 +25,7 @@
 import type { JsonValue, SettingDef, SettingTakes } from "rp-harness/contract";
 import { checkSettingValue, SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 
-export type { SettingDef, SettingTakes } from "rp-harness/contract";
+export type { SettingAdvice, SettingDef, SettingTakes } from "rp-harness/contract";
 export { mergedConfig } from "rp-harness/helpers";
 
 /** Where a per-connection setting's key names the connection, by its name or its id. */
@@ -79,24 +79,8 @@ export type Effect = "use" | "turn" | "start";
 /** Each moment as the Settings page and the docs word it. */
 export const EFFECT_WORDS: Readonly<Record<Effect, string>> = Object.freeze({ use: "at its next use", turn: "from the next turn", start: "from RPE's next start" });
 
-/**
- * A line the Settings page shows beside a setting's control while its value is below `below` or above
- * `above`, saying what such a value does; the value is taken all the same (plan §2.1 point 5). Words for
- * the owner, never sent to a model. RPH's `SettingDef` carries the same shape from its next head (pin).
- */
-export interface Advice {
-  readonly below?: number;
-  readonly above?: number;
-  readonly says: string;
-}
-
-/**
- * A setting as any list declares it, RPH's or RPE's: what the readers and the checks need, its advice,
- * and `unset`: what holds where no level sets it, in a page's words, where that is not what `~` means
- * (`none`): a definition's own value for a setting set per agent. Both are RPH's `SettingDef`'s from
- * its next head (pin).
- */
-export type Declared = Omit<SettingDef, "takes"> & { readonly takes: Takes; readonly advice?: readonly Advice[]; readonly unset?: string };
+/** A setting as any list declares it, RPH's or RPE's: RPH's declaration, with RPE's own shapes beside RPH's among what it takes. */
+export type Declared = Omit<SettingDef, "takes"> & { readonly takes: Takes };
 
 /** A setting of the registry: declared with its words, when it takes effect and its row of Appendix D.1. */
 export interface Setting extends Omit<Declared, "name" | "about"> {
@@ -362,9 +346,13 @@ function shapeWords(t: SettingTakes): string {
       ? `a whole number, at least ${t.least}`
       : `a whole number from ${t.least} to ${t.most}`
     : t.type === "number"
-      ? t.most === undefined
-        ? `a number, at least ${t.least}`
-        : `a number from ${t.least} to ${t.most}`
+      ? t.least === undefined
+        ? t.most === undefined
+          ? "a number"
+          : `a number, at most ${t.most}`
+        : t.most === undefined
+          ? `a number, at least ${t.least}`
+          : `a number from ${t.least} to ${t.most}`
       : t.type === "oneOf"
         ? `one of ${t.values.join(", ")}`
         : t.type === "yesNo"

@@ -78,7 +78,7 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
       )}
       <p class="rpe-line" data-effort>
         Thinks at {run.effort === null ? "its provider's own default" : <strong>{run.effort}</strong>}
-        {agent.effort === undefined ? ". Its definition sets none." : `. Its definition says ${agent.effort}.`} An effort set below, for every chat or this one, stands over it.
+        {agent.effort === undefined ? ". Its definition sets none." : `. Its definition says ${agent.effort}.`} An effort set for its connection on the Settings page stands over its definition's, and one set below, for every chat or this one, over both.
       </p>
     </Section>
   );

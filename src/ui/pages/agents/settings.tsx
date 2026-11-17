@@ -3,7 +3,7 @@
 // beside it, which holds where no level sets one; and the way back to it. A value set at any level stands over the header. The same
 // settings are side by side for every agent on the Settings page, a row for each.
 
-import type { ListedDefinition } from "rp-harness/contract";
+import type { DefinitionLimitsView, ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
 import { Banner, Section, Seg } from "../../../frontend/components";
 import type { SettingView } from "../../../shared/api";
@@ -11,16 +11,32 @@ import type { SettingsShown } from "../settings";
 import { type ChangeLevel, numberWords } from "../settings/model";
 import { type RowActions, SettingRow } from "../settings/row";
 
-/** A definition as the list gives it, with the limits its header sets (RPH's `DefinitionView.limits` from its next head: pin). */
-type WithHeader = ListedDefinition & { readonly limits?: Readonly<Record<string, number>> };
+/**
+ * Each limit set per agent, by the last part of its key, as the definition's header names it: the key names its unit
+ * (`agents.<definition>.limits.seconds`), the header the thing (`limits: { time }`), both in seconds.
+ */
+const HEADER_LIMITS: Readonly<Record<string, keyof DefinitionLimitsView>> = {
+  calls: "calls",
+  tokensIn: "tokensIn",
+  tokensOut: "tokensOut",
+  seconds: "time",
+  callTokensIn: "callTokensIn",
+  callTokensOut: "callTokensOut",
+  callSeconds: "callTime",
+  toolRounds: "toolRounds",
+  toolsPerAnswer: "toolsPerAnswer",
+  toolsAtOnce: "toolsAtOnce",
+  messages: "messages",
+};
 
 /** What the definition's header says of a setting set per agent, where it says anything: its effort, or one of its limits. */
-function headerWords(agent: WithHeader, s: SettingView): string | undefined {
+function headerWords(agent: ListedDefinition, s: SettingView): string | undefined {
   const parts = s.pattern.split(".");
   const [first, second] = parts.slice(parts.indexOf("<definition>") + 1);
   if (first === "effort" && second === undefined) return `Its definition: ${agent.effort ?? "none, so its connection's own"}`;
-  if (first !== "limits" || second === undefined) return undefined;
-  const set = agent.limits?.[second];
+  const limit = first === "limits" && second !== undefined ? HEADER_LIMITS[second] : undefined;
+  if (limit === undefined) return undefined;
+  const set = agent.limits?.[limit];
   return `Its definition: ${set === undefined ? "no limit" : numberWords(set, s.unit)}`;
 }
 

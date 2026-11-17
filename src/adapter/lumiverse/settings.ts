@@ -36,7 +36,7 @@
 //     untagged: { whileAwaited: pass }   pass, or fail: a request with no tag while a reply RPE heard start awaits its tag
 
 import { type ConfigRead, readConfig } from "../../app/config-read";
-import type { Advice, Effect, NumberSettings, Setting, SettingTakes } from "../../app/setting-list";
+import type { Effect, NumberSettings, Setting, SettingAdvice, SettingTakes } from "../../app/setting-list";
 import { CHAT_SEARCH_DEFAULTS, type ChatSearchSettings } from "./chat";
 import { RETRY_MS, TRIES } from "./db";
 import { DRY_RUN_MS } from "./hint";
@@ -100,7 +100,7 @@ const INTERCEPTOR_S = 10;
 /** Lumiverse ends a generation with no text for ten minutes (`services/generation/active-generation-registry.ts:140-158`). */
 const SILENT_GENERATION_S = 600;
 
-const setting = (key: string, value: number, takes: SettingTakes & { type: "whole" | "number" }, name: string, about: string, effect: Effect = "use", advice: readonly Advice[] = []) =>
+const setting = (key: string, value: number, takes: SettingTakes & { type: "whole" | "number" }, name: string, about: string, effect: Effect = "use", advice: readonly SettingAdvice[] = []) =>
   ({ key: `lumiverse.${key}`, default: value, takes, levels: GLOBAL, perConnection: false, name, about, effect, ...(advice.length === 0 ? {} : { advice }) }) as const;
 
 /** Each of the door's settings, by the name its reader takes it under. The question's wait has a row of Appendix D.1; each other is listed for the owner's approval (N-10). */

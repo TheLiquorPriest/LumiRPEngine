@@ -305,7 +305,7 @@ const stackPartRow = shape.named(
   "StackPartRow",
   "One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why.",
   shape.object({
-    kind: field(shape.oneOf("definition", "instruction", "rule", "contract", "guide", "closing", "description", "skills", "given"), "What the part is."),
+    kind: field(shape.oneOf("definition", "instruction", "rule", "contract", "guide", "description", "skills", "given"), "What the part is."),
     part: field(T, "Its name as `off:` lists name it; for `given`, the item as `opening:` writes it."),
     path: field(T, "The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it."),
     level: layerLevel,

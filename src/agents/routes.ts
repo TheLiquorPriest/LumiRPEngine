@@ -15,16 +15,34 @@ const nullable = shape.nullable;
 
 const toolsAs = shape.named("ToolsAs", "How a definition's tools are offered to its model: as the connection does best (`auto`), as native tool calls, or as text.", shape.oneOf("auto", "native", "text"));
 
+const definitionLimits = shape.named(
+  "DefinitionLimitsView",
+  "An agent's limits as a definition's header and the settings write them: `time` and `callTime` in seconds. Each absent is no limit of its own.",
+  shape.object({
+    calls: opt(N),
+    tokensIn: opt(N),
+    tokensOut: opt(N),
+    time: opt(N),
+    callTokensIn: opt(N),
+    callTokensOut: opt(N),
+    callTime: opt(N),
+    toolRounds: opt(N),
+    toolsPerAnswer: opt(N),
+    toolsAtOnce: opt(N),
+    messages: opt(N),
+  }),
+);
+
 const runsOn = shape.named(
   "DefinitionRun",
-  "What a definition runs on, resolved among the user's connections for the chat it is listed for: the connection its header names (his default where it names none), that connection's model, and the effort it thinks at: its definition's, else its connection's own.",
-  shape.object({ connection: nullable(shape.object({ id: T, name: T })), model: nullable(T), effort: nullable(effort) }),
+  "What a definition runs on, resolved among the user's connections for the chat it is listed for, with what the settings there set for it standing over its header: the connection its header names (his default where it names none), that connection's model, the effort it thinks at (the settings' for its definition, else the settings' for its connection, else its definition's, else its connection's own), and the limits it is held to (its header's, each one the settings set standing over it; absent where none holds).",
+  shape.object({ connection: nullable(shape.object({ id: T, name: T })), model: nullable(T), effort: nullable(effort), limits: opt(definitionLimits) }),
 );
 type RunMirrored = Holds<Exactly<Infer<typeof runsOn>, DefinitionRun>>;
 
 const agentShown = shape.named(
   "AgentShown",
-  "A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile and effort as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.",
+  "A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile, effort and limits as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.",
   shape.object({
     name: T,
     description: T,
@@ -34,6 +52,7 @@ const agentShown = shape.named(
     off: shape.yesNo(),
     model: opt(T),
     effort: opt(effort),
+    limits: opt(definitionLimits),
     toolsAs: opt(toolsAs),
     tools: shape.list(T),
     reads: shape.list(T),
@@ -82,7 +101,7 @@ export function agentsRoutes(deps: AgentsRoutesDeps) {
       path: "/api/v1/agents",
       access: "page",
       group: "agents",
-      does: "Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its tools, what it reads and is given, and what it runs on (its connection, its model and its effort) as RPH resolves them.",
+      does: "Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its effort and limits as its header says them, its tools, what it reads and is given, and what it runs on (its connection, its model, its effort and its limits, the settings for it standing over its header) as RPH resolves them.",
       query: { chat: chatQuery },
       reply: agentsReply,
       handle: async ({ user, query }) => ({ chat: query.chat ?? null, agents: await deps.definitions.list(deps.scope(user, query.chat ?? null)) }),
