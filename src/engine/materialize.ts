@@ -4,6 +4,7 @@
 // pinned tables' revision. Previews (GM view, inspector, Dry Run) use the same seed and record
 // nothing.
 
+import { say } from "./lines";
 import { hashJson, hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import type { LedgerEvent, MaterializeEvent, PackEvent } from "../shared/ledger";
@@ -88,5 +89,5 @@ export const unmaterializedEvent: EventTypeDef<PackEvent> = {
   apply: (e, state) => {
     if (typeof e.data.entity === "string" && typeof e.data.domain === "string") delete state.materialized[`${e.data.entity}:${e.data.domain}`];
   },
-  describe: (e) => `${String(e.data.entity)} ${String(e.data.domain)} detail taken back`,
+  describe: (e) => say("ev_unmaterialized", { entity: String(e.data.entity), domain: String(e.data.domain) }),
 };

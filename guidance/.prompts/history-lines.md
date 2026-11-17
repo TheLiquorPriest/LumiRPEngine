@@ -87,6 +87,12 @@ keys:
   vehicle_holding: a thing and what it holds - name, inner
   vehicle_aboard: who is aboard - who
   vehicle_cargo: what is in it - what
+  post_between: a posting between two accounts of the player (or of anyone, on a GM's line) - label, amount, from, to; post_out_of, post_into, post_net_out, post_net_in the other forms of it, and post_label the label of one with no memo
+  thing_carried_by: a thing and who carries it, thing_in and thing_at where it is - name, holder or place
+  set_place: a change of a field as a sentence, one line for each field and form (set_place, set_bed_*, set_home_*, set_owner*, set_unset, set_marked, set_unmarked, set_list*, set_value, set_value_at_most) - who or whose, noun, the value; many is true where the subject is the player (a plural verb)
+  rel_knows: a relation made or ended as a sentence, one line for each relation (rel_knows, rel_carried_by, rel_in, rel_uses, rel_uses_ended, rel_owns, rel_worn_by, rel_equipped, rel_member_of, rel_regard, rel_regard_none, rel_other) - from, to, now (true where it was made), many
+  entity_gone: a thing removed, back, or made (entity_gone, entity_back, entity_appears) - name; add_down and add_up a number that went down or up - whose, noun, amount; stage_now a quest stage - track, stage; change_unseen the line for a change the player may not see
+  ev_set: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - what each names is in the line itself
 ---
 credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
 credit_declined: The application for a {{product}} was declined: {{reason}}.
@@ -173,3 +179,97 @@ vehicle_specs: specs {{specs}}{{#more}}, and {{more}} more{{/more}}
 vehicle_holding: {{name}} (holding {{inner}})
 vehicle_aboard: Aboard: {{who}}.
 vehicle_cargo: Cargo: {{what}}.
+post_label: Money moved
+post_between: {{label}}: {{amount}} from {{from}} to {{to}}
+post_out_of: {{label}}: {{amount}} out of {{account}}
+post_into: {{label}}: {{amount}} into {{account}}
+post_net_out: {{label}}: −{{amount}}
+post_net_in: {{label}}: +{{amount}}
+thing_carried_by: {{name}} (carried by {{holder}})
+thing_in: {{name}} (in {{holder}})
+thing_at: {{name}} (at {{place}})
+set_place: {{who}} {{#many}}are{{/many}}{{^many}}is{{/many}} now at {{place}}
+set_bed_home: {{who}} now {{#many}}sleep{{/many}}{{^many}}sleeps{{/many}} at home
+set_bed_at: {{who}} now {{#many}}sleep{{/many}}{{^many}}sleeps{{/many}} at {{bed}}
+set_bed_in: {{who}} now {{#many}}sleep{{/many}}{{^many}}sleeps{{/many}} in {{bed}}
+set_bed_on: {{who}} now {{#many}}sleep{{/many}}{{^many}}sleeps{{/many}} on {{bed}}
+set_home_none: {{who}} no longer {{#many}}have{{/many}}{{^many}}has{{/many}} a home
+set_home_at: {{who}} now {{#many}}live{{/many}}{{^many}}lives{{/many}} at {{home}}
+set_home_in: {{who}} now {{#many}}live{{/many}}{{^many}}lives{{/many}} in {{home}}
+set_owner_none: {{who}} no longer {{#many}}belong{{/many}}{{^many}}belongs{{/many}} to anyone
+set_owner: {{who}} now {{#many}}belong{{/many}}{{^many}}belongs{{/many}} to {{owner}}
+set_unset: {{whose}} {{noun}} is no longer set
+set_marked: {{who}} {{#many}}are{{/many}}{{^many}}is{{/many}} now marked “{{noun}}”
+set_unmarked: {{who}} {{#many}}are{{/many}}{{^many}}is{{/many}} no longer marked “{{noun}}”
+set_list_changed: {{whose}} {{noun}} changed
+set_list_none: {{whose}} {{noun}} are now none
+set_list: {{whose}} {{noun}} are now {{items}}
+set_value: {{whose}} {{noun}} is now {{value}}
+set_value_at_most: {{whose}} {{noun}} is now at most {{value}}
+rel_knows: {{from}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} {{#many}}know{{/many}}{{^many}}knows{{/many}} {{to}}
+rel_carried_by: {{from}} {{#many}}are{{/many}}{{^many}}is{{/many}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} carried by {{to}}
+rel_in: {{from}} {{#many}}are{{/many}}{{^many}}is{{/many}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} in {{to}}
+rel_uses: {{from}} now {{#many}}borrow{{/many}}{{^many}}borrows{{/many}} {{to}}
+rel_uses_ended: {{from}} gave back {{to}}
+rel_owns: {{from}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} {{#many}}own{{/many}}{{^many}}owns{{/many}} {{to}}
+rel_worn_by: {{from}} {{#many}}are{{/many}}{{^many}}is{{/many}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} worn by {{to}}
+rel_equipped: {{from}} {{#many}}are{{/many}}{{^many}}is{{/many}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} equipped by {{to}}
+rel_member_of: {{from}} {{#many}}are{{/many}}{{^many}}is{{/many}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} a member of {{to}}
+rel_regard: {{whose}} regard for {{to}} changed
+rel_regard_none: {{from}} no longer {{#many}}hold{{/many}}{{^many}}holds{{/many}} any regard for {{to}}
+rel_other: {{from}} {{#now}}now{{/now}}{{^now}}no longer{{/now}} {{#many}}have{{/many}}{{^many}}has{{/many}} a “{{link}}” link to {{to}}
+entity_gone: {{name}} is gone
+entity_back: {{name}} is back
+entity_appears: {{name}} appears
+add_down: {{whose}} {{noun}} went down by {{amount}}
+add_up: {{whose}} {{noun}} went up by {{amount}}
+stage_now: {{track}} is now at “{{stage}}”
+change_unseen: A change no longer applies
+ev_set: {{name}}: {{field}} {{#value}}is {{#atMost}}at most{{/atMost}}{{^atMost}}now{{/atMost}} {{value}}{{/value}}{{^value}}changed{{/value}}
+ev_add: {{name}}: {{field}} {{delta}}
+ev_link: {{from}} {{rel}} {{to}}
+ev_unlink: {{from}} no longer {{rel}} {{to}}
+ev_stage: {{#track}}{{track}}{{/track}}{{^track}}A thread{{/track}}: {{#stage}}{{stage}}{{/stage}}{{^stage}}moved on{{/stage}}
+ev_clock_min: +{{min}} min
+ev_clock_s: +{{s}} s
+ev_clock_min_s: +{{min}} min {{s}} s
+ev_timelapse: timelapse {{minutes}} min
+ev_materialized: {{entity}} {{domain}} detail
+ev_unmaterialized: {{entity}} {{domain}} detail taken back
+ev_rule: rule {{rule}}
+ev_caught: {{agent}} caught up
+ev_catchup_queue: catch-up queue
+ev_choice: {{key}}: {{choice}}
+ev_attempt: attempt on {{track}}
+ev_hint_opened: hint opened on {{track}}
+ev_hint_closed: hint closed on {{track}}
+ev_track_revealed: {{track}} revealed
+ev_clock_pause: clock pause
+ev_clock_set_back: clock set back {{minutes}} min
+ev_renamed: {{was}} is now called {{name}}
+ev_meanwhile: what you saw meanwhile
+ev_roll: {{actor}}: {{action}}, {{outcome}}{{^rolled}} (no roll: {{why}}){{/rolled}}
+ev_check: {{actor}}: {{check}}, {{outcome}}{{#total}} (rolled {{total}}{{#dc}} against {{dc}}{{/dc}}){{/total}}
+ev_entity_tier: is now in the {{tier}} tier
+ev_entity_agent_on: now lives their own life off-screen
+ev_entity_agent_off: no longer lives their own life off-screen
+ev_entity_level_cleared: has {{area}} detail from their tier again
+ev_entity_level: now has {{area}} detail at level {{level}}{{#label}} ({{label}}){{/label}}
+ev_entity: {{name}} {{clauses}}
+ev_none: none
+ev_class_facet: {{whose}} {{noun}} is now {{values}}
+ev_class_tags: {{whose}} tags are now {{tags}}
+ev_class_none: {{name}} now has no classes and no tags
+ev_life: {{name}} is now {{state}}
+ev_life_you: You are now {{state}}
+ev_life_reads: {{name}} {{reads}}
+ev_told: {{who}} now {{#one}}knows{{/one}}{{^one}}know{{/one}} that {{name}} {{reads}}
+ev_ws_written: workspace file {{path}} written
+ev_ws_deleted: workspace file {{path}} deleted
+ev_ws_pinned: workspace file {{path}} pinned
+ev_ws_unpinned: workspace file {{path}} unpinned
+ev_ws_readers_pov: workspace file {{path}} read with the player character's knowledge
+ev_ws_readers_everyone: workspace file {{path}} read with everyone's knowledge
+ev_ws_readers_gm: workspace file {{path}} read with the GM's knowledge
+ev_output_told: {{kind}} lines told to the narrator
+ev_scene_told: the scene's lore and notes told to the narrator

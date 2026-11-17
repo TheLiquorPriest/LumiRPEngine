@@ -4,6 +4,7 @@
 // optimized fold share (DESIGN §14). Validation answers "may this event apply to this state?";
 // a rebased view drops an event whose validation fails. Reducers mutate a working copy.
 
+import { say } from "./lines";
 import type { JsonValue } from "../shared/json";
 import { readAdjudication } from "../shared/adjudication";
 import { readClaims } from "../shared/claims";
@@ -85,7 +86,7 @@ const setDef: EventTypeDef<SetEvent> = {
     return typeof current === "number" && typeof e.value === "number" && current > e.value ? { code: "capped", values: { entity: e.entity, field: e.field, was: current, now: e.value } } : null;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
-  describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is ${e.atMost ? "at most" : "now"} ${String(e.value)}` : "changed"}`,
+  describe: (e, ctx) => say("ev_set", { name: nameOf(ctx, e.entity), field: e.field.replace(/_/g, " "), ...(typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? { value: String(e.value), ...(e.atMost ? { atMost: true } : {}) } : {}) }),
 };
 
 const addDef: EventTypeDef<AddEvent> = {
@@ -108,7 +109,7 @@ const addDef: EventTypeDef<AddEvent> = {
     return current !== undefined && typeof current !== "number" ? { code: "not_numeric", values: { entity: e.entity, field: e.field } } : null;
   },
   touches: (e) => [{ entity: e.entity, field: e.field }],
-  describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${e.delta >= 0 ? "+" : ""}${e.delta}`,
+  describe: (e, ctx) => say("ev_add", { name: nameOf(ctx, e.entity), field: e.field.replace(/_/g, " "), delta: `${e.delta >= 0 ? "+" : ""}${e.delta}` }),
 };
 
 function isAccount(state: Readonly<WorldState>, account: EntityId): boolean {
@@ -145,7 +146,7 @@ const linkDef: EventTypeDef<LinkEvent> = {
     entity.relations.push({ type: e.rel, to: e.to, ...(e.fields ? { fields: e.fields } : {}), ...(e.until !== undefined ? { until: e.until } : {}) });
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
-  describe: (e, ctx) => `${nameOf(ctx, e.from)} ${e.rel.replace(/_/g, " ")} ${nameOf(ctx, e.to)}`,
+  describe: (e, ctx) => say("ev_link", { from: nameOf(ctx, e.from), rel: e.rel.replace(/_/g, " "), to: nameOf(ctx, e.to) }),
 };
 
 const unlinkDef: EventTypeDef<UnlinkEvent> = {
@@ -159,7 +160,7 @@ const unlinkDef: EventTypeDef<UnlinkEvent> = {
     if (entity) entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
   },
   touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
-  describe: (e, ctx) => `${nameOf(ctx, e.from)} no longer ${e.rel.replace(/_/g, " ")} ${nameOf(ctx, e.to)}`,
+  describe: (e, ctx) => say("ev_unlink", { from: nameOf(ctx, e.from), rel: e.rel.replace(/_/g, " "), to: nameOf(ctx, e.to) }),
 };
 
 const spawnDef: EventTypeDef<SpawnEvent> = {
@@ -182,7 +183,7 @@ const spawnDef: EventTypeDef<SpawnEvent> = {
     };
   },
   touches: (e) => [{ entity: e.entity.id, aspect: "spawned" }],
-  describe: (e) => `${e.entity.name} appears`,
+  describe: (e) => say("entity_appears", { name: e.entity.name }),
 };
 
 const stageDef: EventTypeDef<StageEvent> = {
@@ -205,7 +206,8 @@ const stageDef: EventTypeDef<StageEvent> = {
   // Labels, not ids; whether the player may see a track's stages is the caller's check (eventVisible).
   describe: (e, ctx) => {
     const track = hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    return `${track?.label ?? "A thread"}: ${(track && hasOwn(track.stages, e.to) ? track.stages[e.to]?.label : undefined) ?? "moved on"}`;
+    const stage = track && hasOwn(track.stages, e.to) ? track.stages[e.to]?.label : undefined;
+    return say("ev_stage", { ...(track?.label !== undefined ? { track: track.label } : {}), ...(stage !== undefined ? { stage } : {}) });
   },
 };
 
@@ -218,7 +220,7 @@ const clockDef: EventTypeDef<ClockEvent> = {
   },
   describe: (e) => {
     const seconds = clockSeconds(e.minutes);
-    return seconds % 60 === 0 ? `+${seconds / 60} min` : seconds < 60 ? `+${seconds} s` : `+${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+    return seconds % 60 === 0 ? say("ev_clock_min", { min: seconds / 60 }) : seconds < 60 ? say("ev_clock_s", { s: seconds }) : say("ev_clock_min_s", { min: Math.floor(seconds / 60), s: seconds % 60 });
   },
 };
 
@@ -226,7 +228,7 @@ const timelapseDef: EventTypeDef<TimelapseEvent> = {
   type: "timelapse",
   validate: (e) => (e.to >= e.from ? null : reject("bad_interval", "timelapse ends before it starts")),
   apply: () => undefined,
-  describe: (e) => `timelapse ${e.to - e.from} min`,
+  describe: (e) => say("ev_timelapse", { minutes: e.to - e.from }),
 };
 
 /** Registers the core event types; `materialize` needs the full table to validate nested events. */
@@ -253,7 +255,7 @@ export function coreEventTypes(lookup: () => EventTypes): EventTypeDef[] {
       for (const inner of e.events) applyEvent(lookup(), inner, state, ctx);
       state.materialized[`${e.entity}:${e.domain}`] = { generatorVersion: e.generatorVersion, tablesRevision: e.tablesRevision };
     },
-    describe: (e) => `${e.entity} ${e.domain} detail`,
+    describe: (e) => say("ev_materialized", { entity: e.entity, domain: e.domain }),
   };
   const defs: EventTypeDef<CoreEvent>[] = [setDef, addDef, postDef, linkDef, unlinkDef, spawnDef, stageDef, clockDef, materializeDef, timelapseDef];
   return defs as EventTypeDef[];

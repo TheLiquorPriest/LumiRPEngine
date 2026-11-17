@@ -15,6 +15,7 @@
 // a setting (Settings → Agents → Recording), checked where the turn makes them, never here: a limit
 // never changes how a past turn folds. Pure.
 
+import { say } from "./lines";
 import { isRecord } from "../shared/json";
 import type { LedgerEvent, PackEvent } from "../shared/ledger";
 import type { EventTypeDef } from "./registry";
@@ -47,7 +48,7 @@ export const outLinesEvent: EventTypeDef<PackEvent> = {
   },
   apply: () => undefined,
   // The narrator's own input, not a fact of the story: the player's Journal has no line for it.
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `${String(e.data.kind)} lines told to the narrator`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("ev_output_told", { kind: String(e.data.kind) })),
 };
 
 /** `engine.out.scene`: the lore and notes the scene gives its narrator; nothing in the world changes. An older record's `knowledge` still validates, so it replays as it did, and is ignored. */
@@ -55,7 +56,7 @@ export const outSceneEvent: EventTypeDef<PackEvent> = {
   type: OUT_SCENE,
   validate: (e) => (strings(e.data.lore) && strings(e.data.notes) && (e.data.knowledge === undefined || isAgentKnowledge(e.data.knowledge)) ? null : { code: "bad_event", reason: "a scene's lore is entry ids, its notes are texts, and its knowledge is pov, everyone or gm" }),
   apply: () => undefined,
-  describe: (_e, _ctx, viewer) => (viewer !== undefined ? "" : "the scene's lore and notes told to the narrator"),
+  describe: (_e, _ctx, viewer) => (viewer !== undefined ? "" : say("ev_scene_told")),
 };
 
 /** What a turn's planned events tell its narrator, when they are an agent turn's: each kind's lines, and the scene's lore and notes; null when they hold no output event, as a classic turn's never do. */

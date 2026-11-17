@@ -9,6 +9,7 @@
 // `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
 // `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
+import { say } from "./lines";
 import { facetsInOrder } from "../shared/classes";
 import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -248,7 +249,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const n = isRecord(prev) && typeof prev.n === "number" ? prev.n : 0;
       fired[str(e, "rule")] = { n: n + 1, last: state.clock };
     },
-    describe: (e) => `rule ${str(e, "rule")}`,
+    describe: (e) => say("ev_rule", { rule: str(e, "rule") }),
   },
   {
     type: ENGINE_EVENTS.signal,
@@ -269,7 +270,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const slot = e.data.slot;
       if (typeof slot === "number") sub(state, "agents")[str(e, "agent")] = slot;
     },
-    describe: (e) => `${str(e, "agent")} caught up`,
+    describe: (e) => say("ev_caught", { agent: str(e, "agent") }),
   },
   {
     type: ENGINE_EVENTS.cursor,
@@ -277,9 +278,9 @@ const events: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       if (typeof e.data.rr === "number") slice(state).rr = e.data.rr;
     },
-    describe: () => "catch-up queue",
+    describe: () => say("ev_catchup_queue"),
   },
-  { type: ENGINE_EVENTS.choice, validate: (e) => need(e, "key", "choice"), apply: noop, describe: (e) => `${str(e, "key")}: ${str(e, "choice")}` },
+  { type: ENGINE_EVENTS.choice, validate: (e) => need(e, "key", "choice"), apply: noop, describe: (e) => say("ev_choice", { key: str(e, "key"), choice: str(e, "choice") }) },
   {
     type: ENGINE_EVENTS.attempt,
     validate: (e, ctx) => (own(ctx.world.tracks, str(e, "track")) ? null : { code: "missing_track", reason: `no track ${str(e, "track")}` }),
@@ -294,7 +295,7 @@ const events: EventTypeDef<PackEvent>[] = [
         countStage(state, "missed", track, str(e, "stage"), (count) => count + 1);
       }
     },
-    describe: (e) => `attempt on ${str(e, "track")}`,
+    describe: (e) => say("ev_attempt", { track: str(e, "track") }),
   },
   {
     // `n`: how many of the stage's hints are open with this one, as the player saw them when they asked
@@ -315,7 +316,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const n = e.data.n;
       countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => (typeof n === "number" ? (open < n ? open + 1 : open) : open + 1));
     },
-    describe: (e) => `hint opened on ${str(e, "track")}`,
+    describe: (e) => say("ev_hint_opened", { track: str(e, "track") }),
   },
   {
     // The Undo of a hint the player opened: one fewer of the stage's hints is open, never fewer than none.
@@ -329,7 +330,7 @@ const events: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => Math.max(0, open - 1));
     },
-    describe: (e) => `hint closed on ${str(e, "track")}`,
+    describe: (e) => say("ev_hint_closed", { track: str(e, "track") }),
   },
   {
     type: ENGINE_EVENTS.revealed,
@@ -341,7 +342,7 @@ const events: EventTypeDef<PackEvent>[] = [
       if (!stages.includes(str(e, "stage"))) stages.push(str(e, "stage"));
       revealed[str(e, "track")] = stages;
     },
-    describe: (e) => `${str(e, "track")} revealed`,
+    describe: (e) => say("ev_track_revealed", { track: str(e, "track") }),
   },
   {
     type: ENGINE_EVENTS.pause,
@@ -349,7 +350,7 @@ const events: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
-    describe: () => "clock pause",
+    describe: () => say("ev_clock_pause"),
   },
   {
     type: ENGINE_EVENTS.rewind,
@@ -373,16 +374,13 @@ const events: EventTypeDef<PackEvent>[] = [
       s.reached = Math.max(typeof s.reached === "number" ? s.reached : state.clock, state.clock);
       state.clock = clockPlus(state.clock, -minutes);
     },
-    describe: (e) => `clock set back ${String(e.data.minutes)} min`,
+    describe: (e) => say("ev_clock_set_back", { minutes: String(e.data.minutes) }),
   },
   {
     type: ENGINE_EVENTS.check,
     validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str(e, "actor")}` }),
     apply: noop,
-    describe: (e) => {
-      const total = typeof e.data.total === "number" ? ` (rolled ${e.data.total}${typeof e.data.dc === "number" ? ` against ${e.data.dc}` : ""})` : "";
-      return `${str(e, "actor")}: ${str(e, "check").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${total}`;
-    },
+    describe: (e) => say("ev_check", { actor: str(e, "actor"), check: str(e, "check").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(typeof e.data.total === "number" ? { total: String(e.data.total) } : {}), ...(typeof e.data.dc === "number" ? { dc: String(e.data.dc) } : {}) }),
   },
   {
     type: ENGINE_EVENTS.entity,
@@ -414,8 +412,8 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx) => {
       // One sentence for all of it: "Danny Okafor is now in the Supporting tier and has Money detail at level 2".
       const clauses: string[] = [];
-      if (typeof e.data.tier === "string") clauses.push(`is now in the ${tierLabel(ctx.world, e.data.tier)} tier`);
-      if (typeof e.data.agent === "boolean") clauses.push(e.data.agent ? "now lives their own life off-screen" : "no longer lives their own life off-screen");
+      if (typeof e.data.tier === "string") clauses.push(say("ev_entity_tier", { tier: tierLabel(ctx.world, e.data.tier) }));
+      if (typeof e.data.agent === "boolean") clauses.push(say(e.data.agent ? "ev_entity_agent_on" : "ev_entity_agent_off"));
       const levels = e.data.levels;
       if (isRecord(levels))
         for (const [d, v] of Object.entries(levels)) {
@@ -423,9 +421,9 @@ const events: EventTypeDef<PackEvent>[] = [
           const domain = DOMAINS.find((x) => x === d);
           const area = domain ? DOMAIN_LABEL[domain] : d;
           const level = LEVELS.find((n) => n === v);
-          clauses.push(v === null ? `has ${area} detail from their tier again` : `now has ${area} detail at level ${String(v)}${level !== undefined ? ` (${LEVEL_LABEL[level]})` : ""}`);
+          clauses.push(v === null ? say("ev_entity_level_cleared", { area }) : say("ev_entity_level", { area, level: String(v), ...(level !== undefined ? { label: LEVEL_LABEL[level] } : {}) }));
         }
-      return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")} ${listWords(clauses)}`;
+      return clauses.length === 0 ? "" : say("ev_entity", { name: own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity"), clauses: listWords(clauses) });
     },
   },
   {
@@ -452,9 +450,9 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: (e, ctx, viewer) => {
       const classes = classOf(e.data.class) ?? {};
       const name = own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity");
-      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? listWords(values.map((v) => own(f.values, v)?.label ?? v)) : "none");
+      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? listWords(values.map((v) => own(f.values, v)?.label ?? v)) : say("ev_none"));
       // "Danny Okafor's trade is now mechanic": each facet as what it is, then its values.
-      const facetLine = (f: FacetDef, values: readonly string[]): string => `${possessive(name)} ${fieldNoun(f.label, "").noun} is now ${valuesOf(f, values)}`;
+      const facetLine = (f: FacetDef, values: readonly string[]): string => say("ev_class_facet", { whose: possessive(name), noun: fieldNoun(f.label, "").noun, values: valuesOf(f, values) });
       if (viewer !== undefined) {
         // A player's line says only what changed on the facets players can see, a cleared one
         // included, and never tags (DESIGN §4.1), so an edit to a hidden facet or a tag has no line.
@@ -472,8 +470,8 @@ const events: EventTypeDef<PackEvent>[] = [
         return values.length > 0 ? [facetLine(f, values)] : [];
       });
       const tags = tagList(e.data.tags) ?? [];
-      if (tags.length > 0) parts.push(`${possessive(name)} tags are now ${listWords(tags)}`);
-      return parts.length > 0 ? parts.join("; ") : `${name} now has no classes and no tags`;
+      if (tags.length > 0) parts.push(say("ev_class_tags", { whose: possessive(name), tags: listWords(tags) }));
+      return parts.length > 0 ? parts.join("; ") : say("ev_class_none", { name });
     },
   },
   {
@@ -490,14 +488,14 @@ const events: EventTypeDef<PackEvent>[] = [
     },
     // Play's name, so an Upgrade that renames it too keeps the chat's.
     touches: (e) => [{ entity: str(e, "entity"), aspect: "name" }],
-    describe: (e, ctx) => `${str(e, "was") || str(e, "entity")} is now called ${str(e, "name")}`,
+    describe: (e, ctx) => say("ev_renamed", { was: str(e, "was") || str(e, "entity"), name: str(e, "name") }),
     coarsen: { key: (e) => str(e, "entity"), merge: (earlier, later) => ({ ...later, data: { ...later.data, was: earlier.data.was ?? null } }) },
   },
   {
     type: ENGINE_EVENTS.observed,
     validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" }),
     apply: (e, state) => restoreObservations(state, e.data),
-    describe: () => "what you saw meanwhile",
+    describe: () => say("ev_meanwhile"),
   },
   {
     type: ENGINE_EVENTS.adjudged,
@@ -509,7 +507,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const { place, round } = e.data;
       sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str(e, "outcome"), failed: e.data.failed === true, odds: str(e, "odds"), ...(typeof round === "string" ? { round } : {}) };
     },
-    describe: (e) => `${str(e, "actor")}: ${str(e, "action").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str(e, "why")})`}`,
+    describe: (e) => say("ev_roll", { actor: str(e, "actor"), action: str(e, "action").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(e.data.rolled === true ? { rolled: true } : { why: str(e, "why") }) }),
   },
   {
     type: ENGINE_EVENTS.life,
@@ -528,11 +526,11 @@ const events: EventTypeDef<PackEvent>[] = [
       const def = lifeStateOf(ctx.world, str(e, "to"));
       const name = own(ctx.state.entities, id)?.name ?? id;
       const state = def.label.toLowerCase();
-      if (viewer === undefined) return `${name} is now ${state}`;
-      if (id === viewer) return `You are now ${state}`;
+      if (viewer === undefined) return say("ev_life", { name, state });
+      if (id === viewer) return say("ev_life_you", { state });
       // A player's line only for one who saw it change: one learned of later is the telling's news
       // (`engine.told`), so the turn it happened on never dates it.
-      return witnessesOf(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
+      return witnessesOf(e)?.includes(viewer) === true ? say("ev_life_reads", { name, reads: def.reads }) : "";
     },
   },
   {
@@ -547,9 +545,9 @@ const events: EventTypeDef<PackEvent>[] = [
       const id = str(e, "entity");
       const name = own(ctx.state.entities, id)?.name ?? id;
       const who = Array.isArray(e.data.who) ? e.data.who.filter((x): x is string => typeof x === "string") : [];
-      if (viewer === undefined) return `${listWords(who.map((w) => own(ctx.state.entities, w)?.name ?? w))} now ${who.length === 1 ? "knows" : "know"} that ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      if (viewer === undefined) return say("ev_told", { who: listWords(who.map((w) => own(ctx.state.entities, w)?.name ?? w)), ...(who.length === 1 ? { one: true } : {}), name, reads: lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads });
       // Someone else being told is nobody's news; the POV hears what it now takes to be so.
-      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
+      return who.includes(viewer) ? say("ev_life_reads", { name, reads: lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads }) : "";
     },
   },
 ];

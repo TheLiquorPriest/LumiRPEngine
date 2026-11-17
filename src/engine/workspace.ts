@@ -9,6 +9,7 @@
 // whose knowledge might read one, still folds as it did into a readers index nothing reads, so a
 // recorded chat replays as it was. Pure.
 
+import { say } from "./lines";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";
@@ -106,7 +107,7 @@ export const wsWriteEvent: EventTypeDef<PackEvent> = {
     if (isWorkspacePath(e.data.path) && isBlobHash(e.data.hash)) writable(state, WS_KEY)[e.data.path] = e.data.hash;
   },
   // Agent and GM bookkeeping, not a fact of the story: the player's Journal has no line for it.
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `workspace file ${String(e.data.path)} written`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("ev_ws_written", { path: String(e.data.path) })),
 };
 
 /** `engine.ws.delete {path}`: the file at `path` is gone, and its pin with it (and the readers an earlier build named). Refused when there is none, so a carried fix whose file is gone drops with a note. */
@@ -123,7 +124,7 @@ export const wsDeleteEvent: EventTypeDef<PackEvent> = {
     if (isRecord(state.packs.engine?.[PINS_KEY])) delete writable(state, PINS_KEY)[e.data.path];
     if (isRecord(state.packs.engine?.[READERS_KEY])) delete writable(state, READERS_KEY)[e.data.path];
   },
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `workspace file ${String(e.data.path)} deleted`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("ev_ws_deleted", { path: String(e.data.path) })),
 };
 
 /** `engine.ws.pin {path, pinned}`: the file at `path` is pinned, or no longer. Refused when there is no such file. */
@@ -140,7 +141,7 @@ export const wsPinEvent: EventTypeDef<PackEvent> = {
     if (e.data.pinned) pins[e.data.path] = true;
     else delete pins[e.data.path];
   },
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `workspace file ${String(e.data.path)} ${e.data.pinned === true ? "pinned" : "unpinned"}`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say(e.data.pinned === true ? "ev_ws_pinned" : "ev_ws_unpinned", { path: String(e.data.path) })),
 };
 
 /**
@@ -160,5 +161,5 @@ export const wsReadersEvent: EventTypeDef<PackEvent> = {
     if (e.data.readers !== "gm") writable(state, READERS_KEY)[e.data.path] = e.data.readers;
     else if (isRecord(state.packs.engine?.[READERS_KEY])) delete writable(state, READERS_KEY)[e.data.path];
   },
-  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : `workspace file ${String(e.data.path)} read with ${e.data.readers === "pov" ? "the player character's" : e.data.readers === "everyone" ? "everyone's" : "the GM's"} knowledge`),
+  describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say(e.data.readers === "pov" ? "ev_ws_readers_pov" : e.data.readers === "everyone" ? "ev_ws_readers_everyone" : "ev_ws_readers_gm", { path: String(e.data.path) })),
 };
