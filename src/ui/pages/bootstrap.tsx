@@ -191,9 +191,12 @@ function factLines(facts: DoneEnoughShown): { id: keyof DoneEnoughShown; title: 
   ];
 }
 
-/** Opens the chat's warnings in RPE's log on Runtime, where a fact whose records could not be read says what failed. */
-function openLog(app: UiApp, chat: string): void {
-  app.go({ page: "runtime", chat, at: logAt({ chat, level: "warn" }) });
+/**
+ * Opens RPE's log on Runtime where a fact whose records could not be read says what failed: the lines of the job whose question shows the facts
+ * (`job`), else the chat's warnings, for facts read now and no job's.
+ */
+function openLog(app: UiApp, chat: string, job?: string): void {
+  app.go({ page: "runtime", chat, at: logAt(job === undefined ? { chat, level: "warn" } : { chat, job }) });
 }
 
 /** The six facts, each with its counts or why it is not known; none says whether it holds. One whose records could not be read leads to RPE's log (`onLog`), where the failure is. */
@@ -346,7 +349,7 @@ export function QuestionView(props: { question: BootstrapQuestion; chat: string;
         </span>
       </Banner>
       {q.wrote === null ? null : <Pre text={q.wrote} mono={false} />}
-      <FactsView facts={q.facts} onLog={() => openLog(app, props.chat)} />
+      <FactsView facts={q.facts} onLog={() => openLog(app, props.chat, q.job)} />
       <label class="lre-stack">
         <span class="rpe-caption">Tokens more before it asks again</span>
         <input class="lre-input" inputMode="numeric" value={typed} onInput={(e) => setTyped((e.currentTarget as HTMLInputElement).value)} />
