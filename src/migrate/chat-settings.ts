@@ -1,6 +1,6 @@
 // Each chat's own choices (STANDALONE-PLAN §15.2, "Your settings"; §9.6): the knowledge switch and the
 // narrator's view of secrets its metadata holds (`lumi_rp_engine.prefs`), the tidy-up's switch and
-// leave-alone list (`runs/<chat>/prefs.json`, and the metadata's `tidy`), and what counts as its story
+// leave-alone list and the map's display (`runs/<chat>/prefs.json`, and the metadata's `tidy`), and what counts as its story
 // (`harness/chats.json`'s `story`), each into the setting of the same meaning in the chat's own `RPE.yml`, where
 // a chat's setting stands over the user's. A chat with no choice of its own leaves the key unset, so it
 // follows its world and the user as it did. A value is written only where the app's registry declares the
@@ -110,7 +110,7 @@ export async function carryChatSettings(input: { today: Today; chats: readonly s
         if (kept.length < left.length) out.tidyCut.push({ chat, left: left.length - kept.length });
         wanted.push({ from: "what it told the tidy-up to leave alone", key: "things.tidyLeft", value: kept });
       }
-      if (typeof prefs.mapDisplay === "string") out.notCarried.push({ chat, from: "its map display", to: "the map's display", why: "RPE keeps a chat's map display on its own route, which no build serves yet; it stays in the backup and a later run carries it" });
+      if (typeof prefs.mapDisplay === "string") wanted.push({ from: "its map display", key: "map.display", value: prefs.mapDisplay });
     }
 
     await oneFileAtATime(config, async () => {
