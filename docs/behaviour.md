@@ -103,7 +103,7 @@ The files in `.prompts/` lay out what the agents are given, and word what RPE an
 | `guidance/.prompts/reply-errors.md` | The plain line the chat shows when a turn ends without a reply. Where the turn had already shown its progress in the message's thinking block, the line goes there too, so that the message Lumiverse keeps says why. |
 | `guidance/.prompts/turn-errors.md` | The words a turn gives when it cannot be played, when it is stopped, when an agent's read of Lumiverse cannot be made, and when a Settle now is refused. |
 | `guidance/.prompts/play-answers.md` | What the Play page's panels are told when RPE does not do what they asked, or leaves something as it was. |
-| `guidance/.prompts/build-answers.md` | What the Build page is told when RPE does not do what it asked. |
+| `guidance/.prompts/build-jobs.md` | The words of Build's model jobs: the brief each job's agent is started with, what it is told of each proposal it makes, and how a job that was refused, stopped at a limit, failed or was cancelled is said. |
 
 A chat with no world plays on a blank world. Its clock starts at a date nobody set, so no date is shown (in the briefing, the world state, the engine's answers, the cast's views and the story record) until a change in the story sets the clock to a date and a time. A span or a time of day only moves the clock, and until it is set the engine's answers give a time as how long from now. Memories are still timed, and fade all the same. The time skill tells the agents how a date is set.
 
