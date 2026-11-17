@@ -47,3 +47,6 @@ quest_gone: The quests have no {{id}} any more, so the page after it cannot be t
 no_quest: The chat has no quest {{id}}.
 no_place: The chat has no place {{id}}.
 place_gone: The places have no {{id}} any more, so the page after it cannot be told. Read the places again from their start.
+page_not_taken: The request has {{field}}, which it does not take.{{#choices}} It takes {{choices}}.{{/choices}}
+page_size: This list gives at most {{most}} a page, and this asks for {{value}}.
+page_cursor: This cursor is not one this list gave: read the list again from its start, with no cursor.

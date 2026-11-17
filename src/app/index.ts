@@ -56,6 +56,7 @@ export {
   type Exactly,
   type Fields,
   type FieldShape,
+  type FormProblem,
   type Holds,
   type Infer,
   type JoinedAnswer,

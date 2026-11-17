@@ -30,8 +30,8 @@ import type { AppConfig } from "./config";
 import { OWNER_ONLY_FILE } from "./disk";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
-import type { AnyShape, CallAuth, DeclaredRoute, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
-import { JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
+import type { AnyShape, CallAuth, DeclaredRoute, FormProblem, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
+import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
 import type { Workers } from "./workers/pool";
 
 export interface ServerParts {
@@ -255,41 +255,45 @@ interface Asked {
 
 /**
  * A route in the form, answered: its query and its body held to its declaration (refused with 400 in RPE's
- * words), then its handler given what they hold; `cursorKey` seals and reads a paged route's cursors.
+ * words, or in the route's own where it words them), then its handler given what they hold; `cursorKey` seals
+ * and reads a paged route's cursors.
  */
 async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>, asked: Asked, cursorKey: Uint8Array): Promise<Response> {
   const at = `${route.method} ${route.path}`;
+  // A query or a body the form refuses: in the route's own words where it words them, else in the form's.
+  const refused = async (problem: FormProblem, words: string): Promise<Response> =>
+    refusal(asked.path, 400, route.refusal === undefined ? words : await route.refusal(problem, { user: asked.user, params: asked.params }));
   const fields: QueryFields = route.paged === undefined ? (route.query ?? {}) : { ...route.query, ...PAGE_QUERY };
   const read = readQuery(fields, asked.search, at);
-  if (!read.ok) return refusal(asked.path, 400, read.why);
+  if (!read.ok) return await refused(read.problem, read.why);
   const { cursor, ...query } = read.value;
   if (route.paged !== undefined) {
     const sizes: PageSizes | undefined = await route.paged.sizes?.({ params: asked.params, user: asked.user });
     if (sizes !== undefined) {
       const limit = query.limit as number | undefined;
-      if (limit !== undefined && limit > sizes.most) return refusal(asked.path, 400, `${at} gives at most ${sizes.most} a page, and this asks for ${limit}.`);
+      if (limit !== undefined && limit > sizes.most) return await refused({ kind: "page_size", field: "limit", value: limit, choices: [], most: sizes.most }, `${at} gives at most ${sizes.most} a page, and this asks for ${limit}.`);
       query.limit = limit ?? sizes.default;
     }
     if (typeof cursor === "string") {
       const after = placeOf(cursorKey, at, asked.params, cursor);
-      if (after === null) return refusal(asked.path, 400, `This cursor is not one ${at} gave for this list: read the list again from its start, with no cursor.`);
+      if (after === null) return await refused({ kind: "cursor", field: "cursor", value: cursor, choices: [] }, `This cursor is not one ${at} gave for this list: read the list again from its start, with no cursor.`);
       query.after = after;
     }
   }
   let body: unknown;
   const sent = asked.bytes !== null && asked.bytes.length > 0;
   if (route.body === undefined) {
-    if (sent) return refusal(asked.path, 400, `${at} takes no body.`);
+    if (sent) return await refused({ kind: "not_taken", field: "body", choices: [] }, `${at} takes no body.`);
   } else {
     const declared: AnyShape = route.body;
-    if (asked.bytes === null || !sent) return refusal(asked.path, 400, `${at} takes a JSON body: ${shapeWords(declared)}.`);
+    if (asked.bytes === null || !sent) return await refused({ kind: "unreadable", field: "body", choices: [] }, `${at} takes a JSON body: ${shapeWords(declared)}.`);
     try {
       body = await asked.json();
     } catch {
-      return refusal(asked.path, 400, "The request's body is not JSON.");
+      return await refused({ kind: "unreadable", field: "body", choices: [] }, "The request's body is not JSON.");
     }
-    const problems = problemsOf(declared, body, "body");
-    if (problems.length > 0) return refusal(asked.path, 400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
+    const problem = bodyProblem(declared, body);
+    if (problem !== null) return await refused(problem, `${at} does not take this body: ${problemsOf(declared, body, "body").slice(0, 3).join(" ")}`);
   }
   const run = async (signal: AbortSignal): Promise<Response> => {
     const reply: unknown = await route.handle({ params: asked.params, query, body, user: asked.user, auth: asked.auth, signal });

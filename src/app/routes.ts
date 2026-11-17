@@ -314,12 +314,15 @@ function discriminant(alternatives: readonly AnyShape[]): string | null {
   return null;
 }
 
-/**
- * What is wrong with `value` as a value of `s` (each problem a sentence naming where it is, from `at`);
- * none when it holds. Strict: an object with a field its shape does not name is refused.
- */
-export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] {
-  const not = (): string[] => [`${at} must be ${shapeWords(s)}.`];
+/** One thing wrong with a value, where it is: not of its shape, a field its object needs left out, or a field it does not take. */
+type Problem =
+  | { kind: "not"; at: string; shape: AnyShape; value: unknown }
+  | { kind: "needs"; at: string; name: string; shape: AnyShape }
+  | { kind: "extra"; at: string; name: string; value: unknown; takes: string[] };
+
+/** What is wrong with `value` as a value of `s`, each where it is (from `at`); none when it holds. Strict: an object with a field its shape does not name is refused. */
+function problemList(s: AnyShape, value: unknown, at: string): Problem[] {
+  const not = (): Problem[] => [{ kind: "not", at, shape: s, value }];
   switch (s.kind) {
     case "text":
       return typeof value === "string" && (s.blank || value.trim() !== "") ? [] : not();
@@ -332,29 +335,29 @@ export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] 
     case "oneOf":
       return typeof value === "string" && (s.values as readonly string[]).includes(value) ? [] : not();
     case "list":
-      return Array.isArray(value) ? value.flatMap((item, i) => problemsOf(s.of, item, `${at}[${i}]`)) : not();
+      return Array.isArray(value) ? value.flatMap((item, i) => problemList(s.of, item, `${at}[${i}]`)) : not();
     case "object": {
       if (!isRecord(value)) return not();
-      const out: string[] = [];
+      const out: Problem[] = [];
       for (const [name, f] of Object.entries(s.fields)) {
         const { of, optional } = fieldOf(f);
         const given = Object.hasOwn(value, name) ? value[name] : undefined;
         if (given === undefined) {
-          if (!optional) out.push(`${at} needs ${name}: ${shapeWords(of)}.`);
-        } else out.push(...problemsOf(of, given, `${at}.${name}`));
+          if (!optional) out.push({ kind: "needs", at, name, shape: of });
+        } else out.push(...problemList(of, given, `${at}.${name}`));
       }
-      for (const name of Object.keys(value)) if (!Object.hasOwn(s.fields, name) && value[name] !== undefined) out.push(`${at} has ${name}, which it does not take.`);
+      for (const name of Object.keys(value)) if (!Object.hasOwn(s.fields, name) && value[name] !== undefined) out.push({ kind: "extra", at, name, value: value[name], takes: Object.keys(s.fields) });
       return out;
     }
     case "record":
-      return isRecord(value) ? Object.entries(value).flatMap(([name, item]) => problemsOf(s.of, item, `${at}.${name}`)) : not();
+      return isRecord(value) ? Object.entries(value).flatMap(([name, item]) => problemList(s.of, item, `${at}.${name}`)) : not();
     case "union": {
-      if (s.of.some((alternative) => problemsOf(alternative, value, at).length === 0)) return [];
+      if (s.of.some((alternative) => problemList(alternative, value, at).length === 0)) return [];
       // A union of objects told apart by one field: the alternative the value names says what is wrong with it.
       const by = discriminant(s.of);
       if (by !== null && isRecord(value)) {
-        const picked = s.of.find((o) => o.kind === "object" && problemsOf(fieldOf(o.fields[by] as AnyShape | FieldShape).of, value[by]).length === 0);
-        if (picked !== undefined) return problemsOf(picked, value, at);
+        const picked = s.of.find((o) => o.kind === "object" && problemList(fieldOf(o.fields[by] as AnyShape | FieldShape).of, value[by], at).length === 0);
+        if (picked !== undefined) return problemList(picked, value, at);
       }
       return not();
     }
@@ -364,6 +367,67 @@ export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] 
       return s.holds(value) ? [] : not();
     case "nothing":
       return value === undefined ? [] : not();
+  }
+}
+
+/** A problem as the form says it: a sentence naming where it is. */
+function problemWords(p: Problem): string {
+  switch (p.kind) {
+    case "not":
+      return `${p.at} must be ${shapeWords(p.shape)}.`;
+    case "needs":
+      return `${p.at} needs ${p.name}: ${shapeWords(p.shape)}.`;
+    case "extra":
+      return `${p.at} has ${p.name}, which it does not take.`;
+  }
+}
+
+/**
+ * What is wrong with `value` as a value of `s` (each problem a sentence naming where it is, from `at`);
+ * none when it holds. Strict: an object with a field its shape does not name is refused.
+ */
+export function problemsOf(s: AnyShape, value: unknown, at = "value"): string[] {
+  return problemList(s, value, at).map(problemWords);
+}
+
+/**
+ * What the form found wrong with a request before its handler ran, as a route that words its own refusals is handed it (`refusal`):
+ * a field it could not read (`unreadable`: left out, sent twice, or not of its shape; `body` for a body missing or not JSON), with
+ * what was sent there and, where they are few, the values it takes; a field it does not take (`not_taken`), with the names it does;
+ * a page asked larger than its route gives (`page_size`, with `most`); or a cursor the route did not give for the list (`cursor`).
+ */
+export interface FormProblem {
+  kind: "unreadable" | "not_taken" | "page_size" | "cursor";
+  /** The field, by its path in the body (`id`, `items[2].name`) or its name in the query; `body` for the body as a whole. */
+  field: string;
+  /** What was sent there, as it was sent; absent where nothing was. */
+  value?: unknown;
+  /** For `unreadable`, the values the field takes where they are few; for `not_taken`, the names taken where it was sent. */
+  choices: string[];
+  /** For `page_size`: the most a page of the route holds. */
+  most?: number;
+}
+
+/** The values a shape takes, where they are few enough to list: one word of a few, true or false, the one value; none for any other. */
+function choicesOf(s: AnyShape): string[] {
+  return s.kind === "oneOf" ? [...s.values] : s.kind === "yesNo" ? ["true", "false"] : s.kind === "literal" ? [String(s.value)] : [];
+}
+
+/** The first problem of a body as a route's own words take it; null when the body holds. */
+export function bodyProblem(s: AnyShape, value: unknown): FormProblem | null {
+  const first = problemList(s, value, "body")[0];
+  if (first === undefined) return null;
+  const path = (at: string, name?: string): string => {
+    const whole = name === undefined ? at : `${at}.${name}`;
+    return whole === "body" ? whole : whole.slice("body.".length);
+  };
+  switch (first.kind) {
+    case "not":
+      return { kind: "unreadable", field: path(first.at), value: first.value, choices: choicesOf(first.shape) };
+    case "needs":
+      return { kind: "unreadable", field: path(first.at, first.name), choices: choicesOf(first.shape) };
+    case "extra":
+      return { kind: "not_taken", field: path(first.at, first.name), value: first.value, choices: first.takes };
   }
 }
 
@@ -399,22 +463,27 @@ function queryValue(s: QueryShape, given: string): unknown {
 }
 
 /** The query as `fields` read it, or why it is not one they take: a name they do not hold, one given twice, one left out, or a value of the wrong kind. */
-export function readQuery(fields: QueryFields, given: URLSearchParams, route: string): { ok: true; value: Record<string, unknown> } | { ok: false; why: string } {
+export function readQuery(fields: QueryFields, given: URLSearchParams, route: string): { ok: true; value: Record<string, unknown> } | { ok: false; why: string; problem: FormProblem } {
   const names = Object.keys(fields);
   const value: Record<string, unknown> = {};
   for (const name of new Set(given.keys())) {
-    if (!Object.hasOwn(fields, name)) return { ok: false, why: names.length === 0 ? `${route} takes no query, and this one gives ${name}.` : `${route} takes no ${name} in its query: it takes ${names.join(", ")}.` };
     const all = given.getAll(name);
-    if (all.length > 1) return { ok: false, why: `The query gives ${name} ${all.length} times, and ${route} takes it once.` };
+    if (!Object.hasOwn(fields, name))
+      return {
+        ok: false,
+        why: names.length === 0 ? `${route} takes no query, and this one gives ${name}.` : `${route} takes no ${name} in its query: it takes ${names.join(", ")}.`,
+        problem: { kind: "not_taken", field: name, value: all.join(", "), choices: names },
+      };
     const { of } = fieldOf(fields[name] as QueryShape | FieldShape<QueryShape>);
+    if (all.length > 1) return { ok: false, why: `The query gives ${name} ${all.length} times, and ${route} takes it once.`, problem: { kind: "unreadable", field: name, value: all.join(", "), choices: choicesOf(of) } };
     const raw = all[0] ?? "";
     const read = queryValue(of as QueryShape, raw);
-    if (read === undefined || problemsOf(of, read).length > 0) return { ok: false, why: `The query's ${name} is ${shapeWords(of)}, not ${JSON.stringify(raw)}.` };
+    if (read === undefined || problemsOf(of, read).length > 0) return { ok: false, why: `The query's ${name} is ${shapeWords(of)}, not ${JSON.stringify(raw)}.`, problem: { kind: "unreadable", field: name, value: raw, choices: choicesOf(of) } };
     value[name] = read;
   }
   for (const name of names) {
     const { of, optional } = fieldOf(fields[name] as QueryShape | FieldShape<QueryShape>);
-    if (!optional && !Object.hasOwn(value, name)) return { ok: false, why: `${route} needs ${name} in its query: ${shapeWords(of)}.` };
+    if (!optional && !Object.hasOwn(value, name)) return { ok: false, why: `${route} needs ${name} in its query: ${shapeWords(of)}.`, problem: { kind: "unreadable", field: name, choices: choicesOf(of) } };
   }
   return { ok: true, value };
 }
@@ -502,6 +571,11 @@ export interface DeclaredRoute<
    * `JoinedAnswer`, status 409, in the one place the server turns a throw into an answer.
    */
   readonly joined?: true;
+  /**
+   * Words its own refusal of a request the form refused before the handler ran (its query or its body), from what the form found,
+   * for the user and the path's params; absent, the form's own words say it.
+   */
+  readonly refusal?: (problem: FormProblem, asked: { user: UserFor<A>; params: PathParams<P> }) => Promise<string>;
   readonly handle: (call: DeclaredCall<P, A, Q, B, G>) => Infer<R> | Promise<Infer<R>>;
 }
 
