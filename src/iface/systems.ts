@@ -3,7 +3,7 @@
 // person's or a group's accounts with their postings and balance (economy), a thing's four facts and a person's
 // things with theirs (gear), a group's people, positions and ranks and a person's place in each (orgs), the day and
 // the clock where it is told (calendar), the sky over a place or a region (weather), a vehicle's driver and what it
-// has (vehicles), and a person's sheet. Nothing is held back: a value that is out of the player's sight is marked
+// has (vehicles), the fights under way (combat), and a person's sheet. Nothing is held back: a value that is out of the player's sight is marked
 // `secret`, and the page's own gate decides what shows. Read from the stored state alone; nothing is written.
 
 import { route, RouteError, shape } from "../app";
@@ -56,7 +56,7 @@ const systemShown = shape.named(
   "SystemShown",
   "One typed system's view at a level, as the system keeps it, named as the source: its sections of rows.",
   shape.object({
-    system: shape.field(shape.text(), "The system that keeps it: economy, gear, orgs, calendar, weather, vehicles or sheets."),
+    system: shape.field(shape.text(), "The system that keeps it: economy, gear, orgs, calendar, weather, vehicles, combat or sheets."),
     title: shape.text(),
     sections: shape.list(shape.object({ title: shape.text(), rows: shape.list(rowShown) })),
   }),
@@ -421,6 +421,32 @@ function vehicles(r: Read): SectionOut[] {
   return vehiclesFor(ctx, level.id).map((u) => section(nameOf(ctx, u.id), [...vehicleRows(r, u.id), row(r, "May drive", useWords(ctx, level.id, u.id))].map((x) => ({ ...x, secret: x.secret || hiddenFrom(r, u.id) }))));
 }
 
+// ---------------------------------------------------------------- fights
+
+const SIDE_WORDS: Readonly<Record<string, string>> = { party: "Party", foes: "Foes" };
+
+/**
+ * The fights under way (combat): at the world, every one, each with where it is fought, the round, whose turn it is and its
+ * fighters in order with their side, initiative, hit points and conditions; at a place, those fought there; at a person, those
+ * they are in. A fighter out of the player's sight is marked `secret`.
+ */
+function fights(r: Read): SectionOut[] {
+  const { ctx, level } = r;
+  const all = optionalQuery(ctx, "combat.fights")?.(ctx) ?? [];
+  const here = level.kind === "world" ? all : level.kind === "place" ? all.filter((f) => f.place === level.id) : level.kind === "entity" ? all.filter((f) => f.order.some((o) => o.id === level.id)) : [];
+  return here.flatMap((f) => {
+    const at = f.place === null ? "no place" : placeName(ctx, f.place);
+    const head = [row(r, "Where", f.place === null ? "No place" : placeName(ctx, f.place)), row(r, "Round", String(f.round), { note: `${f.turn === "you" ? nameOf(ctx, ctx.world.pov) : f.turn}'s turn` })];
+    const order = f.order.map((o) => {
+      const parts = [SIDE_WORDS[o.side] ?? o.side, ...(o.init === null ? [] : [`initiative ${o.init}`]), ...(o.hp === null ? [] : [`hit points ${o.hp.current}${o.hp.max === null ? "" : ` of ${o.hp.max}`}`])];
+      const note = [o.down ? "down" : o.out ? "out of it" : "", ...o.conditions].filter((x) => x !== "").join(", ");
+      return row(r, o.id === null ? o.name : nameOf(ctx, o.id), parts.join(" · "), { note: note === "" ? null : note, secret: o.id !== null && hiddenFrom(r, o.id) });
+    });
+    const acts = f.log.map((line, i) => row(r, `Act ${i + 1}`, line));
+    return [section(`Fight at ${at} (${f.id})`, head), section(`Fighters at ${at} (${f.id})`, order), ...(acts.length === 0 ? [] : [section(`Recent acts at ${at} (${f.id})`, acts)])];
+  });
+}
+
 // ---------------------------------------------------------------- sheets
 
 const SHEET_PARTS = { identity: "Identity", where: "Where", day: "Day", work: "Work", stats: "Stats", advanced: "Advanced" } as const;
@@ -456,6 +482,7 @@ const SYSTEMS: readonly { system: string; title: string; build: (r: Read) => Sec
   { system: "calendar", title: "Calendar", build: calendar },
   { system: "weather", title: "Weather", build: weather },
   { system: "vehicles", title: "Vehicles", build: vehicles },
+  { system: "combat", title: "Fights", build: fights },
   { system: "sheets", title: "Sheet", build: sheets },
 ];
 
