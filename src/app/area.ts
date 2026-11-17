@@ -19,8 +19,8 @@ import { UPDATE_SETTINGS } from "./update";
 export interface AppTakes {
   /** Told the app once it is mounted in it. */
   opened(app: App): void;
-  /** Where a chat's levels are on disk and the model layer's connections, from the areas that know them, for the Settings routes. */
-  settings(app: App): Pick<SettingsDeps, "levels" | "connections">;
+  /** Where a chat's levels are on disk, the model layer's connections and the agent definitions in force, from the areas that know them, for the Settings routes. */
+  settings(app: App): Pick<SettingsDeps, "levels" | "connections" | "definitions">;
   /** What RPE asks of Lumiverse to sign a user in to the web app, from the door; none where RPE reaches no Lumiverse, and the sign-in with a Lumiverse account then says so. */
   accounts?: LumiverseAccounts;
   /** The latest turns' moments of a chat, or of all chats, for the Runtime page's timings. */
