@@ -27,7 +27,7 @@ file_changed: {{path}} was changed since this session opened. The copy in the op
 file_off: {{path}} has been switched off since this session opened. The copy in the opening block no longer stands.
 skills_changed: The list of skills in the opening block no longer stands.{{#listed}} The list as it stands now follows.{{/listed}}
 migrated_chat: This chat was carried over from the earlier build. Its state, cast and story record are as that build left them. {{carried}}
-unplayed: Since your last turn, replies were written in this chat without a turn of yours (messages {{range}}, counting the chat's first message as 0). The newest of them is this conversation's last assistant turn, and those the conversation holds are already in front of you: they need no reading again.{{#why}} Message {{message}}: {{why}}.{{/why}}
+unplayed: Since your last turn, replies were written in this chat without a turn of yours (messages {{range}}, counting the chat's first message as 0). The newest of them is this conversation's last assistant turn; those the prompt does not hold, chat_read reads.{{#why}} Message {{message}}: {{why}}.{{/why}}
 edited: Message {{message}} was edited after its turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}
 edited_more: {{count}} replies were edited after their turns and are not given in full here: messages {{messages}}, counting the chat's first message as 0. chat_read reads any of them.
 player_edited: The player's message {{message}} was edited since your last turn.{{#old}} Before: {{old}}{{/old}}{{#new}} Now: {{new}}{{/new}}

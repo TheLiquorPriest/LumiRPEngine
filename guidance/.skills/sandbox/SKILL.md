@@ -25,4 +25,4 @@ description: Run a moment with the characters and the GM. Stage it, let each act
 
 5. **You end with** the beats in order and the staged changes in both lanes. Then write the reply.
 
-Play one round per moment, because each round calls every acting agent again; a second round is for when one character's answer changes what another would do.
+Play a moment again when one character's answer changes what another would do.

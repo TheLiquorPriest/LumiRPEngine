@@ -8,7 +8,7 @@ modes:
 
 This is read with `TURN.md`, not in place of it. Everything there still holds.
 
-The player asked for another version of the same turn, and is waiting for it: this turn owes a new reply, like any other. The record is back where it was before the earlier attempt. The earlier attempts are in `previous-attempts/`, each with its reply and its intent record, and with anything the player typed about why.
+The player asked for another version of the same turn: this turn owes a new reply, like any other. The record is back where it was before the earlier attempt. The earlier attempts are in `previous-attempts/`, each with its reply and its intent record, and with anything the player typed about why.
 
 1. **Read why.** If the player said what was wrong, in the briefing's asked lines or in an earlier attempt's file, that is your brief.
 2. **Tell it differently,** unless the player or the feedback asks for more. Assume the player wants a different telling, not a different world. Keep what you decided (the outcomes, the rolls, what the characters did) and tell it differently: another angle, another rhythm, another choice of detail.

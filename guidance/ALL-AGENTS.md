@@ -26,4 +26,4 @@ Never decide what the player's character does, says, thinks or feels beyond what
 
 ## Working text
 
-Only the reply reaches the chat; the player does not see your working text. Keep it short and plain, a line where a line will do and not a paragraph, because every word of it is written while the player waits.
+Only the reply reaches the chat; the player does not see your working text. Keep it short and plain, a line where a line will do, because every later call of your run reads it again.
