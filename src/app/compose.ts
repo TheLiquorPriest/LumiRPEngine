@@ -127,7 +127,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no books to read or write.");
     return parts;
   };
-  const booksNow = (): LoreBooks => loreBooks(lumiverse().reads, app().config.lumiverse.user ?? "");
+  const booksNow = (): LoreBooks => loreBooks(lumiverse().reads, app().config.lumiverse.user ?? "", lumiverse().feed);
   const books: LoreBooks = {
     attached: (user, chat, at) => booksNow().attached(user, chat, at),
     book: (user, id) => booksNow().book(user, id),
@@ -137,6 +137,11 @@ export function compose(options: ComposeOptions = {}): Composition {
       const now = booksNow();
       if (now.list === undefined) throw new Error("The door's books give no list of the user's books.");
       return await now.list(user, chat);
+    },
+    found: async (user, ids, words, limit) => {
+      const now = booksNow();
+      if (now.found === undefined) throw new Error("The door's books give no search of the lore index.");
+      return await now.found(user, ids, words, limit);
     },
   };
   // His worlds, kept by the worlds area: Build edits them through its service, and a proposal for a world's entry is approved through its store, once mounted.

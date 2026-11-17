@@ -57,7 +57,7 @@ const scope = { user: USER, chat: "chat-1", session: "s-1" };
 test("after indexing, neither the index file nor RPE's reads hold a message's or an entry's text; a search reads the text of its hits alone", async () => {
   const { index, texts, chat } = await bed();
   expect((await chat.search(scope, { text: "bell" })).map((h) => h.id)).toEqual(["m1"]);
-  await index.feed.searchEntries(["book-1"], "bell", 5);
+  expect((await index.feed.foundEntries(["book-1"], [{ text: "bell", prefix: false }], 5)).map((e) => e.id)).toEqual(["e1"]);
   const file = readFileSync(index.path).toString("latin1");
   expect(file).not.toContain("lighthouse rocks");
   expect(file).not.toContain("bronze hangs");

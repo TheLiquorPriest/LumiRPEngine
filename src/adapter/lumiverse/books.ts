@@ -3,6 +3,7 @@
 // import lore, so the shape is matched here and the composition plugs one into the other.
 
 import { isRecord } from "../../shared/json";
+import type { EntryWord, IndexFeed } from "./index-feed";
 import type { LvBook, LvChat, LvEntry, LvPersona } from "./rows";
 import type { LumiverseReads } from "./reads";
 
@@ -15,6 +16,8 @@ export interface UserBooks {
   entry(user: string, id: string, book?: string): Promise<LvEntry | null>;
   /** Every book of the user's, as a picker lists it (`listBooks`); `chat` says which have the chat attached. */
   list(user: string, chat: string | null): Promise<BookListing[]>;
+  /** The entries of these books the search index finds for any of `words`: their rows alone (`IndexFeed.foundEntries`). Absent with no index. */
+  found?(user: string, books: readonly string[], words: readonly EntryWord[], limit: number): Promise<LvEntry[]>;
 }
 
 /** Who a generation is for, when the caller knows: the character speaking and the persona in use. */
@@ -130,15 +133,16 @@ export async function listBooks(reads: LumiverseReads, chatId: string | null): P
 }
 
 /**
- * One user's books over their reads. Another user's books are none of RPE's business here: asking for
- * them reads nothing.
+ * One user's books over their reads, and over the search index where the door feeds one. Another user's books are none of RPE's business
+ * here: asking for them reads nothing.
  */
-export function loreBooks(reads: LumiverseReads, user: string): UserBooks {
+export function loreBooks(reads: LumiverseReads, user: string, feed?: Pick<IndexFeed, "foundEntries">): UserBooks {
   return {
     attached: async (asker, chat, at) => (asker === user ? await attachedBooks(reads, chat, at) : []),
     book: async (asker, id) => (asker === user ? await reads.book(id) : null),
     entries: async (asker, book) => (asker === user ? await reads.entries(book) : []),
     entry: async (asker, id, book) => (asker === user ? await reads.entry(id, book) : null),
     list: async (asker, chat) => (asker === user ? await listBooks(reads, chat) : []),
+    ...(feed === undefined ? {} : { found: async (asker: string, books: readonly string[], words: readonly EntryWord[], limit: number) => (asker === user ? await feed.foundEntries(books, words, limit) : []) }),
   };
 }

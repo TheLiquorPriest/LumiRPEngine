@@ -14,14 +14,16 @@
 //
 // The search is today's too (`loreSearch`), over both sources at once as today's lore tools search
 // (`backend/agents/tools/lore.ts:350-366`): the world's lookup table, aliases, keys, titles and topics,
-// then the words of each entry. A book entry is read by a character as today's live lore reads it (`secrets/character.ts`): the entry as
+// then the words of each entry. Where the host keeps the lore search index (`LoreBooks.found`), the books'
+// entries it ranks are only those the index finds for the query's words (by their names and by their texts)
+// and those the world's lookup table leads the query to: no other entry of a book is read. A book entry is read by a character as today's live lore reads it (`secrets/character.ts`): the entry as
 // lore found by its own fields, each secret mark of it its own secret, held by those it names and those the story made holders; a mark a
 // character does not hold is left out of what it reads, and an entry it may not know is not there for it.
 
 import type { LinesPart } from "../app/guidance";
 import type { ActivatedLore, LoreEntry, LoreHit, LoreKnowing, LoreQuery, LoreSecret } from "rp-harness/contract";
 import { blankWorld } from "../engine/authoring";
-import { loreReadable, loreSearch, SEARCH_LIMITS, type SearchLimits, wordsOf } from "../engine/lore";
+import { loreReadable, loreSearch, SEARCH_LIMITS, type SearchLimits, STEM_FROM, tableLeads, wordsOf } from "../engine/lore";
 import { kindIs } from "../engine/scope";
 import { loreGateReader } from "../engine/visibility";
 import { initialState } from "../engine/world-state";
@@ -38,7 +40,7 @@ import type { LoreMap, LoreMapLine } from "./map";
 import { AS_CHARACTER, CharacterReads, type HeldSecret, worldWithBooks } from "./secrets/character";
 import { HoldersAt, peopleOf } from "./secrets/holders";
 import { bookRead, type SecretWords, secretWords } from "./secrets/shown";
-import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBookListing, LoreBooks, LoreTurns, LoreWorlds, WorldAt } from "./sources";
+import type { ActivatedEntry, LoreBook, LoreBookEntry, LoreBookListing, LoreBooks, LoreIndexWord, LoreTurns, LoreWorlds, WorldAt } from "./sources";
 
 /** The lore's settings: the numbers; the stop words and his choice of books are read for the chat (`LoreChatSettings`). */
 export interface LoreSettings {
@@ -52,13 +54,15 @@ export interface LoreSettings {
   minTerm: number;
   /** The most a word repeated in an entry counts in a search's ranking. */
   wordCap: number;
+  /** Entries the lore search index gives a search for each word it asks of a book's names and of its texts, before the search ranks them (`lore.search.candidates`). */
+  searchCandidates: number;
   /** Tokens the secrets a character holds may take in what it is given as its own (`lore.held.budget`). */
   heldBudget: number;
   /** Entries past which the catalogue's deterministic step (title, text, keys, size, activation, revision) runs on a worker thread (`lore.workerCatalogueAt`). */
   workerCatalogueAt: number;
 }
 
-export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8, minTerm: SEARCH_LIMITS.minTerm, wordCap: SEARCH_LIMITS.wordCap, heldBudget: 1600, workerCatalogueAt: 200 });
+export const LORE_DEFAULTS: Readonly<LoreSettings> = Object.freeze({ searchLimit: 20, snippetChars: 80, titleWords: 8, minTerm: SEARCH_LIMITS.minTerm, wordCap: SEARCH_LIMITS.wordCap, searchCandidates: 64, heldBudget: 1600, workerCatalogueAt: 200 });
 
 /** What one call reads of the lore's settings for its chat. */
 interface Chosen {
@@ -518,8 +522,11 @@ export class Lore {
     // A character reads the world's entries as it may know them, with the secrets the story made it a holder of, and its books' as lore.
     const holders = as === undefined || world === null ? null : new HoldersAt(world);
     const reads = as === undefined || world === null || holders === null ? null : new CharacterReads(world, world.world, as, holders);
-    const bookReads = as === undefined || world === null || holders === null ? null : await this.bookReads(at, world, s, as, holders);
-    for (const g of await this.gather(at, world, asked, s)) {
+    const gathered = await this.gather(at, world, asked, s, query.text);
+    // Where the index found the books' entries, a character reads them as lore among those alone.
+    const rows = this.books.found === undefined ? undefined : gathered.flatMap((g) => (g.kind === "book" ? [g.row] : []));
+    const bookReads = as === undefined || world === null || holders === null ? null : await this.bookReads(at, world, s, as, holders, rows);
+    for (const g of gathered) {
       if (g.kind === "world") {
         const entry = reads === null ? g.entry : reads.view(g.key, g.entry);
         lore[g.key] = g.text === g.entry.content ? entry : { ...entry, content: g.text };
@@ -600,10 +607,11 @@ export class Lore {
    * chat reads is one, a disabled one and an empty one included (a disabled entry is indexed and can be
    * bound; an empty one shows its title and keys) and a copy of another entry as much as any: each is
    * its own entry. Not the entries the engine itself wrote (an earlier build's own book of blank,
-   * disabled entries, `shared/lore.ts` `engineWroteEntry`).
+   * disabled entries, `shared/lore.ts` `engineWroteEntry`). For a search (`query`) through the lore
+   * search index, a book's entries are those `indexed` finds.
    */
-  private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen): Promise<Gathered[]> {
-    return (await this.gatherRaw(at, world, asked, s)).map((r): Gathered => {
+  private async gather(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen, query?: string): Promise<Gathered[]> {
+    return (await this.gatherRaw(at, world, asked, s, query)).map((r): Gathered => {
       if (r.kind === "world") return { ...r, title: worldTitle(r.entry, r.key), text: publicText(typeof r.entry.content === "string" ? r.entry.content : "") };
       const text = publicText(r.row.content);
       return { ...r, title: bookTitle(r.row, s.lore.titleWords, text), text };
@@ -611,7 +619,7 @@ export class Lore {
   }
 
   /** The entries `gather` finds, as they are held: the rows alone, with nothing worked out of them. */
-  private async gatherRaw(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen): Promise<Raw[]> {
+  private async gatherRaw(at: LoreAt, world: WorldAt | null, asked: (source: string) => boolean, s: Chosen, query?: string): Promise<Raw[]> {
     const out: Raw[] = [];
     if (world !== null && asked(world.world.name)) {
       for (const [key, entry] of Object.entries(world.world.lore)) {
@@ -620,7 +628,7 @@ export class Lore {
       }
     }
     const read = (await this.booksOf(at, world, s.books)).filter((book) => asked(book.name));
-    const rows = await Promise.all(read.map((book) => this.books.entries(at.user, book.id)));
+    const rows = query === undefined || this.books.found === undefined ? await Promise.all(read.map((book) => this.books.entries(at.user, book.id))) : await this.indexed(at, world, read, query, s);
     for (const [i, book] of read.entries()) {
       for (const row of rows[i] ?? []) {
         if (engineWroteEntry(row.extensions)) continue;
@@ -628,6 +636,30 @@ export class Lore {
       }
     }
     return out;
+  }
+
+  /**
+   * The entries of `read` a search of `text` ranks, by book (plan §4.2 "No copy"): those the lore search index finds for the query's words, each word
+   * asked whole or, where it may stand for itself with an `s`, as the start of a word, then those the world's lookup table leads the query to by a
+   * term or a topic it says, read by id. No other entry of the books is read.
+   */
+  private async indexed(at: LoreAt, world: WorldAt | null, read: readonly LoreBook[], text: string, s: Chosen): Promise<LoreBookEntry[][]> {
+    const books = new Set(read.map((b) => b.id));
+    const words = [...new Set(wordsOf(text, s.limits))].map((w): LoreIndexWord => ({ text: w, prefix: w.length >= STEM_FROM }));
+    const found = words.length === 0 || books.size === 0 || this.books.found === undefined ? [] : await this.books.found(at.user, [...books], words, s.lore.searchCandidates);
+    const have = new Set(found.map((r) => r.id));
+    // The table names a book entry `book:<book>/<entry>`, or one of its marks with `#n` after it.
+    const led = new Map<string, string>();
+    for (const id of world === null ? [] : tableLeads(world.world, text, s.limits)) {
+      const m = /^book:([^/]+)\/([^#]+)/.exec(id);
+      if (m?.[1] !== undefined && m[2] !== undefined && books.has(m[1]) && !have.has(m[2])) led.set(m[2], m[1]);
+    }
+    const more = await Promise.all([...led].map(async ([entry, book]) => {
+      const row = await this.books.entry(at.user, entry);
+      return row !== null && row.book === book ? [row] : [];
+    }));
+    const rows = [...found, ...more.flat()];
+    return read.map((b) => rows.filter((r) => r.book === b.id));
   }
 
   /**
@@ -652,11 +684,11 @@ export class Lore {
 
   /**
    * What the character `who` of the chat's world reads of its books: the books the chat reads as lore beside the world's own, each entry and each
-   * mark held back as its fields and text say, and who holds what at the point `world` stands at (`CharacterReads`).
+   * mark held back as its fields and text say, and who holds what at the point `world` stands at (`CharacterReads`). `only` reads those rows
+   * alone (a search's, through the index) in place of every entry of the books.
    */
-  private async bookReads(at: LoreAt, world: WorldAt, s: Chosen, who: EntityId, holders: HoldersAt): Promise<CharacterReads> {
-    const read = await this.booksOf(at, world, s.books);
-    const rows = (await Promise.all(read.map((book) => this.books.entries(at.user, book.id)))).flat();
+  private async bookReads(at: LoreAt, world: WorldAt, s: Chosen, who: EntityId, holders: HoldersAt, only?: readonly LoreBookEntry[]): Promise<CharacterReads> {
+    const rows = only ?? (await Promise.all((await this.booksOf(at, world, s.books)).map((book) => this.books.entries(at.user, book.id)))).flat();
     return new CharacterReads(world, await worldWithBooks(world.world, rows, (id) => this.books.entry(at.user, id)), who, holders);
   }
 

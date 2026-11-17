@@ -23,6 +23,7 @@ import { createHarness, type CreateHarnessOptions } from "rp-harness";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import type { AgentRef, AttachMoment, Clock, Environment, GapQuery, Harness, HostTool, JsonValue, RunScope, Scope, StoresPort, UserScope, UserSessionScope } from "rp-harness/contract";
 import type { ChatReads } from "../adapter/lumiverse/chat";
+import type { IndexFeed } from "../adapter/lumiverse/index-feed";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
 import { type App, LIVE_JOBS } from "../app";
@@ -188,10 +189,10 @@ export interface TurnsOptions {
   store: Store;
   /**
    * The adapter's reads of Lumiverse, its chat port, and Lumiverse's Stop of one generation of the
-   * user's (false when it was not going on); null before it is mounted, or when RPE is not set up for a
-   * Lumiverse.
+   * user's (false when it was not going on), and the search index's feed the lore searches books by;
+   * null before it is mounted, or when RPE is not set up for a Lumiverse.
    */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean> } | null;
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean>; feed?: Pick<IndexFeed, "foundEntries"> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */

@@ -122,6 +122,9 @@ function plain(text: string): string {
   return words === "" ? "" : ` ${words} `;
 }
 
+/** A word longer than this drops a plural's final `s` (`wordsOf`): a word of this length or more may stand for itself with an `s`. */
+export const STEM_FROM = 4;
+
 /** The words a query scores entries by: no stop words, no short ones, a plural's final `s` dropped. The story pack matches a puzzle's name by them too. */
 export function wordsOf(text: string, limits: Readonly<SearchLimits> = SEARCH_LIMITS): string[] {
   const stop = new Set(limits.stopWords);
@@ -129,10 +132,30 @@ export function wordsOf(text: string, limits: Readonly<SearchLimits> = SEARCH_LI
     .trim()
     .split(" ")
     .filter((w) => w.length >= limits.minTerm && !stop.has(w))
-    .map((w) => (w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
+    .map((w) => (w.length > STEM_FROM && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
 }
 
 const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/**
+ * The ids the world's lookup table leads `query` to, as `loreSearch` hears it: by each term the query says, and by each topic whose label it says
+ * (the table's own topics, and those an entry is filed under by label), every id once. A search that reads only some entries reads these too.
+ */
+export function tableLeads(world: WorldDoc, query: string, limits: Readonly<SearchLimits> = SEARCH_LIMITS): string[] {
+  const text = plain(query);
+  const said = (name: unknown): boolean => {
+    if (typeof name !== "string" || text === "") return false;
+    const p = plain(name);
+    return p.trim().length >= limits.minTerm && text.includes(p);
+  };
+  const out = new Set<string>();
+  for (const [term, ids] of Object.entries(world.loreIndex.terms)) if (said(term)) for (const id of listOf(ids)) out.add(id);
+  const topics = new Set<string>();
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) if (isRecord(topic) && said(topic.label)) topics.add(id);
+  for (const entry of Object.values(world.lore)) for (const label of listOf(entry.topics)) if (said(label)) topics.add(topicIdOf(label));
+  for (const topic of topics) for (const id of hasOwn(world.loreIndex.topics, topic) ? listOf(world.loreIndex.topics[topic]?.entries) : []) out.add(id);
+  return [...out];
+}
 
 /**
  * Whether a secret entry is `who`'s own (DESIGN §24.5): its `holders` name them, or one of their cues

@@ -4,11 +4,15 @@
 // brought up to date at the search that needs it (and again in the background when Lumiverse says one of its messages changed), a book the same, so
 // what a search finds is what is in Lumiverse, edits and deletes included, whether or not an event was heard.
 //
+// An entry is two texts of the index: the whole of it in its book's scope, and its names alone (its title, keys, secondary keys and LRE aliases) in
+// its book's names scope, so an entry a word names is found among many that only mention it.
+//
 // What the feed knows of what it has put is each chat's and book's id to revision, kept for the process's life. A process that starts again feeds a
 // chat whole once (the index leaves a text of the revision it holds as it is), and a message deleted while RPE was down is left in the index under
 // its old words, where every search leaves it out: its id is not on the chat's path.
 
 import type { IndexDoc, IndexHit, IndexName } from "../../app/index-file/index-file";
+import { bookLoreFieldsOf } from "../../shared/lore";
 import type { LumiverseReads, LvStep } from "./reads";
 import type { LvEntry } from "./rows";
 
@@ -35,6 +39,19 @@ const keyOf = (s: LvStep): string => `${s.revision}.${s.swipe}.${s.shown.hash}`;
 
 /** What of an entry is searched: its title, its keys and its text. */
 const entryText = (e: LvEntry): string => [e.comment, ...e.keys, ...e.secondaryKeys, e.content].join("\n");
+
+/** What an entry is named by: its title, its keys, its secondary keys and its LRE aliases. */
+const namesText = (e: LvEntry): string => [e.comment, ...e.keys, ...e.secondaryKeys, ...(bookLoreFieldsOf(e.extensions)?.aliases ?? [])].join("\n");
+
+/** The index's id of an entry's names, and its book's scope for them. */
+const namesId = (entry: string): string => `${entry}\u0000n`;
+const namesScope = (book: string): string => `${book}\u0000n`;
+
+/** One word a search of entries asks the index for: whole, or as the start of a word. */
+export interface EntryWord {
+  text: string;
+  prefix: boolean;
+}
 
 /** One place the index and Lumiverse's rows are compared, one at a time per chat or book. */
 class Serial {
@@ -127,11 +144,17 @@ export class IndexFeed {
         await index.put(
           "entries",
           user,
-          changed.slice(at, at + STRETCH).map((e): IndexDoc => ({ id: e.id, revision: now.get(e.id) ?? "", scope: book, text: entryText(e) })),
+          changed.slice(at, at + STRETCH).flatMap((e): IndexDoc[] => {
+            const revision = now.get(e.id) ?? "";
+            return [
+              { id: e.id, revision, scope: book, text: entryText(e) },
+              { id: namesId(e.id), revision, scope: namesScope(book), text: namesText(e) },
+            ];
+          }),
         );
       }
       const gone = [...had.keys()].filter((id) => !now.has(id));
-      if (gone.length > 0) await index.drop("entries", user, gone);
+      if (gone.length > 0) await index.drop("entries", user, gone.flatMap((id) => [id, namesId(id)]));
       for (const id of gone) this.#bookOf.delete(id);
       for (const e of entries) this.#bookOf.set(e.id, book);
       this.#books.set(book, now);
@@ -139,15 +162,19 @@ export class IndexFeed {
     });
   }
 
-  /** The entries of these books that hold every word of `text`, best first, as `{ id, book }`. The words are asked whole, as the lore's own search reads them. */
-  async searchEntries(books: readonly string[], text: string, limit: number): Promise<{ id: string; book: string }[]> {
-    await Promise.all(books.map((b) => this.ensureBook(b)));
-    const found = await Promise.all(books.map((book) => this.deps.index.search("entries", this.deps.user, text, { scope: book, limit })));
-    const here = new Map(found.flatMap((hits, i) => hits.map((h) => ({ id: h.id, book: books[i] ?? "", rank: h.rank }))).map((h) => [h.id, h] as const));
-    return [...here.values()]
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, limit)
-      .map(({ id, book }) => ({ id, book }));
+  /**
+   * The entries of these books the index finds for any of `words`, each asked alone of the entries' names and of their whole texts, at most `limit`
+   * hits for each ask: the rows of those entries alone, in each book's order (plan §4.2 "No copy": a search reads only what the index found).
+   */
+  async foundEntries(books: readonly string[], words: readonly EntryWord[], limit: number): Promise<LvEntry[]> {
+    const held = await Promise.all(books.map((b) => this.ensureBook(b)));
+    const { index, user } = this.deps;
+    const asks = books.flatMap((book) =>
+      words.flatMap((w) => [index.search("entries", user, w.text, { scope: namesScope(book), limit, prefix: w.prefix }), index.search("entries", user, w.text, { scope: book, limit, prefix: w.prefix })]),
+    );
+    const ids = new Set<string>();
+    for (const hits of await Promise.all(asks)) for (const h of hits) ids.add(h.id.endsWith("\u0000n") ? h.id.slice(0, -2) : h.id);
+    return held.flat().filter((e) => ids.has(e.id));
   }
 
   /** The book an entry fed is in; null where the feed has not fed it. */

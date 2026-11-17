@@ -60,6 +60,12 @@ export interface LoreBookListing {
   added: number | null;
 }
 
+/** A word a search asks the lore search index for: whole, or (`prefix`) as the start of a word, so a plural is found by its singular. */
+export interface LoreIndexWord {
+  text: string;
+  prefix: boolean;
+}
+
 /** The user's Lumiverse books, read-only: every call reads that user's rows and no other's. */
 export interface LoreBooks {
   /**
@@ -77,6 +83,12 @@ export interface LoreBooks {
   entry(user: string, id: string): Promise<LoreBookEntry | null>;
   /** Every book of the user's, as a Settings page lists them for his choice of books (`lore.books`); `chat` says which have the chat attached. Absent where the host lists none. */
   list?(user: string, chat: string | null): Promise<LoreBookListing[]>;
+  /**
+   * The entries of `books` the lore search index finds for any of `words` (plan §4.2 "No copy"), each word asked of the entries' names and of their
+   * whole texts, at most `limit` hits for each ask: those entries' rows alone, in each book's order. Absent where the host keeps no index: a search
+   * then reads every entry of the books.
+   */
+  found?(user: string, books: readonly string[], words: readonly LoreIndexWord[], limit: number): Promise<LoreBookEntry[]>;
 }
 
 /** A chat's world where a point of its path stands. */

@@ -80,11 +80,11 @@ export function turnArea(takes: TurnTakes): TurnArea {
     if (turn === null || store.user(owner()).chat(chat) === null) return new Set();
     return storyCoverage({ store, user: owner(), chat, turn: turn ?? null }).covered;
   };
-  /** The user's books as the lore reads them: through the door's reads, once it is set up for a Lumiverse. */
+  /** The user's books as the lore reads them: through the door's reads and its search index, once it is set up for a Lumiverse. */
   const booksNow = (): LoreBooks => {
     const parts = takes.lumiverse();
     if (parts === null) throw new Error("RPE is not set up for a Lumiverse, so it has no books to read.");
-    return loreBooks(parts.reads, owner());
+    return loreBooks(parts.reads, owner(), parts.feed);
   };
   const books: LoreBooks = {
     attached: (user, chat, at) => booksNow().attached(user, chat, at),
@@ -95,6 +95,11 @@ export function turnArea(takes: TurnTakes): TurnArea {
       const now = booksNow();
       if (now.list === undefined) throw new Error("The door's books give no list of the user's books.");
       return await now.list(user, chat);
+    },
+    found: async (user, ids, words, limit) => {
+      const now = booksNow();
+      if (now.found === undefined) throw new Error("The door's books give no search of the lore index.");
+      return await now.found(user, ids, words, limit);
     },
   };
 

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AgentRef, Scope } from "rp-harness/contract";
+import type { AgentRef, RunScope } from "rp-harness/contract";
 import { harnessSettings, type Setting } from "../../src/app/setting-list";
 import { USER_HEADER } from "../../src/adapter/lumiverse/pipe-wire";
 import { LUMIVERSE_SETTINGS } from "../../src/adapter/lumiverse/settings";
@@ -197,7 +197,7 @@ describe("the hooks areas fill", () => {
   test("a view a test area's file registers is given to an agent by name, and the same area reads a Lumiverse chat's name through the door", async () => {
     const mine = (door: LumiverseDoor): Area => ({
       name: "views-test",
-      fills: { views: async (scope: Scope, _agent: AgentRef, ref: string) => (ref === "test:chat_name" ? ((await door.lumiverse()?.reads.chat(scope.chat))?.name ?? null) : null) },
+      fills: { views: async (scope: RunScope, _agent: AgentRef, ref: string) => (ref === "test:chat_name" && scope.chat !== undefined ? ((await door.lumiverse()?.reads.chat(scope.chat))?.name ?? null) : null) },
     });
     const b = await bedWith((composition) => [mine(composition.door)]);
     beds.push(b);
