@@ -249,7 +249,7 @@ export interface SecretsSaid {
  * hand), each found in the world; null when either is not, and why goes to `unread`. A teller who is the holder is written all the
  * same, as first hand, and said.
  */
-function holderOf(ctx: ReadContext, where: SecretsSaid, holder: Holder, teller: JsonValue | undefined, unread: Unread[]): { holder: EntityId; by: EntityId | null } | null {
+function holderOf(ctx: ReadContext, where: SecretsSaid, holder: Holder, teller: JsonValue | undefined, unread: Unread[]): { holder: EntityId; by: EntityId | null; self?: true } | null {
   const { n, op, field } = where;
   const name = holderName(holder);
   const mine = oneIn(personOf(ctx, holder), n, op, field, name, "no_holder");
@@ -259,7 +259,7 @@ function holderOf(ctx: ReadContext, where: SecretsSaid, holder: Holder, teller: 
   if (typeof mine !== "string" || (told !== null && typeof told !== "string")) return null;
   if (told === mine) {
     unread.push({ line: "self_teller", fields: { ...where, who: name }, kept: true });
-    return { holder: mine, by: null };
+    return { holder: mine, by: null, self: true };
   }
   return { holder: mine, by: told };
 }
@@ -309,7 +309,9 @@ export async function secretsHeld(
       continue;
     }
     if (who === null) continue;
-    const events = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence: given.sure ?? confidence, ...(given.how !== undefined ? { how: given.how } : {}), ...(given.belief !== undefined ? { belief: given.belief } : {}) });
+    // One told by themselves is first hand, so a holding said to be told is witnessed (a holding told names its teller).
+    const how = who.self && given.how === "told" ? "witnessed" : given.how;
+    const events = await world.hold({ holder: who.holder, fact, teller: who.by, since: { msg: turn?.message ?? null, at: turn?.storyTime ?? ctx.state.clock }, confidence: given.sure ?? confidence, ...(how !== undefined ? { how } : {}), ...(given.belief !== undefined ? { belief: given.belief } : {}) });
     if ("code" in events) unread.push(heldNot(world.ctx ?? ctx, where, holderName(holder), secret, events.code));
     else held.push({ fact, events });
   }
