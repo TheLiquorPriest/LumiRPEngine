@@ -98,7 +98,7 @@ credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit
 credit_declined: The application for a {{product}} was declined: {{reason}}.
 credit_why_charged_off: a recent charge-off on their report
 credit_why_score: their credit score is too low
-credit_why_amount: it's more than a lender would lend them (up to {{most}})
+credit_why_amount: it is more than a lender would lend them (at most {{most}})
 card_statement: {{name}} statement: {{owed}}{{#interest}} incl. {{interest}} interest{{/interest}}; minimum {{minimum}} due {{due}}.
 card_due_today: {{name}} payment of {{left}} is due today.
 card_penalty_lifted: {{name}}: six payments on time; the penalty rate is lifted.
@@ -112,11 +112,11 @@ card_payment_charged_off: {{name}} payment of {{short}} charged off{{#fee}}; a {
 flow_paid: {{label}}: {{amount}} paid{{#offscreen}} (set up off screen){{/offscreen}}{{#world}} (set up in the world){{/world}}.
 flow_received: {{label}}: {{amount}} received{{#offscreen}} (set up off screen){{/offscreen}}{{#world}} (set up in the world){{/world}}.
 flow_partial: {{label}}: only {{part}} of {{amount}} paid.
-flow_retry: {{label}} ({{amount}}) didn't go through; it will be tried again.
+flow_retry: {{label}} ({{amount}}) did not go through; it will be tried again.
 flow_fallback: {{label}}: {{amount}} paid from {{from}}.
-flow_deferred: {{label}} ({{amount}}) couldn't be paid; it carries to next time.
+flow_deferred: {{label}} ({{amount}}) could not be paid; it carries over to the next payment.
 flow_declined: {{label}} ({{amount}}) was declined: {{reason}}.
-flow_why_failed: the payment didn't go through
+flow_why_failed: the payment did not go through
 loan_paid_off: The loan of {{borrower}} from {{lender}} is paid off.
 payday: Payday: {{net}} net{{#gross}} ({{gross}} gross){{/gross}}.
 invoice_late: {{memo}} from {{#business}}{{business}}{{/business}}{{^business}}a business{{/business}} is {{days}} {{#one}}day{{/one}}{{^one}}days{{/one}} late: {{amount}} due.
@@ -124,12 +124,12 @@ invoice_late_owner: {{memo}}, billed to {{#customer}}{{customer}}{{/customer}}{{
 bond_matured: {{asset}} matured: {{paid}} paid out{{#coupon}}, its last coupon of {{coupon}} with it{{/coupon}}.
 option_exercised: {{asset}} was exercised at expiry and settled for {{value}}.
 option_expired: {{asset}} expired worthless.
-project_wait_start: {{project}}: {{step}} can't start until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
-project_wait_finish: {{project}}: {{step}} can't finish until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
+project_wait_start: {{project}}: {{step}} cannot start until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
+project_wait_finish: {{project}}: {{step}} cannot finish until {{amount}} can be paid ({{reason}}); it tries again as money comes in.
 person_leaves: {{name}} leaves.
 person_arrives: {{name}} arrives.
 thing_got_back: {{name}} got {{thing}} back.
-need_alert: You're getting {{word}}.
+need_alert: You are getting {{word}}.
 invitation: {{name}} invites you to {{#place}}{{place}}{{/place}}{{^place}}meet up{{/place}} at {{time}}.
 thing_overdue: {{thing}} is overdue from {{borrower}}.
 set_not_to_hand: Not to hand for {{set}}: {{missing}}.
@@ -279,7 +279,7 @@ mind_line: {{name}}'s mind, at {{fidelity}} fidelity, {{#intent}}means to: {{int
 mind_memory: {{name}} remembers the turn in {{notes}} {{#oneNote}}note{{/oneNote}}{{^oneNote}}notes{{/oneNote}} and {{commitments}} new {{#oneCommitment}}commitment{{/oneCommitment}}{{^oneCommitment}}commitments{{/oneCommitment}}
 mind_present_none: No one was present for the minds
 mind_present: {{who}} {{#one}}was{{/one}}{{^one}}were{{/one}} present for the minds
-mind_plan_status: {{name}}'s plan {{#plan}}“{{plan}}”{{/plan}}{{^plan}}that's gone{{/plan}} is now {{status}}
+mind_plan_status: {{name}}'s {{#plan}}plan “{{plan}}”{{/plan}}{{^plan}}deleted plan{{/plan}} is now {{status}}
 mind_part_deleted: {{name}}'s {{key}} was deleted
 mind_part_edited: {{name}}'s {{key}} was edited
 mind_commitment_status: {{name}}'s commitment is now {{status}}

@@ -81,6 +81,6 @@ job_off_path: The job was cut off.
 job_interrupted: The job was interrupted by a restart.
 job_gone: RPH no longer has the job.
 map_problem: - {{#at}}{{at}}: {{/at}}{{message}}
-map_check: Check before you commit:
+map_check: Check before you apply it:
 map_still_problems: The map still has problems; its note lists them, and it starts unticked.
-index_cut: The last {{cut}} characters of the text were past build.index.chars and were not read; index them in another job.
+index_cut: The last {{cut}} characters of the text were past the most one job reads (the setting build.index.chars) and were not read; index them in another job.
