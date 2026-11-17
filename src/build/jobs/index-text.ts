@@ -11,7 +11,7 @@ import type { JobProposal } from "../../shared/jobs";
 import { loreTerm, topicIdOf } from "../../shared/lore";
 import { neutralizeMacros } from "../../shared/macros";
 import type { WorldDoc } from "../../shared/world";
-import type { DropCounts } from "./checks";
+import { addDrop, type DropCounts } from "./checks";
 
 /** The most an entry written from pasted text keeps. */
 const CONTENT_MAX = 4000;
@@ -64,15 +64,13 @@ function names(v: unknown, max: number, count: number): string[] {
  * dropped with a note. Keys are snake case and never replace an existing entry: a taken one gets a number.
  */
 export function checkIndexProposals(world: WorldDoc, raw: readonly JobProposal[], max: number, drops: DropCounts = new Map()): JobProposal[] {
-  const drop = (why: string): void => {
-    drops.set(why, (drops.get(why) ?? 0) + 1);
-  };
+  const drop = (why: string, fields?: Record<string, string | number>): void => addDrop(drops, why, fields);
   // One proposal per title: the later stands, so the agent's fix replaces what it fixed.
   const chosen = new Map<string, JobProposal>();
   for (const p of raw) {
     const v = isRecord(p.value) ? p.value : {};
     const group = typeof v.title === "string" ? loreTerm(v.title) : p.key;
-    if (chosen.has(group)) drop("were replaced by a later proposal of the same title");
+    if (chosen.has(group)) drop("replaced_title");
     chosen.delete(group);
     chosen.set(group, p);
   }
@@ -81,22 +79,22 @@ export function checkIndexProposals(world: WorldDoc, raw: readonly JobProposal[]
   const out: JobProposal[] = [];
   for (const p of chosen.values()) {
     if (out.length >= max) {
-      drop(`were past the ${max}-proposal limit (build.jobs.proposals)`);
+      drop("past_limit", { max });
       continue;
     }
     const v = isRecord(p.value) ? p.value : {};
     const title = names([v.title], NAME_MAX, 1)[0] ?? "";
     if (title === "") {
-      drop("had no title");
+      drop("no_title");
       continue;
     }
     if (titles.has(loreTerm(title))) {
-      drop("repeated an existing entry's title");
+      drop("existing_title");
       continue;
     }
     const content = typeof v.content === "string" ? v.content.trim().slice(0, CONTENT_MAX) : "";
     if (content.trim() === "") {
-      drop("had no text");
+      drop("no_text");
       continue;
     }
     titles.add(loreTerm(title));

@@ -12,7 +12,7 @@ import { publicText } from "../../shared/secret-marks";
 import type { LoreEntryDef, WorldDoc } from "../../shared/world";
 import type { WorldService } from "../../worlds/service";
 import type { BuildBooks } from "../lore/books";
-import { checkProposals, type DropCounts, dropSummary, entryTitle, kindsGiven, type ProposalMode, readProposals } from "./checks";
+import { addDrop, checkProposals, type DropCounts, dropSummary, dropWords, entryTitle, kindsGiven, type ProposalMode, readProposals, type Say } from "./checks";
 import { JobError } from "./home";
 import { checkIndexProposals, keptText, readIndexProposals } from "./index-text";
 import type { JobLimits } from "./limits";
@@ -33,12 +33,12 @@ export interface KindRun {
   given: JsonObject;
   /** The fields its brief's line is filled with, beside the world's id and name. */
   fields: Record<string, string | number>;
-  /** One call of `world_propose`, checked against the draft as it stands now; what it made is kept. */
-  propose(args: JsonObject): Promise<Proposed>;
+  /** One call of `world_propose`, checked against the draft as it stands now; what it made is kept. What it says is in the words of `say`. */
+  propose(args: JsonObject, say: Say): Promise<Proposed>;
   /** The proposals so far, checked, as the review shows them. */
   proposals(): JobProposal[];
   /** What the job ends with; `cut`: its agent stopped at one of RPH's limits. */
-  end(cut: boolean): { result: JobResult; notes: string[] };
+  end(cut: boolean, say: Say): { result: JobResult; notes: string[] };
 }
 
 /** What a kind's job starts from. */
@@ -72,9 +72,9 @@ function stringsOf(v: JsonValue | undefined): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
 }
 
-/** Each reason's count in `after` beyond what `before` counted: what one call added. */
-function droppedBy(before: DropCounts, after: DropCounts): JsonObject[] {
-  return [...after].flatMap(([why, n]) => (n > (before.get(why) ?? 0) ? [{ why, count: n - (before.get(why) ?? 0) }] : []));
+/** Each reason's count in `after` beyond what `before` counted, in the words of its line: what one call added. */
+function droppedBy(before: DropCounts, after: DropCounts, say: Say): JsonObject[] {
+  return [...after].flatMap(([key, d]) => (d.count > (before.get(key)?.count ?? 0) ? [{ why: dropWords(say, d), count: d.count - (before.get(key)?.count ?? 0) }] : []));
 }
 
 /**
@@ -89,23 +89,23 @@ function proposing(from: KindStart, mode: ProposalMode, review: (draft: WorldDoc
   return {
     given,
     fields,
-    async propose(args) {
+    async propose(args, say) {
       const doc = await draft();
       const call = `call${++calls}`;
       // A proposal that cites no source stays unlinked rather than borrowing the call's name.
       const fresh = readProposals(args.proposals, call).map((p) => ({ ...p, source: p.source === call ? (mode === "import" ? "lore" : "refine") : p.source }));
-      const before = new Map<string, number>();
+      const before: DropCounts = new Map();
       review(doc, raw, before);
       raw.push(...fresh);
-      const after = new Map<string, number>();
+      const after: DropCounts = new Map();
       const kept = review(doc, raw, after);
-      return { answer: { read: fresh.length, standing: kept.length, dropped: droppedBy(before, after) }, unusable: fresh.length === 0 };
+      return { answer: { read: fresh.length, standing: kept.length, dropped: droppedBy(before, after, say) }, unusable: fresh.length === 0 };
     },
     proposals: () => (last === null ? [] : review(last, raw, new Map())),
-    end() {
-      const drops = new Map<string, number>();
+    end(_cut, say) {
+      const drops: DropCounts = new Map();
       const proposals = last === null ? [] : review(last, raw, drops);
-      const said = dropSummary(raw.length, proposals.length, drops);
+      const said = dropSummary(raw.length, proposals.length, drops, say);
       return { result: { proposals }, notes: said === null ? [] : [said] };
     },
   };
@@ -195,21 +195,21 @@ const indexText: ModelKindDef = {
         text,
       },
       fields: { chars: text.length },
-      async propose(args) {
+      async propose(args, say) {
         last = await from.worlds.worlds.working(from.world, from.user);
         const fresh = readIndexProposals(args.entries, `call${++calls}`);
-        const before = new Map<string, number>();
+        const before: DropCounts = new Map();
         checkIndexProposals(last, raw, from.limits.proposals, before);
         raw.push(...fresh);
-        const after = new Map<string, number>();
+        const after: DropCounts = new Map();
         const kept = checkIndexProposals(last, raw, from.limits.proposals, after);
-        return { answer: { read: fresh.length, standing: kept.length, dropped: droppedBy(before, after) }, unusable: fresh.length === 0 };
+        return { answer: { read: fresh.length, standing: kept.length, dropped: droppedBy(before, after, say) }, unusable: fresh.length === 0 };
       },
       proposals: () => checkIndexProposals(last, raw, from.limits.proposals),
-      end() {
-        const drops = new Map<string, number>();
+      end(_cut, say) {
+        const drops: DropCounts = new Map();
         const proposals = checkIndexProposals(last, raw, from.limits.proposals, drops);
-        const said = dropSummary(raw.length, proposals.length, drops);
+        const said = dropSummary(raw.length, proposals.length, drops, say);
         const notes = [...(cut > 0 ? [`The last ${cut.toLocaleString("en-US")} characters of the text were past build.index.chars and were not read; index them in another job.`] : []), ...(said === null ? [] : [said])];
         return { result: { proposals }, notes };
       },
@@ -284,17 +284,17 @@ const proposeRoutines: ModelKindDef = {
     return {
       given: routineGiven(scope, pass),
       fields: { people: pass.batch.owners.length },
-      async propose(args) {
+      async propose(args, say) {
         const check = checkRoutineReply(scope, pass.batch, args);
         candidates = laterOver(candidates, check.candidates);
-        return { answer: { ...(check.problem === null ? {} : { problem: check.problem }), read: check.candidates.length, toFix: check.fixable }, unusable: check.problem !== null };
+        return { answer: { ...(check.problem === null ? {} : { problem: say(`unusable_${check.problem.why}`, check.problem.fields) ?? check.problem.why }), read: check.candidates.length, toFix: check.fixable }, unusable: check.problem !== null };
       },
       proposals: () => finishRoutines(scope, candidates).slice(0, from.limits.proposals),
-      end() {
-        const drops = new Map<string, number>();
+      end(_cut, say) {
+        const drops: DropCounts = new Map();
         const all = finishRoutines(scope, candidates, drops);
         const proposals = all.slice(0, from.limits.proposals);
-        if (all.length > proposals.length) drops.set(`were past the ${from.limits.proposals}-proposal limit (build.jobs.proposals)`, all.length - proposals.length);
+        if (all.length > proposals.length) addDrop(drops, "past_limit", { max: from.limits.proposals }, all.length - proposals.length);
         const last: EntityId | undefined = pass.owners.at(-1);
         const next: JsonObject | null = pass.rest > 0 && last !== undefined ? { ...(request.owners ? { owners: request.owners } : {}), after: last } : null;
         const bare = pass.bare.length > 0 ? `${pass.bare.length} had nothing in their sheets or the lore to go on (${pass.bare.slice(0, 6).join(", ")}${pass.bare.length > 6 ? "…" : ""}), so they get none.` : null;
@@ -304,7 +304,7 @@ const proposeRoutines: ModelKindDef = {
           unread,
           loreCutMessage(scope, pass.cut, from.limits.loreTokens),
           bare,
-          dropSummary(candidates.length, proposals.length, drops),
+          dropSummary(candidates.length, proposals.length, drops, say),
           flagged > 0 ? `${flagged} proposal(s) have problems to look at; they start unticked.` : null,
         ].filter((m): m is string => m !== null);
         return { result: { proposals, ...(next ? { next } : {}) }, notes };

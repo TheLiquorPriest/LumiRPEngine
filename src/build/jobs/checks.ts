@@ -166,14 +166,38 @@ function fieldValue(def: FieldDef, value: JsonValue, known: (id: string) => bool
   }
 }
 
-/** Why proposals were dropped, counted per reason (a job that ends with none says why). */
-export type DropCounts = Map<string, number>;
+/** Lines of Build's jobs part filled in (`guidance/.prompts/build-jobs.md`); undefined where the part has no such line. */
+export type Say = (line: string, fields?: Record<string, string | number>) => string | undefined;
 
-export function dropSummary(raw: number, kept: number, drops: DropCounts): string | null {
+/** One reason proposals were dropped: its name (the part's line `dropped_<why>`), what fills the line, and how many it dropped. */
+export interface Drop {
+  why: string;
+  fields: Record<string, string | number>;
+  count: number;
+}
+
+/** Why proposals were dropped, counted per reason and its fields (a job that ends with none says why). */
+export type DropCounts = Map<string, Drop>;
+
+/** Counts `count` more proposals dropped for `why`. */
+export function addDrop(drops: DropCounts, why: string, fields: Record<string, string | number> = {}, count = 1): void {
+  const key = `${why}\0${JSON.stringify(fields)}`;
+  const known = drops.get(key);
+  if (known) known.count += count;
+  else drops.set(key, { why, fields, count });
+}
+
+/** A reason in the words of the part's `dropped_<why>` line; its name and fields as they are where the part has no such line. */
+export function dropWords(say: Say, drop: Drop): string {
+  return say(`dropped_${drop.why}`, drop.fields) ?? [drop.why, ...Object.values(drop.fields)].join(" ");
+}
+
+/** What a job's end says of the proposals dropped, in the part's `proposed_nothing` and `dropped_summary` lines; null when none was. */
+export function dropSummary(raw: number, kept: number, drops: DropCounts, say: Say): string | null {
   if (kept > 0 && drops.size === 0) return null;
-  if (raw === 0) return "The job's agent proposed nothing.";
-  const reasons = [...drops.entries()].sort((a, b) => b[1] - a[1]).map(([why, n]) => `${n} ${why}`);
-  return `${raw - kept} of ${raw} proposal(s) dropped: ${reasons.join("; ")}.`;
+  if (raw === 0) return say("proposed_nothing") ?? null;
+  const reasons = [...drops.values()].sort((a, b) => b.count - a.count).map((d) => `${d.count} ${dropWords(say, d)}`);
+  return say("dropped_summary", { dropped: raw - kept, proposed: raw, reasons: reasons.join("; ") }) ?? JSON.stringify({ dropped: raw - kept, proposed: raw, reasons });
 }
 
 /**
@@ -199,18 +223,16 @@ function baseKind(world: WorldDoc, registry: Registry): string | null {
  * with a note; a proposal whose kind or references don't resolve is dropped. Each kept proposal names its pack for review grouping.
  */
 export function checkProposals(world: WorldDoc, registry: Registry, raw: readonly JobProposal[], mode: ProposalMode, max: number, sources?: ImportSources, drops: DropCounts = new Map()): JobProposal[] {
-  const drop = (why: string): void => {
-    drops.set(why, (drops.get(why) ?? 0) + 1);
-  };
+  const drop = (why: string, fields?: Record<string, string | number>): void => addDrop(drops, why, fields);
   const byKey = new Map<string, JobProposal>();
   for (const p of raw) {
     const key = SNAKE.test(p.key) ? p.key : snake(p.key);
     if (!key || !safeKey(key)) {
-      drop("had no usable id");
+      drop("no_id");
       continue;
     }
     const id = `${p.collection}:${key}`;
-    if (byKey.has(id)) drop("were replaced by a later proposal of the same id");
+    if (byKey.has(id)) drop("replaced");
     byKey.delete(id);
     byKey.set(id, { ...p, key });
   }
@@ -223,16 +245,16 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
   const out: JobProposal[] = [];
   for (const p of byKey.values()) {
     if (out.length >= max) {
-      drop(`were past the ${max}-proposal limit (build.jobs.proposals)`);
+      drop("past_limit", { max });
       continue;
     }
     const exists = hasOwn(world[p.collection] as Record<string, unknown>, p.key);
     if (exists && mode === "import") {
-      drop("already exist in the world");
+      drop("exists");
       continue;
     }
     if (p.collection === "entities" && p.key === world.pov) {
-      drop("named the player character");
+      drop("player_character");
       continue;
     }
     const v = isRecord(p.value) ? p.value : {};
@@ -252,17 +274,17 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
       // A proposed name reaches engine sections, chips and messages: never a host macro.
       const name = typeof v.name === "string" ? neutralizeMacros(v.name).trim() : "";
       if (!kind) {
-        drop(`used a kind this world doesn't have (${stated || "none"})`);
+        drop("unknown_kind", { kind: stated || "none" });
         continue;
       }
       if (assumeKind) notes.push(`assumed kind: ${kindId} (the lore named none)`);
       if (name === "") {
-        drop("had no name");
+        drop("no_name");
         continue;
       }
       const nameKey = `${kindId}:${name.toLowerCase()}`;
       if (!exists && names.has(nameKey)) {
-        drop("duplicated an existing name");
+        drop("duplicate_name");
         continue;
       }
       names.add(nameKey);
@@ -308,7 +330,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
     } else if (p.collection === "places") {
       const name = typeof v.name === "string" ? neutralizeMacros(v.name).trim() : "";
       if (name === "") {
-        drop("had no name");
+        drop("no_name");
         continue;
       }
       const parent = typeof v.parent === "string" && v.parent !== p.key && placeKnown(v.parent) ? v.parent : undefined;
@@ -322,7 +344,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
       const from = typeof v.from === "string" ? v.from : "";
       const to = typeof v.to === "string" ? v.to : "";
       if (!placeKnown(from) || !placeKnown(to) || from === to) {
-        drop("joined places that don't exist");
+        drop("no_places");
         continue;
       }
       const modes: JsonObject = {};
@@ -332,7 +354,7 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
         if (isRecord(leg) && typeof leg.minutes === "number" && leg.minutes > 0) modes[m] = { minutes: Math.round(leg.minutes), ...(typeof leg.distanceKm === "number" ? { distanceKm: leg.distanceKm } : {}) };
       }
       if (Object.keys(modes).length === 0) {
-        drop("had no travel time");
+        drop("no_travel_time");
         continue;
       }
       value = { id: p.key, from, to, modes, bidirectional: v.bidirectional !== false };

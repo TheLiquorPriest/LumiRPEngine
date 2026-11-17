@@ -34,7 +34,7 @@ import type { WorldState } from "../../engine/state";
 import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "../../engine/visibility";
 import { initialState, minutesBetween } from "../../engine/world-state";
 import { blockOnDay, routineIssues } from "../../packs/castlife/core/routines";
-import { snake, type DropCounts } from "./checks";
+import { addDrop, snake, type DropCounts } from "./checks";
 
 /** A job's input as the job reads it: whom it proposes for (absent, every one it may read), and where a second pass starts. */
 export interface RoutineJobInput {
@@ -492,8 +492,8 @@ export interface RoutineCandidate {
 
 /** What checking one reply found. */
 export interface RoutineCheck {
-  /** Why the reply can't be used at all, or null: empty or not JSON, another shape, or nothing in it readable. */
-  problem: string | null;
+  /** Why the reply can't be used at all (the line `unusable_<why>` of Build's jobs part, with what fills it), or null: empty or not JSON, another shape, or nothing in it readable. */
+  problem: { why: "not_json" | "shape" | "none_readable"; fields: Record<string, number> } | null;
   candidates: RoutineCandidate[];
   /** The problems the helper can fix, each naming its item: the repair call lists them. */
   fixable: string[];
@@ -696,11 +696,11 @@ function readRecurrence(scope: RoutineScope, raw: JsonValue | undefined, fatal: 
  * with, and what the agent can fix (answered to it, naming each item); or why the call can't be read at all.
  */
 export function checkRoutineReply(scope: RoutineScope, batch: RoutineBatch, reply: JsonValue | null): RoutineCheck {
-  if (reply === null) return { problem: "empty or not JSON", candidates: [], fixable: [] };
+  if (reply === null) return { problem: { why: "not_json", fields: {} }, candidates: [], fixable: [] };
   const items = itemsOf(reply);
-  if (!items) return { problem: "neither routines nor schedules", candidates: [], fixable: [] };
+  if (!items) return { problem: { why: "shape", fields: {} }, candidates: [], fixable: [] };
   const candidates = items.flatMap((item) => checkItem(scope, batch, item) ?? []);
-  if (items.length > 0 && candidates.length === 0) return { problem: `none of its ${items.length} item(s) readable`, candidates: [], fixable: [] };
+  if (items.length > 0 && candidates.length === 0) return { problem: { why: "none_readable", fields: { items: items.length } }, candidates: [], fixable: [] };
   const fixable = candidates.filter((c) => !c.leak).flatMap((c) => [...c.fatal, ...c.problems, ...c.lint].map((p) => `${c.at} (${nameOf(scope, c.owner)}, "${c.label}"): ${p}`));
   return { problem: null, candidates, fixable };
 }
@@ -918,21 +918,21 @@ function sameKey(c: RoutineCandidate): string {
  * review takes together. A proposal with problems keeps them, unticked.
  */
 export function finishRoutines(scope: RoutineScope, candidates: readonly RoutineCandidate[], drops: DropCounts = new Map()): JobProposal[] {
-  const drop = (why: string): void => void drops.set(why, (drops.get(why) ?? 0) + 1);
+  const drop = (why: string): void => addDrop(drops, why);
   const best = new Map<string, RoutineCandidate>();
   for (const c of candidates) {
     if (c.leak) {
-      drop("carried a secret's words");
+      drop("secret");
       continue;
     }
     if (c.fatal.length > 0) {
-      drop(c.sources.length === 0 ? "cited nothing they rest on" : "didn't read as a routine or a schedule");
+      drop(c.sources.length === 0 ? "no_source" : "not_routine");
       continue;
     }
     const key = sameKey(c);
     const prior = best.get(key);
     if (!prior || c.confidence > prior.confidence) best.set(key, c);
-    if (prior) drop("repeated another proposal");
+    if (prior) drop("repeat");
   }
   const routines = scope.world.routines ?? {};
   const takenRoutines = new Set<string>();
@@ -956,7 +956,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
       const p: ProposedRuns = { fixed: blockSpans(scope, c.owner, block), reach: blockSpans(scope, c.owner, block, true), activity: block.activity, place };
       const { repeat, clashes } = standing(scope, p, held);
       if (repeat) {
-        drop("repeated what the world already has");
+        drop("in_world");
         continue;
       }
       for (const what of clashes) problems.push(`it clashes with ${what}`);
@@ -994,7 +994,7 @@ export function finishRoutines(scope: RoutineScope, candidates: readonly Routine
     const fixed = scheduleSpans(scope, s.recurrence, [s]);
     const { repeat, clashes } = standing(scope, { fixed, reach: fixed, activity: s.activity, place: s.place }, held);
     if (repeat) {
-      drop("repeated what the world already has");
+      drop("in_world");
       continue;
     }
     for (const what of clashes) problems.push(`it clashes with ${what}`);

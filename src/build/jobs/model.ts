@@ -172,7 +172,7 @@ export class ModelJobs {
     const live = await this.liveOf(user, agent);
     const lines = linesOf(await userGuidance(this.deps.rph.files, user).part(BUILD_JOBS_PART));
     if (live === null) return { content: [{ type: "text", text: lines?.line("propose_no_job") ?? JSON.stringify({ proposed: false }) }], error: true };
-    const { answer, unusable } = await live.run.propose(objectOf(args));
+    const { answer, unusable } = await live.run.propose(objectOf(args), (line, fields) => lines?.line(line, fields));
     live.calls += 1;
     const proposals = live.run.proposals();
     live.job.report(1 - 1 / (live.calls + 1), { proposals });
@@ -215,7 +215,7 @@ export class ModelJobs {
       }
       if (now === undefined) throw new Error(lines?.line("job_gone") ?? "RPH no longer has the job");
       const cut = now.limit !== undefined;
-      const { result, notes } = run.end(cut);
+      const { result, notes } = run.end(cut, (line, fields) => lines?.line(line, fields));
       const proposed = "proposals" in result ? result.proposals.length : 0;
       // A job that ended otherwise than done, with nothing proposed, failed with RPH's last word of it.
       if (now.state !== "done" && !cut && proposed === 0) throw new Error(lines?.line(`job_${now.state.replace("-", "_")}`, { report: now.report ?? "" }) ?? now.report ?? now.state);
