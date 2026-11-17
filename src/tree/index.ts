@@ -8,7 +8,7 @@ export { type DefaultStanding, type DefaultUpdate, type DefaultsDeps, defaultSta
 export { cut, type TreeFiles, type TreeFilesDeps, treeFiles } from "./files";
 export { GeneratedFiles, type GeneratedDeps, type GeneratedWrite, type PromptMapFields, promptMapFields } from "./generated";
 export { cacheFileName, type CacheKept, type CacheKind, SessionCache, type SessionCacheDeps } from "./session-cache";
-export { CHAT_CONFIG, CHATS_FOLDER, FILE_KEYS, folderFor, GLOBAL_CONFIG, id8, MOUNTS, NO_CHAT, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, slug, turnFolderName, TURNS_FOLDER } from "./layout";
+export { CHAT_CONFIG, CHATS_FOLDER, FILE_KEYS, folderFor, GLOBAL_CONFIG, id8, MOUNTS, NO_CHAT, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, slug, TURN_TRACE, TURN_TRANSCRIPTS, turnFolderName, TURNS_FOLDER } from "./layout";
 export { type NotesAt, type NotesDeps, type NotesMoved, TreeNotes } from "./notes";
 export { KEPT_IN_OLD_TURNS, type Pruned, pruneChat, pruneTurnFolders, type RetentionSettings, retentionOf } from "./retention";
 export { OwnFiles, type OwnFilesDeps } from "./own-files";

@@ -1,25 +1,131 @@
 // RPE's trace port (`TracePort` in `rp-harness/contract`): everything RPH does goes to the live hub, on
-// the chat the run is played in, and is kept in the turn's folder (plan §5.3 `transcripts/`) in one file
-// of its own, `trace.jsonl`, each record as RPH gave it, for the Turn page and a live view that joins
-// late. Each agent's own transcript there, and each request kept beside it, has one writer, RPH: this
-// port writes none of them. Streaming text goes to the live hub only; the call's `call_ended` holds it
-// whole. A piece of streaming text names only its run, by RPH's own id for it: its chat is the one its
-// run's records name, each run's first record coming before any piece of it. A job of no chat has no
-// chat to tell nor folder to keep its records in: the runs are given them, and nothing more is done.
+// the chat the run is played in, and is kept at the top of the turn's folder (or of the session's, for a
+// job of no turn) in a file of RPE's own, `trace.jsonl`, for the Turn page and a live view that joins
+// late. Each agent's traffic (its messages, its tool calls and their results) has one writer, RPH, in
+// that agent's transcript (plan §5.3 `transcripts/`, §13.4): this port writes nothing in `transcripts/`,
+// keeps a record of a message, a call or a result without what the transcript holds, and reads that
+// back from the transcript when the trace is read. Streaming text goes to the live hub only; the call's
+// `call_ended` holds it whole. A piece of streaming text names only its run, by RPH's own id for it: its
+// chat is the one its run's records name, each run's first record coming before any piece of it. A job
+// of no chat has no chat to tell nor folder to keep its records in: the runs are given them, and nothing
+// more is done.
 
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { Log, Scope, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
+import type { AgentRef, JsonValue, Log, Scope, ToolContent, TraceDelta, TracePort, TraceRecord } from "rp-harness/contract";
 import type { LiveHub } from "../app";
 import { isRecord } from "../shared/json";
-import type { TreeFiles } from "../tree";
+import { type TreeFiles, TURN_TRACE, TURN_TRANSCRIPTS } from "../tree";
 import type { RunTimes } from "./spans";
 
-/** The turn folder's transcripts, where the trace is kept beside them. */
-export const TRANSCRIPTS = "transcripts";
+/** A transcript's line as RPH writes it (`{"at":…,"type":"message"|"call"|"result",…}`), found by its time, its type and its call: a message by the call's number, a tool call and its result by the model's id for the call. */
+type Lines = ReadonlyMap<string, Record<string, unknown>>;
+const lineKey = (at: number, type: "message" | "call" | "result", call: number | string): string => `${at} ${type} ${call}`;
+const NO_LINES: Lines = new Map();
 
-/** The trace's file in `transcripts/`: no agent's transcript is named so (RPH names each `<definition>-<handle>`). */
-export const TRACE_FILE = "trace.jsonl";
+/** An agent's transcript in `transcripts/`, as RPH names it: `<definition>-<handle>.jsonl`, any character but a letter, a digit, `_` or `-` made a `-`. */
+const transcriptName = (agent: AgentRef): string => `${`${agent.definition}-${agent.id}`.replace(/[^A-Za-z0-9_-]/g, "-")}.jsonl`;
+
+/** A record of an agent's traffic, whose words its transcript holds. */
+const isTraffic = (record: TraceRecord): record is TraceRecord & { agent: AgentRef } =>
+  record.agent !== undefined && (record.event.kind === "call_ended" || record.event.kind === "tool_started" || record.event.kind === "tool_ended");
+
+/**
+ * The rows of a JSON-lines file that `takes` takes, none where there is no file. A line torn by a crash, or written over, costs that line:
+ * the rest is read, and the log says how many were passed over, and of which file (`name`, below the folder).
+ */
+async function readLines(folder: string, name: string, takes: (row: Record<string, unknown>) => boolean, log: Log): Promise<Record<string, unknown>[]> {
+  const file = Bun.file(join(folder, name));
+  if (!(await file.exists())) return [];
+  const rows: Record<string, unknown>[] = [];
+  let unreadable = 0;
+  for (const line of (await file.text()).split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const row: unknown = JSON.parse(line);
+      if (isRecord(row) && takes(row)) rows.push(row);
+      else unreadable++;
+    } catch {
+      unreadable++;
+    }
+  }
+  if (unreadable > 0) log.warn("Lines of a turn's trace or of an agent's transcript could not be read and were left out of the turn's trace.", { file: name, lines: unreadable });
+  return rows;
+}
+
+/** An agent's transcript, each line by its time, its type and its call. */
+async function transcriptLines(folder: string, name: string, log: Log): Promise<Lines> {
+  const lines = new Map<string, Record<string, unknown>>();
+  const rows = await readLines(folder, `${TURN_TRANSCRIPTS}/${name}`, (row) => typeof row.at === "number" && typeof row.type === "string", log);
+  for (const row of rows) {
+    const at = row.at as number;
+    if (row.type === "message" && typeof row.call === "number") lines.set(lineKey(at, "message", row.call), row);
+    else if ((row.type === "call" || row.type === "result") && typeof row.callId === "string") lines.set(lineKey(at, row.type, row.callId), row);
+  }
+  return lines;
+}
+
+/** A record as RPE keeps it: a message, a tool call or a result without what its agent's transcript holds (the text, the thinking, the arguments, what the model was shown); any other whole. */
+function withoutTraffic(record: TraceRecord): unknown {
+  if (!isTraffic(record)) return record;
+  const { event } = record;
+  switch (event.kind) {
+    case "call_ended": {
+      const { text: _text, thinking: _thinking, toolCalls, ...rest } = event;
+      return { ...record, event: { ...rest, toolCalls: toolCalls.map(({ args: _args, ...call }) => call) } };
+    }
+    case "tool_started": {
+      const { args: _args, ...rest } = event;
+      return { ...record, event: rest };
+    }
+    case "tool_ended": {
+      const { content: _content, reports: _reports, error: _error, ...result } = event.result;
+      return { ...record, event: { ...event, result } };
+    }
+    default:
+      return record;
+  }
+}
+
+/** A kept record of an agent's traffic with what its transcript's line holds read back in; what no line holds (its write failed, or has not landed) is left empty. */
+function withTraffic(record: TraceRecord, lines: Lines): TraceRecord {
+  const { event } = record;
+  switch (event.kind) {
+    case "call_ended": {
+      const line = lines.get(lineKey(record.at, "message", event.call));
+      const args = new Map<unknown, unknown>((Array.isArray(line?.toolCalls) ? line.toolCalls : []).filter(isRecord).map((call) => [call.id, call.args]));
+      return {
+        ...record,
+        event: {
+          ...event,
+          text: typeof line?.text === "string" ? line.text : "",
+          ...(typeof line?.thinking === "string" ? { thinking: line.thinking } : {}),
+          toolCalls: event.toolCalls.map((call) => ({ ...call, args: (args.get(call.id) ?? null) as JsonValue })),
+        },
+      };
+    }
+    case "tool_started":
+      return { ...record, event: { ...event, args: (lines.get(lineKey(record.at, "call", event.callId))?.args ?? null) as JsonValue } };
+    case "tool_ended": {
+      const result = lines.get(lineKey(record.at, "result", event.callId))?.result;
+      const shown = isRecord(result) ? result : {};
+      return {
+        ...record,
+        event: {
+          ...event,
+          result: {
+            ...event.result,
+            content: Array.isArray(shown.content) ? (shown.content as ToolContent[]) : [],
+            ...(Array.isArray(shown.reports) ? { reports: shown.reports as string[] } : {}),
+            ...(shown.error === true ? { error: true as const } : {}),
+          },
+        },
+      };
+    }
+    default:
+      return record;
+  }
+}
 
 export interface TraceDeps {
   live: LiveHub;
@@ -87,8 +193,8 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     const next = at.tail.then(async () => {
       const folder = await at.folder;
       if (folder === null) return;
-      await mkdir(join(folder, TRANSCRIPTS), { recursive: true });
-      await appendFile(join(folder, TRANSCRIPTS, TRACE_FILE), `${JSON.stringify(record)}\n`, "utf8");
+      await mkdir(folder, { recursive: true });
+      await appendFile(join(folder, TURN_TRACE), `${JSON.stringify(withoutTraffic(record))}\n`, "utf8");
     });
     at.tail = next.catch(() => undefined);
     const done = next
@@ -127,25 +233,15 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     async records(scope) {
       while (pending.size > 0) await Promise.allSettled([...pending]);
       const folder = await (open.get(keyOf(scope))?.folder ?? lookup(scope));
+      // No folder, or no record kept yet: the run has not begun.
       if (folder === null) return [];
-      const out: TraceRecord[] = [];
-      const file = Bun.file(join(folder, TRANSCRIPTS, TRACE_FILE));
-      // No record was kept yet: the run has not begun.
-      if (!(await file.exists())) return [];
-      // A line torn by a crash, or written over, costs that line: the rest of the trace is read, and the log says how many were passed over.
-      let unreadable = 0;
-      for (const line of (await file.text()).split("\n")) {
-        if (line.trim() === "") continue;
-        try {
-          const record: unknown = JSON.parse(line);
-          if (isRecord(record) && typeof record.seq === "number" && isRecord(record.event)) out.push(record as unknown as TraceRecord);
-          else unreadable++;
-        } catch {
-          unreadable++;
-        }
-      }
-      if (unreadable > 0) deps.log.warn("Lines of a turn's trace could not be read and were left out of it.", { file: join(TRANSCRIPTS, TRACE_FILE), lines: unreadable });
-      return out.sort((a, b) => a.at - b.at || a.seq - b.seq);
+      const kept = (await readLines(folder, TURN_TRACE, (row) => typeof row.seq === "number" && isRecord(row.event), deps.log)) as unknown as TraceRecord[];
+      // Each agent's transcript the trace's traffic is in, read once.
+      const names = [...new Set(kept.flatMap((record) => (isTraffic(record) ? [transcriptName(record.agent)] : [])))];
+      const transcripts = new Map(await Promise.all(names.map(async (name) => [name, await transcriptLines(folder, name, deps.log)] as const)));
+      return kept
+        .map((record) => (isTraffic(record) ? withTraffic(record, transcripts.get(transcriptName(record.agent)) ?? NO_LINES) : record))
+        .sort((a, b) => a.at - b.at || a.seq - b.seq);
     },
   };
 }

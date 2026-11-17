@@ -230,7 +230,7 @@ describe("a turn's runs, its folder, and the world", () => {
     // A record cut off where the process ended, then a later record whole, as an append after a restart leaves them.
     const run = b.turns.runs.record(USER, turn)!;
     const disk = (await b.turns.files.turnDisk({ user: USER, chat: CHAT, session: run.session, turn }))!;
-    const file = join(disk, "transcripts", "trace.jsonl");
+    const file = join(disk, "trace.jsonl");
     const kept = await Bun.file(file).text();
     const [first, ...rest] = kept.split("\n");
     await Bun.write(file, [first, `${JSON.stringify(whole[0]).slice(0, 40)}`, ...rest].join("\n"));

@@ -46,6 +46,10 @@ export const JOBS_FOLDER = "jobs";
 export const TURNS_FOLDER = "turns";
 /** The folders of a turn agents may write in (plan §5.1). */
 export const TURN_WRITABLE = ["queries", "scratch", "output", "cache"] as const;
+/** The turn's transcripts (plan §5.3): each agent's own traffic, RPH's alone to write (`<definition>-<handle>.jsonl`, and the requests beside them). */
+export const TURN_TRANSCRIPTS = "transcripts";
+/** RPE's trace of the turn at the top of its folder (or of a session's, for a job of no turn): each record as RPH gave it, its agent's traffic left to the transcripts. */
+export const TURN_TRACE = "trace.jsonl";
 /** Generated files at the top of a chat's folder (plan §5.1). */
 export const GENERATED_FILES: readonly string[] = ["LORE-INDEX.md", "PROMPT-MAP.md"];
 

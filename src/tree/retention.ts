@@ -1,6 +1,7 @@
 // Retention (plan §5.5). The newest turn folders of each chat are kept whole; each older one keeps its
-// record (`turn.json`), what it released (`output/`) and its transcripts (`transcripts/`), and drops the
-// rest: the snapshots of the chat and the lore, which nothing reads as a source of truth and which can
+// record (`turn.json`), what it released (`output/`), its transcripts (`transcripts/`) and RPE's trace of
+// what ran (`trace.jsonl`, which reads the transcripts), and drops the rest: the snapshots of the chat
+// and the lore, which nothing reads as a source of truth and which can
 // be made again. Session files are not pruned here: they stay until the chat is deleted or he prunes them
 // (`prune.ts`). How many turn folders are kept whole is the setting `retention.turnFolders` (`settings.ts`).
 // Pruning runs when asked for and after a turn, never during one: the folders of turns going on are left
@@ -13,13 +14,13 @@
 import { lstat, readFile, readdir, rm } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import type { TreeChats } from "./chats";
-import { SESSIONS_FOLDER, TURNS_FOLDER } from "./layout";
+import { SESSIONS_FOLDER, TURN_TRACE, TURN_TRANSCRIPTS, TURNS_FOLDER } from "./layout";
 import { type TreeSettings, treeSettingsOf } from "./settings";
 import { receivedOf, TURN_RECORD } from "./turn-record";
 import { type ChatLocation, locate } from "./view";
 
-/** What an older turn folder keeps (plan §5.5): its record, what it released, and its transcripts. */
-export const KEPT_IN_OLD_TURNS: readonly string[] = [TURN_RECORD, "output", "transcripts"];
+/** What an older turn folder keeps (plan §5.5): its record, what it released, its transcripts, and the trace that reads them; never a snapshot that can be made again. */
+export const KEPT_IN_OLD_TURNS: readonly string[] = [TURN_RECORD, "output", TURN_TRANSCRIPTS, TURN_TRACE];
 
 export type RetentionSettings = Pick<TreeSettings, "turnFolders">;
 
