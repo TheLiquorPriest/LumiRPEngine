@@ -10,6 +10,7 @@ import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { areaPlaceAt, cellIndex, doorTerrainsOf, entranceCell, gridOf, standingGrid, type Cell } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
+import { MAP_DEFAULTS, type MapConfig } from "../../../shared/map-config";
 import type { GridTrigger } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
@@ -81,11 +82,12 @@ export function walkOn(ctx: ReadContext, ground: Ground, entity: EntityId, from:
  * The squares of the grid of `scope` seen from a cell within a radius, as play stands (the
  * `space.sight` service): the pack's one sight, which the panel's fog and the POV's seen squares
  * (`engine/seen.ts`) read. Doors not open and footprints that block the view shut it; the POV, who
- * looks, never does. By index.
+ * looks, never does. A square in the dark (its light, `light.ts`, at the chat's map settings
+ * `config`) is not seen. By index.
  */
-export function sightFor(source: GroundSource, scope: PlaceId, from: Cell, radius: number): number[] {
-  const ground = groundAt(source, scope);
-  return ground ? sightFrom(ground.drawn, ground.moving, squareOf(from), radius, [source.world.pov]) : [];
+export function sightFor(source: GroundSource, scope: PlaceId, from: Cell, radius: number, config: Readonly<MapConfig> = MAP_DEFAULTS): number[] {
+  const ground = groundAt(source, scope, config);
+  return ground ? sightFrom(ground.drawn, ground.moving, squareOf(from), radius, [source.world.pov]).filter((i) => !ground.drawn.dark.has(i)) : [];
 }
 
 /**

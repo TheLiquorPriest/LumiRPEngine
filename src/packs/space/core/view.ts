@@ -195,8 +195,8 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null,
   const fields = own(state.entities, world.pov)?.fields;
   const pov = stand && typeof fields?.x === "number" && typeof fields.y === "number" && cellIndex(stand.grid, { x: fields.x, y: fields.y }) !== null ? { x: fields.x, y: fields.y } : undefined;
   const ids = [...children.values()].flat().filter(filter.drawn).sort(byShownId(filter));
-  // What the POV sees from where it stands now, while the grid system tracks sight (DESIGN §7).
-  const sight = settings.grid.movement && stand && pov ? new Set(sightFor(ctx, stand.scope, pov, settings.grid.sightRadius)) : new Set<number>();
+  // What the POV sees from where it stands now, while the grid system tracks sight (DESIGN §7): nothing in the dark.
+  const sight = settings.grid.movement && stand && pov ? new Set(sightFor(ctx, stand.scope, pov, settings.grid.sightRadius, config)) : new Set<number>();
   const trail = (id: PlaceId): MapScopeView["trail"] => [
     ...(roots.length > 0 ? [{ id: null, name: WORLD_SCOPE_NAME }] : []),
     ...placePath(world, id)
