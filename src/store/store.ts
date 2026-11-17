@@ -1565,6 +1565,26 @@ export class UserStore {
     return marked.size;
   }
 
+  /** What was heard of a chat (`row`) that a comparison of `shown` (taken as `after`), read once `upto` was heard, does not take. */
+  private untaken(row: ChatDb, shown: readonly ShownMessage[], after: readonly PathEntry[], upto: number): Heard {
+    const heard = JSON.parse(row.heard) as Heard;
+    const marks = new Map(shown.map((m) => [m.id, m.hidden]));
+    const showing = new Map(after.map((e) => [e.message, e]));
+    const out: Heard = {};
+    for (const [message, entry] of Object.entries(heard)) {
+      const at = entry.at ?? 0;
+      const now = showing.get(message);
+      // Heard after the path was read: that path could not show it.
+      if (at > upto) out[message] = entry;
+      else if (now !== undefined) {
+        // A mark the path gives no mark for stays where it differs from the one the comparison takes: none, not hidden.
+        const hidden = entry.hidden === true && marks.get(message) === undefined ? true : undefined;
+        hear(out, message, hidden, Object.fromEntries(Object.entries(entry.edits ?? {}).filter(([turn, hash]) => !(now.turn === turn && now.hash === hash))), at);
+      }
+    }
+    return out;
+  }
+
   /**
    * How many marks and edits of the chat's messages RPE has heard (`markHidden`, `heardEdit`), ever; 0 for a chat the store does not
    * know. A caller reads it before it reads the chat's path, and hands it to the comparison of that path (`sync`), which then keeps

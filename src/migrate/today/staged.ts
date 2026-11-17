@@ -6,7 +6,7 @@ import type { ChatId, MessageId, UserId } from "../../shared/ids";
 import { runDir } from "../../shared/ids";
 import type { JsonObject } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import type { ActionRequest } from "../../shared/protocol";
+import type { ActionRequest } from "./wire";
 import type { HostPort } from "../../shared/host";
 import { readStoredJson } from "../../worlds/stored-json";
 
