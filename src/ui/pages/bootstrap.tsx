@@ -14,7 +14,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { BootstrapBatchReply, BootstrapChatReply, BootstrapJobShown, BootstrapQuestion, BootstrapStartShown, CarriedBootstrap, DoneEnoughShown, FactNotKnown, JobView, MessageStretch } from "../../shared/api";
-import { useApp } from "../app";
+import { type UiApp, useApp } from "../app";
 import { Badge, Banner, Button, Pre, Row, Section } from "../atoms";
 import type { RpeClient } from "../client";
 import { counted, errorWords, num, tokenWords, when } from "../words";
@@ -191,9 +191,14 @@ function factLines(facts: DoneEnoughShown): { id: keyof DoneEnoughShown; title: 
   ];
 }
 
-/** The six facts, each with its counts or why it is not known; none says whether it holds. One whose records could not be read leads to the chat's warnings in RPE's log on Runtime, where the failure is. */
-export function FactsView(props: { facts: DoneEnoughShown; chat: string }) {
-  const app = useApp();
+/** Opens the chat's warnings in RPE's log on Runtime, where a fact whose records could not be read says what failed. */
+function openLog(app: UiApp, chat: string): void {
+  app.go({ page: "runtime", chat, at: logAt({ chat, level: "warn" }) });
+}
+
+/** The six facts, each with its counts or why it is not known; none says whether it holds. One whose records could not be read leads to RPE's log (`onLog`), where the failure is. */
+export function FactsView(props: { facts: DoneEnoughShown; onLog?(): void }) {
+  const { onLog } = props;
   return (
     <div class="lre-stack" data-facts="true">
       {factLines(props.facts).map(({ id, title, fact, lines }) => (
@@ -206,12 +211,14 @@ export function FactsView(props: { facts: DoneEnoughShown; chat: string }) {
               </p>
             ))
           ) : (
-            <div class="lre-inline rpe-wrap">
-              <p class="rpe-fact">{NOT_KNOWN_WORDS[fact.why]}</p>
-              <Button small kind="ghost" onClick={() => app.go({ page: "runtime", chat: props.chat, at: logAt({ chat: props.chat, level: "warn" }) })}>
-                Open the log
-              </Button>
-            </div>
+            <p class="rpe-fact">
+              {NOT_KNOWN_WORDS[fact.why]}
+              {onLog === undefined ? null : (
+                <Button small kind="ghost" onClick={onLog}>
+                  Open the log
+                </Button>
+              )}
+            </p>
           )}
         </div>
       ))}
@@ -328,6 +335,7 @@ export function StartForm(props: { start: BootstrapStartShown; underWay: readonl
 /** A job held at its token limit: what it reached and spent and how that is counted, what its agent last wrote, the six facts now, and his two answers. Given for the Jobs page and the Migration page too. */
 export function QuestionView(props: { question: BootstrapQuestion; chat: string; busy: boolean; onAnswer(word: AnswerWord): void }) {
   const { question: q } = props;
+  const app = useApp();
   const [typed, setTyped] = useState(String(q.more));
   const more = wholeOf(typed);
   return (
@@ -338,7 +346,7 @@ export function QuestionView(props: { question: BootstrapQuestion; chat: string;
         </span>
       </Banner>
       {q.wrote === null ? null : <Pre text={q.wrote} mono={false} />}
-      <FactsView facts={q.facts} chat={props.chat} />
+      <FactsView facts={q.facts} onLog={() => openLog(app, props.chat)} />
       <label class="lre-stack">
         <span class="rpe-caption">Tokens more before it asks again</span>
         <input class="lre-input" inputMode="numeric" value={typed} onInput={(e) => setTyped((e.currentTarget as HTMLInputElement).value)} />
@@ -365,6 +373,7 @@ export interface BootstrapViewProps {
 /** The chat's bootstrap: the six facts, the start, the questions of jobs that wait, and its jobs a page at a time. */
 export function BootstrapView(props: BootstrapViewProps) {
   const { shown } = props;
+  const app = useApp();
   const answer = shown.chat;
   return (
     <Section id="bootstrap" title="Bootstrap">
@@ -395,7 +404,7 @@ export function BootstrapView(props: BootstrapViewProps) {
           {answer.questions.map((q) => (
             <QuestionView key={q.job} question={q} chat={answer.chat} busy={shown.answering === q.job} onAnswer={(word) => props.onAnswer(q.job, word)} />
           ))}
-          <FactsView facts={answer.facts} chat={answer.chat} />
+          <FactsView facts={answer.facts} onLog={() => openLog(app, answer.chat)} />
           <StartForm start={answer.start} underWay={answer.underWay} busy={shown.starting} label="Start a bootstrap job" onStart={props.onStart} />
           <span class="rpe-caption">Its jobs, newest first</span>
           {shown.jobs.length === 0 ? (
