@@ -580,6 +580,17 @@ export function reportText(report: MigrationReport): string {
         for (const d of dead) lines.push(`  ${d.agent}: ${d.tool}`);
       } else if (ownFiles.toolsChecked === false && ownFiles.agents > 0) lines.push("", "His agents' tools were not checked: this run was not given the tree's list of tools.");
     }
+    // Pins whose agent is not the one they were pinned for in today's build, each said with the file (R-174): none is lost, each is still used in play or waits on a switch.
+    const pinned = report.carried.pins ?? null;
+    if (pinned !== null && pinned.forAuthor.length > 0) {
+      lines.push("", "Pins for a role RPE has no agent for, pinned for the Author so they are still used in play:");
+      for (const p of pinned.forAuthor) lines.push(`  ${p.file}: pinned for ${p.role} in today's build`);
+    }
+    if (pinned !== null && pinned.forOwn.length > 0) {
+      lines.push("", "Pins for one of his own agents, which is carried switched off, so the file is handed to it once he switches it on:");
+      for (const p of pinned.forOwn) lines.push(`  ${p.file}: ${p.agent}`);
+    }
+    if (pinned !== null && pinned.carried + pinned.removed + pinned.takenOut > 0) lines.push("", "Today's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");
     if (connections !== null) lines.push("", "why" in connections ? `Connections: none carried, as ${connections.why}.` : `Connections carried from runtime ${connections.runtime}: ${connections.connections.join(", ") || "none"}; ${connections.keys} key(s), ${connections.signins} sign-in(s), ${connections.headerValues} header value(s); the default ${connections.default ?? "not set"}${connections.defaultKept === true ? " (chosen in RPE: kept over today's)" : ""}${connections.kept > 0 ? `; ${connections.kept} key(s), sign-in(s) and header value(s) RPE already held, which differ from today's, kept as RPE's` : ""}${connections.leftOut > 0 ? `; ${connections.leftOut} entry(s) left out, as today's runtime leaves them out` : ""}.`);
     if (connections !== null && !("why" in connections) && (connections.changedInRpe ?? []).length > 0) lines.push(`Connections changed or removed in RPE since a run carried them, left as RPE has them (today's copy not taken): ${(connections.changedInRpe ?? []).join(", ")}.`);
     // What today's side reset, removed or rotated since an earlier run: followed in RPE where RPE's copy was still what a run put there; else left as RPE has it.
