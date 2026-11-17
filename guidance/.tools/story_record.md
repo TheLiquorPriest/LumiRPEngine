@@ -2,8 +2,8 @@
 description: story_record as the model is told it - what the tool does, and what each of its arguments is.
 arguments:
   operations: The operations, recorded in order, in one write.
-  operations.op: "The operation: premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record or overlay."
-  operations.id: "The item to change, by the id the record gave it. Leave it out to add a new beat, thread, player note, future, canon or retcon. A chapter or scene named by no id is the current one, while it is open; once it is closed, name it by its id."
+  operations.op: "Required in every operation, one that changes an item by its id too: the part it writes, one of premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record or overlay."
+  operations.id: "The item to change, by the id the record gave it, with the op of its part. Leave it out to add a new beat, thread, player note, future, canon or retcon. A chapter or scene named by no id is the current one, while it is open; once it is closed, name it by its id. record: a turn's record by the id story_query prints for it (rec: and the turn's id), the same as naming its turn."
   operations.new: "chapter, scene: true to open a new one."
   operations.text: "beat: what happened, as fact. thread: the open question, the promise or the setup. player: what you learned about the player. future: what is to happen. canon: what was established. retcon: what changed. premise: what this story is. overlay: what the story has changed in the entry."
   operations.title: "chapter, scene: its name."
@@ -41,9 +41,9 @@ arguments:
   operations.why: "record: why you decided it. retcon: why it changed. With drop: why it goes."
   operations.rulings: "record: any ruling."
   operations.consents: "record: any consent."
-  operations.turn: "record: the turn it is the record of, by its id; left out, this turn. A call outside any turn names the turn it writes the record of."
+  operations.turn: "record: the turn it is the record of, by its id or by its record's id (rec: and the turn's id); left out, this turn. A call outside any turn names the turn it writes the record of."
   operations.entry: "overlay: the lore entry's id, as the lore map shows it."
   operations.close: "chapter, scene: true to close it. thread: true when it is paid off; say how in state. future: true when it has come to pass. false opens it again."
   operations.drop: "true to strike the item from the record; say why."
 ---
-Writes the story record, as many operations as you need in one call: the premise, chapters and scenes with their summaries, beats, threads, arcs, the player model, futures, canon, retcons, your record of the turn, and an overlay on a lore entry. Every write belongs to this turn: if the turn is swiped or deleted, its writes go with it. A call made outside a turn (a job of yours, or a question put to you) writes as its own change, kept after the chat's newest reply and not given up when a turn is swiped; name the message a beat, a chapter or a scene stands at, since there is no turn's reply to leave it to, and name the turn whose record you write, since none is yours. Messages are numbered as the story so far numbers them. The answer gives each item's id, what was written, and how the item now stands.
+Writes the story record, as many operations as you need in one call: the premise, chapters and scenes with their summaries, beats, threads, arcs, the player model, futures, canon, retcons, your record of the turn, and an overlay on a lore entry. A record operation writes at least one of intent, decided, why, rulings, consents and next; its source, precision and standing go with them. Every write belongs to this turn: if the turn is swiped or deleted, its writes go with it. A call made outside a turn (a job of yours, or a question put to you) writes as its own change, kept after the chat's newest reply and not given up when a turn is swiped; name the message a beat, a chapter or a scene stands at, since there is no turn's reply to leave it to, and name the turn whose record you write, since none is yours. Messages are numbered as the story so far numbers them. The answer gives each item's id, what was written, and how the item now stands.

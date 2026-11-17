@@ -158,7 +158,7 @@ const PROVENANCE_KEYS = ["source", "precision", "standing"] as const;
 function takesOf(op: string): { reads: string[]; needs: string[]; newNeeds: string[] } {
   if (op === OVERLAY) return { reads: ["entry", "text"], needs: ["entry", "text"], newNeeds: [] };
   const def = BY_NAME.get(op) as OpDef;
-  const finding = def.finds === "new-or-id" ? ["id"] : def.finds === "span" ? ["id", "new"] : def.finds === "arc" ? ["who"] : [];
+  const finding = def.finds === "new-or-id" || def.finds === "record" ? ["id"] : def.finds === "span" ? ["id", "new"] : def.finds === "arc" ? ["who"] : [];
   return { reads: [...new Set([...finding, ...Object.keys(def.args)])], needs: def.finds === "arc" ? ["who"] : [], newNeeds: [...(def.needs ?? [])] };
 }
 
@@ -242,12 +242,14 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
     }
     case "premise":
     case "record": {
-      // The turn whose record it is: the one a call names (a job of his own writes the record of a turn it was told of), else the call's own.
-      const named = def.finds === "record" ? value.turn : undefined;
+      // The turn whose record it is: the one a call names (a job of his own writes the record of a turn it was told of), by the turn's
+      // id or by its record's id as answers print it (`rec:<turn>`), in `turn` or `id`; else the call's own.
+      const said = def.finds === "record" ? (value.turn ?? (typeof named === "string" ? named : undefined)) : undefined;
       if (def.finds === "record") delete value.turn;
       if (Object.keys(value).length === 0) return { line: "needs_one", fields: { n, op: def.name, fields: Object.keys(def.args).filter((f) => f !== "turn") } };
       if (def.finds === "premise") return { item: keyedItemId("premise", ""), fresh: false };
-      const turn = typeof named === "string" && named.trim() !== "" ? named.trim() : r.turn;
+      const words = typeof said === "string" ? said.trim() : "";
+      const turn = words === "" ? r.turn : words.startsWith(RECORD_ID) ? words.slice(RECORD_ID.length) : words;
       // A call that belongs to no turn and names none has no record to write.
       if (turn === null) return { line: "turn_needed", fields: { n, op: def.name } };
       if (!r.record.at.turns.includes(turn)) return { line: "no_turn", fields: { id: turn } };
@@ -255,6 +257,9 @@ function findItem(r: Reading, def: OpDef, n: number, raw: JsonObject, value: Jso
     }
   }
 }
+
+/** The start of a turn's record's id (`rec:<turn>`), as answers print it. */
+const RECORD_ID = keyedItemId("record", "");
 
 /** What a write carries to the store: its provenance as a change keeps it; none where the writer's own stands. */
 const stampOn = (prov: Provenance | undefined): { stamp?: Stamp } => (prov === undefined ? {} : { stamp: stampOf(prov) });
