@@ -512,8 +512,9 @@ function namesOf(ctx: ReadContext, who: JsonValue | undefined): string {
   return listOf(ids(who) ? who.map((id) => nameOf(ctx, id)) : []);
 }
 
-const HOW_WORDS: Record<Holding["how"], string> = { authored: "from the start", witnessed: "witnessed", told: "told", inferred: "inferred", guessed: "a guess" };
-const BELIEF_WORDS: Record<Holding["belief"], string> = { true: "taken as true", false: "taken as false", uncertain: "unsure" };
+/** How a holding is held and how far it is believed, as phrases (the lines `mind_how_*` and `mind_belief_*`). */
+const howWords = (how: Holding["how"]): string => say(`mind_how_${how}`);
+const beliefWords = (belief: Holding["belief"]): string => say(`mind_belief_${belief}`);
 
 /** `minds.fact`: a fact the minds can hold, recorded whole; one already held is replaced whole, and whoever holds it still does. */
 const knowledgeFact: EventTypeDef<PackEvent> = {
@@ -586,8 +587,8 @@ const learning: EventTypeDef<PackEvent> = {
     const who = ids(d.who) ? d.who : [];
     if (!isHolding(h)) return say("mind_learned", { who: namesOf(ctx, who), claim: claimOf(ctx, d.fact) });
     const kept = h.keptFrom === "everyone" ? say("mind_kept_everyone") : h.keptFrom && h.keptFrom.length > 0 ? say("mind_kept_from", { who: namesOf(ctx, h.keptFrom) }) : null;
-    const how = h.how === "told" && h.by !== null ? say("mind_told_by", { who: nameOf(ctx, h.by) }) : HOW_WORDS[h.how];
-    const parts = [how, BELIEF_WORDS[h.belief], say("mind_sure", { pct: Math.round(h.confidence * 100) }), kept].filter((p): p is string => p !== null);
+    const how = h.how === "told" && h.by !== null ? say("mind_told_by", { who: nameOf(ctx, h.by) }) : howWords(h.how);
+    const parts = [how, beliefWords(h.belief), say("mind_sure", { pct: Math.round(h.confidence * 100) }), kept].filter((p): p is string => p !== null && p !== "");
     return say("mind_holds", { who: namesOf(ctx, who), ...(who.length === 1 ? { one: true } : {}), claim: claimOf(ctx, d.fact), parts: parts.join(", ") });
   },
 };

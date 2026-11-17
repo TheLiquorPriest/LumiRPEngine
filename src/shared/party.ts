@@ -34,9 +34,6 @@ export const TIER_LABELS: Readonly<Record<PartyTier, string>> = { core: "Core", 
 /** Each tier as a count names one or more of it ("1 companion"), and as a line names one ("as a companion"). */
 export const TIER_NOUNS: Readonly<Record<PartyTier, [string, string]>> = { core: ["core member", "core members"], companion: ["companion", "companions"], hired: ["hired hand", "hired hands"], ally: ["ally", "allies"] };
 
-/** How the People section marks someone in the party ("Danny Okafor (party companion) is here."). */
-export const TIER_MARKS: Readonly<Record<PartyTier, string>> = { core: "core party", companion: "party companion", hired: "hired hand", ally: "party ally" };
-
 /** What each tier means (assess-party §6.1), as the party's Rules tell it. */
 export const TIER_MEANINGS: Readonly<Record<PartyTier, string>> = {
   core: "Comes along wherever you go. Sees the party's money and uses its things.",

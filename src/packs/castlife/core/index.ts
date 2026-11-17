@@ -40,7 +40,7 @@ import { clockPaused, fightHoldsClock, speedThrough } from "../../../engine/time
 import type { AgentInstant, EventTypeDef, FeedLine, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { PlayerBlock, RoutineAwareness, RoutineEditOp, RoutineMode, RoutineRole, RoutineSociability, SkipBlock, SkipLife } from "../../../shared/routines";
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
-import { partyTierIn, TIER_MARKS } from "../../../shared/party";
+import { partyTierIn } from "../../../shared/party";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
 import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
@@ -1732,7 +1732,7 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     const doing = typeof act === "string" ? activityPhrase(shownActivity(ctx, id, act)) : null;
     // Their party tier, then their titles where an organization ties them to the POV (ORG-SPEC §3.15): "Marcus Delgado (owner of Alder Automotive, where you work)".
     const tier = partyTierIn(e.relations, pov);
-    const marks = [...(tier ? [TIER_MARKS[tier]] : []), ...(optionalQuery(ctx, "orgs.titles")?.(ctx, id) ?? [])];
+    const marks = [...(tier ? [say(`word_tier_${tier}`)] : []), ...(optionalQuery(ctx, "orgs.titles")?.(ctx, id) ?? [])];
     const name = marks.length > 0 ? `${e.name} (${marks.join("; ")})` : e.name;
     lines.push({ text: life ? `${name} ${life.reads}.` : say("feed_name_is_here_act", { name: name, act: doing, if_act: !!(doing) }), known: "pov" });
     // How they regard the POV follows them; a body the POV knows of holds no regard to voice.

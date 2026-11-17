@@ -38,20 +38,20 @@ function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null 
   switch (f.type) {
     case "number":
     case "money":
-      if (typeof v !== "number" || !Number.isFinite(v)) return "is not a number";
+      if (typeof v !== "number" || !Number.isFinite(v)) return say("lint_is_not_a_number");
       if (f.min !== undefined && v < f.min) return `is below ${f.min}`;
       if (f.max !== undefined && v > f.max) return `is above ${f.max}`;
-      return f.type === "money" && !Number.isInteger(v) ? "is not whole minor units" : null;
+      return f.type === "money" && !Number.isInteger(v) ? say("lint_is_not_whole_minor_units") : null;
     case "text":
       return typeof v === "string" ? null : "is not text";
     case "bool":
-      return typeof v === "boolean" ? null : "is not true or false";
+      return typeof v === "boolean" ? null : say("lint_is_not_true_or_false");
     case "enum":
-      return typeof v === "string" && (f.values ?? []).includes(v) ? null : `is not one of ${(f.values ?? []).join(", ")}`;
+      return typeof v === "string" && (f.values ?? []).includes(v) ? null : say("lint_is_not_one_of_values", { values: (f.values ?? []).join(", ") });
     case "ref":
-      return typeof v === "string" && (own(world.entities, v) || own(world.places, v)) ? null : "names nothing in the world";
+      return typeof v === "string" && (own(world.entities, v) || own(world.places, v)) ? null : say("lint_names_nothing_in_the_world");
     case "list":
-      return Array.isArray(v) || isRecord(v) ? null : "is not a list";
+      return Array.isArray(v) || isRecord(v) ? null : say("lint_is_not_a_list");
     default:
       return null;
   }
@@ -107,7 +107,7 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
       }
       const label = f.label ?? name;
       const o = kind.overlay;
-      const from = o ? `Your ${o.mine.label} kind doesn't define ${label}: it has it from the packs' ${o.pack.label}, which it lies over, so the value is read as theirs.` : `None of your kinds defines ${label}: it is a pack's field, read as theirs.`;
+      const from = o ? say("lint_your_mine_kind_doesnt_define_label_it", { mine: o.mine.label, label: label, pack: o.pack.label }) : say("lint_none_of_your_kinds_defines_label_it", { label: label });
       warn(at, f.type === "ref" ? "refs" : "types", say("lint_name_s_label_problem_from_name_something", { name: e.name, label: label, problem: problem, from: from, mine: o ? o.mine.label : undefined, if_ref: f.type === "ref", if_o: !!(o) }));
     }
     for (const r of e.relations) if (!known(r.to)) err(`entities.${id}.relations`, "refs", say("lint_name_s_type_relation_names_r_which", { name: e.name, type: r.type, r: r.to }));
@@ -241,7 +241,7 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
       if (raw === undefined || (isRecord(raw) && Object.values(raw).some((v) => typeof v === "string" && v.startsWith("=")))) return;
       const classes = classOf(raw);
       const who = `A spawn in ${path}`;
-      const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet → values map.` }];
+      const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: say("lint_who_gives_a_class_that_isnt_a", { who: who }) }];
       for (const p of problems) warn(`${path}.${i}`, p.code, say("lint_message_the_spawn_is_refused", { message: p.message }));
     });
   }

@@ -105,6 +105,7 @@ keys:
   org_log_*: what an organization's own History says it did (admitting, removing, appointing, delegating, renaming, a vote or a request and its end, founding, restructuring, winding up, merging, entry and keys, hiring, pay, a party's changes) and the phrases those fill in, and what an act for an organization records beside its effects (a payment, a sale, a loan, a project's step, a property's let or sale); each is filled with what it names
   eng_*: what the engine says of what it did or could not do, apart from a refused change (the turn's beats, a formula or dice that does not read, a selector or a field value that does not fit, a ruleset or a world draft that is wrong, what a thing's provenance reads, a thing tidied, what someone may not do for an organization) - each is filled with what it names
   fight_*: what a fight's own narrator lines and notes say (a fight starts, a round and whose turn, you are out of it, it peters out or is over) and what the narrator is told to do with it; each is filled with what it names
+  word_*, mind_how_*, mind_belief_*: the single words and phrases the lines above are filled with (a delinquency stage, an account's status, an entry on a credit report, a pay basis, what was done to a card or a standing payment, a party tier, how a holding is held and believed, whose a line is)
   feedset_*: a section's settings in this chat as one sentence (the feedset line, with its parts feedset_scope_*, feedset_cut, feedset_uncapped, feedset_sources); feed_marked_scene and feed_marked_gm mark a fact beyond the player character's knowledge
 ---
 credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
@@ -2591,3 +2592,68 @@ feed_fact_answer: {{#you}}answer{{/you}}{{^you}}answers{{/you}}
 org_motion_ended_passed: carried
 org_motion_ended_failed: failed
 org_motion_ended_withdrawn: was withdrawn
+lint_is_not_a_number: is not a number
+lint_is_not_whole_minor_units: is not whole minor units
+lint_is_not_true_or_false: is not true or false
+lint_is_not_one_of_values: is not one of {{values}}
+lint_names_nothing_in_the_world: names nothing in the world
+lint_is_not_a_list: is not a list
+lint_your_mine_kind_doesnt_define_label_it: Your {{mine}} kind doesn't define {{label}}: it has it from the packs' {{pack}}, which it lies over, so the value is read as theirs.
+lint_none_of_your_kinds_defines_label_it: None of your kinds defines {{label}}: it is a pack's field, read as theirs.
+lint_who_gives_a_class_that_isnt_a: {{who}} gives a class that isn't a facet → values map.
+lint_the_world_has_no_lore_entry_lore: The world has no lore entry "{{lore}}".
+lint_the_world_has_no_track_track: The world has no track "{{track}}".
+lint_the_track_track_has_no_stage_stage: The track "{{track}}" has no stage "{{stage}}".
+lint_the_world_has_no_entity_entity: The world has no entity "{{entity}}".
+lint_name_has_no_field_field: {{name}} has no field "{{field}}".
+word_stage_current: up to date
+word_stage_late: late
+word_stage_30: 30 days past due
+word_stage_60: 60 days past due
+word_stage_90: 90 days past due
+word_stage_120: 120 days past due
+word_stage_collections: in collections
+word_stage_charged_off: charged off
+word_status_open: open
+word_status_frozen: frozen
+word_status_collections: in collections
+word_status_charged_off: charged off
+word_status_closed: closed
+word_status_paid_off: paid off
+word_status_matured: matured
+word_credit_inquiry: a credit inquiry
+word_credit_opened: a new account
+word_credit_on_time: a payment on time
+word_credit_late: a late payment
+word_credit_collections: an account in collections
+word_credit_charged_off: an account charged off
+word_credit_closed: a closed account
+word_credit_paid_off: an account paid off
+word_credit_declined: a declined application
+mind_how_authored: from the start
+mind_how_witnessed: witnessed
+mind_how_told: told
+mind_how_inferred: inferred
+mind_how_guessed: a guess
+mind_belief_true: taken as true
+mind_belief_false: taken as false
+mind_belief_uncertain: unsure
+word_basis_salary: a year
+word_basis_hourly: an hour
+word_basis_per_shift: a shift
+word_basis_commission: commission
+word_basis_tips: an hour in tips
+word_basis_stipend: a period
+word_card_frozen: Froze
+word_card_active: Unfroze
+word_card_lost: Reported lost
+word_flow_paused: Paused
+word_flow_ended: Cancelled
+word_flow_active: Resumed
+word_tier_core: core party
+word_tier_companion: party companion
+word_tier_hired: hired hand
+word_tier_ally: party ally
+word_whose_you: Your
+word_whose: {{name}}'s
+feed_title_for_employername_an_outside_employer_rate: {{title}} for {{#employerName}}{{employerName}}{{/employerName}}{{^employerName}}an outside employer{{/employerName}}, {{rate}} {{basis}}, paid {{#if_every}}nothing{{/if_every}}{{^if_every}}{{every}}{{/if_every}}.

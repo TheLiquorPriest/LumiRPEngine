@@ -206,19 +206,12 @@ function isCreditAccount(ctx: ReadContext, account: EntityId): boolean {
   return c !== null && isCredit(c);
 }
 
-/** What a delinquency stage, an account's status and a credit history entry say, as the Journal words them. */
-const STAGE_WORDS: Record<DelinquencyStage, string> = { current: "up to date", late: "late", "30": "30 days past due", "60": "60 days past due", "90": "90 days past due", "120": "120 days past due", collections: "in collections", charged_off: "charged off" };
-const STATUS_WORDS: Record<AccountStatus, string> = { open: "open", frozen: "frozen", collections: "in collections", charged_off: "charged off", closed: "closed", paid_off: "paid off", matured: "matured" };
-const CREDIT_WORDS: Record<CreditEntry["kind"], string> = { inquiry: "a credit inquiry", opened: "a new account", on_time: "a payment on time", late: "a late payment", collections: "an account in collections", charged_off: "an account charged off", closed: "a closed account", paid_off: "an account paid off", declined: "a declined application" };
+/** What a delinquency stage, an account's status and a credit history entry say, as the Journal words them (the lines `word_stage_*`, `word_status_*`, `word_credit_*`); an id the lines lack reads as the id in words. */
+const wordOf = (family: string, id: string): string => say(`word_${family}_${id}`) || id.replace(/_/g, " ");
 
-/** Whose a person's line is: "Your" for the person it is for, else their name's. */
+/** Whose a person's line is: the person it is for, or another's (the lines `word_whose_you` and `word_whose`). */
 function whoseFor(ctx: ReadContext, viewer: EntityId | undefined, person: string): string {
-  return viewer === person ? "Your" : `${own(ctx.state.entities, person)?.name ?? person}'s`;
-}
-
-/** A finance word by its id, else the id in words. */
-function wordsOf(words: Readonly<Record<string, string>>, id: string): string {
-  return own(words, id) ?? id.replace(/_/g, " ");
+  return viewer === person ? say("word_whose_you") : say("word_whose", { name: own(ctx.state.entities, person)?.name ?? person });
 }
 
 export const EVENTS: EventTypeDef<PackEvent>[] = [
@@ -338,7 +331,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       for (const k of ["streak", "ontime", "late30", "late60", "late90"] as const) if (typeof e.data[k] === "number") next[k] = e.data[k];
       cycles[account] = next;
     },
-    describe: (e, ctx) => say("money_stage", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), stage: wordsOf(STAGE_WORDS, str(e, "stage")) }),
+    describe: (e, ctx) => say("money_stage", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), stage: wordOf("stage", str(e, "stage")) }),
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {
@@ -420,7 +413,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
     },
     // A credit report is its person's alone: the player reads their own, never anyone else's.
-    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : say("money_credit_report", { whose: whoseFor(ctx, viewer, str(e, "person")), kind: wordsOf(CREDIT_WORDS, str(e, "kind")) })),
+    describe: (e, ctx, viewer) => (viewer !== undefined && viewer !== str(e, "person") ? "" : say("money_credit_report", { whose: whoseFor(ctx, viewer, str(e, "person")), kind: wordOf("credit", str(e, "kind")) })),
   },
   {
     // A person's monthly score.
@@ -476,7 +469,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str(e, "account")] = str(e, "status") as AccountStatus;
     },
-    describe: (e, ctx) => say("money_status", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), status: wordsOf(STATUS_WORDS, str(e, "status")) }),
+    describe: (e, ctx) => say("money_status", { account: own(ctx.state.entities, str(e, "account"))?.name ?? str(e, "account"), status: wordOf("status", str(e, "status")) }),
     coarsen: { key: (e) => str(e, "account"), merge: (_a, b) => b },
   },
   {

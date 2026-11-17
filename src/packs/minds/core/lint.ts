@@ -104,17 +104,17 @@ function configIssues(world: WorldDoc, registry: Registry | undefined): LintIssu
 
 /** What a fact id names in the world, in words for lint, or null when the world has it. */
 function missingRef(world: WorldDoc, registry: Registry | undefined, ref: FactRef): string | null {
-  if (ref.kind === "lore") return hasOwn(world.lore, ref.lore) ? null : `The world has no lore entry "${ref.lore}".`;
+  if (ref.kind === "lore") return hasOwn(world.lore, ref.lore) ? null : say("lint_the_world_has_no_lore_entry_lore", { lore: ref.lore });
   if (ref.kind === "track") {
     const track = hasOwn(world.tracks, ref.track) ? world.tracks[ref.track] : undefined;
-    if (!track) return `The world has no track "${ref.track}".`;
-    return hasOwn(track.stages, ref.stage) ? null : `The track "${track.label}" has no stage "${ref.stage}".`;
+    if (!track) return say("lint_the_world_has_no_track_track", { track: ref.track });
+    return hasOwn(track.stages, ref.stage) ? null : say("lint_the_track_track_has_no_stage_stage", { track: track.label, stage: ref.stage });
   }
   if (ref.kind === "field") {
     const e = hasOwn(world.entities, ref.entity) ? world.entities[ref.entity] : undefined;
-    if (!e) return `The world has no entity "${ref.entity}".`;
+    if (!e) return say("lint_the_world_has_no_entity_entity", { entity: ref.entity });
     const defined = hasOwn(e.fields, ref.field) || (registry !== undefined && fieldDef(registry, world, e.kind, ref.field) !== undefined);
-    return defined ? null : `${e.name} has no field "${ref.field}".`;
+    return defined ? null : say("lint_name_has_no_field_field", { name: e.name, field: ref.field });
   }
   return null;
 }

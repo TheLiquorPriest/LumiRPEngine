@@ -1009,7 +1009,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   if (problem !== null) return reject("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
   if (!(rate > 0)) return reject("bad_amount", say("why_a_raise_needs_a_new_rate_above"));
-  const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", say("org_log_set_worker_s_pay_to_rate_basis", { worker: labelOf(ctx, job.worker), rate: api.money(ctx, rate), basis: BASIS_WORDS[job.basis] }), [job.worker])] as LedgerEvent[];
+  const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", say("org_log_set_worker_s_pay_to_rate_basis", { worker: labelOf(ctx, job.worker), rate: api.money(ctx, rate), basis: basisWords(job.basis) }), [job.worker])] as LedgerEvent[];
   if (strOf(own(ctx.state.entities, job.id)?.fields.pay_every) !== UNPAID) return said;
   // An unpaid title starts to pay from today, never back to its start: on the employer's pay schedule, else its staff's own cycle, else monthly.
   const cal = calendarOf(ctx.world);
@@ -1112,7 +1112,8 @@ function paySchedule(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
 
 // ---------------------------------------------------------------- views
 
-const BASIS_WORDS: Record<PayBasis, string> = { salary: "a year", hourly: "an hour", per_shift: "a shift", commission: "commission", tips: "an hour in tips", stipend: "a period" };
+/** What a pay basis reads as after an amount (the lines `word_basis_*`). */
+const basisWords = (basis: PayBasis): string => say(`word_basis_${basis}`);
 
 /** A job as the dashboards list it, with its next payday and what a period pays when that's known ahead; its employer as `viewer` may read it. */
 export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: EntityId | null): JobView {
@@ -1138,7 +1139,7 @@ export function jobView(ctx: ReadContext, api: FinanceApi, job: Job, viewer: Ent
     worker: shownLabel(ctx, viewer, job.worker),
     workerId: job.worker,
     basis: job.basis,
-    pay: job.every === null ? "Unpaid" : job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
+    pay: job.every === null ? "Unpaid" : job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${basisWords(job.basis)}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
     rate: job.rate,
     payEvery: job.every ?? UNPAID,
     schedule: job.every === null ? "unpaid" : job.every.replace("_", " "),
@@ -1264,6 +1265,6 @@ export function registerEmployment(r: FinanceRegistry): void {
   r.summary((ctx, who) =>
     allJobs(ctx)
       .filter((j) => j.worker === who && j.status === "active")
-      .map((j) => `${j.title} for ${employerName(ctx, j, null) || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`),
+      .map((j) => say("feed_title_for_employername_an_outside_employer_rate", { title: j.title, employerName: employerName(ctx, j, null), rate: api.money(ctx, j.rate), basis: basisWords(j.basis), every: j.every !== null ? j.every.replace("_", " ") : undefined, if_every: j.every === null })),
   );
 }
