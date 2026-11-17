@@ -13,12 +13,13 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { KNOWLEDGE_CHANGES, MINDS_EVENTS } from "../../../shared/minds";
 import type { EffectDef, ProposalChannelDef, ReadContext, Rejection } from "../../../engine/registry";
 import { isFact } from "./events";
+import { say } from "../../../engine/lines";
 
 /** Why a knowledge proposal isn't one, or null: its facts whole, and a learning for the player character alone. */
 function knowledgeProblem(p: JsonObject, ctx: ReadContext): Rejection | null {
   const learn = p.learn;
-  if (!Array.isArray(p.facts) || !p.facts.every((f) => isFact(f))) return { code: "bad_proposal", reason: "a knowledge change carries its facts whole" };
-  if (!isRecord(learn) || typeof learn.fact !== "string" || !Array.isArray(learn.who) || learn.who.length !== 1 || learn.who[0] !== ctx.world.pov) return { code: "bad_proposal", reason: "a knowledge change is the player character's own learning" };
+  if (!Array.isArray(p.facts) || !p.facts.every((f) => isFact(f))) return { code: "bad_proposal", reason: say("why_a_knowledge_change_carries_its_facts_whole") };
+  if (!isRecord(learn) || typeof learn.fact !== "string" || !Array.isArray(learn.who) || learn.who.length !== 1 || learn.who[0] !== ctx.world.pov) return { code: "bad_proposal", reason: say("why_a_knowledge_change_is_the_player_characters") };
   return null;
 }
 
@@ -27,7 +28,7 @@ export const knowEffect: EffectDef = {
   type: "minds.know",
   args: ["facts", "learn"],
   resolve: (a) => {
-    if (!Array.isArray(a.facts) || !isRecord(a.learn)) return { code: "bad_effect", reason: "minds.know needs the facts and the learning" };
+    if (!Array.isArray(a.facts) || !isRecord(a.learn)) return { code: "bad_effect", reason: say("why_minds_know_needs_the_facts_and_the") };
     const facts: LedgerEvent[] = a.facts.map((fact: JsonValue) => ({ type: MINDS_EVENTS.fact, data: { fact } }));
     return [...facts, { type: MINDS_EVENTS.learn, data: a.learn }];
   },

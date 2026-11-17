@@ -816,12 +816,12 @@ export function nextTaxPeriod(ctx: Pick<ReadContext, "world">, clock: number): s
  * proprietorship has exactly one owner. Nothing when it is so already.
  */
 function restructureEvents(api: FinanceApi, ctx: ReadContext, business: EntityId, structure: string): LedgerEvent[] | Rejection {
-  if (!(STRUCTURES as readonly string[]).includes(structure)) return { code: "bad_structure", reason: `a company's structure is one of ${STRUCTURES.join(", ")}` };
+  if (!(STRUCTURES as readonly string[]).includes(structure)) return { code: "bad_structure", reason: say("why_a_companys_structure_is_one_of_join", { join: STRUCTURES.join(", ") }) };
   if (structure === structureOf(ctx.state, business)) return [];
   const holders = api.ownersOf(ctx.state, business).filter((o) => api.shareOf(ctx.state, business, o.party) > 0);
-  if (structure === "sole_proprietorship" && new Set(holders.map((o) => o.party)).size !== 1) return { code: "owners", reason: `A sole proprietorship has exactly one owner; ${labelOf(ctx, business)} has ${new Set(holders.map((o) => o.party)).size}` };
+  if (structure === "sole_proprietorship" && new Set(holders.map((o) => o.party)).size !== 1) return { code: "owners", reason: say("why_a_sole_proprietorship_has_exactly_one_owner", { business: labelOf(ctx, business), size: new Set(holders.map((o) => o.party)).size }) };
   const scorp = structure === "s_corp" ? sCorpProblem(api, ctx, business, holders.map((o) => o.party)) : null;
-  if (scorp !== null) return { code: "scorp_holders", reason: `${labelOf(ctx, business)} can't become an S corporation: ${scorp}` };
+  if (scorp !== null) return { code: "scorp_holders", reason: say("why_business_cant_become_an_s_corporation_scorp", { business: labelOf(ctx, business), scorp: scorp }) };
   const taxed = taxStructureAt(ctx, business, ctx.state.clock);
   const set = (field: string, value: string): LedgerEvent => ({ type: "set", entity: business, field, value });
   return [set("structure", structure), ...(taxed === structure ? [set("structure_before", ""), set("structure_from", "")] : [set("structure_before", taxed), set("structure_from", nextTaxPeriod(ctx, ctx.state.clock))])];
@@ -862,7 +862,7 @@ export function sCorpProblem(api: FinanceApi, ctx: ReadContext, business: Entity
 export function sCorpRefusal(api: FinanceApi, ctx: ReadContext, business: EntityId, holders: readonly EntityId[]): Rejection | null {
   if (structureOf(ctx.state, business) !== "s_corp") return null;
   const problem = sCorpProblem(api, ctx, business, holders);
-  return problem === null ? null : { code: "scorp_holders", reason: `${labelOf(ctx, business)} is an S corporation: ${problem}` };
+  return problem === null ? null : { code: "scorp_holders", reason: say("why_business_is_an_s_corporation_problem", { business: labelOf(ctx, business), problem: problem }) };
 }
 
 /**
@@ -964,7 +964,7 @@ const PERIODS_KEPT = 8;
  */
 export const ESTIMATED_TAX: EventTypeDef<PackEvent> = {
   type: "economy.estimated_tax",
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && Array.isArray(e.data.periods) ? null : ({ code: "bad_event", reason: "estimated tax needs its payer and the periods it pays" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && Array.isArray(e.data.periods) ? null : ({ code: "bad_event", reason: say("why_estimated_tax_needs_its_payer_and_the") } satisfies Rejection)),
   apply: (e, state, ctx) => {
     const party = str(e, "party");
     const all = sliceRecord(state, "economy", "estimated");
@@ -1270,13 +1270,13 @@ function consolidateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string
   const by = strOf(a.by);
   const said = typeof a.elect === "string" ? a.elect.trim().toLowerCase() : a.elect;
   const elect = !(said === false || said === "no" || said === "off" || said === "false" || said === "stop");
-  if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", COMPANY_KIND)) return { code: "not_company", reason: `${labelOf(ctx, org)} isn't a company` };
+  if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, org)?.kind ?? "", COMPANY_KIND)) return { code: "not_company", reason: say("why_name_isnt_a_company", { name: labelOf(ctx, org) }) };
   if (by !== "" && by !== org) {
     const may = mayAct(ctx, by, org, "org.govern");
     if (!may.ok) return { code: "not_allowed", reason: may.reason };
   }
-  if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: `Only a C corporation that pays income tax files a consolidated return; ${labelOf(ctx, org)} is ${isExempt(ctx, org) ? "exempt" : (STRUCTURE_WORDS[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org))}` };
-  if ((own(ctx.state.entities, org)?.fields.consolidated_return === true) === elect) return { code: "no_change", reason: `${labelOf(ctx, org)} ${elect ? "already files" : "doesn't file"} a consolidated return` };
+  if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: say("why_only_a_c_corporation_that_pays_income", { org: labelOf(ctx, org), org2: STRUCTURE_WORDS[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org), org3: !!(isExempt(ctx, org)) }) };
+  if ((own(ctx.state.entities, org)?.fields.consolidated_return === true) === elect) return { code: "no_change", reason: say("why_org_already_filesdoesnt_file_a_consolidated_return", { org: labelOf(ctx, org), elect: !!(elect) }) };
   const members = affiliatedGroup(ctx, api, org, ctx.state.clock).map((m) => m.id);
   const text = elect ? `Elected to file one consolidated return${members.length > 0 ? ` with ${members.map((m) => labelOf(ctx, m)).join(", ")}` : ""}` : "Stopped filing a consolidated return";
   const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text, names: members }) ?? []) : [];

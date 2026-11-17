@@ -459,7 +459,7 @@ export function occurrenceAmount(hooks: FinanceHooks, ctx: ReadContext, flow: Fl
     else cents = Math.min(owed, Math.max(0, (a.due === "minimum" ? cycle.minimum : cycle.closing) - cycle.paid));
   } else {
     const provider = own(hooks.amounts, a.provider);
-    if (!provider) return reject("no_provider", `nothing works out ${flow.label}`);
+    if (!provider) return reject("no_provider", say("why_no_provider_for_flow", { flow: flow.label }));
     const made = provider(ctx, flow, at, rng);
     // Nothing this time: only what an earlier occurrence deferred falls due.
     if (made === null) return deferred > 0 ? { cents: deferred } : null;
@@ -512,7 +512,7 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
   const targets = splitAmount(cents, flow.splits ?? [], flow.to);
   // A party with no account named: as their preferences choose (a bill pays from an account, never wallet cash).
   if ("party" in from && !("account" in from)) {
-    if (targets.length !== 1 || !targets[0]) return reject("bad_flow", `${flow.label} splits a payment that has no account to pay from`);
+    if (targets.length !== 1 || !targets[0]) return reject("bad_flow", say("why_flow_splits_a_payment_that_has_no", { flow: flow.label }));
     const land = landing(ctx, targets[0].to, cents);
     const side = sideOf(ctx, targets[0].to);
     const payee = "party" in side && !("account" in side) ? side.party : undefined;
@@ -521,10 +521,10 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
   }
   const source = "account" in from ? from.account : outsideAccount(from.outside);
   if ("account" in from) {
-    if (statusOf(ctx.state, from.account) !== "open") return reject("declined", `${labelOf(ctx, from.account)} is ${statusOf(ctx.state, from.account).replace(/_/g, " ")}`);
-    if (traitsOf(ctx, from.account)?.locked) return reject("locked", `${labelOf(ctx, from.account)} can't be drawn on`);
+    if (statusOf(ctx.state, from.account) !== "open") return reject("declined", say("why_account_is_g", { account: labelOf(ctx, from.account), g: statusOf(ctx.state, from.account).replace(/_/g, " ") }));
+    if (traitsOf(ctx, from.account)?.locked) return reject("locked", say("why_account_cant_be_drawn_on", { account: labelOf(ctx, from.account) }));
     const room = availableOf(ctx, from.account) + (overdraft ? overdraftRoom(ctx, from.account) : 0);
-    if (accountLevel(ctx, from.account) >= 2 && room < cents) return reject("declined", `${labelOf(ctx, from.account)} can't cover ${formatMoney(cents, ctx.world.currency)}`);
+    if (accountLevel(ctx, from.account) >= 2 && room < cents) return reject("declined", say("why_account_cant_cover_currency", { account: labelOf(ctx, from.account), currency: formatMoney(cents, ctx.world.currency) }));
   }
   const lines: PostingLine[] = [{ account: source, amount: -cents }];
   const extra: LedgerEvent[] = [];
@@ -543,7 +543,7 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
     else merged.push({ ...l });
   }
   const finalLines = merged.filter((l) => l.amount !== 0);
-  if (finalLines.length < 2) return reject("bad_flow", `${flow.label} pays itself`);
+  if (finalLines.length < 2) return reject("bad_flow", say("why_flow_pays_itself", { flow: flow.label }));
   // Into overdraft, the account's own policy applies: the gap from its linked account first, or its overdraft fee after.
   const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents, at) : { before: [], after: [] };
   return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty, payer: sideParty(from) }), ...extra, ...od.after]), paid: cents };
@@ -553,11 +553,11 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
 function providedAttempt(ctx: ReadContext, flow: Flow, made: FlowPosting, at: number): Attempt | Rejection {
   const lines = (made.lines ?? []).filter((l) => l.amount !== 0);
   if (lines.length === 0) return { events: made.extra ?? [], paid: 0 };
-  if (lines.reduce((a, l) => a + l.amount, 0) !== 0) return reject("unbalanced", `${flow.label} doesn't balance`);
+  if (lines.reduce((a, l) => a + l.amount, 0) !== 0) return reject("unbalanced", say("why_flow_doesnt_balance", { flow: flow.label }));
   for (const l of lines) {
     if (l.amount >= 0 || !own(ctx.state.entities, l.account)) continue;
-    if (statusOf(ctx.state, l.account) !== "open") return reject("declined", `${labelOf(ctx, l.account)} is ${statusOf(ctx.state, l.account)}`);
-    if (accountLevel(ctx, l.account) >= 2 && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) return reject("declined", `${labelOf(ctx, l.account)} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+    if (statusOf(ctx.state, l.account) !== "open") return reject("declined", say("why_account_is_g", { account: labelOf(ctx, l.account), g: statusOf(ctx.state, l.account) }));
+    if (accountLevel(ctx, l.account) >= 2 && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) return reject("declined", say("why_account_cant_cover_currency", { account: labelOf(ctx, l.account), currency: formatMoney(-l.amount, ctx.world.currency) }));
   }
   const memo = made.memo ?? flow.label;
   const card: LedgerEvent[] = lines.filter((l) => l.amount > 0 && traitsOf(ctx, l.account)?.liability).map((l) => ({ type: FINANCE_EVENTS.cardPaid, data: { account: l.account, cents: l.amount } }));
@@ -752,7 +752,7 @@ function bounceFee(ctx: ReadContext, flow: Flow, cents: number, at: number, over
 function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents: number, at: number, overdraft: boolean): Attempt | Rejection {
   const shares = flow.shares ?? [];
   const total = shares.reduce((a, s) => a + Math.max(0, s.pct), 0);
-  if (total <= 0) return reject("bad_flow", `${flow.label} has no shares`);
+  if (total <= 0) return reject("bad_flow", say("why_flow_has_no_shares", { flow: flow.label }));
   const trial = new Run(ctx);
   const events: LedgerEvent[] = [];
   let left = cents;
@@ -762,8 +762,8 @@ function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents:
     if (part <= 0) continue;
     const share: Flow = { ...flow, from: s.from ?? s.party, label: flow.label };
     const paid = payFrom(hooks, trial.ctx, share, s.from ?? s.party, part, at, overdraft);
-    if ("code" in paid) return reject("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
-    if (trial.emit(asUnit(paid.events)).length === 0) return reject("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
+    if ("code" in paid) return reject("declined", say("why_party_s_share_reason", { party: labelOf(ctx, s.party), reason: paid.reason }));
+    if (trial.emit(asUnit(paid.events)).length === 0) return reject("declined", say("why_party_s_share_cant_be_covered", { party: labelOf(ctx, s.party) }));
     events.push(...paid.events);
   }
   return { events: asUnit(events), paid: cents };

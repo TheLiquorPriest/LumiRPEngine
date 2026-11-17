@@ -55,6 +55,7 @@ import { classOf, classProblems } from "./selector";
 import type { Working } from "./working";
 import { labelOf, optionalService, own } from "./pack-kit";
 import { movedElsewhere, relocate } from "./relocate";
+import { say } from "./lines";
 
 export interface EffectScope {
   /** Name → entity id (`self`, `actor`, `target`, ref params). */
@@ -171,7 +172,7 @@ function followsXp(reg: Registry, world: WorldDoc, kind: KindId, field: string):
   const prog = levelProgression(reg, world, kind, field);
   if (!prog) return null;
   const label = (id: string): string => fieldDef(reg, world, kind, id)?.label ?? id.replace(/_/g, " ");
-  return reject("follows_xp", `${label(prog.levelField)} follows ${label(prog.xpField)}: change ${label(prog.xpField)} instead`);
+  return reject("follows_xp", say("why_levelfield_follows_xpfield_change_xpfield_instead", { levelField: label(prog.levelField), xpField: label(prog.xpField) }));
 }
 
 /**
@@ -181,14 +182,14 @@ function followsXp(reg: Registry, world: WorldDoc, kind: KindId, field: string):
  */
 function change(reg: Registry, w: Working, entity: EntityId, field: string, delta: number): LedgerEvent[] | Rejection {
   const e = own(w.state.entities, entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
   const def = fieldDef(reg, w.world, e.kind, field);
-  if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
+  if (def?.derived !== undefined) return reject("derived", say("why_field_is_derived", { field: field }));
   const follows = followsXp(reg, w.world, e.kind, field);
   if (follows) return follows;
   const stored = own(e.fields, field);
   const cur = stored ?? def?.default ?? (def?.pool ? (poolMax(reg, w.ctx, entity, def.pool) ?? 0) : 0);
-  if (typeof cur !== "number") return reject("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
+  if (typeof cur !== "number") return reject("not_numeric", say("why_name_s_g_is_not_a_number", { name: e.name, g: field.replace(/_/g, " ") }));
   const b = fieldBounds(reg, w.ctx, entity, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur) return [];
@@ -203,34 +204,34 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const entity = text(args.entity);
       const field = text(args.field);
       const e = own(state.entities, entity);
-      if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-      if (field === "") return reject("bad_args", "set needs a field");
+      if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
+      if (field === "") return reject("bad_args", say("why_set_needs_a_field"));
       const def = fieldDef(reg, world, e.kind, field);
       let value: JsonValue = args.value ?? null;
-      if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
+      if (def?.derived !== undefined) return reject("derived", say("why_field_is_derived", { field: field }));
       const follows = followsXp(reg, world, e.kind, field);
       if (follows) return follows;
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
         const b = fieldBounds(reg, w.ctx, entity, def);
         value = clampNumber(value, b.min, b.max);
       }
-      if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value)) return reject("bad_value", `${field} must be one of ${def.values.join(", ")}`);
+      if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value)) return reject("bad_value", say("why_field_must_be_one_of_values", { field: field, values: def.values.join(", ") }));
       return [{ type: "set", entity, field, value }];
     }
     case "add": {
-      if (typeof args.delta !== "number" || !Number.isFinite(args.delta)) return reject("bad_args", "add needs a numeric delta");
+      if (typeof args.delta !== "number" || !Number.isFinite(args.delta)) return reject("bad_args", say("why_add_needs_a_numeric_delta"));
       return change(reg, w, text(args.entity), text(args.field), args.delta);
     }
     case "recover": {
       const entity = text(args.entity);
       const field = text(args.field);
       const e = own(state.entities, entity);
-      if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
+      if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
       const pool = fieldDef(reg, world, e.kind, field)?.pool;
-      if (!pool) return reject("not_pool", `${e.name}'s ${field.replace(/_/g, " ")} isn't a pool`);
-      if (args.amount !== undefined && (typeof args.amount !== "number" || !Number.isFinite(args.amount))) return reject("bad_args", "recover needs a numeric amount");
+      if (!pool) return reject("not_pool", say("why_name_s_g_isnt_a_pool", { name: e.name, g: field.replace(/_/g, " ") }));
+      if (args.amount !== undefined && (typeof args.amount !== "number" || !Number.isFinite(args.amount))) return reject("bad_args", say("why_recover_needs_a_numeric_amount"));
       const top = poolMax(reg, w.ctx, entity, pool);
-      if (top === null) return reject("no_max", `${e.name}'s ${field.replace(/_/g, " ")} has no max to recover to`);
+      if (top === null) return reject("no_max", say("why_name_s_g_has_no_max_to", { name: e.name, g: field.replace(/_/g, " ") }));
       const read = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity } });
       const now = Number(read.lookup(["self", field])) || 0;
       // By the amount given, else the pool's own recovery, else back to the max. Recovery never lowers a pool.
@@ -241,19 +242,19 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const entity = text(args.entity);
       const id = text(args.progression);
       const prog = own(world.ruleset?.progression ?? {}, id);
-      if (!prog) return reject("unknown_progression", `no progression ${id}`);
+      if (!prog) return reject("unknown_progression", say("why_no_progression_id", { id: id }));
       const e = own(state.entities, entity);
-      if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-      if (!progressionApplies(reg, world, prog, e.kind)) return reject("not_applicable", `${e.name} has no ${prog.label}`);
-      if (typeof args.amount !== "number" || !Number.isFinite(args.amount)) return reject("bad_args", "award needs a numeric amount");
+      if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
+      if (!progressionApplies(reg, world, prog, e.kind)) return reject("not_applicable", say("why_name_has_no_prog", { name: e.name, prog: prog.label }));
+      if (typeof args.amount !== "number" || !Number.isFinite(args.amount)) return reject("bad_args", say("why_award_needs_a_numeric_amount"));
       return change(reg, w, entity, prog.xpField, args.amount);
     }
     case "move": {
       const entity = text(args.entity);
       const to = text(args.to);
       const e = own(state.entities, entity);
-      if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-      if (!own(world.places, to)) return reject("missing_place", `no place ${labelOf(w, to)}`);
+      if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
+      if (!own(world.places, to)) return reject("missing_place", say("why_no_place_place", { place: labelOf(w, to) }));
       const here = placeOfEntity(state, entity);
       // The party follows the player character, except anyone this read or edit already sent
       // somewhere else, even somewhere still `together` with it (its flat inside the building).
@@ -273,18 +274,18 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
     }
     case "link": {
       const rel = text(args.rel);
-      if (rel === "") return reject("bad_args", "link needs rel");
+      if (rel === "") return reject("bad_args", say("why_link_needs_rel"));
       return linkEvents(reg, world, state, { rel, from: text(args.from), to: text(args.to), ...(isRecord(args.fields) ? { fields: args.fields as JsonObject } : {}), ...(typeof args.until === "number" ? { until: Math.round(args.until) } : {}) });
     }
     case "unlink":
       return unlinkEvents(reg, world, state, { rel: text(args.rel), from: text(args.from), to: text(args.to) });
     case "spawn": {
       const kind = text(args.kind);
-      if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind))) return reject("missing_kind", `no kind ${kind}`);
+      if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind))) return reject("missing_kind", say("why_no_kind_kind", { kind: kind }));
       const id = text(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text(args.name)).slice(0, 10)}`;
       // A tier that is none of the world's is the world's spawn tier; asked to take values as given, it is refused with the world's tiers instead, and a tier left out is the spawn tier, handed back as filled in.
       const said = text(args.tier);
-      if (asGiven && said !== "" && !tierOf(world, said)) return { ...reject("bad_tier", `no tier ${said}`), said, choices: tiersInOrder(world).map(([tier]) => tier) };
+      if (asGiven && said !== "" && !tierOf(world, said)) return { ...reject("bad_tier", say("why_no_tier_tier", { tier: said })), said, choices: tiersInOrder(world).map(([tier]) => tier) };
       const tier = tierOf(world, said) ? said : spawnTierOf(world);
       const filledTier = asGiven && said === "";
       const fields: JsonObject = isRecord(args.fields) ? { ...(args.fields as JsonObject) } : {};
@@ -318,13 +319,13 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
     case "stage":
       return [{ type: "stage", track: text(args.track), to: text(args.to) }];
     case "post": {
-      if (!Array.isArray(args.lines)) return reject("bad_args", "post needs lines");
+      if (!Array.isArray(args.lines)) return reject("bad_args", say("why_post_needs_lines"));
       const lines: PostingLine[] = objects(args.lines).map((l) => ({ account: text(l.account), amount: typeof l.amount === "number" ? Math.round(l.amount) : NaN }));
       return [{ type: "post", lines, memo: text(args.memo) }];
     }
     case "signal": {
       const cls = text(args.class);
-      if (!(INTERRUPT_CLASSES as readonly string[]).includes(cls)) return reject("bad_args", `unknown interrupt class ${cls}`);
+      if (!(INTERRUPT_CLASSES as readonly string[]).includes(cls)) return reject("bad_args", say("why_unknown_interrupt_class_cls", { cls: cls }));
       const data: JsonObject = { class: cls as InterruptClass, text: text(args.text) };
       if (typeof args.entity === "string") data.entity = args.entity;
       if (typeof args.visibility === "string") data.visibility = args.visibility;
@@ -347,13 +348,13 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
  * which applies its outcome's effects itself (`applyEffects`).
  */
 export function resolveEffect(reg: Registry, w: Working, spec: EffectSpec, scope: EffectScope): LedgerEvent[] | Rejection {
-  if (spec.type === "check") return reject("bad_effect", "a check applies its outcomes; run it through applyEffects");
+  if (spec.type === "check") return reject("bad_effect", say("why_a_check_applies_its_outcomes_run_it"));
   // Arguments get their own generator: rolls there never shift the draws the effect itself makes.
   const args = scope.literal ? { ...spec.args } : evalArgs(spec.args ?? {}, scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars, rng: scope.rng.fork("args") }), { self: w.world.pov, ...scope.bindings });
   const core = coreEffect(reg, w, spec.type, args, scope.rng, scope.asGiven === true);
   if (core) return core;
   const def = reg.effects.get(spec.type);
-  if (!def) return reject("unknown_effect", `unknown effect ${spec.type}`);
+  if (!def) return reject("unknown_effect", say("why_unknown_effect_type", { type: spec.type }));
   return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {}, effect: { type: spec.type, args } });
 }
 
@@ -372,16 +373,16 @@ function effectList(v: JsonValue | undefined): EffectSpec[] {
  */
 function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectScope): EffectOutcome | Rejection {
   const depth = scope.depth ?? 0;
-  if (depth >= NESTING_CAP) return reject("too_deep", `effects nested past ${NESTING_CAP} levels`);
+  if (depth >= NESTING_CAP) return reject("too_deep", say("why_effects_nested_past_nesting_cap_levels", { nESTING_CAP: NESTING_CAP }));
   const a = spec.args ?? {};
   const bindings = { self: w.world.pov, ...scope.bindings };
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars });
   const actor = text(evalArg(a.actor ?? "self", env, bindings));
   const target = a.target === undefined ? null : text(evalArg(a.target, env, bindings));
   const def = checkOf(w.world, typeof a.check === "string" ? evalArg(a.check, env, bindings) : a.check);
-  if (!def) return reject("unknown_check", `no check ${typeof a.check === "string" ? a.check : "given"}`);
-  if (!own(w.state.entities, actor)) return reject("missing_entity", `no entity ${labelOf(w, actor)}`);
-  if (target !== null && !own(w.state.entities, target)) return reject("missing_entity", `no entity ${labelOf(w, target)}`);
+  if (!def) return reject("unknown_check", say("why_no_check_check_given", { check: a.check, string: typeof a.check === "string" }));
+  if (!own(w.state.entities, actor)) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, actor) }));
+  if (target !== null && !own(w.state.entities, target)) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, target) }));
   const rolling: Record<string, EntityId> = { ...scope.bindings, self: actor, actor, ...(target !== null ? { target } : {}) };
   const ready = readyCheck(reg, w.ctx, def, rolling, scope.vars);
   if ("code" in ready) return ready;

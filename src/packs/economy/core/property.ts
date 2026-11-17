@@ -41,6 +41,7 @@ import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
 import { actAs, asParam, mayAs } from "./acting";
 import { incomeValue } from "./revenue";
+import { say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -470,32 +471,32 @@ export interface PropertyBuy {
  */
 export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x: PropertyBuy): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, x.property);
-  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, x.property)}`);
-  if (!api.feature(ctx, x.party, "property")) return reject("level", "property isn't followed at this money level");
+  if (!e || e.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, x.property) }));
+  if (!api.feature(ctx, x.party, "property")) return reject("level", say("why_property_isnt_followed_at_this_money_level"));
   const { owners, shares } = payers(api, ctx.state, x.property);
-  if (owners.some((o) => o.party === x.party)) return reject("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
+  if (owners.some((o) => o.party === x.party)) return reject("already_yours", say("why_name_is_already_party_s", { name: e.name, party: labelOf(ctx, x.party) }));
   const asking = num(e.fields.asking_price);
-  if (owners.length > 0 && asking === undefined) return reject("not_for_sale", `${e.name} isn't for sale`);
+  if (owners.length > 0 && asking === undefined) return reject("not_for_sale", say("why_name_isnt_for_sale", { name: e.name }));
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   // The least it sells for: its asking price, else (nobody owns it) what it's worth.
   const floor = Math.round(asking ?? propertyValue(ctx.state, x.property));
   const price = Math.round(x.price ?? floor);
-  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
-  if (price < floor) return reject("declined", asking !== undefined ? `the sellers want ${money(floor)} for ${e.name}` : `${e.name} is worth ${money(floor)}`);
+  if (!(price > 0)) return reject("bad_amount", say("why_a_price_is_above_nothing"));
+  if (price < floor) return reject("declined", asking !== undefined ? say("why_the_sellers_want_floor_for_name", { floor: money(floor), name: e.name }) : say("why_name_is_worth_floor", { name: e.name, floor: money(floor) }));
   const down = Math.round(x.down ?? price);
-  if (down < 0 || down > price) return reject("bad_amount", "a down payment is between nothing and the price");
+  if (down < 0 || down > price) return reject("bad_amount", say("why_a_down_payment_is_between_nothing_and"));
   const financed = price - down;
   // A lender wants its share down, and lends for the terms it offers.
   const leastDown = Math.ceil((price * numOf(objOf(mortgageRow(ctx).down_payment_pct).minimum_conventional, 3)) / 100);
-  if (financed > 0 && down < leastDown) return reject("declined", `a lender wants at least ${money(leastDown)} down on ${e.name}`);
+  if (financed > 0 && down < leastDown) return reject("declined", say("why_a_lender_wants_at_least_leastdown_down", { leastDown: money(leastDown), name: e.name }));
   const terms = mortgageTerms(ctx);
   const term = x.term_months ?? terms[0] ?? 360;
   if (financed > 0 && !terms.includes(term)) {
     const years = [...terms].sort((a, b) => a - b).map((m) => String(Math.round((m / 12) * 10) / 10));
-    return reject("bad_term", `lenders offer mortgages over ${years.length > 1 ? `${years.slice(0, -1).join(", ")} or ${years[years.length - 1]}` : years[0]} years`);
+    return reject("bad_term", say("why_lenders_offer_mortgages_over_years_or_years2", { years: years.slice(0, -1).join(", "), years2: years[years.length - 1], years3: years[0], years4: years.length > 1 }));
   }
   const from = x.from ?? api.depositAccount(ctx, x.party);
-  if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+  if (!from) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: labelOf(ctx, x.party) }));
   const unusableFrom = api.mayUse(ctx, x.party, from, "from");
   if (unusableFrom) return unusableFrom;
   const events: LedgerEvent[] = [];
@@ -513,7 +514,7 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   if (financed > 0) lines.push({ account: api.outside(`closing:${x.property}`), amount: -financed });
   const loans = securedLoans(api, ctx.state, x.property);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
-  if (owed > price) return reject("declined", `the price doesn't cover what ${e.name}'s sellers owe on it`);
+  if (owed > price) return reject("declined", say("why_the_price_doesnt_cover_what_name_s", { name: e.name }));
   for (const l of loans) if (l.owed > 0) lines.push({ account: l.loan, amount: l.owed });
   const net = price - owed;
   const sellers = owners.length > 0 ? byShare(shares, net) : [];
@@ -552,12 +553,12 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
  */
 function priceOwned(api: FinanceApi, ctx: EffectContext | ReadContext, x: { party: EntityId; property: EntityId; price: number; from?: EntityId }): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, x.property);
-  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, x.property)}`);
-  if (!api.feature(ctx, x.party, "property")) return reject("level", "property isn't followed at this money level");
+  if (!e || e.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, x.property) }));
+  if (!api.feature(ctx, x.party, "property")) return reject("level", say("why_property_isnt_followed_at_this_money_level"));
   const price = Math.round(x.price);
-  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
+  if (!(price > 0)) return reject("bad_amount", say("why_a_price_is_above_nothing"));
   const from = x.from ?? api.depositAccount(ctx, x.party);
-  if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+  if (!from) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: labelOf(ctx, x.party) }));
   const unusable = api.mayUse(ctx, x.party, from, "from");
   if (unusable) return unusable;
   const lines: PostingLine[] = [
@@ -592,11 +593,11 @@ export interface PropertyMake {
 /** A property made of a place that isn't one yet (DESIGN §27.9): its name the place's, its value and owner as given. */
 export function makeProperty(ctx: ReadContext, x: PropertyMake): { entity: EntityId; events: LedgerEvent[] } | Rejection {
   const place = own(ctx.world.places, x.place);
-  if (!place) return reject("missing_place", `no place ${labelOf(ctx, x.place)}`);
+  if (!place) return reject("missing_place", say("why_no_place_place", { place: labelOf(ctx, x.place) }));
   const had = propertyAt(ctx.state, x.place);
   // Never naming it: Play's place sheet offers this on a place whose property the player may not know of.
-  if (had) return reject("already_property", `${place.name} is a property already`);
-  if (x.owner && !own(ctx.state.entities, x.owner)) return reject("missing_entity", `no owner ${labelOf(ctx, x.owner)}`);
+  if (had) return reject("already_property", say("why_name_is_a_property_already", { name: place.name }));
+  if (x.owner && !own(ctx.state.entities, x.owner)) return reject("missing_entity", say("why_no_owner_owner", { owner: labelOf(ctx, x.owner) }));
   let id = `property:${x.place}`;
   for (let i = 2; own(ctx.state.entities, id); i++) id = `property:${x.place}:${i}`;
   const value = Math.max(0, Math.round(x.value ?? 0));
@@ -690,25 +691,25 @@ export interface PropertySale {
 /** Selling one's share of a property: the buyer pays, the loans it secures are paid off from the proceeds, the rest lands where the seller says. */
 export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x: PropertySale): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, x.property);
-  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, x.property)}`);
-  if (!api.feature(ctx, x.party, "property")) return reject("level", "property isn't followed at this money level");
+  if (!e || e.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, x.property) }));
+  if (!api.feature(ctx, x.party, "property")) return reject("level", say("why_property_isnt_followed_at_this_money_level"));
   const owners = api.ownersOf(ctx.state, x.property);
   const mine = owners.find((o) => o.party === x.party);
   const share = api.shareOf(ctx.state, x.property, x.party);
-  if (!mine || share <= 0) return reject("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to sell`);
+  if (!mine || share <= 0) return reject("not_yours", say("why_name_isnt_party_s_to_sell", { name: e.name, party: labelOf(ctx, x.party) }));
   const price = Math.round(x.price);
-  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
-  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party)) return reject("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  if (!(price > 0)) return reject("bad_amount", say("why_a_price_is_above_nothing"));
+  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party)) return reject("missing_entity", say("why_no_buyer_buyer", { buyer: labelOf(ctx, x.buyer) }));
   // Someone outside the world can't hold a share beside the other owners: they buy a whole property from its only owner (§27.9).
-  if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0)) return reject("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
+  if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0)) return reject("needs_buyer", say("why_selling_a_share_of_name_needs_a", { name: e.name }));
   const to = x.to ?? api.depositAccount(ctx, x.party);
-  if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+  if (!to) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, x.party) }));
   const unusableTo = api.mayUse(ctx, x.party, to, "into");
   if (unusableTo) return unusableTo;
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   // A buyer outside the world pays what the market does: no more than the property is worth.
   const value = propertyValue(ctx.state, x.property);
-  if (x.buyer === undefined && price > value) return reject("declined", `no buyer outside the world pays more than ${money(value)} for ${e.name}`);
+  if (x.buyer === undefined && price > value) return reject("declined", say("why_no_buyer_outside_the_world_pays_more", { currency: money(value), name: e.name }));
   const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
   // The seller's own loans against it are settled from the proceeds.
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
@@ -768,20 +769,20 @@ export interface LeaseStart {
 /** A landlord lets a unit (`lease_start`): a rent flow from the tenant to the landlord's account, for a term from today. */
 export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, x.property);
-  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, x.property)}`);
-  if (!api.feature(ctx, x.party, "property")) return reject("level", "property isn't followed at this money level");
-  if (api.shareOf(ctx.state, x.property, x.party) <= 0) return reject("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to let`);
-  if (!own(ctx.state.entities, x.tenant) || x.tenant === x.party) return reject("missing_entity", `no tenant ${labelOf(ctx, x.tenant)}`);
+  if (!e || e.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, x.property) }));
+  if (!api.feature(ctx, x.party, "property")) return reject("level", say("why_property_isnt_followed_at_this_money_level"));
+  if (api.shareOf(ctx.state, x.property, x.party) <= 0) return reject("not_yours", say("why_name_isnt_party_s_to_let", { name: e.name, party: labelOf(ctx, x.party) }));
+  if (!own(ctx.state.entities, x.tenant) || x.tenant === x.party) return reject("missing_entity", say("why_no_tenant_tenant", { tenant: labelOf(ctx, x.tenant) }));
   const rent = Math.round(x.rent);
-  if (!(rent > 0)) return reject("bad_amount", "rent is above nothing");
+  if (!(rent > 0)) return reject("bad_amount", say("why_rent_is_above_nothing"));
   const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
-  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units) return reject("full", `every unit of ${e.name} is let`);
+  if (authoredLeases(ctx, x.property).filter((l) => holdsUnit(l, ctx.state.clock)).length >= units) return reject("full", say("why_every_unit_of_name_is_let", { name: e.name }));
   if (x.from) {
     const unusable = api.mayUse(ctx, x.tenant, x.from, "from");
     if (unusable) return unusable;
   }
   const side = rentSide(api, ctx, x.property);
-  if (!side) return reject("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
+  if (!side) return reject("no_account", say("why_party_has_no_account_the_rent_could", { party: labelOf(ctx, x.party) }));
   const months = Math.max(1, Math.round(x.months ?? 12));
   const day = Math.min(28, Math.max(1, Math.round(x.day ?? 1)));
   const last = clockOfDate(ctx.world, addMonths(ctx.world, ctx.state.clock, months));
@@ -810,13 +811,13 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
 /** Ending a lease (`lease_end`), by its landlord or its tenant: its last day is the one given, today at the earliest. */
 export function endLease(api: FinanceApi, ctx: ReadContext, party: EntityId, lease: EntityId, on?: string): LedgerEvent[] | Rejection {
   const f = own(ctx.state.entities, lease);
-  if (!f || f.kind !== "flow" || f.fields.flow_kind !== "rent") return reject("missing_lease", `no lease ${labelOf(ctx, lease)}`);
+  if (!f || f.kind !== "flow" || f.fields.flow_kind !== "rent") return reject("missing_lease", say("why_no_lease_lease", { lease: labelOf(ctx, lease) }));
   const property = strOf(f.fields.link);
   const from = strOf(f.fields.from);
   const tenant = from === party || api.ownersOf(ctx.state, from).some((o) => o.party === party);
-  if (!tenant && api.shareOf(ctx.state, property, party) <= 0) return reject("not_yours", `${f.name} isn't ${labelOf(ctx, party)}'s to end`);
+  if (!tenant && api.shareOf(ctx.state, property, party) <= 0) return reject("not_yours", say("why_name_isnt_party_s_to_end", { name: f.name, party: labelOf(ctx, party) }));
   const at = on ? clockOfDate(ctx.world, on) : ctx.state.clock;
-  if (at === null) return reject("bad_date", "a lease ends on a date (YYYY-MM-DD)");
+  if (at === null) return reject("bad_date", say("why_a_lease_ends_on_a_date_yyyy"));
   const date = dateText(ctx.world, Math.max(at, ctx.state.clock));
   return strOf(f.fields.end) === date ? [] : [{ type: "set", entity: lease, field: "end", value: date }];
 }
@@ -824,9 +825,9 @@ export function endLease(api: FinanceApi, ctx: ReadContext, party: EntityId, lea
 /** Listing a property for sale (`property_list`) by one of its owners: an asking price, so someone in the world may buy it, or none, taking it off the market. */
 export function listProperty(api: FinanceApi, ctx: ReadContext, party: EntityId, property: EntityId, price: number | undefined): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, property);
-  if (!e || e.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, property)}`);
-  if (!api.feature(ctx, party, "property")) return reject("level", "property isn't followed at this money level");
-  if (api.shareOf(ctx.state, property, party) <= 0) return reject("not_yours", `${e.name} isn't ${labelOf(ctx, party)}'s to sell`);
+  if (!e || e.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, property) }));
+  if (!api.feature(ctx, party, "property")) return reject("level", say("why_property_isnt_followed_at_this_money_level"));
+  if (api.shareOf(ctx.state, property, party) <= 0) return reject("not_yours", say("why_name_isnt_party_s_to_sell", { name: e.name, party: labelOf(ctx, party) }));
   const asking = price !== undefined && price > 0 ? Math.round(price) : null;
   return (num(e.fields.asking_price) ?? null) === asking ? [] : [{ type: "set", entity: property, field: "asking_price", value: asking }];
 }

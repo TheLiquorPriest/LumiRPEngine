@@ -564,7 +564,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // An older chat's market step (before holdings were rebuilt): a symbol's price in major units.
     type: "economy.price",
-    validate: (e) => (typeof e.data.price === "number" && e.data.price > 0 && safeKey(str(e, "symbol")) ? null : reject("bad_event", "price needs a symbol and a positive price")),
+    validate: (e) => (typeof e.data.price === "number" && e.data.price > 0 && safeKey(str(e, "symbol")) ? null : reject("bad_event", say("why_price_needs_a_symbol_and_a_positive"))),
     apply: (e, state) => {
       const economy = mutableSlice(state, "economy");
       const prices: JsonObject = isRecord(economy.prices) ? (economy.prices as JsonObject) : {};
@@ -579,10 +579,10 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     validate: (e) => {
       const price = e.data.price;
       const y = e.data.yield;
-      if (!safeKey(str(e, "asset"))) return reject("bad_event", "a quote names its asset");
-      if (price === undefined && y === undefined) return reject("bad_event", "a quote carries a price or a yield");
-      if (price !== undefined && !(typeof price === "number" && Number.isFinite(price) && price > 0)) return reject("bad_event", "a price is above zero");
-      return y === undefined || (typeof y === "number" && Number.isFinite(y) && y >= 0) ? null : reject("bad_event", "a yield is a percentage");
+      if (!safeKey(str(e, "asset"))) return reject("bad_event", say("why_a_quote_names_its_asset"));
+      if (price === undefined && y === undefined) return reject("bad_event", say("why_a_quote_carries_a_price_or_a"));
+      if (price !== undefined && !(typeof price === "number" && Number.isFinite(price) && price > 0)) return reject("bad_event", say("why_a_price_is_above_zero"));
+      return y === undefined || (typeof y === "number" && Number.isFinite(y) && y >= 0) ? null : reject("bad_event", say("why_a_yield_is_a_percentage"));
     },
     apply: (e, state) => {
       if (typeof e.data.price === "number") holdingsRecord(state, "quotes")[str(e, "asset")] = e.data.price;
@@ -601,10 +601,10 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     type: "economy.closes",
     validate: (e) => {
       const closes = e.data.closes;
-      if (!safeKey(str(e, "asset"))) return reject("bad_event", "closes name their asset");
-      if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT) return reject("bad_event", `closes are one to ${CLOSES_KEPT} months`);
+      if (!safeKey(str(e, "asset"))) return reject("bad_event", say("why_closes_name_their_asset"));
+      if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT) return reject("bad_event", say("why_closes_are_one_to_closes_kept_months", { cLOSES_KEPT: CLOSES_KEPT }));
       const each = closes.every((c) => Array.isArray(c) && c.length === 2 && typeof c[0] === "string" && /^-?\d{4,}-\d{2}$/.test(c[0]) && typeof c[1] === "number" && Number.isFinite(c[1]) && c[1] > 0);
-      return each ? null : reject("bad_event", "a close is a month (YYYY-MM) and a price above zero");
+      return each ? null : reject("bad_event", say("why_a_close_is_a_month_yyyy_mm"));
     },
     apply: (e, state) => {
       holdingsRecord(state, "closes")[str(e, "asset")] = e.data.closes ?? [];
@@ -624,9 +624,9 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => {
       const id = str(e, "asset");
       const def = readAssetDef(e.data.def);
-      if (!safeKey(id) || !def || def.class !== "option") return reject("bad_event", "a minted asset is an option contract");
-      if (own(configAssets(ctx.world), id)) return reject("bad_event", `${id} is an authored asset`);
-      return assetOf(ctx, def.underlying ?? "") ? null : reject("missing_asset", `no asset ${def.underlying ?? ""}`);
+      if (!safeKey(id) || !def || def.class !== "option") return reject("bad_event", say("why_a_minted_asset_is_an_option_contract"));
+      if (own(configAssets(ctx.world), id)) return reject("bad_event", say("why_id_is_an_authored_asset", { id: id }));
+      return assetOf(ctx, def.underlying ?? "") ? null : reject("missing_asset", say("why_no_asset_underlying", { underlying: def.underlying ?? "" }));
     },
     apply: (e, state) => {
       const def = readAssetDef(e.data.def);
@@ -639,10 +639,10 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
 /** The marks a GM sets: a price per unit, or for a bond the yield that price implies. */
 function setPrice(ctx: AssetBooks, asset: string, price: number): LedgerEvent[] | Rejection {
   const a = assetOf(ctx, asset);
-  if (!a) return reject("missing_asset", `no asset ${asset}`);
-  if (a.option) return reject("derived_price", `${a.label} is priced from ${a.option.underlying}; set its price instead`);
-  if (a.class === "property" || a.class === "business_stake") return reject("derived_price", `${a.label} is valued from what it stands for`);
-  if (!(Number.isFinite(price) && price > 0)) return reject("bad_amount", "a price is above zero");
+  if (!a) return reject("missing_asset", say("why_no_asset_underlying", { underlying: asset }));
+  if (a.option) return reject("derived_price", say("why_label_is_priced_from_underlying_set_its", { label: a.label, underlying: a.option.underlying }));
+  if (a.class === "property" || a.class === "business_stake") return reject("derived_price", say("why_label_is_valued_from_what_it_stands", { label: a.label }));
+  if (!(Number.isFinite(price) && price > 0)) return reject("bad_amount", say("why_a_price_is_above_zero"));
   if (a.bond) return [{ type: "economy.quote", data: { asset, yield: impliedYield(a.bond, price, ctx.state.clock, a.pays || 2) } }];
   return [{ type: "economy.quote", data: { asset, price: mark(price) } }];
 }

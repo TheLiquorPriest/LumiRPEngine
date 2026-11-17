@@ -20,6 +20,7 @@ import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
+import { say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -91,19 +92,19 @@ function endOfDay(ctx: ReadContext, date: string): number | Rejection {
     const cal = calendarOf(ctx.world);
     return clockAt(cal, dayIndexOfText(cal, date.slice(0, 10)) + 1, 0) - 1;
   } catch {
-    return refuse("bad_date", "until is a date (YYYY-MM-DD)");
+    return refuse("bad_date", say("why_until_is_a_date_yyyy_mm_dd"));
   }
 }
 
 /** An organization an op names, or why not. A dissolved one is still named: a change to it is recorded (`orgOpFindings` says so). */
 function orgProblem(ctx: ReadContext, org: EntityId): Rejection | null {
-  return orgTypeOf(ctx, org) === null || isGone(ctx.state, org) ? refuse("missing_entity", `no organization ${labelOf(ctx, org)}`) : null;
+  return orgTypeOf(ctx, org) === null || isGone(ctx.state, org) ? refuse("missing_entity", say("why_no_organization_org", { org: labelOf(ctx, org) })) : null;
 }
 
 /** A job that is no job, refused with the jobs there are. */
 function missingJob(ctx: ReadContext, job: EntityId): Rejection {
   const jobs = Object.keys(ctx.state.entities).filter((id) => jobOf(ctx, id) !== null).sort();
-  return { code: "missing_entity", reason: `no job ${labelOf(ctx, job)}`, choices: jobs, said: job };
+  return { code: "missing_entity", reason: say("why_no_job_job", { job: labelOf(ctx, job) }), choices: jobs, said: job };
 }
 
 /** What an op finds that the world's rules would have refused and the GM's change records all the same: a code and its values, for the tool that records it to say. */
@@ -137,7 +138,7 @@ function duesNow(ctx: ReadContext, org: EntityId): { every: (typeof DUES_EVERY)[
 
 /** An effect another lane's pack registers (shares, founding, entry, the party), or why this world can't run it. */
 function needs(ctx: ReadContext, type: string, what: string): Rejection | null {
-  return ctx.registry.effects.has(type) ? null : refuse("not_available", `this world can't ${what}`);
+  return ctx.registry.effects.has(type) ? null : refuse("not_available", say("why_this_world_cant_type", { type: what }));
 }
 
 /** The op's effects, or why not. */
@@ -201,7 +202,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     case "delegate": {
       const bad = orgProblem(ctx, op.org);
       if (bad) return bad;
-      if (!own(ctx.state.entities, op.to) || op.to === op.org) return refuse("missing_entity", `no one ${name(op.to)} to act for ${name(op.org)}`);
+      if (!own(ctx.state.entities, op.to) || op.to === op.org) return refuse("missing_entity", say("why_no_one_name_to_act_for_org", { name: name(op.to), org: name(op.org) }));
       // A delegation to oneself, and one that ends before today, are recorded as given (`orgOpFindings` says so).
       const until = op.until === undefined ? undefined : endOfDay(ctx, op.until);
       if (typeof until === "object") return until;
@@ -255,7 +256,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     case "transfer": {
       const bad = orgProblem(ctx, op.org);
       if (bad) return bad;
-      if (op.units === undefined && op.pct === undefined) return refuse("bad_args", "a transfer gives its units or its percentage");
+      if (op.units === undefined && op.pct === undefined) return refuse("bad_args", say("why_a_transfer_gives_its_units_or_its"));
       // Sold, or given for nothing: the price is the whole stake's.
       return [{ type: "economy.stake_sell", args: { business: op.org, party: op.from, buyer: op.to, ...(op.units !== undefined ? { units: Math.round(op.units) } : {}), ...(op.pct !== undefined ? { share: op.pct } : {}), price: Math.round(op.price ?? 0) } }];
     }
@@ -276,7 +277,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       const listing = listingIn(fields);
       if (!listing) {
         // On no market, the stake changes hands between the parties the call gives, as a sale off the market is recorded.
-        if (op.with === undefined) return refuse("bad_args", "a trade in a company on no market names the other party (with)");
+        if (op.with === undefined) return refuse("bad_args", say("why_a_trade_in_a_company_on_no"));
         return [{ type: "economy.stake_sell", args: { business: op.org, party: op.side === "sell" ? op.who : op.with, buyer: op.side === "sell" ? op.with : op.who, units: Math.round(op.units), price: 0 } }];
       }
       // Units held on the cap table, and none on the market, sell into its float as a stake with no buyer.

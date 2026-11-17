@@ -68,9 +68,9 @@ function nameOf(ctx: ReadContext, id: EntityId): string {
 const setDef: EventTypeDef<SetEvent> = {
   type: "set",
   validate: (e, ctx) => {
-    if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
-    if (!safeKey(e.field)) return reject("bad_field", "not a field name");
-    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject("bad_value", "a cap is a finite number") : null;
+    if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", say("why_no_entity_who", { who: e.entity }));
+    if (!safeKey(e.field)) return reject("bad_field", say("why_not_a_field_name"));
+    return e.atMost && (typeof e.value !== "number" || !Number.isFinite(e.value)) ? reject("bad_value", say("why_a_cap_is_a_finite_number")) : null;
   },
   apply: (e, state) => {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
@@ -92,10 +92,10 @@ const setDef: EventTypeDef<SetEvent> = {
 const addDef: EventTypeDef<AddEvent> = {
   type: "add",
   validate: (e, ctx) => {
-    if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
-    if (!safeKey(e.field)) return reject("bad_field", "not a field name");
+    if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", say("why_no_entity_who", { who: e.entity }));
+    if (!safeKey(e.field)) return reject("bad_field", say("why_not_a_field_name"));
     // A field that holds no number does not refuse the event: it applies and leaves the field as it is, and `advise` says so (plan §6.7).
-    return Number.isFinite(e.delta) ? null : reject("bad_delta", "delta must be finite");
+    return Number.isFinite(e.delta) ? null : reject("bad_delta", say("why_delta_must_be_finite"));
   },
   apply: (e, state) => {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
@@ -119,14 +119,14 @@ function isAccount(state: Readonly<WorldState>, account: EntityId): boolean {
 const postDef: EventTypeDef<PostEvent> = {
   type: "post",
   validate: (e, ctx) => {
-    if (e.lines.length < 2) return reject("unbalanced", "a posting needs two lines");
+    if (e.lines.length < 2) return reject("unbalanced", say("why_a_posting_needs_two_lines"));
     let sum = 0;
     for (const line of e.lines) {
-      if (!Number.isSafeInteger(line.amount)) return reject("bad_amount", "amounts are integer cents");
-      if (!isAccount(ctx.state, line.account)) return reject("missing_account", `no account ${line.account}`);
+      if (!Number.isSafeInteger(line.amount)) return reject("bad_amount", say("why_amounts_are_integer_cents"));
+      if (!isAccount(ctx.state, line.account)) return reject("missing_account", say("why_no_account_account", { account: line.account }));
       sum += line.amount;
     }
-    return sum === 0 ? null : reject("unbalanced", `posting sums to ${sum}`);
+    return sum === 0 ? null : reject("unbalanced", say("why_posting_sums_to_sum", { sum: sum }));
   },
   apply: (e, state) => {
     for (const line of e.lines) if (safeKey(line.account)) state.accounts[line.account] = (hasOwn(state.accounts, line.account) ? (state.accounts[line.account] ?? 0) : 0) + line.amount;
@@ -138,7 +138,7 @@ const postDef: EventTypeDef<PostEvent> = {
 const linkDef: EventTypeDef<LinkEvent> = {
   type: "link",
   // Both ends are entities, except that a `knows` link may point at a place (hearing of it, DESIGN §7).
-  validate: (e, ctx) => (hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || (e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to))) ? null : reject("missing_entity", `link ${e.from} → ${e.to}`)),
+  validate: (e, ctx) => (hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || (e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to))) ? null : reject("missing_entity", say("why_link_from_to", { from: e.from, to: e.to }))),
   apply: (e, state) => {
     const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
     if (!entity) return;
@@ -153,7 +153,7 @@ const unlinkDef: EventTypeDef<UnlinkEvent> = {
   type: "unlink",
   validate: (e, ctx) => {
     const entity = hasEntity(ctx.state, e.from) ? ctx.state.entities[e.from] : undefined;
-    return entity && entity.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject("missing_relation", `no ${e.rel} from ${e.from} to ${e.to}`);
+    return entity && entity.relations.some((r) => r.type === e.rel && r.to === e.to) ? null : reject("missing_relation", say("why_no_rel_from_from_to_to", { rel: e.rel, from: e.from, to: e.to }));
   },
   apply: (e, state) => {
     const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
@@ -165,7 +165,7 @@ const unlinkDef: EventTypeDef<UnlinkEvent> = {
 
 const spawnDef: EventTypeDef<SpawnEvent> = {
   type: "spawn",
-  validate: (e, ctx) => (!safeKey(e.entity.id) ? reject("bad_id", "not an entity id") : hasEntity(ctx.state, e.entity.id) ? reject("exists", `entity ${e.entity.id} exists`) : null),
+  validate: (e, ctx) => (!safeKey(e.entity.id) ? reject("bad_id", say("why_not_an_entity_id")) : hasEntity(ctx.state, e.entity.id) ? reject("exists", say("why_entity_id_exists", { id: e.entity.id })) : null),
   apply: (e, state) => {
     const d = e.entity;
     if (!safeKey(d.id)) return;
@@ -190,15 +190,15 @@ const stageDef: EventTypeDef<StageEvent> = {
   type: "stage",
   validate: (e, ctx) => {
     const track = safeKey(e.track) && hasOwn(ctx.world.tracks, e.track) ? ctx.world.tracks[e.track] : undefined;
-    if (!track) return reject("missing_track", `no track ${e.track}`);
-    if (!safeKey(e.to) || !hasOwn(track.stages, e.to)) return reject("missing_stage", `no stage ${e.to} in ${e.track}`);
+    if (!track) return reject("missing_track", say("why_no_track_track", { track: e.track }));
+    if (!safeKey(e.to) || !hasOwn(track.stages, e.to)) return reject("missing_stage", say("why_no_stage_to_in_track", { to: e.to, track: e.track }));
     if (e.from === undefined) return null;
     // A move holds only where the track still stands where it moved from (DESIGN §10): replayed after
     // the story got there another way, it isn't made, and paid for, twice.
     const at = (hasOwn(ctx.state.tracks, e.track) ? ctx.state.tracks[e.track]?.stage : undefined) ?? track.start;
     if (at === e.from) return null;
     const label = (stage: string): string => (hasOwn(track.stages, stage) ? track.stages[stage]?.label : undefined) ?? stage;
-    return reject("stage_moved", `${track.label} is at ${label(at)} now, no longer at ${label(e.from)}, where this move began`);
+    return reject("stage_moved", say("why_track_is_at_at_now_no_longer", { track: track.label, at: label(at), from: label(e.from) }));
   },
   apply: (e, state) => {
     if (safeKey(e.track)) state.tracks[e.track] = { stage: e.to, since: state.clock };
@@ -214,7 +214,7 @@ const stageDef: EventTypeDef<StageEvent> = {
 // The clock is summed in whole seconds (`clockPlus`): a part of a minute is kept exactly, and a sum of any number of them never reads the minute before.
 const clockDef: EventTypeDef<ClockEvent> = {
   type: "clock",
-  validate: (e) => (Number.isFinite(e.minutes) && e.minutes >= 0 ? null : reject("bad_minutes", "minutes must be ≥ 0")),
+  validate: (e) => (Number.isFinite(e.minutes) && e.minutes >= 0 ? null : reject("bad_minutes", say("why_minutes_must_be_0"))),
   apply: (e, state) => {
     state.clock = clockPlus(state.clock, e.minutes);
   },
@@ -226,7 +226,7 @@ const clockDef: EventTypeDef<ClockEvent> = {
 
 const timelapseDef: EventTypeDef<TimelapseEvent> = {
   type: "timelapse",
-  validate: (e) => (e.to >= e.from ? null : reject("bad_interval", "timelapse ends before it starts")),
+  validate: (e) => (e.to >= e.from ? null : reject("bad_interval", say("why_timelapse_ends_before_it_starts"))),
   apply: () => undefined,
   describe: (e) => say("ev_timelapse", { minutes: e.to - e.from }),
 };
@@ -236,10 +236,10 @@ export function coreEventTypes(lookup: () => EventTypes): EventTypeDef[] {
   const materializeDef: EventTypeDef<MaterializeEvent> = {
     type: "materialize",
     validate: (e, ctx) => {
-      if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
+      if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", say("why_no_entity_who", { who: e.entity }));
       // Detail is sampled once per entity and domain (DESIGN §9.2): a second one, such as a carried
       // ✎ cash fix's when the new swipe already opened the accounts, would post their opening again.
-      if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`)) return reject("materialized", `${e.domain} detail for ${nameOf(ctx, e.entity)} is already recorded`);
+      if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`)) return reject("materialized", say("why_domain_detail_for_entity_is_already_recorded", { domain: e.domain, entity: nameOf(ctx, e.entity) }));
       // Nested events validate in sequence against the state they will see: a lone one sees the
       // state as it is, so only several need a scratch copy, and the last of them needs no applying.
       if (e.events.length <= 1) return e.events[0] ? validateEvent(lookup(), e.events[0], ctx) : null;
@@ -263,7 +263,7 @@ export function coreEventTypes(lookup: () => EventTypes): EventTypeDef[] {
 
 export function validateEvent(types: EventTypes, event: LedgerEvent, ctx: ReadContext): Rejection | null {
   const def = types.get(event.type);
-  if (!def) return reject("unknown_event", `unknown event type ${event.type}`);
+  if (!def) return reject("unknown_event", say("why_unknown_event_type_type", { type: event.type }));
   return def.validate(event, ctx);
 }
 

@@ -17,6 +17,7 @@ import type { ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { holdingOf, isHolding } from "./events";
 import { readCharacter, readKnowledge } from "./state";
+import { say } from "../../../engine/lines";
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };
@@ -65,12 +66,12 @@ const minutes = (v: JsonValue | undefined): number | null => (typeof v === "numb
 /** The entity ids among `v`, every one a person in the world: a value naming anything else refuses. */
 function peopleIn(ctx: ReadContext, v: JsonValue | undefined): EntityId[] | Rejection {
   if (v === undefined) return [];
-  if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) return reject("bad_value", "who it's with is a list of people");
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) return reject("bad_value", say("why_who_its_with_is_a_list_of"));
   const ids = v as string[];
   for (const id of ids) {
     const e = own(ctx.state.entities, id);
-    if (!e) return reject("missing_entity", `there's no ${labelOf(ctx, id)}`);
-    if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return reject("bad_value", `${e.name} isn't a person`);
+    if (!e) return reject("missing_entity", say("why_theres_no_subject", { subject: labelOf(ctx, id) }));
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return reject("bad_value", say("why_name_isnt_a_person", { name: e.name }));
   }
   return [...new Set(ids)];
 }
@@ -79,9 +80,9 @@ function noteFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
   const said = gmText(v.text, lengths?.note, before?.text, "A note");
   if (typeof said === "object" && said !== null) return said;
   const body = said ?? before?.text ?? null;
-  if (body === null) return reject("bad_value", "a note needs its text");
+  if (body === null) return reject("bad_value", say("why_a_note_needs_its_text"));
   const salience = v.salience === undefined ? (before?.salience ?? 3) : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
-  if (salience === null) return reject("bad_value", "a note's salience is 1 to 5");
+  if (salience === null) return reject("bad_value", say("why_a_notes_salience_is_1_to_5"));
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 
@@ -89,15 +90,15 @@ function commitmentFrom(ctx: ReadContext, who: EntityId, id: string | null, v: J
   const said = gmText(v.text, lengths?.commitment, before?.text, "A commitment");
   if (typeof said === "object" && said !== null) return said;
   const body = said ?? before?.text ?? null;
-  if (body === null) return reject("bad_value", "a commitment needs its text");
+  if (body === null) return reject("bad_value", say("why_a_commitment_needs_its_text"));
   const kind = v.kind === undefined ? (before?.kind ?? "other") : (COMMITMENT_KINDS as readonly JsonValue[]).includes(v.kind) ? (v.kind as CommitmentKind) : null;
-  if (kind === null) return reject("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+  if (kind === null) return reject("bad_value", say("why_a_commitment_is_one_of_join", { join: COMMITMENT_KINDS.join(", ") }));
   const status = v.status === undefined ? (before?.status ?? "open") : (COMMITMENT_STATUSES as readonly JsonValue[]).includes(v.status) ? (v.status as CommitmentStatus) : null;
-  if (status === null) return reject("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+  if (status === null) return reject("bad_value", say("why_a_commitments_status_is_one_of_join", { join: COMMITMENT_STATUSES.join(", ") }));
   const withList = v.with === undefined ? (before?.with ?? []) : peopleIn(ctx, v.with);
   if (!Array.isArray(withList)) return withList;
   const due = v.due === undefined ? (before?.due ?? null) : v.due === null ? null : minutes(v.due);
-  if (v.due !== undefined && v.due !== null && due === null) return reject("bad_value", "a commitment's due time is game minutes");
+  if (v.due !== undefined && v.due !== null && due === null) return reject("bad_value", say("why_a_commitments_due_time_is_game_minutes"));
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
@@ -106,25 +107,25 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
   const said = gmText(v.what, lengths?.plan, before?.what, "What a plan is");
   if (typeof said === "object" && said !== null) return said;
   const what = said ?? before?.what ?? null;
-  if (what === null) return reject("bad_value", "a plan needs what it is");
+  if (what === null) return reject("bad_value", say("why_a_plan_needs_what_it_is"));
   const when = v.when === undefined ? (before?.when ?? null) : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
-  if (!when || when.from === null || when.to === null || when.to < when.from) return reject("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+  if (!when || when.from === null || when.to === null || when.to < when.from) return reject("bad_value", say("why_a_plan_needs_when_from_and_to"));
   const kind = v.kind === undefined ? (before?.kind ?? "other") : (PLAN_KINDS as readonly JsonValue[]).includes(v.kind) ? (v.kind as PlanKind) : null;
-  if (kind === null) return reject("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+  if (kind === null) return reject("bad_value", say("why_a_plan_is_one_of_join", { join: PLAN_KINDS.join(", ") }));
   const where = v.where === undefined ? (before?.where ?? null) : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
-  if (where === undefined) return reject("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+  if (where === undefined) return reject("missing_place", say("why_theres_no_place_where_like_that", { where: typeof v.where === "string" ? labelOf(ctx, v.where) : undefined }));
   const withList = v.with === undefined ? (before?.with ?? []) : peopleIn(ctx, v.with);
   if (!Array.isArray(withList)) return withList;
   const priority = v.priority === undefined ? (before?.priority ?? PLAN_PRIORITY.normal) : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
-  if (priority === null) return reject("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+  if (priority === null) return reject("bad_value", say("why_a_plans_priority_is_min_to_max", { min: PLAN_PRIORITY.min, max: PLAN_PRIORITY.max }));
   const statuses: readonly JsonValue[] = ["open", "done", "dropped"];
   const status = v.status === undefined ? (before?.status ?? "open") : statuses.includes(v.status) ? (v.status as PlanStatus) : null;
-  if (status === null) return reject("bad_value", "a plan's status is open, done or dropped");
+  if (status === null) return reject("bad_value", say("why_a_plans_status_is_open_done_or"));
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   // A pay or lend plan's amount is whole minor units, kept from before unless the edit gives one; it's handed to the first person it's with.
   const money = kind === "pay" || kind === "lend";
   const cents = v.cents === undefined ? before?.cents : typeof v.cents === "number" && Number.isInteger(v.cents) && v.cents > 0 ? v.cents : null;
-  if (money && (cents === null || cents === undefined || withList.length === 0)) return reject("bad_value", "a pay or lend plan needs an amount in minor units and someone to hand it to");
+  if (money && (cents === null || cents === undefined || withList.length === 0)) return reject("bad_value", say("why_a_pay_or_lend_plan_needs_an"));
   // A plan with others in it is theirs too (DESIGN §24.8): one plan, under the id the same people and start give it, whoever records it.
   const shared = sharesPlan({ kind, with: withList });
   return {
@@ -155,19 +156,19 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
  */
 function knowledgeEdit(ctx: ReadContext, op: Extract<MindEditOp, { op: "mind_knowledge" }>, name: string): LedgerEvent[] | Rejection {
   const k = readKnowledge(ctx.state);
-  if (!own(k.facts, op.fact)) return reject("missing_fact", "the minds hold no such fact");
+  if (!own(k.facts, op.fact)) return reject("missing_fact", say("why_the_minds_hold_no_such_fact"));
   const before = own(own(k.holdings, op.entity) ?? {}, op.fact);
-  if (op.holding === null) return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject("no_change", `${name} doesn't hold that`);
+  if (op.holding === null) return before ? [{ type: MINDS_EVENTS.forget, data: { who: [op.entity], fact: op.fact } }] : reject("no_change", say("why_name_doesnt_hold_that", { name: name }));
   const h = op.holding as unknown as JsonValue;
-  if (!isHolding(h)) return reject("bad_value", "a holding is how it's held and by whom (one told names its teller), its evidence, since when, the belief, a confidence from 0 to 1 and whom it's kept from");
+  if (!isHolding(h)) return reject("bad_value", say("why_a_holding_is_how_its_held_and"));
   // Someone who is their own teller knows it first hand: recorded with no teller, and a holding that was told, as witnessed.
   const self = h.by === op.entity;
   const given: typeof h = self ? { ...h, by: null, how: h.how === "told" ? "witnessed" : h.how } : h;
   const named = peopleIn(ctx, [...(given.by === null ? [] : [given.by]), ...(Array.isArray(given.keptFrom) ? given.keptFrom : [])]);
   if (!Array.isArray(named)) return named;
-  if (given.evidence.some((ref) => ref === op.fact || (!isWitnessRef(ref) && !own(k.facts, ref)))) return reject("missing_fact", "a holding rests on facts the minds hold, never on itself");
+  if (given.evidence.some((ref) => ref === op.fact || (!isWitnessRef(ref) && !own(k.facts, ref)))) return reject("missing_fact", say("why_a_holding_rests_on_facts_the_minds"));
   const next = holdingOf(given, op.entity);
-  if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next)) return reject("no_change", "nothing to change");
+  if (before && JSON.stringify(holdingOf(before, op.entity)) === JSON.stringify(next)) return reject("no_change", say("why_nothing_to_change"));
   // The event carries the holding whole, so a fold reads it without the state it was made on.
   return [{ type: MINDS_EVENTS.learn, data: { who: [op.entity], fact: op.fact, how: next.how, by: next.by, evidence: next.evidence, belief: next.belief, confidence: next.confidence, ...(next.keptFrom ? { keptFrom: next.keptFrom } : {}), msg: next.since.msg, at: next.since.at } }];
 }
@@ -180,15 +181,15 @@ function knowledgeEdit(ctx: ReadContext, op: Extract<MindEditOp, { op: "mind_kno
 export function mindEdit(ctx: ReadContext, op: MindEditOp, lengths?: Readonly<MindLengths>): LedgerEvent[] | Rejection {
   const { world, state, registry } = ctx;
   const e = own(state.entities, op.entity);
-  if (!e) return reject("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+  if (!e) return reject("missing_entity", say("why_theres_no_subject", { subject: labelOf(ctx, op.entity) }));
   // What someone knows is anyone's to hold, the player character's too; a mind is everyone's but theirs.
-  if (op.op === "mind_knowledge") return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject("bad_value", `${e.name} isn't a person`);
-  if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person")) return reject("no_mind", `${e.name} doesn't have a mind`);
+  if (op.op === "mind_knowledge") return kindIs(registry, world, e.kind, "person") ? knowledgeEdit(ctx, op, e.name) : reject("bad_value", say("why_name_isnt_a_person", { name: e.name }));
+  if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person")) return reject("no_mind", say("why_name_doesnt_have_a_mind", { name: e.name }));
   if (op.op === "mind_pin") return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh") return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
   const c = readCharacter(state, op.entity);
   if (op.op === "mind_intent") {
-    if (op.text === undefined && op.approach === undefined) return reject("bad_value", "say what they mean to do, or how they go about it");
+    if (op.text === undefined && op.approach === undefined) return reject("bad_value", say("why_say_what_they_mean_to_do_or"));
     const said = op.text === undefined ? undefined : gmText(op.text, lengths?.gmIntent, c.intent?.text, "Your intent for them");
     if (typeof said === "object" && said !== null) return said;
     // The event carries the intent whole, so a fold reads it without the state it was made on.
@@ -199,21 +200,21 @@ export function mindEdit(ctx: ReadContext, op: MindEditOp, lengths?: Readonly<Mi
   const value = op.value;
   if (op.part === "note") {
     const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
-    if (op.id !== null && !before) return reject("missing_note", `${e.name} has no such note`);
-    if (value === null) return op.id === null ? reject("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+    if (op.id !== null && !before) return reject("missing_note", say("why_name_has_no_such_note", { name: e.name }));
+    if (value === null) return op.id === null ? reject("bad_value", say("why_say_which_note_to_delete")) : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
     const note = noteFrom(ctx, op.entity, op.id, value, before, lengths);
     return "code" in note ? note : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note.id, value: note as unknown as JsonObject } }];
   }
   if (op.part === "commitment") {
     const before = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
-    if (op.id !== null && !before) return reject("missing_commitment", `${e.name} has no such commitment`);
-    if (value === null) return op.id === null ? reject("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+    if (op.id !== null && !before) return reject("missing_commitment", say("why_name_has_no_such_commitment", { name: e.name }));
+    if (value === null) return op.id === null ? reject("bad_value", say("why_say_which_commitment_to_delete")) : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
     const commitment = commitmentFrom(ctx, op.entity, op.id, value, before, lengths);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment as unknown as JsonObject } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
-  if (op.id !== null && !before) return reject("missing_plan", `${e.name} has no such plan`);
-  if (value === null) return op.id === null ? reject("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+  if (op.id !== null && !before) return reject("missing_plan", say("why_name_has_no_such_plan", { name: e.name }));
+  if (value === null) return op.id === null ? reject("bad_value", say("why_say_which_plan_to_delete")) : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
   const plan = planFrom(ctx, op.entity, op.id, value, before, lengths);
   return "code" in plan ? plan : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan.id, value: plan as unknown as JsonObject } }];
 }

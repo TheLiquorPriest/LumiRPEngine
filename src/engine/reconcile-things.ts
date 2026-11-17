@@ -28,6 +28,7 @@ import { findThings, type ThingCandidate, type ThingScope } from "./thing-resolv
 import { holdersOf, holdsOf, isThing, possessorOf, sizeOf, whoseOf } from "./things";
 import { canSeeEntity, isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
+import { say } from "./lines";
 
 /** How a fact is settled: whose knowledge marks a candidate secret, what made things' ids are drawn from, and what the read may still make. */
 export interface ReconcileOptions {
@@ -197,14 +198,14 @@ class Settling {
   make(words: string, at: Spot, extra: { owner?: EntityId; maybe?: EntityId; named?: EntityId } = {}): Rejection | EntityId {
     const ctx = this.w.ctx;
     // An id of a thing out of the fact's reach is that thing, not one to make: it can't be had as told.
-    if (extra.named !== undefined) return reject("not_here", `${labelOf(ctx, extra.named)} isn't where that could happen`);
-    if (this.opts.makes !== undefined && this.made.length >= this.opts.makes) return reject("thing_cap", "the reply has made as many things as one reply may (Settings → Changes from the reply)");
+    if (extra.named !== undefined) return reject("not_here", say("why_named_isnt_where_that_could_happen", { named: labelOf(ctx, extra.named) }));
+    if (this.opts.makes !== undefined && this.made.length >= this.opts.makes) return reject("thing_cap", say("why_the_reply_has_made_as_many_things"));
     const name = madeName(ctx, words);
     const typed = thingTypeFor(ctx, name, "place" in at ? at.place : placeOfEntity(ctx.state, at.in));
     const out = this.apply({ do: "make", name, at, why: this.why, ...(typed.type !== undefined ? { type: typed.type } : {}), ...(extra.owner !== undefined ? { owner: extra.owner } : {}) });
     if ("code" in out) return out;
     const id = out.made;
-    if (id === undefined) return reject("not_made", `${name} wasn't made`);
+    if (id === undefined) return reject("not_made", say("why_name_wasnt_made", { name: name }));
     // A hidden thing it may be, for Tidy up: the read never moves a hidden thing from elsewhere.
     if (extra.maybe !== undefined && own(ctx.state.entities, id)?.fields.maybe_same_as === undefined) {
       const marked = this.w.apply({ type: "set", entity: id, field: "maybe_same_as", value: extra.maybe });
@@ -236,7 +237,7 @@ class Settling {
     const out = this.apply({ do: "move", item: thing, to, why: this.why });
     if ("code" in out) return out;
     // The size rules put it where it was (too big to carry, lying where they stand already): nothing moved.
-    if (out.placed && where() === before) return reject("too_big", `${labelOf(ctx, thing)} is too big to carry`);
+    if (out.placed && where() === before) return reject("too_big", say("why_thing_is_too_big_to_carry", { thing: labelOf(ctx, thing) }));
     return secret ? this.know(thing, [finder]) : null;
   }
 
@@ -277,7 +278,7 @@ function fromOf(ctx: ReadContext, said: string, actor: EntityId, viewer: EntityI
  */
 export function reconcileFact(w: Working, p: JsonObject, opts: ReconcileOptions): Reconciled {
   const fact = factOf(p);
-  if (!fact) return refused("not_a_fact", `${String(p.type)} isn't a change to a thing`);
+  if (!fact) return refused("not_a_fact", say("why_type_isnt_a_change_to_a_thing", { type: String(p.type) }));
   const mark = w.mark();
   const out = settle(w, fact, p, opts);
   if (out.kind !== "change") w.restore(mark);
@@ -289,12 +290,12 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
   const viewer = opts.viewer;
   const s = new Settling(w, opts, str(p.why));
   const item = str(p.item);
-  if (item === "") return refused("bad_proposal", "it names no thing");
+  if (item === "") return refused("bad_proposal", say("why_it_names_no_thing"));
   if (fact === "give") return give(s, p, item);
   if (fact === "put") return put(s, p, item, str(p.entity) || viewer);
   if (fact === "owner") return owner(s, p, item);
   const actor = str(p.entity) || viewer;
-  if (!own(ctx.state.entities, actor)) return refused("missing_entity", `no one ${labelOf(ctx, actor)}`);
+  if (!own(ctx.state.entities, actor)) return refused("missing_entity", say("why_no_one_id", { id: labelOf(ctx, actor) }));
   const maybe = (found: Picked): { maybe?: EntityId; named?: EntityId } => ("none" in found ? { ...(found.maybe !== undefined ? { maybe: found.maybe } : {}), ...(found.named !== undefined ? { named: found.named } : {}) } : {});
   switch (fact) {
     case "take": {
@@ -305,7 +306,7 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
       const found = pick(ctx, item, { actor, viewer, scope: "here", keep: (id) => !holdersOf(ctx.state, id).includes(actor) && inside(id) });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
       if ("id" in found) return s.after(s.move(found.id, { in: actor }, actor, found.secret), "item_move");
-      if ("id" in pick(ctx, item, { actor, viewer, scope: "on" })) return already(`${labelOf(ctx, actor)} has it already`);
+      if ("id" in pick(ctx, item, { actor, viewer, scope: "on" })) return already(say("why_actor_has_it_already", { actor: labelOf(ctx, actor) }));
       // What they took that nobody tracked yet comes into being in their hands.
       const made = s.make(item, { in: actor }, maybe(found));
       return typeof made === "string" ? s.done("item_make") : refusedBy(made);
@@ -313,18 +314,18 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
     case "drop": {
       const found = pick(ctx, item, { actor, viewer, scope: "on" });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
-      if (!("id" in found)) return refused("not_held", `${labelOf(ctx, actor)} doesn't have it`);
+      if (!("id" in found)) return refused("not_held", say("why_actor_doesnt_have_it", { actor: labelOf(ctx, actor) }));
       const place = placeOfEntity(ctx.state, actor);
-      if (place === null) return refused("no_place", `${labelOf(ctx, actor)} is nowhere`);
+      if (place === null) return refused("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, actor) }));
       return s.after(s.move(found.id, { place }, actor, found.secret), "item_move");
     }
     case "has": {
       const found = pick(ctx, item, { actor, viewer, scope: "all" });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
       if ("id" in found) {
-        if (holdersOf(ctx.state, found.id).includes(actor)) return already(`${labelOf(ctx, actor)} has it already`);
+        if (holdersOf(ctx.state, found.id).includes(actor)) return already(say("why_actor_has_it_already", { actor: labelOf(ctx, actor) }));
         // Furniture, a fixture or a vehicle is used where it is: having it moves nothing.
-        if (tooBigToHold(ctx, found.id)) return already(`${labelOf(ctx, found.id)} is used where it is`);
+        if (tooBigToHold(ctx, found.id)) return already(say("why_id_is_used_where_it_is", { id: labelOf(ctx, found.id) }));
         const reach = reachOf(ctx, actor, found.id);
         return s.after(s.move(found.id, { in: actor }, actor, found.secret), "item_move", reach.reach === "away" ? { brought: { place: reach.place } } : {});
       }
@@ -333,7 +334,7 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
     }
     case "use_up": {
       const n = p.qty === undefined ? 1 : p.qty;
-      if (typeof n !== "number" || !Number.isInteger(n) || n < 1) return refused("bad_amount", "using up is a whole number of at least 1");
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1) return refused("bad_amount", say("why_using_up_is_a_whole_number_of"));
       const found = pick(ctx, item, { actor, viewer, scope: "here" });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
       if ("id" in found) {
@@ -345,7 +346,7 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
       return typeof made === "string" ? s.after(s.apply({ do: "use", item: made, qty: n }), "item_make") : refusedBy(made);
     }
     case "wear": {
-      if (ctx.levelOf(actor, "gear") < 3) return refused("level", "slots are tracked from Gear level 3");
+      if (ctx.levelOf(actor, "gear") < 3) return refused("level", say("why_slots_are_tracked_from_gear_level_3"));
       const off = p.off === true;
       const found = pick(ctx, item, { actor, viewer, scope: off ? "on" : "here" });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
@@ -353,7 +354,7 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
         const known = found.secret ? s.know(found.id, [actor]) : null;
         return s.after(known ?? s.apply({ do: "wear", item: found.id, who: actor, ...(off ? { off: true } : {}) }), "item_wear");
       }
-      if (off) return refused("not_worn", `${labelOf(ctx, actor)} isn't wearing it`);
+      if (off) return refused("not_worn", say("why_actor_isnt_wearing_it", { actor: labelOf(ctx, actor) }));
       const made = s.make(item, { in: actor }, maybe(found));
       if (typeof made !== "string") return refusedBy(made);
       // Worn when its type says how; else it is only theirs to hold.
@@ -363,16 +364,16 @@ function settle(w: Working, fact: ThingFact, p: JsonObject, opts: ReconcileOptio
     case "lose": {
       const found = pick(ctx, item, { actor, viewer, scope: "all", keep: (id) => holdersOf(ctx.state, id).includes(actor) || whoseOf(ctx, id).owners.includes(actor) });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
-      if (!("id" in found)) return refused("not_held", `${labelOf(ctx, actor)} doesn't have it`);
+      if (!("id" in found)) return refused("not_held", say("why_actor_doesnt_have_it", { actor: labelOf(ctx, actor) }));
       const by = str(p.by);
-      if (by !== "" && !own(ctx.state.entities, by)) return refused("missing_entity", `no thief ${labelOf(ctx, by)}`);
+      if (by !== "" && !own(ctx.state.entities, by)) return refused("missing_entity", say("why_no_thief_by", { by: labelOf(ctx, by) }));
       return s.after(s.apply({ do: "lose", item: found.id, ...(by !== "" ? { by } : {}) }), "item_lose");
     }
     case "item_condition": {
-      if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0) return refused("bad_amount", "an item's condition moves by a whole, non-zero number");
+      if (typeof p.delta !== "number" || !Number.isInteger(p.delta) || p.delta === 0) return refused("bad_amount", say("why_an_items_condition_moves_by_a_whole"));
       const found = pick(ctx, item, { actor, viewer, scope: "here" });
       if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
-      if (!("id" in found)) return refused("missing_entity", "the world has no such thing here");
+      if (!("id" in found)) return refused("missing_entity", say("why_the_world_has_no_such_thing_here"));
       const known = found.secret ? s.know(found.id, [actor]) : null;
       return s.after(known ?? s.apply({ do: "condition", item: found.id, delta: p.delta }), "item_condition");
     }
@@ -385,13 +386,13 @@ function owner(s: Settling, p: JsonObject, item: string): Reconciled {
   const viewer = s.opts.viewer;
   const said = str(p.owner);
   const nobody = said === "" || /^(?:null|none|nobody|no one)$/i.test(said);
-  if (!nobody && !own(ctx.state.entities, said)) return refused("missing_entity", `no one ${labelOf(ctx, said)}`);
+  if (!nobody && !own(ctx.state.entities, said)) return refused("missing_entity", say("why_no_one_id", { id: labelOf(ctx, said) }));
   const found = pick(ctx, item, { actor: !nobody && isPerson(ctx, said) ? said : viewer, viewer, scope: "all" });
   if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
-  if (!("id" in found)) return refused("missing_entity", "the world has no such thing to own");
+  if (!("id" in found)) return refused("missing_entity", say("why_the_world_has_no_such_thing_to"));
   const to = nobody ? null : said;
   const owners = ownersIn(own(ctx.state.entities, found.id)?.fields ?? {}).map((o) => o.party);
-  if (to === null ? owners.length === 0 : owners.length === 1 && owners[0] === to) return already("it is so already");
+  if (to === null ? owners.length === 0 : owners.length === 1 && owners[0] === to) return already(say("why_it_is_so_already"));
   const known = found.secret ? s.know(found.id, to !== null ? [to] : []) : null;
   return s.after(known ?? s.apply({ do: "own", item: found.id, owner: to, why: s.why }), "item_own");
 }
@@ -400,7 +401,7 @@ function owner(s: Settling, p: JsonObject, item: string): Reconciled {
 function put(s: Settling, p: JsonObject, item: string, actor: EntityId): Reconciled {
   const ctx = s.w.ctx;
   const viewer = s.opts.viewer;
-  if (!own(ctx.state.entities, actor)) return refused("missing_entity", `no one ${labelOf(ctx, actor)}`);
+  if (!own(ctx.state.entities, actor)) return refused("missing_entity", say("why_no_one_id", { id: labelOf(ctx, actor) }));
   const here = placeOfEntity(ctx.state, actor);
   const into = str(p.into);
   const at = str(p.at);
@@ -413,7 +414,7 @@ function put(s: Settling, p: JsonObject, item: string, actor: EntityId): Reconci
       to = { in: holder.id };
       const known = holder.secret ? s.know(holder.id, [actor]) : null;
       if (known) return refusedBy(known);
-    } else if (here === null) return refused("no_place", `${labelOf(ctx, actor)} is nowhere`);
+    } else if (here === null) return refused("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, actor) }));
     else makeHolder = holder.maybe !== undefined ? { maybe: holder.maybe } : {};
   } else if (at !== "") {
     const place = placeSaid(ctx.registry, ctx.world, ctx.state, at);
@@ -421,8 +422,8 @@ function put(s: Settling, p: JsonObject, item: string, actor: EntityId): Reconci
     if (holder && "ambiguous" in holder) return { kind: "which", field: "into", candidates: holder.ambiguous };
     if (place !== null) to = { place };
     else if (holder && "id" in holder) to = { in: holder.id };
-    else return refused("missing_place", "the world has no such place");
-  } else if (here === null) return refused("no_place", `${labelOf(ctx, actor)} is nowhere`);
+    else return refused("missing_place", say("why_the_world_has_no_such_place"));
+  } else if (here === null) return refused("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, actor) }));
   else to = { place: here };
   const found = pick(ctx, item, { actor, viewer, scope: "here" });
   if ("ambiguous" in found) return { kind: "which", field: "item", candidates: found.ambiguous };
@@ -430,10 +431,10 @@ function put(s: Settling, p: JsonObject, item: string, actor: EntityId): Reconci
   if (makeHolder !== null && here !== null) {
     const made = s.make(into, { place: here }, makeHolder);
     if (typeof made !== "string") return refusedBy(made);
-    if (holdsOf(ctx, made) === null) return refused("cant_hold", `${labelOf(ctx, made)} can't hold anything`);
+    if (holdsOf(ctx, made) === null) return refused("cant_hold", say("why_name_cant_hold_anything", { name: labelOf(ctx, made) }));
     to = { in: made };
   }
-  if (to === null) return refused("missing_place", "it names nowhere to put it");
+  if (to === null) return refused("missing_place", say("why_it_names_nowhere_to_put_it"));
   if ("id" in found) return s.after(s.move(found.id, to, actor, found.secret), "item_move");
   const made = s.make(item, to, "none" in found ? { ...(found.maybe !== undefined ? { maybe: found.maybe } : {}), ...(found.named !== undefined ? { named: found.named } : {}) } : {});
   return typeof made === "string" ? s.done("item_make") : refusedBy(made);
@@ -487,9 +488,9 @@ function give(s: Settling, p: JsonObject, item: string): Reconciled {
   const ctx = s.w.ctx;
   const viewer = s.opts.viewer;
   const to = str(p.to);
-  if (!isPerson(ctx, to)) return refused("not_a_person", `${labelOf(ctx, to)} can't be handed anything`);
+  if (!isPerson(ctx, to)) return refused("not_a_person", say("why_to_cant_be_handed_anything", { to: labelOf(ctx, to) }));
   const from = str(p.from);
-  if (from !== "" && !own(ctx.state.entities, from)) return refused("missing_entity", `no giver ${labelOf(ctx, from)}`);
+  if (from !== "" && !own(ctx.state.entities, from)) return refused("missing_entity", say("why_no_giver_from", { from: labelOf(ctx, from) }));
   // What the giver has, or lies here: never what the receiver holds already, nor what someone else has on them.
   const keep = (id: EntityId): boolean => {
     const by = possessorOf(ctx, id);
@@ -501,7 +502,7 @@ function give(s: Settling, p: JsonObject, item: string): Reconciled {
   const loan = (basis: HandoverBasis): { until?: number } => (basis === "loan" && until !== null ? { until } : {});
   if ("id" in found) {
     const thing = own(ctx.state.entities, found.id);
-    if (thing?.kind === "account") return refused("is_money", "money changes hands as a transfer");
+    if (thing?.kind === "account") return refused("is_money", say("why_money_changes_hands_as_a_transfer"));
     const type = typeRowOf(ctx, thing?.fields ?? {})?.row.name;
     const food = optionalQuery(ctx, "economy.thing_type")?.(ctx, typeof type === "string" ? type : (thing?.name ?? ""), placeOfEntity(ctx.state, found.id))?.food === true;
     const basis = basisOf(ctx, ownersIn(thing?.fields ?? {}).map((o) => o.party), to, p.basis, food);
@@ -512,7 +513,7 @@ function give(s: Settling, p: JsonObject, item: string): Reconciled {
     return s.after(known, handChange(basis), { basis });
   }
   // Only someone other than the player character hands over what the world lacks: the player character can't give what it doesn't have.
-  if (from === "" || from === viewer || !isPerson(ctx, from)) return refused("missing_entity", "the world has no such thing to hand over");
+  if (from === "" || from === viewer || !isPerson(ctx, from)) return refused("missing_entity", say("why_the_world_has_no_such_thing_to_2"));
   const place = placeOfEntity(ctx.state, from);
   const food = thingTypeFor(ctx, madeName(ctx, item), place).food;
   const told = basisOf(ctx, [], to, p.basis, food);

@@ -35,6 +35,7 @@ import { labelOf, optionalService, own } from "./pack-kit";
 import type { InferredResult } from "./inferred";
 import type { ToldAction } from "./action-words";
 import type { Needs } from "./steps";
+import { say } from "./lines";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -130,16 +131,16 @@ interface Prepared {
 
 function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, req: ActionRequest): Prepared | Rejection {
   const action = typeof req.action === "string" ? findAction(reg, world, req.action) : req.action;
-  if (!action) return { code: "unknown_action", reason: `no action ${String(req.action)}` };
+  if (!action) return { code: "unknown_action", reason: say("why_no_action_action", { action: String(req.action) }) };
   const actor = req.actor ?? world.pov;
-  if (!own(state.entities, actor)) return { code: "missing_actor", reason: `no entity ${labelOf({ world, state }, actor)}` };
+  if (!own(state.entities, actor)) return { code: "missing_actor", reason: say("why_no_entity_who", { who: labelOf({ world, state }, actor) }) };
   const bindings: Record<string, EntityId> = { self: actor, actor };
   const params: Record<string, Value> = {};
   const given = req.params ?? {};
   for (const [name, def] of Object.entries(action.params)) {
     const raw: JsonValue | undefined = own(given, name);
     if (raw === undefined || raw === null || raw === "") {
-      if (!def.optional) return { code: "missing_param", reason: `${action.label} needs ${def.label ?? name}` };
+      if (!def.optional) return { code: "missing_param", reason: say("why_type_needs_k", { type: action.label, k: def.label ?? name }) };
       continue;
     }
     if (def.type === "ref") {
@@ -156,10 +157,10 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
           params[name] = id;
           continue;
         }
-        return { code: "bad_param", reason: `no entity ${labelOf({ world, state }, id)}` };
+        return { code: "bad_param", reason: say("why_no_entity_who", { who: labelOf({ world, state }, id) }) };
       }
-      if (def.ref && !kindIs(reg, world, target.kind, def.ref)) return { code: "bad_param", reason: `${target.name} is not ${/^[aeiou]/i.test(def.ref) ? "an" : "a"} ${(reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase()}` };
-      if (def.of && !selectorMatches(reg, world, state, def.of, id)) return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
+      if (def.ref && !kindIs(reg, world, target.kind, def.ref)) return { code: "bad_param", reason: say("why_name_is_not_ana_def", { name: target.name, def: (reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase(), def2: /^[aeiou]/i.test(def.ref) }) };
+      if (def.of && !selectorMatches(reg, world, state, def.of, id)) return { code: "bad_param", reason: say("why_name_cant_be_the_g_of_action", { name: target.name, g: (def.label ?? name).replace(/_/g, " ").toLowerCase(), action: action.label }) };
       bindings[name] = id;
       params[name] = id;
       continue;
@@ -177,13 +178,13 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
     // A text param naming a table row (a skill, a save) takes the row's id or its label, and keeps the id.
     if (def.type === "text" && def.table !== undefined) {
       const key = typeof raw === "string" ? tableRowKey(own(world.tables, def.table), raw) : null;
-      if (key === null) return { code: "bad_param", reason: `${String(raw)} isn't one of the ${(def.label ?? name).toLowerCase()}s here` };
+      if (key === null) return { code: "bad_param", reason: say("why_raw_isnt_one_of_the_name_s", { raw: String(raw), name: (def.label ?? name).toLowerCase() }) };
       params[name] = key;
       continue;
     }
-    if ((def.type === "number" || def.type === "money" || def.type === "duration") && typeof raw !== "number") return { code: "bad_param", reason: `${name} must be a number` };
+    if ((def.type === "number" || def.type === "money" || def.type === "duration") && typeof raw !== "number") return { code: "bad_param", reason: say("why_name_must_be_a_number", { name: name }) };
     const v = toValue(raw);
-    if (v === undefined) return { code: "bad_param", reason: `${name} must be a scalar` };
+    if (v === undefined) return { code: "bad_param", reason: say("why_name_must_be_a_scalar", { name: name }) };
     params[name] = v;
   }
   // Acting for an organization (`ParamDef.acting`, ORG-SPEC §3.6): the organization the param names
@@ -210,7 +211,7 @@ function unmet(req: Requirement, env: ExprEnv, hard: boolean): Failure {
   const why = requirementWhy(req);
   const said = why === null ? null : evalExpr(why, env, "");
   const words = typeof said === "string" && said.trim() !== "" ? { words: said.trim() } : {};
-  return { code: "requirement", reason: `requires ${expr}`, requirement: expr, ...(hard ? { hard: true as const } : {}), ...words };
+  return { code: "requirement", reason: say("why_requires_expr", { expr: expr }), requirement: expr, ...(hard ? { hard: true as const } : {}), ...words };
 }
 
 /**
@@ -285,7 +286,7 @@ export interface Availability {
  * DESIGN §11): its fight's state, the actor's turn and economy. Nothing for any other action.
  */
 function combatSpend(ctx: ReadContext, actor: EntityId, action: ActionDef): LedgerEvent[] | Rejection {
-  return action.combat ? (optionalService(ctx, "combat.spend")?.(ctx, actor, action) ?? { code: "no_combat", reason: "this world has no combat" }) : [];
+  return action.combat ? (optionalService(ctx, "combat.spend")?.(ctx, actor, action) ?? { code: "no_combat", reason: say("why_this_world_has_no_combat") }) : [];
 }
 
 /** What the palette shows: availability, exact odds and duration, against the current state. */

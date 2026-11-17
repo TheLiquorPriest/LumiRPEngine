@@ -64,11 +64,11 @@ function disposeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
     // the gain against that part of their basis is theirs for the year.
     type: "economy.dispose",
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, str(e, "entity")) || !own(ctx.state.entities, str(e, "party"))) return reject("missing_entity", "a disposal names what was sold and who sold it");
+      if (!own(ctx.state.entities, str(e, "entity")) || !own(ctx.state.entities, str(e, "party"))) return reject("missing_entity", say("why_a_disposal_names_what_was_sold_and"));
       const pct = e.data.pct;
       const proceeds = e.data.proceeds;
-      if (typeof pct !== "number" || !(pct > 0 && pct <= 100)) return reject("bad_event", "a disposal is of a part of a share");
-      return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject("bad_event", "a disposal's proceeds are a whole amount");
+      if (typeof pct !== "number" || !(pct > 0 && pct <= 100)) return reject("bad_event", say("why_a_disposal_is_of_a_part_of"));
+      return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject("bad_event", say("why_a_disposals_proceeds_are_a_whole_amount"));
     },
     apply: (e, state, ctx) => {
       const entity = str(e, "entity");
@@ -90,9 +90,9 @@ const acquireEvent: EventTypeDef<PackEvent> = {
   // A party pays `cents` for a share of a property or a business: it adds to their basis.
   type: "economy.acquire",
   validate: (e, ctx) => {
-    if (!own(ctx.state.entities, str(e, "entity")) || !own(ctx.state.entities, str(e, "party"))) return reject("missing_entity", "an acquisition names what was bought and who bought it");
+    if (!own(ctx.state.entities, str(e, "entity")) || !own(ctx.state.entities, str(e, "party"))) return reject("missing_entity", say("why_an_acquisition_names_what_was_bought_and"));
     const cents = e.data.cents;
-    return typeof cents === "number" && Number.isSafeInteger(cents) && cents >= 0 ? null : reject("bad_event", "an acquisition costs a whole amount");
+    return typeof cents === "number" && Number.isSafeInteger(cents) && cents >= 0 ? null : reject("bad_event", say("why_an_acquisition_costs_a_whole_amount"));
   },
   apply: (e, state) => {
     const r = basisRecord(state, str(e, "entity"), str(e, "party"));
@@ -140,7 +140,7 @@ const TRUST_YEARS_KEPT = 2;
 
 const trustDistributionEvent: EventTypeDef<PackEvent> = {
   type: TRUST_DISTRIBUTION,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "trust")) && Array.isArray(e.data.parts) ? null : reject("bad_event", "a trust's distribution names the trust and each beneficiary's part")),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "trust")) && Array.isArray(e.data.parts) ? null : reject("bad_event", say("why_a_trusts_distribution_names_the_trust_and"))),
   apply: (e, state, ctx) => {
     const trust = str(e, "trust");
     const year = String(yearAt(ctx.world, state.clock));

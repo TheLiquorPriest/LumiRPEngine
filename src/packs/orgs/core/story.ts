@@ -25,6 +25,7 @@ import { isGone, kindIs } from "../../../engine/scope";
 import { isMemberOf, MEMBER_OF, type MembershipContext } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import { compileOrgOp, flagged, historyLine, jobOf, plainWords, positionNamed, withWhy } from "./ops";
+import { say } from "../../../engine/lines";
 
 /** What a membership fact says changed: someone joined or left, was appointed to a position, or took a title. */
 export const MEMBERSHIP_CHANGES = ["join", "leave", "appoint", "title"] as const;
@@ -117,9 +118,9 @@ function quoted(p: Proposal): string {
 
 /** What every fact shares: who it is about, and words that state the change. */
 function common(ctx: ReadContext, p: Proposal): { who: EntityId } | Rejection {
-  if (!statesChange(strOf(p.said))) return refuse("not_stated", "the reply doesn't state it as done");
+  if (!statesChange(strOf(p.said))) return refuse("not_stated", say("why_the_reply_doesnt_state_it_as_done"));
   const who = personNamed(ctx, strOf(p.who));
-  if (who === null) return refuse("missing_entity", `no one ${strOf(p.who) || "named"} the player character knows`);
+  if (who === null) return refuse("missing_entity", say("why_no_one_who_named_the_player_character", { who: strOf(p.who) }));
   return { who };
 }
 
@@ -134,9 +135,9 @@ function membership(ctx: ReadContext, p: Proposal): MembershipPlan | Rejection {
   if ("code" in base) return base;
   const { who } = base;
   const org = orgNamed(ctx, strOf(p.org));
-  if (org === null) return refuse("missing_entity", `no organization ${strOf(p.org) || "named"} the player character knows`);
+  if (org === null) return refuse("missing_entity", say("why_no_organization_org_named_the_player_character", { org: strOf(p.org) }));
   const by = actorOf(ctx, p);
-  if (by === null) return refuse("missing_entity", `no one ${strOf(p.by)} the player character knows`);
+  if (by === null) return refuse("missing_entity", say("why_no_one_by_the_player_character_knows", { by: strOf(p.by) }));
   const change = strOf(p.change);
   const why = quoted(p);
   const name = (id: EntityId): string => labelOf(ctx, id);
@@ -144,16 +145,16 @@ function membership(ctx: ReadContext, p: Proposal): MembershipPlan | Rejection {
   const flag = (power: OrgPower, did: string): EffectSpec[] => (by === undefined || by === who ? [] : flagged(ctx, by, org, power, did));
   switch (change) {
     case "join": {
-      if (member) return refuse("already", `${name(who)} is already a member of ${name(org)}`);
+      if (member) return refuse("already", say("why_who_is_already_a_member_of_org", { who: name(who), org: name(org) }));
       const said = strOf(p.position);
       const position = said === "" ? null : positionNamed(ctx, org, said);
-      if (said !== "" && position === null) return refuse("bad_position", `${name(org)} has no position ${said}`);
+      if (said !== "" && position === null) return refuse("bad_position", say("why_employer_has_no_position_position", { employer: name(org), position: said }));
       const title = plainWords(strOf(p.title));
       const ops = compileOrgOp(ctx, { do: "admit", org, who, ...(title !== "" ? { title } : {}), ...(position !== null ? { position } : {}), why });
       return Array.isArray(ops) ? { effects: [...ops, ...flag("members.admit", `admitted ${name(who)} to ${name(org)}`)] } : ops;
     }
     case "leave": {
-      if (!member) return refuse("already", `${name(who)} isn't a member of ${name(org)}`);
+      if (!member) return refuse("already", say("why_who_isnt_a_member_of_org", { who: name(who), org: name(org) }));
       // Anyone may leave; someone else putting them out is a removal.
       if (by === undefined || by === who) return { effects: [{ type: "orgs.leave", args: { org, who, why } }] };
       const ops = compileOrgOp(ctx, { do: "remove", org, who, why });
@@ -162,24 +163,24 @@ function membership(ctx: ReadContext, p: Proposal): MembershipPlan | Rejection {
     case "appoint": {
       const said = strOf(p.position);
       const position = positionNamed(ctx, org, said);
-      if (position === null) return refuse("bad_position", said === "" ? "an appointment names one of the organization's positions" : `${name(org)} has no position ${said}`);
+      if (position === null) return refuse("bad_position", said === "" ? say("why_an_appointment_names_one_of_the_organizations") : say("why_employer_has_no_position_position", { employer: name(org), position: said }));
       const staff = member ? null : isStaff(ctx, who, org);
-      if (!member && !staff) return refuse("not_member", `${name(who)} isn't in ${name(org)}`);
+      if (!member && !staff) return refuse("not_member", say("why_who_isnt_in_org", { who: name(who), org: name(org) }));
       const held = member ? strOf(objOf(own(ctx.state.entities, who)?.relations.find((r) => r.type === MEMBER_OF && r.to === org)?.fields).position) : strOf(own(ctx.state.entities, staff?.id ?? "")?.fields.position);
       const title = positionsOf(ctx, org).find((x) => x.id === position)?.title ?? position;
-      if (held === position) return refuse("already", `${name(who)} already holds ${title}`);
+      if (held === position) return refuse("already", say("why_who_already_holds_title", { who: name(who), title: title }));
       const ops = compileOrgOp(ctx, { do: "appoint", org, who, position, why });
       return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", `appointed ${name(who)} ${title}`)] } : ops;
     }
     case "title": {
       const title = plainWords(strOf(p.title));
-      if (title === "") return refuse("bad_title", "a title is the words they go by");
-      if (!member) return refuse("not_member", `${name(who)} isn't a member of ${name(org)}`);
+      if (title === "") return refuse("bad_title", say("why_a_title_is_the_words_they_go"));
+      if (!member) return refuse("not_member", say("why_who_isnt_a_member_of_org", { who: name(who), org: name(org) }));
       const ops = compileOrgOp(ctx, { do: "title", org, who, title });
       return Array.isArray(ops) ? { effects: [...ops, ...flag("members.appoint", `gave ${name(who)} the title ${title}`)] } : ops;
     }
     default:
-      return refuse("bad_proposal", `a membership change is one of ${MEMBERSHIP_CHANGES.join(", ")}`);
+      return refuse("bad_proposal", say("why_a_membership_change_is_one_of_join", { join: MEMBERSHIP_CHANGES.join(", ") }));
   }
 }
 
@@ -199,9 +200,9 @@ function jobsOf(ctx: ReadContext, who: EntityId): EntityId[] {
 function jobNamed(ctx: ReadContext, who: EntityId, p: Proposal): EntityId | Rejection {
   const jobs = jobsOf(ctx, who);
   const id = strOf(p.job).trim();
-  if (id !== "") return jobs.includes(id) ? id : refuse("missing_entity", `${labelOf(ctx, who)} has no job ${id}`);
+  if (id !== "") return jobs.includes(id) ? id : refuse("missing_entity", say("why_who_has_no_job_id", { who: labelOf(ctx, who), id: id }));
   const said = strOf(p.org).trim();
-  if (said === "") return jobs.length === 1 && jobs[0] !== undefined ? jobs[0] : refuse("missing_entity", jobs.length === 0 ? `${labelOf(ctx, who)} has no job` : `which of ${labelOf(ctx, who)}'s jobs the reply means isn't said`);
+  if (said === "") return jobs.length === 1 && jobs[0] !== undefined ? jobs[0] : refuse("missing_entity", jobs.length === 0 ? say("why_who_has_no_job", { who: labelOf(ctx, who) }) : say("why_which_of_who_s_jobs_the_reply", { who: labelOf(ctx, who) }));
   const key = placeKey(said);
   const employs = (job: EntityId): boolean => {
     const employer = strOf(own(ctx.state.entities, job)?.fields.employer);
@@ -214,7 +215,7 @@ function jobNamed(ctx: ReadContext, who: EntityId, p: Proposal): EntityId | Reje
     return org !== null && isStaff(ctx, who, org)?.id === job;
   };
   const found = jobs.filter(employs);
-  return found.length === 1 && found[0] !== undefined ? found[0] : refuse("missing_entity", `${labelOf(ctx, who)} has no job at ${said}`);
+  return found.length === 1 && found[0] !== undefined ? found[0] : refuse("missing_entity", say("why_who_has_no_job_at_said", { who: labelOf(ctx, who), said: said }));
 }
 
 /** A party a hire's employer may be: an organization, or a person, the player character may know. */
@@ -227,7 +228,7 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
   if ("code" in base) return base;
   const { who } = base;
   const by = actorOf(ctx, p);
-  if (by === null) return refuse("missing_entity", `no one ${strOf(p.by)} the player character knows`);
+  if (by === null) return refuse("missing_entity", say("why_no_one_by_the_player_character_knows", { by: strOf(p.by) }));
   const change = strOf(p.change);
   const why = quoted(p);
   const name = (id: EntityId): string => labelOf(ctx, id);
@@ -235,12 +236,12 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
   const line = (org: EntityId | null, text: string): EffectSpec[] => (org === null ? [] : [historyLine(org, withWhy(text, why), { names: [who] })]);
   if (change === "hired") {
     const org = employerNamed(ctx, strOf(p.org));
-    if (org === null) return refuse("missing_entity", `no employer ${strOf(p.org) || "named"} the player character knows`);
-    if (org === who) return refuse("bad_employer", "nobody hires themselves");
-    if (jobsOf(ctx, who).some((job) => strOf(own(ctx.state.entities, job)?.fields.employer) === org)) return refuse("already", `${name(who)} already works for ${name(org)}`);
+    if (org === null) return refuse("missing_entity", say("why_no_employer_org_named_the_player_character", { org: strOf(p.org) }));
+    if (org === who) return refuse("bad_employer", say("why_nobody_hires_themselves"));
+    if (jobsOf(ctx, who).some((job) => strOf(own(ctx.state.entities, job)?.fields.employer) === org)) return refuse("already", say("why_worker_already_employed_by_employer", { worker: name(who), employer: name(org) }));
     const said = strOf(p.position);
     const position = said === "" ? null : positionNamed(ctx, org, said);
-    if (said !== "" && position === null) return refuse("bad_position", `${name(org)} has no position ${said}`);
+    if (said !== "" && position === null) return refuse("bad_position", say("why_employer_has_no_position_position", { employer: name(org), position: said }));
     const title = plainWords(strOf(p.title));
     const rate = typeof p.rate === "number" && Number.isFinite(p.rate) && p.rate > 0 ? Math.round(p.rate) : undefined;
     const hours = typeof p.hours === "number" && Number.isFinite(p.hours) && p.hours > 0 && p.hours <= 168 ? p.hours : undefined;
@@ -263,7 +264,7 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
     case "raise": {
       const rate = typeof p.rate === "number" && Number.isFinite(p.rate) && p.rate > 0 ? Math.round(p.rate) : undefined;
       const pct = typeof p.pct === "number" && Number.isFinite(p.pct) && p.pct > -100 && p.pct !== 0 ? p.pct : undefined;
-      if (rate === undefined && pct === undefined) return refuse("bad_amount", "a raise gives the new rate or a percentage");
+      if (rate === undefined && pct === undefined) return refuse("bad_amount", say("why_a_raise_gives_the_new_rate_or"));
       const was = typeof fields.rate === "number" ? fields.rate : 0;
       const now = rate ?? Math.round(was * (1 + (pct ?? 0) / 100));
       const pay = now > 0 ? `Set ${name(who)}'s pay to ${formatMoney(now, ctx.world.currency)}` : `Changed ${name(who)}'s pay`;
@@ -272,11 +273,11 @@ function employment(ctx: ReadContext, p: Proposal): { effects: EffectSpec[] } | 
     case "leave":
     case "back": {
       const leave = change === "leave";
-      if (leave !== (strOf(fields.status) !== "leave")) return refuse("already", leave ? `${name(who)} is already on leave` : `${name(who)} isn't on leave`);
+      if (leave !== (strOf(fields.status) !== "leave")) return refuse("already", leave ? say("why_who_is_already_on_leave", { who: name(who) }) : say("why_who_isnt_on_leave", { who: name(who) }));
       return { effects: [{ type: "economy.job_leave", args: { job, leave } }, ...line(org, leave ? `Put ${name(who)} on leave` : `${name(who)} came back from leave`), ...flag(org, "staff.pay", leave ? `put ${name(who)} on leave` : `brought ${name(who)} back from leave`)] };
     }
     default:
-      return refuse("bad_proposal", `an employment change is one of ${EMPLOYMENT_CHANGES.join(", ")}`);
+      return refuse("bad_proposal", say("why_an_employment_change_is_one_of_join", { join: EMPLOYMENT_CHANGES.join(", ") }));
   }
 }
 

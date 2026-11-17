@@ -102,6 +102,7 @@ import regions from "./tables/modern-us/regions.json";
 import shipped from "./tables/modern-us/shipped.json";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { registerCashRule } from "./cash-rule";
+import { say } from "../../../engine/lines";
 
 const TABLES: DataTable[] = [catalog, categories, occupations, regions, finance, exempt, history] as unknown as DataTable[];
 /** Every revision each table has shipped as (the table build's record). */
@@ -416,9 +417,9 @@ function methodSource(ctx: ReadContext, payer: EntityId, words: string): { sourc
     const account = e.kind === "card" ? strOf(e.fields.account) : id;
     const holder = e.kind === "card" ? strOf(e.fields.holder) : payer;
     if (holder === payer && canSpend(ctx.state, account, payer)) return { source: id };
-    return reject("bad_method", `${labelOf(ctx, payer)} can't pay from ${labelOf(ctx, id)}; they can pay from ${payChoices(ctx, payer)}`);
+    return reject("bad_method", say("why_payer_cant_pay_from_id_they_can", { payer: labelOf(ctx, payer), id: labelOf(ctx, id), payer2: payChoices(ctx, payer) }));
   }
-  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(id)) return reject("bad_method", `no account or card ${id}; ${labelOf(ctx, payer)} can pay from ${payChoices(ctx, payer)}`);
+  if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(id)) return reject("bad_method", say("why_no_account_or_card_id_payer_can", { id: id, payer: labelOf(ctx, payer), payer2: payChoices(ctx, payer) }));
   return null;
 }
 
@@ -477,10 +478,10 @@ function makeApi(hooks: FinanceHooks): FinanceApi {
 /** A module's payment, paid the way the foundation pays everything. */
 function payWith(hooks: FinanceHooks, ctx: ReadContext, p: Payment): LedgerEvent[] | Rejection {
   const from = own(ctx.state.entities, p.from);
-  if (!from) return reject("missing_entity", `no ${labelOf(ctx, p.from)}`);
+  if (!from) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, p.from) }));
   const account = from.kind === "account" ? p.from : undefined;
   const payer = account ? holdersOf(ctx.state, account).find((h) => canSpend(ctx.state, account, h)) : p.from;
-  if (!payer) return reject("not_owner", `no one can pay from ${labelOf(ctx, p.from)}`);
+  if (!payer) return reject("not_owner", say("why_no_one_can_pay_from_from", { from: labelOf(ctx, p.from) }));
   const to = own(ctx.state.entities, p.to);
   const opts: ChargeOptions = { method: (p.method as PayMethod | undefined) ?? (account ? "auto" : "account"), ...(account ? { source: account } : {}), ...(p.kind ? { kind: p.kind } : {}), ...(p.category ? { category: p.category } : {}), ...(p.flow ? { flow: p.flow } : {}) };
   if (to?.kind === "account") {
@@ -498,7 +499,7 @@ function payWith(hooks: FinanceHooks, ctx: ReadContext, p: Payment): LedgerEvent
  */
 function postWith(ctx: ReadContext, lines: PostingLine[], meta: PostMeta): LedgerEvent[] | Rejection {
   const clean = lines.filter((l) => l.amount !== 0);
-  if (clean.length < 2 || clean.reduce((a, l) => a + l.amount, 0) !== 0) return reject("unbalanced", `${meta.memo} doesn't balance`);
+  if (clean.length < 2 || clean.reduce((a, l) => a + l.amount, 0) !== 0) return reject("unbalanced", say("why_flow_doesnt_balance", { flow: meta.memo }));
   const bands: LedgerEvent[] = [];
   for (const l of clean) {
     const party = l.account.startsWith("economy.external:") ? l.account.slice("economy.external:".length) : "";
@@ -603,8 +604,8 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   r.service("economy.claim_cash", claimCash);
   r.service("economy.reprice", reprice);
   r.service("economy.adjust", (ctx, account, cents) => {
-    if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
-    if (!Number.isSafeInteger(cents) || cents === 0) return reject("bad_amount", "an adjustment is a whole amount other than nothing");
+    if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", say("why_account_isnt_an_account", { account: labelOf(ctx, account) }));
+    if (!Number.isSafeInteger(cents) || cents === 0) return reject("bad_amount", say("why_an_adjustment_is_a_whole_amount_other"));
     const lines: PostingLine[] = [
       { account, amount: cents },
       { account: CORRECTION_ACCOUNT, amount: -cents },
@@ -792,13 +793,13 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     boundField: "money",
     validate(p, ctx) {
       const { payer } = purchaser(p, ctx);
-      if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
-      if (!isParty(ctx, payer)) return reject("bad_payer", "a payer must be an account holder");
+      if (!own(ctx.state.entities, payer)) return reject("missing_entity", say("why_no_payer_payer", { payer: labelOf(ctx, payer) }));
+      if (!isParty(ctx, payer)) return reject("bad_payer", say("why_a_payer_must_be_an_account_holder"));
       // Nothing pricing it doesn't refuse it: what was bought is the payer's, with nothing charged
       // until a price is set (`economy.unpriced`).
       // A property bought (`property`: a property, or a place one is made of) needs the property or place.
-      if (typeof p.property === "string" && p.property !== "") return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject("missing_property", `no property or place ${labelOf(ctx, p.property)}`);
-      return strOf(p.item) === "" && strOf(p.category) === "" ? reject("bad_proposal", "a purchase needs an item or a category") : null;
+      if (typeof p.property === "string" && p.property !== "") return own(ctx.state.entities, p.property)?.kind === "property" || own(ctx.world.places, p.property) ? null : reject("missing_property", say("why_no_property_or_place_property", { property: labelOf(ctx, p.property) }));
+      return strOf(p.item) === "" && strOf(p.category) === "" ? reject("bad_proposal", say("why_a_purchase_needs_an_item_or_a")) : null;
     },
     // `playerPrice` (minor units) is the price the player set on a chip, charged as set; `owned` says
     // the thing is the payer's already (an unpriced purchase priced later), so only its charge is
@@ -828,13 +829,13 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
     type: "transfer",
     boundField: "money",
     validate(p, ctx) {
-      if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", "a transfer needs a payer and a payee");
+      if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", say("why_a_transfer_needs_a_payer_and_a"));
       const payer = transferParty(ctx, strOf(p.from), "from");
       if ("code" in payer) return payer;
       const payee = transferParty(ctx, strOf(p.to), "to");
       if ("code" in payee) return payee;
       const cents = transferCents(p);
-      return Number.isFinite(cents) && cents > 0 ? null : reject("bad_amount", "a transfer needs a positive amount");
+      return Number.isFinite(cents) && cents > 0 ? null : reject("bad_amount", say("why_a_transfer_needs_a_positive_amount"));
     },
     // `method`: how the money changed hands ("cash" for bills handed over).
     toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...(typeof p.method === "string" ? { method: p.method } : {}), story: true } }],
@@ -968,7 +969,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       // is the payer's, with nothing charged until a price is set. So does one nothing of the payer's
       // can pay: `charge` charges nothing, and its journal line says what it would have cost.
       const story = args.story === true;
-      if (!priced && !story) return reject("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
+      if (!priced && !story) return reject("unpriced", say("why_no_price_for_category", { category: labelOf(ctx, strOf(args.item) || strOf(args.category)) }));
       const name = sold ? (own(ctx.state.entities, sold)?.name ?? "something") : strOf(args.name) || priced?.price.name || strOf(args.item) || strOf(args.category) || "something";
       const what = `${name}${qty > 1 ? ` ×${qty}` : ""}`;
       const seller = strOf(args.seller);
@@ -979,7 +980,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
       const terms = objOf(auto.term_months);
       const financing = spawnVehicle !== null && priced !== null && (args.finance === true || typeof args.down === "number" || typeof args.term_months === "number");
       const term = Math.round(typeof args.term_months === "number" ? args.term_months : numOf(terms.typical, 60));
-      if (financing && (term < numOf(terms.min, 12) || term > numOf(terms.max, 96))) return reject("bad_term", `car loans run ${numOf(terms.min, 12)} to ${numOf(terms.max, 96)} months`);
+      if (financing && (term < numOf(terms.min, 12) || term > numOf(terms.max, 96))) return reject("bad_term", say("why_car_loans_run_min_to_max_months", { min: numOf(terms.min, 12), max: numOf(terms.max, 96) }));
       const down = financing && priced ? Math.max(0, Math.min(priced.price.cents, Math.round(typeof args.down === "number" ? args.down : (priced.price.cents * numOf(auto.down_payment_pct_typical, 12)) / 100))) : 0;
       const financed = financing && priced ? priced.price.cents - down : 0;
       return actAs(ctx, { by, party: payer, power: "money.spend", ...(seller !== "" ? { target: seller } : {}), line: (paid) => `Bought ${what}${paid !== undefined ? ` for ${moneyWords(ctx, paid)}` : ""}` }, () => {
@@ -1076,11 +1077,11 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
     resolve(a, ctx) {
       const scope = strOf(a.scope, "all");
       const place = strOf(a.place);
-      if (place !== "" && !own(ctx.world.places, place)) return reject("missing_place", `no place ${labelOf(ctx, place)}`);
+      if (place !== "" && !own(ctx.world.places, place)) return reject("missing_place", say("why_no_place_place", { place: labelOf(ctx, place) }));
       const id = strOf(a.id) || `${place || "*"}:${scope}`;
       const percent = numOf(a.percent);
       if (a.clear === true || percent === 0) return [{ type: "economy.modifier", data: { id } }];
-      if (percent <= -100) return reject("bad_amount", "a price modifier can't make things free");
+      if (percent <= -100) return reject("bad_amount", say("why_a_price_modifier_cant_make_things_free"));
       const minutes = numOf(a.minutes);
       return [{ type: "economy.modifier", data: { id, scope, place, mult: Math.round((1 + percent / 100) * 10000) / 10000, ...(minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {}) } }];
     },
@@ -1093,14 +1094,14 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
     args: ["card", "from?", "cents?", "who?", "by?"],
     resolve(a, ctx) {
       const card = strOf(a.card);
-      if (!traitsOf(ctx, card)?.liability) return reject("not_a_liability", `${labelOf(ctx, card)} isn't a card or a loan`);
+      if (!traitsOf(ctx, card)?.liability) return reject("not_a_liability", say("why_account_isnt_a_card_or_a_loan", { account: labelOf(ctx, card) }));
       const who = strOf(a.who) || holdersOf(ctx.state, card).find((h) => own(ctx.state.entities, h)) || "";
       const owed = Math.max(0, -balance(ctx.state, card));
       const cents = typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : owed;
       return actAs(ctx, { by: strOf(a.by), party: who, power: "money.manage", account: card, line: () => `Paid ${moneyWords(ctx, cents)} toward ${labelOf(ctx, card)}` }, () => {
-        if (rightsOf(ctx.state, card, who) === null) return reject("not_owner", `${labelOf(ctx, card)} isn't ${labelOf(ctx, who)}'s to pay`);
+        if (rightsOf(ctx.state, card, who) === null) return reject("not_owner", say("why_card_isnt_who_s_to_pay", { card: labelOf(ctx, card), who: labelOf(ctx, who) }));
         const from = strOf(a.from) || depositAccount(ctx, who, card) || "";
-        if (from === "") return reject("missing_account", `${labelOf(ctx, who)} has no account to pay ${labelOf(ctx, card)} from`);
+        if (from === "") return reject("missing_account", say("why_who_has_no_account_to_pay_card", { who: labelOf(ctx, who), card: labelOf(ctx, card) }));
         const unusable = mayUse(ctx, who, from, "from");
         if (unusable) return unusable;
         return move(ctx, from, card, cents, `${own(ctx.state.entities, card)?.name ?? "Card"} payment`);
@@ -1143,14 +1144,14 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
  */
 function gmOpenAccount(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const party = strOf(a.party);
-  if (!partyKindOf(ctx, party)) return reject("missing_entity", `${labelOf(ctx, party)} can't hold money`);
+  if (!partyKindOf(ctx, party)) return reject("missing_entity", say("why_party_cant_hold_money", { party: labelOf(ctx, party) }));
   const product = strOf(a.product).trim();
   const def = own(worldProducts(ctx.world), product);
   const cls = def?.class ?? (isAccountClass(product) ? product : null);
-  if (cls === null) return { code: "bad_product", reason: `there's no product ${product.replace(/_/g, " ")}`, choices: Object.keys(worldProducts(ctx.world)).sort(), said: product };
+  if (cls === null) return { code: "bad_product", reason: say("why_theres_no_product_g", { g: product.replace(/_/g, " ") }), choices: Object.keys(worldProducts(ctx.world)).sort(), said: product };
   const day = (v: JsonValue | undefined): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 31 ? v : undefined);
   // A day the call gave that is no day of the month is refused, never dropped.
-  for (const field of ["due_day", "statement_day"]) if (a[field] !== undefined && a[field] !== null && day(a[field]) === undefined) return { code: "bad_day", reason: `${field.replace(/_/g, " ")} is a day of the month, 1 to 31` };
+  for (const field of ["due_day", "statement_day"]) if (a[field] !== undefined && a[field] !== null && day(a[field]) === undefined) return { code: "bad_day", reason: say("why_g_is_a_day_of_the_month", { g: field.replace(/_/g, " ") }) };
   const due = day(a.due_day);
   const statement = day(a.statement_day);
   const from = strOf(a.autopay_from);

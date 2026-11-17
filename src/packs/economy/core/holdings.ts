@@ -253,13 +253,13 @@ function lotsEvent(api: FinanceApi): EventTypeDef<PackEvent> {
     validate(e, ctx) {
       const holding = str(e, "holding");
       const h = own(ctx.state.entities, holding);
-      if (!h || h.kind !== "holding") return reject("missing_holding", `no holding ${labelOf(ctx, holding)}`);
+      if (!h || h.kind !== "holding") return reject("missing_holding", say("why_no_holding_holding", { holding: labelOf(ctx, holding) }));
       const qty = e.data.qty;
       const cents = e.data.cents;
-      if (typeof qty !== "number" || !Number.isFinite(qty) || Math.abs(qty) <= QTY_EPSILON) return reject("bad_event", "lots change by a number of units");
-      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return reject("bad_event", "lots change for a whole amount, nothing or more");
+      if (typeof qty !== "number" || !Number.isFinite(qty) || Math.abs(qty) <= QTY_EPSILON) return reject("bad_event", say("why_lots_change_by_a_number_of_units"));
+      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return reject("bad_event", say("why_lots_change_for_a_whole_amount_nothing"));
       const held = qtyOf(lotsOf(ctx, holding));
-      return qty < 0 && held + qty < -QTY_EPSILON ? reject("declined", `${h.name} holds ${held} units, not ${-qty}`) : null;
+      return qty < 0 && held + qty < -QTY_EPSILON ? reject("declined", say("why_name_holds_held_units_not_qty", { name: h.name, held: held, qty: -qty })) : null;
     },
     apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str(e, "holding")))),
     describe: (e, ctx, viewer) => (viewer ? "" : say("holding_units", { holding: labelOf(ctx, str(e, "holding")), qty: `${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)}`, kind: strOf(e.data.kind, "trade"), amount: formatMoney(numOf(e.data.cents), ctx.world.currency) })),
@@ -326,9 +326,9 @@ export interface Trade {
 export function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: EntityId | undefined): EntityId | Rejection {
   const account = accountOfHolding(ctx.state, holding);
   // A retirement account's money stays in it: its own effects are the only way out.
-  if (account && api.traitsOf(ctx, account)?.locked && to && to !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
+  if (account && api.traitsOf(ctx, account)?.locked && to && to !== account) return reject("locked", say("why_account_keeps_what_its_holdings_pay_move", { account: labelOf(ctx, account) }));
   if (to && to !== account) return api.mayUse(ctx, party, to, "into") ?? to;
-  return to ?? account ?? api.depositAccount(ctx, party) ?? reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+  return to ?? account ?? api.depositAccount(ctx, party) ?? reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, party) }));
 }
 
 /**
@@ -338,42 +338,42 @@ export function proceedsAccount(api: FinanceApi, ctx: ReadContext, party: Entity
  */
 export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trade): LedgerEvent[] | Rejection {
   const { party } = t;
-  if (!own(ctx.state.entities, party)) return reject("missing_entity", `no ${labelOf(ctx, party)}`);
-  if (!api.feature(ctx, party, "investments")) return reject("level", "investments aren't followed at this money level");
+  if (!own(ctx.state.entities, party)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, party) }));
+  if (!api.feature(ctx, party, "investments")) return reject("level", say("why_investments_arent_followed_at_this_money_level"));
   const events: LedgerEvent[] = [];
   // What is traded, and in which holding.
   let holding = t.holding && own(ctx.state.entities, t.holding)?.kind === "holding" ? t.holding : null;
-  if (t.holding && !holding) return reject("missing_holding", `no holding ${labelOf(ctx, t.holding)}`);
+  if (t.holding && !holding) return reject("missing_holding", say("why_no_holding_holding", { holding: labelOf(ctx, t.holding) }));
   let assetId = holding ? strOf(own(ctx.state.entities, holding)?.fields.asset) : (t.asset ?? "");
   let asset: Asset | null = assetOf(ctx, assetId);
   if (t.option && !holding) {
-    if (!api.feature(ctx, party, "options")) return reject("level", "options aren't followed at this money level");
+    if (!api.feature(ctx, party, "options")) return reject("level", say("why_options_arent_followed_at_this_money_level"));
     // A listed company's units sell only from its float (§27.10 Listing): no contract delivers them.
-    if (listedCompany(ctx, assetId) !== null) return reject("bad_option", `no options are written on ${asset?.label ?? labelOf(ctx, assetId)}'s stock: its units sell only from its float`);
+    if (listedCompany(ctx, assetId) !== null) return reject("bad_option", say("why_no_options_are_written_on_assetid_s", { assetId: asset?.label ?? labelOf(ctx, assetId) }));
     const def = optionDef(ctx, assetId, t.option.right, t.option.strike, t.option.expiry);
-    if (!def) return reject("bad_option", `there's no ${t.option.right} on ${labelOf(ctx, assetId)} at that strike and expiry`);
+    if (!def) return reject("bad_option", say("why_theres_no_right_on_assetid_at_that", { right: t.option.right, assetId: labelOf(ctx, assetId) }));
     assetId = optionId(assetId, t.option.right, t.option.strike, t.option.expiry);
     asset = assetFromDef(ctx, assetId, def);
     if (!assetDefOf(ctx, assetId)) events.push({ type: "economy.mint", data: { asset: assetId, def: def as unknown as JsonObject } });
   }
-  if (!asset) return reject("missing_asset", `no asset ${assetId || "named"}`);
-  if (asset.option && !api.feature(ctx, party, "options")) return reject("level", "options aren't followed at this money level");
-  if (asset.class === "property" || asset.class === "business_stake") return reject("not_traded", `${asset.label} changes hands as a property or a stake, not a trade`);
+  if (!asset) return reject("missing_asset", say("why_no_asset_assetid_named", { assetId: assetId }));
+  if (asset.option && !api.feature(ctx, party, "options")) return reject("level", say("why_options_arent_followed_at_this_money_level"));
+  if (asset.class === "property" || asset.class === "business_stake") return reject("not_traded", say("why_asset_changes_hands_as_a_property_or", { asset: asset.label }));
   // A listed company's stock trades in whole units, within what its market has left, and never to the company itself (§27.10 Listing).
   const listed = listedFloat(ctx, assetId);
-  if (listed && party === listed.business) return reject("own_stock", `${labelOf(ctx, party)} takes its own units back by buying back shares or going off the market`);
+  if (listed && party === listed.business) return reject("own_stock", say("why_party_takes_its_own_units_back_by", { party: labelOf(ctx, party) }));
   const account = holding ? accountOfHolding(ctx.state, holding) : t.account && own(ctx.state.entities, t.account) ? t.account : null;
-  if (t.account && !account) return reject("missing_account", `no account ${labelOf(ctx, t.account)}`);
+  if (t.account && !account) return reject("missing_account", say("why_no_account_account", { account: labelOf(ctx, t.account) }));
   if (account && !holding) {
-    if (!api.traitsOf(ctx, account)?.investment) return reject("not_investment", `${labelOf(ctx, account)} doesn't hold investments`);
-    if (!api.accountsOf(ctx, party, "spend").includes(account)) return reject("not_yours", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s to trade in`);
+    if (!api.traitsOf(ctx, account)?.investment) return reject("not_investment", say("why_account_doesnt_hold_investments", { account: labelOf(ctx, account) }));
+    if (!api.accountsOf(ctx, party, "spend").includes(account)) return reject("not_yours", say("why_account_isnt_party_s_to_trade_in", { account: labelOf(ctx, account), party: labelOf(ctx, party) }));
   }
   holding ??= findHolding(ctx.state, assetId, account, party);
-  if (holding && !canTrade(api, ctx, party, holding)) return reject("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to trade`);
-  if (asset.option && ctx.state.clock >= asset.option.expiry) return reject("expired", `${asset.label} has expired`);
-  if (asset.bond && ctx.state.clock >= asset.bond.maturity) return reject("matured", `${asset.label} has matured`);
+  if (holding && !canTrade(api, ctx, party, holding)) return reject("not_yours", say("why_holding_isnt_party_s_to_trade", { holding: labelOf(ctx, holding), party: labelOf(ctx, party) }));
+  if (asset.option && ctx.state.clock >= asset.option.expiry) return reject("expired", say("why_asset_has_expired", { asset: asset.label }));
+  if (asset.bond && ctx.state.clock >= asset.bond.maturity) return reject("matured", say("why_asset_has_matured", { asset: asset.label }));
   const price = priceOf(ctx, asset);
-  if (!(price > 0)) return reject("no_price", `${asset.label} has no price to trade at`);
+  if (!(price > 0)) return reject("no_price", say("why_asset_has_no_price_to_trade_at", { asset: asset.label }));
   const whole = asset.option !== null || listed !== null;
   const held = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
@@ -381,12 +381,12 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   if (t.side === "buy") {
     const raw = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : 0;
     const qty = whole ? Math.floor(raw + 1e-9) : roundQty(raw);
-    if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole ${listed ? "unit" : "contract"} at ${money(Math.round(price))}` : "say how much to buy");
-    if (listed && qty > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${asset.symbol ?? asset.label} are for sale on the market` : `No units of ${asset.symbol ?? asset.label} are for sale on the market`);
+    if (!(qty > QTY_EPSILON)) return reject("bad_amount", whole ? say("why_amount_buys_no_whole_unitcontract_at_price", { amount: money(Math.round(t.amount ?? 0)), price: money(Math.round(price)), listed: !!(listed) }) : say("why_say_how_much_to_buy"));
+    if (listed && qty > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? say("why_only_left_units_of_asset_are_for", { left: unitsText(listed.left), asset: asset.symbol ?? asset.label }) : say("why_no_units_of_asset_are_for_sale", { asset: asset.symbol ?? asset.label }));
     const cents = Math.round(qty * price);
-    if (cents <= 0) return reject("bad_amount", "say how much to buy");
+    if (cents <= 0) return reject("bad_amount", say("why_say_how_much_to_buy"));
     const source = t.from ?? account ?? api.depositAccount(ctx, party);
-    if (!source) return reject("no_account", `${labelOf(ctx, party)} has no account to pay from`);
+    if (!source) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: labelOf(ctx, party) }));
     // Cash in the holding's own account buys within it; any other account is paid from (the foundation's `mayUse`).
     const unusable = source === account ? null : api.mayUse(ctx, party, source, "from");
     if (unusable) return unusable;
@@ -408,13 +408,13 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   }
 
   if (!holding || held <= QTY_EPSILON) {
-    if (listed && unitsOf(api.ownersOf(ctx.state, listed.business), party) > 0) return reject("nothing_held", `${labelOf(ctx, party)} holds ${labelOf(ctx, listed.business)}'s units on its cap table, not on the market: sell them as a stake`);
-    return reject("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
+    if (listed && unitsOf(api.ownersOf(ctx.state, listed.business), party) > 0) return reject("nothing_held", say("why_party_holds_business_s_units_on_its", { party: labelOf(ctx, party), business: labelOf(ctx, listed.business) }));
+    return reject("nothing_held", say("why_party_holds_no_asset", { party: labelOf(ctx, party), asset: asset.label }));
   }
   const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held;
   const qty = whole ? Math.min(held, Math.floor(wanted + 1e-9)) : Math.min(held, roundQty(wanted));
-  if (!(qty > QTY_EPSILON)) return reject("bad_amount", "say how much to sell");
-  if (typeof t.qty === "number" && t.qty > held + QTY_EPSILON) return reject("declined", `${labelOf(ctx, holding)} holds ${unitsText(held)}, not ${unitsText(t.qty)}`);
+  if (!(qty > QTY_EPSILON)) return reject("bad_amount", say("why_say_how_much_to_sell"));
+  if (typeof t.qty === "number" && t.qty > held + QTY_EPSILON) return reject("declined", say("why_holding_holds_held_not_qty", { holding: labelOf(ctx, holding), held: unitsText(held), qty: unitsText(t.qty) }));
   const cents = Math.round(qty * price);
   const dest = proceedsAccount(api, ctx, party, holding, t.to);
   if (typeof dest !== "string") return dest;
@@ -430,12 +430,12 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
 
 /** Where a holding's distributions go (`route_distributions`): reinvested, an account of the owner's, or back to the default. */
 export function setRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, holding: EntityId, to: string): LedgerEvent[] | Rejection {
-  if (own(ctx.state.entities, holding)?.kind !== "holding") return reject("missing_holding", `no holding ${labelOf(ctx, holding)}`);
-  if (!canTrade(api, ctx, party, holding)) return reject("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
+  if (own(ctx.state.entities, holding)?.kind !== "holding") return reject("missing_holding", say("why_no_holding_holding", { holding: labelOf(ctx, holding) }));
+  if (!canTrade(api, ctx, party, holding)) return reject("not_yours", say("why_holding_isnt_party_s_to_manage", { holding: labelOf(ctx, holding), party: labelOf(ctx, party) }));
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
     const account = accountOfHolding(ctx.state, holding);
-    if (account && api.traitsOf(ctx, account)?.locked && route !== account) return reject("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
+    if (account && api.traitsOf(ctx, account)?.locked && route !== account) return reject("locked", say("why_account_keeps_what_its_holdings_pay", { account: labelOf(ctx, account) }));
     const unusable = route === account ? null : api.mayUse(ctx, party, route, "into");
     if (unusable) return unusable;
   }

@@ -89,12 +89,12 @@ export const calendarPack: PackDef = {
       type: "calendar.holiday",
       validate(e, ctx) {
         const id = strOf(e.data.id);
-        if (id === "") return { code: "bad_event", reason: "a holiday has an id" };
+        if (id === "") return { code: "bad_event", reason: say("why_a_holiday_has_an_id") };
         if (e.data.removed === true) return null;
         const held = holidaysOf(ctx).find((h) => h.id === id);
-        if (e.data.rule !== undefined && dateRuleOf(e.data.rule) === null) return { code: "bad_event", reason: "a holiday's rule is a date the calendar reads" };
-        if (e.data.label !== undefined && strOf(e.data.label) === "") return { code: "bad_event", reason: "a holiday's label is a text" };
-        return held === undefined && (strOf(e.data.label) === "" || dateRuleOf(e.data.rule) === null) ? { code: "bad_event", reason: "a new holiday needs a label and a rule" } : null;
+        if (e.data.rule !== undefined && dateRuleOf(e.data.rule) === null) return { code: "bad_event", reason: say("why_a_holidays_rule_is_a_date_the") };
+        if (e.data.label !== undefined && strOf(e.data.label) === "") return { code: "bad_event", reason: say("why_a_holidays_label_is_a_text") };
+        return held === undefined && (strOf(e.data.label) === "" || dateRuleOf(e.data.rule) === null) ? { code: "bad_event", reason: say("why_a_new_holiday_needs_a_label_and") } : null;
       },
       apply(e, state) {
         const id = strOf(e.data.id);
@@ -164,7 +164,7 @@ export const calendarPack: PackDef = {
       type: "time_advance",
       boundField: "duration",
       // Applied by the backend through engine/time.applyTimeAdvance (all or nothing, with its catch-up).
-      validate: (p) => (typeof p.minutes === "number" && p.minutes > 0 ? null : { code: "bad_proposal", reason: "time_advance needs minutes > 0" }),
+      validate: (p) => (typeof p.minutes === "number" && p.minutes > 0 ? null : { code: "bad_proposal", reason: say("why_time_advance_needs_minutes_0") }),
       toEffects: () => [],
     });
 

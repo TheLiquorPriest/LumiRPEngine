@@ -35,10 +35,10 @@ export function isMaterialized(state: Readonly<WorldState>, entity: EntityId, do
  */
 export function pinnedVersion(world: WorldDoc, reg: Registry, domain: DomainId): number | Rejection {
   const def = reg.materializers.get(domain);
-  if (!def) return { code: "no_materializer", reason: `no materializer for ${domain}` };
+  if (!def) return { code: "no_materializer", reason: say("why_no_materializer_for_domain", { domain: domain }) };
   const pin = world.pins.generators[domain];
   const carried = def.versions ?? [def.version];
-  if (pin !== undefined && !carried.includes(pin)) return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${carried.join(", v")}` };
+  if (pin !== undefined && !carried.includes(pin)) return { code: "generator_pin", reason: say("why_domain_is_pinned_to_generator_v_pin", { domain: domain, pin: pin, carried: carried.join(", v") }) };
   return pin ?? def.version;
 }
 
@@ -85,7 +85,7 @@ export const UNMATERIALIZED = "engine.unmaterialized";
 /** `engine.unmaterialized {entity, domain}`: the detail recorded for it is taken off the record of what was sampled, so it is sampled again when next needed; where none is recorded, nothing changes. */
 export const unmaterializedEvent: EventTypeDef<PackEvent> = {
   type: UNMATERIALIZED,
-  validate: (e) => (typeof e.data.entity === "string" && typeof e.data.domain === "string" ? null : { code: "bad_event", reason: `${UNMATERIALIZED} needs entity and domain` }),
+  validate: (e) => (typeof e.data.entity === "string" && typeof e.data.domain === "string" ? null : { code: "bad_event", reason: say("why_unmaterialized_needs_entity_and_domain", { uNMATERIALIZED: UNMATERIALIZED }) }),
   apply: (e, state) => {
     if (typeof e.data.entity === "string" && typeof e.data.domain === "string") delete state.materialized[`${e.data.entity}:${e.data.domain}`];
   },

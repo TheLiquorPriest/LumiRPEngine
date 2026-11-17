@@ -50,7 +50,7 @@ function keysArg(v: JsonValue | undefined): string[] | null | undefined | Reject
   if (v === AS_THE_WORLD) return null;
   if (v === NO_KEYS) return [];
   const list = Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : null;
-  if (list === null || list.some((k) => typeof k !== "string")) return { code: "bad_args", reason: "keys are item ids or item types" };
+  if (list === null || list.some((k) => typeof k !== "string")) return { code: "bad_args", reason: say("why_keys_are_item_ids_or_item_types") };
   return [...new Set(list.map((k) => String(k).trim()).filter((k) => k !== ""))];
 }
 
@@ -105,18 +105,18 @@ function holdersOf(ctx: ReadContext, place: PlaceId): EntityId[] {
  */
 function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const place = strOf(a.place);
-  if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+  if (!own(ctx.world.places, place)) return { code: "missing_place", reason: say("why_no_place_place", { place: labelOf(ctx, place) }) };
   const raw = a.entry;
   const entry = raw === undefined || raw === null ? undefined : raw === AS_THE_WORLD ? null : isAudience(raw) ? raw : false;
-  if (entry === false) return { code: "bad_args", reason: `who may enter is one of ${AUDIENCES.join(", ")}, or ${AS_THE_WORLD}` };
+  if (entry === false) return { code: "bad_args", reason: say("why_who_may_enter_is_one_of_join", { join: AUDIENCES.join(", "), aS_THE_WORLD: AS_THE_WORLD }) };
   const keys = keysArg(a.keys);
   if (keys !== null && keys !== undefined && !Array.isArray(keys)) return keys;
-  if (entry === undefined && keys === undefined) return { code: "bad_args", reason: "an entry change needs who may enter or its keys" };
+  if (entry === undefined && keys === undefined) return { code: "bad_args", reason: say("why_an_entry_change_needs_who_may_enter") };
   const org = strOf(a.org);
   const now = entryInPlay(ctx.state, place);
   const sameEntry = entry === undefined || (entry === null ? now.entry === undefined : now.entry === entry);
   const sameKeys = keys === undefined || (keys === null ? now.keys === undefined : JSON.stringify(now.keys ?? null) === JSON.stringify(keys));
-  if (sameEntry && sameKeys) return { code: "no_change", reason: "it is so already" };
+  if (sameEntry && sameKeys) return { code: "no_change", reason: say("why_it_is_so_already") };
   const by = strOf(a.by);
   const actor = by !== "" && own(ctx.state.entities, by) ? by : null;
   const data: JsonObject = { place, ...(entry !== undefined ? { entry } : {}), ...(keys !== undefined ? { keys } : {}), ...(actor !== null ? { by: actor } : {}), ...(org !== "" ? { org } : {}), visibility: "secret" };
@@ -141,12 +141,12 @@ const ENTRY_EVENT: EventTypeDef<PackEvent> = {
   // A place's entry and keys set in play over the world's: null puts either back.
   type: ORGS_ENTRY,
   validate: (e, ctx) => {
-    if (!own(ctx.world.places, str(e, "place"))) return { code: "missing_place", reason: `no place ${labelOf(ctx, str(e, "place"))}` };
+    if (!own(ctx.world.places, str(e, "place"))) return { code: "missing_place", reason: say("why_no_place_place", { place: labelOf(ctx, str(e, "place")) }) };
     const entry = e.data.entry;
     const keys = e.data.keys;
-    if (entry !== undefined && entry !== null && !isAudience(entry)) return { code: "bad_event", reason: "an entry is an audience" };
-    if (keys !== undefined && keys !== null && !(Array.isArray(keys) && keys.every((k) => typeof k === "string"))) return { code: "bad_event", reason: "keys are item ids or item types" };
-    return entry === undefined && keys === undefined ? { code: "bad_event", reason: "an entry change changes who may enter or the keys" } : null;
+    if (entry !== undefined && entry !== null && !isAudience(entry)) return { code: "bad_event", reason: say("why_an_entry_is_an_audience") };
+    if (keys !== undefined && keys !== null && !(Array.isArray(keys) && keys.every((k) => typeof k === "string"))) return { code: "bad_event", reason: say("why_keys_are_item_ids_or_item_types") };
+    return entry === undefined && keys === undefined ? { code: "bad_event", reason: say("why_an_entry_change_changes_who_may_enter") } : null;
   },
   // A change made for an organization on a place that is not one of its places is kept all the same, and said.
   advise: (e, ctx) => {
@@ -177,8 +177,8 @@ const TRESPASS_EVENT: EventTypeDef<PackEvent> = {
   validate: (e, ctx) => {
     const who = str(e, "entity");
     const place = str(e, "place");
-    if (!own(ctx.state.entities, who)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, who)}` };
-    return own(ctx.world.places, place) ? null : { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+    if (!own(ctx.state.entities, who)) return { code: "missing_entity", reason: say("why_no_entity_who", { who: labelOf(ctx, who) }) };
+    return own(ctx.world.places, place) ? null : { code: "missing_place", reason: say("why_no_place_place", { place: labelOf(ctx, place) }) };
   },
   // Someone recorded as trespassing where the record does not place them is kept all the same, and said.
   advise: (e, ctx) => {

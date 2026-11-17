@@ -208,7 +208,7 @@ function tagList(v: JsonValue | undefined): string[] | null {
 }
 
 function need(e: PackEvent, ...keys: string[]): Rejection | null {
-  for (const k of keys) if (typeof e.data[k] !== "string" || e.data[k] === "") return { code: "bad_event", reason: `${e.type} needs ${k}` };
+  for (const k of keys) if (typeof e.data[k] !== "string" || e.data[k] === "") return { code: "bad_event", reason: say("why_type_needs_k", { type: e.type, k: k }) };
   return null;
 }
 
@@ -253,7 +253,7 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.signal,
-    validate: (e) => (signalOf(e) ? null : { code: "bad_event", reason: "signal needs a known class" }),
+    validate: (e) => (signalOf(e) ? null : { code: "bad_event", reason: say("why_signal_needs_a_known_class") }),
     apply: noop,
     describe: (e) => str(e, "text"),
   },
@@ -264,7 +264,7 @@ const events: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => {
       const missing = need(e, "agent");
       if (missing) return missing;
-      return typeof e.data.slot === "number" && own(ctx.state.entities, str(e, "agent")) ? null : { code: "bad_event", reason: "caught needs an agent and a slot" };
+      return typeof e.data.slot === "number" && own(ctx.state.entities, str(e, "agent")) ? null : { code: "bad_event", reason: say("why_caught_needs_an_agent_and_a_slot") };
     },
     apply: (e, state) => {
       const slot = e.data.slot;
@@ -274,7 +274,7 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.cursor,
-    validate: (e) => (typeof e.data.rr === "number" ? null : { code: "bad_event", reason: "cursor needs rr" }),
+    validate: (e) => (typeof e.data.rr === "number" ? null : { code: "bad_event", reason: say("why_cursor_needs_rr") }),
     apply: (e, state) => {
       if (typeof e.data.rr === "number") slice(state).rr = e.data.rr;
     },
@@ -283,7 +283,7 @@ const events: EventTypeDef<PackEvent>[] = [
   { type: ENGINE_EVENTS.choice, validate: (e) => need(e, "key", "choice"), apply: noop, describe: (e) => say("ev_choice", { key: str(e, "key"), choice: str(e, "choice") }) },
   {
     type: ENGINE_EVENTS.attempt,
-    validate: (e, ctx) => (own(ctx.world.tracks, str(e, "track")) ? null : { code: "missing_track", reason: `no track ${str(e, "track")}` }),
+    validate: (e, ctx) => (own(ctx.world.tracks, str(e, "track")) ? null : { code: "missing_track", reason: say("why_no_track_track", { track: str(e, "track") }) }),
     apply: (e, state) => {
       const track = str(e, "track");
       if (e.data.correct === true) sub(state, "solved")[track] = str(e, "stage");
@@ -308,9 +308,9 @@ const events: EventTypeDef<PackEvent>[] = [
       const missing = need(e, "track", "stage");
       if (missing) return missing;
       const n = e.data.n;
-      if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) return { code: "bad_event", reason: `${e.type} needs n, a whole number from 1` };
+      if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) return { code: "bad_event", reason: say("why_type_needs_n_a_whole_number_from", { type: e.type }) };
       const t = own(ctx.world.tracks, str(e, "track"));
-      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str(e, "stage")} of track ${str(e, "track")}` };
+      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: say("why_no_stage_stage_of_track_track", { stage: str(e, "stage"), track: str(e, "track") }) };
     },
     apply: (e, state) => {
       const n = e.data.n;
@@ -325,7 +325,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const missing = need(e, "track", "stage");
       if (missing) return missing;
       const t = own(ctx.world.tracks, str(e, "track"));
-      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: `no stage ${str(e, "stage")} of track ${str(e, "track")}` };
+      return t && own(t.stages, str(e, "stage")) ? null : { code: "missing_track", reason: say("why_no_stage_stage_of_track_track", { stage: str(e, "stage"), track: str(e, "track") }) };
     },
     apply: (e, state) => {
       countStage(state, "hints", str(e, "track"), str(e, "stage"), (open) => Math.max(0, open - 1));
@@ -346,7 +346,7 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.pause,
-    validate: (e) => (typeof e.data.scene === "string" || e.data.scene === null ? null : { code: "bad_event", reason: "pause needs scene" }),
+    validate: (e) => (typeof e.data.scene === "string" || e.data.scene === null ? null : { code: "bad_event", reason: say("why_pause_needs_scene") }),
     apply: (e, state) => {
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
@@ -357,7 +357,7 @@ const events: EventTypeDef<PackEvent>[] = [
     // Any time the story states, before the story's start too: it is applied as stated, never clamped, and said (`before_start`).
     validate: (e) => {
       const minutes = e.data.minutes;
-      if (typeof minutes !== "number" || !Number.isFinite(minutes) || clockSeconds(minutes) <= 0) return { code: "bad_event", reason: "a clock set back needs a time above zero, in minutes or a part of one counted in seconds" };
+      if (typeof minutes !== "number" || !Number.isFinite(minutes) || clockSeconds(minutes) <= 0) return { code: "bad_event", reason: say("why_a_clock_set_back_needs_a_time") };
       return null;
     },
     advise: (e, ctx) => {
@@ -378,18 +378,18 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.check,
-    validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str(e, "actor")}` }),
+    validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "actor") }) }),
     apply: noop,
     describe: (e) => say("ev_check", { actor: str(e, "actor"), check: str(e, "check").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(typeof e.data.total === "number" ? { total: String(e.data.total) } : {}), ...(typeof e.data.dc === "number" ? { dc: String(e.data.dc) } : {}) }),
   },
   {
     type: ENGINE_EVENTS.entity,
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "entity") }) };
       const { tier, agent, levels } = e.data;
-      if (tier !== undefined && (typeof tier !== "string" || !(tierOf(ctx.world, tier) || isBand(tier)))) return { code: "bad_tier", reason: `no tier ${String(tier)}` };
-      if (agent !== undefined && typeof agent !== "boolean") return { code: "bad_event", reason: "agent is yes or no" };
-      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d, v]) => DOMAINS.some((x) => x === d) && (v === null || (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4))))) return { code: "bad_level", reason: "a level is a whole number 0–4, or null to follow the tier" };
+      if (tier !== undefined && (typeof tier !== "string" || !(tierOf(ctx.world, tier) || isBand(tier)))) return { code: "bad_tier", reason: say("why_no_tier_tier", { tier: String(tier) }) };
+      if (agent !== undefined && typeof agent !== "boolean") return { code: "bad_event", reason: say("why_agent_is_yes_or_no") };
+      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d, v]) => DOMAINS.some((x) => x === d) && (v === null || (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4))))) return { code: "bad_level", reason: say("why_a_level_is_a_whole_number_0_2") };
       return null;
     },
     apply: (e, state) => {
@@ -430,14 +430,14 @@ const events: EventTypeDef<PackEvent>[] = [
     type: ENGINE_EVENTS.classes,
     validate: (e, ctx) => {
       const ent = own(ctx.state.entities, str(e, "entity"));
-      if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      if (!ent) return { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "entity") }) };
       const classes = classOf(e.data.class);
-      if (!classes) return { code: "bad_event", reason: "a classification is facet → values" };
+      if (!classes) return { code: "bad_event", reason: say("why_a_classification_is_facet_values") };
       // More values than a one-valued facet takes are held as they were recorded (the edit that recorded them said so); a facet or a value the world lacks is still held back.
       const problem = classProblems(ctx.world, classes, ent.name).find((p) => p.code !== "single_class");
       if (problem) return { code: problem.code, reason: problem.message };
-      if (e.data.was !== undefined && !classOf(e.data.was)) return { code: "bad_event", reason: "the classification before is facet → values" };
-      return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
+      if (e.data.was !== undefined && !classOf(e.data.was)) return { code: "bad_event", reason: say("why_the_classification_before_is_facet_values") };
+      return tagList(e.data.tags) ? null : { code: "bad_event", reason: say("why_tags_are_a_list_of_words") };
     },
     apply: (e, state) => {
       const ent = own(state.entities, str(e, "entity"));
@@ -479,8 +479,8 @@ const events: EventTypeDef<PackEvent>[] = [
     type: ENGINE_EVENTS.rename,
     validate: (e, ctx) => {
       const name = str(e, "name");
-      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
-      return name.trim() !== "" ? null : { code: "bad_name", reason: "a name is not empty" };
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "entity") }) };
+      return name.trim() !== "" ? null : { code: "bad_name", reason: say("why_a_name_is_not_empty") };
     },
     apply: (e, state) => {
       const ent = own(state.entities, str(e, "entity"));
@@ -493,13 +493,13 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: ENGINE_EVENTS.observed,
-    validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" }),
+    validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: say("why_observed_needs_places_and_people") }),
     apply: (e, state) => restoreObservations(state, e.data),
     describe: () => say("ev_meanwhile"),
   },
   {
     type: ENGINE_EVENTS.adjudged,
-    validate: (e, ctx) => need(e, "actor", "action", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str(e, "actor")}` }),
+    validate: (e, ctx) => need(e, "actor", "action", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "actor") }) }),
     apply: (e, state) => {
       // Only an attempt a retry rule reads carries a key; its record is the latest for that check.
       const key = e.data.key;
@@ -513,11 +513,11 @@ const events: EventTypeDef<PackEvent>[] = [
     type: ENGINE_EVENTS.life,
     validate: (e, ctx) => {
       const ent = own(ctx.state.entities, str(e, "entity"));
-      if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
-      if (!isLifeState(ctx.world, str(e, "to"))) return { code: "bad_life", reason: `there's no life state ${str(e, "to")}` };
+      if (!ent) return { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "entity") }) };
+      if (!isLifeState(ctx.world, str(e, "to"))) return { code: "bad_life", reason: say("why_theres_no_life_state_to", { to: str(e, "to") }) };
       const seen = e.data.witnesses;
-      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string"))) return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
-      return lifeOf(ctx.state, str(e, "entity")) === str(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str(e, "to")).label.toLowerCase()}` } : null;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string"))) return { code: "bad_event", reason: say("why_a_life_changes_witnesses_are_entity_ids") };
+      return lifeOf(ctx.state, str(e, "entity")) === str(e, "to") ? { code: "no_change", reason: say("why_name_is_already_to", { name: ent.name, to: lifeStateOf(ctx.world, str(e, "to")).label.toLowerCase() }) } : null;
     },
     apply: (e, state, ctx) => applyLife(state, ctx, str(e, "entity"), str(e, "to"), witnessesOf(e)),
     touches: (e) => [{ entity: str(e, "entity"), aspect: "life" }],
@@ -536,9 +536,9 @@ const events: EventTypeDef<PackEvent>[] = [
   {
     type: ENGINE_EVENTS.told,
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "entity") }) };
       const who = e.data.who;
-      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
+      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: say("why_told_needs_the_people_told") };
     },
     apply: (e, state) => tellLife(state, str(e, "entity"), Array.isArray(e.data.who) ? e.data.who.filter((id): id is string => typeof id === "string") : []),
     describe: (e, ctx, viewer) => {

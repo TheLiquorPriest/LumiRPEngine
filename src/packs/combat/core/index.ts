@@ -73,7 +73,7 @@ function reject(code: string, reason: string): Rejection {
 
 /** The fight an event names, when it is under way. */
 function current(e: PackEvent, ctx: Pick<ReadContext, "state">): Encounter | Rejection {
-  return fightById(ctx.state, strOf(e.data.encounter)) ?? reject("no_fight", "that fight is not under way");
+  return fightById(ctx.state, strOf(e.data.encounter)) ?? reject("no_fight", say("why_that_fight_is_not_under_way"));
 }
 
 function counts(v: JsonValue | undefined): Record<string, number> | null {
@@ -114,11 +114,11 @@ function namedFoes(ctx: ReadContext, v: JsonValue | undefined, here: readonly En
   if (isRecord(v)) {
     // A selector as the visibility reader reads one: a constraint it doesn't know names no one.
     const selector = knownBySelector(v);
-    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject("bad_args", "the foes are ids or a selector");
+    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject("bad_args", say("why_the_foes_are_ids_or_a_selector"));
   }
   const ids = idsOf(v);
   const away = ids.find((id) => !here.includes(id));
-  return away !== undefined ? reject("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
+  return away !== undefined ? reject("not_here", say("why_away_isnt_here_to_fight", { away: labelOf(ctx, away) })) : ids;
 }
 
 /**
@@ -137,10 +137,10 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
   let foes: EntityId[];
   if (given.length > 0) foes = idsOf(a.foes);
   else {
-    if (fightsOf(ctx.state).some((f) => fighterOf(f, pov))) return reject("in_fight", "a fight is already under way");
+    if (fightsOf(ctx.state).some((f) => fighterOf(f, pov))) return reject("in_fight", say("why_a_fight_is_already_under_way"));
     const place = placeOfEntity(ctx.state, pov);
-    if (place === null) return reject("nowhere", "there's nowhere to fight");
-    if (rules && !canFight(ctx, rules, pov)) return reject("cannot_fight", "you can't fight here");
+    if (place === null) return reject("nowhere", say("why_theres_nowhere_to_fight"));
+    if (rules && !canFight(ctx, rules, pov)) return reject("cannot_fight", say("why_you_cant_fight_here"));
     const here = Object.keys(ctx.state.entities)
       .sort()
       .filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place && (rules === null || canFight(ctx, rules, id)));
@@ -148,7 +148,7 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
     if (named !== null && !Array.isArray(named)) return named;
     foes = named ?? here.filter((id) => hostile(ctx, rules?.sides?.hostile, id, pov));
   }
-  if (foes.length === 0) return reject("no_foes", "there's no one to fight here");
+  if (foes.length === 0) return reject("no_foes", say("why_theres_no_one_to_fight_here"));
   const sides = sidesOf(ctx, party, foes);
   if ("code" in sides) return sides;
   const places = new Set(sides.fighters.map((id) => placeOfEntity(ctx.state, id)));
@@ -161,9 +161,9 @@ function startFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEve
 /** The fighters of two sides, each once; the refusal when someone is on both sides or is no one in the world. */
 function sidesOf(ctx: ReadContext, party: readonly EntityId[], foes: readonly EntityId[]): { fighters: EntityId[] } | Rejection {
   const both = party.find((id) => foes.includes(id));
-  if (both !== undefined) return { code: "bad_args", reason: `${labelOf(ctx, both)} is named on both sides`, said: both };
+  if (both !== undefined) return { code: "bad_args", reason: say("why_both_is_named_on_both_sides", { both: labelOf(ctx, both) }), said: both };
   const absent = [...party, ...foes].find((id) => !own(ctx.state.entities, id));
-  if (absent !== undefined) return reject("missing_entity", `no ${labelOf(ctx, absent)}`);
+  if (absent !== undefined) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, absent) }));
   return { fighters: [...new Set([...party, ...foes])] };
 }
 
@@ -177,7 +177,7 @@ function rankedOrder(a: Record<string, JsonValue>, ctx: EffectContext, rules: Co
   const rolls = new Map<EntityId, { init: number; tie: number }>();
   if (a.roll_initiative === true) {
     const init = rules ? checkOf(ctx.world, rules.initiative) : null;
-    if (!rules || !init) return { code: "no_initiative", reason: "the world has no initiative check", choices: Object.keys(ctx.world.checks), said: "initiative" };
+    if (!rules || !init) return { code: "no_initiative", reason: say("why_the_world_has_no_initiative_check"), choices: Object.keys(ctx.world.checks), said: "initiative" };
     for (const id of ranked) {
       const ready = readyCheck(ctx.registry, ctx, init, { self: id, actor: id });
       if ("code" in ready) return ready;
@@ -198,14 +198,14 @@ function rankedOrder(a: Record<string, JsonValue>, ctx: EffectContext, rules: Co
  */
 function joinFight(a: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const enc = fightById(ctx.state, strOf(a.fight));
-  if (!enc) return { code: "no_fight", reason: "that fight is not under way", choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
+  if (!enc) return { code: "no_fight", reason: say("why_that_fight_is_not_under_way"), choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
   const party = idsOf(a.with);
   const foes = idsOf(a.foes);
-  if (party.length + foes.length === 0) return reject("no_foes", "no one is named to join");
+  if (party.length + foes.length === 0) return reject("no_foes", say("why_no_one_is_named_to_join"));
   const sides = sidesOf(ctx, party, foes);
   if ("code" in sides) return sides;
   const already = sides.fighters.find((id) => fighterOf(enc, id));
-  if (already !== undefined) return { code: "bad_args", reason: `${labelOf(ctx, already)} is in that fight already`, said: already };
+  if (already !== undefined) return { code: "bad_args", reason: say("why_already_is_in_that_fight_already", { already: labelOf(ctx, already) }), said: already };
   const add = rankedOrder(a, ctx, rulesOf(ctx.world), party, sides.fighters);
   if ("code" in add) return add;
   return [{ type: "combat.join", data: { encounter: enc.id, add } }];
@@ -220,12 +220,12 @@ const events: EventTypeDef<PackEvent>[] = [
   {
     type: "combat.start",
     validate(e, ctx) {
-      if (fightById(ctx.state, strOf(e.data.encounter))) return reject("in_fight", "that fight is already under way");
+      if (fightById(ctx.state, strOf(e.data.encounter))) return reject("in_fight", say("why_that_fight_is_already_under_way"));
       const order = orderOf(e.data.order);
-      if (strOf(e.data.encounter) === "" || !order) return reject("bad_event", "a fight needs an id and an order");
-      if (new Set(order.map((f) => f.id)).size !== order.length) return reject("bad_event", "someone is in the fight twice");
+      if (strOf(e.data.encounter) === "" || !order) return reject("bad_event", say("why_a_fight_needs_an_id_and_an"));
+      if (new Set(order.map((f) => f.id)).size !== order.length) return reject("bad_event", say("why_someone_is_in_the_fight_twice"));
       const missing = order.find((f) => !own(ctx.state.entities, f.id));
-      if (missing) return reject("missing_entity", `no ${labelOf(ctx, missing.id)}`);
+      if (missing) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, missing.id) }));
       return null;
     },
     apply(e, state, ctx) {
@@ -243,11 +243,11 @@ const events: EventTypeDef<PackEvent>[] = [
       const enc = current(e, ctx);
       if ("code" in enc) return enc;
       const add = orderOf(e.data.add);
-      if (!add || add.length === 0) return reject("bad_event", "a join names who joins and on which side");
+      if (!add || add.length === 0) return reject("bad_event", say("why_a_join_names_who_joins_and_on"));
       const twice = add.find((f, i) => fighterOf(enc, f.id) !== undefined || add.findIndex((g) => g.id === f.id) !== i);
-      if (twice) return reject("bad_event", `${labelOf(ctx, twice.id)} is in the fight twice`);
+      if (twice) return reject("bad_event", say("why_id_is_in_the_fight_twice", { id: labelOf(ctx, twice.id) }));
       const missing = add.find((f) => !own(ctx.state.entities, f.id));
-      return missing ? reject("missing_entity", `no ${labelOf(ctx, missing.id)}`) : null;
+      return missing ? reject("missing_entity", say("why_no_party", { party: labelOf(ctx, missing.id) })) : null;
     },
     apply(e, state, ctx) {
       const enc = fightById(state, strOf(e.data.encounter));
@@ -275,11 +275,11 @@ const events: EventTypeDef<PackEvent>[] = [
       if ("code" in enc) return enc;
       const round = e.data.round;
       const turn = e.data.turn;
-      if (typeof round !== "number" || typeof turn !== "number" || !Number.isInteger(round) || !Number.isInteger(turn)) return reject("bad_event", "a turn needs a round and a place in the order");
-      if (enc.order[turn]?.id !== strOf(e.data.actor)) return reject("bad_turn", "that isn't who goes there");
-      if (round < enc.round || (round === enc.round && turn <= enc.turn)) return reject("bad_turn", "turns only move on");
+      if (typeof round !== "number" || typeof turn !== "number" || !Number.isInteger(round) || !Number.isInteger(turn)) return reject("bad_event", say("why_a_turn_needs_a_round_and_a"));
+      if (enc.order[turn]?.id !== strOf(e.data.actor)) return reject("bad_turn", say("why_that_isnt_who_goes_there"));
+      if (round < enc.round || (round === enc.round && turn <= enc.turn)) return reject("bad_turn", say("why_turns_only_move_on"));
       const reset = objOf(e.data.reset);
-      for (const [id, budgets] of Object.entries(reset)) if (!fighterOf(enc, id) || !counts(budgets)) return reject("bad_event", "a refill names a participant and its budgets");
+      for (const [id, budgets] of Object.entries(reset)) if (!fighterOf(enc, id) || !counts(budgets)) return reject("bad_event", say("why_a_refill_names_a_participant_and_its"));
       return null;
     },
     apply(e, state, ctx) {
@@ -312,10 +312,10 @@ const events: EventTypeDef<PackEvent>[] = [
       const who = strOf(e.data.who);
       const f = fighterOf(enc, who);
       const cost = counts(e.data.cost);
-      if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0)) return reject("bad_event", "a spend needs a participant and what it spends");
-      if (!standing(ctx, enc, f)) return reject("down", `${labelOf(ctx, who)} is out of the fight`);
-      if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost)) return reject("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
-      return fits(cost, f.left) ? null : reject("spent", `${labelOf(ctx, who)} has nothing like that left`);
+      if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0)) return reject("bad_event", say("why_a_spend_needs_a_participant_and_what"));
+      if (!standing(ctx, enc, f)) return reject("down", say("why_actor_is_out_of_the_fight", { actor: labelOf(ctx, who) }));
+      if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost)) return reject("not_your_turn", say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, who) }));
+      return fits(cost, f.left) ? null : reject("spent", say("why_who_has_nothing_like_that_left", { who: labelOf(ctx, who) }));
     },
     apply(e, state) {
       const enc = fightById(state, strOf(e.data.encounter));
@@ -329,7 +329,7 @@ const events: EventTypeDef<PackEvent>[] = [
     validate(e, ctx) {
       const enc = current(e, ctx);
       if ("code" in enc) return enc;
-      return fighterOf(enc, strOf(e.data.actor)) ? null : reject("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
+      return fighterOf(enc, strOf(e.data.actor)) ? null : reject("not_fighting", say("why_actor_isnt_in_this_fight", { actor: labelOf(ctx, strOf(e.data.actor)) }));
     },
     apply(e, state, ctx) {
       const enc = fightById(state, strOf(e.data.encounter));
@@ -349,9 +349,9 @@ const events: EventTypeDef<PackEvent>[] = [
       if ("code" in enc) return enc;
       const rules = rulesOf(ctx.world);
       const who = strOf(e.data.entity);
-      if (!rules || !fighterOf(enc, who) || typeof e.data.down !== "boolean") return reject("bad_event", "a fall names a participant");
+      if (!rules || !fighterOf(enc, who) || typeof e.data.down !== "boolean") return reject("bad_event", say("why_a_fall_names_a_participant"));
       // Re-read against the state, so a view where the blow never landed drops it.
-      return downHolds(ctx, rules, who) === e.data.down ? null : reject("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
+      return downHolds(ctx, rules, who) === e.data.down ? null : reject("not_down", e.data.down ? say("why_who_isnt_down", { who: labelOf(ctx, who) }) : say("why_who_is_still_down", { who: labelOf(ctx, who) }));
     },
     apply(e, state) {
       const enc = fightById(state, strOf(e.data.encounter));
@@ -365,10 +365,10 @@ const events: EventTypeDef<PackEvent>[] = [
       const enc = current(e, ctx);
       if ("code" in enc) return enc;
       const rules = rulesOf(ctx.world);
-      if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc))) return reject("not_over", "the fight isn't over");
+      if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc))) return reject("not_over", say("why_the_fight_isnt_over"));
       // Each re-reads the state, so a view where the POV stayed, or someone attacked or was hurt, keeps the fight.
-      if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc)) return reject("not_left", "you are still in the fight");
-      if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc))) return reject("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
+      if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc)) return reject("not_left", say("why_you_are_still_in_the_fight"));
+      if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc))) return reject("not_stalemate", rules && stalemateRounds(rules) === 0 ? say("why_this_worlds_fights_never_peter_out") : say("why_someone_has_attacked_or_been_hurt_since"));
       return null;
     },
     apply: (e, state, ctx) => removeEncounter(state, strOf(e.data.encounter), ctx.world.pov),
@@ -376,7 +376,7 @@ const events: EventTypeDef<PackEvent>[] = [
   },
   {
     type: "combat.decision",
-    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject("bad_event", "a decision needs a key and a choice")),
+    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject("bad_event", say("why_a_decision_needs_a_key_and_a"))),
     apply: (e, state) => {
       sliceRecord(state, PACK, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
@@ -408,7 +408,7 @@ export const combatPack: PackDef = {
       args: ["winner?", "fight?"],
       resolve(a, ctx) {
         const enc = a.fight === undefined ? encounterOf(ctx.state) : fightById(ctx.state, strOf(a.fight));
-        if (!enc) return { code: "no_fight", reason: "no fight is under way", choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
+        if (!enc) return { code: "no_fight", reason: say("why_no_fight_is_under_way"), choices: fightsOf(ctx.state).map((f) => f.id), said: strOf(a.fight) };
         // The winner is the call's; none given, none is recorded, though only one side stands.
         const winner = a.winner === "party" || a.winner === "foes" ? a.winner : null;
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
@@ -421,10 +421,10 @@ export const combatPack: PackDef = {
         const rules = rulesOf(ctx.world);
         const enc = encounterOf(ctx.state);
         const who = strOf(a.who) || ctx.world.pov;
-        if (!rules || !enc) return reject("no_fight", "no fight is under way");
-        if (enc.order[enc.turn]?.id !== who) return reject("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
+        if (!rules || !enc) return reject("no_fight", say("why_no_fight_is_under_way"));
+        if (enc.order[enc.turn]?.id !== who) return reject("not_your_turn", who === ctx.world.pov ? say("why_it_isnt_your_turn") : say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, who) }));
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject("no_one", "no one is left to take a turn");
+        return next ? [next] : reject("no_one", say("why_no_one_is_left_to_take_a"));
       },
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });

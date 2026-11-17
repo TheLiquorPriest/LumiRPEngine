@@ -18,6 +18,7 @@ import { together } from "./presence";
 import type { Advice, ReadContext, Rejection } from "./registry";
 import { isGone, placeOfEntity } from "./scope";
 import { carriersOf, holdsOf } from "./things";
+import { say } from "./lines";
 
 export interface RelocateOptions {
   /**
@@ -46,7 +47,7 @@ export interface RelocateOptions {
  */
 export function relocate(ctx: ReadContext, who: EntityId, to: PlaceId, opts: RelocateOptions = {}): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, who);
-  if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
+  if (!e) return { code: "missing_entity", reason: say("why_no_entity_who", { who: who }) };
   const from = placeOfEntity(ctx.state, who);
   const next = opts.told ? (from !== to ? (opts.activity ?? "idle") : opts.activity) : opts.along && from !== to ? "idle" : undefined;
   // A move to where they already are still takes them out of what holds them and onto their cell.
@@ -77,9 +78,9 @@ export interface Boarded {
  */
 export function relocateInto(ctx: ReadContext, who: EntityId, into: EntityId, opts: { driver?: boolean } = {}): Boarded | Rejection {
   const e = own(ctx.state.entities, who);
-  if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
+  if (!e) return { code: "missing_entity", reason: say("why_no_entity_who", { who: who }) };
   const holder = own(ctx.state.entities, into);
-  if (!holder || isGone(ctx.state, into)) return { code: "missing_entity", reason: `no holder ${into}` };
+  if (!holder || isGone(ctx.state, into)) return { code: "missing_entity", reason: say("why_no_holder_in", { in: into }) };
   const events: LedgerEvent[] = e.relations.filter((r) => (r.type === "in" && r.to !== into) || r.type === "on").map((r): LedgerEvent => ({ type: "unlink", rel: r.type, from: who, to: r.to }));
   if (typeof e.fields.place === "string" && e.fields.place !== "") events.push({ type: "set", entity: who, field: "place", value: null });
   if (!e.relations.some((r) => r.type === "in" && r.to === into)) events.push({ type: "link", rel: "in", from: who, to: into });
@@ -97,9 +98,9 @@ export function relocateInto(ctx: ReadContext, who: EntityId, into: EntityId, op
  */
 export function relocateOnto(ctx: ReadContext, who: EntityId, support: EntityId): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, who);
-  if (!e) return { code: "missing_entity", reason: `no entity ${who}` };
-  if (!own(ctx.state.entities, support) || isGone(ctx.state, support)) return { code: "missing_entity", reason: `no support ${support}` };
-  if (support === who || carriersOf(ctx.state, support).includes(who)) return { code: "cycle", reason: `${e.name} can't be on ${support}` };
+  if (!e) return { code: "missing_entity", reason: say("why_no_entity_who", { who: who }) };
+  if (!own(ctx.state.entities, support) || isGone(ctx.state, support)) return { code: "missing_entity", reason: say("why_no_support_on", { on: support }) };
+  if (support === who || carriersOf(ctx.state, support).includes(who)) return { code: "cycle", reason: say("why_name_cant_be_on_support", { name: e.name, support: support }) };
   const events: LedgerEvent[] = e.relations.filter((r) => (r.type === "in" || r.type === "on") && !(r.type === "on" && r.to === support)).map((r): LedgerEvent => ({ type: "unlink", rel: r.type, from: who, to: r.to }));
   if (typeof e.fields.place === "string" && e.fields.place !== "") events.push({ type: "set", entity: who, field: "place", value: null });
   if (!e.relations.some((r) => r.type === "on" && r.to === support)) events.push({ type: "link", rel: "on", from: who, to: support });

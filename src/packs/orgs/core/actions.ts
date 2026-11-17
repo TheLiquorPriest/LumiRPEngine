@@ -24,6 +24,7 @@ import { linkEvents } from "../../../engine/relations";
 import { MEMBER_OF } from "../../../engine/selector";
 import { orgLog } from "./log";
 import { dateWords } from "./view";
+import { say } from "../../../engine/lines";
 
 /** Every organization: a group of any kind (a company, a household, the party) or a trust. */
 const ORG_PARAM: ParamDef = { type: "ref", of: { kind: ["business", "household", "group", "trust"] }, label: "Organization" };
@@ -68,25 +69,25 @@ function mayReach(ctx: ReadContext, by: EntityId, org: EntityId, power: OrgPower
   if (mine?.scope !== "below") return null;
   const below = positionsBelow(positionsOf(ctx, org), mine.id);
   const reached = [...heldPositions(ctx, who, org).map((h) => h.position.id), ...(position !== undefined ? [position] : [])];
-  return reached.length > 0 && reached.every((p) => below.includes(p)) ? null : refuse("not_allowed", `${labelOf(ctx, who)} isn't below ${mine.title} at ${labelOf(ctx, org)}`);
+  return reached.length > 0 && reached.every((p) => below.includes(p)) ? null : refuse("not_allowed", say("why_who_isnt_below_title_at_org", { who: labelOf(ctx, who), title: mine.title, org: labelOf(ctx, org) }));
 }
 
 /** A seat free in `position` for `who` (§3.3): fewer holders filling a seat than its seats (`seatFilled`: an organization seated there fills one while it stands), `who` aside; 0 seats is any number. */
 function seatFree(ctx: ReadContext, org: EntityId, position: Position, who: EntityId): Rejection | null {
   if (position.seats === 0) return null;
   const holders = new Set(directMembers(ctx, org).filter((r) => r.position === position.id && r.who !== who && seatFilled(ctx, r.who)).map((r) => r.who));
-  return holders.size < position.seats ? null : refuse("no_seat", `${position.title} at ${labelOf(ctx, org)} has no seat free`);
+  return holders.size < position.seats ? null : refuse("no_seat", say("why_title_at_org_has_no_seat_free", { title: position.title, org: labelOf(ctx, org) }));
 }
 
 /** The organization an effect names, or why not. */
 function orgOf(ctx: ReadContext, a: Args): EntityId | Rejection {
   const org = strOf(a.org);
-  return orgTypeOf(ctx, org) === null ? refuse("missing_entity", `no organization ${labelOf(ctx, org)}`) : org;
+  return orgTypeOf(ctx, org) === null ? refuse("missing_entity", say("why_no_organization_org", { org: labelOf(ctx, org) })) : org;
 }
 
 /** The position `id` names at `org`, or why not. */
 function positionAt(ctx: ReadContext, org: EntityId, id: string): Position | Rejection {
-  return positionsOf(ctx, org).find((p) => p.id === id) ?? refuse("bad_position", `${labelOf(ctx, org)} has no position ${id}`);
+  return positionsOf(ctx, org).find((p) => p.id === id) ?? refuse("bad_position", say("why_employer_has_no_position_position", { employer: labelOf(ctx, org), position: id }));
 }
 
 function isRejection<T>(v: T | Rejection): v is Rejection {
@@ -97,7 +98,7 @@ function isRejection<T>(v: T | Rejection): v is Rejection {
 function powersOf(v: JsonValue | undefined): OrgPower[] | Rejection {
   const words = (Array.isArray(v) ? v.map(String) : strOf(v).split(/[\s,]+/)).map((w) => w.trim()).filter((w) => w !== "");
   const unknown = words.find((w) => !isOrgPower(w));
-  return unknown !== undefined ? refuse("bad_power", `${unknown} isn't a power`) : [...new Set(words as OrgPower[])];
+  return unknown !== undefined ? refuse("bad_power", say("why_unknown_isnt_a_power", { unknown: unknown })) : [...new Set(words as OrgPower[])];
 }
 
 /** Limits in words, as a History line gives them: ", up to $200.00 a payment and $1,000.00 a month". */
@@ -137,8 +138,8 @@ function admitMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   if (isRejection(org)) return org;
   const who = strOf(a.who);
   const by = strOf(a.by);
-  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", `no one ${labelOf(ctx, who)} to admit`);
-  if (memberLink(ctx, who, org)) return refuse("already_member", `${labelOf(ctx, who)} is already a member of ${labelOf(ctx, org)}`);
+  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", say("why_no_one_who_to_admit", { who: labelOf(ctx, who) }));
+  if (memberLink(ctx, who, org)) return refuse("already_member", say("why_who_is_already_a_member_of_org", { who: labelOf(ctx, who), org: labelOf(ctx, org) }));
   // New members join in the position named, else the organization's default one (§3.3).
   const named = strOf(a.position);
   const id = named || (positionsOf(ctx, org).find((p) => p.default === true)?.id ?? "");
@@ -164,7 +165,7 @@ function removeMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   if (isRejection(org)) return org;
   const who = strOf(a.who);
   const by = strOf(a.by);
-  if (!memberLink(ctx, who, org)) return refuse("not_member", `${labelOf(ctx, who)} isn't a member of ${labelOf(ctx, org)}`);
+  if (!memberLink(ctx, who, org)) return refuse("not_member", say("why_who_isnt_a_member_of_org", { who: labelOf(ctx, who), org: labelOf(ctx, org) }));
   if (by !== "") {
     const denied = mayReach(ctx, by, org, "members.remove", who);
     if (denied) return denied;
@@ -179,7 +180,7 @@ function leaveOrg(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const who = strOf(a.who);
   if (!memberLink(ctx, who, org)) {
     const owner = ownersIn(own(ctx.state.entities, org)?.fields ?? {}).some((o) => o.party === who && ROLE_RIGHTS[o.role].worth);
-    return owner ? refuse("owner", `${labelOf(ctx, who)} owns part of ${labelOf(ctx, org)}: selling that share is how to leave it`) : refuse("not_member", `${labelOf(ctx, who)} isn't a member of ${labelOf(ctx, org)}`);
+    return owner ? refuse("owner", say("why_who_owns_part_of_org_selling_that", { who: labelOf(ctx, who), org: labelOf(ctx, org) })) : refuse("not_member", say("why_who_isnt_a_member_of_org", { who: labelOf(ctx, who), org: labelOf(ctx, org) }));
   }
   return [{ type: "unlink", rel: MEMBER_OF, from: who, to: org }, orgLog(ctx, org, withWhy(`${labelOf(ctx, who)} left`, a), { by: who, names: [who] })];
 }
@@ -190,7 +191,7 @@ function appointMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   if (isRejection(org)) return org;
   const who = strOf(a.who);
   const by = strOf(a.by);
-  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", `no one ${labelOf(ctx, who)} to appoint`);
+  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", say("why_no_one_who_to_appoint", { who: labelOf(ctx, who) }));
   const id = strOf(a.position);
   const position = id === "" ? undefined : positionAt(ctx, org, id);
   if (position !== undefined && isRejection(position)) return position;
@@ -217,7 +218,7 @@ function titleMember(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   if (isRejection(org)) return org;
   const who = strOf(a.who);
   const by = strOf(a.by);
-  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", `no one ${labelOf(ctx, who)} to title`);
+  if (!own(ctx.state.entities, who) || who === org) return refuse("missing_entity", say("why_no_one_who_to_title", { who: labelOf(ctx, who) }));
   const words = strOf(a.title).trim();
   if (strOf(objOf(memberLink(ctx, who, org)?.fields).role) === words) return [];
   if (by !== "" && by !== who) {
@@ -244,11 +245,11 @@ function setPosition(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   }
   const positions = positionsOf(ctx, org);
   const id = strOf(a.id) || positionIdOf(strOf(a.title));
-  if (id === "") return refuse("bad_position", "a position needs a title");
+  if (id === "") return refuse("bad_position", say("why_a_position_needs_a_title"));
   const before = positions.find((p) => p.id === id);
   const write = (list: readonly Position[]): LedgerEvent => ({ type: "set", entity: org, field: "positions", value: list as unknown as JsonValue });
   if (a.remove === true) {
-    if (!before) return refuse("bad_position", `${labelOf(ctx, org)} has no position ${id}`);
+    if (!before) return refuse("bad_position", say("why_employer_has_no_position_position", { employer: labelOf(ctx, org), position: id }));
     const rest = positions.filter((p) => p.id !== id).map((p) => (p.reports_to === id ? (({ reports_to: _gone, ...keep }) => keep)(p) : p));
     return [write(rest), orgLog(ctx, org, `Removed the position ${before.title}`, by !== "" ? { by, power: "org.govern" } : {})];
   }
@@ -275,11 +276,11 @@ function setPosition(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
     ...(text("successor") !== undefined ? { successor: text("successor") } : {}),
     ...(typeof a.default === "boolean" ? { default: a.default } : {}),
   } as unknown as JsonObject);
-  if (!next) return refuse("bad_position", "a position needs a title");
+  if (!next) return refuse("bad_position", say("why_a_position_needs_a_title"));
   if (a.default === false) delete next.default;
   if (next.reports_to !== undefined) {
-    if (next.reports_to === id || !positions.some((p) => p.id === next.reports_to)) return refuse("bad_position", `${labelOf(ctx, org)} has no other position ${next.reports_to} to report to`);
-    if (positionsBelow(positions, id).includes(next.reports_to)) return refuse("reports_cycle", `${next.title} can't report to a position that reports to it`);
+    if (next.reports_to === id || !positions.some((p) => p.id === next.reports_to)) return refuse("bad_position", say("why_org_has_no_other_position_reports_to", { org: labelOf(ctx, org), reports_to: next.reports_to }));
+    if (positionsBelow(positions, id).includes(next.reports_to)) return refuse("reports_cycle", say("why_title_cant_report_to_a_position_that", { title: next.title }));
   }
   const list = [...positions.filter((p) => p.id !== id).map((p) => (next.default === true && p.default === true ? (({ default: _was, ...keep }) => keep)(p) : p)), next];
   const ordered = before ? positions.map((p) => list.find((q) => q.id === p.id) ?? p) : list;
@@ -295,7 +296,7 @@ function endOfDay(ctx: ReadContext, v: JsonValue | undefined): number | undefine
     const cal = calendarOf(ctx.world);
     return clockAt(cal, dayIndexOfText(cal, text.slice(0, 10)) + 1, 0) - 1;
   } catch {
-    return refuse("bad_date", "until is a date (YYYY-MM-DD)");
+    return refuse("bad_date", say("why_until_is_a_date_yyyy_mm_dd"));
   }
 }
 
@@ -309,19 +310,19 @@ function delegatePowers(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection 
   if (isRejection(org)) return org;
   const to = strOf(a.to);
   const by = strOf(a.by);
-  if (!own(ctx.state.entities, to) || to === org || to === by) return refuse("missing_entity", `no one ${labelOf(ctx, to)} to act for ${labelOf(ctx, org)}`);
+  if (!own(ctx.state.entities, to) || to === org || to === by) return refuse("missing_entity", say("why_no_one_name_to_act_for_org", { name: labelOf(ctx, to), org: labelOf(ctx, org) }));
   const powers = powersOf(a.powers);
   if (isRejection(powers)) return powers;
-  if (powers.length === 0) return refuse("bad_power", "a delegation gives at least one power");
+  if (powers.length === 0) return refuse("bad_power", say("why_a_delegation_gives_at_least_one_power"));
   const asked: OrgLimits = { ...(typeof a.payment === "number" && a.payment > 0 ? { payment: Math.round(a.payment) } : {}), ...(typeof a.month === "number" && a.month > 0 ? { month: Math.round(a.month) } : {}) };
   const limits: OrgLimits = { ...asked };
   if (by !== "") {
     const may = mayAct(ctx, by, org, "delegate");
     if (!may.ok) return refuse("not_allowed", may.reason);
     for (const power of powers) {
-      if (orgPower(ctx, by, org, power) === null) return refuse("not_allowed", `${labelOf(ctx, by)} may not ${POWER_WORDS[power]} for ${labelOf(ctx, org)}, so can't give that`);
+      if (orgPower(ctx, by, org, power) === null) return refuse("not_allowed", say("why_by_may_not_power_for_org_so", { by: labelOf(ctx, by), power: POWER_WORDS[power], org: labelOf(ctx, org) }));
       const mine = heldLimits(ctx, by, org, power);
-      if (mine.below && SCOPED.includes(power)) return refuse("not_allowed", `${labelOf(ctx, by)} may ${POWER_WORDS[power]} only for those below ${mine.below.title}, so can't give that for all of ${labelOf(ctx, org)}`);
+      if (mine.below && SCOPED.includes(power)) return refuse("not_allowed", say("why_by_may_power_only_for_those_below", { by: labelOf(ctx, by), power: POWER_WORDS[power], title: mine.below.title, org: labelOf(ctx, org) }));
       const theirs = mine.limits;
       if (theirs?.payment !== undefined && (limits.payment === undefined || limits.payment > theirs.payment)) limits.payment = theirs.payment;
       if (theirs?.month !== undefined && (limits.month === undefined || limits.month > theirs.month)) limits.month = theirs.month;
@@ -330,7 +331,7 @@ function delegatePowers(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection 
   }
   const until = endOfDay(ctx, a.until);
   if (until !== undefined && isRejection(until)) return until;
-  if (until !== undefined && until < ctx.state.clock) return refuse("bad_date", "a delegation ends after today");
+  if (until !== undefined && until < ctx.state.clock) return refuse("bad_date", say("why_a_delegation_ends_after_today"));
   const fields: JsonObject = { powers, ...(limits.payment !== undefined ? { payment: limits.payment } : {}), ...(limits.month !== undefined ? { month: limits.month } : {}), ...(limits.accounts !== undefined ? { accounts: limits.accounts } : {}), ...(by !== "" ? { by } : {}) };
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: ACTS_FOR, from: to, to: org, fields, ...(until !== undefined ? { until } : {}) });
   if (isRejection(linked)) return linked;
@@ -345,14 +346,14 @@ function revokeDelegation(ctx: EffectContext, a: Args): LedgerEvent[] | Rejectio
   const to = strOf(a.to);
   const by = strOf(a.by);
   const link = own(ctx.state.entities, to)?.relations.find((r) => r.type === ACTS_FOR && r.to === org);
-  if (!link) return refuse("no_delegation", `${labelOf(ctx, to)} doesn't act for ${labelOf(ctx, org)}`);
+  if (!link) return refuse("no_delegation", say("why_to_doesnt_act_for_org", { to: labelOf(ctx, to), org: labelOf(ctx, org) }));
   const f = objOf(link.fields);
   if (by !== "" && by !== strOf(f.by)) {
     const may = mayAct(ctx, by, org, "delegate");
     if (!may.ok) return refuse("not_allowed", may.reason);
     const given = Array.isArray(f.powers) ? f.powers.filter(isOrgPower) : [];
     const beyond = given.find((p) => orgPower(ctx, by, org, p) === null);
-    if (beyond !== undefined) return refuse("not_allowed", `${labelOf(ctx, by)} may not ${POWER_WORDS[beyond]} for ${labelOf(ctx, org)}, so can't take that back`);
+    if (beyond !== undefined) return refuse("not_allowed", say("why_by_may_not_beyond_for_org_so", { by: labelOf(ctx, by), beyond: POWER_WORDS[beyond], org: labelOf(ctx, org) }));
   }
   return [{ type: "unlink", rel: ACTS_FOR, from: to, to: org }, orgLog(ctx, org, `${labelOf(ctx, to)} no longer acts for it`, { ...actedBy(by, by === strOf(f.by) ? null : "delegate"), names: [to] })];
 }
@@ -364,7 +365,7 @@ function renameOrg(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const by = strOf(a.by);
   const name = strOf(a.name).trim();
   const was = own(ctx.state.entities, org)?.name ?? org;
-  if (name === "") return refuse("bad_name", "a new name, please");
+  if (name === "") return refuse("bad_name", say("why_a_new_name_please"));
   if (name === was) return [];
   if (by !== "") {
     const may = mayAct(ctx, by, org, "org.govern");

@@ -159,7 +159,7 @@ function str(e: PackEvent, k: string): string {
 const routeEvent: EventTypeDef<PackEvent> = {
   // Where one owner's share of a business's profit goes from now on ("" puts it back to their deposit account).
   type: "economy.stake_route",
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "business")) && own(ctx.state.entities, str(e, "owner")) ? null : reject("missing_entity", "a route names a business and its owner")),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "business")) && own(ctx.state.entities, str(e, "owner")) ? null : reject("missing_entity", say("why_a_route_names_a_business_and_its"))),
   apply: (e, state) => {
     const routes = holdingsRecord(state, "routes");
     const mine = objOf(own(routes, str(e, "business")));
@@ -172,8 +172,8 @@ const routeEvent: EventTypeDef<PackEvent> = {
 
 /** Where an owner's profit share from a business lands (`economy.route` with a business). */
 export function setStakeRoute(api: FinanceApi, ctx: ReadContext, owner: EntityId, business: EntityId, to: string): LedgerEvent[] | Rejection {
-  if (api.partyKind(ctx, business) !== "business") return reject("not_business", `${labelOf(ctx, business)} isn't a business`);
-  if (api.shareOf(ctx.state, business, owner) <= 0) return reject("not_yours", `${labelOf(ctx, owner)} owns no part of ${labelOf(ctx, business)}`);
+  if (api.partyKind(ctx, business) !== "business") return reject("not_business", say("why_business_isnt_a_business", { business: labelOf(ctx, business) }));
+  if (api.shareOf(ctx.state, business, owner) <= 0) return reject("not_yours", say("why_owner_owns_no_part_of_business", { owner: labelOf(ctx, owner), business: labelOf(ctx, business) }));
   const route = to.trim();
   if (route !== "" && route !== "reinvest") {
     const unusable = api.mayUse(ctx, owner, route, "into");
@@ -203,7 +203,7 @@ export interface StakeSale {
  * only take a whole business from its only owner. A price of nothing gives the stake away.
  */
 export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: StakeSale): LedgerEvent[] | Rejection {
-  if (api.partyKind(ctx, x.business) !== "business") return reject("not_business", `${labelOf(ctx, x.business)} isn't a business`);
+  if (api.partyKind(ctx, x.business) !== "business") return reject("not_business", say("why_business_isnt_a_business", { business: labelOf(ctx, x.business) }));
   // A listed company's units sell on its market when no buyer is named (§27.10 Listing).
   if (x.buyer === undefined && listingIn(own(ctx.state.entities, x.business)?.fields ?? {})) {
     const market = optionalService(ctx, "economy.market_sale");
@@ -213,26 +213,26 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
   const shares = worthShares(owners);
   const held = shares[x.party] ?? 0;
   const name = labelOf(ctx, x.business);
-  if (held <= 0) return reject("not_yours", `${labelOf(ctx, x.party)} owns no part of ${name}`);
+  if (held <= 0) return reject("not_yours", say("why_owner_owns_no_part_of_business", { owner: labelOf(ctx, x.party), business: name }));
   const counting = countsUnits(owners);
-  if (x.units !== undefined && !counting) return reject("no_units", `${name} doesn't count its shares in units: sell a share of it in percent`);
+  if (x.units !== undefined && !counting) return reject("no_units", say("why_name_doesnt_count_its_shares_in_units", { name: name }));
   const heldUnits = unitsOf(owners, x.party);
   const units = counting ? (x.units ?? Math.round((unitsOf(owners) * (x.share ?? 0)) / 100)) : undefined;
-  if (units !== undefined && !(Number.isSafeInteger(units) && units > 0)) return reject("bad_amount", "say how many units to sell");
-  if (units !== undefined && units > heldUnits) return reject("declined", `${labelOf(ctx, x.party)} holds ${heldUnits} units of ${name}, not ${units}`);
+  if (units !== undefined && !(Number.isSafeInteger(units) && units > 0)) return reject("bad_amount", say("why_say_how_many_units_to_sell"));
+  if (units !== undefined && units > heldUnits) return reject("declined", say("why_holder_holds_held_units_of_name_not", { holder: labelOf(ctx, x.party), held: heldUnits, name: name, units: units }));
   const share = units !== undefined ? (held * units) / heldUnits : Math.min(held, x.share ?? 0);
-  if (!(share > 0)) return reject("bad_amount", "say what share to sell");
-  if (units === undefined && (x.share ?? 0) > held + 1e-9) return reject("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held * 100) / 100}% of ${name}, not ${x.share}%`);
+  if (!(share > 0)) return reject("bad_amount", say("why_say_what_share_to_sell"));
+  if (units === undefined && (x.share ?? 0) > held + 1e-9) return reject("declined", say("why_party_owns_held_of_name_not_share", { party: labelOf(ctx, x.party), held: Math.round(held * 100) / 100, name: name, share: x.share }));
   const price = Math.round(x.price);
-  if (!(price >= 0) || !Number.isSafeInteger(price)) return reject("bad_amount", "a price is a whole amount");
-  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business)) return reject("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  if (!(price >= 0) || !Number.isSafeInteger(price)) return reject("bad_amount", say("why_a_price_is_a_whole_amount"));
+  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business)) return reject("missing_entity", say("why_no_buyer_buyer", { buyer: labelOf(ctx, x.buyer) }));
   const whole = units !== undefined ? units === heldUnits : Math.abs(share - held) < 1e-9;
-  if (x.buyer === undefined && !(whole && held >= 100 - 1e-9)) return reject("needs_buyer", `selling part of ${name} needs a buyer in the world`);
+  if (x.buyer === undefined && !(whole && held >= 100 - 1e-9)) return reject("needs_buyer", say("why_selling_part_of_name_needs_a_buyer", { name: name }));
   // A buyer outside the world pays what the market does: no more than the business is worth.
   const worth = orgValue(api, ctx, x.business);
-  if (x.buyer === undefined && price > worth) return reject("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${name}`);
+  if (x.buyer === undefined && price > worth) return reject("declined", say("why_no_buyer_outside_the_world_pays_more", { currency: formatMoney(worth, ctx.world.currency), name: name }));
   const to = x.to ?? api.depositAccount(ctx, x.party);
-  if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+  if (!to) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, x.party) }));
   const unusable = api.mayUse(ctx, x.party, to, "into");
   if (unusable) return unusable;
   const part = `${units !== undefined ? `${units} units (${Math.round(share * 100) / 100}%)` : `${Math.round(share * 100) / 100}%`} of ${name}`;

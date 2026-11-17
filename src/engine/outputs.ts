@@ -43,8 +43,8 @@ export function outScene(lore: readonly string[], notes: readonly string[], kept
 export const outLinesEvent: EventTypeDef<PackEvent> = {
   type: OUT_LINES,
   validate: (e) => {
-    if (typeof e.data.kind !== "string" || !(OUTPUT_KINDS as readonly string[]).includes(e.data.kind)) return { code: "bad_event", reason: "an output's lines are the outcome, the montage, the outline or the brief" };
-    return strings(e.data.lines) ? null : { code: "bad_event", reason: "an output's lines are texts" };
+    if (typeof e.data.kind !== "string" || !(OUTPUT_KINDS as readonly string[]).includes(e.data.kind)) return { code: "bad_event", reason: say("why_an_outputs_lines_are_the_outcome_the") };
+    return strings(e.data.lines) ? null : { code: "bad_event", reason: say("why_an_outputs_lines_are_texts") };
   },
   apply: () => undefined,
   // The narrator's own input, not a fact of the story: the player's Journal has no line for it.
@@ -54,7 +54,7 @@ export const outLinesEvent: EventTypeDef<PackEvent> = {
 /** `engine.out.scene`: the lore and notes the scene gives its narrator; nothing in the world changes. An older record's `knowledge` still validates, so it replays as it did, and is ignored. */
 export const outSceneEvent: EventTypeDef<PackEvent> = {
   type: OUT_SCENE,
-  validate: (e) => (strings(e.data.lore) && strings(e.data.notes) && (e.data.knowledge === undefined || isAgentKnowledge(e.data.knowledge)) ? null : { code: "bad_event", reason: "a scene's lore is entry ids, its notes are texts, and its knowledge is pov, everyone or gm" }),
+  validate: (e) => (strings(e.data.lore) && strings(e.data.notes) && (e.data.knowledge === undefined || isAgentKnowledge(e.data.knowledge)) ? null : { code: "bad_event", reason: say("why_a_scenes_lore_is_entry_ids_its") }),
   apply: () => undefined,
   describe: (_e, _ctx, viewer) => (viewer !== undefined ? "" : say("ev_scene_told")),
 };

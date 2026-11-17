@@ -34,6 +34,7 @@ import { ORGS_CONFIG_EVENT, SEATS_PROCESS, SUCCESSION_EFFECT } from "./seats";
 import { registerStory } from "./story";
 import { buildOrgList, buildOrgPages } from "./view";
 import { registerWind } from "./wind";
+import { say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -74,7 +75,7 @@ export const orgsPack: PackDef = {
     for (const def of ORG_EVENTS) r.event(def);
     r.service("orgs.acted", orgsActed);
     // A History line the GM writes, beside a change made in GM → Orgs or by an agent's org op (§6.1, §7.2), with the people its words name (`names`), as `orgLog` keeps them.
-    r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => (strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...(strOf(a.by) !== "" ? { by: strOf(a.by) } : {}), names: Array.isArray(a.names) ? a.names.filter((n): n is string => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: "a History line needs an organization and its words" }) });
+    r.effect({ type: "orgs.note", args: ["org", "text", "by?", "names?"], gm: true, resolve: (a, ctx) => (strOf(a.org) !== "" && strOf(a.text) !== "" ? [orgLog(ctx, strOf(a.org), strOf(a.text), { ...(strOf(a.by) !== "" ? { by: strOf(a.by) } : {}), names: Array.isArray(a.names) ? a.names.filter((n): n is string => typeof n === "string" && n !== "") : [] })] : { code: "bad_args", reason: say("why_a_history_line_needs_an_organization_and") }) });
     r.view({ panel: ORGS_LIST_PANEL, build: (ctx) => buildOrgList(ctx) as unknown as JsonValue });
     r.view({ panel: ORGS_ORG_PANEL, build: (ctx) => buildOrgPages(ctx) as unknown as JsonValue });
     r.query("orgs.gm", (ctx, only) => buildOrgsGm(ctx, only));

@@ -165,7 +165,7 @@ export function bookRecovery(state: WorldState, party: EntityId, month: string, 
 /** `economy.depreciate`: an asset's recovery for a month, what it has recovered grown by it, and each owner's part in their books. */
 const DEPRECIATE_EVENT: EventTypeDef<PackEvent> = {
   type: FINANCE_EVENTS.depreciate,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "asset")) && /^\d{4}-\d{2}$/.test(str(e, "month")) && typeof e.data.cents === "number" && Array.isArray(e.data.parts) ? null : ({ code: "bad_event", reason: "a depreciation needs its asset, its month, its amount and its parts" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "asset")) && /^\d{4}-\d{2}$/.test(str(e, "month")) && typeof e.data.cents === "number" && Array.isArray(e.data.parts) ? null : ({ code: "bad_event", reason: say("why_a_depreciation_needs_its_asset_its_month") } satisfies Rejection)),
   apply: (e, state) => {
     const asset = str(e, "asset");
     const month = str(e, "month");

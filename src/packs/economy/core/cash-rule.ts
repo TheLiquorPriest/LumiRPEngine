@@ -35,7 +35,7 @@ function ruleOf(v: JsonValue | undefined): boolean | null | undefined {
 /** `economy.config {atm}`: this chat's own cash rule; null returns it to the world's switch. */
 export const cashRuleEvent: EventTypeDef<PackEvent> = {
   type: CASH_RULE_EVENT,
-  validate: (e) => (ruleOf(e.data.atm) === undefined ? { code: "bad_event", reason: "the cash rule is true, false or null (the world's)" } : null),
+  validate: (e) => (ruleOf(e.data.atm) === undefined ? { code: "bad_event", reason: say("why_the_cash_rule_is_true_false_or") } : null),
   apply: (e, state) => {
     const slice = mutableSlice(state, "economy");
     const rules: JsonObject = { ...objOf(slice[CHAT_RULES]) };
@@ -74,7 +74,7 @@ export function registerCashRule(r: CoreRegistry): void {
     gm: true,
     resolve: (a) => {
       const atm = ruleOf(a.atm);
-      if (atm === undefined) return { code: "bad_args", reason: "the cash rule is on, off or the world's (null)" };
+      if (atm === undefined) return { code: "bad_args", reason: say("why_the_cash_rule_is_on_off_or") };
       return [{ type: CASH_RULE_EVENT, data: { atm } }];
     },
   });

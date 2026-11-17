@@ -22,6 +22,7 @@ import type { EffectContext, ReadContext, Rejection } from "../../../engine/regi
 import { reject } from "./journal";
 import { holdersOf, traitsOf } from "./model";
 import { namedSource } from "./pay";
+import { say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -117,7 +118,7 @@ export function approvedWords(ctx: ReadContext, party: EntityId): string {
 export function heldTo(ctx: ReadContext, act: { by: EntityId; party: EntityId; power: OrgPower; text: string; cents?: number; account?: EntityId; target?: EntityId }, may: MayAct, code = "not_allowed"): LedgerEvent[] | Rejection | null {
   if (may.ok) return null;
   const approval = may.limit === true ? approvalFor(ctx, act.party) : null;
-  if (approval) return approval.cents !== undefined && act.cents !== undefined && act.cents > approval.cents ? reject(code, `It comes to ${moneyWords(ctx, act.cents)} now, more than the ${moneyWords(ctx, approval.cents)} approved`) : null;
+  if (approval) return approval.cents !== undefined && act.cents !== undefined && act.cents > approval.cents ? reject(code, say("why_it_comes_to_cents_now_more_than", { cents: moneyWords(ctx, act.cents), cents2: moneyWords(ctx, approval.cents) })) : null;
   const asked = may.limit === true && (ctx as Partial<EffectContext>).params?.ask === true ? optionalService(ctx, "orgs.ask_approval") : null;
   if (asked) return asked(ctx, { org: act.party, by: act.by, power: act.power, ...(act.cents !== undefined ? { cents: act.cents } : {}), ...(act.account !== undefined ? { account: act.account } : {}), ...(act.target !== undefined ? { target: act.target } : {}), text: act.text, why: may.reason });
   return reject(code, may.reason);

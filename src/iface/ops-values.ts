@@ -41,6 +41,7 @@ import type { Provenance } from "./source";
 import { textOf } from "./texts";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
+import { say } from "../engine/lines";
 
 /** The fact store every `fact` is recorded through: the store's own. */
 const FACTS: FactStore = factStore;
@@ -294,7 +295,7 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
   const reg = o.reading.registry;
   const w = o.draft.w;
   const e = own(w.state.entities, entity);
-  if (!e) return refusedAs(o, { code: "missing_entity", reason: `no entity ${entity}` }, "at", "entity");
+  if (!e) return refusedAs(o, { code: "missing_entity", reason: say("why_no_entity_who", { who: entity }) }, "at", "entity");
   if (!safeKey(key) || key === GONE_FIELD) return notAs(o, "key", key, "key");
   const def = fieldDef(reg, w.ctx.world, e.kind, key);
   if (key === "cash") {
@@ -345,7 +346,7 @@ function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonVa
   const w = o.draft.w;
   const played = w.ctx.world;
   const def = own(played.places, placeId);
-  if (!def) return refusedAs(o, { code: "missing_place", reason: `no place ${placeId}` }, "at", "place");
+  if (!def) return refusedAs(o, { code: "missing_place", reason: say("why_no_place_place", { place: placeId }) }, "at", "place");
   if (!safeKey(key)) return notAs(o, "key", key, "key");
   const fields: JsonObject = { ...def.fields };
   if (add !== undefined) {
@@ -372,7 +373,7 @@ function setPlaceField(o: OpContext, placeId: string, key: string, value: JsonVa
  */
 function setPlaceBase(o: OpContext, place: string, value: JsonValue | undefined): Unread | undefined {
   if (typeof value !== "string" || value.trim() === "") return notAs(o, "value", value ?? null, "words");
-  if (!own(o.draft.w.ctx.world.places, place)) return refusedAs(o, { code: "missing_place", reason: `no place ${place}` }, "at", "place");
+  if (!own(o.draft.w.ctx.world.places, place)) return refusedAs(o, { code: "missing_place", reason: say("why_no_place_place", { place: place }) }, "at", "place");
   o.draft.recordStoreOp(o.n, o.op, "engine", o.prov, { op: PLACE_OPS.base, value: { place, text: value.trim(), drawn: drawnAgainst(o.call, place) } });
   o.after((state) => ({ base: baseOf(placeSliceOf(state), place)?.text ?? null }));
   return undefined;

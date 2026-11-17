@@ -51,6 +51,7 @@ import { counted, decisionRefusal } from "./shares";
 import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
 import { sCorpRefusal, structureOf, taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
+import { say } from "../../../engine/lines";
 
 /** What a step said, for the History the orgs pack writes: its words, and the people they name. */
 export interface WindSaid {
@@ -121,11 +122,11 @@ function listed(ctx: ReadContext, business: EntityId): boolean {
 /** Why `business` can't be wound up or merged now: it isn't a company still in the world, it was dissolved, it is listed, or its money is below Money 3. */
 function standingProblem(ctx: ReadContext, business: EntityId): Rejection | null {
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business) || isGone(ctx.state, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business) || isGone(ctx.state, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const dissolved = dissolvedOn(ctx.state, business);
-  if (dissolved !== null) return reject("dissolved", `${name} was dissolved on ${dayWords(ctx.world, dissolved)}`);
-  if (listed(ctx, business)) return reject("listed", `${name} is listed on the market: delist it first`);
-  if (ctx.levelOf(business, "money") < 3) return reject("level", `${name} is wound up or merged from Money 3`);
+  if (dissolved !== null) return reject("dissolved", say("why_name_was_dissolved_on_dissolved", { name: name, dissolved: dayWords(ctx.world, dissolved) }));
+  if (listed(ctx, business)) return reject("listed", say("why_name_is_listed_on_the_market_delist", { name: name }));
+  if (ctx.levelOf(business, "money") < 3) return reject("level", say("why_name_is_wound_up_or_merged_from", { name: name }));
   return null;
 }
 
@@ -261,7 +262,7 @@ export function deciderFor(ctx: ReadContext, by: EntityId, business: EntityId, p
     if (why === null) return { party };
     first ??= reject("votes", why);
   }
-  return first ?? reject("not_allowed", `${labelOf(ctx, business)}: you may not ${POWER_WORDS[power]}`);
+  return first ?? reject("not_allowed", say("why_business_you_may_not_power", { business: labelOf(ctx, business), power: POWER_WORDS[power] }));
 }
 
 // ---------------------------------------------------------------- winding up: begin
@@ -464,7 +465,7 @@ function assetsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: P
 function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan, said: WindSaid[]): Rejection | null {
   const bizName = labelOf(w.ctx, business);
   const holders = holdersOf(api, w.ctx, business);
-  if (holders.length === 0) return reject("no_owners", `${bizName} has no owners to pay out to`);
+  if (holders.length === 0) return reject("no_owners", say("why_bizname_has_no_owners_to_pay_out", { bizName: bizName }));
   const money = (c: number): string => api.money(w.ctx, c);
   const run = (events: LedgerEvent[] | Rejection): Rejection | null => (isRejection(events) ? events : applied(w, events));
 
@@ -480,12 +481,12 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
   for (const p of properties.filter((x) => x.sold)) {
     const sold = sellProperty(api, w.ctx, { party: business, property: p.id, price: propertyValue(w.ctx.state, p.id) });
     if (isRejection(sold)) p.sold = false;
-    else if (applied(w, sold)) return reject("declined", `${labelOf(w.ctx, p.id)} couldn't be sold`);
+    else if (applied(w, sold)) return reject("declined", say("why_id_couldnt_be_sold", { id: labelOf(w.ctx, p.id) }));
   }
   for (const s of stakes.filter((x) => x.sold)) {
     const sold = sellStake(api, w.ctx, { party: business, business: s.id, share: 100, price: orgValue(api, w.ctx, s.id) });
     if (isRejection(sold)) s.sold = false;
-    else if (applied(w, sold)) return reject("declined", `${bizName}'s stake in ${labelOf(w.ctx, s.id)} couldn't be sold`);
+    else if (applied(w, sold)) return reject("declined", say("why_bizname_s_stake_in_id_couldnt_be", { bizName: bizName, id: labelOf(w.ctx, s.id) }));
   }
 
   // Every account's cash gathered in one.
@@ -504,7 +505,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
   // What it owes, reckoned in all before any of it is paid.
   const owing = debtsOf(api, w.ctx, business, gather, false, null).reduce((a, d) => a + d.cents, 0);
   const cash = gather === null ? 0 : api.balance(w.ctx.state, gather);
-  if (owing > cash) return reject("insolvent", `${bizName} owes ${money(owing)} and holds ${money(Math.max(0, cash))}: it is ${money(owing - Math.max(0, cash))} short. Sell something first, or put money in.`);
+  if (owing > cash) return reject("insolvent", say("why_bizname_owes_owing_and_holds_cash_it", { bizName: bizName, owing: money(owing), cash: money(Math.max(0, cash)), cash2: money(owing - Math.max(0, cash)) }));
   const pay = (lines: readonly PostingLine[], memo: string, category: string, extra: readonly LedgerEvent[] = []): Rejection | null => {
     const posted = api.post(w.ctx, [...lines], { memo, kind: "payment", category });
     return isRejection(posted) ? posted : applied(w, [...posted, ...extra]);
@@ -623,7 +624,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
   for (const part of parts) {
     if (part.cents > 0 && gather !== null) {
       const into = api.depositAccount(w.ctx, part.party);
-      if (!into) return reject("no_account", `${labelOf(w.ctx, part.party)} has no account their share of ${bizName} could go to`);
+      if (!into) return reject("no_account", say("why_party_has_no_account_their_share_of", { party: labelOf(w.ctx, part.party), bizName: bizName }));
       const failed = run(api.pay(w.ctx, { from: gather, to: part.party, cents: part.cents, memo: `${bizName} wound up: a share of what was left`, deposit: into, kind: "purchase", category: "investment" }));
       if (failed) return failed;
     }
@@ -657,7 +658,7 @@ function windUp(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: Win
   const standing = standingProblem(ctx, business);
   if (standing) return standing;
   const winding = windingUpSince(ctx.state, business) !== null;
-  if (plan.stage === "begin" && winding) return reject("winding_up", `${labelOf(ctx, business)} is winding up already`);
+  if (plan.stage === "begin" && winding) return reject("winding_up", say("why_business_is_winding_up_already", { business: labelOf(ctx, business) }));
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const said: WindSaid[] = [];
   const failed = (winding ? null : begin(api, w, business, said)) ?? (plan.stage === "finish" ? finish(api, w, business, plan, said) : null);
@@ -698,19 +699,19 @@ function unitValue(api: FinanceApi, ctx: ReadContext, business: EntityId): { own
 function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: EntityId, terms: MergeTerms): WindResult | Rejection {
   const name = labelOf(ctx, business);
   const intoName = labelOf(ctx, into);
-  if (business === into) return reject("same", `${name} can't merge with itself`);
+  if (business === into) return reject("same", say("why_name_cant_merge_with_itself", { name: name }));
   const standing = standingProblem(ctx, business) ?? standingProblem(ctx, into);
   if (standing) return standing;
-  for (const id of [business, into]) if (windingUpSince(ctx.state, id) !== null) return reject("winding_up", `${labelOf(ctx, id)} is winding up`);
+  for (const id of [business, into]) if (windingUpSince(ctx.state, id) !== null) return reject("winding_up", say("why_id_is_winding_up", { id: labelOf(ctx, id) }));
   const b = unitValue(api, ctx, business);
   const a = unitValue(api, ctx, into);
   const holders = holdersOf(api, ctx, business).filter((h) => h.party !== into);
   const cash = Math.max(0, Math.round(terms.cash ?? 0));
   const ratio = terms.ratio ?? (cash > 0 || holders.length === 0 ? 0 : a.perUnit > 0 ? b.perUnit / a.perUnit : Number.NaN);
-  if (!Number.isFinite(ratio) || ratio < 0) return reject("bad_ratio", `${intoName} is worth nothing a unit: say how many of its units each of ${name}'s is worth, or a price`);
+  if (!Number.isFinite(ratio) || ratio < 0) return reject("bad_ratio", say("why_intoname_is_worth_nothing_a_unit_say", { intoName: intoName, name: name }));
   const units = new Map(holders.map((h) => [h.party, Math.round(unitsOf(b.owners, h.party) * ratio)]));
   const paid = new Map(splitByShare(cash, holders).map((p) => [p.party, p.cents]));
-  if (holders.length > 0 && cash === 0 && [...units.values()].every((u) => u === 0)) return reject("bad_ratio", `${name}'s holders would get nothing: say a ratio or a price`);
+  if (holders.length > 0 && cash === 0 && [...units.values()].every((u) => u === 0)) return reject("bad_ratio", say("why_name_s_holders_would_get_nothing_say", { name: name }));
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const said: WindSaid[] = [];
   const money = (c: number): string => api.money(ctx, c);
@@ -718,14 +719,14 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   // The cash, from the survivor's own account.
   if (cash > 0) {
     const from = terms.from ?? operatingAccount(api, ctx, into);
-    if (!from) return reject("no_account", `${intoName} has no account to pay from`);
+    if (!from) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: intoName }));
     const unusable = api.mayUse(ctx, into, from, "from");
     if (unusable) return unusable;
     for (const h of holders) {
       const cents = paid.get(h.party) ?? 0;
       if (cents <= 0) continue;
       const deposit = api.depositAccount(w.ctx, h.party);
-      if (!deposit) return reject("no_account", `${labelOf(ctx, h.party)} has no account the money could go to`);
+      if (!deposit) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, h.party) }));
       const posted = api.pay(w.ctx, { from, to: h.party, cents, memo: `For a share of ${name}`, deposit, kind: "purchase", category: "investment" });
       const failed = isRejection(posted) ? posted : applied(w, posted);
       if (failed) return failed;
@@ -781,7 +782,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
     const p = settlePosting(w.ctx, api, business, what);
     if (!p || p.cents <= 0 || !p.lines) continue;
     const posted = api.post(w.ctx, p.lines, { memo: p.memo ?? what, kind: "payment", category: p.category ?? what });
-    if (isRejection(posted)) return reject("insolvent", `${name} can't pay what it owes ${what === "sales_tax" ? "in sales tax" : "its suppliers"} (${money(p.cents)})`);
+    if (isRejection(posted)) return reject("insolvent", say("why_name_cant_pay_what_it_owes_in", { name: name, cents: money(p.cents), sales_tax: what === "sales_tax" }));
     const failed = applied(w, [...posted, ...(p.extra ?? [])]);
     if (failed) return failed;
   }
@@ -789,7 +790,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   if (due && due.cents > 0) {
     // Booked as payroll by the payment's own record, as the quarterly flow books it.
     const posted = api.post(w.ctx, due.lines, { memo: "Unemployment tax", kind: "payment", category: "payroll" });
-    if (isRejection(posted)) return reject("insolvent", `${name} can't pay its unemployment tax (${money(due.cents)})`);
+    if (isRejection(posted)) return reject("insolvent", say("why_name_cant_pay_its_unemployment_tax_cents", { name: name, cents: money(due.cents) }));
     const failed = applied(w, [...posted, ...due.events]);
     if (failed) return failed;
   }
@@ -798,7 +799,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   if (tax) {
     const from = gatheringAccount(api, w.ctx, business);
     const posted = from ? api.post(w.ctx, [{ account: from, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], { memo: "Corporate income tax", kind: "payment", category: "business_tax" }) : null;
-    if (!posted || isRejection(posted)) return reject("insolvent", `${name} can't pay its income tax (${money(tax.cents)})`);
+    if (!posted || isRejection(posted)) return reject("insolvent", say("why_name_cant_pay_its_income_tax_cents", { name: name, cents: money(tax.cents) }));
     const failed = applied(w, [...posted, ...tax.extra]);
     if (failed) return failed;
   }

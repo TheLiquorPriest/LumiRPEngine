@@ -15,6 +15,7 @@ import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./reg
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { engineSlice } from "./scope";
+import { say } from "./lines";
 
 /** The engine's state-slice key for the GM's per-chat section overrides. */
 const FEED_KEY = "feed";
@@ -108,8 +109,8 @@ export function secretLineText(line: FeedLine, secrets: "marked" | "omit", wordi
 export const feedEvent: EventTypeDef<PackEvent> = {
   type: FEED_EVENT,
   validate: (e) => {
-    if (typeof e.data.section !== "string" || e.data.section.trim() === "") return { code: "bad_event", reason: "a section override names its section" };
-    return e.data.to === null || readSectionFeed(e.data.to) ? null : { code: "bad_event", reason: "a section override is enabled, maxTokens, maxLines, include or scope" };
+    if (typeof e.data.section !== "string" || e.data.section.trim() === "") return { code: "bad_event", reason: say("why_a_section_override_names_its_section") };
+    return e.data.to === null || readSectionFeed(e.data.to) ? null : { code: "bad_event", reason: say("why_a_section_override_is_enabled_maxtokens_maxlines") };
   },
   apply: (e, state) => {
     const section = typeof e.data.section === "string" ? e.data.section : "";

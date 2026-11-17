@@ -21,6 +21,7 @@ import { ASK_PARAM } from "../../../shared/org-motions";
 import { approvedWords, heldTo } from "./acting";
 import { orgRecord } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
+import { say } from "../../../engine/lines";
 
 type DuesEvery = (typeof DUES_EVERY)[number];
 
@@ -97,8 +98,8 @@ function refusal(ctx: ReadContext, by: EntityId, org: EntityId, power: "org.gove
 /** An organization dues and shares are for: a household, any other group, or the party; a rejection otherwise. */
 function treasuryOf(ctx: ReadContext, org: EntityId): Rejection | null {
   const type = own(ctx.state.entities, org) && !isGone(ctx.state, org) ? orgTypeOf(ctx, org) : null;
-  if (type === null) return { code: "missing_entity", reason: `no organization ${labelOf(ctx, org)}` };
-  return type === "company" || type === "trust" ? { code: "not_shared", reason: `${labelOf(ctx, org)} pays out to its owners by their shares` } : null;
+  if (type === null) return { code: "missing_entity", reason: say("why_no_organization_org", { org: labelOf(ctx, org) }) };
+  return type === "company" || type === "trust" ? { code: "not_shared", reason: say("why_org_pays_out_to_its_owners_by", { org: labelOf(ctx, org) }) } : null;
 }
 
 /** `economy.dues`: an organization's dues change (`cents` 0 ends them), every week, month or year on `day`. */
@@ -108,7 +109,7 @@ function setDues(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCo
   if (bad) return bad;
   const cents = Math.round(numOf(args.cents));
   const every = strOf(args.every, "month");
-  if (cents < 0 || !(DUES_EVERY as readonly string[]).includes(every)) return { code: "bad_amount", reason: `dues are an amount every ${DUES_EVERY.join(", ")}` };
+  if (cents < 0 || !(DUES_EVERY as readonly string[]).includes(every)) return { code: "bad_amount", reason: say("why_dues_are_an_amount_every_join", { join: DUES_EVERY.join(", ") }) };
   const by = strOf(args.by);
   const no = refusal(ctx, by, org, "org.govern");
   if (no) return no;
@@ -126,18 +127,18 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
   const bad = treasuryOf(ctx, org);
   if (bad) return bad;
   const cents = Math.round(numOf(args.cents));
-  if (!(cents > 0)) return { code: "bad_amount", reason: "a share out needs an amount" };
+  if (!(cents > 0)) return { code: "bad_amount", reason: say("why_a_share_out_needs_an_amount") };
   const to = sharersOf(ctx, org);
-  if (to.length === 0) return { code: "no_members", reason: `${labelOf(ctx, org)} has nobody to share with` };
+  if (to.length === 0) return { code: "no_members", reason: say("why_org_has_nobody_to_share_with", { org: labelOf(ctx, org) }) };
   const from = strOf(args.from) || (api.depositAccount(ctx, org) ?? "");
-  if (from === "" || !api.accountsOf(ctx, org, "spend").includes(from)) return { code: "bad_account", reason: from === "" ? `${labelOf(ctx, org)} holds no money to share out` : `${labelOf(ctx, from)} isn't ${labelOf(ctx, org)}'s to spend` };
+  if (from === "" || !api.accountsOf(ctx, org, "spend").includes(from)) return { code: "bad_account", reason: from === "" ? say("why_org_holds_no_money_to_share_out", { org: labelOf(ctx, org) }) : say("why_account_isnt_org_s_to_spend", { account: labelOf(ctx, from), org: labelOf(ctx, org) }) };
   const by = strOf(args.by);
   // Over its limit, put up for approval when the action asks; under an approval, past it (ORG-SPEC Phase 5).
   if (by !== "" && by !== org) {
     const held = heldTo(ctx, { by, party: org, power: "money.payout", text: `Shared out ${api.money(ctx, cents)}`, cents, account: from }, mayAct(ctx, by, org, "money.payout", { amount: cents, account: from }), "not_owner");
     if (held) return held;
   }
-  if (api.available(ctx, from) < cents) return { code: "declined", reason: `${labelOf(ctx, from)} doesn't have ${api.money(ctx, cents)}` };
+  if (api.available(ctx, from) < cents) return { code: "declined", reason: say("why_from_doesnt_have_cents", { from: labelOf(ctx, from), cents: api.money(ctx, cents) }) };
   const each = Math.floor(cents / to.length);
   const out: LedgerEvent[] = [];
   for (const [i, who] of to.entries()) {

@@ -192,7 +192,7 @@ const END_WORDS: Readonly<Record<Exclude<MotionStatus, "open">, string>> = { pas
 /** The act a motion holds, carried out as `org`'s own decision (`EffectContext.carried`): its events, or why it can't be. */
 function carryOut(ctx: ReadContext, rng: Rng, org: EntityId, id: string, what: CarriedAct): LedgerEvent[] | Rejection {
   const def = ctx.registry.effects.get(what.type);
-  if (!def) return refuse("unknown_effect", `this world can't carry out ${what.type}`);
+  if (!def) return refuse("unknown_effect", say("why_this_world_cant_carry_out_type", { type: what.type }));
   return def.resolve({ ...what.args }, { ...ctx, rng, params: {}, effect: { type: what.type, args: { ...what.args } }, carried: { org, motion: id } });
 }
 
@@ -229,7 +229,7 @@ function settle(ctx: ReadContext, rng: Rng, org: EntityId, m: Motion, final: boo
 export function putToVote(ctx: ReadContext, ask: { org: EntityId; by: EntityId; party: EntityId; text: string; why: string }): LedgerEvent[] | Rejection | null {
   const e = ctx as Partial<EffectContext>;
   if (e.params?.vote !== true) return null;
-  if (!e.effect || !e.rng) return refuse("votes", `${ask.why}, and it can't be put to a vote from here`);
+  if (!e.effect || !e.rng) return refuse("votes", say("why_why_and_it_cant_be_put_to", { why: ask.why }));
   return openMotion(ctx, e.rng, { ...ask, what: e.effect });
 }
 
@@ -244,9 +244,9 @@ export function openMotion(ctx: ReadContext, rng: Rng, o: { org: EntityId; by: E
   const name = labelOf(ctx, org);
   const rules = rulesOf(ctx, org);
   const { weights, public: pub } = electorateOf(ctx, org);
-  if (Object.keys(weights).length === 0) return refuse("no_voters", `${name} has no one to vote`);
+  if (Object.keys(weights).length === 0) return refuse("no_voters", say("why_name_has_no_one_to_vote", { name: name }));
   const all = motionsOf(ctx.state, org);
-  if (all.filter((m) => m.status === "open").length >= MOTIONS_KEPT.open) return refuse("too_many", `${name} has ${MOTIONS_KEPT.open} motions open already`);
+  if (all.filter((m) => m.status === "open").length >= MOTIONS_KEPT.open) return refuse("too_many", say("why_name_has_open_motions_open_already", { name: name, open: MOTIONS_KEPT.open }));
   const id = `m_${hashParts("orgs.motion", org, o.text, String(ctx.state.clock), String(all.length)).slice(0, 10)}`;
   // What it would do is tried now, as if it had passed: one that couldn't be carried out isn't put.
   const tried = carryOut(ctx, rng.fork("try"), org, id, o.what);
@@ -268,8 +268,8 @@ export function openMotion(ctx: ReadContext, rng: Rng, o: { org: EntityId; by: E
 
 function motionAt(ctx: ReadContext, org: EntityId, id: string): Motion | Rejection {
   const m = motionsOf(ctx.state, org).find((x) => x.id === id);
-  if (!m) return refuse("missing_motion", `${labelOf(ctx, org)} has no motion ${id}`);
-  return m.status === "open" ? m : refuse("closed", `That motion ${END_WORDS[m.status]} already`);
+  if (!m) return refuse("missing_motion", say("why_org_has_no_motion_id", { org: labelOf(ctx, org), id: id }));
+  return m.status === "open" ? m : refuse("closed", say("why_that_motion_status_already", { status: END_WORDS[m.status] }));
 }
 
 function isRejection(v: unknown): v is Rejection {
@@ -290,17 +290,17 @@ function voteEvent(ctx: ReadContext, org: EntityId, m: Motion, who: EntityId, v:
 export function voteEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
   const m = motionsOf(ctx.state, org).find((x) => x.id === strOf(a.motion));
-  if (!m) return refuse("missing_motion", `${labelOf(ctx, org)} has no motion ${strOf(a.motion)}`);
+  if (!m) return refuse("missing_motion", say("why_org_has_no_motion_id", { org: labelOf(ctx, org), id: strOf(a.motion) }));
   const vote = strOf(a.vote);
-  if (!isVote(vote)) return refuse("bad_vote", "A vote is for, against or abstain");
+  if (!isVote(vote)) return refuse("bad_vote", say("why_a_vote_is_for_against_or_abstain"));
   const by = strOf(a.by);
   const who = strOf(a.who) || by;
-  if (who === "") return refuse("bad_args", "Say whose vote it is");
-  if (by !== "" && !castsFor(ctx, by, who)) return refuse("not_allowed", `${labelOf(ctx, by)} may not vote for ${labelOf(ctx, who)}`);
+  if (who === "") return refuse("bad_args", say("why_say_whose_vote_it_is"));
+  if (by !== "" && !castsFor(ctx, by, who)) return refuse("not_allowed", say("why_by_may_not_vote_for_who", { by: labelOf(ctx, by), who: labelOf(ctx, who) }));
   const said = strOf(a.said);
   const how: VoteHow = by !== "" ? "own" : said !== "" ? "story" : "gm";
   const was = m.votes[who];
-  if (was && was.vote === vote && was.how !== "rule") return refuse("already", `${labelOf(ctx, who)} voted ${VOTE_WORDS[vote]} already`);
+  if (was && was.vote === vote && was.how !== "rule") return refuse("already", say("why_who_voted_vote_already", { who: labelOf(ctx, who), vote: VOTE_WORDS[vote] }));
   const at = ctx.state.clock;
   const cast: MotionVote = { vote, how, at, ...(by !== "" && by !== who ? { by } : {}) };
   // A vote by someone with no vote on it, or on a motion that closed, is kept beside it: it moves no standing rule and settles nothing.
@@ -318,9 +318,9 @@ export function endEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejectio
   if (isRejection(m)) return m;
   const by = strOf(a.by);
   const how = strOf(a.how) || "withdraw";
-  if (how === "close") return by !== "" ? refuse("not_allowed", "Only the GM closes a motion before its time") : settle(ctx, ctx.rng.fork(`close:${m.id}`), org, m, true);
-  if (how !== "withdraw") return refuse("bad_args", "A motion is withdrawn or closed");
-  if (by !== "" && by !== m.by && !(m.party !== undefined && castsFor(ctx, by, m.party))) return refuse("not_allowed", `Only ${labelOf(ctx, m.by)} may withdraw it`);
+  if (how === "close") return by !== "" ? refuse("not_allowed", say("why_only_the_gm_closes_a_motion_before")) : settle(ctx, ctx.rng.fork(`close:${m.id}`), org, m, true);
+  if (how !== "withdraw") return refuse("bad_args", say("why_a_motion_is_withdrawn_or_closed"));
+  if (by !== "" && by !== m.by && !(m.party !== undefined && castsFor(ctx, by, m.party))) return refuse("not_allowed", say("why_only_m_may_withdraw_it", { m: labelOf(ctx, m.by) }));
   return ended(ctx, org, m, "withdrawn", "withdrawn", tallyOf(m), by);
 }
 
@@ -331,26 +331,26 @@ export function endEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejectio
  */
 export function proposeEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const by = strOf(a.by);
-  if (by === "" || !own(ctx.state.entities, by)) return refuse("bad_args", "A motion is put by someone: name who puts it");
+  if (by === "" || !own(ctx.state.entities, by)) return refuse("bad_args", say("why_a_motion_is_put_by_someone_name"));
   const op = parseOrgOp(a.change);
-  if (!op) return refuse("bad_op", "The motion's change isn't an organization op");
+  if (!op) return refuse("bad_op", say("why_the_motions_change_isnt_an_organization_op"));
   const specs = compileOrgOp(ctx, op);
   if (!Array.isArray(specs)) return specs;
   const decided = specs.filter((s) => s.type !== "orgs.note");
   const spec = decided[0];
-  if (decided.length !== 1 || !spec) return refuse("bad_op", "A motion carries one decision");
+  if (decided.length !== 1 || !spec) return refuse("bad_op", say("why_a_motion_carries_one_decision"));
   const def = ctx.registry.effects.get(spec.type);
-  if (!def) return refuse("unknown_effect", `this world can't ${spec.type}`);
+  if (!def) return refuse("unknown_effect", say("why_this_world_cant_type", { type: spec.type }));
   const args: Args = { ...spec.args, by, ...(strOf(a.party) !== "" ? { party: strOf(a.party) } : {}) };
   const out = def.resolve(args, { ...ctx, params: { vote: true }, effect: { type: spec.type, args } });
   if (!Array.isArray(out)) return out;
-  return out.some((e) => e.type === ORGS_MOTION) ? out : refuse("no_vote_needed", `${labelOf(ctx, by)} may decide that alone: no vote is needed`);
+  return out.some((e) => e.type === ORGS_MOTION) ? out : refuse("no_vote_needed", say("why_by_may_decide_that_alone_no_vote", { by: labelOf(ctx, by) }));
 }
 
 function pctArg(v: JsonValue | undefined, [lo, hi]: readonly [number, number]): number | null | undefined | Rejection {
   if (v === undefined || v === "") return undefined;
   if (v === null || v === "default") return null;
-  return typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : refuse("bad_args", `say a number from ${lo} to ${hi}`);
+  return typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : refuse("bad_args", say("why_say_a_number_from_lo_to_hi", { lo: lo, hi: hi }));
 }
 
 /**
@@ -360,7 +360,7 @@ function pctArg(v: JsonValue | undefined, [lo, hi]: readonly [number, number]): 
  */
 export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
-  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", `no organization ${labelOf(ctx, org)}`);
+  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", say("why_no_organization_org", { org: labelOf(ctx, org) }));
   const by = strOf(a.by);
   if (by !== "") {
     const may = mayAct(ctx, by, org, "org.govern");
@@ -376,8 +376,8 @@ export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Reject
   };
   const basis = a.vote_by;
   if (basis !== undefined && basis !== "") {
-    if (basis !== null && basis !== "default" && !isVoteBasis(basis)) return refuse("bad_args", "votes are counted by shares, by members or by trustees");
-    if (basis === "trustees" && orgTypeOf(ctx, org) !== "trust") return refuse("bad_args", `only a trust counts its trustees' votes; ${labelOf(ctx, org)} isn't one`);
+    if (basis !== null && basis !== "default" && !isVoteBasis(basis)) return refuse("bad_args", say("why_votes_are_counted_by_shares_by_members"));
+    if (basis === "trustees" && orgTypeOf(ctx, org) !== "trust") return refuse("bad_args", say("why_only_a_trust_counts_its_trustees_votes", { org: labelOf(ctx, org) }));
     put(DECISION_FIELDS.basis, isVoteBasis(basis) ? basis : null, isVoteBasis(basis) ? `votes counted by ${basis}` : "votes counted as its type counts them");
   }
   // Each number: its argument, its field, its range, its words set, and its words put back to the default.
@@ -394,22 +394,22 @@ export function rulesEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Reject
     const n = v === null ? null : arg.endsWith("days") ? Math.round(v) : v;
     put(field, n, n === null ? back : said(n));
   }
-  if (out.length === 0) return refuse("no_change", "nothing to change");
+  if (out.length === 0) return refuse("no_change", say("why_nothing_to_change"));
   return [...out, orgLog(ctx, org, `Set how decisions are made: ${words.join(", ")}`, by !== "" ? { by, power: "org.govern" } : {})];
 }
 
 /** `orgs.vote_rule`: someone's standing vote (for, against, abstain, or with another voter; `none` clears it), set by them or by the GM. */
 export function standingEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
-  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", `no organization ${labelOf(ctx, org)}`);
+  if (orgTypeOf(ctx, org) === null || isGone(ctx.state, org)) return refuse("missing_entity", say("why_no_organization_org", { org: labelOf(ctx, org) }));
   const by = strOf(a.by);
   const who = strOf(a.who) || by;
-  if (who === "" || !own(ctx.state.entities, who)) return refuse("bad_args", "Say whose standing vote it is");
-  if (by !== "" && !castsFor(ctx, by, who)) return refuse("not_allowed", `${labelOf(ctx, by)} may not set ${labelOf(ctx, who)}'s standing vote`);
+  if (who === "" || !own(ctx.state.entities, who)) return refuse("bad_args", say("why_say_whose_standing_vote_it_is"));
+  if (by !== "" && !castsFor(ctx, by, who)) return refuse("not_allowed", say("why_by_may_not_set_who_s_standing", { by: labelOf(ctx, by), who: labelOf(ctx, who) }));
   const vote = strOf(a.vote) || "none";
   const follows = strOf(a.with);
-  if (vote !== "none" && !(STANDING_VOTES as readonly string[]).includes(vote)) return refuse("bad_args", "A standing vote is for, against, abstain, with someone, or none");
-  if (vote === "with" && (follows === "" || follows === who || !own(ctx.state.entities, follows))) return refuse("bad_args", "Say whose vote it follows");
+  if (vote !== "none" && !(STANDING_VOTES as readonly string[]).includes(vote)) return refuse("bad_args", say("why_a_standing_vote_is_for_against_abstain"));
+  if (vote === "with" && (follows === "" || follows === who || !own(ctx.state.entities, follows))) return refuse("bad_args", say("why_say_whose_vote_it_follows"));
   const rules = rulesOf(ctx, org).standing.filter((s) => s.who !== who);
   const next: StandingVote[] = vote === "none" ? rules : [...rules, vote === "with" ? { who, vote: "with", with: follows } : { who, vote: vote as StandingVote["vote"] }];
   const words = vote === "none" ? `${labelOf(ctx, who)} no longer has a standing vote` : vote === "with" ? `${labelOf(ctx, who)} votes with ${labelOf(ctx, follows)}` : `${labelOf(ctx, who)} votes ${VOTE_WORDS[vote as "for" | "against" | "abstain"]} as a rule`;
@@ -476,7 +476,7 @@ function writeList(state: Parameters<EventTypeDef<PackEvent>["apply"]>[1], org: 
 
 function openIn(ctx: ReadContext, e: PackEvent): Motion | Rejection {
   const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
-  return m && m.status === "open" ? m : refuse("bad_event", "no such motion open");
+  return m && m.status === "open" ? m : refuse("bad_event", say("why_no_such_motion_open"));
 }
 
 export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
@@ -485,8 +485,8 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_MOTION,
     validate: (e, ctx) => {
       const m = motionIn(e.data.motion);
-      if (str(e, "org") === "" || !m) return refuse("bad_event", "a motion needs its organization, words and act");
-      return motionsOf(ctx.state, str(e, "org")).some((x) => x.id === m.id) ? refuse("bad_event", `motion ${m.id} is on record already`) : null;
+      if (str(e, "org") === "" || !m) return refuse("bad_event", say("why_a_motion_needs_its_organization_words_and"));
+      return motionsOf(ctx.state, str(e, "org")).some((x) => x.id === m.id) ? refuse("bad_event", say("why_motion_id_is_on_record_already", { id: m.id })) : null;
     },
     apply: (e, state) => {
       const org = str(e, "org");
@@ -504,8 +504,8 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_VOTE,
     validate: (e, ctx) => {
       const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
-      if (!m) return refuse("bad_event", "no such motion");
-      return isVote(e.data.vote) && str(e, "who") !== "" ? null : refuse("bad_event", "a vote is for, against or abstain, by someone");
+      if (!m) return refuse("bad_event", say("why_no_such_motion"));
+      return isVote(e.data.vote) && str(e, "who") !== "" ? null : refuse("bad_event", say("why_a_vote_is_for_against_or_abstain_2"));
     },
     advise: (e, ctx): Advice | null => {
       const m = motionsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
@@ -542,7 +542,7 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => {
       const m = openIn(ctx, e);
       if (isRejection(m)) return m;
-      return ["passed", "failed", "withdrawn"].includes(str(e, "status")) ? null : refuse("bad_event", "a motion ends carried, failed or withdrawn");
+      return ["passed", "failed", "withdrawn"].includes(str(e, "status")) ? null : refuse("bad_event", say("why_a_motion_ends_carried_failed_or_withdrawn"));
     },
     apply: (e, state) => {
       const org = str(e, "org");

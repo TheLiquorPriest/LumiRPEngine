@@ -27,6 +27,7 @@ import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { ownersCue } from "./visibility";
 import type { Working } from "./working";
+import { say } from "./lines";
 
 /** Transitions per track per pass: a stage cycle stops here. */
 export const TRANSITION_CAP = 8;
@@ -175,14 +176,14 @@ function stagesAfter(track: TrackDef, stage: StageId): Set<StageId> {
  */
 export function moveTrack(reg: Registry, w: Working, trackId: TrackId, to: StageId, seed: string): Rejection | null {
   const track = own(w.world.tracks, trackId);
-  if (!track) return { code: "missing_track", reason: `no track ${trackId}` };
-  if (!own(track.stages, to)) return { code: "missing_stage", reason: `${track.label} has no stage ${to}` };
+  if (!track) return { code: "missing_track", reason: say("why_no_track_track", { track: trackId }) };
+  if (!own(track.stages, to)) return { code: "missing_stage", reason: say("why_track_has_no_stage_to", { track: track.label, to: to }) };
   const from = own(w.state.tracks, trackId)?.stage ?? track.start;
   if (from === to) return null;
   if (!stagesAfter(track, from).has(to)) return w.apply({ type: "stage", track: trackId, to, from });
   const leaving = own(track.stages, from);
   const fails = leaving !== undefined && leaving.fail?.to === to && !leaving.next.some((n) => n.to === to);
-  return enter(reg, w, trackId, track, from, to, fails ? "fail" : "gm", seed) ? null : { code: "bad_stage", reason: `${track.label} can't move to ${to}` };
+  return enter(reg, w, trackId, track, from, to, fails ? "fail" : "gm", seed) ? null : { code: "bad_stage", reason: say("why_track_cant_move_to_to", { track: track.label, to: to }) };
 }
 
 /** Answer normalization: case, accents, punctuation, spacing and a leading article don't matter. */

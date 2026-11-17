@@ -58,6 +58,7 @@ import items from "./tables/modern-us/items.json";
 import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
 import shipped from "./tables/modern-us/shipped.json";
+import { say } from "../../../engine/lines";
 
 /**
  * The authored effects that move a thing, by the argument naming what they move and the one naming
@@ -349,12 +350,12 @@ function detach(ctx: ReadContext, thing: EntityId): LedgerEvent[] {
  * (DESIGN §11).
  */
 const transfer = (ctx: ReadContext, item: EntityId, to: EntityId, told = false): Events => {
-  if (!own(ctx.state.entities, item)) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (!own(ctx.state.entities, to)) return reject("missing_entity", `no holder ${labelOf(ctx, to)}`);
+  if (!own(ctx.state.entities, item)) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
+  if (!own(ctx.state.entities, to)) return reject("missing_entity", say("why_no_holder_in", { in: labelOf(ctx, to) }));
   const level = gearLevel(ctx, item, to);
   if (level === 0) return [];
   if (holderOf(ctx.state, item) === to) return [];
-  if (item === to || isInside(ctx.state, to, item)) return reject("cycle", "can't put something inside itself");
+  if (item === to || isInside(ctx.state, to, item)) return reject("cycle", say("why_cant_put_something_inside_itself"));
   // Nobody carries a vehicle, a part built into one or a fixed thing, and only what holds things holds them (DESIGN §7).
   const cannot = holdProblem(ctx, item, to);
   if (cannot) return reject(fixedOf(ctx, item) === null ? "cant_hold" : "fixed", cannot);
@@ -372,8 +373,8 @@ const transfer = (ctx: ReadContext, item: EntityId, to: EntityId, told = false):
 };
 
 const drop = (ctx: ReadContext, item: EntityId, place: PlaceId): Events => {
-  if (!own(ctx.state.entities, item)) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (!own(ctx.world.places, place)) return reject("missing_place", `no place ${labelOf(ctx, place)}`);
+  if (!own(ctx.state.entities, item)) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
+  if (!own(ctx.world.places, place)) return reject("missing_place", say("why_no_place_place", { place: labelOf(ctx, place) }));
   if (gearLevel(ctx, item) === 0) return [];
   // Put down by someone the grid system has on a cell, it lies on that cell.
   return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }, ...(optionalService(ctx, "space.lay")?.(ctx, item, place, holderOf(ctx.state, item)) ?? [])];
@@ -394,9 +395,9 @@ function endLoans(ctx: ReadContext, thing: EntityId): LedgerEvent[] {
 
 const give = (ctx: ReadContext, item: EntityId, from: EntityId, to: EntityId, told = false): Events => {
   const e = own(ctx.state.entities, item);
-  if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (e.kind === "account") return reject("is_money", "cash changes hands as a transfer");
-  if (from !== to && !isInside(ctx.state, item, from) && e.fields.owner !== from) return reject("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
+  if (!e) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
+  if (e.kind === "account") return reject("is_money", say("why_cash_changes_hands_as_a_transfer"));
+  if (from !== to && !isInside(ctx.state, item, from) && e.fields.owner !== from) return reject("not_held", say("why_from_doesnt_have_cents", { from: labelOf(ctx, from), cents: e.name }));
   const moved = transfer(ctx, item, to, told);
   if (!Array.isArray(moved)) return moved;
   const owner: LedgerEvent[] = e.fields.owner === from || e.fields.owner === undefined ? [{ type: "set", entity: item, field: "owner", value: to }] : [];
@@ -480,12 +481,12 @@ function usedUp(ctx: ReadContext, item: EntityId, done: boolean): LedgerEvent[] 
  * never what is in them or on anyone. Finding nothing is no failure: the room is searched.
  */
 function search(ctx: ReadContext, who: EntityId, target: EntityId | null): Events {
-  if (!own(ctx.state.entities, who)) return reject("missing_entity", `no searcher ${labelOf(ctx, who)}`);
+  if (!own(ctx.state.entities, who)) return reject("missing_entity", say("why_no_searcher_who", { who: labelOf(ctx, who) }));
   const place = placeOfEntity(ctx.state, who);
   if (target !== null) {
-    if (!own(ctx.state.entities, target)) return reject("missing_entity", `no ${labelOf(ctx, target)} to search`);
-    if (placeOfEntity(ctx.state, target) !== place) return reject("not_here", `${labelOf(ctx, target)} isn't here`);
-  } else if (!place) return reject("no_place", `${labelOf(ctx, who)} is nowhere`);
+    if (!own(ctx.state.entities, target)) return reject("missing_entity", say("why_no_target_to_search", { target: labelOf(ctx, target) }));
+    if (placeOfEntity(ctx.state, target) !== place) return reject("not_here", say("why_target_isnt_here", { target: labelOf(ctx, target) }));
+  } else if (!place) return reject("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, who) }));
   const found = target !== null ? contentsOf(ctx.state, target) : Object.keys(ctx.state.entities).filter((id) => holderOf(ctx.state, id) === null && own(ctx.state.entities, id)?.fields.place === place).sort();
   return found.filter((id) => id !== who && !isGone(ctx.state, id) && isDiscoverable(ctx.world, ctx.state, id) && !knows(ctx.state, who, id)).map((id) => ({ type: "link" as const, rel: "knows", from: who, to: id }));
 }
@@ -578,12 +579,12 @@ function claimId(ctx: ReadContext, c: GearClaim): EntityId {
  * the claimer already holds stands for it: an earlier action of the turn made it (a Buy).
  */
 const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: LedgerEvent[] } | Rejection => {
-  if (!own(ctx.state.entities, c.by)) return reject("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
+  if (!own(ctx.state.entities, c.by)) return reject("missing_entity", say("why_no_claimer_c", { c: labelOf(ctx, c.by) }));
   const name = c.name.trim();
   // A tracking gap closed: their own thing comes to them as the story has it, never a second one.
   if (c.existing && own(ctx.state.entities, c.existing)) {
     const place = placeOfEntity(ctx.state, c.by);
-    const moved = c.at === "held" ? transfer(ctx, c.existing, c.by) : place ? drop(ctx, c.existing, place) : reject("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+    const moved = c.at === "held" ? transfer(ctx, c.existing, c.by) : place ? drop(ctx, c.existing, place) : reject("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, c.by) }));
     return Array.isArray(moved) ? { entity: c.existing, events: moved } : moved;
   }
   if (c.at === "held") {
@@ -594,7 +595,7 @@ const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: Ledg
     if (held) return { entity: held, events: [] };
   }
   const place = placeOfEntity(ctx.state, c.by);
-  if (c.at === "here" && !place) return reject("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+  if (c.at === "here" && !place) return reject("no_place", say("why_name_is_nowhere", { name: labelOf(ctx, c.by) }));
   const row = c.like ? (rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like)) : undefined;
   // Notable, so Gear 1 shows what the player said they have.
   const fields: JsonObject = { claimed: true, notable: true };
@@ -615,15 +616,15 @@ const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: Ledg
 
 const takePiece = (ctx: ReadContext, kit: EntityId, piece: string, to: EntityId): Events => {
   const k = own(ctx.state.entities, kit);
-  if (!k) return reject("missing_entity", `no kit ${labelOf(ctx, kit)}`);
+  if (!k) return reject("missing_entity", say("why_no_kit_kit", { kit: labelOf(ctx, kit) }));
   const status = kitStatus(ctx, kit);
   const p = findPiece(ctx, kit, piece);
-  if (!status || !p) return reject("no_piece", `${k.name} has no ${piece}`);
+  if (!status || !p) return reject("no_piece", say("why_name_has_no_prog", { name: k.name, prog: piece }));
   // A piece that was taken before and put back is an override item already: just move it.
   const back = contentsOf(ctx.state, kit).find((id) => own(ctx.state.entities, id)?.fields.from_kit === kit && own(ctx.state.entities, id)?.fields.piece === p.name);
   if (back) return transfer(ctx, back, to);
   const present = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
-  if (present <= 0) return reject("no_piece", `no ${p.name} left in ${k.name}`);
+  if (present <= 0) return reject("no_piece", say("why_no_name_left_in_name2", { name: p.name, name2: k.name }));
   const taken = takenOf(ctx.state, kit);
   const spawned = spawn(ctx, { name: p.name, owner: typeof k.fields.owner === "string" ? k.fields.owner : null, holder: to, salt: `${kit}:${p.name}:${own(taken, p.name) ?? 0}` });
   if (!Array.isArray(spawned)) return spawned;
@@ -638,9 +639,9 @@ const takePiece = (ctx: ReadContext, kit: EntityId, piece: string, to: EntityId)
 
 const lend = (ctx: ReadContext, thing: EntityId, to: EntityId, until: number): Events => {
   const e = own(ctx.state.entities, thing);
-  if (!e) return reject("missing_entity", `no ${labelOf(ctx, thing)}`);
-  if (!own(ctx.state.entities, to)) return reject("missing_entity", `no ${labelOf(ctx, to)}`);
-  if (!Number.isFinite(until) || until <= ctx.state.clock) return reject("bad_until", "a loan needs a future end");
+  if (!e) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, thing) }));
+  if (!own(ctx.state.entities, to)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, to) }));
+  if (!Number.isFinite(until) || until <= ctx.state.clock) return reject("bad_until", say("why_a_loan_needs_a_future_end"));
   const out: LedgerEvent[] = [];
   // A vehicle (or anything with a place of its own) stays where it is; carried things change hands.
   if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing)) {
@@ -655,7 +656,7 @@ const lend = (ctx: ReadContext, thing: EntityId, to: EntityId, until: number): E
 
 const retrieve = (ctx: ReadContext, thing: EntityId): Events => {
   const e = own(ctx.state.entities, thing);
-  if (!e) return reject("missing_entity", `no ${labelOf(ctx, thing)}`);
+  if (!e) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, thing) }));
   const out: LedgerEvent[] = [];
   for (const g of grants(ctx.state)) if (g.thing === thing) out.push({ type: "unlink", rel: "uses", from: g.borrower, to: thing });
   const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
@@ -672,13 +673,13 @@ const retrieve = (ctx: ReadContext, thing: EntityId): Events => {
 
 const wear = (ctx: ReadContext, item: EntityId, wearer: EntityId, slot?: string): Events => {
   const e = own(ctx.state.entities, item);
-  if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
-  if (ctx.levelOf(wearer, "gear") < 3) return reject("level", "slots are tracked from Gear level 3");
+  if (!e) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
+  if (ctx.levelOf(wearer, "gear") < 3) return reject("level", say("why_slots_are_tracked_from_gear_level_3"));
   const s = slot ?? strOf(e.fields.slot);
-  if (!s || s === "none") return reject("no_slot", `${e.name} isn't worn`);
+  if (!s || s === "none") return reject("no_slot", say("why_name_isnt_worn", { name: e.name }));
   const rel = s === "hand_held" ? "equipped" : "worn_by";
   const occupied = Object.keys(ctx.state.entities).find((id) => id !== item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === wearer && r.fields?.slot === s));
-  if (occupied && s !== "pocket" && s !== "pocket_or_bag") return reject("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
+  if (occupied && s !== "pocket" && s !== "pocket_or_bag") return reject("slot_taken", say("why_occupied_is_already_in_the_g_slot", { occupied: labelOf(ctx, occupied), g: s.replace(/_/g, " ") }));
   const out: LedgerEvent[] = [];
   if (holderOf(ctx.state, item) !== wearer) {
     const moved = transfer(ctx, item, wearer);
@@ -786,7 +787,7 @@ export const gearPack: PackDef = {
       const item = strOf(a.item);
       const rest = restOf(ctx, item).rest;
       const owner = whoseOf(ctx, item).owners[0];
-      if (rest === null || (rest === "owner" && owner === undefined)) return reject("no_rest", `${labelOf(ctx, item)} has nowhere it's kept`);
+      if (rest === null || (rest === "owner" && owner === undefined)) return reject("no_rest", say("why_item_has_nowhere_its_kept", { item: labelOf(ctx, item) }));
       const op: Exclude<ItemOp, { do: "remove" }> = rest === "owner" ? { do: "hand", item, to: owner ?? "", basis: "return", why: "" } : { do: "move", item, to: rest, why: "" };
       return itemOpEvents(ctx, op, strOf(a.by) || ctx.world.pov, ctx.rng.seed);
     });
@@ -803,7 +804,7 @@ export const gearPack: PackDef = {
       const said = strOf(a.said);
       const at = said !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said) : null;
       const until = at ?? numOf(a.until, NaN);
-      if (said !== "" && at === null && !(until > ctx.state.clock)) return reject("bad_until", `"${said}" names no time; say how many days or until when`);
+      if (said !== "" && at === null && !(until > ctx.state.clock)) return reject("bad_until", say("why_said_names_no_time_say_how_many", { said: said }));
       return lend(ctx, strOf(a.item), strOf(a.to), until);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
@@ -812,7 +813,7 @@ export const gearPack: PackDef = {
     // action reads, and the story is told, "Change into: Everyday", never its id; its id still works.
     wrap("gear.set_save", ["who", "name", "kind"], (a, ctx) => {
       const kind = SET_KINDS.find((k) => k === a.kind);
-      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject("bad_kind", "a saved set is an outfit or a loadout");
+      return kind ? itemOpEvents(ctx, { do: "set_save", who: strOf(a.who) || ctx.world.pov, name: strOf(a.name), kind }, strOf(a.who) || ctx.world.pov, ctx.rng.seed) : reject("bad_kind", say("why_a_saved_set_is_an_outfit_or"));
     });
     const setOf = (a: Readonly<Record<string, JsonValue>>, ctx: EffectContext): { who: EntityId; set: string } => {
       const who = strOf(a.who) || ctx.world.pov;
@@ -830,7 +831,7 @@ export const gearPack: PackDef = {
     wrap("gear.remove", ["item"], (a, ctx) => {
       const item = strOf(a.item);
       const e = own(ctx.state.entities, item);
-      if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
+      if (!e) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
       return e.relations.filter((x) => x.type === "worn_by" || x.type === "equipped").map((x) => ({ type: "unlink" as const, rel: x.type, from: item, to: x.to }));
     });
     r.effect({
@@ -840,13 +841,13 @@ export const gearPack: PackDef = {
         const item = strOf(args.item);
         const user = strOf(args.user) || ctx.world.pov;
         const e = own(ctx.state.entities, item);
-        if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
+        if (!e) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
         const level = ctx.levelOf(user, "gear");
         const out: LedgerEvent[] = [];
         if (level >= 4) {
           if (e.fields.consumable === true || typeof e.fields.uses === "number") {
             const uses = numOf(e.fields.uses, 1);
-            if (uses <= 0) return reject("used_up", `${e.name} is used up`);
+            if (uses <= 0) return reject("used_up", say("why_name_is_used_up", { name: e.name }));
             out.push(bump(ctx.state, item, "uses", -1, uses));
           }
           const wearBy = ctx.rng.int(0, 2);
@@ -872,8 +873,8 @@ export const gearPack: PackDef = {
       resolve(args, ctx) {
         const item = strOf(args.item);
         const e = own(ctx.state.entities, item);
-        if (!e) return reject("missing_entity", `no ${labelOf(ctx, item)}`);
-        if (e.fields.lost === true) return reject("already_lost", `${e.name} is already lost`);
+        if (!e) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, item) }));
+        if (e.fields.lost === true) return reject("already_lost", say("why_name_is_already_lost", { name: e.name }));
         const out: LedgerEvent[] = [];
         const lose = optionalService(ctx, "economy.lose");
         if (lose) {
@@ -1002,11 +1003,11 @@ export const gearPack: PackDef = {
       return { out: reconcileFact(w, p, { viewer: ctx.world.pov, salt, confirmed: p.confirmed === true }), w };
     };
     const refusal = (p: JsonObject, out: Reconciled): Rejection | null => {
-      if (out.kind === "which") return reject("ambiguous", "more than one thing fits");
+      if (out.kind === "which") return reject("ambiguous", say("why_more_than_one_thing_fits"));
       if (out.kind === "refused") return out.rejection;
-      return isItemChange(p.type) && out.change !== p.type ? reject("changed", "it would no longer happen as told") : null;
+      return isItemChange(p.type) && out.change !== p.type ? reject("changed", say("why_it_would_no_longer_happen_as_told")) : null;
     };
-    const cash = (p: JsonObject, ctx: ReadContext): Rejection | null => (factOf(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject("is_money", "a cash give is a transfer") : null);
+    const cash = (p: JsonObject, ctx: ReadContext): Rejection | null => (factOf(p) === "give" && cashGift(strOf(p.item), ctx.world.currency) ? reject("is_money", say("why_a_cash_give_is_a_transfer")) : null);
     for (const type of new Set<string>([...ITEM_CHANGES, ...THING_FACTS])) {
       r.proposal({
         type,
@@ -1031,9 +1032,9 @@ export const gearPack: PackDef = {
         try {
           p = JSON.parse(strOf(a.change)) as JsonValue;
         } catch {
-          return reject("bad_proposal", "the change isn't one");
+          return reject("bad_proposal", say("why_the_change_isnt_one"));
         }
-        if (!isRecord(p)) return reject("bad_proposal", "the change isn't one");
+        if (!isRecord(p)) return reject("bad_proposal", say("why_the_change_isnt_one"));
         const { out, w } = settled(p, ctx, ctx.rng.seed);
         return refusal(p, out) ?? [...w.events];
       },
@@ -1044,11 +1045,11 @@ export const gearPack: PackDef = {
       validate(p, ctx) {
         const item = strOf(p.item);
         const e = own(ctx.state.entities, item);
-        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "item")) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
+        if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "item")) return reject("missing_entity", say("why_no_item_item", { item: labelOf(ctx, item) }));
         const delta = p.delta;
-        if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0) return reject("bad_proposal", "quantity needs a whole, non-zero delta");
+        if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0) return reject("bad_proposal", say("why_quantity_needs_a_whole_non_zero_delta"));
         const who = strOf(p.entity);
-        if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item, who)) return reject("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
+        if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item, who)) return reject("not_holder", say("why_from_doesnt_have_cents", { from: labelOf(ctx, who), cents: e.name }));
         return null;
       },
       // As far as the story says, never below none; its bound in Build applies (`boundTarget`).

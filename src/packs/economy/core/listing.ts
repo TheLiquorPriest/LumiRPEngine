@@ -31,6 +31,7 @@ import type { FinanceApi, FinanceRegistry } from "./module";
 import { QTY_EPSILON } from "./pricing";
 import { counted, decided, decision, decisionRefusal, listedVotes, stamped } from "./shares";
 import { bookValuationOf } from "./stakes";
+import { say } from "../../../engine/lines";
 
 /** A sale of a holder's registered units on its company's market: units, or a percent of all its units. */
 export interface MarketSale {
@@ -108,8 +109,8 @@ function tickerFor(ctx: ReadContext, business: EntityId, asked: string): string 
   const taken = tickersTaken(ctx, business);
   if (asked !== "") {
     const symbol = asked.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9.]{0,5}$/.test(symbol)) return reject("bad_symbol", "a ticker is a letter and up to five more letters, digits or dots");
-    return taken.has(symbol) ? reject("bad_symbol", `${symbol} is already another asset's ticker`) : symbol;
+    if (!/^[A-Z][A-Z0-9.]{0,5}$/.test(symbol)) return reject("bad_symbol", say("why_a_ticker_is_a_letter_and_up"));
+    return taken.has(symbol) ? reject("bad_symbol", say("why_symbol_is_already_another_assets_ticker", { symbol: symbol })) : symbol;
   }
   const words = labelOf(ctx, business)
     .split(/[^A-Za-z0-9]+/)
@@ -118,7 +119,7 @@ function tickerFor(ctx: ReadContext, business: EntityId, asked: string): string 
   const base = /^[A-Z]/.test(initials) && initials.length >= 2 ? initials : (words[0] ?? business).replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase() || "CO";
   if (!taken.has(base)) return base;
   for (let i = 2; i < 100; i++) if (!taken.has(`${base}${i}`)) return `${base}${i}`;
-  return reject("bad_symbol", "say a ticker for it");
+  return reject("bad_symbol", say("why_say_a_ticker_for_it"));
 }
 
 /** The asset a new listing trades as: `stock:<company>`, or a later number where an earlier listing left marks or holdings under it. */
@@ -161,13 +162,13 @@ function shortOfVotes(ctx: ReadContext, party: EntityId, business: EntityId, doi
 function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rejection {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const units = a.units;
-  if (typeof units !== "number" || !Number.isSafeInteger(units) || units <= 0) return reject("bad_amount", "say a whole number of units");
+  if (typeof units !== "number" || !Number.isSafeInteger(units) || units <= 0) return reject("bad_amount", say("why_say_a_whole_number_of_units"));
   const fields = own(ctx.state.entities, business)?.fields ?? {};
-  if (strOf(fields.structure, "llc") !== "c_corp") return reject("structure", `Only a C corporation lists on a market: change ${name}'s structure first`);
+  if (strOf(fields.structure, "llc") !== "c_corp") return reject("structure", say("why_only_a_c_corporation_lists_on_a", { name: name }));
   const listing = listingIn(fields);
   // Short of the votes, an action that asks (`vote`) puts it to a vote instead (ORG-SPEC Phase 5): the motion's events.
   const offered = `${listing ? `Offer ${units} more units of ${name}` : `List ${units} units of ${name}`} on the market${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : ""}`;
@@ -176,21 +177,21 @@ function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   const counting = ownersIn(fields).some((o) => ROLE_RIGHTS[o.role].worth && o.units !== undefined);
   const owners = counted(api, ctx, business);
   const registered = unitsOf(owners);
-  if (registered <= 0) return reject("no_owners", `${name} has no owners to list it for`);
+  if (registered <= 0) return reject("no_owners", say("why_name_has_no_owners_to_list_it", { name: name }));
   const classes = classesIn(fields);
   const cls = strOf(a.class);
-  if (cls !== "" && !classes.some((c) => c.id === cls)) return reject("bad_class", `${name} has no class ${cls}: its classes are ${classes.map((c) => c.label).join(", ")}`);
+  if (cls !== "" && !classes.some((c) => c.id === cls)) return reject("bad_class", say("why_name_has_no_class_named_its_classes", { name: name, named: cls, c: classes.map((c) => c.label).join(", ") }));
   // What a unit is worth to the market: its books a unit, listed already its market price; it pays up to the config's multiple of that.
   const worth = listing ? Math.round(quoteOf(ctx, listing.asset) ?? listing.price) : Math.round(bookValuationOf(api, ctx, business).value / registered);
   const each = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : worth;
-  if (!(each > 0)) return reject("bad_amount", listing || typeof a.price === "number" ? "a price a unit is above nothing" : `${name}'s books give its units no value yet, so the public pays nothing for them`);
+  if (!(each > 0)) return reject("bad_amount", listing || typeof a.price === "number" ? say("why_a_price_a_unit_is_above_nothing") : say("why_name_s_books_give_its_units_no", { name: name }));
   const multiple = listingOfferCap(ctx);
   const cap = Math.floor(worth * multiple);
-  if (each > cap) return reject("declined", `the public pays no more than ${multiple === 1 ? "" : `${Math.round(multiple * 100) / 100} times `}its ${listing ? "market price" : "books a unit"} for new units of ${name}, ${moneyWords(ctx, Math.max(0, cap))} a unit`);
+  if (each > cap) return reject("declined", say("why_the_public_pays_no_more_than_multiple", { multiple: Math.round(multiple * 100) / 100, name: name, cap: moneyWords(ctx, Math.max(0, cap)), multiple2: multiple === 1, listing: !!(listing) }));
   const cents = each * units;
-  if (!Number.isSafeInteger(cents)) return reject("bad_amount", "a price is a whole amount");
+  if (!Number.isSafeInteger(cents)) return reject("bad_amount", say("why_a_price_is_a_whole_amount"));
   const deposit = operatingAccount(api, ctx, business);
-  if (!deposit) return reject("no_account", `${name} has no account to take the money`);
+  if (!deposit) return reject("no_account", say("why_name_has_no_account_to_take_the", { name: name }));
   let next: Listing;
   if (listing) next = { ...listing, float: listing.float + units };
   else {
@@ -221,20 +222,20 @@ function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
 function delist(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rejection {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const listing = listingIn(own(ctx.state.entities, business)?.fields ?? {});
-  if (!listing) return reject("not_listed", `${name} isn't on a market`);
+  if (!listing) return reject("not_listed", say("why_name_isnt_on_a_market", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const denied = decision(ctx, by, party, business, "shares.manage", "Delisting", `Take ${name} off the market${typeof a.price === "number" ? `, buying back its public units at ${moneyWords(ctx, a.price)} a unit` : ""}`);
   if (denied) return denied;
   const market = Math.round(quoteOf(ctx, listing.asset) ?? listing.price);
   const given = typeof a.price === "number" && Number.isFinite(a.price) ? Math.round(a.price) : null;
-  if (given !== null && given < market) return reject("declined", `the public sells at no less than its market price, ${moneyWords(ctx, market)} a unit`);
+  if (given !== null && given < market) return reject("declined", say("why_the_public_sells_at_no_less_than", { market: moneyWords(ctx, market) }));
   const each = given ?? market;
   const float = listedFloat(ctx, listing.asset);
   const source = operatingAccount(api, ctx, business);
-  if (!source) return reject("no_account", `${name} has no account to pay from`);
+  if (!source) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: name }));
   const lines: PostingLine[] = [];
   const add = (account: string, amount: number): void => {
     const line = lines.find((l) => l.account === account);
@@ -252,7 +253,7 @@ function delist(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rej
     const proceeds = Math.round(qty * each);
     const owners = holdingOwners(api, ctx.state, holding);
     const paid = payout(api, ctx, owners, proceeds, source, null, accountOfHolding(ctx.state, holding));
-    if (paid.paid < proceeds) return reject("no_account", `${labelOf(ctx, owners[0]?.party ?? holding)} has no account to be paid into`);
+    if (paid.paid < proceeds) return reject("no_account", say("why_holding_has_no_account_to_be_paid", { holding: labelOf(ctx, owners[0]?.party ?? holding) }));
     for (const l of paid.lines) if (l.account !== source) add(l.account, l.amount);
     lots.push(lotsChange(ctx.state, holding, -qty, proceeds, "sell", `${listing.symbol} bought out at ${moneyWords(ctx, each)} a unit`));
     names.push(...owners.filter((o) => ROLE_RIGHTS[o.role].worth).map((o) => o.party));
@@ -285,18 +286,18 @@ function marketSale(api: FinanceApi, ctx: ReadContext, sale: MarketSale): Ledger
   const name = labelOf(ctx, business);
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const listing = listingIn(fields);
-  if (!listing) return reject("not_listed", `${name} isn't on a market`);
+  if (!listing) return reject("not_listed", say("why_name_isnt_on_a_market", { name: name }));
   const owners = ownersIn(fields);
   const held = unitsOf(owners, party);
-  if (held <= 0) return reject("not_yours", `${labelOf(ctx, party)} holds no units of ${name} on its cap table`);
+  if (held <= 0) return reject("not_yours", say("why_party_holds_no_units_of_name_on", { party: labelOf(ctx, party), name: name }));
   const units = sale.units ?? Math.round((allUnits(fields) * (sale.share ?? 0)) / 100);
-  if (!(Number.isSafeInteger(units) && units > 0)) return reject("bad_amount", "say how many units to sell");
-  if (units > held) return reject("declined", `${labelOf(ctx, party)} holds ${held} units of ${name}, not ${units}`);
-  if (units >= unitsOf(owners)) return reject("last_units", `${name} keeps an owner on its cap table: sell to someone in the world, or take it off the market`);
+  if (!(Number.isSafeInteger(units) && units > 0)) return reject("bad_amount", say("why_say_how_many_units_to_sell"));
+  if (units > held) return reject("declined", say("why_holder_holds_held_units_of_name_not", { holder: labelOf(ctx, party), held: held, name: name, units: units }));
+  if (units >= unitsOf(owners)) return reject("last_units", say("why_name_keeps_an_owner_on_its_cap", { name: name }));
   const price = quoteOf(ctx, listing.asset) ?? listing.price;
   const cents = Math.round(price * units);
   const to = sale.to ?? api.depositAccount(ctx, party);
-  if (!to) return reject("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+  if (!to) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, party) }));
   const unusable = api.mayUse(ctx, party, to, "into");
   if (unusable) return unusable;
   const memo = `Sold ${units} units of ${name} on the market at ${moneyWords(ctx, Math.round(price))} a unit`;

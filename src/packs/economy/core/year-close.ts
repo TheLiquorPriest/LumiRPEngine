@@ -293,7 +293,7 @@ export function foundationTaxFor(ctx: Pick<ReadContext, "state">, org: EntityId,
 /** `economy.year_close`: a party's close of a year, an assignment of the whole record, so a timelapse keeps only the last. */
 export const YEAR_CLOSE_EVENT: EventTypeDef<PackEvent> = {
   type: YEAR_CLOSE,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && typeof e.data.year === "number" && typeof e.data.record === "object" && e.data.record !== null && !Array.isArray(e.data.record) ? null : ({ code: "bad_event", reason: "a year close names its party, its year and its record" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && typeof e.data.year === "number" && typeof e.data.record === "object" && e.data.record !== null && !Array.isArray(e.data.record) ? null : ({ code: "bad_event", reason: say("why_a_year_close_names_its_party_its") } satisfies Rejection)),
   apply: (e, state) => {
     const all = sliceRecord(state, "economy", "year_close");
     const party = str(e, "party");
@@ -305,7 +305,7 @@ export const YEAR_CLOSE_EVENT: EventTypeDef<PackEvent> = {
 /** `economy.foundation_mark`: a foundation's assets as a month ends. */
 export const FOUNDATION_MARK_EVENT: EventTypeDef<PackEvent> = {
   type: FOUNDATION_MARK,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && /^\d{4}-\d{2}$/.test(str(e, "month")) && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: "a foundation's mark names it, the month and its assets" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && /^\d{4}-\d{2}$/.test(str(e, "month")) && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: say("why_a_foundations_mark_names_it_the_month") } satisfies Rejection)),
   apply: (e, state) => {
     const all = sliceRecord(state, "economy", "foundation_marks");
     const org = str(e, "org");
@@ -326,7 +326,7 @@ function addReceived(state: WorldState, party: EntityId, month: string, cents: n
 /** `economy.dividend_received`: a corporation's dividend from a company it holds a stake in, with the part of it the dividends-received deduction takes off, by its stake then. Rides with the payout. */
 export const DIVIDEND_RECEIVED_EVENT: EventTypeDef<PackEvent> = {
   type: DIVIDEND_RECEIVED,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && own(ctx.state.entities, str(e, "source")) && typeof e.data.cents === "number" && e.data.cents > 0 && typeof e.data.deducted === "number" ? null : ({ code: "bad_event", reason: "a dividend received names its receiver, its payer, its amount and what is deducted of it" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && own(ctx.state.entities, str(e, "source")) && typeof e.data.cents === "number" && e.data.cents > 0 && typeof e.data.deducted === "number" ? null : ({ code: "bad_event", reason: say("why_a_dividend_received_names_its_receiver_its") } satisfies Rejection)),
   apply: (e, state, ctx) => addReceived(state, str(e, "party"), monthOf(ctx.world, state.clock), numOf(e.data.cents), numOf(e.data.deducted)),
   describe: (e, ctx, viewer) => (viewer ? "" : say("money_dividend_received", { party: labelOf(ctx, str(e, "party")), source: labelOf(ctx, str(e, "source")) })),
 };
@@ -340,7 +340,7 @@ export function dividendReceived(ctx: Pick<ReadContext, "registry" | "world" | "
 /** `economy.consent_dividend`: a corporation's consent dividend for a year: counted as paid, and each holder's part their dividend for that year and more basis in their stake. No money moves. */
 export const CONSENT_DIVIDEND_EVENT: EventTypeDef<PackEvent> = {
   type: CONSENT_DIVIDEND,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && typeof e.data.year === "number" && typeof e.data.cents === "number" && e.data.cents > 0 && Array.isArray(e.data.parts) ? null : ({ code: "bad_event", reason: "a consent dividend names its corporation, its year, its amount and each holder's part" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && typeof e.data.year === "number" && typeof e.data.cents === "number" && e.data.cents > 0 && Array.isArray(e.data.parts) ? null : ({ code: "bad_event", reason: say("why_a_consent_dividend_names_its_corporation_its") } satisfies Rejection)),
   apply: (e, state, ctx) => {
     const org = str(e, "org");
     const year = numOf(e.data.year);
@@ -365,7 +365,7 @@ export const CONSENT_DIVIDEND_EVENT: EventTypeDef<PackEvent> = {
 /** `economy.penalty_tax`: a corporation's PHC tax or AET for a year, paid: booked as its income tax. Rides with the payment. */
 export const PENALTY_TAX_EVENT: EventTypeDef<PackEvent> = {
   type: PENALTY_TAX,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && typeof e.data.year === "number" && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: "a penalty tax names its payer, its year and its amount" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "party")) && typeof e.data.year === "number" && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: say("why_a_penalty_tax_names_its_payer_its") } satisfies Rejection)),
   apply: (e, state, ctx) => {
     const party = str(e, "party");
     const all = sliceRecord(state, "economy", "penalty_taxes");
@@ -378,7 +378,7 @@ export const PENALTY_TAX_EVENT: EventTypeDef<PackEvent> = {
 /** `economy.foundation_tax`: a foundation's excise and 30% tax for a year, paid. Rides with the payment. */
 export const FOUNDATION_TAX_EVENT: EventTypeDef<PackEvent> = {
   type: FOUNDATION_TAX,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && typeof e.data.year === "number" && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: "a foundation's tax names it, its year and its amount" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "org")) && typeof e.data.year === "number" && typeof e.data.cents === "number" ? null : ({ code: "bad_event", reason: say("why_a_foundations_tax_names_it_its_year") } satisfies Rejection)),
   apply: (e, state) => {
     const org = str(e, "org");
     const all = sliceRecord(state, "economy", "foundation_taxes");
@@ -443,9 +443,9 @@ function consentEvents(api: FinanceApi, deps: YearCloseDeps, ctx: EffectContext,
   const by = strOf(a.by);
   const cents = Math.round(numOf(a.cents));
   const e = own(ctx.state.entities, org);
-  if (!e || isGone(ctx.state, org) || !kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND)) return { code: "not_company", reason: `${labelOf(ctx, org)} isn't a company` };
-  if (!deps.corporation(ctx, org, ctx.state.clock)) return { code: "not_corporation", reason: `Only a C corporation that pays income tax declares a consent dividend; ${labelOf(ctx, org)} isn't one` };
-  if (!(cents > 0)) return { code: "bad_amount", reason: "a consent dividend is more than nothing" };
+  if (!e || isGone(ctx.state, org) || !kindIs(ctx.registry, ctx.world, e.kind, COMPANY_KIND)) return { code: "not_company", reason: say("why_name_isnt_a_company", { name: labelOf(ctx, org) }) };
+  if (!deps.corporation(ctx, org, ctx.state.clock)) return { code: "not_corporation", reason: say("why_only_a_c_corporation_that_pays_income_2", { org: labelOf(ctx, org) }) };
+  if (!(cents > 0)) return { code: "bad_amount", reason: say("why_a_consent_dividend_is_more_than_nothing") };
   if (by !== "" && by !== org) {
     const may = mayAct(ctx, by, org, "org.govern");
     if (!may.ok) return { code: "not_allowed", reason: may.reason };
@@ -453,14 +453,14 @@ function consentEvents(api: FinanceApi, deps: YearCloseDeps, ctx: EffectContext,
   const now = dateAt(calendarOf(ctx.world), ctx.state.clock);
   const filing = now.month < 4 || (now.month === 4 && now.day <= 15);
   const year = typeof a.year === "number" && Number.isFinite(a.year) && a.year > 0 ? Math.round(a.year) : filing ? now.year - 1 : now.year;
-  if (year !== now.year && !(year === now.year - 1 && filing)) return { code: "bad_year", reason: `A consent dividend counts for this year (${now.year}) or, until its return is filed on 15 April, the last` };
-  if (taxPaidFor(ctx.state, "penalty_taxes", org, year)) return { code: "filed", reason: `${labelOf(ctx, org)}'s return for ${year} is filed already` };
+  if (year !== now.year && !(year === now.year - 1 && filing)) return { code: "bad_year", reason: say("why_a_consent_dividend_counts_for_this_year", { year: now.year }) };
+  if (taxPaidFor(ctx.state, "penalty_taxes", org, year)) return { code: "filed", reason: say("why_org_s_return_for_year_is_filed", { org: labelOf(ctx, org), year: year }) };
   const holders = api
     .ownersOf(ctx.state, org)
     .map((o) => ({ party: o.party, share: api.shareOf(ctx.state, org, o.party) }))
     .filter((o, i, all) => o.share > 0 && all.findIndex((x) => x.party === o.party) === i);
   const total = holders.reduce((s, h) => s + h.share, 0);
-  if (holders.length === 0 || total <= 0) return { code: "no_owners", reason: `${labelOf(ctx, org)} has no holders to consent` };
+  if (holders.length === 0 || total <= 0) return { code: "no_owners", reason: say("why_org_has_no_holders_to_consent", { org: labelOf(ctx, org) }) };
   let given = 0;
   const parts = holders.map((h, i) => {
     const part = i === holders.length - 1 ? cents - given : Math.round((cents * h.share) / total);

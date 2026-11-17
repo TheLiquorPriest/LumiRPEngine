@@ -120,7 +120,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_GOAL,
     validate: (e) => {
       const goal = goalIn(objOf(e.data.goal));
-      return strOf(e.data.org) === "" || !goal ? { code: "bad_event", reason: "a goal needs an organization, an id, its words, a status and where it came from" } : null;
+      return strOf(e.data.org) === "" || !goal ? { code: "bad_event", reason: say("why_a_goal_needs_an_organization_an_id") } : null;
     },
     // A plan holds what the story gives: past its number of open goals the goal is kept, and the number said.
     advise: (e, ctx) => {
@@ -145,7 +145,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_ORDER,
     validate: (e) => {
       const order = orderIn(objOf(e.data.order));
-      return strOf(e.data.org) === "" || !order ? { code: "bad_event", reason: "an order needs an organization, an id, whom it is for, its words, a status and where it came from" } : null;
+      return strOf(e.data.org) === "" || !order ? { code: "bad_event", reason: say("why_an_order_needs_an_organization_an_id") } : null;
     },
     advise: (e, ctx) => {
       const order = orderIn(objOf(e.data.order));
@@ -170,8 +170,8 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => {
       const plan = planOf(ctx.state, strOf(e.data.org));
       const id = strOf(e.data.id);
-      if (!isPlanStatus(e.data.status) || !(PLAN_SOURCES as readonly string[]).includes(strOf(e.data.source))) return { code: "bad_event", reason: "a status change needs a status and where it came from" };
-      return plan.goals.some((g) => g.id === id) || plan.orders.some((o) => o.id === id) ? null : { code: "not_found", reason: `nothing on the plan is ${id}` };
+      if (!isPlanStatus(e.data.status) || !(PLAN_SOURCES as readonly string[]).includes(strOf(e.data.source))) return { code: "bad_event", reason: say("why_a_status_change_needs_a_status_and") };
+      return plan.goals.some((g) => g.id === id) || plan.orders.some((o) => o.id === id) ? null : { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id: id }) };
     },
     apply: (e, state) => {
       const org = strOf(e.data.org);
@@ -195,7 +195,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // The day planner's marker (`orgs.orders`): every block it laid for an order has ended, at `at`. It closes nothing.
     type: ORGS_LIVED,
-    validate: (e, ctx) => (typeof e.data.at === "number" && planOf(ctx.state, strOf(e.data.org)).orders.some((o) => o.id === strOf(e.data.id)) ? null : { code: "not_found", reason: `no order on the plan is ${strOf(e.data.id)}` }),
+    validate: (e, ctx) => (typeof e.data.at === "number" && planOf(ctx.state, strOf(e.data.org)).orders.some((o) => o.id === strOf(e.data.id)) ? null : { code: "not_found", reason: say("why_no_order_on_the_plan_is_id", { id: strOf(e.data.id) }) }),
     apply: (e, state) => {
       const org = strOf(e.data.org);
       const id = strOf(e.data.id);
@@ -226,10 +226,10 @@ export function mayGive(ctx: ReadContext, who: EntityId, org: EntityId): boolean
 
 /** Why someone may not change the plan, or null when they may: the GM (no `by`) always may. */
 function refusal(ctx: ReadContext, by: string, org: EntityId): Rejection | null {
-  if (!planned(ctx, org)) return { code: "bad_org", reason: "only an organization (not a trust) has a plan" };
+  if (!planned(ctx, org)) return { code: "bad_org", reason: say("why_only_an_organization_not_a_trust_has") };
   if (by === "" || mayGive(ctx, by, org)) return null;
   const may = orgTypeOf(ctx, org) === null ? null : mayAct(ctx, by, org, "orders.give");
-  return { code: "not_allowed", reason: may && !may.ok ? may.reason : `${labelOf(ctx, by)} may not give orders for ${labelOf(ctx, org)}` };
+  return { code: "not_allowed", reason: may && !may.ok ? may.reason : say("why_by_may_not_give_orders_for_org", { by: labelOf(ctx, by), org: labelOf(ctx, org) }) };
 }
 
 // ---------------------------------------------------------------- the effects
@@ -255,7 +255,7 @@ function whenOf(ctx: ReadContext, v: JsonValue | undefined): number | null | Rej
   try {
     return clockOfLocal(calendarOf(ctx.world), text.replace(" ", "T"));
   } catch {
-    return { code: "bad_args", reason: `"${text}" isn't a date and time (YYYY-MM-DD HH:MM)` };
+    return { code: "bad_args", reason: say("why_text_isnt_a_date_and_time_yyyy", { text: text }) };
   }
 }
 
@@ -263,12 +263,12 @@ function whenOf(ctx: ReadContext, v: JsonValue | undefined): number | null | Rej
 function windowOf(v: JsonValue | undefined): string | null | Rejection {
   const text = strOf(v).trim();
   if (text === "") return null;
-  return text === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : { code: "bad_args", reason: `a goal's window is "today" or a date (YYYY-MM-DD), not "${text}"` };
+  return text === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : { code: "bad_args", reason: say("why_a_goals_window_is_today_or_a", { text: text }) };
 }
 
 function words(text: string): string | Rejection {
   const t = text.trim();
-  return t === "" ? { code: "bad_args", reason: "what it is, in words" } : t;
+  return t === "" ? { code: "bad_args", reason: say("why_what_it_is_in_words") } : t;
 }
 
 function isRejection(v: unknown): v is Rejection {
@@ -294,7 +294,7 @@ export function goalEvents(ctx: ReadContext, a: Args): LedgerEvent[] | Rejection
   const plan = planOf(ctx.state, org);
   const id = strOf(a.id);
   const was = id === "" ? undefined : plan.goals.find((g) => g.id === id);
-  if (id !== "" && !was) return { code: "not_found", reason: `nothing on the plan is ${id}` };
+  if (id !== "" && !was) return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id: id }) };
   const text = keeps(a, "text") && was ? was.text : words(strOf(a.text));
   if (isRejection(text)) return text;
   const window = keeps(a, "window") && was ? (was.window ?? null) : windowOf(a.window);
@@ -314,17 +314,17 @@ export function orderEvents(ctx: ReadContext, a: Args): LedgerEvent[] | Rejectio
   const plan = planOf(ctx.state, org);
   const id = strOf(a.id);
   const was = id === "" ? undefined : plan.orders.find((o) => o.id === id);
-  if (id !== "" && !was) return { code: "not_found", reason: `nothing on the plan is ${id}` };
+  if (id !== "" && !was) return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id: id }) };
   const text = keeps(a, "text") && was ? was.text : words(strOf(a.text));
   if (isRejection(text)) return text;
   const to = keeps(a, "to") && was ? was.to : idsOf(a.to);
-  if (to.length === 0) return { code: "bad_args", reason: "whom the order is for" };
+  if (to.length === 0) return { code: "bad_args", reason: say("why_whom_the_order_is_for") };
   const unknown = to.find((who) => !own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person"));
-  if (unknown !== undefined) return { code: "bad_args", reason: `${unknown} is no one in the world` };
+  if (unknown !== undefined) return { code: "bad_args", reason: say("why_unknown_is_no_one_in_the_world", { unknown: unknown }) };
   const lead = keeps(a, "lead") && was ? (was.lead ?? "") : strOf(a.lead).trim();
-  if (lead !== "" && !to.includes(lead)) return { code: "bad_args", reason: "who leads must be one of those it is for" };
+  if (lead !== "" && !to.includes(lead)) return { code: "bad_args", reason: say("why_who_leads_must_be_one_of_those") };
   const goal = keeps(a, "goal") && was ? (was.goal ?? "") : strOf(a.goal).trim();
-  if (goal !== "" && !plan.goals.some((g) => g.id === goal)) return { code: "not_found", reason: `no goal on the plan is ${goal}` };
+  if (goal !== "" && !plan.goals.some((g) => g.id === goal)) return { code: "not_found", reason: say("why_no_goal_on_the_plan_is_goal", { goal: goal }) };
   const when = keeps(a, "when") && was ? (was.when ?? null) : whenOf(ctx, a.when);
   if (isRejection(when)) return when;
   const where = keeps(a, "where") && was ? (was.where ?? "") : strOf(a.where).trim();
@@ -355,11 +355,11 @@ export function statusEvents(ctx: ReadContext, a: Args): LedgerEvent[] | Rejecti
   const by = strOf(a.by);
   const id = strOf(a.id);
   const status = a.status;
-  if (!isPlanStatus(status)) return { code: "bad_args", reason: `a status is one of ${Object.keys(PLAN_STATUS_WORDS).join(", ")}` };
+  if (!isPlanStatus(status)) return { code: "bad_args", reason: say("why_a_status_is_one_of_keys", { keys: Object.keys(PLAN_STATUS_WORDS).join(", ") }) };
   const plan = planOf(ctx.state, org);
   const order = plan.orders.find((o) => o.id === id);
   const item = order ?? plan.goals.find((g) => g.id === id);
-  if (!item) return { code: "not_found", reason: `nothing on the plan is ${id}` };
+  if (!item) return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id: id }) };
   const own = order !== undefined && by !== "" && (order.to.includes(by) || order.lead === by) && OWN_MOVES.includes(status);
   if (!own) {
     const refused = refusal(ctx, by, org);
@@ -617,8 +617,8 @@ function planOrgNamed(ctx: ReadContext, words: string | undefined): EntityId | R
   const org = Object.keys(ctx.state.entities)
     .sort()
     .find((id) => orgTypeOf(ctx, id) !== null && (id.toLowerCase() === w || (own(ctx.state.entities, id)?.name ?? "").toLowerCase() === w));
-  if (org === undefined) return { code: "not_found", reason: `no organization is called ${words}` };
-  return mayGive(ctx, pov, org) ? org : { code: "not_allowed", reason: `you may not give orders for ${labelOf(ctx, org)}` };
+  if (org === undefined) return { code: "not_found", reason: say("why_no_organization_is_called_words", { words: words }) };
+  return mayGive(ctx, pov, org) ? org : { code: "not_allowed", reason: say("why_you_may_not_give_orders_for_org", { org: labelOf(ctx, org) }) };
 }
 
 /** `orgs.plan_read`: the plan the player's own message gives, as events for one organization. */
@@ -626,10 +626,10 @@ export function planRead(ctx: ReadContext, items: PlanReadItems, message: string
   const pov = ctx.world.pov;
   const goals = items.goals ?? [];
   const orders = items.orders ?? [];
-  if (goals.length + orders.length === 0) return { code: "bad_args", reason: "nothing to add to the plan" };
+  if (goals.length + orders.length === 0) return { code: "bad_args", reason: say("why_nothing_to_add_to_the_plan") };
   const org = planOrgNamed(ctx, [...goals, ...orders].map((x) => x.org).find((x) => x !== undefined && x.trim() !== ""));
   if (isRejection(org)) return org;
-  if (!mayGive(ctx, pov, org)) return { code: "not_allowed", reason: `you may not give orders for ${labelOf(ctx, org)}` };
+  if (!mayGive(ctx, pov, org)) return { code: "not_allowed", reason: say("why_you_may_not_give_orders_for_org", { org: labelOf(ctx, org) }) };
   const events: LedgerEvent[] = [];
   let state = ctx;
   const apply = (made: LedgerEvent[]): void => {
@@ -641,17 +641,17 @@ export function planRead(ctx: ReadContext, items: PlanReadItems, message: string
   };
   const goalIds: string[] = [];
   for (const g of goals) {
-    if (!statedIn(g.said, message)) return { code: "not_said", reason: `"${g.said}" isn't in your message` };
+    if (!statedIn(g.said, message)) return { code: "not_said", reason: say("why_said_isnt_in_your_message", { said: g.said }) };
     const made = goalEvents(state, { org, text: g.text, ...(g.window ? { window: g.window } : {}), ...(g.where ? { where: g.where } : {}), by: pov, source: "player" });
     if (isRejection(made)) return made;
     goalIds.push(strOf(objOf(made[0]?.type === ORGS_GOAL ? (made[0] as PackEvent).data.goal : undefined).id));
     apply(made);
   }
   for (const o of orders) {
-    if (!statedIn(o.said, message)) return { code: "not_said", reason: `"${o.said}" isn't in your message` };
+    if (!statedIn(o.said, message)) return { code: "not_said", reason: say("why_said_isnt_in_your_message", { said: o.said }) };
     const to = o.to.map((n) => personNamed(state, org, n));
     const missing = o.to.find((_, i) => to[i] === null);
-    if (missing !== undefined) return { code: "not_found", reason: `you don't know anyone called ${missing}` };
+    if (missing !== undefined) return { code: "not_found", reason: say("why_you_dont_know_anyone_called_missing", { missing: missing }) };
     const lead = o.lead ? personNamed(state, org, o.lead) : null;
     const made = orderEvents(state, { org, to: to as string[], ...(lead ? { lead } : {}), text: o.text, ...(o.where ? { where: o.where } : {}), ...(o.when ? { when: o.when } : {}), ...(goalIds.length === 1 ? { goal: goalIds[0] ?? "" } : {}), by: pov, source: "player" });
     if (isRejection(made)) return made;
@@ -687,15 +687,15 @@ function offerOf(ctx: ReadContext, p: JsonObject): { org: EntityId; who: EntityI
   const named = strOf(p.who).trim();
   const byId = own(ctx.state.entities, named);
   const who = byId && kindIs(ctx.registry, ctx.world, byId.kind, "person") ? named : personNamed(ctx, org, named);
-  if (who === null || who === pov) return { code: "not_found", reason: named === "" ? "who offers it" : `no one you know is ${named}` };
-  if (isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who)) return { code: "not_acting", reason: `${labelOf(ctx, who)} can't take it on` };
+  if (who === null || who === pov) return { code: "not_found", reason: named === "" ? say("why_who_offers_it") : say("why_no_one_you_know_is_named", { named: named }) };
+  if (isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who)) return { code: "not_acting", reason: say("why_who_cant_take_it_on", { who: labelOf(ctx, who) }) };
   const text = words(strOf(p.offer));
   if (isRejection(text)) return text;
   const said = strOf(p.said).trim().slice(0, PLAN_LIMITS.text);
-  if (said === "") return { code: "bad_proposal", reason: "it quotes the story's words" };
+  if (said === "") return { code: "bad_proposal", reason: say("why_it_quotes_the_storys_words") };
   const when = whenOf(ctx, p.when);
   if (isRejection(when)) return when;
-  if (planOf(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text.toLowerCase())) return { code: "already", reason: "it's on the plan already" };
+  if (planOf(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text.toLowerCase())) return { code: "already", reason: say("why_its_on_the_plan_already") };
   return { org, who, text, where: strOf(p.where).trim(), when, said };
 }
 
@@ -715,13 +715,13 @@ export const AGENDA_CHANNEL: ProposalChannelDef = {
     }
     const id = strOf(p.id);
     const status = p.status;
-    if (!isPlanStatus(status) || !OWN_MOVES.includes(status)) return { code: "bad_proposal", reason: "a plan's status from the story is under way, done, blocked or refused" };
-    if (strOf(p.said).trim() === "") return { code: "bad_proposal", reason: "it quotes the story's words" };
+    if (!isPlanStatus(status) || !OWN_MOVES.includes(status)) return { code: "bad_proposal", reason: say("why_a_plans_status_from_the_story_is") };
+    if (strOf(p.said).trim() === "") return { code: "bad_proposal", reason: say("why_it_quotes_the_storys_words") };
     const org = itemOrg(ctx.state, strOf(p.org), id);
     const plan = org === null ? null : planOf(ctx.state, org);
     const item = plan?.orders.find((o) => o.id === id) ?? plan?.goals.find((g) => g.id === id);
-    if (!item) return { code: "not_found", reason: `nothing on the plan is ${id}` };
-    return isPlanStatusLive(item.status) ? null : { code: "closed", reason: `${id} is closed already` };
+    if (!item) return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id: id }) };
+    return isPlanStatusLive(item.status) ? null : { code: "closed", reason: say("why_id_is_closed_already", { id: id }) };
   },
   toEffects: (p, ctx) => {
     if (agendaAsks(p)) {

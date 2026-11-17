@@ -152,9 +152,9 @@ export const ORGS_CONFIG_EVENT: EventTypeDef<PackEvent> = {
   validate: (e) => {
     const key = strOf(e.data.key);
     const check = own(CHAT_SETTINGS, key);
-    if (!check) return { code: "bad_event", reason: `no orgs setting "${key}"` };
+    if (!check) return { code: "bad_event", reason: say("why_no_orgs_setting_key", { key: key }) };
     const value = e.data.value;
-    return value === null || (value !== undefined && check(value)) ? null : { code: "bad_event", reason: `a bad value for the orgs setting "${key}"` };
+    return value === null || (value !== undefined && check(value)) ? null : { code: "bad_event", reason: say("why_a_bad_value_for_the_orgs_setting", { key: key }) };
   },
   apply: (e, state) => {
     const config = sliceRecord(state, "orgs", "config");

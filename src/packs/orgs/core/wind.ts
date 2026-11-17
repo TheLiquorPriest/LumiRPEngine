@@ -24,6 +24,7 @@ import { Working } from "../../../engine/working";
 import { orgLog } from "./log";
 import { putToVote } from "./motions";
 import { plainWords, withWhy } from "./ops";
+import { say } from "../../../engine/lines";
 
 function refuse(code: string, reason: string): Rejection {
   return { code, reason };
@@ -49,7 +50,7 @@ function linksTo(ctx: ReadContext, rel: string, org: EntityId): { from: EntityId
 function decide(ctx: EffectContext, by: EntityId, org: EntityId, doing: string, what: string): { party: EntityId } | LedgerEvent[] | Rejection {
   if (by !== "" && ctx.carried?.motion !== undefined && ctx.carried.org === org) return { party: by };
   const decider = optionalQuery(ctx, "economy.decider");
-  if (!decider) return refuse("no_money", "a company's ownership needs the economy");
+  if (!decider) return refuse("no_money", say("why_a_companys_ownership_needs_the_economy"));
   const decided = decider(ctx, by, org, "org.govern", doing);
   if (!isRejection(decided) || decided.code !== "votes") return decided;
   return putToVote(ctx, { org, by, party: by, text: what, why: decided.reason }) ?? decided;
@@ -69,9 +70,9 @@ function linesOf(ctx: ReadContext, org: EntityId, said: readonly { text: string;
 function windUpEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
   const name = labelOf(ctx, org);
-  if (orgTypeOf(ctx, org) !== "company") return refuse("not_company", `${name} isn't a company`);
+  if (orgTypeOf(ctx, org) !== "company") return refuse("not_company", say("why_name_isnt_a_company", { name: name }));
   const stage = WIND_STAGES.find((s) => s === strOf(a.stage, "all"));
-  if (stage === undefined) return refuse("bad_stage", `winding up is ${WIND_STAGES.join(", ")}`);
+  if (stage === undefined) return refuse("bad_stage", say("why_winding_up_is_join", { join: WIND_STAGES.join(", ") }));
   const property = WIND_PROPERTY.find((p) => p === strOf(a.property, "distribute"));
   if (property === undefined) return refuse("bad_property", `its property is ${WIND_PROPERTY.join(" or ")}`);
   const by = strOf(a.by);
@@ -82,11 +83,11 @@ function windUpEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerE
   const holder = decider.party !== by && decider.party !== "" ? decider.party : null;
   const credit = by !== "" ? { by } : {};
   if (stage === "resume") {
-    if (windingUpSince(ctx.state, org) === null) return refuse("not_winding", `${name} isn't winding up`);
+    if (windingUpSince(ctx.state, org) === null) return refuse("not_winding", say("why_name_isnt_winding_up", { name: name }));
     return [{ type: "set", entity: org, field: WINDING_FIELD, value: null }, orgLog(ctx, org, withWhy("Stopped winding up: it trades again", why), { ...credit, power: "org.govern" })];
   }
   const money = optionalService(ctx, "economy.wind_up");
-  if (!money) return refuse("no_money", "winding up a company needs the economy");
+  if (!money) return refuse("no_money", say("why_winding_up_a_company_needs_the_economy"));
   const result = money(ctx, org, { stage: stage === "begin" ? "begin" : "finish", property, to: strOf(a.to) });
   if (isRejection(result)) return result;
   const w = new Working(ctx.registry, ctx.world, ctx.state);
@@ -149,8 +150,8 @@ function mergeEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEv
   const into = strOf(a.into);
   const name = labelOf(ctx, org);
   const intoName = labelOf(ctx, into);
-  for (const id of [org, into]) if (orgTypeOf(ctx, id) !== "company") return refuse("not_company", `${labelOf(ctx, id)} isn't a company`);
-  if (org === into) return refuse("same", `${name} can't merge with itself`);
+  for (const id of [org, into]) if (orgTypeOf(ctx, id) !== "company") return refuse("not_company", say("why_name_isnt_a_company", { name: labelOf(ctx, id) }));
+  if (org === into) return refuse("same", say("why_name_cant_merge_with_itself", { name: name }));
   const keep = a.keep === true;
   const by = strOf(a.by);
   const why = plainWords(strOf(a.why));
@@ -161,7 +162,7 @@ function mergeEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEv
   const ours = decide(ctx, by, into, keep ? "Taking over a company for" : "Merging into", what);
   if (Array.isArray(ours) || isRejection(ours)) return ours;
   const money = optionalService(ctx, "economy.merge");
-  if (!money) return refuse("no_money", "merging companies needs the economy");
+  if (!money) return refuse("no_money", say("why_merging_companies_needs_the_economy"));
   const { positions, map } = keep ? { positions: null, map: {} } : mergedPositions(ctx, org, into);
   const result = money(ctx, org, into, { ...(typeof a.ratio === "number" ? { ratio: a.ratio } : {}), ...(typeof a.cash === "number" ? { cash: Math.round(numOf(a.cash)) } : {}), ...(strOf(a.from) !== "" ? { from: strOf(a.from) } : {}), keep, positions: map });
   if (isRejection(result)) return result;

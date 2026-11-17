@@ -30,6 +30,7 @@ import { hiddenFrom } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { marketValueOf, orgValue, ownedOrgIds, stakeRoute, valuationOf } from "./stakes";
 import { deciderFor, mergeView, windingView } from "./winding";
+import { say } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -165,18 +166,18 @@ export function counted(api: FinanceApi, ctx: ReadContext, business: EntityId): 
 function priced(api: FinanceApi, ctx: ReadContext, business: EntityId, owners: readonly Owner[], units: number, given: JsonValue | undefined): { each: number; cents: number } | Rejection {
   if (typeof given === "number" && Number.isFinite(given)) {
     const each = Math.round(given);
-    return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject("bad_amount", "a price is a whole amount");
+    return each >= 0 && Number.isSafeInteger(each * units) ? { each, cents: each * units } : reject("bad_amount", say("why_a_price_is_a_whole_amount"));
   }
   const market = marketValueOf(ctx, business);
   if (market) return { each: Math.round(market.price), cents: Math.round(market.price * units) };
   const total = unitsOf(owners);
-  if (total <= 0) return reject("bad_amount", `${labelOf(ctx, business)} has no units to value one by: say the price a unit`);
+  if (total <= 0) return reject("bad_amount", say("why_business_has_no_units_to_value_one", { business: labelOf(ctx, business) }));
   const value = orgValue(api, ctx, business);
   return { each: Math.round(value / total), cents: Math.round((value * units) / total) };
 }
 
 function wholeUnits(v: JsonValue | undefined): number | Rejection {
-  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : reject("bad_amount", "say a whole number of units");
+  return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : reject("bad_amount", say("why_say_a_whole_number_of_units"));
 }
 
 function isRejection<T>(v: T | Rejection): v is Rejection {
@@ -192,11 +193,11 @@ function isRejection<T>(v: T | Rejection): v is Rejection {
 function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rejection {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const to = strOf(a.to);
-  if (to === "" || to === business || api.partyKind(ctx, to) === null) return reject("missing_entity", `no one ${labelOf(ctx, to)} to issue shares to`);
+  if (to === "" || to === business || api.partyKind(ctx, to) === null) return reject("missing_entity", say("why_no_one_to_to_issue_shares_to", { to: labelOf(ctx, to) }));
   const units = wholeUnits(a.units);
   if (isRejection(units)) return units;
   const denied = decision(ctx, by, party, business, "shares.manage", "Issuing shares in", `Issue ${units} units of ${name} to ${labelOf(ctx, to)}${typeof a.price === "number" ? ` at ${moneyWords(ctx, a.price)} a unit` : " at their value a unit"}`);
@@ -204,7 +205,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   const fields = own(ctx.state.entities, business)?.fields ?? {};
   const classes = classesIn(fields);
   const named = strOf(a.class);
-  if (named !== "" && !classes.some((c) => c.id === named)) return reject("bad_class", `${name} has no class ${named}: its classes are ${classes.map((c) => c.label).join(", ")}`);
+  if (named !== "" && !classes.some((c) => c.id === named)) return reject("bad_class", say("why_name_has_no_class_named_its_classes", { name: name, named: named, c: classes.map((c) => c.label).join(", ") }));
   const owners = counted(api, ctx, business);
   const price = priced(api, ctx, business, owners, units, a.price);
   if (isRejection(price)) return price;
@@ -219,7 +220,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
   const events: LedgerEvent[] = [];
   if (price.cents > 0) {
     const deposit = operatingAccount(api, ctx, business);
-    if (!deposit) return reject("no_account", `${name} has no account to take the money`);
+    if (!deposit) return reject("no_account", say("why_name_has_no_account_to_take_the", { name: name }));
     const from = strOf(a.from);
     if (from !== "") {
       const unusable = api.mayUse(ctx, to, from, "from");
@@ -245,7 +246,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
 function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rejection {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const holder = strOf(a.from);
@@ -255,17 +256,17 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
   if (denied) return denied;
   const owners = counted(api, ctx, business);
   const held = unitsOf(owners, holder);
-  if (held <= 0) return reject("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
-  if (units > held) return reject("declined", `${labelOf(ctx, holder)} holds ${held} units of ${name}, not ${units}`);
+  if (held <= 0) return reject("not_holder", say("why_holder_holds_no_units_of_name", { holder: labelOf(ctx, holder), name: name }));
+  if (units > held) return reject("declined", say("why_holder_holds_held_units_of_name_not", { holder: labelOf(ctx, holder), held: held, name: name, units: units }));
   const price = priced(api, ctx, business, owners, units, a.price);
   if (isRejection(price)) return price;
   const memo = `${name} bought back ${units} units at ${moneyWords(ctx, price.each)} a unit`;
   const events: LedgerEvent[] = [];
   if (price.cents > 0) {
     const source = operatingAccount(api, ctx, business);
-    if (!source) return reject("no_account", `${name} has no account to pay from`);
+    if (!source) return reject("no_account", say("why_intoname_has_no_account_to_pay_from", { intoName: name }));
     const into = strOf(a.to) || api.depositAccount(ctx, holder);
-    if (!into) return reject("no_account", `${labelOf(ctx, holder)} has no account the money could go to`);
+    if (!into) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, holder) }));
     const unusable = api.mayUse(ctx, holder, into, "into");
     if (unusable) return unusable;
     const paid = api.pay(ctx, { from: source, to: holder, cents: price.cents, memo, deposit: into, kind: "purchase", category: "investment" });
@@ -295,7 +296,7 @@ function buyBack(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Re
 function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] | Rejection {
   const business = strOf(a.business);
   const name = labelOf(ctx, business);
-  if (!isBusiness(ctx, business)) return reject("not_business", `${name} isn't a company`);
+  if (!isBusiness(ctx, business)) return reject("not_business", say("why_name_isnt_a_company", { name: name }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const denied = decision(ctx, by, party, business, "shares.manage", "Changing the share classes of", `${a.remove === true ? "Remove" : "Set"} the share class ${strOf(a.label).trim() || strOf(a.class)} of ${name}${a.remove !== true && typeof a.votes === "number" ? ` (${a.votes} votes a unit)` : ""}${strOf(a.holder) !== "" ? `, with ${labelOf(ctx, strOf(a.holder))}'s units in it` : ""}`);
@@ -304,11 +305,11 @@ function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   const before = classesIn(fields);
   const label = strOf(a.label).trim();
   const id = strOf(a.class) || positionIdOf(label);
-  if (id === "") return reject("bad_class", "a class needs a name");
+  if (id === "") return reject("bad_class", say("why_a_class_needs_a_name"));
   const was = before.find((c) => c.id === id);
   let classes: ShareClass[];
   if (a.remove === true) {
-    if (!was) return reject("bad_class", `${name} has no class ${id}`);
+    if (!was) return reject("bad_class", say("why_name_has_no_class_id", { name: name, id: id }));
     const rest = before.filter((c) => c.id !== id);
     classes = rest.length > 0 ? rest : [COMMON_CLASS];
   } else {
@@ -319,7 +320,7 @@ function setClasses(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
   const holder = strOf(a.holder);
   const first = classes[0] ?? COMMON_CLASS;
   const owners = counted(api, ctx, business);
-  if (holder !== "" && unitsOf(owners, holder) <= 0) return reject("not_holder", `${labelOf(ctx, holder)} holds no units of ${name}`);
+  if (holder !== "" && unitsOf(owners, holder) <= 0) return reject("not_holder", say("why_holder_holds_no_units_of_name", { holder: labelOf(ctx, holder), name: name }));
   // Each row in a class that's gone goes to the first left; the holder's, into the class named. Rows of one holder and class merge.
   const moved: Owner[] = [];
   for (const o of owners) {

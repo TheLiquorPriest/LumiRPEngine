@@ -23,6 +23,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { buildEntitySheet } from "../../../engine/ruleset";
 import { bandOf, kindIs } from "../../../engine/scope";
 import { povPlace } from "../../../engine/visibility";
+import { say } from "../../../engine/lines";
 
 export interface StatDef {
   id: string;
@@ -260,9 +261,9 @@ export const sheetsPack: PackDef = {
       resolve(a, ctx) {
         const who = strOf(a.who) || ctx.world.pov;
         const e = own(ctx.state.entities, who);
-        if (!e) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
+        if (!e) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, who) }));
         const id = strOf(a.condition).toLowerCase().replace(/\W+/g, "_");
-        if (!id) return reject("bad_condition", "a condition needs a name");
+        if (!id) return reject("bad_condition", say("why_a_condition_needs_a_name"));
         const kept = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
         if (a.clear === true) return [{ type: "set", entity: who, field: "conditions", value: kept }];
         const next: JsonObject = { id, label: strOf(a.label, strOf(a.condition)), mod: numOf(a.mod, CONDITION_MOD) };
@@ -302,8 +303,8 @@ export const sheetsPack: PackDef = {
       boundField: "list",
       validate(p, ctx) {
         const who = strOf(p.who) || ctx.world.pov;
-        if (!own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person")) return reject("missing_entity", "a condition needs a person");
-        if (strOf(p.condition) === "") return reject("bad_condition", "a condition needs a name");
+        if (!own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person")) return reject("missing_entity", say("why_a_condition_needs_a_person"));
+        if (strOf(p.condition) === "") return reject("bad_condition", say("why_a_condition_needs_a_name"));
         return null;
       },
       toEffects: (p) => [{ type: "sheets.condition", args: { who: strOf(p.who), condition: strOf(p.condition), ...(typeof p.minutes === "number" ? { minutes: p.minutes } : {}), ...(p.clear === true ? { clear: true } : {}) } }],

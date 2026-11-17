@@ -28,6 +28,7 @@ import { Working } from "../../../engine/working";
 import { fundingSources, today } from "./found";
 import { orgLog } from "./log";
 import { partyIdOf } from "./view";
+import { say } from "../../../engine/lines";
 
 /** The tiers a share-out pays (§3.8). */
 const SHARES: readonly PartyTier[] = ["core", "companion"];
@@ -64,18 +65,18 @@ export function shareOutRecipients(ctx: ReadContext, party: EntityId): EntityId[
 /** Someone added to the party in a tier, their tier changed (keeping since when), or taken out (`out`). */
 function tierEvents(ctx: EffectContext, by: EntityId, who: EntityId, tier: string): LedgerEvent[] | Rejection {
   const pov = ctx.world.pov;
-  if (by !== pov) return refuse("not_leader", "Only the party's leader changes who is in it");
-  if (who === pov) return refuse("bad_party", "You lead the party");
+  if (by !== pov) return refuse("not_leader", say("why_only_the_partys_leader_changes_who_is"));
+  if (who === pov) return refuse("bad_party", say("why_you_lead_the_party"));
   const e = own(ctx.state.entities, who);
-  if (!e || isGone(ctx.state, who) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, who)) return refuse("missing_entity", `no person ${labelOf(ctx, who)}`);
+  if (!e || isGone(ctx.state, who) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, who)) return refuse("missing_entity", say("why_no_person_worker", { worker: labelOf(ctx, who) }));
   const party = partyIdOf(ctx).id;
   const now = partyTierIn(e.relations, pov);
   if (tier === PARTY_OUT) {
-    if (now === null) return refuse("not_in_party", `${e.name} isn't in your party`);
+    if (now === null) return refuse("not_in_party", say("why_name_isnt_in_your_party", { name: e.name }));
     return [...unlinkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov }), orgLog(ctx, party, `${labelOf(ctx, by)} took ${e.name} out of the party.`, { by, names: [by, who] })];
   }
-  if (!isPartyTier(tier)) return refuse("bad_tier", `a tier is one of ${PARTY_TIERS.join(", ")}, or ${PARTY_OUT}`);
-  if (now === tier) return refuse("unchanged", `${e.name} is already ${aTier(tier)} of the party`);
+  if (!isPartyTier(tier)) return refuse("bad_tier", say("why_a_tier_is_one_of_join_or", { join: PARTY_TIERS.join(", "), pARTY_OUT: PARTY_OUT }));
+  if (now === tier) return refuse("unchanged", say("why_name_is_already_tier_of_the_party", { name: e.name, tier: aTier(tier) }));
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked)) return linked;
   const text = now === null ? `${labelOf(ctx, by)} added ${e.name} to the party as ${aTier(tier)}.` : `${labelOf(ctx, by)} made ${e.name} ${aTier(tier)} of the party.`;
@@ -98,12 +99,12 @@ function spawnParty(ctx: ReadContext, id: EntityId, name?: string): LedgerEvent 
 
 /** Name the party: its entity made with the name, or its name changed. */
 function nameEvents(ctx: EffectContext, by: EntityId, raw: string): LedgerEvent[] | Rejection {
-  if (notLeader(ctx, by)) return refuse("not_leader", "Only the party's leader names it");
+  if (notLeader(ctx, by)) return refuse("not_leader", say("why_only_the_partys_leader_names_it"));
   const name = raw.replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", `a party's name is 1–${NAME_MAX} characters`);
+  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_a_partys_name_is_1_name_max", { nAME_MAX: NAME_MAX }));
   const party = partyIdOf(ctx);
   const was = own(ctx.state.entities, party.id)?.name;
-  if (party.exists && was === name) return refuse("unchanged", `the party is already called ${name}`);
+  if (party.exists && was === name) return refuse("unchanged", say("why_the_party_is_already_called_name", { name: name }));
   const named: LedgerEvent = party.exists ? { type: "engine.rename", data: { entity: party.id, name, was: was ?? party.id } } : spawnParty(ctx, party.id, name);
   return [named, orgLog(ctx, party.id, `${labelOf(ctx, by)} named the party ${name}.`, { by, names: [by] })];
 }
@@ -114,14 +115,14 @@ function nameEvents(ctx: EffectContext, by: EntityId, raw: string): LedgerEvent[
  * state so each part sees the last, and returned as one unit: a rebased view keeps all of it or none.
  */
 function purseEvents(ctx: EffectContext, by: EntityId, cents: number, from: EntityId): LedgerEvent[] | Rejection {
-  if (notLeader(ctx, by)) return refuse("not_leader", "Only the party's leader starts its purse");
-  if (!(cents > 0)) return refuse("bad_amount", "a purse starts with a deposit above nothing");
+  if (notLeader(ctx, by)) return refuse("not_leader", say("why_only_the_partys_leader_starts_its_purse"));
+  if (!(cents > 0)) return refuse("bad_amount", say("why_a_purse_starts_with_a_deposit_above"));
   const sources = fundingSources(ctx, by);
   const source = from === "" ? sources[0]?.id : sources.find((s) => s.id === from)?.id;
-  if (source === undefined) return refuse("no_source", from === "" ? "You have no account to start a purse from" : `${labelOf(ctx, from)} isn't an account of yours a purse can start from`);
+  if (source === undefined) return refuse("no_source", from === "" ? say("why_you_have_no_account_to_start_a") : say("why_from_isnt_an_account_of_yours_a", { from: labelOf(ctx, from) }));
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const party = partyIdOf(w.ctx);
-  if (party.exists && purseAccount(w.ctx, party.id)) return refuse("exists", `${labelOf(ctx, party.id)} already has a purse`);
+  if (party.exists && purseAccount(w.ctx, party.id)) return refuse("exists", say("why_id_already_has_a_purse", { id: labelOf(ctx, party.id) }));
   const apply = (events: readonly LedgerEvent[]): Rejection | null => {
     for (const ev of events) {
       const failed = w.apply(ev);
@@ -131,7 +132,7 @@ function purseEvents(ctx: EffectContext, by: EntityId, cents: number, from: Enti
   };
   const open = optionalService(w.ctx, "economy.open_account");
   const pay = optionalService(w.ctx, "economy.transfer");
-  if (!open || !pay) return refuse("no_money", "a purse needs the economy");
+  if (!open || !pay) return refuse("no_money", say("why_a_purse_needs_the_economy"));
   const spawned = party.exists ? null : apply([spawnParty(w.ctx, party.id)]);
   if (spawned) return spawned;
   const opened = open(w.ctx, { name: "Party purse", product: "checking", owners: [{ party: party.id, role: "owner" }] });
@@ -139,7 +140,7 @@ function purseEvents(ctx: EffectContext, by: EntityId, cents: number, from: Enti
   const failed = apply(opened);
   if (failed) return failed;
   const account = opened.find((ev): ev is Extract<LedgerEvent, { type: "spawn" }> => ev.type === "spawn")?.entity.id;
-  if (account === undefined) return refuse("no_account", "the purse didn't open");
+  if (account === undefined) return refuse("no_account", say("why_the_purse_didnt_open"));
   const paid = pay(w.ctx, source, account, cents, `Into ${labelOf(w.ctx, party.id)}'s purse`);
   if (!Array.isArray(paid)) return paid;
   const short = apply(paid);
@@ -162,15 +163,15 @@ function purseAccount(ctx: ReadContext, party: EntityId): EntityId | null {
 
 /** Hire a hand (§3.12): the economy's hire with the party as employer, and the hired tier, in one unit. */
 function hireEvents(ctx: EffectContext, by: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
-  if (notLeader(ctx, by)) return refuse("not_leader", "Only the party's leader hires for it");
+  if (notLeader(ctx, by)) return refuse("not_leader", say("why_only_the_partys_leader_hires_for_it"));
   const party = partyIdOf(ctx);
-  if (!party.exists || !purseAccount(ctx, party.id)) return refuse("no_purse", "Start a purse first: the party pays its hands from it");
+  if (!party.exists || !purseAccount(ctx, party.id)) return refuse("no_purse", say("why_start_a_purse_first_the_party_pays"));
   const worker = strOf(args.worker);
-  if (worker === ctx.world.pov) return refuse("bad_party", "You lead the party");
+  if (worker === ctx.world.pov) return refuse("bad_party", say("why_you_lead_the_party"));
   const may = mayAct(ctx, by, party.id, "staff.hire", { target: worker });
   if (!may.ok) return refuse("not_allowed", may.reason);
   const hire = ctx.registry.effects.get("economy.hire");
-  if (!hire) return refuse("no_money", "hiring needs the economy");
+  if (!hire) return refuse("no_money", say("why_hiring_needs_the_economy"));
   const job: Record<string, JsonValue> = { business: party.id, worker, by };
   for (const k of ["title", "occupation", "basis", "rate", "hours_per_week", "pay_every"] as const) if (args[k] !== undefined && args[k] !== null && args[k] !== "") job[k] = args[k];
   const hired = hire.resolve(job, ctx);

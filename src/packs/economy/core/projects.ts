@@ -221,21 +221,21 @@ const dayText = (cal: Calendar, at: number): string => formatStamp(cal, at).slic
 
 function stepEventProblem(ctx: ReadContext, e: PackEvent): Rejection | null {
   const p = projectOf(ctx, strOf(e.data.project));
-  if (!p) return { code: "missing_entity", reason: `there's no project ${strOf(e.data.project)}` };
+  if (!p) return { code: "missing_entity", reason: say("why_theres_no_project_project", { project: strOf(e.data.project) }) };
   const s = p.def.steps.find((x) => x.id === strOf(e.data.step));
-  if (!s) return { code: "not_found", reason: `${p.def.name} has no step ${strOf(e.data.step)}` };
-  if (typeof e.data.at !== "number") return { code: "bad_event", reason: "a project step needs its instant" };
+  if (!s) return { code: "not_found", reason: say("why_name_has_no_step_step", { name: p.def.name, step: strOf(e.data.step) }) };
+  if (typeof e.data.at !== "number") return { code: "bad_event", reason: say("why_a_project_step_needs_its_instant") };
   if (p.status !== "active") return { code: "not_active", reason: statusWords(p) };
   const r = p.run.steps[s.id];
-  if (doneAt(p, s) !== null) return { code: "done", reason: `${s.name} is done` };
+  if (doneAt(p, s) !== null) return { code: "done", reason: say("why_name_is_done", { name: s.name }) };
   const phase = strOf(e.data.phase);
   if (phase === "start") {
     const ready = readyAt(p, s);
-    return typeof r?.start === "number" ? { code: "started", reason: `${s.name} has started` } : ready === null || ready > e.data.at ? { code: "not_ready", reason: `${s.name} waits for the steps before it` } : null;
+    return typeof r?.start === "number" ? { code: "started", reason: say("why_name_has_started", { name: s.name }) } : ready === null || ready > e.data.at ? { code: "not_ready", reason: say("why_name_waits_for_the_steps_before_it", { name: s.name }) } : null;
   }
-  if (phase === "done") return typeof r?.start === "number" ? null : { code: "not_started", reason: `${s.name} hasn't started` };
-  if (phase === "wait") return (e.data.side === "end") === (typeof r?.start === "number") ? null : { code: "bad_event", reason: `${s.name} can't wait to ${strOf(e.data.side)}` };
-  return { code: "bad_event", reason: `a project step is started, waits or is done, not ${phase}` };
+  if (phase === "done") return typeof r?.start === "number" ? null : { code: "not_started", reason: say("why_name_hasnt_started", { name: s.name }) };
+  if (phase === "wait") return (e.data.side === "end") === (typeof r?.start === "number") ? null : { code: "bad_event", reason: say("why_name_cant_wait_to_side", { name: s.name, side: strOf(e.data.side) }) };
+  return { code: "bad_event", reason: say("why_a_project_step_is_started_waits_or", { phase: phase }) };
 }
 
 /** Every step of a project done, by its run and its authored flags. */
@@ -249,7 +249,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
     type: PROJECT_EVENTS.begin,
     validate: (e, ctx) => {
       const p = projectOf(ctx, strOf(e.data.project));
-      if (!p || typeof e.data.at !== "number") return { code: "missing_entity", reason: `there's no project ${strOf(e.data.project)}` };
+      if (!p || typeof e.data.at !== "number") return { code: "missing_entity", reason: say("why_theres_no_project_project", { project: strOf(e.data.project) }) };
       return p.status === "planned" ? null : { code: "not_planned", reason: statusWords(p) };
     },
     apply: (e, state) => {
@@ -343,11 +343,11 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
       if (bad) return bad;
       const p = projectOf(ctx, strOf(e.data.project));
       const s = p?.def.steps.find((x) => x.id === strOf(e.data.step));
-      if (!p || !s) return { code: "not_found", reason: `there's no such step` };
-      if (doneAt(p, s) !== null) return { code: "done", reason: `${s.name} is done` };
+      if (!p || !s) return { code: "not_found", reason: say("why_theres_no_such_step") };
+      if (doneAt(p, s) !== null) return { code: "done", reason: say("why_name_is_done", { name: s.name }) };
       const days = e.data.days;
       const cents = e.data.cents;
-      return typeof days === "number" && Number.isInteger(days) && days >= 0 && typeof cents === "number" && Number.isInteger(cents) && cents >= 0 && days + cents > 0 ? null : { code: "bad_event", reason: "a note sets a step back by whole days or adds to its cost" };
+      return typeof days === "number" && Number.isInteger(days) && days >= 0 && typeof cents === "number" && Number.isInteger(cents) && cents >= 0 && days + cents > 0 ? null : { code: "bad_event", reason: say("why_a_note_sets_a_step_back_by") };
     },
     apply: (e, state) => {
       const id = strOf(e.data.project);
@@ -372,7 +372,7 @@ export const PROJECT_EVENT_DEFS: EventTypeDef<PackEvent>[] = [
 
 function statusProblem(ctx: ReadContext, e: PackEvent, allowed: readonly ProjectStatus[]): Rejection | null {
   const p = projectOf(ctx, strOf(e.data.project));
-  if (!p || typeof e.data.at !== "number") return { code: "missing_entity", reason: `there's no project ${strOf(e.data.project)}` };
+  if (!p || typeof e.data.at !== "number") return { code: "missing_entity", reason: say("why_theres_no_project_project", { project: strOf(e.data.project) }) };
   return allowed.includes(p.status) ? null : { code: "bad_status", reason: statusWords(p) };
 }
 
@@ -407,8 +407,8 @@ interface Paid {
 function payStep(api: FinanceApi, ctx: ReadContext, p: Project, s: ProjectStep, cents: number, side: "start" | "end"): Paid | Rejection {
   if (cents <= 0) return { events: [], built: 0, capex: 0 };
   const from = payingAccount(api, ctx, p.def);
-  if (from === null) return { code: "no_account", reason: `${labelOf(ctx, p.def.org)} has no account to pay from` };
-  if (api.available(ctx, from) < cents) return { code: "declined", reason: `${labelOf(ctx, from)} doesn't have ${api.money(ctx, cents)}` };
+  if (from === null) return { code: "no_account", reason: say("why_intoname_has_no_account_to_pay_from", { intoName: labelOf(ctx, p.def.org) }) };
+  if (api.available(ctx, from) < cents) return { code: "declined", reason: say("why_from_doesnt_have_cents", { from: labelOf(ctx, from), cents: api.money(ctx, cents) }) };
   const builds = s.capitalize === true && makes(p.def);
   const capital = builds && depreciates(ctx, p.def.org);
   const part = (s.paid ?? "start") === "split" ? (side === "start" ? " (first half)" : " (the rest)") : "";
@@ -614,7 +614,7 @@ function acted(ctx: ReadContext, org: EntityId, by: EntityId, text: string): Led
 
 function projectArg(ctx: ReadContext, args: Args): Project | Rejection {
   const p = projectOf(ctx, strOf(args.project));
-  return p ?? { code: "missing_entity", reason: `there's no project ${strOf(args.project) || "named"}` };
+  return p ?? { code: "missing_entity", reason: say("why_theres_no_project_project_named", { project: strOf(args.project) }) };
 }
 
 const isRejection = (v: unknown): v is Rejection => isRecord(v) && typeof v.code === "string" && typeof v.reason === "string";
@@ -654,31 +654,31 @@ function startEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
     def = p.def;
   } else {
     const org = strOf(args.org);
-    if (!own(ctx.state.entities, org) || isGone(ctx.state, org)) return { code: "missing_entity", reason: `there's no ${org || "party"} to run it` };
+    if (!own(ctx.state.entities, org) || isGone(ctx.state, org)) return { code: "missing_entity", reason: say("why_theres_no_org_party_to_run_it", { org: org }) };
     const template = strOf(args.template);
     const row = templateRow(ctx, template);
-    if (!row && !Array.isArray(args.steps)) return { code: "no_template", reason: template === "" ? "a new project needs a template" : `there's no project template ${template}` };
+    if (!row && !Array.isArray(args.steps)) return { code: "no_template", reason: template === "" ? say("why_a_new_project_needs_a_template") : say("why_theres_no_project_template_template", { template: template }) };
     const steps = stepsIn(Array.isArray(args.steps) ? args.steps : row?.steps);
-    if (steps.length === 0) return { code: "no_steps", reason: "a project needs at least one step" };
-    if (!stepOrder(steps)) return { code: "bad_steps", reason: "its steps wait on each other in a ring" };
+    if (steps.length === 0) return { code: "no_steps", reason: say("why_a_project_needs_at_least_one_step") };
+    if (!stepOrder(steps)) return { code: "bad_steps", reason: say("why_its_steps_wait_on_each_other_in") };
     const name = strOf(args.name).trim().slice(0, PROJECT_LIMITS.name) || strOf(row?.name, "Project");
     const account = strOf(args.account);
-    if (account !== "" && !api.accountsOf(ctx, org, "spend").includes(account)) return { code: "bad_account", reason: `${labelOf(ctx, account)} isn't ${labelOf(ctx, org)}'s to spend` };
+    if (account !== "" && !api.accountsOf(ctx, org, "spend").includes(account)) return { code: "bad_account", reason: say("why_account_isnt_org_s_to_spend", { account: labelOf(ctx, account), org: labelOf(ctx, org) }) };
     id = freeId(ctx, `project_${slug(org)}_${slug(name)}`);
     const payee = strOf(args.payee) || strOf(row?.payee);
     const fields: JsonObject = { org, ...(template !== "" && row ? { template } : {}), steps: steps as unknown as JsonValue, ...(account !== "" ? { account } : {}), ...(payee !== "" ? { payee } : {}), status: "planned" };
     spawn = { type: "spawn", entity: { id, kind: PROJECT_KIND, name, tier: "background", fields, relations: [] } };
     def = { org, name, steps };
   }
-  if (ctx.levelOf(def.org, "money") < 3) return { code: "level", reason: "projects run from Money 3" };
+  if (ctx.levelOf(def.org, "money") < 3) return { code: "level", reason: say("why_projects_run_from_money_3") };
   const open = projectIds(ctx.state, def.org).filter((x) => x !== id && isLive(projectOf(ctx, x)?.status ?? "done")).length;
-  if (open >= OPEN_MAX) return { code: "too_many", reason: `${labelOf(ctx, def.org)} runs ${OPEN_MAX} projects at most at once` };
+  if (open >= OPEN_MAX) return { code: "too_many", reason: say("why_org_runs_open_max_projects_at_most", { org: labelOf(ctx, def.org), oPEN_MAX: OPEN_MAX }) };
   const biggest = Math.max(0, ...def.steps.map((s) => Math.max(costParts(s).start, costParts(s).end)));
   const no = refusal(ctx, by, def.org, biggest);
   if (no) return no;
   const run = new Run(ctx);
-  if (spawn && run.emit([spawn]).length === 0) return { code: "bad_project", reason: `${def.name} can't be set up` };
-  if (run.emit([{ type: PROJECT_EVENTS.begin, data: { project: id, at } }]).length === 0) return { code: "bad_project", reason: `${def.name} can't start` };
+  if (spawn && run.emit([spawn]).length === 0) return { code: "bad_project", reason: say("why_name_cant_be_set_up", { name: def.name }) };
+  if (run.emit([{ type: PROJECT_EVENTS.begin, data: { project: id, at } }]).length === 0) return { code: "bad_project", reason: say("why_name_cant_start", { name: def.name }) };
   advance(api, run, [id], at, null);
   return [...run.out, ...acted(ctx, def.org, by, `Started ${def.name}`)];
 }
@@ -694,7 +694,7 @@ function caughtUp(api: FinanceApi, ctx: EffectContext, args: Args): { run: Run; 
   const run = new Run(ctx);
   if (first.status === "active") advance(api, run, [first.def.id], ctx.state.clock, null);
   const p = projectOf(run.ctx, first.def.id);
-  return p ? { run, p } : { code: "missing_entity", reason: `there's no project ${first.def.id}` };
+  return p ? { run, p } : { code: "missing_entity", reason: say("why_theres_no_project_project", { project: first.def.id }) };
 }
 
 /** `economy.project_pause`: a project under way paused now, each step's clock stopped with the work it had left. */
@@ -713,7 +713,7 @@ function pauseEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
     const r = p.run.steps[s.id];
     if (typeof r?.start === "number" && typeof r.end === "number" && doneAt(p, s) === null && !r.wait) left[s.id] = workBetween(cal, at, r.end, s.business_days !== undefined);
   }
-  if (run.emit([{ type: PROJECT_EVENTS.pause, data: { project: p.def.id, at, left } }]).length === 0) return { code: "bad_status", reason: `${p.def.name} can't be paused` };
+  if (run.emit([{ type: PROJECT_EVENTS.pause, data: { project: p.def.id, at, left } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_be_paused", { name: p.def.name }) };
   return [...run.out, ...acted(ctx, p.def.org, by, `Paused ${p.def.name}`)];
 }
 
@@ -733,7 +733,7 @@ function resumeEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEv
     if (typeof r?.left === "number") ends[s.id] = addWork(cal, at, r.left, s.business_days !== undefined);
   }
   const run = new Run(ctx);
-  if (run.emit([{ type: PROJECT_EVENTS.resume, data: { project: p.def.id, at, ends } }]).length === 0) return { code: "bad_status", reason: `${p.def.name} can't resume` };
+  if (run.emit([{ type: PROJECT_EVENTS.resume, data: { project: p.def.id, at, ends } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_resume", { name: p.def.name }) };
   advance(api, run, [p.def.id], at, null);
   return [...run.out, ...acted(ctx, p.def.org, by, `Resumed ${p.def.name}`)];
 }
@@ -748,7 +748,7 @@ function dropEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEven
   const no = refusal(ctx, by, p.def.org);
   if (no) return no;
   const why = strOf(args.text).trim();
-  if (run.emit([{ type: PROJECT_EVENTS.drop, data: { project: p.def.id, at: ctx.state.clock } }]).length === 0) return { code: "bad_status", reason: `${p.def.name} can't be dropped` };
+  if (run.emit([{ type: PROJECT_EVENTS.drop, data: { project: p.def.id, at: ctx.state.clock } }]).length === 0) return { code: "bad_status", reason: say("why_name_cant_be_dropped", { name: p.def.name }) };
   return [...run.out, ...acted(ctx, p.def.org, by, `Dropped ${p.def.name}${why !== "" ? `: ${why}` : ""}`)];
 }
 
@@ -759,21 +759,21 @@ function dropEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEven
  */
 export function noteProblem(ctx: ReadContext, a: JsonObject, source: "story" | "gm"): { project: Project; step: ProjectStep } | Rejection {
   const p = projectOf(ctx, strOf(a.project));
-  if (!p) return { code: "missing_entity", reason: `there's no project ${strOf(a.project) || "named"}` };
+  if (!p) return { code: "missing_entity", reason: say("why_theres_no_project_project_named", { project: strOf(a.project) }) };
   if (!isLive(p.status)) return { code: "bad_status", reason: statusWords(p) };
   const named = strOf(a.step);
   const open = p.def.steps.filter((s) => doneAt(p, s) === null);
   const step = named !== "" ? p.def.steps.find((s) => s.id === named || s.name.toLowerCase() === named.toLowerCase()) : (open.find((s) => typeof p.run.steps[s.id]?.start === "number") ?? open[0]);
-  if (!step) return { code: "not_found", reason: named !== "" ? `${p.def.name} has no step ${named}` : `every step of ${p.def.name} is done` };
-  if (doneAt(p, step) !== null) return { code: "done", reason: `${step.name} is done: a note sets back or adds to a step still to finish` };
+  if (!step) return { code: "not_found", reason: named !== "" ? say("why_name_has_no_step_step", { name: p.def.name, step: named }) : say("why_every_step_of_name_is_done", { name: p.def.name }) };
+  if (doneAt(p, step) !== null) return { code: "done", reason: say("why_name_is_done_a_note_sets_back", { name: step.name }) };
   const days = a.days === undefined || a.days === null ? 0 : a.days;
   const cents = a.cents === undefined || a.cents === null ? 0 : a.cents;
   const maxDays = source === "story" ? PROJECT_LIMITS.noteDays : GM_NOTE_DAYS;
-  if (typeof days !== "number" || !Number.isInteger(days) || days < 0 || days > maxDays) return { code: "bad_days", reason: `a note sets a step back by whole days, ${maxDays} at most` };
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 0 || days > maxDays) return { code: "bad_days", reason: say("why_a_note_sets_a_step_back_by_2", { maxDays: maxDays }) };
   const cap = unpricedCap(ctx.world);
-  if (typeof cents !== "number" || !Number.isInteger(cents) || cents < 0 || (source === "story" && cents > cap)) return { code: "bad_amount", reason: `a note adds to a step's cost up to ${formatMoneyIn(ctx.world, cap)}, the world's narrated-price cap` };
-  if (days === 0 && cents === 0) return { code: "bad_note", reason: "a note sets a step back or adds to its cost" };
-  if (strOf(a.text).trim() === "") return { code: "bad_note", reason: "a note says why, in the story's words" };
+  if (typeof cents !== "number" || !Number.isInteger(cents) || cents < 0 || (source === "story" && cents > cap)) return { code: "bad_amount", reason: say("why_a_note_adds_to_a_steps_cost", { cap: formatMoneyIn(ctx.world, cap) }) };
+  if (days === 0 && cents === 0) return { code: "bad_note", reason: say("why_a_note_sets_a_step_back_or") };
+  if (strOf(a.text).trim() === "") return { code: "bad_note", reason: say("why_a_note_says_why_in_the_storys") };
   return { project: p, step };
 }
 
@@ -792,7 +792,7 @@ function noteEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEven
   const end = typeof r?.end === "number" && p.status === "active" ? addWork(calendarIn(ctx), r.end, days * MINUTES_PER_DAY, s.business_days !== undefined) : undefined;
   const text = strOf(args.text).trim().slice(0, NOTE_TEXT_MAX);
   const by = strOf(args.by);
-  if (run.emit([{ type: PROJECT_EVENTS.note, data: { project: p.def.id, step: s.id, at: ctx.state.clock, days, cents, text, source, ...(end !== undefined ? { end } : {}) } }]).length === 0) return { code: "bad_note", reason: `${p.def.name} can't take the note` };
+  if (run.emit([{ type: PROJECT_EVENTS.note, data: { project: p.def.id, step: s.id, at: ctx.state.clock, days, cents, text, source, ...(end !== undefined ? { end } : {}) } }]).length === 0) return { code: "bad_note", reason: say("why_name_cant_take_the_note", { name: p.def.name }) };
   return [...run.out, ...acted(ctx, p.def.org, by, `${p.def.name}: ${noteWords(ctx.world, s.name, days, cents)}`)];
 }
 

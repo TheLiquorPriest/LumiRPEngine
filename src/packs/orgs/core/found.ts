@@ -34,6 +34,7 @@ import { Working } from "../../../engine/working";
 import { orgLog, ORGS_SPENT } from "./log";
 import { putToVote } from "./motions";
 import { dateWords } from "./view";
+import { say } from "../../../engine/lines";
 
 /** The Money level a company, a trust or a nonprofit needs (payroll, books and property, §4.7). */
 const COMPANY_LEVEL = 3;
@@ -158,7 +159,7 @@ function sourceOf(ctx: ReadContext, f: Founding, what: string): EntityId | Rejec
   const sources = fundingSources(ctx, f.founder);
   const source = f.from === "" ? sources[0]?.id : sources.find((s) => s.id === f.from)?.id;
   const whose = f.founder === f.by ? "of yours" : `of ${labelOf(ctx, f.founder)}'s`;
-  return source ?? refuse("no_source", f.from === "" ? `${f.founder === f.by ? "You have" : `${labelOf(ctx, f.founder)} has`} no account to put ${what} in from` : `${labelOf(ctx, f.from)} isn't an account ${whose} ${what} can come from`);
+  return source ?? refuse("no_source", f.from === "" ? say("why_you_have_founder_has_no_account_to", { founder: labelOf(ctx, f.founder), what: what, f: f.founder === f.by }) : say("why_from_isnt_an_account_whose_what_can", { from: labelOf(ctx, f.from), whose: whose, what: what }));
 }
 
 /**
@@ -170,7 +171,7 @@ function sourceOf(ctx: ReadContext, f: Founding, what: string): EntityId | Rejec
 function openAndFund(ctx: EffectContext, w: Working, f: Founding, o: { org: EntityId; label: string; product: string; users: readonly EntityId[]; source: EntityId | null; category: string; memo: string }): EntityId | Rejection {
   const open = optionalService(ctx, "economy.open_account");
   const pay = optionalService(ctx, "economy.transfer");
-  if (!open || !pay) return refuse("no_money", `${f.name} needs the economy`);
+  if (!open || !pay) return refuse("no_money", say("why_name_needs_the_economy", { name: f.name }));
   const owners = [{ party: o.org, role: "owner" as const }, ...o.users.map((party) => ({ party, role: "authorized_user" as const }))];
   const product = (p: string) => open(w.ctx, { name: `${f.name} ${o.label}`, product: p, owners });
   const tried = product(o.product);
@@ -179,7 +180,7 @@ function openAndFund(ctx: EffectContext, w: Working, f: Founding, o: { org: Enti
   const failed = applyAll(w, opened);
   if (failed) return failed;
   const account = opened.find((ev): ev is Extract<LedgerEvent, { type: "spawn" }> => ev.type === "spawn")?.entity.id;
-  if (account === undefined) return refuse("no_account", `${f.name}'s account didn't open`);
+  if (account === undefined) return refuse("no_account", say("why_name_s_account_didnt_open", { name: f.name }));
   if (o.source === null || f.cents <= 0) return account;
   const paid = pay(w.ctx, o.source, account, f.cents, o.memo);
   if (!Array.isArray(paid)) return paid;
@@ -219,9 +220,9 @@ function spending(ctx: ReadContext, f: Founding, source: EntityId | null, benefi
 function companyEvents(ctx: EffectContext, c: Company): LedgerEvent[] | Rejection {
   const refused = startRefusal(ctx, c.founder, "Starting a company");
   if (refused) return refuse("level", refused);
-  if (!(c.cents > 0)) return refuse("bad_amount", "a company starts with capital above nothing");
-  if (!STRUCTURES.some((s) => s === c.structure)) return refuse("bad_structure", `a company's structure is one of ${STRUCTURES.join(", ")}`);
-  if (c.units !== undefined && !(Number.isSafeInteger(c.units) && c.units > 0)) return refuse("bad_amount", "a company counts its shares in a whole number of units");
+  if (!(c.cents > 0)) return refuse("bad_amount", say("why_a_company_starts_with_capital_above_nothing"));
+  if (!STRUCTURES.some((s) => s === c.structure)) return refuse("bad_structure", say("why_a_companys_structure_is_one_of_join", { join: STRUCTURES.join(", ") }));
+  if (c.units !== undefined && !(Number.isSafeInteger(c.units) && c.units > 0)) return refuse("bad_amount", say("why_a_company_counts_its_shares_in_a"));
   const classes = c.classes === undefined ? null : classesIn({ share_classes: c.classes });
   const source = sourceOf(ctx, c, "capital");
   if (typeof source !== "string") return source;
@@ -265,10 +266,10 @@ function holderOk(ctx: ReadContext, id: EntityId): boolean {
 function trustEvents(ctx: EffectContext, t: Trust): LedgerEvent[] | Rejection {
   const refused = startRefusal(ctx, t.founder, "Settling a trust");
   if (refused) return refuse("level", refused);
-  if (t.cents < 0) return refuse("bad_amount", "what goes into a trust is nothing or more");
-  for (const [role, id] of [["trustee", t.trustee], ["beneficiary", t.beneficiary]] as const) if (!holderOk(ctx, id)) return refuse("missing_entity", `no one ${labelOf(ctx, id)} to be its ${role}`);
-  if (t.until !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(t.until)) return refuse("bad_date", "a trust ends on a day, YYYY-MM-DD");
-  if (t.until !== "" && t.until <= today(ctx)) return refuse("bad_date", "a trust ends after today");
+  if (t.cents < 0) return refuse("bad_amount", say("why_what_goes_into_a_trust_is_nothing"));
+  for (const [role, id] of [["trustee", t.trustee], ["beneficiary", t.beneficiary]] as const) if (!holderOk(ctx, id)) return refuse("missing_entity", say("why_no_one_id_to_be_its_role", { id: labelOf(ctx, id), role: role }));
+  if (t.until !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(t.until)) return refuse("bad_date", say("why_a_trust_ends_on_a_day_yyyy"));
+  if (t.until !== "" && t.until <= today(ctx)) return refuse("bad_date", say("why_a_trust_ends_after_today"));
   const source = t.cents > 0 ? sourceOf(ctx, t, "money for it") : null;
   if (source !== null && typeof source !== "string") return source;
   const spent = spending(ctx, t, source, t.beneficiary);
@@ -308,7 +309,7 @@ function trustEvents(ctx: EffectContext, t: Trust): LedgerEvent[] | Rejection {
 function nonprofitEvents(ctx: EffectContext, f: Founding): LedgerEvent[] | Rejection {
   const refused = startRefusal(ctx, f.founder, "Starting a nonprofit");
   if (refused) return refuse("level", refused);
-  if (f.cents < 0) return refuse("bad_amount", "what goes into a nonprofit is nothing or more");
+  if (f.cents < 0) return refuse("bad_amount", say("why_what_goes_into_a_nonprofit_is_nothing"));
   const source = f.cents > 0 ? sourceOf(ctx, f, "a gift") : null;
   if (source !== null && typeof source !== "string") return source;
   const spent = spending(ctx, f, source);
@@ -338,7 +339,7 @@ function nonprofitEvents(ctx: EffectContext, f: Founding): LedgerEvent[] | Rejec
 function groupEvents(ctx: EffectContext, by: EntityId, name: string, kind: string): LedgerEvent[] | Rejection {
   const kinds = groupKinds(ctx);
   const of = kinds.find((k) => k.id === kind);
-  if (!of) return refuse("bad_kind", kinds.length === 0 ? "This world has no kinds of group to start" : `a group is one of ${kinds.map((k) => k.label).join(", ")}`);
+  if (!of) return refuse("bad_kind", kinds.length === 0 ? say("why_this_world_has_no_kinds_of_group") : say("why_a_group_is_one_of_kinds", { kinds: kinds.map((k) => k.label).join(", ") }));
   const id = freshId(ctx, name, "");
   const founder = own(ctx.state.entities, by);
   const leader: Position = { id: LEADER, title: "Leader", powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" };
@@ -362,22 +363,22 @@ function foundEvents(ctx: EffectContext, args: Record<string, JsonValue>): Ledge
   const founder = strOf(args.founder) || given || ctx.world.pov;
   const person = (id: EntityId): boolean => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !isGone(ctx.state, id);
   const by = given !== "" ? given : person(founder) ? founder : "";
-  if (by !== "" && !person(by)) return refuse("bad_founder", "Only a person founds an organization, for themselves or for one they govern");
+  if (by !== "" && !person(by)) return refuse("bad_founder", say("why_only_a_person_founds_an_organization_for"));
   const type = strOf(args.type);
   if (founder !== by) {
-    if (orgTypeOf(ctx, founder) === null || isGone(ctx.state, founder)) return refuse("bad_founder", `${labelOf(ctx, founder)} isn't an organization`);
-    if (!FOUNDED_BY_ORGS.some((t) => t === type)) return refuse("bad_type", `${labelOf(ctx, founder)} founds companies, settles trusts and starts nonprofits; a group is founded by its people`);
+    if (orgTypeOf(ctx, founder) === null || isGone(ctx.state, founder)) return refuse("bad_founder", say("why_founder_isnt_an_organization", { founder: labelOf(ctx, founder) }));
+    if (!FOUNDED_BY_ORGS.some((t) => t === type)) return refuse("bad_type", say("why_founder_founds_companies_settles_trusts_and_starts", { founder: labelOf(ctx, founder) }));
     const may = by === "" ? null : mayAct(ctx, by, founder, "org.govern");
     if (may && !may.ok) return refuse("not_allowed", may.reason);
   }
   const name = strOf(args.name).replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", `an organization's name is 1–${NAME_MAX} characters`);
+  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_an_organizations_name_is_1_name_max", { nAME_MAX: NAME_MAX }));
   const founding: Founding = { by, founder, name, cents: Math.round(numOf(args.cents)), from: strOf(args.from) };
   if (type === "company") return companyEvents(ctx, { ...founding, structure: strOf(args.structure) || STRUCTURES[0], units: typeof args.units === "number" ? args.units : undefined, classes: args.classes ?? undefined });
   if (type === "trust") return trustEvents(ctx, { ...founding, trustee: strOf(args.trustee) || founder, beneficiary: strOf(args.beneficiary) || founder, revocable: args.revocable === true, purpose: strOf(args.purpose).replace(/\s+/g, " ").trim().slice(0, 300), until: strOf(args.until).trim() });
   if (type === "nonprofit") return nonprofitEvents(ctx, founding);
   if (type === "group") return groupEvents(ctx, by, name, strOf(args.kind));
-  return refuse("bad_type", "an organization founded is a company, a trust, a nonprofit or a group");
+  return refuse("bad_type", say("why_an_organization_founded_is_a_company_a"));
 }
 
 /**
@@ -389,12 +390,12 @@ function foundEvents(ctx: EffectContext, args: Record<string, JsonValue>): Ledge
  */
 function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
-  if (orgTypeOf(ctx, org) !== "company") return refuse("not_company", `${labelOf(ctx, org)} isn't a company`);
+  if (orgTypeOf(ctx, org) !== "company") return refuse("not_company", say("why_name_isnt_a_company", { name: labelOf(ctx, org) }));
   const structure = strOf(a.structure);
   // A nonprofit has no owners of its worth to hold a company's shares: what it is changes only in Build (DESIGN §29.1 Nonprofits).
-  if (structure === NONPROFIT_STRUCTURE || own(ctx.state.entities, org)?.fields.structure === NONPROFIT_STRUCTURE) return refuse("nonprofit", `${labelOf(ctx, org)} ${structure === NONPROFIT_STRUCTURE ? "becomes a nonprofit" : "stops being a nonprofit"} only by changing what it is in Build`);
+  if (structure === NONPROFIT_STRUCTURE || own(ctx.state.entities, org)?.fields.structure === NONPROFIT_STRUCTURE) return refuse("nonprofit", say("why_org_becomes_a_nonprofitstops_being_a_nonprofit", { org: labelOf(ctx, org), structure: structure === NONPROFIT_STRUCTURE }));
   // A listed company stays a C corporation while the public holds its units (DESIGN §27.10 Listing).
-  if (structure !== "c_corp" && listingIn(own(ctx.state.entities, org)?.fields ?? {})) return refuse("listed", `${labelOf(ctx, org)} is on a market: take it off the market before it stops being a C corporation`);
+  if (structure !== "c_corp" && listingIn(own(ctx.state.entities, org)?.fields ?? {})) return refuse("listed", say("why_org_is_on_a_market_take_it", { org: labelOf(ctx, org) }));
   const by = strOf(a.by);
   const party = strOf(a.party) || by;
   const voted = ctx.carried?.motion !== undefined && ctx.carried.org === org;
@@ -409,7 +410,7 @@ function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): Le
     if (votes !== null) return putToVote(ctx, { org, by, party, text: `Make ${labelOf(ctx, org)} ${STRUCTURE_WORDS[structure] ?? structure}`, why: votes }) ?? refuse("votes", votes);
   }
   const change = optionalService(ctx, "economy.restructure");
-  if (!change) return refuse("no_money", "a company's structure needs the economy");
+  if (!change) return refuse("no_money", say("why_a_companys_structure_needs_the_economy"));
   const events = change(ctx, org, structure);
   if (!Array.isArray(events) || events.length === 0) return events;
   const from = events.flatMap((e) => (e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : []))[0] ?? "";

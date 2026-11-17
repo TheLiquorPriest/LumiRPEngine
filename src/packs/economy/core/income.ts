@@ -163,11 +163,11 @@ function incomeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
     // share (to one owner, `party`). A reinvested profit share adds to that owner's stake.
     type: "economy.income",
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, str(e, "source"))) return reject("missing_entity", `no ${labelOf(ctx, str(e, "source"))}`);
-      if (!(INCOME_KINDS as readonly string[]).includes(str(e, "kind"))) return reject("bad_event", "income is a dividend, interest or a profit share");
+      if (!own(ctx.state.entities, str(e, "source"))) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, str(e, "source")) }));
+      if (!(INCOME_KINDS as readonly string[]).includes(str(e, "kind"))) return reject("bad_event", say("why_income_is_a_dividend_interest_or_a"));
       const cents = e.data.cents;
-      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents <= 0) return reject("bad_event", "income is a whole amount above nothing");
-      return str(e, "party") === "" || own(ctx.state.entities, str(e, "party")) ? null : reject("missing_entity", `no ${labelOf(ctx, str(e, "party"))}`);
+      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents <= 0) return reject("bad_event", say("why_income_is_a_whole_amount_above_nothing"));
+      return str(e, "party") === "" || own(ctx.state.entities, str(e, "party")) ? null : reject("missing_entity", say("why_no_party", { party: labelOf(ctx, str(e, "party")) }));
     },
     apply: (e, state, ctx) => {
       const kind = str(e, "kind") as IncomeKind;

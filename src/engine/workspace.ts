@@ -100,8 +100,8 @@ function writable(state: WorldState, key: string): JsonObject {
 export const wsWriteEvent: EventTypeDef<PackEvent> = {
   type: WS_WRITE,
   validate: (e) => {
-    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
-    return isBlobHash(e.data.hash) ? null : { code: "bad_event", reason: "a workspace file's body is a blob's hash" };
+    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: say("why_a_workspace_files_path_is_names_joined") };
+    return isBlobHash(e.data.hash) ? null : { code: "bad_event", reason: say("why_a_workspace_files_body_is_a_blobs") };
   },
   apply: (e, state) => {
     if (isWorkspacePath(e.data.path) && isBlobHash(e.data.hash)) writable(state, WS_KEY)[e.data.path] = e.data.hash;
@@ -114,8 +114,8 @@ export const wsWriteEvent: EventTypeDef<PackEvent> = {
 export const wsDeleteEvent: EventTypeDef<PackEvent> = {
   type: WS_DELETE,
   validate: (e, ctx) => {
-    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
-    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: say("why_a_workspace_files_path_is_names_joined") };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: say("why_no_workspace_file_path", { path: e.data.path }) };
   },
   apply: (e, state) => {
     if (!isWorkspacePath(e.data.path)) return;
@@ -131,9 +131,9 @@ export const wsDeleteEvent: EventTypeDef<PackEvent> = {
 export const wsPinEvent: EventTypeDef<PackEvent> = {
   type: WS_PIN,
   validate: (e, ctx) => {
-    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
-    if (typeof e.data.pinned !== "boolean") return { code: "bad_event", reason: "a pin is on or off" };
-    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: say("why_a_workspace_files_path_is_names_joined") };
+    if (typeof e.data.pinned !== "boolean") return { code: "bad_event", reason: say("why_a_pin_is_on_or_off") };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: say("why_no_workspace_file_path", { path: e.data.path }) };
   },
   apply: (e, state) => {
     if (!isWorkspacePath(e.data.path) || typeof e.data.pinned !== "boolean") return;
@@ -152,9 +152,9 @@ export const wsPinEvent: EventTypeDef<PackEvent> = {
 export const wsReadersEvent: EventTypeDef<PackEvent> = {
   type: WS_READERS,
   validate: (e, ctx) => {
-    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: "a workspace file's path is names joined by /" };
-    if (!isAgentKnowledge(e.data.readers)) return { code: "bad_event", reason: "a file's readers are the player character's, everyone's or the GM's knowledge" };
-    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: `no workspace file ${e.data.path}` };
+    if (!isWorkspacePath(e.data.path)) return { code: "bad_event", reason: say("why_a_workspace_files_path_is_names_joined") };
+    if (!isAgentKnowledge(e.data.readers)) return { code: "bad_event", reason: say("why_a_files_readers_are_the_player_characters") };
+    return own(workspaceOf(ctx.state), e.data.path) !== undefined ? null : { code: "missing_file", reason: say("why_no_workspace_file_path", { path: e.data.path }) };
   },
   apply: (e, state) => {
     if (!isWorkspacePath(e.data.path) || !isAgentKnowledge(e.data.readers)) return;

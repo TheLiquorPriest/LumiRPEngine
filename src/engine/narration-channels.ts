@@ -19,6 +19,7 @@ import { kindIs, placeOfEntity } from "./scope";
 import { canSeePlace, loreGateReader, trackShown } from "./visibility";
 import { placeKey } from "./place-names";
 import { labelOf, own } from "./pack-kit";
+import { say } from "./lines";
 
 /** The `spawned` field value that marks a character a reply introduced. */
 export const SPAWNED_BY_NARRATION = "narration";
@@ -87,32 +88,32 @@ export function heardPlace(ctx: FactView, p: JsonObject): string | null {
  * reply's note read alike whether or not it exists; `gm` keeps the real reason.
  */
 function noSuchFact(said: string, gm?: string): Rejection {
-  return { ...reject("unknown_fact", `no world fact ${said.replace(/_/g, " ").trim() || "nothing"}`), ...(gm !== undefined ? { gm } : {}) };
+  return { ...reject("unknown_fact", say("why_no_world_fact_g_nothing", { g: said.replace(/_/g, " ").trim() })), ...(gm !== undefined ? { gm } : {}) };
 }
 
 /** Why `fact` can't be learned from a reply, or null when it is a public entity or a hidden, non-secret place the POV doesn't know yet. */
 function unlearnable(ctx: ReadContext, fact: string): Rejection | null {
   const { world, state, registry } = ctx;
   const pov = world.pov;
-  if (fact === "") return reject("bad_proposal", "knows needs a fact");
-  if (fact === pov) return reject("already_known", "everyone knows themselves");
+  if (fact === "") return reject("bad_proposal", say("why_knows_needs_a_fact"));
+  if (fact === pov) return reject("already_known", say("why_everyone_knows_themselves"));
   if (hasOwn(state.entities, fact)) {
     if (!isPublic(own(world.entities, fact)?.visibility ?? own(state.entities, fact)?.fields.visibility)) {
-      return povMayKnow(registry, world, state, fact) ? reject("not_public", "only public facts are read from a reply") : noSuchFact(fact, `${labelOf(ctx, fact)} isn't public, and the POV doesn't know them`);
+      return povMayKnow(registry, world, state, fact) ? reject("not_public", say("why_only_public_facts_are_read_from_a")) : noSuchFact(fact, `${labelOf(ctx, fact)} isn't public, and the POV doesn't know them`);
     }
-    return knowsAlready(ctx, pov, fact) ? reject("already_known", `already knows ${labelOf(ctx, fact)}`) : null;
+    return knowsAlready(ctx, pov, fact) ? reject("already_known", say("why_already_knows_fact", { fact: labelOf(ctx, fact) })) : null;
   }
   const place = hasOwn(world.places, fact) ? own(world.places, fact) : undefined;
   if (place) {
     // A reply can tell of a place kept to those who know it or hidden until found; a secret one only its story reveals.
     if (placeKept(ctx, fact)) return noSuchFact(fact, `${place.name} is secret`);
-    if (place.visibility !== "known_by" && place.visibility !== "discoverable") return isPublic(place.visibility) ? reject("already_known", `${place.name} is public`) : reject("not_public", "only public facts are read from a reply");
-    return canSeePlace(registry, world, state, pov, fact) ? reject("already_known", `already knows ${place.name}`) : null;
+    if (place.visibility !== "known_by" && place.visibility !== "discoverable") return isPublic(place.visibility) ? reject("already_known", say("why_name_is_public", { name: place.name })) : reject("not_public", say("why_only_public_facts_are_read_from_a"));
+    return canSeePlace(registry, world, state, pov, fact) ? reject("already_known", say("why_already_knows_fact", { fact: place.name })) : null;
   }
   const lore = hasOwn(world.lore, fact) ? own(world.lore, fact) : undefined;
   if (lore && loreIsSecret(lore) && !loreGateReader(registry, world, state)(lore)) return noSuchFact(fact, "secret lore whose gate doesn't hold");
-  if (lore && (loreIsSecret(lore) || lore.gate !== undefined)) return reject("not_public", "secret lore is learned through its gate, never from a reply");
-  if (hasOwn(world.tracks, fact)) return trackShown(registry, world, state, pov, fact) ? reject("not_public", "tracks advance through their stages, never from a reply") : noSuchFact(fact, "a track the POV may not know of");
+  if (lore && (loreIsSecret(lore) || lore.gate !== undefined)) return reject("not_public", say("why_secret_lore_is_learned_through_its_gate"));
+  if (hasOwn(world.tracks, fact)) return trackShown(registry, world, state, pov, fact) ? reject("not_public", say("why_tracks_advance_through_their_stages_never_from")) : noSuchFact(fact, "a track the POV may not know of");
   return noSuchFact(fact);
 }
 
@@ -121,7 +122,7 @@ export const knowsChannel: ProposalChannelDef = {
   boundField: "knows",
   validate(p, ctx) {
     const who = text(p.who) || ctx.world.pov;
-    if (who !== ctx.world.pov) return reject("not_pov", "a reply only teaches the player character");
+    if (who !== ctx.world.pov) return reject("not_pov", say("why_a_reply_only_teaches_the_player_character"));
     return unlearnable(ctx, factOf(ctx, text(p.fact)));
   },
   toEffects: (p, ctx) => [{ type: "link", args: { rel: "knows", from: ctx.world.pov, to: factOf(ctx, text(p.fact)) } }],
@@ -161,27 +162,27 @@ export const spawnChannel: ProposalChannelDef = {
   boundField: "spawn",
   validate(p, ctx) {
     const kind = text(p.kind);
-    if (kind === "" || !(hasOwn(ctx.world.kinds, kind) || ctx.registry.kinds.has(kind))) return reject("missing_kind", `no kind ${kind}`);
-    if (!kindIs(ctx.registry, ctx.world, kind, "person")) return reject("not_a_character", "a reply introduces characters only");
+    if (kind === "" || !(hasOwn(ctx.world.kinds, kind) || ctx.registry.kinds.has(kind))) return reject("missing_kind", say("why_no_kind_kind", { kind: kind }));
+    if (!kindIs(ctx.registry, ctx.world, kind, "person")) return reject("not_a_character", say("why_a_reply_introduces_characters_only"));
     const name = text(p.name);
-    if (name === "" || name.length > NAME_MAX || !NAME_OK.test(name)) return reject("bad_name", "a new character needs a plain name");
+    if (name === "" || name.length > NAME_MAX || !NAME_OK.test(name)) return reject("bad_name", say("why_a_new_character_needs_a_plain_name"));
     const place = placeFor(p, ctx);
     const def = hasOwn(ctx.world.places, place) ? own(ctx.world.places, place) : undefined;
-    if (!def) return reject("missing_place", `no place ${place}`);
-    if (def.visibility === "secret") return reject("not_public", "a reply can't place someone somewhere secret");
+    if (!def) return reject("missing_place", say("why_no_place_place", { place: place }));
+    if (def.visibility === "secret") return reject("not_public", say("why_a_reply_cant_place_someone_somewhere_secret"));
     const lower = name.toLowerCase();
     const named = Object.keys(ctx.state.entities).filter((id) => own(ctx.state.entities, id)?.name.trim().toLowerCase() === lower);
-    if (named.some((id) => povMayKnow(ctx.registry, ctx.world, ctx.state, id))) return reject("duplicate", `${name} already exists`);
+    if (named.some((id) => povMayKnow(ctx.registry, ctx.world, ctx.state, id))) return reject("duplicate", say("why_name_already_exists", { name: name }));
     const cap = spawnCapOf(ctx.world);
-    if (spawnedCount(ctx) >= cap) return reject("spawn_cap", cap === 0 ? "this world lets no reply introduce characters" : `replies have introduced ${cap} characters already`);
+    if (spawnedCount(ctx) >= cap) return reject("spawn_cap", cap === 0 ? say("why_this_world_lets_no_reply_introduce_characters") : say("why_replies_have_introduced_cap_characters_already", { cap: cap }));
     // A name only people the POV may not know have: the player can't tell the newcomer from one of
     // them, so it is dropped as a change that changed nothing, which no chip or note tells of; only
     // the log says why (DESIGN §7). Checked after every refusal the player sees, so those read as
     // they would with no such person.
-    if (named.length > 0) return { code: "duplicate", reason: "that newcomer didn't appear", gm: `${name} is already ${named.join(", ")}, whom the POV may not know`, unseen: true };
+    if (named.length > 0) return { code: "duplicate", reason: say("why_that_newcomer_didnt_appear"), gm: say("why_name_is_already_named_whom_the_pov", { name: name, named: named.join(", ") }), unseen: true };
     // An authored id that happens to be the newcomer's is the same: nothing the player sees says it is taken.
     const id = spawnId(ctx, name);
-    if (hasOwn(ctx.state.entities, id)) return { code: "duplicate", reason: "that newcomer didn't appear", gm: `the id ${id} is taken`, unseen: true };
+    if (hasOwn(ctx.state.entities, id)) return { code: "duplicate", reason: say("why_that_newcomer_didnt_appear"), gm: say("why_the_id_id_is_taken", { id: id }), unseen: true };
     return null;
   },
   toEffects(p, ctx): EffectSpec[] {

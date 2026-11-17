@@ -40,6 +40,7 @@ import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working } from "./working";
 import { optionalQuery, optionalService, own } from "./pack-kit";
+import { say } from "./lines";
 
 export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */
@@ -232,7 +233,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     // A skip that can't run (the clock paused) leaves the fight as it was.
     const before = w.mark();
     const broke = target ? skipPastFight(w, input.runSeed) : [];
-    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
+    const outcome = !target ? { code: "bad_target", reason: say("why_no_timelapse_target") } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
     if ("code" in outcome) {
       w.restore(before);
       w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });

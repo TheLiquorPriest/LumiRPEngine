@@ -17,6 +17,7 @@ import { chatDraftOf, draftEvent } from "../../engine/world-draft";
 import { oneOf, TEXT, TEXTS, YES_NO } from "../kit";
 import { find, isUnread, notAs, notOneOf, type OpContext, refusedAs, textArg, type Unread } from "../ops";
 import { isAlready, notApplicable, type WriteDef, writeTool } from "./run";
+import { say } from "../../engine/lines";
 
 const FAMILY = "places";
 
@@ -41,7 +42,7 @@ const label: WriteDef = {
     if (isUnread(place)) return place;
     const w = o.draft.w;
     const def = own(w.ctx.world.places, place.id);
-    if (!def) return refusedAs(o, { code: "missing_place", reason: `no place ${place.id}` }, "place", "place");
+    if (!def) return refusedAs(o, { code: "missing_place", reason: say("why_no_place_place", { place: place.id }) }, "place", "place");
     const name = textArg(o.args, "name");
     const aliases = aliasesOf(o, name ?? def.name);
     if (isUnread(aliases)) return aliases;
@@ -89,7 +90,7 @@ const remove: WriteDef = {
     if (isUnread(place)) return place;
     const w = o.draft.w;
     const def = own(w.ctx.world.places, place.id);
-    if (!def) return refusedAs(o, { code: "gone", reason: `no place ${place.id}` }, "place", "place");
+    if (!def) return refusedAs(o, { code: "gone", reason: say("why_no_place_place", { place: place.id }) }, "place", "place");
     const from = w.events.length;
     if (madeOf(def) !== null) {
       const out = placeOp(w.ctx, { do: "remove", place: place.id }, { by: o.call.agent.definition, salt: o.draft.seed(o.n) });

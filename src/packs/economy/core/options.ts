@@ -45,11 +45,11 @@ function exerciseEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const qty = numOf(e.data.qty);
       const units = numOf(e.data.units);
       const cash = e.data.cash;
-      if (own(ctx.state.entities, option)?.kind !== "holding" || own(ctx.state.entities, into)?.kind !== "holding") return reject("missing_holding", "an exercise names its contracts and the holding of their underlying");
-      if (!(qty > 0) || !(units > 0) || typeof cash !== "number" || !Number.isSafeInteger(cash) || cash < 0) return reject("bad_event", "an exercise is a number of contracts, their units and the strike's cash");
-      if (qtyOf(lotsOf(ctx, option)) + QTY_EPSILON < qty) return reject("declined", `${labelOf(ctx, option)} holds fewer than ${qty} contracts`);
-      if (e.data.right === "put" && qtyOf(lotsOf(ctx, into)) + QTY_EPSILON < units) return reject("declined", `${labelOf(ctx, into)} holds fewer than ${unitsText(units)} units to deliver`);
-      return e.data.right === "call" || e.data.right === "put" ? null : reject("bad_event", "an exercise is of a call or a put");
+      if (own(ctx.state.entities, option)?.kind !== "holding" || own(ctx.state.entities, into)?.kind !== "holding") return reject("missing_holding", say("why_an_exercise_names_its_contracts_and_the"));
+      if (!(qty > 0) || !(units > 0) || typeof cash !== "number" || !Number.isSafeInteger(cash) || cash < 0) return reject("bad_event", say("why_an_exercise_is_a_number_of_contracts"));
+      if (qtyOf(lotsOf(ctx, option)) + QTY_EPSILON < qty) return reject("declined", say("why_option_holds_fewer_than_qty_contracts", { option: labelOf(ctx, option), qty: qty }));
+      if (e.data.right === "put" && qtyOf(lotsOf(ctx, into)) + QTY_EPSILON < units) return reject("declined", say("why_into_holds_fewer_than_units_units_to", { into: labelOf(ctx, into), units: unitsText(units) }));
+      return e.data.right === "call" || e.data.right === "put" ? null : reject("bad_event", say("why_an_exercise_is_of_a_call_or"));
     },
     apply(e, state, ctx) {
       const option = str(e, "option");
@@ -83,18 +83,18 @@ export interface Exercise {
 /** Exercising contracts before expiry (`economy.exercise`): the strike's cash, the units, the lots; one unit. */
 export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): LedgerEvent[] | Rejection {
   const h = own(ctx.state.entities, x.holding);
-  if (!h || h.kind !== "holding") return reject("missing_holding", `no holding ${labelOf(ctx, x.holding)}`);
+  if (!h || h.kind !== "holding") return reject("missing_holding", say("why_no_holding_holding", { holding: labelOf(ctx, x.holding) }));
   const a = assetOf(ctx, strOf(h.fields.asset));
-  if (!a?.option) return reject("not_option", `${h.name} isn't an option`);
-  if (!api.feature(ctx, x.party, "options")) return reject("level", "options aren't followed at this money level");
-  if (!canTrade(api, ctx, x.party, x.holding)) return reject("not_yours", `${h.name} isn't ${labelOf(ctx, x.party)}'s to exercise`);
-  if (ctx.state.clock >= a.option.expiry) return reject("expired", `${a.label} has expired`);
+  if (!a?.option) return reject("not_option", say("why_name_isnt_an_option", { name: h.name }));
+  if (!api.feature(ctx, x.party, "options")) return reject("level", say("why_options_arent_followed_at_this_money_level"));
+  if (!canTrade(api, ctx, x.party, x.holding)) return reject("not_yours", say("why_name_isnt_party_s_to_exercise", { name: h.name, party: labelOf(ctx, x.party) }));
+  if (ctx.state.clock >= a.option.expiry) return reject("expired", say("why_asset_has_expired", { asset: a.label }));
   const held = qtyOf(lotsOf(ctx, x.holding));
   const qty = typeof x.qty === "number" && x.qty > 0 ? Math.floor(x.qty + 1e-9) : Math.floor(held + 1e-9);
-  if (qty < 1) return reject("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
-  if (qty > held + QTY_EPSILON) return reject("declined", `${h.name} holds ${unitsText(held)} contracts, not ${qty}`);
+  if (qty < 1) return reject("nothing_held", say("why_party_holds_no_whole_contract_of_label", { party: labelOf(ctx, x.party), label: a.label }));
+  if (qty > held + QTY_EPSILON) return reject("declined", say("why_name_holds_held_contracts_not_qty", { name: h.name, held: unitsText(held), qty: qty }));
   const under = assetOf(ctx, a.option.underlying);
-  if (!under) return reject("missing_asset", `no asset ${a.option.underlying}`);
+  if (!under) return reject("missing_asset", say("why_no_asset_underlying", { underlying: a.option.underlying }));
   const units = qty * a.option.multiplier;
   const strike = Math.round(units * a.option.strike);
   const account = accountOfHolding(ctx.state, x.holding);
@@ -103,7 +103,7 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
 
   if (a.option.settlement === "cash") {
     const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under), a.option.strike));
-    if (cash <= 0) return reject("out_of_money", `${a.label} is worth nothing to exercise`);
+    if (cash <= 0) return reject("out_of_money", say("why_label_is_worth_nothing_to_exercise", { label: a.label }));
     // Where the cash goes: an account the holder may pay into, and a retirement account's stays in it.
     const to = x.to !== undefined ? proceedsAccount(api, ctx, x.party, x.holding, x.to) : undefined;
     if (to !== undefined && typeof to !== "string") return to;
@@ -119,10 +119,10 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
   if (a.option.right === "call") {
     // A listed company's units sell only from its float (§27.10 Listing): a call brings no more than the market has left, and never the company its own.
     const listed = listedFloat(ctx, under.id);
-    if (listed && x.party === listed.business) return reject("own_stock", `${labelOf(ctx, x.party)} takes its own units back by buying back shares or going off the market`);
-    if (listed && units > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? `Only ${unitsText(listed.left)} units of ${under.symbol ?? under.label} are for sale on the market` : `No units of ${under.symbol ?? under.label} are for sale on the market`);
+    if (listed && x.party === listed.business) return reject("own_stock", say("why_party_takes_its_own_units_back_by", { party: labelOf(ctx, x.party) }));
+    if (listed && units > listed.left + QTY_EPSILON) return reject("declined", listed.left > 0 ? say("why_only_left_units_of_asset_are_for", { left: unitsText(listed.left), asset: under.symbol ?? under.label }) : say("why_no_units_of_asset_are_for_sale", { asset: under.symbol ?? under.label }));
     const from = x.from ?? account ?? api.depositAccount(ctx, x.party);
-    if (!from) return reject("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
+    if (!from) return reject("no_account", say("why_party_has_no_account_to_pay_the", { party: labelOf(ctx, x.party) }));
     // Cash in the contract's own account pays within it; any other account is paid from (the foundation's `mayUse`).
     const unusable = from === account ? null : api.mayUse(ctx, x.party, from, "from");
     if (unusable) return unusable;
@@ -136,7 +136,7 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
       { account: market, amount: strike },
     ];
   } else {
-    if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units) return reject("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under.symbol ?? under.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
+    if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units) return reject("nothing_to_deliver", say("why_exercising_qty_label_delivers_units_under_which", { qty: qty, label: a.label, units: unitsText(units), under: under.symbol ?? under.label, party: labelOf(ctx, x.party), account: account ? labelOf(ctx, account) : undefined }));
     const to = proceedsAccount(api, ctx, x.party, x.holding, x.to);
     if (typeof to !== "string") return to;
     lines = [
@@ -154,7 +154,7 @@ function settle(api: FinanceApi, ctx: ReadContext, holding: EntityId, a: Asset, 
   const source = marketOf(api, a.option?.underlying ?? a.id);
   const account = accountOfHolding(ctx.state, holding);
   const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cash, source, to ?? null, account);
-  if (paid.paid <= 0) return reject("no_account", `nobody holding ${a.label} has an account the cash could go to`);
+  if (paid.paid <= 0) return reject("no_account", say("why_nobody_holding_label_has_an_account_the", { label: a.label }));
   const posted = api.post(ctx, paid.lines, { memo: label, kind: "sale", category: "investment" });
   if (isRejection(posted)) return posted;
   return [...posted, lotsChange(ctx.state, holding, -qty, paid.paid, "settle", label)];

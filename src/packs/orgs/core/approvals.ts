@@ -175,11 +175,11 @@ function povIn(ctx: Pick<ReadContext, "world">, r: Pick<ApprovalRequest, "by" | 
  */
 export function askApproval(ctx: ReadContext, ask: { org: EntityId; by: EntityId; power: OrgPower; cents?: number; account?: EntityId; target?: EntityId; text: string; why: string }): LedgerEvent[] | Rejection {
   const what = (ctx as Partial<EffectContext>).effect;
-  if (!what) return refuse("not_allowed", `${ask.why}, and it can't be put up for approval from here`);
+  if (!what) return refuse("not_allowed", say("why_why_and_it_cant_be_put_up", { why: ask.why }));
   const approvers = approversOf(ctx, ask.org, ask);
-  if (approvers.length === 0) return refuse("not_allowed", `${ask.why}, and no one above you may approve it`);
+  if (approvers.length === 0) return refuse("not_allowed", say("why_why_and_no_one_above_you_may", { why: ask.why }));
   const all = requestsOf(ctx.state, ask.org);
-  if (all.filter((r) => requestState(ctx, r) === "asked").length >= ASKS_KEPT.open) return refuse("too_many", `${labelOf(ctx, ask.org)} has ${ASKS_KEPT.open} requests waiting already`);
+  if (all.filter((r) => requestState(ctx, r) === "asked").length >= ASKS_KEPT.open) return refuse("too_many", say("why_org_has_open_requests_waiting_already", { org: labelOf(ctx, ask.org), open: ASKS_KEPT.open }));
   const at = ctx.state.clock;
   const id = `r_${hashParts("orgs.ask", ask.org, ask.by, ask.text, String(at), String(all.length)).slice(0, 10)}`;
   const r: ApprovalRequest = {
@@ -216,7 +216,7 @@ export function askApproval(ctx: ReadContext, ask: { org: EntityId; by: EntityId
 export function answerEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
   const org = strOf(a.org);
   const r = requestsOf(ctx.state, org).find((x) => x.id === strOf(a.request));
-  if (!r) return refuse("missing_request", `${labelOf(ctx, org)} has no request ${strOf(a.request)}`);
+  if (!r) return refuse("missing_request", say("why_org_has_no_request_request", { org: labelOf(ctx, org), request: strOf(a.request) }));
   const state = requestState(ctx, r);
   const by = strOf(a.by);
   const who = by !== "" ? by : strOf(a.approver);
@@ -231,17 +231,17 @@ export function answerEvents(ctx: EffectContext, a: Args): LedgerEvent[] | Rejec
   // Answered after it closed: kept beside what was decided, which stands; nothing is carried out.
   if (state !== "asked") {
     const closing = answer === "approve" ? "approved" : answer === "deny" ? "denied" : answer === "withdraw" ? "withdrawn" : null;
-    return closing === null ? refuse("bad_args", "A request is approved, denied or withdrawn") : [end(closing)];
+    return closing === null ? refuse("bad_args", say("why_a_request_is_approved_denied_or_withdrawn")) : [end(closing)];
   }
   if (answer === "withdraw") {
-    if (who !== "" && who !== r.by) return refuse("not_allowed", `Only ${labelOf(ctx, r.by)} may withdraw it`);
+    if (who !== "" && who !== r.by) return refuse("not_allowed", say("why_only_m_may_withdraw_it", { m: labelOf(ctx, r.by) }));
     return [end("withdrawn"), orgLog(ctx, org, `${labelOf(ctx, r.by)} withdrew the request: ${r.text}`, { by: r.by, names: [r.by, ...named], power: r.power })];
   }
-  if (answer !== "approve" && answer !== "deny") return refuse("bad_args", "A request is approved, denied or withdrawn");
-  if (who !== "" && !approversOf(ctx, org, r).includes(who)) return refuse("not_allowed", `${labelOf(ctx, who)} may not ${answer} it: ${notApprover(ctx, org, r, who)}`);
+  if (answer !== "approve" && answer !== "deny") return refuse("bad_args", say("why_a_request_is_approved_denied_or_withdrawn"));
+  if (who !== "" && !approversOf(ctx, org, r).includes(who)) return refuse("not_allowed", say("why_who_may_not_answer_it_who2", { who: labelOf(ctx, who), answer: answer, who2: notApprover(ctx, org, r, who) }));
   if (answer === "deny") return [end("denied"), orgLog(ctx, org, `${who !== "" ? labelOf(ctx, who) : "The GM"} denied ${labelOf(ctx, r.by)}'s request: ${r.text}${why !== "" ? `: ${why}` : ""}`, { ...(who !== "" ? { by: who } : {}), names: [r.by, who, ...named].filter((x) => x !== ""), power: r.power })];
   const def = ctx.registry.effects.get(r.what.type);
-  if (!def) return refuse("unknown_effect", `this world can't carry out ${r.what.type}`);
+  if (!def) return refuse("unknown_effect", say("why_this_world_cant_carry_out_type", { type: r.what.type }));
   const carried = def.resolve({ ...r.what.args }, { ...ctx, rng: ctx.rng.fork(`approve:${r.id}`), params: {}, effect: { type: r.what.type, args: { ...r.what.args } }, carried: { org, approval: r.id, ...(who !== "" ? { by: who } : {}), ...(r.cents !== undefined ? { cents: r.cents } : {}) } });
   if (!Array.isArray(carried)) return carried;
   return [...carried, end("approved")];
@@ -280,8 +280,8 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_ASK,
     validate: (e, ctx) => {
       const r = requestIn(e.data.request);
-      if (str(e, "org") === "" || !r) return refuse("bad_event", "a request needs its organization, power, words and act");
-      return requestsOf(ctx.state, str(e, "org")).some((x) => x.id === r.id) ? refuse("bad_event", `request ${r.id} is on record already`) : null;
+      if (str(e, "org") === "" || !r) return refuse("bad_event", say("why_a_request_needs_its_organization_power_words"));
+      return requestsOf(ctx.state, str(e, "org")).some((x) => x.id === r.id) ? refuse("bad_event", say("why_request_id_is_on_record_already", { id: r.id })) : null;
     },
     apply: (e, state) => {
       const org = str(e, "org");
@@ -299,8 +299,8 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
     type: ORGS_ANSWER,
     validate: (e, ctx) => {
       const r = requestsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));
-      if (!r) return refuse("bad_event", "no such request");
-      return ["approved", "denied", "withdrawn"].includes(str(e, "status")) ? null : refuse("bad_event", "a request is approved, denied or withdrawn");
+      if (!r) return refuse("bad_event", say("why_no_such_request"));
+      return ["approved", "denied", "withdrawn"].includes(str(e, "status")) ? null : refuse("bad_event", say("why_a_request_is_approved_denied_or_withdrawn_2"));
     },
     advise: (e, ctx) => {
       const r = requestsOf(ctx.state, str(e, "org")).find((x) => x.id === str(e, "id"));

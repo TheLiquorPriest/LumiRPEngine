@@ -57,6 +57,7 @@ import { counterpartOf, linkEvents } from "./relations";
 import { householdOf, isThing, mayFixThing, restOf, whoseOf } from "./things";
 import { claimsOf } from "./realism";
 import { canSeeEntity, canSeePlace } from "./visibility";
+import { say } from "./lines";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */
@@ -193,25 +194,25 @@ function thingMove(w: Working, thing: EntityId, to: Spot, opts: EditOptions, rng
 function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions, rng: Rng): Rejection | null {
   const pov = w.world.pov;
   const spotProblem = (spot: Spot): Rejection | null => {
-    if ("place" in spot) return canSeePlace(reg, w.world, w.state, pov, spot.place) ? null : reject("missing_place", "no such place");
+    if ("place" in spot) return canSeePlace(reg, w.world, w.state, pov, spot.place) ? null : reject("missing_place", say("why_no_such_place"));
     if (spot.in === pov) return null;
     const holder = own(w.state.entities, spot.in);
-    if (!holder || isGone(w.state, spot.in) || !canSeeEntity(reg, w.world, w.state, pov, spot.in)) return reject("missing_entity", "no such holder");
-    if (kindIs(reg, w.world, holder.kind, "person")) return reject("not_yours", `${holder.name} isn't yours to put things on`);
-    return accessFor(w.ctx, pov, spot.in).use !== null ? null : reject("not_yours", `${holder.name} isn't yours to use`);
+    if (!holder || isGone(w.state, spot.in) || !canSeeEntity(reg, w.world, w.state, pov, spot.in)) return reject("missing_entity", say("why_no_such_holder"));
+    if (kindIs(reg, w.world, holder.kind, "person")) return reject("not_yours", say("why_name_isnt_yours_to_put_things_on", { name: holder.name }));
+    return accessFor(w.ctx, pov, spot.in).use !== null ? null : reject("not_yours", say("why_name_isnt_yours_to_use", { name: holder.name }));
   };
   // Someone the player character knows, for a grant; someone here with them, for a handover.
   const partyProblem = (who: EntityId, here: boolean): Rejection | null => {
     const e = own(w.state.entities, who);
-    if (who === pov || !e || isGone(w.state, who) || !canSeeEntity(reg, w.world, w.state, pov, who)) return reject("missing_entity", "no such person");
+    if (who === pov || !e || isGone(w.state, who) || !canSeeEntity(reg, w.world, w.state, pov, who)) return reject("missing_entity", say("why_no_such_person"));
     if (!here) return null;
-    if (!kindIs(reg, w.world, e.kind, "person")) return reject("not_a_person", `${e.name} can't be handed anything`);
+    if (!kindIs(reg, w.world, e.kind, "person")) return reject("not_a_person", say("why_to_cant_be_handed_anything", { to: e.name }));
     const at = placeOfEntity(w.state, pov);
-    return at !== null && placeOfEntity(w.state, who) === at ? null : reject("not_here", `${e.name} isn't here to take it`);
+    return at !== null && placeOfEntity(w.state, who) === at ? null : reject("not_here", say("why_name_isnt_here_to_take_it", { name: e.name }));
   };
   const options: ItemOpOptions = { ...itemOptions({ ...opts, gm: false, confirmed: false }, rng), room: true };
   if (change.do === "make") {
-    if (claimsOf(w.world, w.state).mode === "hold") return reject("no_claims", "This chat holds you to the world: nothing is added that the story hasn't brought in.");
+    if (claimsOf(w.world, w.state).mode === "hold") return reject("no_claims", say("why_this_chat_holds_you_to_the_world"));
     const where = spotProblem(change.at);
     if (where) return where;
     const typed = change.type !== undefined || change.class !== undefined;
@@ -219,8 +220,8 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
     return "code" in made ? made : null;
   }
   const item = change.item;
-  if (!isThing(w.ctx, item) || isGone(w.state, item) || !canSeeEntity(reg, w.world, w.state, pov, item)) return reject("missing_entity", `no thing ${labelOf(w, item)}`);
-  if (!mayFixThing(w.ctx, pov, item)) return reject("not_yours", `${labelOf(w, item)} isn't yours to change`);
+  if (!isThing(w.ctx, item) || isGone(w.state, item) || !canSeeEntity(reg, w.world, w.state, pov, item)) return reject("missing_entity", say("why_no_thing_thing", { thing: labelOf(w, item) }));
+  if (!mayFixThing(w.ctx, pov, item)) return reject("not_yours", say("why_item_isnt_yours_to_change", { item: labelOf(w, item) }));
   const applied = (() => {
     switch (change.do) {
       case "move":
@@ -231,18 +232,18 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
         return applyItemOp(w, { do: "wear", item, who: pov, ...(change.off === true ? { off: true } : {}), ...(change.slot !== undefined ? { slot: change.slot } : {}) }, options);
       case "size":
         if (change.size !== null) return applyItemOp(w, { do: "label", item, size: change.size }, options);
-        return own(w.state.entities, item)?.fields.size === undefined ? reject("no_change", "nothing sets its size") : (w.apply({ type: "set", entity: item, field: "size", value: null }) ?? {});
+        return own(w.state.entities, item)?.fields.size === undefined ? reject("no_change", say("why_nothing_sets_its_size")) : (w.apply({ type: "set", entity: item, field: "size", value: null }) ?? {});
       case "own": {
         // Theirs, their household's or nobody's (§10.3): anyone else's is a Give, a Lend or a sale, told to the story.
         const owner = change.owner === "self" ? pov : change.owner === "household" ? householdOf(w.ctx, pov) : null;
-        if (change.owner === "household" && owner === null) return reject("no_household", "You aren't in a household");
+        if (change.owner === "household" && owner === null) return reject("no_household", say("why_you_arent_in_a_household"));
         return applyItemOp(w, { do: "own", item, owner, why: "" }, options);
       }
       case "grant":
-        if (change.until !== undefined && !(change.until > w.state.clock)) return reject("bad_until", "an end is after now");
+        if (change.until !== undefined && !(change.until > w.state.clock)) return reject("bad_until", say("why_an_end_is_after_now"));
         return partyProblem(change.who, false) ?? applyItemOp(w, { do: "grant", item, who: change.who, basis: change.until !== undefined ? "loan" : "assign", by: pov, ...(change.until !== undefined ? { until: change.until } : {}) }, options);
       case "revoke":
-        if (!own(w.state.entities, change.who)?.relations.some((r) => r.type === "uses" && r.to === item)) return reject("no_change", `${labelOf(w, change.who)} has no leave to use it`);
+        if (!own(w.state.entities, change.who)?.relations.some((r) => r.type === "uses" && r.to === item)) return reject("no_change", say("why_who_has_no_leave_to_use_it", { who: labelOf(w, change.who) }));
         return partyProblem(change.who, false) ?? applyItemOp(w, { do: "revoke", item, who: change.who }, options);
       case "label":
         return applyItemOp(w, { do: "label", item, name: change.name }, options);
@@ -251,15 +252,15 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
       case "away": {
         // Back where it is kept (`restOf`, as Put away takes it): a place or a holder they can see, or on its owner, who is them or someone here.
         const rest = restOf(w.ctx, item).rest;
-        if (rest === null) return reject("no_rest", `${labelOf(w, item)} has nowhere it's kept`);
+        if (rest === null) return reject("no_rest", say("why_item_has_nowhere_its_kept", { item: labelOf(w, item) }));
         if (rest !== "owner") return spotProblem(rest) ?? applyItemOp(w, { do: "move", item, to: rest, why: "" }, options);
         const owner = whoseOf(w.ctx, item).owners[0];
         if (owner === pov) return applyItemOp(w, { do: "move", item, to: { in: pov }, why: "" }, options);
-        if (owner === undefined) return reject("no_rest", `${labelOf(w, item)} has nowhere it's kept`);
+        if (owner === undefined) return reject("no_rest", say("why_item_has_nowhere_its_kept", { item: labelOf(w, item) }));
         return partyProblem(owner, true) ?? applyItemOp(w, { do: "hand", item, to: owner, basis: "return", why: "" }, options);
       }
       case "hand":
-        if (change.basis === "loan" && change.until === undefined) return reject("bad_until", "a loan needs its end");
+        if (change.basis === "loan" && change.until === undefined) return reject("bad_until", say("why_a_loan_needs_its_end"));
         return partyProblem(change.to, true) ?? applyItemOp(w, { do: "hand", item, to: change.to, basis: change.basis, why: "", ...(change.until !== undefined ? { until: change.until } : {}) }, options);
     }
   })();
@@ -269,14 +270,14 @@ function fixItemOp(reg: Registry, w: Working, change: ItemFix, opts: EditOptions
 /** The checks every field write shares: a field the kind may hold, never derived, locked only for the GM. */
 function writable(reg: Registry, w: Working, entity: EntityId, field: FieldId, opts: EditOptions): { def: FieldDef | undefined; label: string } | Rejection {
   const e = own(w.state.entities, entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-  if (!safeKey(field)) return reject("bad_field", "not a field name");
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
+  if (!safeKey(field)) return reject("bad_field", say("why_not_a_field_name"));
   // Remove and Restore own `gone`, so the GM view's lists and every filter agree on it.
-  if (field === GONE_FIELD) return reject("reserved", "use Remove or Restore");
+  if (field === GONE_FIELD) return reject("reserved", say("why_use_remove_or_restore"));
   const def = fieldDef(reg, w.world, e.kind, field);
   const label = def?.label ?? field.replace(/_/g, " ");
-  if (def?.derived !== undefined) return reject("derived", `${label} is worked out from other values`);
-  if (def?.locked && !opts.gm) return reject("locked", `${label} is locked`);
+  if (def?.derived !== undefined) return reject("derived", say("why_label_is_worked_out_from_other_values", { label: label }));
+  if (def?.locked && !opts.gm) return reject("locked", say("why_label_is_locked", { label: label }));
   return { def, label };
 }
 
@@ -309,9 +310,9 @@ function setField(reg: Registry, w: Working, entity: EntityId, field: FieldId, v
 function addField(reg: Registry, w: Working, entity: EntityId, field: FieldId, delta: number, opts: EditOptions, rng: Rng): Rejection | null {
   const ok = writable(reg, w, entity, field, opts);
   if ("code" in ok) return ok;
-  if (!Number.isFinite(delta) || delta === 0) return reject("bad_delta", "add a number other than 0");
-  if (ok.def && ok.def.type !== "number" && ok.def.type !== "money" && ok.def.type !== "duration") return reject("not_numeric", `${ok.label} isn't a number`);
-  if (ok.def?.type === "money" && !Number.isSafeInteger(delta)) return reject("bad_delta", `${ok.label} moves in whole amounts`);
+  if (!Number.isFinite(delta) || delta === 0) return reject("bad_delta", say("why_add_a_number_other_than_0"));
+  if (ok.def && ok.def.type !== "number" && ok.def.type !== "money" && ok.def.type !== "duration") return reject("not_numeric", say("why_ok_isnt_a_number", { ok: ok.label }));
+  if (ok.def?.type === "money" && !Number.isSafeInteger(delta)) return reject("bad_delta", say("why_ok_moves_in_whole_amounts", { ok: ok.label }));
   return run(reg, w, [{ type: "add", args: { entity, field, delta } }], rng);
 }
 
@@ -322,11 +323,11 @@ function addField(reg: Registry, w: Working, entity: EntityId, field: FieldId, d
  */
 function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, opts: EditOptions, rng: Rng): Rejection | null {
   const def = own(w.world.relations, op.rel) ?? reg.relations.get(op.rel);
-  if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel)) return { code: "unknown_relation", reason: `no relation type ${op.rel.replace(/_/g, " ")}`, choices: relationTypes(reg, w.world), said: op.rel };
+  if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel)) return { code: "unknown_relation", reason: say("why_no_relation_type_g", { g: op.rel.replace(/_/g, " ") }), choices: relationTypes(reg, w.world), said: op.rel };
   const from = own(w.state.entities, op.from);
   const to = own(w.state.entities, op.to);
-  if (!from || !to) return reject("missing_entity", `no entity ${labelOf(w, from ? op.to : op.from)}`);
-  if (op.from === op.to && op.rel === "in" && isThing(w.ctx, op.from)) return reject("self", `${from.name} can't be inside itself`);
+  if (!from || !to) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, from ? op.to : op.from) }));
+  if (op.from === op.to && op.rel === "in" && isThing(w.ctx, op.from)) return reject("self", say("why_name_cant_be_inside_itself", { name: from.name }));
   // A thing linked `in` something is a thing moved into it.
   if (op.rel === "in" && isThing(w.ctx, op.from)) return thingMove(w, op.from, { in: op.to }, opts, rng);
   for (const [key, value] of Object.entries(op.fields ?? {})) {
@@ -334,7 +335,7 @@ function linkOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "link" }>, 
     const problem = !safeKey(key) ? "isn't a field name" : fdef ? shapeProblem(reg, w, fdef.type, fdef, value) : null;
     if (problem) return reject("bad_value", `${fdef?.label ?? key.replace(/_/g, " ")} ${problem}`);
   }
-  if (op.until !== undefined && !Number.isFinite(op.until)) return reject("bad_until", "an end time is a time");
+  if (op.until !== undefined && !Number.isFinite(op.until)) return reject("bad_until", say("why_an_end_time_is_a_time"));
   const link = { rel: op.rel, from: op.from, to: op.to, ...(op.fields && Object.keys(op.fields).length > 0 ? { fields: op.fields as JsonObject } : {}), ...(op.until !== undefined ? { until: Math.round(op.until) } : {}) };
   const made = linkEvents(reg, w.world, w.state, link);
   if (!Array.isArray(made)) {
@@ -402,30 +403,30 @@ export function editFindings(reg: Registry, w: Working, op: EditOp): EditFinding
 /** Into a container (`in`), never inside itself; or out of it (`into: null`) to where the container stands. */
 function putOp(reg: Registry, w: Working, entity: EntityId, into: EntityId | null, opts: EditOptions, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
   if (isThing(w.ctx, entity)) {
     if (into !== null) return thingMove(w, entity, { in: into }, opts, rng);
     const place = placeOfEntity(w.state, entity);
-    if (!e.relations.some((r) => r.type === "in") || !place) return reject("not_inside", `${e.name} isn't inside anything`);
+    if (!e.relations.some((r) => r.type === "in") || !place) return reject("not_inside", say("why_name_isnt_inside_anything", { name: e.name }));
     return thingMove(w, entity, { place }, opts, rng);
   }
   const holders = e.relations.filter((r) => r.type === "in");
   const specs: EffectSpec[] = holders.filter((r) => r.to !== into).map((r) => ({ type: "unlink", args: { rel: "in", from: entity, to: r.to } }));
   if (into === null) {
-    if (holders.length === 0) return reject("not_inside", `${e.name} isn't inside anything`);
+    if (holders.length === 0) return reject("not_inside", say("why_name_isnt_inside_anything", { name: e.name }));
     const place = placeOfEntity(w.state, entity);
     if (place) specs.push({ type: "set", args: { entity, field: "place", value: place } });
     return run(reg, w, specs, rng);
   }
   const container = own(w.state.entities, into);
-  if (!container) return reject("missing_entity", `no entity ${labelOf(w, into)}`);
+  if (!container) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, into) }));
   // Walking up from the container must never reach the entity: nothing goes inside itself.
   let cur: EntityId | undefined = into;
   for (let guard = 0; cur && guard < 32; guard++) {
-    if (cur === entity) return reject("cycle", `${e.name} can't go inside ${container.name}`);
+    if (cur === entity) return reject("cycle", say("why_name_cant_go_inside_in", { name: e.name, in: container.name }));
     cur = own(w.state.entities, cur)?.relations.find((r) => r.type === "in")?.to;
   }
-  if (holders.some((r) => r.to === into)) return reject("already_inside", `${e.name} is already in ${container.name}`);
+  if (holders.some((r) => r.to === into)) return reject("already_inside", say("why_name_is_already_in_name2", { name: e.name, name2: container.name }));
   // Only what holds things holds them, and only what can go inside something goes (DESIGN §7): no truck in a wallet, no phone in a bill.
   const cannot = optionalQuery(w.ctx, "gear.hold_problem")?.(w.ctx, entity, into) ?? null;
   if (cannot) return reject("cant_hold", cannot);
@@ -437,8 +438,8 @@ function putOp(reg: Registry, w: Working, entity: EntityId, into: EntityId | nul
 
 /** Money into or out of an account against the correction account: the economy's posting with its history line, or a bare one. */
 function adjustOp(reg: Registry, w: Working, account: EntityId, cents: number, rng: Rng): Rejection | null {
-  if (!own(w.state.entities, account)) return reject("missing_entity", `no account ${labelOf(w, account)}`);
-  if (!Number.isSafeInteger(cents) || cents === 0) return reject("bad_amount", "an adjustment is a whole amount other than nothing");
+  if (!own(w.state.entities, account)) return reject("missing_entity", say("why_no_account_account", { account: labelOf(w, account) }));
+  if (!Number.isSafeInteger(cents) || cents === 0) return reject("bad_amount", say("why_an_adjustment_is_a_whole_amount_other"));
   const adjust = optionalService(w.ctx, "economy.adjust");
   if (adjust) {
     const events = adjust(w.ctx, account, cents);
@@ -457,10 +458,10 @@ function caughtUp(w: Working, entity: EntityId): Rejection | null {
 
 function entityOp(w: Working, op: Extract<EditOp, { op: "entity" }>): Rejection | null {
   const e = own(w.state.entities, op.entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, op.entity)}`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, op.entity) }));
   const data: JsonObject = { entity: op.entity };
   if (op.tier !== undefined) {
-    if (!tierOf(w.world, op.tier) && !isBand(op.tier)) return { code: "bad_tier", reason: `no tier ${op.tier}`, choices: [...new Set([...Object.keys(w.world.tiers).filter((t) => tierOf(w.world, t)), ...BANDS])], said: op.tier };
+    if (!tierOf(w.world, op.tier) && !isBand(op.tier)) return { code: "bad_tier", reason: say("why_no_tier_tier", { tier: op.tier }), choices: [...new Set([...Object.keys(w.world.tiers).filter((t) => tierOf(w.world, t)), ...BANDS])], said: op.tier };
     data.tier = op.tier;
   }
   // The player's own character may be made an agent: whether the persona has a mind of its own is the owner's setting (`editFindings` says so).
@@ -468,13 +469,13 @@ function entityOp(w: Working, op: Extract<EditOp, { op: "entity" }>): Rejection 
   if (op.levels !== undefined) {
     const levels: JsonObject = {};
     for (const [domain, level] of Object.entries(op.levels)) {
-      if (!DOMAINS.some((d) => d === domain)) return { code: "bad_domain", reason: `no domain ${domain}`, choices: [...DOMAINS], said: domain };
-      if (level !== null && level !== undefined && !(Number.isInteger(level) && level >= 0 && level <= 4)) return { code: "bad_level", reason: "a level is a whole number 0–4", choices: ["0", "1", "2", "3", "4"], said: String(level) };
+      if (!DOMAINS.some((d) => d === domain)) return { code: "bad_domain", reason: say("why_no_domain_domain", { domain: domain }), choices: [...DOMAINS], said: domain };
+      if (level !== null && level !== undefined && !(Number.isInteger(level) && level >= 0 && level <= 4)) return { code: "bad_level", reason: say("why_a_level_is_a_whole_number_0"), choices: ["0", "1", "2", "3", "4"], said: String(level) };
       levels[domain] = level ?? null;
     }
     data.levels = levels;
   }
-  if (Object.keys(data).length === 1) return reject("no_change", "nothing to change");
+  if (Object.keys(data).length === 1) return reject("no_change", say("why_nothing_to_change"));
   const wasAgent = e.agent;
   const rejection = applyAll(w, [{ type: ENGINE_EVENTS.entity, data }]);
   if (rejection) return rejection;
@@ -488,15 +489,15 @@ function entityOp(w: Working, op: Extract<EditOp, { op: "entity" }>): Rejection 
  */
 function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Rejection | null {
   const e = own(w.state.entities, op.entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, op.entity)}`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, op.entity) }));
   const classes = classOf(op.class);
-  if (!classes) return reject("bad_args", "a classification is facet → values");
+  if (!classes) return reject("bad_args", say("why_a_classification_is_facet_values"));
   // A facet or a value the world does not have is refused with the world's own; more values than a one-valued facet takes are recorded (`editFindings` says so).
   for (const [facet, values] of Object.entries(classes)) {
     const def = hasOwn(w.world.classifications, facet) ? w.world.classifications[facet] : undefined;
-    if (!def) return { code: "unknown_facet", reason: `${e.name} is classed under "${facet}", which isn't one of the world's classifications.`, choices: Object.keys(w.world.classifications), said: facet };
+    if (!def) return { code: "unknown_facet", reason: say("why_name_is_classed_under_facet_which_isnt", { name: e.name, facet: facet }), choices: Object.keys(w.world.classifications), said: facet };
     const unknown = values.find((v) => !hasOwn(def.values, v));
-    if (unknown !== undefined) return { code: "unknown_class", reason: `${e.name} is classed as "${unknown}", which isn't a value of ${def.label}.`, choices: Object.keys(def.values), said: unknown };
+    if (unknown !== undefined) return { code: "unknown_class", reason: say("why_name_is_classed_as_unknown_which_isnt", { name: e.name, unknown: unknown, def: def.label }), choices: Object.keys(def.values), said: unknown };
   }
   const problem = classProblems(w.world, classes, e.name).find((p) => p.code !== "single_class");
   if (problem) return reject(problem.code, problem.message);
@@ -504,7 +505,7 @@ function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Reject
   const sameAs = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
   const facets = new Set([...Object.keys(classes), ...Object.keys(w.world.classifications)]);
   const unchanged = [...facets].every((f) => sameAs(classValues(w.world, w.state, op.entity, f), classes[f] ?? [])) && sameAs(tagsOf(w.world, w.state, op.entity), tags);
-  if (unchanged) return reject("no_change", "nothing to change");
+  if (unchanged) return reject("no_change", say("why_nothing_to_change"));
   // What it read as before, kept in the event so its player line can say only what changed, the
   // same on every replay: which facets players see is read when the line is worded.
   const was = Object.fromEntries([...facets].flatMap((f) => {
@@ -519,15 +520,15 @@ function lifeOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "life" }>, 
   const before = w.events.length;
   const rejection = run(reg, w, [{ type: "life", args: { entity: op.entity, ...(op.to !== undefined ? { to: op.to } : {}), ...(op.tell !== undefined ? { tell: op.tell } : {}) } }], rng);
   if (rejection) return rejection;
-  return w.events.length === before ? reject("no_change", "nothing to change") : null;
+  return w.events.length === before ? reject("no_change", say("why_nothing_to_change")) : null;
 }
 
 function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>, rng: Rng): Rejection | null {
   const name = op.name.trim();
-  if (name === "" || name.length > 80) return reject("bad_name", "a name is 1–80 characters");
-  if (op.id !== undefined && (!safeKey(op.id) || own(w.state.entities, op.id))) return reject("bad_id", `${op.id} is taken or isn't an id`);
-  if (op.tier !== undefined && !tierOf(w.world, op.tier)) return reject("bad_tier", `no tier ${op.tier}`);
-  if (op.place !== undefined && !own(w.world.places, op.place)) return reject("missing_place", `no place ${labelOf(w, op.place)}`);
+  if (name === "" || name.length > 80) return reject("bad_name", say("why_a_name_is_1_80_characters"));
+  if (op.id !== undefined && (!safeKey(op.id) || own(w.state.entities, op.id))) return reject("bad_id", say("why_id_is_taken_or_isnt_an_id", { id: op.id }));
+  if (op.tier !== undefined && !tierOf(w.world, op.tier)) return reject("bad_tier", say("why_no_tier_tier", { tier: op.tier }));
+  if (op.place !== undefined && !own(w.world.places, op.place)) return reject("missing_place", say("why_no_place_place", { place: labelOf(w, op.place) }));
   const args: Record<string, JsonValue> = { kind: op.kind, name };
   if (op.id !== undefined) args.id = op.id;
   if (op.tier !== undefined) args.tier = op.tier;
@@ -544,9 +545,9 @@ function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>
  */
 function despawnOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
   // The player's own character may be removed: that is a story event (`editFindings` says so).
-  if (e.fields[GONE_FIELD] === true) return reject("gone", `${e.name} is already removed`);
+  if (e.fields[GONE_FIELD] === true) return reject("gone", say("why_name_is_already_removed", { name: e.name }));
   // Where it is, read before its container lets go of it: taken out, it keeps that place, so Restore brings it back there.
   const where = placeOfEntity(w.state, entity);
   const contained = typeof e.fields.place !== "string" && e.relations.some((r) => r.type === "in");
@@ -563,8 +564,8 @@ function despawnOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejec
 
 function restoreOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
-  if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
-  if (e.fields[GONE_FIELD] !== true) return reject("not_gone", `${e.name} isn't removed`);
+  if (!e) return reject("missing_entity", say("why_no_entity_who", { who: labelOf(w, entity) }));
+  if (e.fields[GONE_FIELD] !== true) return reject("not_gone", say("why_name_isnt_removed", { name: e.name }));
   const rejection = run(reg, w, [{ type: "set", args: { entity, field: GONE_FIELD, value: false } }], rng);
   if (rejection) return rejection;
   // An agent comes back caught up: the slots it was away for aren't replayed.
@@ -577,11 +578,11 @@ function restoreOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejec
  */
 function effectOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "effect" }>, opts: EditOptions, rng: Rng): Rejection | null {
   const def = reg.effects.get(op.effect);
-  if (!opts.gm || def?.gm !== true) return reject("not_editable", `${op.effect.replace(/[._]/g, " ")} isn't something the GM view can run`);
+  if (!opts.gm || def?.gm !== true) return reject("not_editable", say("why_g_isnt_something_the_gm_view_can", { g: op.effect.replace(/[._]/g, " ") }));
   const before = w.events.length;
   const rejection = run(reg, w, [{ type: op.effect, args: op.args }], rng);
   if (rejection) return rejection;
-  return w.events.length === before ? reject("no_change", "nothing to change") : null;
+  return w.events.length === before ? reject("no_change", say("why_nothing_to_change")) : null;
 }
 
 /**
@@ -593,25 +594,25 @@ function workspaceOp(w: Working, op: WorkspaceOp): Rejection | null {
   const files = workspaceOf(w.state);
   switch (op.op) {
     case "ws_write":
-      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash)) return reject("bad_op", "a workspace file's path is names joined by /, and its body a stored text");
-      if (own(files, op.path) === op.hash) return reject("no_change", "the file already holds that text");
+      if (!isWorkspacePath(op.path) || !isBlobHash(op.hash)) return reject("bad_op", say("why_a_workspace_files_path_is_names_joined_2"));
+      if (own(files, op.path) === op.hash) return reject("no_change", say("why_the_file_already_holds_that_text"));
       return w.apply(wsWrite(op.path, op.hash));
     case "ws_delete":
       // The event's own check refuses a file that isn't there (`missing_file`).
       return w.apply(wsDelete(op.path));
     case "ws_move": {
       const hash = own(files, op.from);
-      if (hash === undefined) return reject("no_file", `no workspace file ${op.from}`);
-      if (!isWorkspacePath(op.to)) return reject("bad_op", "a workspace file's path is names joined by /");
-      if (op.to === op.from) return reject("no_change", "the file is already there");
-      if (own(files, op.to) !== undefined) return reject("file_exists", `there is a workspace file ${op.to} already`);
+      if (hash === undefined) return reject("no_file", say("why_no_workspace_file_path", { path: op.from }));
+      if (!isWorkspacePath(op.to)) return reject("bad_op", say("why_a_workspace_files_path_is_names_joined"));
+      if (op.to === op.from) return reject("no_change", say("why_the_file_is_already_there"));
+      if (own(files, op.to) !== undefined) return reject("file_exists", say("why_there_is_a_workspace_file_to_already", { to: op.to }));
       const events = [wsWrite(op.to, hash), wsDelete(op.from)];
       if (own(workspacePins(w.state), op.from)) events.push(wsPin(op.to, true));
       return applyAll(w, events);
     }
     case "ws_pin":
-      if (own(files, op.path) === undefined) return reject("no_file", `no workspace file ${op.path}`);
-      if ((own(workspacePins(w.state), op.path) === true) === op.pinned) return reject("no_change", op.pinned ? "the file is pinned already" : "the file isn't pinned");
+      if (own(files, op.path) === undefined) return reject("no_file", say("why_no_workspace_file_path", { path: op.path }));
+      if ((own(workspacePins(w.state), op.path) === true) === op.pinned) return reject("no_change", op.pinned ? say("why_the_file_is_pinned_already") : say("why_the_file_isnt_pinned"));
       return w.apply(wsPin(op.path, op.pinned));
   }
 }
@@ -662,7 +663,7 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "mind_knowledge": {
       // A character's mind, and what anyone knows, is the minds pack's (DESIGN §24.9, §24.11): it words the control as its events.
       const edit = optionalService(w.ctx, "minds.edit");
-      if (!edit) return reject("no_minds", "this world has no character minds");
+      if (!edit) return reject("no_minds", say("why_this_world_has_no_character_minds"));
       const out = edit(w.ctx, op, opts.mindLengths);
       return Array.isArray(out) ? applyAll(w, out) : out;
     }
@@ -671,7 +672,7 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "schedule_override": {
       // A character's routine and schedules in a chat are Cast life's (DESIGN §8): it words the control as its events.
       const edit = optionalService(w.ctx, "castlife.edit");
-      if (!edit) return reject("no_castlife", "this world has no Cast life");
+      if (!edit) return reject("no_castlife", say("why_this_world_has_no_cast_life"));
       const out = edit(w.ctx, op);
       return Array.isArray(out) ? applyAll(w, out) : out;
     }
@@ -683,8 +684,8 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "item": {
       // Taking a thing out of the world is the GM's Remove, as for anyone.
       if (op.change.do === "remove") {
-        if (!opts.gm) return reject("gm_only", "removing a thing from the world is the GM's");
-        if (!isThing(w.ctx, op.change.item)) return reject("not_a_thing", `${labelOf(w, op.change.item)} isn't a thing`);
+        if (!opts.gm) return reject("gm_only", say("why_removing_a_thing_from_the_world_is"));
+        if (!isThing(w.ctx, op.change.item)) return reject("not_a_thing", say("why_id_isnt_a_thing", { id: labelOf(w, op.change.item) }));
         return despawnOp(reg, w, op.change.item, rng);
       }
       const out = applyItemOp(w, op.change, itemOptions(opts, rng));
@@ -693,22 +694,22 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
     case "place": {
       // A place made in play is the space pack's (ITEMS-SPEC §6.2): it words the change as its events.
       const change = optionalService(w.ctx, "space.place_op");
-      if (!change) return reject("no_places", "this world can't make places in play");
+      if (!change) return reject("no_places", say("why_this_world_cant_make_places_in_play"));
       const out = change(w.ctx, op.change, { by: opts.by ?? (opts.gm ? "gm" : "player"), salt: rng.seed });
       return "code" in out ? out : applyAll(w, out.events);
     }
     case "org": {
       // An organization's change (ORG-SPEC §7.2) is the orgs pack's: it compiles to the packs' own
       // effects with no actor, the GM's, so no power is asked, and its History line, run as one unit.
-      if (!opts.gm) return reject("gm_only", "an organization's change is the GM's");
+      if (!opts.gm) return reject("gm_only", say("why_an_organizations_change_is_the_gms"));
       const compile = optionalService(w.ctx, "orgs.op");
-      if (!compile) return reject("no_orgs", "this world has no organizations");
+      if (!compile) return reject("no_orgs", say("why_this_world_has_no_organizations"));
       const specs = compile(w.ctx, op.change);
       if (!Array.isArray(specs)) return specs;
       const before = w.events.length;
       const rejection = run(reg, w, specs, rng);
       if (rejection) return rejection;
-      return w.events.length === before ? reject("no_change", "nothing to change") : null;
+      return w.events.length === before ? reject("no_change", say("why_nothing_to_change")) : null;
     }
     case "ws_write":
     case "ws_delete":
@@ -719,7 +720,7 @@ function applyOp(reg: Registry, w: Working, op: FixOp, opts: EditOptions, rng: R
       // The clock set as its ✎ fix sets it (DESIGN §9.2, §12), from where the operations before it leave the story.
       const fixed = clockFix(reg, w.world, w.state, op.time, opts.runSeed);
       if ("code" in fixed) return fixed;
-      if (fixed.events.length === 0) return reject("no_change", "the clock already reads that time");
+      if (fixed.events.length === 0) return reject("no_change", say("why_the_clock_already_reads_that_time"));
       return applyAll(w, fixed.events);
     }
   }

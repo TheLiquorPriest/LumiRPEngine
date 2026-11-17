@@ -26,6 +26,7 @@ import type { FinanceApi, FinanceRegistry } from "./module";
 import { asUnit, depositAccount, isParty, posting, notice } from "./pay";
 import { openingEvent } from "./process";
 import type { Run } from "./run";
+import { say } from "../../../engine/lines";
 
 /** The note a loan between parties is owed to (its `note` field, naming an account of class `note`), or null for a bank's loan. */
 export function noteOf(ctx: ReadContext, loan: EntityId): EntityId | null {
@@ -84,23 +85,23 @@ function lendNow(api: FinanceApi, ctx: ReadContext, a: Record<string, JsonValue>
   const lender = strOf(a.who) || by || ctx.world.pov;
   const borrower = strOf(a.to);
   const cents = Math.round(numOf(a.cents));
-  if (!own(ctx.state.entities, lender) || api.partyKind(ctx, lender) === null) return reject("missing_entity", "there's no one to lend it");
-  if (!own(ctx.state.entities, borrower) || api.partyKind(ctx, borrower) === null) return reject("missing_entity", "there's no one to borrow it");
-  if (borrower === lender) return reject("bad_party", `${labelOf(ctx, lender)} can't lend to itself`);
-  if (!(cents > 0)) return reject("bad_amount", "a loan needs an amount");
-  for (const party of [lender, borrower]) if (ctx.levelOf(party, "money") < 3) return reject("level", `${labelOf(ctx, party)}'s money isn't followed closely enough for loans between parties (Money 3)`);
+  if (!own(ctx.state.entities, lender) || api.partyKind(ctx, lender) === null) return reject("missing_entity", say("why_theres_no_one_to_lend_it"));
+  if (!own(ctx.state.entities, borrower) || api.partyKind(ctx, borrower) === null) return reject("missing_entity", say("why_theres_no_one_to_borrow_it"));
+  if (borrower === lender) return reject("bad_party", say("why_lender_cant_lend_to_itself", { lender: labelOf(ctx, lender) }));
+  if (!(cents > 0)) return reject("bad_amount", say("why_a_loan_needs_an_amount"));
+  for (const party of [lender, borrower]) if (ctx.levelOf(party, "money") < 3) return reject("level", say("why_party_s_money_isnt_followed_closely_enough", { party: labelOf(ctx, party) }));
   const apr = typeof a.apr === "number" && a.apr >= 0 ? a.apr : 0;
   const months = typeof a.months === "number" && a.months >= 1 ? Math.round(a.months) : 12;
   const named = strOf(a.from);
   const sources = lendingSources(api, ctx, lender);
-  if (named !== "" && !sources.includes(named)) return reject("bad_account", `${labelOf(ctx, lender)} can't lend from ${labelOf(ctx, named)}`);
+  if (named !== "" && !sources.includes(named)) return reject("bad_account", say("why_lender_cant_lend_from_named", { lender: labelOf(ctx, lender), named: labelOf(ctx, named) }));
   const source = named !== "" ? named : sources.find((s) => availableOf(ctx, s) >= cents);
-  if (!source) return reject("insufficient_funds", `${labelOf(ctx, lender)} has no account with ${moneyWords(ctx, cents)} to lend`);
-  if (availableOf(ctx, source) < cents) return reject("insufficient_funds", `${labelOf(ctx, source)} has less than ${moneyWords(ctx, cents)}`);
+  if (!source) return reject("insufficient_funds", say("why_lender_has_no_account_with_cents_to", { lender: labelOf(ctx, lender), cents: moneyWords(ctx, cents) }));
+  if (availableOf(ctx, source) < cents) return reject("insufficient_funds", say("why_source_has_less_than_cents", { source: labelOf(ctx, source), cents: moneyWords(ctx, cents) }));
   const into = strOf(a.into) || api.depositAccount(ctx, borrower) || "";
-  if (into === "" || api.mayUse(ctx, borrower, into, "into") !== null || api.traitsOf(ctx, into)?.pays !== true || api.traitsOf(ctx, into)?.liability) return reject("no_account", `${labelOf(ctx, borrower)} has no bank account to take the loan into`);
+  if (into === "" || api.mayUse(ctx, borrower, into, "into") !== null || api.traitsOf(ctx, into)?.pays !== true || api.traitsOf(ctx, into)?.liability) return reject("no_account", say("why_borrower_has_no_bank_account_to_take", { borrower: labelOf(ctx, borrower) }));
   const borrows = by !== "" && by !== borrower && own(ctx.state.entities, by) !== undefined;
-  if (borrows && orgTypeOf(ctx, borrower) === null) return reject("not_allowed", `${labelOf(ctx, borrower)} has to agree to borrow it: ask them`);
+  if (borrows && orgTypeOf(ctx, borrower) === null) return reject("not_allowed", say("why_borrower_has_to_agree_to_borrow_it", { borrower: labelOf(ctx, borrower) }));
   const d = dateAt(calendarOf(ctx.world), ctx.state.clock);
   const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
   const dueDay = typeof a.due_day === "number" && a.due_day >= 1 ? Math.min(28, Math.round(a.due_day)) : Math.min(28, d.day);

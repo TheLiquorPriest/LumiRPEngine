@@ -23,13 +23,14 @@ import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, r
 import { gainsIn, incomeIn } from "./records";
 import { businessIds, registerStakes, setStakeRoute, stakeWorth, valuationOf } from "./stakes";
 import { actAs, asParam } from "./acting";
+import { say } from "../../../engine/lines";
 
 /** Where a property's rent lands (`economy.route` with a property): an account of the owner's, or back to the owners' accounts. */
 function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, property: EntityId, to: string): LedgerEvent[] | Rejection {
-  if (own(ctx.state.entities, property)?.kind !== "property") return reject("missing_property", `no property ${labelOf(ctx, property)}`);
-  if (!api.ownersOf(ctx.state, property).some((o) => o.party === party && (o.role === "owner" || o.role === "joint" || o.role === "trustee" || o.role === "custodian"))) return reject("not_yours", `${labelOf(ctx, property)} isn't ${labelOf(ctx, party)}'s to manage`);
+  if (own(ctx.state.entities, property)?.kind !== "property") return reject("missing_property", say("why_no_property_property", { property: labelOf(ctx, property) }));
+  if (!api.ownersOf(ctx.state, property).some((o) => o.party === party && (o.role === "owner" || o.role === "joint" || o.role === "trustee" || o.role === "custodian"))) return reject("not_yours", say("why_holding_isnt_party_s_to_manage", { holding: labelOf(ctx, property), party: labelOf(ctx, party) }));
   const route = to.trim();
-  if (route === "reinvest") return reject("bad_route", "rent goes to an account");
+  if (route === "reinvest") return reject("bad_route", say("why_rent_goes_to_an_account"));
   if (route !== "") {
     const unusable = api.mayUse(ctx, party, route, "into");
     if (unusable) return unusable;
@@ -151,7 +152,7 @@ export function registerAssets(r: FinanceRegistry): void {
         if (strOf(a.holding) !== "") return setRoute(r.api, ctx, party, strOf(a.holding), to);
         if (strOf(a.property) !== "") return setRentRoute(r.api, ctx, party, strOf(a.property), to);
         if (strOf(a.business) !== "") return setStakeRoute(r.api, ctx, party, strOf(a.business), to);
-        return reject("bad_route", "say which holding, property or business");
+        return reject("bad_route", say("why_say_which_holding_property_or_business"));
       });
     },
   });

@@ -34,6 +34,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fightById, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
+import { say } from "../../../engine/lines";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;
@@ -68,16 +69,16 @@ function targetOf(action: ActionDef, params: JsonObject): EntityId | null {
 export function spendFor(ctx: ReadContext, actor: EntityId, action: Pick<ActionDef, "combat">): LedgerEvent[] | Rejection {
   if (!action.combat) return [];
   const rules = rulesOf(ctx.world);
-  if (!rules) return { code: "no_combat", reason: "this world has no combat" };
+  if (!rules) return { code: "no_combat", reason: say("why_this_world_has_no_combat") };
   const enc = encounterOf(ctx.state);
-  if (action.combat.start === true) return enc && !povLeft(ctx.state, ctx.world, enc) ? { code: "in_fight", reason: "a fight is already under way" } : [];
-  if (!enc) return { code: "no_fight", reason: "no fight is under way" };
+  if (action.combat.start === true) return enc && !povLeft(ctx.state, ctx.world, enc) ? { code: "in_fight", reason: say("why_a_fight_is_already_under_way") } : [];
+  if (!enc) return { code: "no_fight", reason: say("why_no_fight_is_under_way") };
   const you = actor === ctx.world.pov;
   const f = fighterOf(enc, actor);
-  if (!f) return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor)} isn't in this fight` };
-  if (!standing(ctx, enc, f)) return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
+  if (!f) return { code: "not_fighting", reason: you ? say("why_you_arent_in_this_fight") : say("why_actor_isnt_in_this_fight", { actor: labelOf(ctx, actor) }) };
+  if (!standing(ctx, enc, f)) return { code: "down", reason: you ? say("why_you_are_out_of_the_fight") : say("why_actor_is_out_of_the_fight", { actor: labelOf(ctx, actor) }) };
   const cost = costOf(action);
-  if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost)) return { code: "not_your_turn", reason: you ? "it isn't your turn" : `it isn't ${labelOf(ctx, actor)}'s turn` };
+  if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost)) return { code: "not_your_turn", reason: you ? say("why_it_isnt_your_turn") : say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, actor) }) };
   const short = Object.entries(cost).filter(([budget, n]) => (f.left[budget] ?? 0) < n).map(([budget]) => own(rules.economy, budget)?.label ?? budget);
   if (short.length > 0) return { code: "spent", reason: `no ${short.join(" or ")} left` };
   return Object.keys(cost).length > 0 ? [{ type: "combat.spend", data: { encounter: enc.id, who: actor, cost } }] : [];

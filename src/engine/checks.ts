@@ -24,6 +24,7 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { evalExpr, scopeEnv } from "./scope";
 import { own } from "./pack-kit";
+import { say } from "./lines";
 
 /** The outcome when no band covers a roll (lint flags gaps). */
 export const NO_BAND = "none";
@@ -152,14 +153,14 @@ export function readyCheck(reg: Registry, ctx: ReadContext, check: CheckDef, bin
     const vs = check.vs;
     if (vs) {
       const opponent = own(bindings, vs.who ?? "target");
-      if (opponent === undefined || !own(ctx.state.entities, opponent)) return { code: "no_opponent", reason: "there is no one to roll against" };
+      if (opponent === undefined || !own(ctx.state.entities, opponent)) return { code: "no_opponent", reason: say("why_there_is_no_one_to_roll_against") };
       inputs.opponent = opponent;
       const theirs = scopeEnv({ reg, ctx, bindings: { ...bindings, self: opponent }, vars });
       if (vs.passive !== undefined) inputs.dc = whole(evalExpr(vs.passive, theirs, 0));
       else {
         // The opponent rolls the named check, else this check's dice with `modifier`, else this very check.
         const other = vs.check !== undefined ? own(ctx.world.checks, vs.check) : vs.modifier === undefined ? check : undefined;
-        if (vs.check !== undefined && !other) return { code: "unknown_check", reason: `no check ${vs.check}` };
+        if (vs.check !== undefined && !other) return { code: "unknown_check", reason: say("why_no_check_check", { check: vs.check }) };
         const dice = other ? (withAdvantage(other.dice, Math.sign(whole(evalExpr(other.advantage ?? 0, theirs, 0)))) ?? other.dice) : check.dice;
         inputs.against = { dice, modifier: whole(evalExpr((other ? other.modifier : vs.modifier) ?? 0, theirs, 0)) };
       }

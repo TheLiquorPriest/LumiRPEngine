@@ -226,7 +226,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     // A worth the economy fixed for someone it keeps no accounts for. One with no band takes the fixed worth off (an Undo of the
     // first one), so the worth is read from the person's band again.
     type: FINANCE_EVENTS.anchor,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && (str(e, "band") === "" || (typeof e.data.typical === "number" && typeof e.data.base === "number")) ? null : reject("bad_event", "anchor needs entity, typical and base")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && (str(e, "band") === "" || (typeof e.data.typical === "number" && typeof e.data.base === "number")) ? null : reject("bad_event", say("why_anchor_needs_entity_typical_and_base"))),
     apply: (e, state) => {
       const anchors = sliceRecord(state, "economy", "anchors");
       if (str(e, "band") === "") delete anchors[str(e, "entity")];
@@ -273,7 +273,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     // Someone's payday, bill or decline note, kept for the GM view. It is secret, so it never becomes
     // a player line, and it isn't a signal, so it never stops or joins the POV's timelapse.
     type: FINANCE_EVENTS.note,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && str(e, "text") !== "" ? null : reject("bad_event", "a money note needs a party and its text")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && str(e, "text") !== "" ? null : reject("bad_event", say("why_a_money_note_needs_a_party_and"))),
     apply: (e, state) => {
       const notes = sliceRecord(state, "economy", "notes");
       notes[str(e, "entity")] = pushCapped(notes[str(e, "entity")], { at: typeof e.data.at === "number" ? e.data.at : state.clock, class: str(e, "class"), text: str(e, "text") }, NOTES_CAP);
@@ -283,7 +283,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A price multiplier (festival, storm, scarcity) by category and place, until a time or until replaced.
     type: FINANCE_EVENTS.modifier,
-    validate: (e) => (str(e, "id") !== "" && (e.data.mult === undefined || (typeof e.data.mult === "number" && e.data.mult > 0)) ? null : reject("bad_event", "a price modifier needs an id and a positive multiplier")),
+    validate: (e) => (str(e, "id") !== "" && (e.data.mult === undefined || (typeof e.data.mult === "number" && e.data.mult > 0)) ? null : reject("bad_event", say("why_a_price_modifier_needs_an_id_and"))),
     apply: (e, state) => {
       const mods = sliceRecord(state, "economy", "modifiers");
       if (typeof e.data.mult !== "number") delete mods[str(e, "id")];
@@ -294,7 +294,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A credit account's statement closes: the cycle's whole state, and its accrual starts again.
     type: FINANCE_EVENTS.statement,
-    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) ? null : reject("bad_event", "statements are for credit accounts")),
+    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) ? null : reject("bad_event", say("why_statements_are_for_credit_accounts"))),
     apply: (e, state) => {
       const account = str(e, "account");
       const at = typeof e.data.at === "number" ? e.data.at : state.clock;
@@ -315,7 +315,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A payment toward a credit account's statement, or, on a card without statements, toward what it owed when its period began.
     type: FINANCE_EVENTS.cardPaid,
-    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) ? null : reject("bad_event", "statement payments are for credit accounts")),
+    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) ? null : reject("bad_event", say("why_statement_payments_are_for_credit_accounts"))),
     apply: (e, state) => {
       const cycles = sliceRecord(state, "economy", "cycles");
       const account = str(e, "account");
@@ -329,7 +329,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A credit account moves to a delinquency stage, or back to current.
     type: FINANCE_EVENTS.delinquency,
-    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) && (DELINQUENCY_STAGES as readonly string[]).includes(str(e, "stage")) ? null : reject("bad_event", "a delinquency stage needs a credit account and a stage")),
+    validate: (e, ctx) => (isCreditAccount(ctx, str(e, "account")) && (DELINQUENCY_STAGES as readonly string[]).includes(str(e, "stage")) ? null : reject("bad_event", say("why_a_delinquency_stage_needs_a_credit_account"))),
     apply: (e, state) => {
       const cycles = sliceRecord(state, "economy", "cycles");
       const account = str(e, "account");
@@ -344,7 +344,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // What one occurrence of a flow did; carries the flow's whole run state after it.
     type: FINANCE_EVENTS.flowRun,
-    validate: (e) => (str(e, "flow") !== "" && typeof e.data.state === "object" ? null : reject("bad_event", "a flow run needs its flow and state")),
+    validate: (e) => (str(e, "flow") !== "" && typeof e.data.state === "object" ? null : reject("bad_event", say("why_a_flow_run_needs_its_flow_and"))),
     apply: (e, state) => {
       sliceRecord(state, "economy", "flows")[str(e, "flow")] = objOf(e.data.state);
     },
@@ -356,7 +356,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     type: FINANCE_EVENTS.flowRenamed,
     validate: (e, ctx) => {
       const name = str(e, "name");
-      return own(ctx.state.entities, str(e, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject("bad_event", "a rename needs a standing payment and a name of up to 80 characters");
+      return own(ctx.state.entities, str(e, "flow"))?.kind === "flow" && name.trim() !== "" && name.length <= 80 ? null : reject("bad_event", say("why_a_rename_needs_a_standing_payment_and"));
     },
     apply: (e, state) => {
       const flow = own(state.entities, str(e, "flow"));
@@ -372,11 +372,11 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     type: FINANCE_EVENTS.hold,
     validate: (e, ctx) => {
       const account = str(e, "account");
-      if (!own(ctx.state.entities, account) || str(e, "id") === "") return reject("bad_event", "a hold needs an account and an id");
+      if (!own(ctx.state.entities, account) || str(e, "id") === "") return reject("bad_event", say("why_a_hold_needs_an_account_and_an"));
       if (e.data.release === true) return null;
       const cents = numOf(e.data.cents);
-      if (!(cents > 0) || typeof e.data.until !== "number") return reject("bad_event", "a hold needs an amount and an end");
-      return e.data.kind === "authorization" && availableOf(ctx, account) < cents ? reject("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents, ctx.world.currency)}`) : null;
+      if (!(cents > 0) || typeof e.data.until !== "number") return reject("bad_event", say("why_a_hold_needs_an_amount_and_an"));
+      return e.data.kind === "authorization" && availableOf(ctx, account) < cents ? reject("declined", say("why_account_cant_cover_currency", { account: own(ctx.state.entities, account)?.name ?? account, currency: formatMoney(cents, ctx.world.currency) })) : null;
     },
     apply: (e, state) => {
       const holds = sliceRecord(state, "economy", "holds");
@@ -392,7 +392,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // An account's pending journal lines up to a time post.
     type: FINANCE_EVENTS.settle,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.upto === "number" ? null : reject("bad_event", "settling needs an account and a time")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.upto === "number" ? null : reject("bad_event", say("why_settling_needs_an_account_and_a_time"))),
     apply: (e, state) => {
       const journal = sliceRecord(state, "economy", "journal");
       const account = str(e, "account");
@@ -411,7 +411,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // Something enters a person's credit history.
     type: FINANCE_EVENTS.credit,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "person")) && str(e, "kind") !== "" ? null : reject("bad_event", "a credit entry needs a person and a kind")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "person")) && str(e, "kind") !== "" ? null : reject("bad_event", say("why_a_credit_entry_needs_a_person_and"))),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
       const person = str(e, "person");
@@ -425,7 +425,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A person's monthly score.
     type: FINANCE_EVENTS.score,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "person")) && typeof e.data.score === "number" ? null : reject("bad_event", "a score needs a person and a number")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "person")) && typeof e.data.score === "number" ? null : reject("bad_event", say("why_a_score_needs_a_person_and_a"))),
     apply: (e, state) => {
       const credit = sliceRecord(state, "economy", "credit");
       const person = str(e, "person");
@@ -438,7 +438,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A card's spending today: its new totals (an assignment, so a record keeps only the last).
     type: FINANCE_EVENTS.spend,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "card")) && typeof e.data.day === "number" ? null : reject("bad_event", "card spending needs a card and a day")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "card")) && typeof e.data.day === "number" ? null : reject("bad_event", say("why_card_spending_needs_a_card_and_a"))),
     apply: (e, state) => {
       sliceRecord(state, "economy", "spend")[str(e, "card")] = { day: numOf(e.data.day), purchase: numOf(e.data.purchase), atm: numOf(e.data.atm) };
     },
@@ -454,11 +454,11 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
       const opened = objOf(sliceOf(ctx.state, "economy").opened);
       const closing = e.data.close === true;
       for (const a of list) {
-        if (typeof a !== "string" || !own(ctx.state.entities, a)) return reject("bad_event", "only accounts open");
-        if (!closing && own(opened, a) === true) return reject("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
-        if (closing && own(opened, a) !== true) return reject("not_opened", `${own(ctx.state.entities, a)?.name ?? a} is not open`);
+        if (typeof a !== "string" || !own(ctx.state.entities, a)) return reject("bad_event", say("why_only_accounts_open"));
+        if (!closing && own(opened, a) === true) return reject("opened", say("why_name_is_already_open", { name: own(ctx.state.entities, a)?.name ?? a }));
+        if (closing && own(opened, a) !== true) return reject("not_opened", say("why_name_is_not_open", { name: own(ctx.state.entities, a)?.name ?? a }));
       }
-      return list.length > 0 ? null : reject("bad_event", "nothing to open");
+      return list.length > 0 ? null : reject("bad_event", say("why_nothing_to_open"));
     },
     apply: (e, state) => {
       const opened = sliceRecord(state, "economy", "opened");
@@ -472,7 +472,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     type: FINANCE_EVENTS.status,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account"))?.kind === "account" && (ACCOUNT_STATUSES as readonly string[]).includes(str(e, "status")) ? null : reject("bad_event", "a status needs an account and a status")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account"))?.kind === "account" && (ACCOUNT_STATUSES as readonly string[]).includes(str(e, "status")) ? null : reject("bad_event", say("why_a_status_needs_an_account_and_a"))),
     apply: (e, state) => {
       sliceRecord(state, "economy", "status")[str(e, "account")] = str(e, "status") as AccountStatus;
     },
@@ -482,7 +482,7 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // An interest period ends: the account's average daily balance starts again, and a card without statements keeps what it owed then.
     type: FINANCE_EVENTS.accrue,
-    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.at === "number" && (e.data.owed === undefined || (typeof e.data.owed === "number" && Number.isFinite(e.data.owed))) ? null : reject("bad_event", "an accrual needs an account and a time")),
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "account")) && typeof e.data.at === "number" && (e.data.owed === undefined || (typeof e.data.owed === "number" && Number.isFinite(e.data.owed))) ? null : reject("bad_event", say("why_an_accrual_needs_an_account_and_a"))),
     apply: (e, state) => {
       const at = numOf(e.data.at);
       sliceRecord(state, "economy", "adb")[str(e, "account")] = { from: at, at, sum: 0, spent: 0, ...(typeof e.data.owed === "number" ? { owed: e.data.owed } : {}) };

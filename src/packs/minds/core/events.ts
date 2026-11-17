@@ -96,7 +96,7 @@ function commitmentOf(v: MindCommitment): MindCommitment {
 }
 
 function person(ctx: ReadContext, data: JsonObject): Rejection | null {
-  return str(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
+  return str(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: say("why_a_minds_event_names_someone_who_isnt") };
 }
 
 /** A fidelity level as the GM's controls name it ("near" reads "Near"). */
@@ -122,7 +122,7 @@ const round: EventTypeDef<PackEvent> = {
   validate: (e, ctx) => {
     const levels = e.data.levels;
     const passedOk = levels === undefined || (isRecord(levels) && Object.entries(levels).every(([id, v]) => own(ctx.state.entities, id) !== undefined && isRecord(v) && isFidelity(v.level) && (v.place === null || str(v.place))));
-    return finite(e.data.at) && typeof e.data.on === "boolean" && passedOk ? null : bad("a minds round needs its clock, whether minds are on, and each passed mind's level and place");
+    return finite(e.data.at) && typeof e.data.on === "boolean" && passedOk ? null : bad(say("why_a_minds_round_needs_its_clock_whether"));
   },
   apply: (e, state) => {
     const s = writeSlice(state);
@@ -137,10 +137,10 @@ const round: EventTypeDef<PackEvent> = {
 
 function validMind(data: JsonObject): Rejection | null {
   const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
-  if (!finite(at) || !(place === null || str(place)) || !isFidelity(level) || (moment !== "turn" && moment !== "beat") || !str(reason)) return bad("a mind needs its clock, place, level, moment and reason");
+  if (!finite(at) || !(place === null || str(place)) || !isFidelity(level) || (moment !== "turn" && moment !== "beat") || !str(reason)) return bad(say("why_a_mind_needs_its_clock_place_level"));
   // Only a mind from an older chat carries plans (minds no longer make them); any it has must be well formed.
-  if (!str(monologue) || !str(depiction) || !str(intent) || !texts(reactions) || (plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))) return bad("a mind needs its monologue, depiction, intent and reactions, and any plans it carries well formed");
-  if (!(mood === null || str(mood)) || !(interrupt === null || (isRecord(interrupt) && str(interrupt.reason))) || typeof withheld !== "boolean") return bad("a mind's mood, interrupt or withheld flag is malformed");
+  if (!str(monologue) || !str(depiction) || !str(intent) || !texts(reactions) || (plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))) return bad(say("why_a_mind_needs_its_monologue_depiction_intent"));
+  if (!(mood === null || str(mood)) || !(interrupt === null || (isRecord(interrupt) && str(interrupt.reason))) || typeof withheld !== "boolean") return bad(say("why_a_minds_mood_interrupt_or_withheld_flag"));
   return null;
 }
 
@@ -183,9 +183,9 @@ const mind: EventTypeDef<PackEvent> = {
 
 function validMemory(data: JsonObject): Rejection | null {
   const { at, notes, commitments, resolved, plans, told, summary } = data;
-  if (!finite(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c))) return bad("a memory needs its clock, notes and commitments");
-  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released"))) return bad("a memory's resolved commitments are malformed");
-  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str(t.what)) || !(summary === null || str(summary))) return bad("a memory's plans, told or summary are malformed");
+  if (!finite(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c))) return bad(say("why_a_memory_needs_its_clock_notes_and"));
+  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released"))) return bad(say("why_a_memorys_resolved_commitments_are_malformed"));
+  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str(t.what)) || !(summary === null || str(summary))) return bad(say("why_a_memorys_plans_told_or_summary_are"));
   return null;
 }
 
@@ -228,7 +228,7 @@ const memory: EventTypeDef<PackEvent> = {
 /** `minds.presence`: who was in the POV's scene for a turn, and the notable things they saw happen in it. */
 const presence: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.presence,
-  validate: (e) => (finite(e.data.at) && (e.data.msg === null || str(e.data.msg)) && (e.data.place === null || str(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw")),
+  validate: (e) => (finite(e.data.at) && (e.data.msg === null || str(e.data.msg)) && (e.data.place === null || str(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad(say("why_a_presence_record_needs_its_clock_message"))),
   apply: (e, state) => {
     const d = e.data;
     const at = finite(d.at) ? d.at : state.clock;
@@ -256,10 +256,10 @@ const planStatus: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.plan,
   validate: (e, ctx) => {
     const d = e.data;
-    if (!str(d.plan) || typeof d.status !== "string" || !(PLAN_STATUSES as readonly string[]).includes(d.status) || !finite(d.at) || !(d.reason === null || str(d.reason))) return bad("a plan's status needs the plan, a status, its clock and a reason or null");
+    if (!str(d.plan) || typeof d.status !== "string" || !(PLAN_STATUSES as readonly string[]).includes(d.status) || !finite(d.at) || !(d.reason === null || str(d.reason))) return bad(say("why_a_plans_status_needs_the_plan_a"));
     const missing = person(ctx, d);
     if (missing) return missing;
-    return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
+    return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: say("why_that_plan_isnt_theirs_any_more") };
   },
   apply: (e, state) => {
     const d = e.data;
@@ -285,9 +285,9 @@ function editDef(type: PackEvent["type"], key: "plan" | "note" | "commitment", v
       const missing = person(ctx, d);
       if (missing) return missing;
       const id = d[key];
-      if (!str(id) || id === "") return bad(`a ${key} edit needs the ${key}'s id`);
-      if (d.value === null) return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
-      return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
+      if (!str(id) || id === "") return bad(say("why_a_key_edit_needs_the_key_s", { key: key }));
+      if (d.value === null) return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: say("why_that_key_isnt_theirs_any_more", { key: key }) };
+      return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(say("why_a_key_edits_value_is_malformed", { key: key }));
     },
     apply: (e, state, ctx) => {
       const d = e.data;
@@ -344,10 +344,10 @@ const commitmentStatus: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.commitment,
   validate: (e, ctx) => {
     const d = e.data;
-    if (!str(d.commitment) || typeof d.status !== "string" || !(COMMITMENT_STATUSES as readonly string[]).includes(d.status) || !finite(d.at) || !(d.reason === null || str(d.reason))) return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
+    if (!str(d.commitment) || typeof d.status !== "string" || !(COMMITMENT_STATUSES as readonly string[]).includes(d.status) || !finite(d.at) || !(d.reason === null || str(d.reason))) return bad(say("why_a_commitments_status_needs_the_commitment_a"));
     const missing = person(ctx, d);
     if (missing) return missing;
-    return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
+    return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: say("why_that_commitment_isnt_theirs_any_more") };
   },
   apply: (e, state) => {
     const d = e.data;
@@ -363,7 +363,7 @@ const commitmentStatus: EventTypeDef<PackEvent> = {
 /** `minds.consolidated`: notes folded into the summary, and gone. */
 const consolidated: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.consolidated,
-  validate: (e, ctx) => person(ctx, e.data) ?? (finite(e.data.at) && ids(e.data.notes) && str(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  validate: (e, ctx) => person(ctx, e.data) ?? (finite(e.data.at) && ids(e.data.notes) && str(e.data.summary) ? null : bad(say("why_a_consolidation_needs_its_clock_the_notes"))),
   apply: (e, state) => {
     const d = e.data;
     const c = writeCharacter(state, String(d.entity));
@@ -378,7 +378,7 @@ const consolidated: EventTypeDef<PackEvent> = {
 /** `minds.pin`: the GM's pin on a character's fidelity, or null to unpin. */
 const pin: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.pin,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad(say("why_a_pin_is_a_fidelity_level_or"))),
   apply: (e, state) => {
     writeCharacter(state, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
   },
@@ -405,7 +405,7 @@ function isIntent(v: JsonValue | undefined): v is MindIntent & JsonObject {
 /** `minds.intent`: the GM's intent for a character, set whole, or cleared with null. */
 const intent: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.intent,
-  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad("an intent is its text, its approach or both, or null to clear it")),
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.intent === null || isIntent(e.data.intent) ? null : bad(say("why_an_intent_is_its_text_its_approach"))),
   apply: (e, state) => {
     const c = writeCharacter(state, String(e.data.entity));
     const v = e.data.intent;
@@ -427,7 +427,7 @@ const intent: EventTypeDef<PackEvent> = {
 const skip: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.skip,
   validate: (e) =>
-    finite(e.data.from) && finite(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite(b.at) && str(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
+    finite(e.data.from) && finite(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite(b.at) && str(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad(say("why_a_skips_beats_need_their_span_and")),
   apply: () => undefined,
   describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("mind_skip", { beats: Array.isArray(e.data.beats) ? e.data.beats.length : 0 })),
 };
@@ -493,8 +493,8 @@ function learnedHolding(d: JsonObject): JsonObject {
 
 /** Who a knowledge event names: some people, each once, each in the world. */
 function knowers(ctx: ReadContext, v: JsonValue | undefined): EntityId[] | Rejection {
-  if (!someIds(v) || v.length === 0 || new Set(v).size !== v.length) return bad("a knowledge event names who, each once");
-  return v.every((id) => own(ctx.state.entities, id) !== undefined) ? v : { code: "missing_entity", reason: "a knowledge event names someone who isn't in the world" };
+  if (!someIds(v) || v.length === 0 || new Set(v).size !== v.length) return bad(say("why_a_knowledge_event_names_who_each_once"));
+  return v.every((id) => own(ctx.state.entities, id) !== undefined) ? v : { code: "missing_entity", reason: say("why_a_knowledge_event_names_someone_who_isnt") };
 }
 
 /** Whether `who` holds `fact` in the state. */
@@ -519,7 +519,7 @@ const BELIEF_WORDS: Record<Holding["belief"], string> = { true: "taken as true",
 /** `minds.fact`: a fact the minds can hold, recorded whole; one already held is replaced whole, and whoever holds it still does. */
 const knowledgeFact: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.fact,
-  validate: (e) => (isFact(e.data.fact) ? null : bad("a fact needs an id in its kind's form, a claim, what it's about and its truth, and any source and text hash well formed")),
+  validate: (e) => (isFact(e.data.fact) ? null : bad(say("why_a_fact_needs_an_id_in_its"))),
   apply: (e, state) => {
     const v = e.data.fact;
     if (isFact(v)) writeKnowledge(state).facts[v.id] = factOf(v);
@@ -557,13 +557,13 @@ const learning: EventTypeDef<PackEvent> = {
     const who = knowers(ctx, d.who);
     if (!Array.isArray(who)) return who;
     const k = readKnowledge(ctx.state);
-    if (!str(d.fact) || !own(k.facts, d.fact)) return { code: "missing_fact", reason: "a learning names a fact the minds don't hold" };
+    if (!str(d.fact) || !own(k.facts, d.fact)) return { code: "missing_fact", reason: say("why_a_learning_names_a_fact_the_minds") };
     const h = learnedHolding(d);
-    if (d.by === undefined || d.msg === undefined || !isHolding(h)) return bad("a learning needs how and by whom (one told names its teller), its evidence, its message and clock, the belief, a confidence from 0 to 1 and whom it's kept from, if anyone");
-    if (h.by !== null && (own(ctx.state.entities, h.by) === undefined || who.includes(h.by))) return { code: "missing_entity", reason: "a learning's teller is in the world, and isn't one who learns it" };
-    if (Array.isArray(h.keptFrom) && h.keptFrom.some((id) => own(ctx.state.entities, id) === undefined || who.includes(id))) return { code: "missing_entity", reason: "those a learning is kept from are in the world, and aren't those who learn it" };
-    if (h.evidence.some((ref) => ref === d.fact || (!isWitnessRef(ref) && own(k.facts, ref) === undefined))) return { code: "missing_fact", reason: "a learning rests on facts the minds hold, never on itself" };
-    if (d.witness !== undefined && (!isLearnedWitness(d.witness) || (h.how !== "witnessed" && h.how !== "told"))) return bad("a learning's witness line is what was seen or told, and where, for one witnessed or told");
+    if (d.by === undefined || d.msg === undefined || !isHolding(h)) return bad(say("why_a_learning_needs_how_and_by_whom"));
+    if (h.by !== null && (own(ctx.state.entities, h.by) === undefined || who.includes(h.by))) return { code: "missing_entity", reason: say("why_a_learnings_teller_is_in_the_world") };
+    if (Array.isArray(h.keptFrom) && h.keptFrom.some((id) => own(ctx.state.entities, id) === undefined || who.includes(id))) return { code: "missing_entity", reason: say("why_those_a_learning_is_kept_from_are") };
+    if (h.evidence.some((ref) => ref === d.fact || (!isWitnessRef(ref) && own(k.facts, ref) === undefined))) return { code: "missing_fact", reason: say("why_a_learning_rests_on_facts_the_minds") };
+    if (d.witness !== undefined && (!isLearnedWitness(d.witness) || (h.how !== "witnessed" && h.how !== "told"))) return bad(say("why_a_learnings_witness_line_is_what_was"));
     return null;
   },
   apply: (e, state) => {
@@ -598,9 +598,9 @@ const forgetting: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.forget,
   validate: (e, ctx) => {
     const d = e.data;
-    if (!someIds(d.who) || d.who.length === 0 || new Set(d.who).size !== d.who.length || !str(d.fact)) return bad("forgetting names the fact and who forgets it, each once");
+    if (!someIds(d.who) || d.who.length === 0 || new Set(d.who).size !== d.who.length || !str(d.fact)) return bad(say("why_forgetting_names_the_fact_and_who_forgets"));
     const fact = d.fact;
-    return d.who.every((who) => holds(ctx.state, who, fact)) ? null : { code: "missing_holding", reason: "someone it names doesn't hold that fact" };
+    return d.who.every((who) => holds(ctx.state, who, fact)) ? null : { code: "missing_holding", reason: say("why_someone_it_names_doesnt_hold_that_fact") };
   },
   apply: (e, state) => {
     const d = e.data;
@@ -622,9 +622,9 @@ const keeping: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.keep,
   validate: (e, ctx) => {
     const { who, fact, keptFrom } = e.data;
-    if (!str(who) || !str(fact) || !(keptFrom === "everyone" || someIds(keptFrom))) return bad("keeping names who keeps the fact, the fact, and whom it's kept from: some people or everyone");
-    if (!holds(ctx.state, who, fact)) return { code: "missing_holding", reason: "they don't hold that fact" };
-    return keptFrom !== "everyone" && keptFrom.some((id) => id === who || own(ctx.state.entities, id) === undefined) ? { code: "missing_entity", reason: "those a fact is kept from are in the world, and never the one who keeps it" } : null;
+    if (!str(who) || !str(fact) || !(keptFrom === "everyone" || someIds(keptFrom))) return bad(say("why_keeping_names_who_keeps_the_fact_the"));
+    if (!holds(ctx.state, who, fact)) return { code: "missing_holding", reason: say("why_they_dont_hold_that_fact") };
+    return keptFrom !== "everyone" && keptFrom.some((id) => id === who || own(ctx.state.entities, id) === undefined) ? { code: "missing_entity", reason: say("why_those_a_fact_is_kept_from_are") } : null;
   },
   apply: (e, state) => {
     const d = e.data;
@@ -653,8 +653,8 @@ function isTruth(v: JsonValue | undefined): v is FactTruth {
 const settling: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.settle,
   validate: (e, ctx) => {
-    if (!str(e.data.fact) || own(readKnowledge(ctx.state).facts, e.data.fact) === undefined) return { code: "missing_fact", reason: "that fact isn't one the minds hold" };
-    return isTruth(e.data.truth) ? null : bad("a fact's truth is true, false or open");
+    if (!str(e.data.fact) || own(readKnowledge(ctx.state).facts, e.data.fact) === undefined) return { code: "missing_fact", reason: say("why_that_fact_isnt_one_the_minds_hold") };
+    return isTruth(e.data.truth) ? null : bad(say("why_a_facts_truth_is_true_false_or"));
   },
   apply: (e, state) => {
     const d = e.data;
@@ -674,7 +674,7 @@ const settling: EventTypeDef<PackEvent> = {
  */
 const tracking: EventTypeDef<PackEvent> = {
   type: MINDS_EVENTS.knowledge,
-  validate: (e) => (typeof e.data.on === "boolean" && (e.data.threshold === undefined || isConfidence(e.data.threshold)) ? null : bad("knowledge tracking is on or off, and a threshold runs from 0 to 1")),
+  validate: (e) => (typeof e.data.on === "boolean" && (e.data.threshold === undefined || isConfidence(e.data.threshold)) ? null : bad(say("why_knowledge_tracking_is_on_or_off_and"))),
   apply: (e, state) => {
     if (typeof e.data.on !== "boolean") return;
     if (e.data.on) {

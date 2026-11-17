@@ -27,6 +27,7 @@ import { selectEntities } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { knownBySelector } from "./visibility";
 import { entitiesAt } from "./whereabouts";
+import { say } from "./lines";
 
 const PACK = "engine";
 const SLICE = "life";
@@ -185,11 +186,11 @@ function listeners(ctx: ReadContext, raw: JsonValue | undefined): EntityId[] | R
   if (raw === undefined || raw === null || raw === "") return [];
   if (isRecord(raw)) {
     const selector = knownBySelector(raw);
-    return selector ? selectEntities(ctx.registry, ctx.world, ctx.state, selector) : { code: "bad_args", reason: "tell names people by id or a selector" };
+    return selector ? selectEntities(ctx.registry, ctx.world, ctx.state, selector) : { code: "bad_args", reason: say("why_tell_names_people_by_id_or_a") };
   }
   const ids = (Array.isArray(raw) ? raw : [raw]).map((v) => (typeof v === "string" ? v : ""));
   const missing = ids.find((id) => !own(ctx.state.entities, id));
-  return missing === undefined ? ids : { code: "missing_entity", reason: `there's no ${labelOf(ctx, missing)} to tell` };
+  return missing === undefined ? ids : { code: "missing_entity", reason: say("why_theres_no_missing_to_tell", { missing: labelOf(ctx, missing) }) };
 }
 
 /**
@@ -201,15 +202,15 @@ function listeners(ctx: ReadContext, raw: JsonValue | undefined): EntityId[] | R
  */
 export function lifeEffect(args: Record<string, JsonValue>, ctx: ReadContext): LedgerEvent[] | Rejection {
   const subject = typeof args.entity === "string" ? args.entity : "";
-  if (!own(ctx.state.entities, subject)) return { code: "missing_entity", reason: `there's no ${labelOf(ctx, subject)}` };
+  if (!own(ctx.state.entities, subject)) return { code: "missing_entity", reason: say("why_theres_no_subject", { subject: labelOf(ctx, subject) }) };
   // Someone out of the world takes the state all the same: a state is the story's, not a rule's (`editFindings` says so).
   const given = args.to;
-  if (given !== undefined && given !== null && typeof given !== "string") return { code: "bad_args", reason: "a life state is named by its id" };
+  if (given !== undefined && given !== null && typeof given !== "string") return { code: "bad_args", reason: say("why_a_life_state_is_named_by_its") };
   const to = typeof given === "string" && given !== "" ? given : null;
-  if (to !== null && !isLifeState(ctx.world, to)) return { code: "bad_life", reason: `there's no life state ${to}`, choices: lifeStatesOf(ctx.world).map(([id]) => id), said: to };
+  if (to !== null && !isLifeState(ctx.world, to)) return { code: "bad_life", reason: say("why_theres_no_life_state_to", { to: to }), choices: lifeStatesOf(ctx.world).map(([id]) => id), said: to };
   const who = listeners(ctx, args.tell);
   if (!Array.isArray(who)) return who;
-  if (to === null && who.length === 0) return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };
+  if (to === null && who.length === 0) return { code: "bad_args", reason: say("why_a_life_change_needs_a_state_to") };
   const now = lifeOf(ctx.state, subject);
   const out: LedgerEvent[] = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to, witnesses: witnessesOf(ctx.registry, ctx.world, ctx.state, subject) } }] : [];
   const after = to ?? now;
@@ -238,11 +239,11 @@ export const lifeChannel: ProposalChannelDef = {
   validate(p, ctx) {
     const subject = typeof p.entity === "string" ? p.entity : "";
     const e = own(ctx.state.entities, subject);
-    if (!e || isGone(ctx.state, subject)) return { code: "missing_entity", reason: "there's no one by that name" };
-    if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_a_character", reason: "only people live and die" };
+    if (!e || isGone(ctx.state, subject)) return { code: "missing_entity", reason: say("why_theres_no_one_by_that_name") };
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_a_character", reason: say("why_only_people_live_and_die") };
     const to = stateNamed(ctx.world, p.state);
     if (to === null) return { code: "bad_life", reason: `there's no life state ${typeof p.state === "string" ? p.state : ""}`.trim() };
-    if (lifeKnownTo(ctx.state, subject, ctx.world.pov) === to) return { code: "already", reason: `${e.name} already ${lifeStateOf(ctx.world, to).reads}` };
+    if (lifeKnownTo(ctx.state, subject, ctx.world.pov) === to) return { code: "already", reason: say("why_name_already_reads", { name: e.name, reads: lifeStateOf(ctx.world, to).reads }) };
     return null;
   },
   toEffects(p, ctx) {

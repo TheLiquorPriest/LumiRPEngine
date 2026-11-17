@@ -21,6 +21,7 @@ import { refFor } from "./agenda";
 import { answerEvents, approversOf, orgsWithRequests, requestsOf, requestState } from "./approvals";
 import { castsFor, electorateOf, motionsOf, orgsWithMotions, povIn, rulesOf, voteEvents } from "./motions";
 import { entityNamed, personNamed, statesChange } from "./story";
+import { say } from "../../../engine/lines";
 
 /** The latest closed motions and answered requests the page shows. */
 const RECENT = 10;
@@ -262,27 +263,27 @@ function isRejection(v: unknown): v is Rejection {
 /** A reply's vote fact as the `orgs.vote` it lands as, the story's (no `by`, quoting the reply): the open motion it names by id, the voter among its voters by id or name; or why not. */
 function voteArgs(ctx: ReadContext, p: JsonObject): Record<string, JsonValue> | Rejection {
   const said = strOf(p.said).trim();
-  if (!statesChange(said)) return { code: "not_stated", reason: "the reply doesn't state it as done" };
+  if (!statesChange(said)) return { code: "not_stated", reason: say("why_the_reply_doesnt_state_it_as_done") };
   const id = strOf(p.motion).trim();
   const org = orgsWithMotions(ctx.state).find((o) => motionsOf(ctx.state, o).some((m) => m.id === id));
   const m = org === undefined ? undefined : motionsOf(ctx.state, org).find((x) => x.id === id);
-  if (org === undefined || !m) return { code: "missing_motion", reason: `no motion ${id || "named"}` };
+  if (org === undefined || !m) return { code: "missing_motion", reason: say("why_no_motion_id_named", { id: id }) };
   const who = entityNamed(ctx, strOf(p.who), (e) => m.electorate[e] !== undefined);
-  if (who === null) return { code: "not_voter", reason: `${strOf(p.who).trim() || "No one named"} has no vote on it` };
+  if (who === null) return { code: "not_voter", reason: say("why_who_no_one_named_has_no_vote", { who: strOf(p.who).trim() }) };
   return { org, motion: id, who, vote: strOf(p.vote).trim().toLowerCase(), said };
 }
 
 /** A reply's approval fact as the `orgs.answer` it lands as, the story's (`approver`, no `by`, quoting the reply): the request it names by id, who answers by id or name, and the answer; or why not. */
 function answerArgs(ctx: ReadContext, p: JsonObject): Record<string, JsonValue> | Rejection {
   const said = strOf(p.said).trim();
-  if (!statesChange(said)) return { code: "not_stated", reason: "the reply doesn't state it as done" };
+  if (!statesChange(said)) return { code: "not_stated", reason: say("why_the_reply_doesnt_state_it_as_done") };
   const id = strOf(p.request).trim();
   const org = orgsWithRequests(ctx.state).find((o) => requestsOf(ctx.state, o).some((r) => r.id === id));
-  if (org === undefined) return { code: "missing_request", reason: `no request ${id || "named"}` };
+  if (org === undefined) return { code: "missing_request", reason: say("why_no_request_id_named", { id: id }) };
   const who = personNamed(ctx, strOf(p.who));
-  if (who === null) return { code: "missing_entity", reason: `no one ${strOf(p.who).trim() || "named"} the player character knows` };
+  if (who === null) return { code: "missing_entity", reason: say("why_no_one_who_named_the_player_character", { who: strOf(p.who).trim() }) };
   const answer = strOf(p.answer).trim().toLowerCase();
-  if (!(ANSWERS as readonly string[]).includes(answer)) return { code: "bad_proposal", reason: `an answer is ${ANSWERS.join(", ")}` };
+  if (!(ANSWERS as readonly string[]).includes(answer)) return { code: "bad_proposal", reason: say("why_an_answer_is_join", { join: ANSWERS.join(", ") }) };
   return { org, request: id, answer, approver: who, said };
 }
 

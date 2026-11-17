@@ -494,7 +494,7 @@ function spawnVehicle(ctx: ReadContext, spec: VehicleSpawn): { entity: EntityId;
   const row = rowOf(ctx, "vehicles.classes", spec.class);
   if (!row) {
     const classes = Object.keys(ctx.tables.get("vehicles.classes")?.rows ?? {});
-    return { code: "unknown_class", reason: `no vehicle class ${spec.class}`, choices: classes, said: spec.class };
+    return { code: "unknown_class", reason: say("why_no_vehicle_class_class", { class: spec.class }), choices: classes, said: spec.class };
   }
   const d = spec.details ?? {};
   const name = spec.name?.trim() || strOf(row.name, spec.class);
@@ -631,19 +631,19 @@ export const vehiclesPack: PackDef = {
         const v = strOf(args.vehicle);
         const to = strOf(args.to);
         const e = own(ctx.state.entities, v);
-        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
-        if (e.fields.status === "broken") return reject("broken", `${e.name} has broken down`);
+        if (!e) return reject("missing_entity", say("why_no_vehicle_v", { v: labelOf(ctx, v) }));
+        if (e.fields.status === "broken") return reject("broken", say("why_name_has_broken_down", { name: e.name }));
         // The driver is the call's, else the vehicle's recorded one, else no one.
         const driver = driverOf(ctx, v, args.driver);
         // The trip starts where the driver is: they walk to the vehicle when it's parked elsewhere.
         // An effect tells what happened, so a driver too far to fetch it (a rule's "the tow truck
         // takes you there") still rides it from where it stands.
         // Driving a vehicle to where it already is would only take it away to park and walk back.
-        if (placeOfEntity(ctx.state, v) === to) return reject("already_there", `${e.name} is at ${labelOf(ctx, to)} already: walk there`);
+        if (placeOfEntity(ctx.state, v) === to) return reject("already_there", say("why_name_is_at_to_already_walk_there", { name: e.name, to: labelOf(ctx, to) }));
         const trip = driveTrip(ctx, v, driver, to);
-        if (!trip) return reject("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+        if (!trip) return reject("no_route", say("why_no_route_for_name_to_to", { name: e.name, to: labelOf(ctx, to) }));
         const leg = legOf(trip);
-        if (!fuelOk(ctx, v, leg)) return reject("no_fuel", `${e.name} doesn't have the fuel`);
+        if (!fuelOk(ctx, v, leg)) return reject("no_fuel", say("why_name_doesnt_have_the_fuel", { name: e.name }));
         const out: LedgerEvent[] = [...driveSums(ctx, v, leg), { type: "set", entity: v, field: "place", value: trip.park }];
         if (driver !== null) out.push({ type: "set", entity: v, field: "driver", value: driver });
         // The driver and the riders the call names arrive too, through the one move path. Whoever
@@ -663,7 +663,7 @@ export const vehiclesPack: PackDef = {
         const v = strOf(args.vehicle);
         const to = strOf(args.to);
         const e = own(ctx.state.entities, v);
-        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        if (!e) return reject("missing_entity", say("why_no_vehicle_v", { v: labelOf(ctx, v) }));
         const park = strOf(args.park) || to;
         const driver = driverOf(ctx, v, args.driver);
         const out: LedgerEvent[] = [{ type: "set", entity: v, field: "place", value: park }];
@@ -684,13 +684,13 @@ export const vehiclesPack: PackDef = {
         const v = strOf(args.vehicle);
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
-        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        if (!e) return reject("missing_entity", say("why_no_vehicle_v", { v: labelOf(ctx, v) }));
         if (ownerLevel(ctx, v) < 2) return [];
         // The fill is what the recorded tank lacks (or the amount asked, if less). With no level recorded it is the amount asked, else a full tank: only a full tank is then a level to record.
         const recorded = typeof e.fields.fuel_pct === "number" ? e.fields.fuel_pct : null;
         const asked = typeof args.pct === "number" ? args.pct : null;
         const wanted = recorded !== null ? Math.min(100 - recorded, asked ?? 100 - recorded) : Math.min(100, asked ?? 100);
-        if (wanted <= 0) return reject("full", `${e.name} is full`);
+        if (wanted <= 0) return reject("full", say("why_name_is_full", { name: e.name }));
         const product = fuelProduct(ctx, v);
         const qty = Math.round(((wanted / 100) * product.capacity) * 100) / 100;
         const cents = product.catalog !== null ? priceOf(ctx, product.catalog, qty) : Math.round(product.perUnit * qty);
@@ -707,7 +707,7 @@ export const vehiclesPack: PackDef = {
         const v = strOf(args.vehicle);
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
-        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        if (!e) return reject("missing_entity", say("why_no_vehicle_v", { v: labelOf(ctx, v) }));
         const repair = args.repair === true;
         // Marine and off-road engines have no catalog service row; the oil-change row stands in.
         const cents = repair ? priceOf(ctx, "tow_hookup", 1) + priceOf(ctx, "diagnostic_fee", 1) + priceOf(ctx, "brake_pads_axle", 1) : priceOf(ctx, "oil_change_synthetic", 1);
@@ -728,7 +728,7 @@ export const vehiclesPack: PackDef = {
       resolve(args, ctx) {
         const v = strOf(args.vehicle);
         const e = own(ctx.state.entities, v);
-        if (!e) return reject("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+        if (!e) return reject("missing_entity", say("why_no_vehicle_v", { v: labelOf(ctx, v) }));
         const out: LedgerEvent[] = [];
         const payer = strOf(args.payer);
         const cents = Math.round(numOf(args.cents));

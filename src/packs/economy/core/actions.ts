@@ -22,6 +22,7 @@ import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, payeeAccount, posting, notice } from "./pay";
+import { say } from "../../../engine/lines";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);
@@ -63,13 +64,13 @@ function debitCard(ctx: ReadContext, who: EntityId, account: EntityId): EntityId
  */
 export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw: number): LedgerEvent[] | Rejection {
   const cents = Math.round(raw);
-  if (!(cents > 0)) return reject("bad_amount", "the amount must be positive");
-  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash) return reject("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
-  if (statusOf(ctx.state, account) !== "open") return reject("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
+  if (!(cents > 0)) return reject("bad_amount", say("why_the_amount_must_be_positive"));
+  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash) return reject("not_owner", say("why_who_cant_draw_cash_from_account", { who: labelOf(ctx, who), account: labelOf(ctx, account) }));
+  if (statusOf(ctx.state, account) !== "open") return reject("declined", say("why_account_is_g", { account: labelOf(ctx, account), g: statusOf(ctx.state, account).replace(/_/g, " ") }));
   const wallet = cashAccount(ctx, who);
-  if (!wallet) return reject("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
+  if (!wallet) return reject("no_wallet", say("why_payer_has_nowhere_to_carry_cash", { payer: labelOf(ctx, who) }));
   const p = productOf(ctx, account);
-  if (!p) return reject("missing_account", "no such account");
+  if (!p) return reject("missing_account", say("why_no_such_account"));
   const t = traitsOf(ctx, account);
   const atTop = cashNeedsAMachine(ctx, who);
   // The fees post apart from the cash: a bank's own charges may overdraw, so they're exempt from the funds check, but the cash itself never is.
@@ -85,9 +86,9 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
     if (branch && branch.feature.bank === p.institution) where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
     else if (atm) {
       card = debitCard(ctx, who, account);
-      if (!card) return reject("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
-      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit) return reject("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
-      if (cardRoom(ctx, card, "atm") < cents) return reject("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
+      if (!card) return reject("no_card", cardsOn(ctx.state, account).length > 0 ? say("why_none_of_who_s_cards_on_account", { who: labelOf(ctx, who), account: labelOf(ctx, account) }) : say("why_account_has_no_card_for_a_cash", { account: labelOf(ctx, account) }));
+      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit) return reject("over_limit", say("why_the_machine_gives_at_most_limit_at", { limit: money(ctx, atm.feature.limit) }));
+      if (cardRoom(ctx, card, "atm") < cents) return reject("over_limit", say("why_card_has_atm_left_of_its_daily", { card: labelOf(ctx, card), atm: money(ctx, cardRoom(ctx, card, "atm")) }));
       where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
       if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
         const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
@@ -100,7 +101,7 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
         const s = spendOf(ctx.state, card, day);
         extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
       }
-    } else return reject("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
+    } else return reject("no_atm", say("why_theres_no_cash_machine_or_institution_bank", { institution: p.institution }));
   }
   const advance = cashAdvanceFee(ctx, account, cents);
   if (advance > 0) {
@@ -108,7 +109,7 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
     fees += advance;
   }
   const total = cents + fees;
-  if (availableOf(ctx, account) < total) return reject("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
+  if (availableOf(ctx, account) < total) return reject("declined", say("why_account_cant_cover_currency", { account: labelOf(ctx, account), currency: money(ctx, total) }));
   const charge = (lines: PostingLine[], memo: string, category: string): LedgerEvent[] => {
     const cents = lines.reduce((a, l) => a + l.amount, 0);
     return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
@@ -126,16 +127,16 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
  */
 export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw: number): LedgerEvent[] | Rejection {
   const cents = Math.round(raw);
-  if (!(cents > 0)) return reject("bad_amount", "the amount must be positive");
+  if (!(cents > 0)) return reject("bad_amount", say("why_the_amount_must_be_positive"));
   const unusable = mayUse(ctx, who, account, "into");
   if (unusable) return unusable;
   // Cash goes into a bank account; a wallet or a locked account doesn't take it at a machine or a branch.
-  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked) return reject("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+  if (traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked) return reject("not_owner", say("why_who_cant_pay_cash_into_account", { who: labelOf(ctx, who), account: labelOf(ctx, account) }));
   const wallet = cashAccount(ctx, who);
-  if (!wallet || availableOf(ctx, wallet) < cents) return reject("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
+  if (!wallet || availableOf(ctx, wallet) < cents) return reject("declined", say("why_who_doesnt_have_cents_in_cash", { who: labelOf(ctx, who), cents: money(ctx, cents) }));
   const p = productOf(ctx, account);
-  if (!p) return reject("missing_account", "no such account");
-  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account)) return reject("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
+  if (!p) return reject("missing_account", say("why_no_such_account"));
+  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account)) return reject("overpay", say("why_to_owes_only_currency", { to: labelOf(ctx, account), currency: money(ctx, Math.max(0, -balance(ctx.state, account))) }));
   let held = false;
   let where = "";
   if (cashNeedsAMachine(ctx, who)) {
@@ -145,7 +146,7 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
     else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
       where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
       held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
-    } else return reject("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
+    } else return reject("no_atm", say("why_theres_no_institution_bank_branch_or_deposit", { institution: p.institution }));
   }
   const lines: PostingLine[] = [
     { account: wallet, amount: -cents },
@@ -160,22 +161,22 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
 /** A card's new state, by its holder (frozen and unfrozen; reported lost, for good). */
 export function setCardState(ctx: ReadContext, who: EntityId, card: EntityId, state: string): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card") return reject("not_card", `${labelOf(ctx, card)} isn't a payment card`);
-  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (!(CARD_STATES as readonly string[]).includes(state)) return reject("bad_state", `a card can't be ${state}`);
+  if (e?.kind !== "card") return reject("not_card", say("why_card_isnt_a_payment_card", { card: labelOf(ctx, card) }));
+  if (strOf(e.fields.holder) !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", say("why_account_isnt_party_s", { account: e.name, party: labelOf(ctx, who) }));
+  if (!(CARD_STATES as readonly string[]).includes(state)) return reject("bad_state", say("why_a_card_cant_be_v", { v: state }));
   const now = strOf(e.fields.state, "active");
   if (now === state) return [];
-  if (now === "lost" || now === "cancelled") return reject("bad_state", `${e.name} is ${now}; replace it`);
+  if (now === "lost" || now === "cancelled") return reject("bad_state", say("why_name_is_now_replace_it", { name: e.name, now: now }));
   return [{ type: "set", entity: card, field: "state", value: state }];
 }
 
 /** A replacement for a card: a new card on the same account and in the same hands, its gear card in the holder's keeping, the old one cancelled. */
 export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, card);
-  if (e?.kind !== "card") return reject("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  if (e?.kind !== "card") return reject("not_card", say("why_card_isnt_a_payment_card", { card: labelOf(ctx, card) }));
   const holder = strOf(e.fields.holder);
-  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
-  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "") return reject("bad_state", `${e.name} was already replaced`);
+  if (holder !== who && !managesAccount(ctx, strOf(e.fields.account), who)) return reject("not_owner", say("why_account_isnt_party_s", { account: e.name, party: labelOf(ctx, who) }));
+  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "") return reject("bad_state", say("why_name_was_already_replaced", { name: e.name }));
   let n = 2;
   while (own(ctx.state.entities, `${card}_r${n}`)) n++;
   const id = `${card}_r${n}`;
@@ -216,21 +217,21 @@ function said(ctx: ReadContext, id: string): string {
  */
 export function autopaySourceProblem(ctx: ReadContext, who: EntityId, account: EntityId, from: EntityId): Rejection | null {
   const t = traitsOf(ctx, from);
-  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
+  if ((!canSpend(ctx.state, from, who) && !managesAccount(ctx, from, who)) || !t?.pays || t.liability) return reject("bad_account", say("why_who_cant_pay_from_from", { who: said(ctx, who), from: said(ctx, from) }));
   const debtors = debtorsOf(ctx.state, account);
-  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", `${said(ctx, account)} is paid from ${said(ctx, debtors[0] ?? who)}'s own money, not from ${said(ctx, from)}`);
+  if (!debtors.some((d) => canSpend(ctx.state, from, d) || rightsOf(ctx.state, from, d)?.worth === true)) return reject("bad_account", say("why_account_is_paid_from_who_s_own", { account: said(ctx, account), who: said(ctx, debtors[0] ?? who), from: said(ctx, from) }));
   return null;
 }
 
 /** A credit account's autopay, by whoever manages it: how much, and from where (`autopaySourceProblem`). */
 export function setAutopay(ctx: ReadContext, who: EntityId, account: EntityId, mode: string, from: string, cents: number): LedgerEvent[] | Rejection {
   const cls = classOf(ctx, account);
-  if (!cls || !isCredit(cls)) return reject("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
-  if (!managesAccount(ctx, account, who)) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
-  if (!(AUTOPAY_MODES as readonly string[]).includes(mode)) return reject("bad_mode", `autopay can't be ${mode}`);
+  if (!cls || !isCredit(cls)) return reject("not_credit", say("why_account_isnt_a_card_or_a_loan", { account: labelOf(ctx, account) }));
+  if (!managesAccount(ctx, account, who)) return reject("not_owner", say("why_account_isnt_who_s_to_change", { account: labelOf(ctx, account), who: labelOf(ctx, who) }));
+  if (!(AUTOPAY_MODES as readonly string[]).includes(mode)) return reject("bad_mode", say("why_autopay_cant_be_mode", { mode: mode }));
   const source = from === "" ? null : autopaySourceProblem(ctx, who, account, from);
   if (source) return source;
-  if (mode === "fixed" && !(cents > 0)) return reject("bad_amount", "fixed autopay needs an amount");
+  if (mode === "fixed" && !(cents > 0)) return reject("bad_amount", say("why_fixed_autopay_needs_an_amount"));
   const out: LedgerEvent[] = [{ type: "set", entity: account, field: "autopay", value: mode }];
   if (from !== "") out.push({ type: "set", entity: account, field: "autopay_from", value: from });
   if (mode === "fixed") out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
@@ -249,16 +250,16 @@ function flowFields(args: Record<string, JsonValue>): { fields: JsonObject; labe
     if (param === "label") label = String(v).slice(0, 80);
     else fields[field] = v;
   }
-  if (typeof fields.flow_kind === "string" && !(FLOW_KINDS as readonly string[]).includes(fields.flow_kind)) return reject("bad_flow", `a flow can't be a ${fields.flow_kind}`);
-  if (typeof fields.shortfall === "string" && !(FLOW_SHORTFALLS as readonly string[]).includes(fields.shortfall)) return reject("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
+  if (typeof fields.flow_kind === "string" && !(FLOW_KINDS as readonly string[]).includes(fields.flow_kind)) return reject("bad_flow", say("why_a_flow_cant_be_a_flow_kind", { flow_kind: fields.flow_kind }));
+  if (typeof fields.shortfall === "string" && !(FLOW_SHORTFALLS as readonly string[]).includes(fields.shortfall)) return reject("bad_flow", say("why_theres_no_shortfall_policy_shortfall", { shortfall: fields.shortfall }));
   if (typeof fields.amount_cents === "number") fields.amount_cents = Math.round(fields.amount_cents);
   const every = args.every;
   if (every === "once") {
     delete fields.every;
     fields.once = strOf(args.once);
-    if (fields.once === "") return reject("bad_flow", "a one-off flow needs its date and time");
+    if (fields.once === "") return reject("bad_flow", say("why_a_one_off_flow_needs_its_date"));
   } else if (every !== undefined && every !== null && every !== "") {
-    if (!["day", "week", "month", "year"].includes(String(every))) return reject("bad_flow", `a flow can't fall every ${String(every)}`);
+    if (!["day", "week", "month", "year"].includes(String(every))) return reject("bad_flow", say("why_a_flow_cant_fall_every_every", { every: String(every) }));
     fields.once = "";
     if (typeof args.weekday === "number") fields.weekdays = [args.weekday];
     else if (every !== "week") fields.weekdays = [];
@@ -420,16 +421,16 @@ export function paysFor(ctx: ReadContext, who: EntityId, to: string, from: strin
  * on it carries the spending right.
  */
 function flowProblem(ctx: ReadContext, who: EntityId, from: string, to: string, fallback: string): Rejection | null {
-  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${said(ctx, who)} can't pay from ${said(ctx, from)}`);
+  if (!mayPayFrom(ctx, who, from)) return reject("not_owner", say("why_who_cant_pay_from_from", { who: said(ctx, who), from: said(ctx, from) }));
   if (fallback !== "" && (!mayPayFrom(ctx, who, fallback) || !fallsBackOn(ctx, from, fallback))) {
-    return reject("not_owner", own(ctx.state.entities, fallback) ? `${said(ctx, who)} can't fall back on ${said(ctx, fallback)}` : `a fallback is an account of ${said(ctx, who)}'s, not "${fallback}"`);
+    return reject("not_owner", own(ctx.state.entities, fallback) ? say("why_who_cant_fall_back_on_fallback", { who: said(ctx, who), fallback: said(ctx, fallback) }) : say("why_a_fallback_is_an_account_of_who", { who: said(ctx, who), fallback: fallback }));
   }
   const managed = [from, fallback].filter((side) => side !== "" && side !== who && (isParty(ctx, side) || !canSpend(ctx.state, side, who)));
   const paying = managed.find((side) => paysFor(ctx, who, to, side));
   if (paying === undefined) return null;
-  if (isParty(ctx, paying)) return reject("not_owner", `${said(ctx, paying)} pays for itself, not for ${said(ctx, who)}`);
+  if (isParty(ctx, paying)) return reject("not_owner", say("why_party_pays_for_itself_not_for_pov", { party: said(ctx, paying), pov: said(ctx, who) }));
   const holder = holdersOf(ctx.state, paying).find((h) => managesParty(ctx.state, h, who)) ?? paying;
-  return reject("not_owner", `${said(ctx, paying)} pays for ${said(ctx, holder)}, not for ${said(ctx, who)}`);
+  return reject("not_owner", say("why_paying_pays_for_holder_not_for_who", { paying: said(ctx, paying), holder: said(ctx, holder), who: said(ctx, who) }));
 }
 
 export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
@@ -438,10 +439,10 @@ export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string,
   const f = made.fields;
   const from = strOf(f.from);
   const to = strOf(f.to);
-  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0)) return reject("bad_flow", "a flow needs who pays, who is paid and an amount");
+  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0)) return reject("bad_flow", say("why_a_flow_needs_who_pays_who_is"));
   const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
   if (problem) return problem;
-  if (f.once === undefined && f.every === undefined) return reject("bad_flow", "a flow needs a schedule");
+  if (f.once === undefined && f.every === undefined) return reject("bad_flow", say("why_a_flow_needs_a_schedule"));
   const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
   const fields: JsonObject = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
@@ -460,7 +461,7 @@ const CLEARABLE = ["at", "start", "end", "count", "roll", "retry_days", "retries
 function renameAndClear(current: string, id: EntityId, name: string | undefined, clear: JsonValue | undefined): LedgerEvent[] | Rejection {
   const names = typeof clear === "string" ? clear.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
   const bad = names.find((n) => !(CLEARABLE as readonly string[]).includes(n));
-  if (bad !== undefined) return reject("bad_flow", `a standing payment's ${bad.replace(/_/g, " ")} can't be cleared`);
+  if (bad !== undefined) return reject("bad_flow", say("why_a_standing_payments_g_cant_be_cleared", { g: bad.replace(/_/g, " ") }));
   const out: LedgerEvent[] = [...new Set(names)].map((n): LedgerEvent => ({ type: "set", entity: id, field: FLOW_PARAM_FIELDS[n] ?? n, value: null }));
   const label = name?.trim().slice(0, 80) ?? "";
   if (label !== "" && label !== current) out.push({ type: FINANCE_EVENTS.flowRenamed, data: { flow: id, name: label } });
@@ -469,14 +470,14 @@ function renameAndClear(current: string, id: EntityId, name: string | undefined,
 
 export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow") return reject("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from))) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  if (e?.kind !== "flow") return reject("not_flow", say("why_flow_isnt_a_standing_payment", { flow: labelOf(ctx, flow) }));
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from))) return reject("not_owner", say("why_account_isnt_who_s_to_change", { account: e.name, who: labelOf(ctx, who) }));
   const made = flowFields(args);
   if ("code" in made) return made;
   const more = renameAndClear(e.name, flow, made.label, args.clear);
   if ("code" in more) return more;
   const both = more.find((x) => x.type === "set" && x.field in made.fields);
-  if (both && both.type === "set") return reject("bad_flow", `a standing payment's ${both.field.replace(/_/g, " ")} can't be both changed and cleared`);
+  if (both && both.type === "set") return reject("bad_flow", say("why_a_standing_payments_g_cant_be_both", { g: both.field.replace(/_/g, " ") }));
   // The payment as it will be: what changes, what's cleared, and the rest as it was.
   const cleared = new Set(more.flatMap((x) => (x.type === "set" ? [x.field] : [])));
   const after = (field: string): string => (cleared.has(field) ? "" : strOf(made.fields[field] ?? e.fields[field]));
@@ -488,14 +489,14 @@ export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args
 /** GM: a standing payment's name, and the fields a comma list of parameters clears (`economy.flow_edit`). */
 export function editFlow(ctx: ReadContext, flow: EntityId, name: string | undefined, clear: JsonValue | undefined): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow") return reject("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (e?.kind !== "flow") return reject("not_flow", say("why_flow_isnt_a_standing_payment", { flow: labelOf(ctx, flow) }));
   return renameAndClear(e.name, flow, name, clear);
 }
 
 export function setFlowStatus(ctx: ReadContext, who: EntityId, flow: EntityId, status: "active" | "paused" | "ended"): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, flow);
-  if (e?.kind !== "flow") return reject("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
-  if (!mayPayFrom(ctx, who, strOf(e.fields.from))) return reject("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  if (e?.kind !== "flow") return reject("not_flow", say("why_flow_isnt_a_standing_payment", { flow: labelOf(ctx, flow) }));
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from))) return reject("not_owner", say("why_account_isnt_who_s_to_change", { account: e.name, who: labelOf(ctx, who) }));
   const out: LedgerEvent[] = [{ type: "set", entity: flow, field: "status", value: status }];
   if (status === "ended") out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
   return out;
@@ -518,9 +519,9 @@ function newAccountId(ctx: ReadContext, spec: OpenAccount): EntityId {
 export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] | Rejection {
   const products = worldProducts(ctx.world);
   const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
-  if (!cls) return { code: "bad_product", reason: `there's no product ${spec.product.replace(/_/g, " ")}`, choices: Object.keys(products).sort(), said: spec.product };
+  if (!cls) return { code: "bad_product", reason: say("why_theres_no_product_g", { g: spec.product.replace(/_/g, " ") }), choices: Object.keys(products).sort(), said: spec.product };
   const holder = spec.owners[0]?.party;
-  if (!holder || !own(ctx.state.entities, holder)) return reject("missing_entity", "an account needs an owner");
+  if (!holder || !own(ctx.state.entities, holder)) return reject("missing_entity", say("why_an_account_needs_an_owner"));
   const id = newAccountId(ctx, spec);
   const cal = calendarOf(ctx.world);
   const d = dateAt(cal, ctx.state.clock);
@@ -579,7 +580,7 @@ export interface CreditMade {
  * asked `force`d: then the account opens as an approved one does, with the same fields and events.
  */
 export function creditApplication(ctx: ReadContext, who: EntityId, app: CreditRequest): CreditMade | Rejection {
-  if (!isParty(ctx, who)) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
+  if (!isParty(ctx, who)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, who) }));
   const reports = featureFor(ctx, who, "credit");
   const decision = decide(ctx, who, app, reports);
   if ("code" in decision) return decision;
@@ -617,17 +618,17 @@ export function applyForCredit(ctx: ReadContext, who: EntityId, product: string,
 
 /** A party's payment preferences, set by them: a list of tiers, or that list as JSON text (an action's parameters are scalars). */
 export function setPayPrefs(ctx: ReadContext, who: EntityId, tiers: JsonValue | undefined): LedgerEvent[] | Rejection {
-  if (!isParty(ctx, who)) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
+  if (!isParty(ctx, who)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, who) }));
   let raw = tiers;
   if (typeof tiers === "string") {
     try {
       raw = JSON.parse(tiers) as JsonValue;
     } catch {
-      return reject("bad_tiers", "payment preferences are a list of ways to pay");
+      return reject("bad_tiers", say("why_payment_preferences_are_a_list_of_ways"));
     }
   }
   const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
-  if (!list) return reject("bad_tiers", "payment preferences are a list of ways to pay");
+  if (!list) return reject("bad_tiers", say("why_payment_preferences_are_a_list_of_ways"));
   return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
 }
 
@@ -637,23 +638,23 @@ export function setPayPrefs(ctx: ReadContext, who: EntityId, tiers: JsonValue | 
  */
 export function closeAccount(ctx: ReadContext, account: EntityId): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, account);
-  if (e?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (balance(ctx.state, account) !== 0) return reject("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+  if (e?.kind !== "account") return reject("not_account", say("why_account_isnt_an_account", { account: labelOf(ctx, account) }));
+  if (balance(ctx.state, account) !== 0) return reject("not_empty", say("why_account_still_has_account2_on_it", { account: labelOf(ctx, account), account2: money(ctx, balance(ctx.state, account)) }));
   const opening = Math.round(numOf(e.fields.opening));
-  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account))) return reject("not_empty", `${labelOf(ctx, account)} opens with ${money(ctx, opening)} still to post`);
+  if (opening !== 0 && !isOpened(ctx.state, account, openerOf(ctx.state, account))) return reject("not_empty", say("why_account_opens_with_opening_still_to_post", { account: labelOf(ctx, account), opening: money(ctx, opening) }));
   return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c): LedgerEvent => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
 }
 
 /** GM: an account's status; closing it is closing the account, with the same checks. */
 export function setStatus(ctx: ReadContext, account: EntityId, status: string): LedgerEvent[] | Rejection {
-  if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
-  if (!(ACCOUNT_STATUSES as readonly string[]).includes(status)) return reject("bad_status", `an account can't be ${status}`);
+  if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", say("why_account_isnt_an_account", { account: labelOf(ctx, account) }));
+  if (!(ACCOUNT_STATUSES as readonly string[]).includes(status)) return reject("bad_status", say("why_an_account_cant_be_status", { status: status }));
   if (statusOf(ctx.state, account) === status) return [];
   return status === "closed" ? closeAccount(ctx, account) : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
 }
 
 export function releaseHold(ctx: ReadContext, account: EntityId, hold: string): LedgerEvent[] | Rejection {
-  if (!own(ctx.state.entities, account)) return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (!own(ctx.state.entities, account)) return reject("not_account", say("why_account_isnt_an_account", { account: labelOf(ctx, account) }));
   return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
 }
 

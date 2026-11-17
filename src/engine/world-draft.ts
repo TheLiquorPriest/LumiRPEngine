@@ -367,16 +367,16 @@ export const draftEventDef: EventTypeDef<PackEvent> = {
   type: DRAFT_EVENT,
   validate(e, ctx) {
     const change = changeOf(e.data);
-    if (!change) return reject("bad_change", "that isn't a change of the world as this chat plays it");
+    if (!change) return reject("bad_change", say("why_that_isnt_a_change_of_the_world"));
     if ("part" in change) {
       const bad = "value" in change ? settingsProblem(change.value) : null;
       if (bad !== null) return reject("bad_item", bad);
     } else {
       const { collection, id } = change;
       const held = heldIn(ctx.world, collection, id);
-      if (isRecord(held) && typeof held.map === "string") return reject("drawn", `the ${NOUN[collection]} ${id} is drawn by the map ${held.map}: change it in that map`);
-      if (collection === "places" && isRecord(held) && isRecord(held.made)) return reject("made_in_play", `${labelOf(ctx, id)} was made in play: place_label and place_remove change it`);
-      if ("gone" in change && held === undefined) return reject("gone", `there is no ${NOUN[collection]} ${id} to take out`);
+      if (isRecord(held) && typeof held.map === "string") return reject("drawn", say("why_the_collection_id_is_drawn_by_the", { collection: NOUN[collection], id: id, held: held.map }));
+      if (collection === "places" && isRecord(held) && isRecord(held.made)) return reject("made_in_play", say("why_id_was_made_in_play_place_label", { id: labelOf(ctx, id) }));
+      if ("gone" in change && held === undefined) return reject("gone", say("why_there_is_no_collection_id_to_take", { collection: NOUN[collection], id: id }));
       const bad = "value" in change ? ITEM_PROBLEM[collection](id, change.value) : null;
       if (bad !== null) return reject("bad_item", bad);
     }

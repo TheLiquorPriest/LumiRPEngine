@@ -366,7 +366,7 @@ function unitsOf(n: number): number {
 /** `economy.revenue`: one occurrence of a stream, recorded by month; a royalty's production also by the property it comes from. */
 const RECORD: EventTypeDef<PackEvent> = {
   type: REVENUE_EVENT,
-  validate: (e) => (typeof e.data.stream === "string" && e.data.stream !== "" && typeof e.data.month === "string" && /^\d{4}-\d{2}$/.test(e.data.month) ? null : reject("bad_event", "a stream's record needs its stream and month")),
+  validate: (e) => (typeof e.data.stream === "string" && e.data.stream !== "" && typeof e.data.month === "string" && /^\d{4}-\d{2}$/.test(e.data.month) ? null : reject("bad_event", say("why_a_streams_record_needs_its_stream_and"))),
   apply: (e, state) => {
     const stream = strOf(e.data.stream);
     const month = strOf(e.data.month);
@@ -443,12 +443,12 @@ export function adjustBoundsOf(world: Pick<WorldDoc, "packs">): { factorMin: num
 
 /** Why an adjustment can't be made at all (null: it can): what has no meaning, never what is only past a figure (`adjustAdvice`). */
 export function adjustRefusal(ctx: ReadContext, a: AdjustArgs): Rejection | null {
-  if (!streamOf(ctx, a.stream)) return reject("no_stream", `${a.stream || "That"} isn't a revenue stream`);
-  if ((a.factor === undefined) === (a.cents === undefined)) return reject("bad_amount", "an adjustment is either a factor or an amount, one of them");
-  if (a.factor !== undefined && !(a.factor >= 0)) return reject("bad_amount", "a factor is a number, nothing or more");
-  if (a.cents !== undefined && (!Number.isInteger(a.cents) || a.cents === 0)) return reject("bad_amount", "an amount is a whole number other than nothing, in or out");
-  if (a.days !== undefined && (!Number.isInteger(a.days) || a.days < 1)) return reject("bad_amount", "an adjustment lasts a whole number of days, one or more");
-  if (a.reason.trim() === "") return reject("no_reason", "an adjustment says why: the GM's reason, or what the story said");
+  if (!streamOf(ctx, a.stream)) return reject("no_stream", say("why_stream_that_isnt_a_revenue_stream", { stream: a.stream }));
+  if ((a.factor === undefined) === (a.cents === undefined)) return reject("bad_amount", say("why_an_adjustment_is_either_a_factor_or"));
+  if (a.factor !== undefined && !(a.factor >= 0)) return reject("bad_amount", say("why_a_factor_is_a_number_nothing_or"));
+  if (a.cents !== undefined && (!Number.isInteger(a.cents) || a.cents === 0)) return reject("bad_amount", say("why_an_amount_is_a_whole_number_other"));
+  if (a.days !== undefined && (!Number.isInteger(a.days) || a.days < 1)) return reject("bad_amount", say("why_an_adjustment_lasts_a_whole_number_of"));
+  if (a.reason.trim() === "") return reject("no_reason", say("why_an_adjustment_says_why_the_gms_reason"));
   return null;
 }
 
@@ -487,10 +487,10 @@ function adjustedEvent(api: FinanceApi): EventTypeDef<PackEvent> {
   return {
   type: ADJUSTED_EVENT,
   validate: (e, ctx) => {
-    if (streamOf(ctx, strOf(e.data.stream)) === null) return reject("no_stream", "that isn't a revenue stream");
+    if (streamOf(ctx, strOf(e.data.stream)) === null) return reject("no_stream", say("why_that_isnt_a_revenue_stream"));
     const from = numOf(e.data.from, NaN);
     const until = numOf(e.data.until, NaN);
-    return until > from ? null : reject("bad_amount", "an adjustment ends after it starts");
+    return until > from ? null : reject("bad_amount", say("why_an_adjustment_ends_after_it_starts"));
   },
   advise: (e, ctx) => {
     const from = numOf(e.data.from, NaN);
@@ -731,7 +731,7 @@ export function registerRevenue(r: FinanceRegistry): void {
     type: REVENUE_FACT,
     boundField: "money",
     validate: (p, ctx) => {
-      if (strOf(p.said).trim() === "") return reject("no_quote", "a revenue change quotes what the story said");
+      if (strOf(p.said).trim() === "") return reject("no_quote", say("why_a_revenue_change_quotes_what_the_story"));
       return adjustRefusal(ctx, adjustArgs(p));
     },
     toEffects: (p) => {

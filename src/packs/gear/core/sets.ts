@@ -24,6 +24,7 @@ import { applyItemOp, type ItemOpOptions } from "../../../engine/thing-ops";
 import { contentsOf, isThing, possessorOf, restOf, setKindOf, slotOf } from "../../../engine/things";
 import { Working } from "../../../engine/working";
 import type { GearSet, GearSetPiece } from "./view";
+import { say } from "../../../engine/lines";
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };
@@ -111,14 +112,14 @@ export function saveFindings(ctx: ReadContext, op: Extract<SetOp, { do: "set_sav
 function saveSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_save" }>): LedgerEvent[] | Rejection {
   const who = own(ctx.state.entities, op.who);
   const name = op.name.trim();
-  if (name === "") return reject("bad_name", "a name is at least one character");
-  if (!who) return reject("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+  if (name === "") return reject("bad_name", say("why_a_name_is_at_least_one_character"));
+  if (!who) return reject("missing_entity", say("why_no_one_id", { id: labelOf(ctx, op.who) }));
   const pieces = op.pieces ?? wornPieces(ctx, op.who, op.kind);
-  for (const p of pieces) if (!isThing(ctx, p.item) || isGone(ctx.state, p.item)) return reject("missing_entity", `no thing ${labelOf(ctx, p.item)}`);
+  for (const p of pieces) if (!isThing(ctx, p.item) || isGone(ctx.state, p.item)) return reject("missing_entity", say("why_no_thing_thing", { thing: labelOf(ctx, p.item) }));
   const sets = setsOf(who.fields);
   const id = setIdOf(name);
   const set: SavedSet = { name, kind: op.kind, pieces: pieces.map((p) => ({ item: p.item, ...(p.slot !== undefined ? { slot: p.slot } : {}) })) };
-  if (JSON.stringify(sets[id]) === JSON.stringify(set)) return reject("no_change", `${name} is saved as it is`);
+  if (JSON.stringify(sets[id]) === JSON.stringify(set)) return reject("no_change", say("why_name_is_saved_as_it_is", { name: name }));
   return [written(op.who, { ...sets, [id]: set })];
 }
 
@@ -126,7 +127,7 @@ function saveSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_save" }>): Ledg
 function dropSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_drop" }>): LedgerEvent[] | Rejection {
   const who = own(ctx.state.entities, op.who);
   const sets = setsOf(who?.fields);
-  if (!who || !Object.hasOwn(sets, op.set)) return reject("no_set", `${labelOf(ctx, op.who)} keeps no such outfit`);
+  if (!who || !Object.hasOwn(sets, op.set)) return reject("no_set", say("why_who_keeps_no_such_outfit", { who: labelOf(ctx, op.who) }));
   const { [op.set]: _dropped, ...rest } = sets;
   return [written(op.who, rest)];
 }
@@ -138,9 +139,9 @@ function dropSet(ctx: ReadContext, op: Extract<SetOp, { do: "set_drop" }>): Ledg
  */
 function applySet(ctx: ReadContext, op: Extract<SetOp, { do: "set_apply" }>, opts: ItemOpOptions): LedgerEvent[] | Rejection {
   const who = own(ctx.state.entities, op.who);
-  if (!who || !kindIs(ctx.registry, ctx.world, who.kind, "person")) return reject("not_a_person", `${labelOf(ctx, op.who)} can't wear anything`);
+  if (!who || !kindIs(ctx.registry, ctx.world, who.kind, "person")) return reject("not_a_person", say("why_who_cant_wear_anything", { who: labelOf(ctx, op.who) }));
   const set = setsOf(who.fields)[op.set];
-  if (!set) return reject("no_set", `${who.name} keeps no such outfit`);
+  if (!set) return reject("no_set", say("why_who_keeps_no_such_outfit", { who: who.name }));
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const before = wornPieces(w.ctx, op.who).map((p) => p.item);
   const missing: string[] = [];
@@ -163,7 +164,7 @@ function applySet(ctx: ReadContext, op: Extract<SetOp, { do: "set_apply" }>, opt
     }
     wearing.add(piece.item);
   }
-  if (wearing.size === 0) return reject("none_to_hand", `None of ${set.name} is to hand: ${missing.join("; ")}`);
+  if (wearing.size === 0) return reject("none_to_hand", say("why_none_of_name_is_to_hand_missing", { name: set.name, missing: missing.join("; ") }));
   // What else of its kind they wear comes off (an outfit's other clothes), staying carried.
   for (const p of wornPieces(w.ctx, op.who, set.kind)) {
     if (wearing.has(p.item)) continue;
@@ -191,7 +192,7 @@ function applySet(ctx: ReadContext, op: Extract<SetOp, { do: "set_apply" }>, opt
 
 /** A saved set's change (`gear.set_op`, the item ops `set_save`, `set_apply`, `set_drop`): its events, or why not. */
 export function setOpEvents(ctx: ReadContext, op: SetOp, opts: ItemOpOptions): LedgerEvent[] | Rejection {
-  if (!own(ctx.state.entities, op.who) || isGone(ctx.state, op.who)) return reject("missing_entity", `no one ${labelOf(ctx, op.who)}`);
+  if (!own(ctx.state.entities, op.who) || isGone(ctx.state, op.who)) return reject("missing_entity", say("why_no_one_id", { id: labelOf(ctx, op.who) }));
   switch (op.do) {
     case "set_save":
       return saveSet(ctx, op);

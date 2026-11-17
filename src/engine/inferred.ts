@@ -47,6 +47,7 @@ import type { WorldState } from "./state";
 import { canSeeEntity } from "./visibility";
 import { initialState } from "./world-state";
 import type { Working } from "./working";
+import { say } from "./lines";
 
 /** The built-in action an inferred check plays as (DESIGN §11): Try something, carrying the check. */
 export const TRY_ACTION = "try";
@@ -243,7 +244,7 @@ const NEUTRAL_DC = 10;
 /** `who`'s check for a skill against a difficulty, fixed from the state: the skill's own check, its param naming the skill. */
 function readyFor(reg: Registry, w: Pick<Working, "world" | "ctx">, skill: SkillSource, who: EntityId, dc: number): ReadyCheck | Rejection {
   const check = checkOf(w.world, skill.action.check);
-  if (!check) return { code: "unknown_check", reason: `no check rolls ${skill.label}` };
+  if (!check) return { code: "unknown_check", reason: say("why_no_check_rolls_skill", { skill: skill.label }) };
   return readyCheck(reg, w.ctx, check, { self: who, actor: who }, { [skill.param]: skill.id, difficulty: dc, params: { [skill.param]: skill.id, difficulty: dc } });
 }
 
@@ -390,7 +391,7 @@ export function resolveTry(reg: Registry, w: Working, params: JsonObject, rng: R
   const band = clampBand(policy, read.difficulty);
   const ownCheck = skill ? readyFor(reg, w, skill, pov, band.dc) : null;
   if (!skill || !ownCheck || "code" in ownCheck) {
-    const failed = ownCheck && "code" in ownCheck ? ownCheck : { code: "bad_param", reason: `${read.skill || "the attempt"} isn't a skill here` };
+    const failed = ownCheck && "code" in ownCheck ? ownCheck : { code: "bad_param", reason: say("why_skill_the_attempt_isnt_a_skill_here", { skill: read.skill }) };
     return { action: TRY_ACTION, actor: pov, ok: false, failed, check: null, outcome: null, events: [], rejected: [], duration: 0, activity: null, observable: null, adjudged: null };
   }
   const nameOf = (id: EntityId): string => own(w.state.entities, id)?.name ?? id;

@@ -80,7 +80,7 @@ export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A History line, kept with its organization: the last 40.
     type: ORGS_LOG,
-    validate: (e) => (str(e, "org") !== "" && str(e, "text") !== "" ? null : { code: "bad_event", reason: "a History line needs an organization and its words" }),
+    validate: (e) => (str(e, "org") !== "" && str(e, "text") !== "" ? null : { code: "bad_event", reason: say("why_a_history_line_needs_an_organization_and") }),
     apply: (e, state) => {
       const log = sliceRecord(state, "orgs", "log");
       const org = str(e, "org");
@@ -96,7 +96,7 @@ export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // What someone paid out of an organization's money in a calendar month, added up: the last 13 months.
     type: ORGS_SPENT,
-    validate: (e) => (str(e, "org") !== "" && str(e, "who") !== "" && MONTH.test(str(e, "month")) && typeof e.data.cents === "number" && Number.isFinite(e.data.cents) ? null : { code: "bad_event", reason: "spending needs an organization, who spent, a month and an amount" }),
+    validate: (e) => (str(e, "org") !== "" && str(e, "who") !== "" && MONTH.test(str(e, "month")) && typeof e.data.cents === "number" && Number.isFinite(e.data.cents) ? null : { code: "bad_event", reason: say("why_spending_needs_an_organization_who_spent_a") }),
     apply: (e, state) => {
       const spent = sliceRecord(state, "orgs", "spent");
       const org = objOf(spent[str(e, "org")]);

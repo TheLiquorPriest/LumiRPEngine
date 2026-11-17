@@ -208,10 +208,10 @@ const regardEvent: EventTypeDef<PackEvent> = {
   validate: (e, ctx) => {
     const from = strOf(e.data.from);
     const to = strOf(e.data.to);
-    if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to)) return { code: "missing_entity", reason: "regard needs two entities" };
+    if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to)) return { code: "missing_entity", reason: say("why_regard_needs_two_entities") };
     const numbers = [...Object.values(objOf(e.data.deltas)), ...Object.values(objOf(e.data.anchor))];
-    if (e.data.deltas === undefined && e.data.anchor === undefined) return { code: "bad_delta", reason: "regard needs deltas or an anchor" };
-    return numbers.every((v) => typeof v === "number" && Number.isFinite(v)) ? null : { code: "bad_delta", reason: "regard values must be numbers" };
+    if (e.data.deltas === undefined && e.data.anchor === undefined) return { code: "bad_delta", reason: say("why_regard_needs_deltas_or_an_anchor") };
+    return numbers.every((v) => typeof v === "number" && Number.isFinite(v)) ? null : { code: "bad_delta", reason: say("why_regard_values_must_be_numbers") };
   },
   // What was kept as the story gave it and lies past its axis's range: kept all the same, and said.
   advise: (e, ctx) => {
@@ -367,12 +367,12 @@ export const relationshipsPack: PackDef = {
       resolve(a, ctx) {
         const from = strOf(a.from);
         const to = strOf(a.to);
-        if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to)) return reject("missing_entity", "regard needs two entities");
+        if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to)) return reject("missing_entity", say("why_regard_needs_two_entities"));
         const delta = numOf(a.delta);
         const axis = strOf(a.axis);
         // As given: the change is kept on the axis named (else every axis by it), whatever the level, between anyone and themself, never spread and never clamped; past the range it is advised.
         const given = a.asGiven === true;
-        if (given && axis !== "" && !axesOf(ctx).some((x) => x.id === axis)) return { ...reject("bad_axis", `no regard axis ${axis}`), said: axis, choices: axesOf(ctx).map((x) => x.id) };
+        if (given && axis !== "" && !axesOf(ctx).some((x) => x.id === axis)) return { ...reject("bad_axis", say("why_no_regard_axis_axis", { axis: axis })), said: axis, choices: axesOf(ctx).map((x) => x.id) };
         return appraiseWith(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"), undefined, given);
       },
     });
@@ -387,9 +387,9 @@ export const relationshipsPack: PackDef = {
       type: "regard",
       boundField: "number",
       validate(p, ctx) {
-        if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", "regard needs two known people");
-        if (typeof p.delta !== "number" || p.delta === 0) return reject("bad_delta", "regard needs a non-zero delta");
-        if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis)) return reject("bad_axis", `no regard axis ${p.axis}`);
+        if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to))) return reject("missing_entity", say("why_regard_needs_two_known_people"));
+        if (typeof p.delta !== "number" || p.delta === 0) return reject("bad_delta", say("why_regard_needs_a_non_zero_delta"));
+        if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis)) return reject("bad_axis", say("why_no_regard_axis_axis", { axis: p.axis }));
         return null;
       },
       // As far as the story says; each axis stays inside its range (`appraise`).

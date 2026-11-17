@@ -24,6 +24,7 @@ import type { Advice, ReadContext, Rejection } from "./registry";
 import { placeOfEntity, placeWithin } from "./scope";
 import type { WorldState } from "./state";
 import { chatDraftOf, draftedWorld, NO_DRAFT } from "./world-draft";
+import { say } from "./lines";
 
 /** The event that writes a made place whole, or (`gone`) takes it away (ITEMS-SPEC §3.5, a fixed format). */
 export const PLACE_EVENT = "space.place";
@@ -336,8 +337,8 @@ export function placeOp(ctx: ReadContext, op: PlaceOp, opts: PlaceOpOptions): Pl
 
 function makePlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "make" }>, opts: PlaceOpOptions): PlaceOpOutcome {
   const name = cleanName(op.name);
-  if (name === null) return reject("bad_name", "a new place needs a name");
-  if (!hasOwn(ctx.world.places, op.parent)) return { ...reject("missing_place", `no place ${labelOf(ctx, op.parent)}`), said: op.parent, choices: Object.keys(ctx.world.places) };
+  if (name === null) return reject("bad_name", say("why_a_new_place_needs_a_name"));
+  if (!hasOwn(ctx.world.places, op.parent)) return { ...reject("missing_place", say("why_no_place_place", { place: labelOf(ctx, op.parent) })), said: op.parent, choices: Object.keys(ctx.world.places) };
   const aliases = cleanAliases(name, op.aliases ?? []);
   const advising = opts.advise === true;
   const advice: Advice[] = [];
@@ -345,7 +346,7 @@ function makePlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "make" }>, opts:
   const same = new Map<PlaceId, string>();
   for (const said of [name, ...aliases]) {
     for (const found of findPlaces(ctx, said, { parent: op.parent })) {
-      if (!advising) return { ...reject("exists", `${found.name} is there already`), exists: found.id };
+      if (!advising) return { ...reject("exists", say("why_name_is_there_already", { name: found.name })), exists: found.id };
       same.set(found.id, `${found.name} [${found.id}]`);
     }
   }
@@ -353,7 +354,7 @@ function makePlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "make" }>, opts:
   const cap = typeof ctx.world.placeCap === "number" || opts.cap === undefined ? placeCapsOf(ctx.world).chat : opts.cap;
   const made = placesMade(ctx.state);
   if (made >= cap) {
-    if (!advising) return reject("place_cap", cap === 0 ? "this world makes no places in play" : `this chat has made ${cap} places already, all its world allows`);
+    if (!advising) return reject("place_cap", cap === 0 ? say("why_this_world_makes_no_places_in_play") : say("why_this_chat_has_made_cap_places_already", { cap: cap }));
     advice.push({ code: "place_past_cap", values: { name, cap, made } });
   }
   const id = madeId(ctx, name, op.parent, opts.salt);
@@ -365,15 +366,15 @@ function makePlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "make" }>, opts:
 
 function labelPlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "label" }>): PlaceOpOutcome {
   const def = own(ctx.world.places, op.place);
-  if (!def) return reject("missing_place", `no place ${labelOf(ctx, op.place)}`);
-  if (madeOf(def) === null) return reject("not_made", `${def.name} is the world's own place: Build changes it`);
+  if (!def) return reject("missing_place", say("why_no_place_place", { place: labelOf(ctx, op.place) }));
+  if (madeOf(def) === null) return reject("not_made", say("why_name_is_the_worlds_own_place_build", { name: def.name }));
   const made = def as MadePlace;
   const name = op.name === undefined ? made.name : cleanName(op.name);
-  if (name === null) return reject("bad_name", "a place needs a name");
+  if (name === null) return reject("bad_name", say("why_a_place_needs_a_name"));
   const aliases = op.aliases === undefined ? placeAliases(made) : cleanAliases(name, op.aliases);
   for (const said of [name, ...aliases]) {
     const found = findPlaces(ctx, said, { parent: made.parent }).find((h) => h.id !== op.place && h.matched !== "head");
-    if (found) return { ...reject("exists", `${found.name} is there already`), exists: found.id };
+    if (found) return { ...reject("exists", say("why_name_is_there_already", { name: found.name })), exists: found.id };
   }
   const description = op.description === undefined ? made.fields.description : op.description.trim();
   const fields: JsonObject = { ...made.fields };
@@ -382,17 +383,17 @@ function labelPlace(ctx: ReadContext, op: Extract<PlaceOp, { do: "label" }>): Pl
   if (typeof description === "string" && description !== "") fields.description = description;
   if (aliases.length > 0) fields.aliases = aliases;
   const next: MadePlace = { ...made, name, fields };
-  if (JSON.stringify(next) === JSON.stringify(made)) return reject("no_change", `${made.name} is so already`);
+  if (JSON.stringify(next) === JSON.stringify(made)) return reject("no_change", say("why_name_is_so_already", { name: made.name }));
   return { events: [placeEvent(op.place, next)] };
 }
 
 function removePlace(ctx: ReadContext, place: PlaceId): PlaceOpOutcome {
   const def = own(ctx.world.places, place);
-  if (!def) return reject("gone", `no place ${labelOf(ctx, place)}`);
-  if (madeOf(def) === null) return reject("not_made", `${def.name} is the world's own place: Build removes it`);
-  if (Object.values(ctx.world.places).some((p) => p.parent === place)) return reject("occupied", `the places in ${def.name} go first`);
+  if (!def) return reject("gone", say("why_no_place_place", { place: labelOf(ctx, place) }));
+  if (madeOf(def) === null) return reject("not_made", say("why_name_is_the_worlds_own_place_build_2", { name: def.name }));
+  if (Object.values(ctx.world.places).some((p) => p.parent === place)) return reject("occupied", say("why_the_places_in_name_go_first", { name: def.name }));
   const there = Object.keys(ctx.state.entities).some((id) => placeWithin(ctx.world, placeOfEntity(ctx.state, id), place));
-  if (there) return reject("occupied", `someone or something is still at ${def.name}`);
+  if (there) return reject("occupied", say("why_someone_or_something_is_still_at_name", { name: def.name }));
   return { events: [{ type: PLACE_EVENT, data: { place, gone: true } }] };
 }
 
@@ -436,14 +437,14 @@ export function parentSaid(ctx: ReadContext, said: string): PlaceId | null {
  */
 export function settlePlaceFact(ctx: ReadContext, p: JsonObject): PlaceFact {
   const said = typeof p.place === "string" ? p.place.trim() : "";
-  if (said === "") return { kind: "refused", rejection: reject("bad_name", "it names no place") };
+  if (said === "") return { kind: "refused", rejection: reject("bad_name", say("why_it_names_no_place")) };
   if (hasOwn(ctx.world.places, said)) return { kind: "found", place: said };
   const parent = parentSaid(ctx, typeof p.parent === "string" ? p.parent : "");
-  if (parent === null) return { kind: "refused", rejection: reject("missing_place", "it names no place it is in") };
+  if (parent === null) return { kind: "refused", rejection: reject("missing_place", say("why_it_names_no_place_it_is_in")) };
   const found = findPlaces(ctx, said, { parent })[0];
   if (found) return { kind: "found", place: found.id };
   const name = cleanName(said);
-  if (name === null) return { kind: "refused", rejection: reject("bad_name", "a new place needs a name") };
+  if (name === null) return { kind: "refused", rejection: reject("bad_name", say("why_a_new_place_needs_a_name")) };
   const as = (PLACE_KINDS as readonly unknown[]).includes(p.as) ? (p.as as PlaceKind) : placeKindFor(ctx.world, parent, name);
   const aliases = Array.isArray(p.aliases) ? p.aliases.filter((a): a is string => typeof a === "string") : [];
   const description = typeof p.description === "string" ? p.description : "";

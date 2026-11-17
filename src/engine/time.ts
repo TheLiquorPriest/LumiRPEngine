@@ -24,6 +24,7 @@ import { canSeeField } from "./visibility";
 import { Working } from "./working";
 import { clampScale, clampThreshold, clampTick, clampUnitCap, TIME_LIMITS } from "./time-limits";
 import { fieldNoun, possessive } from "../shared/words";
+import { say } from "./lines";
 
 export const DEFAULT_SCENE_TYPE = "conversation";
 
@@ -182,7 +183,7 @@ export function nextCommitment(reg: Registry, world: WorldDoc, state: Readonly<W
  */
 export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, target: TimelapseTarget): ResolvedTarget | Rejection {
   const level = reg.context(world, state).levelOf(world.pov, "calendar");
-  if (level < 1) return { code: "calendar_off", reason: "Calendar & time is off" };
+  if (level < 1) return { code: "calendar_off", reason: say("why_calendar_time_is_off") };
   const cal = calendarOf(world);
   const now = state.clock;
   let to: number;
@@ -195,7 +196,7 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
       break;
     case "day_part": {
       const idx = cal.dayParts.findIndex((p) => p.id === target.dayPart);
-      if (idx < 0) return { code: "bad_target", reason: `no day part ${target.dayPart}` };
+      if (idx < 0) return { code: "bad_target", reason: say("why_no_day_part_daypart", { dayPart: target.dayPart }) };
       to = nextTimeOfDay(cal, now, cal.partStarts[idx] ?? 0);
       label = cal.dayParts[idx]?.label ?? target.dayPart;
       break;
@@ -207,22 +208,22 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
     case "shift":
     case "commitment": {
       const next = nextCommitment(reg, world, state, world.pov, target.type === "shift");
-      if (!next) return { code: "no_commitment", reason: target.type === "shift" ? "no upcoming shift" : "no upcoming commitment" };
+      if (!next) return { code: "no_commitment", reason: target.type === "shift" ? say("why_no_upcoming_shift") : say("why_no_upcoming_commitment") };
       to = next.at;
       label = next.label;
       break;
     }
     case "arrival": {
       const until = activitySpanEnd(own(state.entities, world.pov)?.fields);
-      if (until === null || until <= now) return { code: "no_trip", reason: "no active trip" };
+      if (until === null || until <= now) return { code: "no_trip", reason: say("why_no_active_trip") };
       to = until;
       label = "arrival";
       break;
     }
     case "stage": {
       const t = own(world.tracks, target.track);
-      if (!t || !own(t.stages, target.stage)) return { code: "bad_target", reason: `no stage ${target.stage} in ${target.track}` };
-      if ((own(state.tracks, target.track)?.stage ?? t.start) === target.stage) return { code: "already", reason: "already at that stage" };
+      if (!t || !own(t.stages, target.stage)) return { code: "bad_target", reason: say("why_no_stage_to_in_track", { to: target.stage, track: target.track }) };
+      if ((own(state.tracks, target.track)?.stage ?? t.start) === target.stage) return { code: "already", reason: say("why_already_at_that_stage") };
       to = now + DEFAULT_HORIZON;
       label = `${t.label}: ${own(t.stages, target.stage)?.label ?? target.stage}`;
       stopWhen = (w) => (own(w.state.tracks, target.track)?.stage ?? t.start) === target.stage;
@@ -237,7 +238,7 @@ export function resolveTarget(reg: Registry, world: WorldDoc, state: Readonly<Wo
     const k = slotIndexAt(cal, to);
     if (slotStart(cal, k) < to) to = slotStart(cal, k + 1);
   }
-  if (!Number.isFinite(to) || to <= now) return { code: "past", reason: "that time has passed" };
+  if (!Number.isFinite(to) || to <= now) return { code: "past", reason: say("why_that_time_has_passed") };
   // A target farther than one timelapse reaches is run toward in steps: this run goes as far as it
   // reaches (to a day part's start at Calendar level 1), and its Continue carries on (DESIGN §9.2).
   const reach = now + TIME_LIMITS.timelapseMinutes;
@@ -579,7 +580,7 @@ export class TimelapseRun {
 
   /** A run toward `target`, or why none can start (the clock is paused, the target doesn't resolve). */
   static start(reg: Registry, w: Working, target: TimelapseTarget, opts: TimelapseOptions): TimelapseRun | Rejection {
-    if (clockPaused(w.world, w.state)) return { code: "paused", reason: "The clock is paused; resume it first." };
+    if (clockPaused(w.world, w.state)) return { code: "paused", reason: say("why_the_clock_is_paused_resume_it_first") };
     const resolved = resolveTarget(reg, w.world, w.state, target);
     return "code" in resolved ? resolved : new TimelapseRun(reg, w, target, opts, resolved);
   }
@@ -745,16 +746,16 @@ export type ClockFix = { events: LedgerEvent[] } | Rejection;
  *   up to where it stood is undone, and none of it runs again (L48).
  */
 export function clockFix(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, local: string, runSeed: string): ClockFix {
-  if (reg.context(world, state).levelOf(world.pov, "calendar") < 1) return { code: "calendar_off", reason: "Calendar & time is off" };
+  if (reg.context(world, state).levelOf(world.pov, "calendar") < 1) return { code: "calendar_off", reason: say("why_calendar_time_is_off") };
   const at = clockOfStamp(calendarOf(world), local);
-  if (at === null) return { code: "bad_time", reason: "that isn't a date and time of day in this world's calendar (YYYY-MM-DD HH:MM)" };
+  if (at === null) return { code: "bad_time", reason: say("why_that_isnt_a_date_and_time_of") };
   // Local time at the POV's place, as the HUD shows it and typed time reads it.
   const to = at - placeOffset(world, at, placeOfEntity(state, world.pov));
   const w = new Working(reg, world, state);
   if (to < state.clock) return w.apply({ type: ENGINE_EVENTS.rewind, data: { minutes: state.clock - to } }) ?? { events: [...w.events] };
   const advanced = applyTimeAdvance(reg, w, to - state.clock, { runSeed, capMinutes: TIME_LIMITS.timelapseMinutes });
-  if (advanced.reason === "unit_cap") return { code: "unit_cap", reason: "too much happens before then to run in one go; a Timelapse to that time gets there in steps" };
-  if (advanced.reason === "over_cap") return { code: "too_long", reason: `the clock moves on at most ${TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY} days at a time` };
+  if (advanced.reason === "unit_cap") return { code: "unit_cap", reason: say("why_too_much_happens_before_then_to_run") };
+  if (advanced.reason === "over_cap") return { code: "too_long", reason: say("why_the_clock_moves_on_at_most_timelapseminutes", { timelapseMinutes: TIME_LIMITS.timelapseMinutes / MINUTES_PER_DAY }) };
   if (!advanced.applied) return { events: [] };
   const events = coarsen(reg, world, state, w.events);
   if (events.length < 2) return { events };

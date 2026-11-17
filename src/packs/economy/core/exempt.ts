@@ -114,7 +114,7 @@ function str(e: PackEvent, k: string): string {
 /** `economy.donation`: a gift's amount added to its donor's year (deductible or not, as it was when given; a private foundation's apart, `pf`) and to its receiver's. Its posting travels beside it in one unit. */
 export const DONATION_EVENT: EventTypeDef<PackEvent> = {
   type: DONATION,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "donor")) && own(ctx.state.entities, str(e, "org")) && typeof e.data.cents === "number" && typeof e.data.year === "number" ? null : ({ code: "bad_event", reason: "a donation needs its donor, its receiver, its amount and its year" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "donor")) && own(ctx.state.entities, str(e, "org")) && typeof e.data.cents === "number" && typeof e.data.year === "number" ? null : ({ code: "bad_event", reason: say("why_a_donation_needs_its_donor_its_receiver") } satisfies Rejection)),
   apply: (e, state) => {
     const cents = numOf(e.data.cents);
     const year = numOf(e.data.year);
@@ -171,9 +171,9 @@ function donateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, Jso
   const by = strOf(a.by);
   const from = strOf(a.from);
   const cents = Math.round(numOf(a.cents));
-  if (from === "") return { code: "needs_from", reason: "a gift names who gives it" };
-  if (api.partyKind(ctx, to) === null || isGone(ctx.state, to)) return { code: "not_a_party", reason: `${labelOf(ctx, to)} isn't someone or something to give to` };
-  if (cents <= 0) return { code: "bad_amount", reason: "a gift is more than nothing" };
+  if (from === "") return { code: "needs_from", reason: say("why_a_gift_names_who_gives_it") };
+  if (api.partyKind(ctx, to) === null || isGone(ctx.state, to)) return { code: "not_a_party", reason: say("why_to_isnt_someone_or_something_to_give", { to: labelOf(ctx, to) }) };
+  if (cents <= 0) return { code: "bad_amount", reason: say("why_a_gift_is_more_than_nothing") };
   const grant = isGrant(ctx, to);
   const method = strOf(a.method);
   // The memo is the caller's words (an agent's tool gives them from its files); a player's own gift keeps the engine's.
@@ -198,10 +198,10 @@ function taxStatusEvents(ctx: EffectContext, a: Record<string, JsonValue>): Ledg
   const org = strOf(a.org);
   const status = strOf(a.status).trim();
   const type = isGone(ctx.state, org) ? null : orgTypeOf(ctx, org);
-  if (type === null) return { code: "missing_entity", reason: `no organization ${labelOf(ctx, org)}`, said: org };
+  if (type === null) return { code: "missing_entity", reason: say("why_no_organization_org", { org: labelOf(ctx, org) }), said: org };
   const row = status === "" ? null : rowOf(ctx, EXEMPT_TABLE, status);
-  if (status !== "" && !row) return { code: "unknown_status", reason: `"${status}" isn't a status in this world's exempt table (${Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).join(", ") || "none"})`, choices: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}), said: status };
-  if (strOf(own(ctx.state.entities, org)?.fields.tax_exempt).trim() === status) return { code: "no_change", reason: `${labelOf(ctx, org)} ${status === "" ? "isn't exempt" : `is exempt as ${strOf(row?.name, status)} already`}` };
+  if (status !== "" && !row) return { code: "unknown_status", reason: say("why_status_isnt_a_status_in_this_worlds", { status: status, rows: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}).join(", ") }), choices: Object.keys(ctx.tables.get(EXEMPT_TABLE)?.rows ?? {}), said: status };
+  if (strOf(own(ctx.state.entities, org)?.fields.tax_exempt).trim() === status) return { code: "no_change", reason: say("why_org_isnt_exemptis_exempt_as_status_already", { org: labelOf(ctx, org), status: strOf(row?.name, status), status2: status === "" }) };
   const by = strOf(a.by);
   const text = status === "" ? "No longer exempt from income tax" : `Exempt from income tax as ${strOf(row?.name, status)}${strOf(row?.code) !== "" ? ` (${strOf(row?.code)})` : ""}`;
   const line = by !== "" && by !== org ? (optionalService(ctx, "orgs.acted")?.(ctx, { org, by, power: "org.govern", text }) ?? []) : [];

@@ -31,6 +31,7 @@ import { chatSchedulesIn, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeePlace } from "../../../engine/visibility";
 import { activeBlocks, blockOnDay, blockPlace, chatBlocks, routineCandidates, scheduleOff } from "./routines";
+import { say } from "../../../engine/lines";
 
 /** The proposal type: `routine{entity, change, label, days, start?, end?, minutes?, activity?, place?, with?, replaces?}`. */
 export const ROUTINE_CHANNEL = "routine";
@@ -207,18 +208,18 @@ function theirSchedules(ctx: ReadContext, who: EntityId): { id: ScheduleId; def:
 function personOf(ctx: ReadContext, p: JsonObject): EntityId | Rejection {
   const who = text(p.entity);
   const e = own(ctx.state.entities, who);
-  if (!e || isGone(ctx.state, who) || !povMayKnow(ctx.registry, ctx.world, ctx.state, who)) return refuse("there's no one by that name");
-  if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return refuse(`${e.name} has no routine: only people do`);
-  if (!acts(ctx.world, ctx.state, who)) return refuse(`${e.name} keeps no routine now`);
+  if (!e || isGone(ctx.state, who) || !povMayKnow(ctx.registry, ctx.world, ctx.state, who)) return refuse(say("why_theres_no_one_by_that_name"));
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return refuse(say("why_name_has_no_routine_only_people_do", { name: e.name }));
+  if (!acts(ctx.world, ctx.state, who)) return refuse(say("why_name_keeps_no_routine_now", { name: e.name }));
   return who;
 }
 
 /** The block a `start` lays: what the reply says, with nothing invented but how long it takes and where, when it doesn't say. */
 function startBlock(ctx: ReadContext, who: EntityId, p: JsonObject): RoutineBlock | Rejection {
   const label = cleanLabel(p.label);
-  if (label === "") return refuse("a new routine needs what it is");
+  if (label === "") return refuse(say("why_a_new_routine_needs_what_it_is"));
   const days = daysOf(ctx, p.days);
-  if (!days) return refuse("the reply doesn't say which days");
+  if (!days) return refuse(say("why_the_reply_doesnt_say_which_days"));
   const said = text(p.activity)
     .toLowerCase()
     .replace(/[^a-z0-9 _-]/g, "")
@@ -233,23 +234,23 @@ function startBlock(ctx: ReadContext, who: EntityId, p: JsonObject): RoutineBloc
   const hm = HHMM.exec(start);
   const at = hm ? `${(hm[1] ?? "").padStart(2, "0")}:${hm[2] ?? "00"}` : null;
   const part = at === null && start !== "" ? DAY_PARTS[start] : undefined;
-  if (at === null && start !== "" && !part) return refuse("its time doesn't read");
+  if (at === null && start !== "" && !part) return refuse(say("why_its_time_doesnt_read"));
   const endHm = HHMM.exec(end);
   const stated = typeof p.minutes === "number" && Number.isInteger(p.minutes) ? p.minutes : null;
   const minutes = at !== null && endHm ? (parseHHMM(`${(endHm[1] ?? "").padStart(2, "0")}:${endHm[2] ?? "00"}`) - parseHHMM(at) + MINUTES_PER_DAY) % MINUTES_PER_DAY || MINUTES_PER_DAY : (stated ?? MINUTES[activity] ?? basic?.minutes ?? DEFAULT_MINUTES);
-  if (minutes < 1 || minutes > MINUTES_PER_DAY) return refuse("its length is a day at most");
+  if (minutes < 1 || minutes > MINUTES_PER_DAY) return refuse(say("why_its_length_is_a_day_at_most"));
   // A place it names, or their home or work; else where the reply leaves it: their work for a job,
   // and wherever they are for anything else, so the block moves no one the reply didn't. A place it
   // names that resolves to none (the world lacks it, or the POV may not know it) is refused alike.
   const keyword = text(p.place).toLowerCase();
   const named = keyword === "home" || keyword === "work" ? null : placeOf(ctx, p.place);
-  if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work") return refuse("there's no such place");
+  if (named === null && keyword !== "" && keyword !== "home" && keyword !== "work") return refuse(say("why_theres_no_such_place"));
   const place: RoutinePlace = named !== null ? { place: named } : keyword === "home" || keyword === "work" ? keyword : activity === "work" ? "work" : basic ? (basic.place ?? "home") : "here";
   const company: EntityId[] = [];
   for (const raw of Array.isArray(p.with) ? p.with : []) {
     const id = text(raw);
     const e = own(ctx.state.entities, id);
-    if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id)) return refuse("there's no one by that name");
+    if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !povMayKnow(ctx.registry, ctx.world, ctx.state, id)) return refuse(say("why_theres_no_one_by_that_name"));
     if (id !== who && !company.includes(id)) company.push(id);
   }
   return {
@@ -287,12 +288,12 @@ function startChange(ctx: ReadContext, who: EntityId, p: JsonObject): StoryChang
   const block = startBlock(ctx, who, p);
   if ("code" in block) return block;
   const days = weekOf(ctx, who, block, firstDay(ctx));
-  if (days.length === 0) return refuse("it falls on no day of the week");
-  if (already(ctx, who, block, days)) return refuse("it's already their routine");
+  if (days.length === 0) return refuse(say("why_it_falls_on_no_day_of_the"));
+  if (already(ctx, who, block, days)) return refuse(say("why_its_already_their_routine"));
   const mine = blockSpans(ctx, block, days);
   const clashing = theirSchedules(ctx, who).filter(({ def }) => overlaps(mine, slotSpans(ctx, def, days).map((s) => s.span)));
   const replaces = p.replaces === true;
-  if (clashing.length > 0 && !replaces) return refuse("it clashes with their schedule, and the reply doesn't say it takes its place");
+  if (clashing.length > 0 && !replaces) return refuse(say("why_it_clashes_with_their_schedule_and_the"));
   const schedules = [...new Set(clashing.map((c) => c.id))].map((schedule) => ({ schedule, value: { off: true as const, until: null } }));
   // What it takes the place of in their routine: the fixed blocks it overlaps (not a basic need, nor a private block: the reply can't know of one).
   const blocks: { block: RoutineBlockId; value: RoutineEntry | null }[] = [];
@@ -317,10 +318,10 @@ function stopChange(ctx: ReadContext, who: EntityId, p: JsonObject): StoryChange
   const cal = calendarIn(ctx);
   const words = wordsOf(cleanLabel(p.label));
   const where = placeOf(ctx, p.place);
-  if (where === null && text(p.place) !== "") return refuse("there's no such place");
-  if (words.length === 0 && where === null) return refuse("the reply doesn't say what they gave up");
+  if (where === null && text(p.place) !== "") return refuse(say("why_theres_no_such_place"));
+  if (words.length === 0 && where === null) return refuse(say("why_the_reply_doesnt_say_what_they_gave"));
   const stated = p.days === undefined || p.days === null ? {} : daysOf(ctx, p.days);
-  if (!stated) return refuse("the reply doesn't say which days");
+  if (!stated) return refuse(say("why_the_reply_doesnt_say_which_days"));
   const from = dateAt(cal, ctx.state.clock).dayIndex;
   const week = [0, 1, 2, 3, 4, 5, 6].map((i) => from + i);
   const probe: RoutineBlock = { id: "", label: "", activity: "", kind: "flexible", window: WAKING, minutes: 1, ...(Object.keys(stated).length > 0 ? { days: stated } : {}) };
@@ -352,7 +353,7 @@ function stopChange(ctx: ReadContext, who: EntityId, p: JsonObject): StoryChange
       schedules.push({ schedule: other.id, value: cut(other.def, paired) });
     }
   }
-  if (blocks.length === 0 && schedules.length === 0) return refuse("nothing of their routine is what the reply says they gave up");
+  if (blocks.length === 0 && schedules.length === 0) return refuse(say("why_nothing_of_their_routine_is_what_the"));
   return { entity: who, blocks, schedules };
 }
 
@@ -361,12 +362,12 @@ export function storyChange(p: JsonObject, ctx: ReadContext): StoryChange | Reje
   const who = personOf(ctx, p);
   if (typeof who !== "string") return who;
   const change = text(p.change).toLowerCase();
-  if (!(change in CHANGES)) return refuse("a routine change starts, stops or moves house");
+  if (!(change in CHANGES)) return refuse(say("why_a_routine_change_starts_stops_or_moves"));
   if (change === "start") return startChange(ctx, who, p);
   if (change === "stop") return stopChange(ctx, who, p);
   const home = placeOf(ctx, p.place);
-  if (home === null) return refuse("there's no such place");
-  if (own(ctx.state.entities, who)?.fields.home === home) return refuse("it's already their home");
+  if (home === null) return refuse(say("why_theres_no_such_place"));
+  if (own(ctx.state.entities, who)?.fields.home === home) return refuse(say("why_its_already_their_home"));
   return { entity: who, home };
 }
 
@@ -398,7 +399,7 @@ export const routineChannel: ProposalChannelDef = {
 export function storyEvents(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const who = text(args.entity);
   const e = own(ctx.state.entities, who);
-  if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: "only people have a routine" };
+  if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: say("why_only_people_have_a_routine") };
   const turn = text(args.turn);
   const source: JsonObject = { type: "story", at: ctx.state.clock, ...(turn !== "" ? { turn } : {}), ...(args.by === "player" ? { by: "player" } : {}) };
   const list = (v: JsonValue | undefined): JsonObject[] => (Array.isArray(v) ? v.filter(isRecord).map(objOf) : []);

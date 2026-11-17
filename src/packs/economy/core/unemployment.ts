@@ -212,7 +212,7 @@ function quarterOk(v: JsonValue | undefined): boolean {
 /** `economy.unemployment_accrued`: a paycheck's wages counted toward the worker's bases at its employer (with what they were paid there before the year counted them, `before`), and its FUTA, credit reduction and SUTA added to the quarter. */
 export const ACCRUED_EVENT: EventTypeDef<PackEvent> = {
   type: UNEMPLOYMENT_ACCRUED,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "employer")) && typeof e.data.year === "number" && quarterOk(e.data.quarter) ? null : ({ code: "bad_event", reason: "an unemployment tax accrual needs its employer, its year and its quarter" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "employer")) && typeof e.data.year === "number" && quarterOk(e.data.quarter) ? null : ({ code: "bad_event", reason: say("why_an_unemployment_tax_accrual_needs_its_employer") } satisfies Rejection)),
   apply: (e, state) => {
     const employer = str(e, "employer");
     const worker = str(e, "worker");
@@ -235,7 +235,7 @@ export const ACCRUED_EVENT: EventTypeDef<PackEvent> = {
 /** `economy.unemployment_paid`: what a FUTA deposit or return, or a SUTA payment, paid toward each period; a company's goes in its books as payroll. */
 export const PAID_EVENT: EventTypeDef<PackEvent> = {
   type: UNEMPLOYMENT_PAID,
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "employer")) && (e.data.kind === "futa" || e.data.kind === "suta") && Array.isArray(e.data.periods) ? null : ({ code: "bad_event", reason: "an unemployment tax payment needs its employer, its kind (futa or suta) and the periods it pays" } satisfies Rejection)),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "employer")) && (e.data.kind === "futa" || e.data.kind === "suta") && Array.isArray(e.data.periods) ? null : ({ code: "bad_event", reason: say("why_an_unemployment_tax_payment_needs_its_employer") } satisfies Rejection)),
   apply: (e, state, ctx) => {
     const employer = str(e, "employer");
     let total = 0;

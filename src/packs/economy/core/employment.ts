@@ -672,7 +672,7 @@ function reject(code: string, reason: string): Rejection {
  */
 export const PAYSLIP: EventTypeDef<PackEvent> = {
   type: "economy.payslip",
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && own(ctx.state.entities, str(e, "worker")) && typeof e.data.through === "number" ? null : reject("bad_event", "a payslip needs its job, its worker and the time it pays through")),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && own(ctx.state.entities, str(e, "worker")) && typeof e.data.through === "number" ? null : reject("bad_event", say("why_a_payslip_needs_its_job_its_worker"))),
   apply: (e, state, ctx) => {
     const job = str(e, "job");
     const gross = numOf(e.data.gross);
@@ -700,7 +700,7 @@ function sheetDays(v: JsonValue | undefined): number[] {
  */
 export const TIMESHEET: EventTypeDef<PackEvent> = {
   type: "economy.timesheet",
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && typeof e.data.minutes === "number" && e.data.minutes > 0 ? null : reject("bad_event", "a timesheet entry needs its job and minutes")),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && typeof e.data.minutes === "number" && e.data.minutes > 0 ? null : reject("bad_event", say("why_a_timesheet_entry_needs_its_job_and"))),
   apply: (e, state) => {
     const job = str(e, "job");
     const payroll = sliceRecord(state, "economy", "payroll");
@@ -719,7 +719,7 @@ export const TIMESHEET: EventTypeDef<PackEvent> = {
 /** `economy.commission`: a sale credited to a job's commission until its next paycheck. Merges like the timesheet. */
 export const COMMISSION: EventTypeDef<PackEvent> = {
   type: "economy.commission",
-  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && typeof e.data.cents === "number" ? null : reject("bad_event", "a commission credit needs its job and amount")),
+  validate: (e, ctx) => (own(ctx.state.entities, str(e, "job")) && typeof e.data.cents === "number" ? null : reject("bad_event", say("why_a_commission_credit_needs_its_job_and"))),
   apply: (e, state) => {
     const job = str(e, "job");
     const payroll = sliceRecord(state, "economy", "payroll");
@@ -933,16 +933,16 @@ export function payScheduleOf(ctx: Pick<ReadContext, "state">, org: EntityId): J
 function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const employer = strOf(args.business);
   const worker = strOf(args.worker);
-  if (!own(ctx.state.entities, employer) || isGone(ctx.state, employer) || api.partyKind(ctx, employer) === null) return reject("missing_entity", `no employer ${labelOf(ctx, employer)}`);
-  if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person")) return reject("missing_entity", `no person ${labelOf(ctx, worker)}`);
+  if (!own(ctx.state.entities, employer) || isGone(ctx.state, employer) || api.partyKind(ctx, employer) === null) return reject("missing_entity", say("why_no_employer_employer", { employer: labelOf(ctx, employer) }));
+  if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person")) return reject("missing_entity", say("why_no_person_worker", { worker: labelOf(ctx, worker) }));
   const position = strOf(args.position);
   const into = positionsOf(ctx, employer).find((p) => p.id === position);
-  if (position !== "" && !into) return reject("bad_position", `${labelOf(ctx, employer)} has no position ${position}`);
+  if (position !== "" && !into) return reject("bad_position", say("why_employer_has_no_position_position", { employer: labelOf(ctx, employer), position: position }));
   const by = strOf(args.by);
   const refusal = by === "" ? null : (staffRefusal(ctx, by, employer, "staff.hire", { position }) ?? (by === employer ? null : payrollProblem(ctx, api, by, employer, worker, [], "hire")));
   if (refusal !== null) return reject("not_owner", refusal);
   const jobs = allJobs(ctx);
-  if (jobs.some((j) => j.worker === worker && j.party === employer && j.status !== "ended")) return reject("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, employer)}`);
+  if (jobs.some((j) => j.worker === worker && j.party === employer && j.status !== "ended")) return reject("exists", say("why_worker_already_employed_by_employer", { worker: labelOf(ctx, worker), employer: labelOf(ctx, employer) }));
   const cal = calendarOf(ctx.world);
   const fields: JsonObject = { worker, employer, status: "active", start: typeof args.start === "string" && args.start !== "" ? args.start : dateText(cal, today(ctx)), ...(into ? { position } : {}) };
   for (const k of ["title", "occupation", "basis", "hours", "pay_every"] as const) if (typeof args[k] === "string" && args[k] !== "") fields[k] = args[k];
@@ -969,8 +969,8 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
  */
 function staffJob(ctx: ReadContext, args: Record<string, JsonValue>, power: OrgPower, position?: string): Job | Rejection {
   const job = readJob(ctx, strOf(args.job));
-  if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
-  if (job.status === "ended") return reject("ended", "that job has already ended");
+  if (!job) return reject("missing_entity", say("why_no_job_job", { job: labelOf(ctx, strOf(args.job)) }));
+  if (job.status === "ended") return reject("ended", say("why_that_job_has_already_ended"));
   const by = strOf(args.by);
   if (by === "") return job;
   const refusal = job.party === null ? `${labelOf(ctx, by)} doesn't decide ${labelOf(ctx, job.id)}` : staffRefusal(ctx, by, job.party, power, position === undefined ? { worker: job.worker } : { worker: job.worker, position });
@@ -985,13 +985,13 @@ function payProblem(ctx: ReadContext, api: FinanceApi, by: EntityId, job: Job): 
 /** `economy.job_end`: the job ends today (or on `end`): its worker quits, or someone lets them go. Its last paycheck pays through that day on the next payday. */
 function endJob(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const job = readJob(ctx, strOf(args.job));
-  if (!job) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+  if (!job) return reject("missing_entity", say("why_no_job_job", { job: labelOf(ctx, strOf(args.job)) }));
   const by = strOf(args.by);
   if (by !== "" && by !== job.worker) {
     const refusal = job.party === null ? `${labelOf(ctx, by)} can't end that job` : staffRefusal(ctx, by, job.party, "staff.fire", { worker: job.worker });
     if (refusal !== null) return reject("not_owner", refusal);
   }
-  if (job.status === "ended") return reject("ended", "that job has already ended");
+  if (job.status === "ended") return reject("ended", say("why_that_job_has_already_ended"));
   const end = typeof args.end === "string" && args.end !== "" ? args.end : dateText(calendarOf(ctx.world), today(ctx));
   return [
     { type: "set", entity: job.id, field: "end", value: end },
@@ -1008,7 +1008,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
   const problem = payProblem(ctx, api, by, job);
   if (problem !== null) return reject("not_owner", problem);
   const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
-  if (!(rate > 0)) return reject("bad_amount", "a raise needs a new rate above nothing, or a percentage");
+  if (!(rate > 0)) return reject("bad_amount", say("why_a_raise_needs_a_new_rate_above"));
   const said = [{ type: "set", entity: job.id, field: "rate", value: rate }, ...acted(ctx, job.party, by, "staff.pay", `Set ${labelOf(ctx, job.worker)}'s pay to ${api.money(ctx, rate)} ${BASIS_WORDS[job.basis]}`, [job.worker])] as LedgerEvent[];
   if (strOf(own(ctx.state.entities, job.id)?.fields.pay_every) !== UNPAID) return said;
   // An unpaid title starts to pay from today, never back to its start: on the employer's pay schedule, else its staff's own cycle, else monthly.
@@ -1021,7 +1021,7 @@ function raise(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectCont
 /** `economy.job_hours`: the hours a week a job counts from now on (its pay, where hours pay it). Changing them sets the worker's pay, so the self-dealing guard holds. */
 function setHours(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const hours = typeof args.hours_per_week === "number" && Number.isFinite(args.hours_per_week) ? args.hours_per_week : NaN;
-  if (!(hours > 0 && hours <= 168)) return reject("bad_amount", "hours a week are more than none and at most 168");
+  if (!(hours > 0 && hours <= 168)) return reject("bad_amount", say("why_hours_a_week_are_more_than_none"));
   const job = staffJob(ctx, args, "staff.pay");
   if ("code" in job) return job;
   const by = strOf(args.by);
@@ -1036,7 +1036,7 @@ function setLeave(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEv
   if ("code" in job) return job;
   const leave = args.leave !== false;
   const who = labelOf(ctx, job.worker);
-  if (leave === (job.status === "leave")) return reject("unchanged", leave ? `${who} is already on leave` : `${who} isn't on leave`);
+  if (leave === (job.status === "leave")) return reject("unchanged", leave ? say("why_who_is_already_on_leave", { who: who }) : say("why_who_isnt_on_leave", { who: who }));
   return [{ type: "set", entity: job.id, field: "status", value: leave ? "leave" : "active" }, ...acted(ctx, job.party, strOf(args.by), "staff.pay", leave ? `Put ${who} on leave` : `${who} came back from leave`, [job.worker])];
 }
 
@@ -1045,11 +1045,11 @@ function setPosition(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
   const position = strOf(args.position);
   const held = readJob(ctx, strOf(args.job));
   const into = held?.party ? positionsOf(ctx, held.party).find((p) => p.id === position) : undefined;
-  if (held && position !== "" && !into) return reject("bad_position", `${held.party ? labelOf(ctx, held.party) : held.employer} has no position ${position}`);
+  if (held && position !== "" && !into) return reject("bad_position", say("why_employer_has_no_position_position", { employer: held.party ? labelOf(ctx, held.party) : held.employer, position: position }));
   const job = staffJob(ctx, args, "members.appoint", into ? position : undefined);
   if ("code" in job) return job;
   const who = labelOf(ctx, job.worker);
-  if (position === strOf(own(ctx.state.entities, job.id)?.fields.position)) return reject("unchanged", into ? `${who} already holds ${into.title}` : `${who} holds no position`);
+  if (position === strOf(own(ctx.state.entities, job.id)?.fields.position)) return reject("unchanged", into ? say("why_who_already_holds_title", { who: who, title: into.title }) : say("why_who_holds_no_position", { who: who }));
   return [{ type: "set", entity: job.id, field: "position", value: into ? position : null }, ...acted(ctx, job.party, strOf(args.by), "members.appoint", into ? `Appointed ${who} ${into.title}` : `${who} no longer holds a position`, [job.worker])];
 }
 
@@ -1060,14 +1060,14 @@ function setPosition(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
  */
 function setTitle(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const held = readJob(ctx, strOf(args.job));
-  if (!held) return reject("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+  if (!held) return reject("missing_entity", say("why_no_job_job", { job: labelOf(ctx, strOf(args.job)) }));
   const by = strOf(args.by);
   const theirOwn = by !== "" && by === held.worker;
-  const job = theirOwn ? (held.status === "ended" ? reject("ended", "that job has already ended") : held) : staffJob(ctx, args, "members.appoint");
+  const job = theirOwn ? (held.status === "ended" ? reject("ended", say("why_that_job_has_already_ended")) : held) : staffJob(ctx, args, "members.appoint");
   if ("code" in job) return job;
   const words = strOf(args.title).trim();
   const who = labelOf(ctx, job.worker);
-  if (words === strOf(own(ctx.state.entities, job.id)?.fields.title)) return reject("unchanged", words !== "" ? `${who} already goes by ${words}` : `${who}'s job has no title of its own`);
+  if (words === strOf(own(ctx.state.entities, job.id)?.fields.title)) return reject("unchanged", words !== "" ? say("why_who_already_goes_by_words", { who: who, words: words }) : say("why_who_s_job_has_no_title_of", { who: who }));
   const line = words !== "" ? `${who} goes by ${words}` : `${who}'s job no longer has a title of its own`;
   return [{ type: "set", entity: job.id, field: "title", value: words === "" ? null : words }, ...(theirOwn ? [] : acted(ctx, job.party, by, "members.appoint", line, [job.worker]))];
 }
@@ -1080,9 +1080,9 @@ function setTitle(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEv
  */
 function paySchedule(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection {
   const org = strOf(args.org);
-  if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || orgTypeOf(ctx, org) === null) return reject("missing_entity", `no organization ${labelOf(ctx, org)}`);
+  if (!own(ctx.state.entities, org) || isGone(ctx.state, org) || orgTypeOf(ctx, org) === null) return reject("missing_entity", say("why_no_organization_org", { org: labelOf(ctx, org) }));
   const every = strOf(args.every);
-  if (!(SCHEDULE_EVERY as readonly string[]).includes(every)) return reject("bad_schedule", `a pay schedule is ${SCHEDULE_EVERY.join(", ")}`);
+  if (!(SCHEDULE_EVERY as readonly string[]).includes(every)) return reject("bad_schedule", say("why_a_pay_schedule_is_join", { join: SCHEDULE_EVERY.join(", ") }));
   const by = strOf(args.by);
   const refusal = by === "" ? null : staffRefusal(ctx, by, org, "staff.pay", "all");
   if (refusal !== null) return reject("not_owner", refusal);
@@ -1090,7 +1090,7 @@ function paySchedule(args: Record<string, JsonValue>, ctx: EffectContext): Ledge
   const weekly = every === "weekly" || every === "biweekly";
   const given = strOf(args.anchor);
   const anchor = given === "" ? null : dayOfField(cal, given);
-  if (given !== "" && anchor === null) return reject("bad_date", `${given} isn't a date`);
+  if (given !== "" && anchor === null) return reject("bad_date", say("why_given_isnt_a_date", { given: given }));
   const weekday = anchor !== null ? dateAt(cal, clockAt(cal, anchor, 0)).weekday : typeof args.weekday === "number" && Number.isInteger(args.weekday) && args.weekday >= 0 && args.weekday <= 6 ? args.weekday : 5;
   const from = today(ctx);
   const first = anchor ?? from + ((((weekday - dateAt(cal, clockAt(cal, from, 0)).weekday) % 7) + 7) % 7);

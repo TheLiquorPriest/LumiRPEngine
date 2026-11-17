@@ -1202,7 +1202,7 @@ function blockLabel(ctx: ReadContext, block: string, value: JsonValue | undefine
 const EVENTS: EventTypeDef<PackEvent>[] = [
   {
     type: "castlife.need",
-    validate: (e, ctx) => (own(ctx.state.entities, strOf(e.data.entity)) && own(NEEDS, strOf(e.data.need)) && typeof e.data.delta === "number" ? null : { code: "bad_event", reason: "need needs an entity, a known need and a delta" }),
+    validate: (e, ctx) => (own(ctx.state.entities, strOf(e.data.entity)) && own(NEEDS, strOf(e.data.need)) && typeof e.data.delta === "number" ? null : { code: "bad_event", reason: say("why_need_needs_an_entity_a_known_need") }),
     // The need it started from rides with it (`from`), so the fold reads no day plan; an event an
     // earlier build recorded without it reads the day as that build laid it, so it folds as it did.
     apply: (e, state, ctx) => {
@@ -1228,7 +1228,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     type: "castlife.decision",
-    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : { code: "bad_event", reason: "decision needs key and choice" }),
+    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : { code: "bad_event", reason: say("why_decision_needs_key_and_choice") }),
     apply: (e, state) => {
       sliceRecord(state, "castlife", "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
@@ -1236,7 +1236,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     type: "castlife.invitation",
-    validate: (e, ctx) => (own(ctx.state.entities, strOf(e.data.agent)) ? null : { code: "missing_entity", reason: "invitation needs an agent" }),
+    validate: (e, ctx) => (own(ctx.state.entities, strOf(e.data.agent)) ? null : { code: "missing_entity", reason: say("why_invitation_needs_an_agent") }),
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
@@ -1250,7 +1250,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     // An earlier build's event has no role or skip life: it folds as it did, with none.
     type: ROUTINE_EVENTS.follow,
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine setting names someone in the world" };
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: say("why_a_routine_setting_names_someone_in_the") };
       const f = e.data.follow;
       if (f === null) return null;
       const o = objOf(f);
@@ -1259,7 +1259,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       const role = o.role === undefined || o.role === null || ROUTINE_ROLES.some((r) => r === o.role);
       const skips = o.skips === undefined || o.skips === null || SKIP_LIVES.some((s) => s === o.skips);
       const some = o.mode !== null || o.awareness !== null || (o.role !== undefined && o.role !== null) || (o.skips !== undefined && o.skips !== null);
-      return mode && awareness && role && skips && some ? null : { code: "bad_event", reason: "a routine setting is a mode, an awareness, a role, a skip life or some of them, or null to clear it" };
+      return mode && awareness && role && skips && some ? null : { code: "bad_event", reason: say("why_a_routine_setting_is_a_mode_an") };
     },
     apply: (e, state) => {
       const follow = sliceRecord(state, "castlife", "follow");
@@ -1281,13 +1281,13 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     type: ROUTINE_EVENTS.skipPlan,
     validate: (e, ctx) => {
       const { from, to, plans, note } = e.data;
-      if (typeof from !== "number" || typeof to !== "number" || from >= to || !Array.isArray(plans) || (note !== undefined && typeof note !== "string")) return { code: "bad_event", reason: "a skip plan has its span, its plans and an optional note" };
+      if (typeof from !== "number" || typeof to !== "number" || from >= to || !Array.isArray(plans) || (note !== undefined && typeof note !== "string")) return { code: "bad_event", reason: say("why_a_skip_plan_has_its_span_its") };
       const block = (raw: JsonValue): boolean => {
         const b = objOf(raw);
         return typeof b.label === "string" && typeof b.start === "number" && typeof b.end === "number" && from <= b.start && b.start < b.end && b.end <= to && own(ctx.world.places, strOf(b.place)) !== undefined && strOf(b.activity) !== "" && (b.days === undefined || typeof b.days === "string");
       };
       const planned = plans.every((raw) => own(ctx.state.entities, strOf(objOf(raw).entity)) !== undefined && Array.isArray(objOf(raw).blocks) && (objOf(raw).blocks as JsonValue[]).every(block));
-      return planned ? null : { code: "bad_value", reason: "a skip plan names people in the world, each block inside its span at a place the world has" };
+      return planned ? null : { code: "bad_value", reason: say("why_a_skip_plan_names_people_in_the") };
     },
     apply: (e, state) => {
       mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
@@ -1299,12 +1299,12 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.
     type: ROUTINE_EVENTS.block,
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a routine change names someone in the world" };
-      if (strOf(e.data.block) === "" || !isChatSource(e.data.source)) return { code: "bad_event", reason: "a routine change names its block and where it came from" };
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: say("why_a_routine_change_names_someone_in_the") };
+      if (strOf(e.data.block) === "" || !isChatSource(e.data.source)) return { code: "bad_event", reason: say("why_a_routine_change_names_its_block_and") };
       const v = e.data.value;
       if (v === null) return null;
       const problems = blockShapeProblems(v, false);
-      return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? "the block's id is the one it changes" };
+      return problems.length === 0 && objOf(v).id === e.data.block ? null : { code: "bad_value", reason: problems[0] ?? say("why_the_blocks_id_is_the_one_it") };
     },
     apply: (e, state) => {
       const routines = sliceRecord(state, "castlife", "routines");
@@ -1322,9 +1322,9 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     // One of someone's schedules in this chat (`schedule_override`, or the story's): off, their own slots, or null to drop the chat's change.
     type: ROUTINE_EVENTS.schedule,
     validate: (e, ctx) => {
-      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: "a schedule change names someone in the world" };
-      if (!allSchedules(ctx.registry, ctx.world).some((s) => s.id === strOf(e.data.schedule)) || !isChatSource(e.data.source)) return { code: "bad_event", reason: "a schedule change names one of the world's schedules and where it came from" };
-      return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots" };
+      if (!own(ctx.state.entities, strOf(e.data.entity))) return { code: "missing_entity", reason: say("why_a_schedule_change_names_someone_in_the") };
+      if (!allSchedules(ctx.registry, ctx.world).some((s) => s.id === strOf(e.data.schedule)) || !isChatSource(e.data.source)) return { code: "bad_event", reason: say("why_a_schedule_change_names_one_of_the") };
+      return e.data.value === null || isScheduleChange(e.data.value) ? null : { code: "bad_value", reason: say("why_a_schedule_change_is_off_until_a") };
     },
     apply: (e, state) => {
       const schedules = sliceRecord(state, "castlife", "schedules");
@@ -1353,8 +1353,8 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
  */
 function routineEdit(ctx: ReadContext, op: RoutineEditOp): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, op.entity);
-  if (!e) return { code: "missing_entity", reason: `no ${labelOf(ctx, op.entity)}` };
-  if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: `${e.name} has no routine: only people do` };
+  if (!e) return { code: "missing_entity", reason: say("why_no_party", { party: labelOf(ctx, op.entity) }) };
+  if (!kindIs(ctx.registry, ctx.world, e.kind, "person")) return { code: "not_person", reason: say("why_name_has_no_routine_only_people_do", { name: e.name }) };
   const source = { type: "gm", at: ctx.state.clock };
   if (op.op === "routine_follow") {
     const now = followOf(ctx, op.entity).chat;
@@ -1372,10 +1372,10 @@ function routineEdit(ctx: ReadContext, op: RoutineEditOp): LedgerEvent[] | Rejec
     return [{ type: ROUTINE_EVENTS.block, data: { entity: op.entity, block: op.block, value, source } }];
   }
   const schedule = allSchedules(ctx.registry, ctx.world).find((s) => s.id === op.schedule);
-  if (!schedule) return { code: "missing_schedule", reason: `there's no schedule ${op.schedule}` };
-  if (op.value !== null && "off" in op.value && !scheduleOwners(ctx.registry, ctx.world, ctx.state, schedule).includes(op.entity)) return { code: "not_owner", reason: `${e.name} doesn't follow ${op.schedule}` };
+  if (!schedule) return { code: "missing_schedule", reason: say("why_theres_no_schedule_schedule", { schedule: op.schedule }) };
+  if (op.value !== null && "off" in op.value && !scheduleOwners(ctx.registry, ctx.world, ctx.state, schedule).includes(op.entity)) return { code: "not_owner", reason: say("why_name_doesnt_follow_schedule", { name: e.name, schedule: op.schedule }) };
   const value = op.value === null ? null : (structuredClone(op.value) as unknown as JsonObject);
-  if (value !== null && !isScheduleChange(value)) return { code: "bad_value", reason: "a schedule change is off (until a time or for good) or their own slots (HH:MM to HH:MM)" };
+  if (value !== null && !isScheduleChange(value)) return { code: "bad_value", reason: say("why_a_schedule_change_is_off_until_a_2") };
   return [{ type: ROUTINE_EVENTS.schedule, data: { entity: op.entity, schedule: op.schedule, value, source } }];
 }
 
@@ -1835,7 +1835,7 @@ export const castlifePack: PackDef = {
       resolve(a, ctx) {
         const who = strOf(a.who);
         const e = own(ctx.state.entities, who);
-        if (!e) return { code: "missing_entity", reason: `no ${labelOf(ctx, who)}` };
+        if (!e) return { code: "missing_entity", reason: say("why_no_party", { party: labelOf(ctx, who) }) };
         const until = ctx.state.clock + numOf(a.minutes, 60);
         const holds: JsonObject = { ...objOf(e.fields.holds) };
         const out: LedgerEvent[] = [];

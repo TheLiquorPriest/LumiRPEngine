@@ -497,7 +497,7 @@ export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, o
   const first = named[0];
   if (first && (level < 2 || covers(ctx, first, cents, opts.overdraft) || (story && runsDebt(ctx, first.account)))) return first;
   if (opts.source && !opts.story) {
-    if (first) return reject("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents)}`);
+    if (first) return reject("declined", first.card ? say("why_card_was_declined_for_cents", { card: labelOf(ctx, first.card), cents: money(cents) }) : say("why_account_cant_cover_currency", { account: labelOf(ctx, first.account), currency: money(cents) }));
     if (problems.length > 0) return reject("declined", `${problems[0]}`);
   }
   const method = opts.method ?? "auto";
@@ -520,10 +520,10 @@ export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, o
   if (story) {
     const debt = candidates.findLast((s) => runsDebt(ctx, s.account)) ?? spendable(ctx, payer).filter((id) => id !== opts.except && runsDebt(ctx, id)).map(account).at(-1);
     const saved = debt ?? sourcesFor(ctx, payer, "savings", opts.till, []).find((s) => s.account !== opts.except && covers(ctx, s, cents, false));
-    return saved ? elsewhere(saved) : reject(NO_WAY_TO_PAY, `${name} has nothing that covers ${money(cents)} or can run a debt, so nothing was paid`);
+    return saved ? elsewhere(saved) : reject(NO_WAY_TO_PAY, say("why_name_has_nothing_that_covers_cents_or", { name: name, cents: money(cents) }));
   }
-  if (problems.length > 0 && (method !== "auto" || candidates.length === 0)) return reject("declined", problems[0] ?? `${name}'s card was declined`);
-  return reject("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents)} available`);
+  if (problems.length > 0 && (method !== "auto" || candidates.length === 0)) return reject("declined", problems[0] ?? say("why_name_s_card_was_declined", { name: name }));
+  return reject("declined", method === "credit" || method === "card" || method === "charge" ? say("why_name_s_card_was_declined", { name: name }) : say("why_name_doesnt_have_cents_available", { name: name, cents: money(cents) }));
 }
 
 // ---------------------------------------------------------------- deposits and the payee's side
@@ -739,7 +739,7 @@ function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cen
  */
 export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
   if (opts.given === true) return chargeGiven(hooks, ctx, payer, rawCents, memo, opts);
-  if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+  if (!own(ctx.state.entities, payer)) return reject("missing_entity", say("why_no_payer_payer", { payer: labelOf(ctx, payer) }));
   const cents = Math.round(rawCents);
   // A financed purchase put nothing down still pays the sales tax on its whole price now.
   if (!(cents > 0) && !(cents === 0 && (opts.sale?.price ?? 0) > 0)) return [];
@@ -762,15 +762,15 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
     if ("code" in p) return opts.story === true && opts.kind === "purchase" && p.code === NO_WAY_TO_PAY ? [txn([], { memo, kind: "purchase", ...(opts.category ? { category: opts.category } : {}), payer, unpaid: total })] : p;
     picked = p;
     source = p.account;
-    if (cashback > 0 && p.via !== "debit") return reject("no_cashback", "cash back comes only with a debit card");
+    if (cashback > 0 && p.via !== "debit") return reject("no_cashback", say("why_cash_back_comes_only_with_a_debit"));
   } else {
-    if (cashback > 0) return reject("no_cashback", "cash back needs an account");
-    if (level >= 1 && opts.story !== true && notional(ctx.state, payer) < total) return reject("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
+    if (cashback > 0) return reject("no_cashback", say("why_cash_back_needs_an_account"));
+    if (level >= 1 && opts.story !== true && notional(ctx.state, payer) < total) return reject("declined", say("why_payer_cant_afford_currency", { payer: labelOf(ctx, payer), currency: formatMoney(total, ctx.world.currency) }));
     source = external(payer);
     out.push(...l1Move(ctx.state, payer, -total));
   }
   const wallet = cashback > 0 ? cashAccount(ctx, payer) : null;
-  if (cashback > 0 && !wallet) return reject("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
+  if (cashback > 0 && !wallet) return reject("no_cashback", say("why_payer_has_nowhere_to_carry_cash", { payer: labelOf(ctx, payer) }));
   const lines = merged([
     { account: source, amount: -total },
     { account: dest.account, amount: cents },
@@ -859,9 +859,9 @@ export function sourceGiven(ctx: ReadContext, payer: EntityId, cents: number, op
  * and nothing besides it unless `terms` asks; the funds guard advises on it where the way is not open or holds less.
  */
 function chargeGiven(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions): LedgerEvent[] | Rejection {
-  if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+  if (!own(ctx.state.entities, payer)) return reject("missing_entity", say("why_no_payer_payer", { payer: labelOf(ctx, payer) }));
   const cents = Math.round(rawCents);
-  if (!(cents > 0)) return reject("bad_amount", "the amount must be positive");
+  if (!(cents > 0)) return reject("bad_amount", say("why_the_amount_must_be_positive"));
   const at = opts.at ?? ctx.state.clock;
   const sold = opts.terms !== undefined && opts.sale !== undefined ? saleTermsOf(hooks, ctx, payer, cents, opts.category ?? "", opts.sale) : null;
   const tax = Math.max(0, Math.round(sold?.tax ?? 0));
@@ -870,7 +870,7 @@ function chargeGiven(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, raw
   const ledger = hasLedger(ctx, payer);
   const picked = ledger ? sourceGiven(ctx, payer, cents, { ...(opts.source !== undefined ? { source: opts.source } : {}), except: dest.account, ...(opts.category ? { category: opts.category } : {}) }) : null;
   const source = picked?.account ?? external(payer);
-  if (source === dest.account) return reject("bad_party", `${labelOf(ctx, payer)} can't pay ${labelOf(ctx, dest.account)} from itself`);
+  if (source === dest.account) return reject("bad_party", say("why_payer_cant_pay_account_from_itself", { payer: labelOf(ctx, payer), account: labelOf(ctx, dest.account) }));
   const band = !ledger && ctx.levelOf(payer, "money") >= 1 ? l1Move(ctx.state, payer, -cents) : [];
   const lines = merged([
     { account: source, amount: -cents },
@@ -908,17 +908,17 @@ export function moverOf(ctx: TableBooks, from: EntityId, to: EntityId): EntityId
  */
 export function mayUse(ctx: ReadContext, party: EntityId, account: EntityId, side: "from" | "into"): Rejection | null {
   const t = traitsOf(ctx, account);
-  if (own(ctx.state.entities, account)?.kind !== "account" || !t) return reject("missing_account", `there's no account ${labelOf(ctx, account)}`);
+  if (own(ctx.state.entities, account)?.kind !== "account" || !t) return reject("missing_account", say("why_theres_no_account_account", { account: labelOf(ctx, account) }));
   const status = statusOf(ctx.state, account);
   if (side === "from") {
-    if (status !== "open") return reject("declined", `${labelOf(ctx, account)} is ${status.replace(/_/g, " ")}`);
-    if (!canSpend(ctx.state, account, party)) return reject("not_owner", `${labelOf(ctx, party)} can't spend from ${labelOf(ctx, account)}`);
-    return t.locked ? reject("locked", `${labelOf(ctx, account)} can't be drawn on here`) : null;
+    if (status !== "open") return reject("declined", say("why_account_is_g", { account: labelOf(ctx, account), g: status.replace(/_/g, " ") }));
+    if (!canSpend(ctx.state, account, party)) return reject("not_owner", say("why_party_cant_spend_from_account", { party: labelOf(ctx, party), account: labelOf(ctx, account) }));
+    return t.locked ? reject("locked", say("why_account_cant_be_drawn_on_here", { account: labelOf(ctx, account) })) : null;
   }
-  if (status === "closed") return reject("declined", `${labelOf(ctx, account)} is closed`);
-  if (rightsOf(ctx.state, account, party) === null) return reject("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s`);
-  if (t.receivable) return reject("locked", `${labelOf(ctx, account)} is a loan made: only its borrower's payments reach it`);
-  return classOf(ctx, account) === "cd" ? reject("locked", `${labelOf(ctx, account)} takes nothing in after it opens`) : null;
+  if (status === "closed") return reject("declined", say("why_account_is_closed", { account: labelOf(ctx, account) }));
+  if (rightsOf(ctx.state, account, party) === null) return reject("not_owner", say("why_account_isnt_party_s", { account: labelOf(ctx, account), party: labelOf(ctx, party) }));
+  if (t.receivable) return reject("locked", say("why_account_is_a_loan_made_only_its", { account: labelOf(ctx, account) }));
+  return classOf(ctx, account) === "cd" ? reject("locked", say("why_account_takes_nothing_in_after_it_opens", { account: labelOf(ctx, account) })) : null;
 }
 
 /** A cash advance's fee on a credit account, where fees run: the product's percentage of it, at least its minimum. */
@@ -940,29 +940,29 @@ export function cashAdvanceFee(ctx: ReadContext, account: EntityId, cents: numbe
  */
 export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean; story?: boolean; named?: EntityId } = {}): LedgerEvent[] | Rejection {
   const s = ctx.state;
-  if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account") return reject("missing_account", "both accounts must exist");
-  if (from === to) return reject("bad_party", `${labelOf(ctx, from)} can't pay itself`);
+  if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account") return reject("missing_account", say("why_both_accounts_must_exist"));
+  if (from === to) return reject("bad_party", say("why_from_cant_pay_itself", { from: labelOf(ctx, from) }));
   const party = moverOf(ctx, from, to);
-  if (!party) return reject("not_owner", "both accounts must belong to the same holder");
+  if (!party) return reject("not_owner", say("why_both_accounts_must_belong_to_the_same"));
   const fromTraits = traitsOf(ctx, from);
   const toTraits = traitsOf(ctx, to);
-  if (!fromTraits || !toTraits) return reject("missing_account", "both accounts must exist");
+  if (!fromTraits || !toTraits) return reject("missing_account", say("why_both_accounts_must_exist"));
   const unusable = mayUse(ctx, party, from, "from") ?? mayUse(ctx, party, to, "into");
   if (unusable) return unusable;
   let c = Math.round(cents);
-  if (!(c > 0)) return reject("bad_amount", "the amount must be positive");
+  if (!(c > 0)) return reject("bad_amount", say("why_the_amount_must_be_positive"));
   if (toTraits.liability) {
     const owed = -balance(s, to);
-    if (owed <= 0) return reject("nothing_owed", `${labelOf(ctx, to)} owes nothing`);
+    if (owed <= 0) return reject("nothing_owed", say("why_to_owes_nothing", { to: labelOf(ctx, to) }));
     if (c > owed) {
-      if (!opts.cap) return reject("overpay", `${labelOf(ctx, to)} owes only ${formatMoney(owed, ctx.world.currency)}`);
+      if (!opts.cap) return reject("overpay", say("why_to_owes_only_currency", { to: labelOf(ctx, to), currency: formatMoney(owed, ctx.world.currency) }));
       c = owed;
     }
   }
   const advance = fromTraits.revolving && !toTraits.liability;
   const fee = advance ? cashAdvanceFee(ctx, from, c) : 0;
   const debt = opts.story === true && runsDebt(ctx, from);
-  if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c + fee, ctx.world.currency)}`);
+  if (!opts.unchecked && !debt && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c + fee) return reject("declined", say("why_from_doesnt_have_cents", { from: labelOf(ctx, from), cents: formatMoney(c + fee, ctx.world.currency) }));
   const lines: PostingLine[] = [
     { account: from, amount: -c },
     { account: to, amount: c },
@@ -981,7 +981,7 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
  */
 export function transferParty(ctx: ReadContext, id: EntityId, side: "from" | "to"): { holder: EntityId; account?: EntityId } | Rejection {
   const e = own(ctx.state.entities, id);
-  if (!e) return reject("missing_entity", `no ${labelOf(ctx, id)}`);
+  if (!e) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, id) }));
   if (isParty(ctx, id)) return { holder: id };
   const t = traitsOf(ctx, id);
   if (t && (side === "to" || t.pays)) {
@@ -989,7 +989,7 @@ export function transferParty(ctx: ReadContext, id: EntityId, side: "from" | "to
     const holder = holders[0];
     if (holder) return { holder, account: id };
   }
-  return reject("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
+  return reject("bad_party", say("why_id_isnt_someone_or_an_account_someone", { id: labelOf(ctx, id), from: side === "from" }));
 }
 
 /**
@@ -1021,7 +1021,7 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
     const side = payee !== null ? { payee: payee.holder } : outside !== null ? { counterparty: outside } : {};
     return charge(hooks, ctx, payer.holder, cents, memo, { ...side, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false, story });
   }
-  if (!payer.account && !payee.account) return reject("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
+  if (!payer.account && !payee.account) return reject("bad_party", say("why_from_cant_pay_themselves", { from: labelOf(ctx, from) }));
   const level = ctx.levelOf(payer.holder, "money");
   if (level === 0) return [];
   const c = Math.round(cents);
@@ -1036,7 +1036,7 @@ export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, 
     named ??= picked.named;
   }
   const target = payee.account ?? (cash !== undefined && cash !== source ? cash : (depositAccount(ctx, payee.holder, source) ?? undefined));
-  if (!target || target === source) return reject("bad_party", `${labelOf(ctx, source)} can't pay itself`);
+  if (!target || target === source) return reject("bad_party", say("why_from_cant_pay_itself", { from: labelOf(ctx, source) }));
   return move(ctx, source, target, c, memo, { cap: true, story, ...(named ? { named } : {}) });
 }
 
@@ -1076,8 +1076,8 @@ export function fundsAdvice(ctx: ReadContext, lines: readonly PostingLine[]): Ad
 /** The cash inside `item` goes with it: lost to the outside world, or stolen by `thief`. */
 export function loseWith(ctx: ReadContext, item: EntityId, thief?: EntityId): LedgerEvent[] | Rejection {
   const s = ctx.state;
-  if (!own(s.entities, item)) return reject("missing_entity", `no ${labelOf(ctx, item)}`);
-  if (thief && !own(s.entities, thief)) return reject("missing_entity", `no ${labelOf(ctx, thief)}`);
+  if (!own(s.entities, item)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, item) }));
+  if (thief && !own(s.entities, thief)) return reject("missing_entity", say("why_no_party", { party: labelOf(ctx, thief) }));
   const out: LedgerEvent[] = [];
   for (const id of Object.keys(s.entities).sort()) {
     const cents = balance(s, id);
@@ -1105,7 +1105,7 @@ export function setCash(ctx: ReadContext, holder: EntityId, cents: number): Ledg
   const [first, ...rest] = [...cash.filter((id) => cashOnHolder(s, id, holder)), ...cash.filter((id) => !cashOnHolder(s, id, holder))];
   if (!first) return null;
   const target = Math.round(cents);
-  if (!Number.isSafeInteger(target) || target < 0) return reject("bad_amount", "cash can't be less than nothing");
+  if (!Number.isSafeInteger(target) || target < 0) return reject("bad_amount", say("why_cash_cant_be_less_than_nothing"));
   let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
   if (left === 0) return [];
   const lines: PostingLine[] = left > 0 ? [{ account: first, amount: left }] : [];
@@ -1126,9 +1126,9 @@ export function setCash(ctx: ReadContext, holder: EntityId, cents: number): Ledg
  */
 export function claimCash(ctx: ReadContext, holder: EntityId, cents: number): { entity: EntityId; events: LedgerEvent[] } | Rejection {
   const into = cashAccount(ctx, holder);
-  if (!into) return reject("no_cash", `${labelOf(ctx, holder)} carries no cash`);
+  if (!into) return reject("no_cash", say("why_holder_carries_no_cash", { holder: labelOf(ctx, holder) }));
   const c = Math.round(cents);
-  if (!Number.isSafeInteger(c) || c <= 0) return reject("bad_amount", "cash said to be had is a whole amount above zero");
+  if (!Number.isSafeInteger(c) || c <= 0) return reject("bad_amount", say("why_cash_said_to_be_had_is_a"));
   const lines: PostingLine[] = [
     { account: into, amount: c },
     { account: CORRECTION_ACCOUNT, amount: -c },
@@ -1165,9 +1165,9 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
   const paid = post?.lines.find((l) => l.amount < 0);
   const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
-  if (!post || !paid || !got) return reject("not_a_purchase", "there's no purchase to reprice");
+  if (!post || !paid || !got) return reject("not_a_purchase", say("why_theres_no_purchase_to_reprice"));
   const total = Math.round(cents);
-  if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", "the amount must be positive");
+  if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", say("why_the_amount_must_be_positive"));
   const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0) return [];
   const note = `${post.memo}: price corrected`;
@@ -1286,11 +1286,11 @@ export function reversedAs(post: Pick<PostEvent, "lines" | "memo">): { memo: str
  */
 export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { from: EntityId; repay: LedgerEvent[] } | Rejection {
   const paid = storyPayment(ctx, events);
-  if (!paid) return reject("not_a_payment", "there's no payment to pay another way");
+  if (!paid) return reject("not_a_payment", say("why_theres_no_payment_to_pay_another_way"));
   const touched = new Set(paid.post.lines.map((l) => l.account));
   const ways = [...(paid.named ? idSources(ctx, paid.payer, paid.named, []) : []), ...(["savings", "card", "checking", "cash"] as const).flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
   const way = ways.find((s) => !touched.has(s.account) && covers(ctx, s, paid.total, false));
-  if (!way) return reject("declined", "No other way to pay covers it.");
+  if (!way) return reject("declined", say("why_no_other_way_to_pay_covers_it"));
   const memo = `${paid.post.memo}: paid from ${labelOf(ctx, way.account)} instead`;
   const lines: PostingLine[] = [
     { account: way.account, amount: -paid.total },

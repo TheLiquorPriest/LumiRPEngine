@@ -504,8 +504,8 @@ function answerTo(ctx: ReadContext, track: TrackId, a: Record<string, JsonValue>
   const answer = typeof a.answer === "number" && Number.isFinite(a.answer) ? String(a.answer) : strOf(a.answer);
   const check = checkAnswer(ctx.world, ctx.state, track, answer, decision);
   // The author opted this stage into model judgement: the turn asks `puzzle.answer`, then retries with `decision`.
-  if (check.needsDecision) return reject("needs_decision", "this answer needs a judgement");
-  return check.event ? [check.event] : reject("no_answer", "there is nothing to answer here");
+  if (check.needsDecision) return reject("needs_decision", say("why_this_answer_needs_a_judgement"));
+  return check.event ? [check.event] : reject("no_answer", say("why_there_is_nothing_to_answer_here"));
 }
 
 export const storyPack: PackDef = {
@@ -517,7 +517,7 @@ export const storyPack: PackDef = {
   register(r) {
     r.event<PackEvent>({
       type: "story.flag",
-      validate: (e) => (strOf(e.data.name) !== "" ? null : { code: "bad_flag", reason: "a flag needs a name" }),
+      validate: (e) => (strOf(e.data.name) !== "" ? null : { code: "bad_flag", reason: say("why_a_flag_needs_a_name") }),
       apply: (e, state) => {
         const s = mutableSlice(state, "story");
         s.flags = { ...objOf(s.flags), [strOf(e.data.name)]: e.data.value ?? true };
@@ -530,7 +530,7 @@ export const storyPack: PackDef = {
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;
     });
 
-    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => (strOf(a.name) === "" ? reject("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }]) });
+    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => (strOf(a.name) === "" ? reject("bad_flag", say("why_a_flag_needs_a_name")) : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }]) });
     r.effect({
       type: "story.answer",
       // `track`: the puzzle's own id, which only the world's own content gives (an authored action or rule).
@@ -541,7 +541,7 @@ export const storyPack: PackDef = {
         // the player sees of it. A refusal names no track: the id is the author's.
         if (a.track !== undefined) {
           const id = strOf(a.track);
-          if (own(ctx.world.tracks, id)?.kind !== "puzzle") return { code: "not_a_puzzle", reason: "there is nothing to answer here", gm: `story.answer's track ${id === "" ? "names nothing" : `"${id}" is no puzzle`}` };
+          if (own(ctx.world.tracks, id)?.kind !== "puzzle") return { code: "not_a_puzzle", reason: say("why_there_is_nothing_to_answer_here"), gm: say("why_story_answers_track_names_nothing_id_is", { id: id, id2: id === "" }) };
           return answerTo(ctx, id, a);
         }
         // The player's reference reaches only a puzzle in their quest log (`puzzlesFor`).
@@ -552,12 +552,12 @@ export const storyPack: PackDef = {
         if (fits.length > 1) {
           return {
             code: "ambiguous_puzzle",
-            reason: asked === "" ? "more than one puzzle is open, and the answer doesn't say which" : `more than one open puzzle fits ${asked ?? "that name"}`,
-            gm: `${fits.length} open puzzles fit ${askedForGm(ctx, ref)}: ${fits.map((id) => labelOf(ctx, id)).join(", ")}`,
+            reason: asked === "" ? say("why_more_than_one_puzzle_is_open_and") : say("why_more_than_one_open_puzzle_fits_asked", { asked: asked }),
+            gm: say("why_fits_open_puzzles_fit_askedforgm_id", { fits: fits.length, askedForGm: askedForGm(ctx, ref), id: fits.map((id) => labelOf(ctx, id)).join(", ") }),
           };
         }
         const track = fits[0];
-        if (track === undefined) return { code: "not_a_puzzle", reason: asked === "" ? "there is no open puzzle to answer" : `no open puzzle ${asked ?? "by that name"}`, gm: `no open puzzle in the quest log fits ${askedForGm(ctx, ref)}` };
+        if (track === undefined) return { code: "not_a_puzzle", reason: asked === "" ? say("why_there_is_no_open_puzzle_to_answer") : say("why_no_open_puzzle_asked_by_that_name", { asked: asked }), gm: say("why_no_open_puzzle_in_the_quest_log", { askedForGm: askedForGm(ctx, ref) }) };
         return answerTo(ctx, track, a);
       },
     });

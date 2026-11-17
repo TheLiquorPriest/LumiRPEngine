@@ -162,7 +162,7 @@ export function decide(ctx: ReadContext, person: EntityId, app: CreditApplicatio
   const products = worldProducts(ctx.world);
   const def = own(products, app.product);
   const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
-  if (!cls || !isCredit(cls)) return reject("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
+  if (!cls || !isCredit(cls)) return reject("not_credit", say("why_g_isnt_a_kind_of_credit", { g: app.product.replace(/_/g, " ") }));
   const score = reports ? currentScore(ctx, person) : null;
   const assumed = app.scoreAssumed ?? CREDIT_SCORE_ASSUMED;
   const entries = reports ? creditEntriesOf(ctx, person) : [];

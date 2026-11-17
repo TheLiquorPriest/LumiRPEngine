@@ -30,6 +30,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { evalExpr, kindIs, placeOfEntity, scopeEnv, truthy } from "../../../engine/scope";
 import { passMemo } from "../../../engine/read-pass";
+import { say } from "../../../engine/lines";
 
 export type Season = "winter" | "spring" | "summer" | "autumn";
 
@@ -383,7 +384,7 @@ export const weatherPack: PackDef = {
         const target = strOf(a.region);
         const { region, place } = weatherTarget(ctx, target);
         const st = strOf(a.state);
-        if (st === "") return reject("bad_args", "weather.set needs a state");
+        if (st === "") return reject("bad_args", say("why_weather_set_needs_a_state"));
         const out: LedgerEvent[] = [];
         if (place !== null && (region === null || own(ctx.world.places, place)?.fields.weather !== undefined)) out.push(placeWeather(ctx, place, st));
         if (region !== null) {
@@ -391,7 +392,7 @@ export const weatherPack: PackDef = {
           if (typeof a.minutes === "number" && a.minutes > 0) out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
           if (typeof a.until === "string" && a.until.trim() !== "") out.push({ type: "set", entity: region, field: "weather_hold_until", value: a.until });
         }
-        return out.length > 0 ? out : reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+        return out.length > 0 ? out : reject("missing_region", say("why_no_weather_region_for_target", { target: labelOf(ctx, target) }));
       },
     });
     // Ends a scripted state now (a rule's `clear`): the hold lifts, the sky turns to `state` when one is given and stays as it was
@@ -410,7 +411,7 @@ export const weatherPack: PackDef = {
           out.push({ type: "set", entity: region, field: "weather_hold", value: 0 }, { type: "set", entity: region, field: "weather_hold_until", value: "" });
         }
         if (out.length > 0) return out;
-        return place !== null ? reject("no_change", `${labelOf(ctx, place)} has no weather of its own to clear`) : reject("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+        return place !== null ? reject("no_change", say("why_place_has_no_weather_of_its_own", { place: labelOf(ctx, place) })) : reject("missing_region", say("why_no_weather_region_for_target", { target: labelOf(ctx, target) }));
       },
     });
 
