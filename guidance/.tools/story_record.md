@@ -1,5 +1,6 @@
 ---
 description: story_record as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing the story record
 arguments:
   operations: The operations, recorded in order, in one write.
   operations.op: "Required in every operation, one that changes an item by its id too: the part it writes, one of premise, chapter, scene, beat, thread, arc, player, future, canon, retcon, record or overlay."
