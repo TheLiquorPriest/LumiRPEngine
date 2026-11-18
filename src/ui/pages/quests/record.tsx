@@ -53,7 +53,7 @@ export function QuestRecordView(props: { record: QuestRecord; onTurn?: (turn: st
       </Section>
       <Section id="history" title="History">
         {history.length === 0 ? (
-          <p class="lre-muted rpe-line" data-history-none>{quest.world ? "The world's own quest has no writes made to it." : "No write is recorded."}</p>
+          <p class="lre-muted rpe-line" data-history-none>{quest.world ? "The story has not moved this world's own quest between stages." : "No write is recorded."}</p>
         ) : (
           <ol class="rpe-plain lre-stack" data-history>
             {history.map((entry, i) => (

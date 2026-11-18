@@ -1298,7 +1298,7 @@ export interface JournalQuestRow {
   where: string[];
   /** What it involves, as tree refs. */
   things: string[];
-  /** How it closed; null while it is open. */
+  /** How it closed; null while it is open. A quest of the world's standing on an end stage the story never closed is closed as that stage ended it. */
   closed: QuestClosedRow | null;
   /** The player sees the whole quest; false: only its name and the stages named. */
   whole: boolean;
@@ -2460,7 +2460,7 @@ export interface QuestClosedRow {
   why: string | null;
 }
 
-/** One quest in full: its record, and every write made to it in the order made (those of a quest opened in play; the world's own quest has none). */
+/** One quest in full: its record, and every write made to it in the order made (the writes of a quest opened in play, and each move of the world's own quest from one stage to another, with how it went and the reason it came with). */
 export interface QuestRecord {
   quest: QuestRecordRow;
   history: ({ turn: TurnId | null; by: string | null; op: string; value: { [key: string]: JsonValue } })[];
@@ -2486,7 +2486,7 @@ export interface QuestRecordRow {
   where: string[];
   /** What it involves, as tree refs. */
   things: string[];
-  /** How it closed; null while it is open. */
+  /** How it closed; null while it is open. A quest of the world's standing on an end stage the story never closed is closed as that stage ended it. */
   closed: QuestClosedRow | null;
   thread: string | null;
   /** The quest's own visibility; null where it was not said. */
@@ -2507,9 +2507,9 @@ export interface QuestStageRow {
   id: string;
   label: string;
   condition: string;
-  /** What the Author or the GM called on the stage; null where nothing was called. */
+  /** What the Author or the GM called on the stage; for a stage the world's quest was moved past and nothing was called on, how the move went (its outcome, or failed where it took the stage's failing way, else met); null where nothing was called and the quest has not moved on. */
   state: "met" | "failed" | "open" | null;
-  /** The reason given with that call. */
+  /** The reason given with that call, or with the move. */
   why: string | null;
   /** Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand. */
   current: boolean | null;

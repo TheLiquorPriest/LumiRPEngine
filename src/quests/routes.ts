@@ -14,6 +14,7 @@ import { QUESTS_DEFAULTS, type QuestsSettings } from "./settings";
 import { journalOf, recordOf } from "./journal";
 import { findQuest, openQuests, type QuestView, questSliceOf, questViews } from "./record";
 import { threadClosedAt } from "./thread";
+import { movesAsHistory, type QuestTrails, trailsOf, withTrails } from "./trail";
 import { type JournalAnswer, journalReply, type QuestAnswer, type QuestsPage, questReply, questsReply } from "./shapes";
 
 export const JOURNAL_PATH = "/api/v1/chats/:chat/journal";
@@ -48,6 +49,8 @@ interface Standing {
   open: ReadonlySet<string>;
   standing: Record<string, string>;
   tracks: Readonly<Record<string, TrackDef>>;
+  /** How each world quest that has moved was moved, from the ledger (`trail.ts`). */
+  trails: QuestTrails;
   /** Whether the player's character knows a quest the world made known to some, at the point read, by the world's own rule. */
   knows(quest: string): boolean;
 }
@@ -70,7 +73,8 @@ async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, tur
     const track = Object.hasOwn(tracks, quest) ? tracks[quest] : undefined;
     return doc !== undefined && track !== undefined && trackKnown(deps.store.env.registry, doc, folded.state.world, doc.pov, track);
   };
-  return { views: questViews(tracks, slice), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks, knows };
+  const trails = trailsOf(s, deps.store.env, chat, turn, tracks, folded.state.world.tracks);
+  return { views: withTrails(questViews(tracks, slice), tracks, trails), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks, trails, knows };
 }
 
 export function questRoutes(deps: QuestRoutesDeps) {
@@ -131,7 +135,8 @@ export function questRoutes(deps: QuestRoutesDeps) {
         // The turn its thread closed is in its history (R-169), where the thread is closed on this path.
         const thread = doc?.thread == null ? undefined : storySliceOf(state).items[doc.thread];
         const closed = thread === undefined ? null : threadClosedAt(thread);
-        const history = [...rows, ...(thread === undefined || closed === null ? [] : [{ n: closed.n, turn: closed.turn, by: null, op: "thread_closed", value: { thread: thread.id } }])].sort((a, b) => a.n - b.n).map(({ n: _n, ...r }) => r);
+        const moved = movesAsHistory(at.trails[found.id] ?? []);
+        const history = [...rows, ...moved, ...(thread === undefined || closed === null ? [] : [{ n: closed.n, turn: closed.turn, by: null, op: "thread_closed", value: { thread: thread.id } }])].sort((a, b) => a.n - b.n).map(({ n: _n, ...r }) => r);
         return { quest: recordOf(found, at.standing, at.open.has(found.id)), history };
       },
     }),

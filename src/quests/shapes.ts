@@ -17,8 +17,8 @@ const stageRow = shape.named(
     id: T,
     label: T,
     condition: T,
-    state: field(nullable(call), "What the Author or the GM called on the stage; null where nothing was called."),
-    why: field(nullable(T), "The reason given with that call."),
+    state: field(nullable(call), "What the Author or the GM called on the stage; for a stage the world's quest was moved past and nothing was called on, how the move went (its outcome, or failed where it took the stage's failing way, else met); null where nothing was called and the quest has not moved on."),
+    why: field(nullable(T), "The reason given with that call, or with the move."),
     current: field(nullable(shape.yesNo()), "Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand."),
   }),
 );
@@ -38,7 +38,7 @@ const record = {
   who: field(shape.list(T), "Who it involves, as tree refs."),
   where: field(shape.list(T), "Where it takes place, as tree refs."),
   things: field(shape.list(T), "What it involves, as tree refs."),
-  closed: field(nullable(closedRow), "How it closed; null while it is open."),
+  closed: field(nullable(closedRow), "How it closed; null while it is open. A quest of the world's standing on an end stage the story never closed is closed as that stage ended it."),
 } as const;
 
 const journalRow = shape.named(
@@ -73,7 +73,7 @@ export type QuestsPage = Infer<typeof questsReply>;
 
 export const questReply = shape.named(
   "QuestRecord",
-  "One quest in full: its record, and every write made to it in the order made (those of a quest opened in play; the world's own quest has none).",
+  "One quest in full: its record, and every write made to it in the order made (the writes of a quest opened in play, and each move of the world's own quest from one stage to another, with how it went and the reason it came with).",
   shape.object({
     quest: recordRow,
     history: shape.list(shape.object({ turn: nullable(shape.turnId()), by: nullable(T), op: T, value: shape.record(shape.json()) })),

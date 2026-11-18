@@ -7,9 +7,11 @@ import { shippedTexts } from "../../src/iface/texts";
 import { QUEST_STORE_AREA, recordQuests } from "../../src/quests";
 import { questRoutes } from "../../src/quests/routes";
 import type { JournalAnswer, QuestAnswer, QuestsPage } from "../../src/quests/shapes";
+import type { LedgerEvent } from "../../src/shared/ledger";
 import type { TurnRow } from "../../src/store";
 import { callRoute } from "../app/call";
 import { CHAT, openTable, USER } from "../story/rig";
+import { engine } from "../store/fixtures";
 
 const writer = (turn: TurnRow) => ({ user: USER, chat: CHAT, turn: turn.id, by: "gm", agent: "gm-1", job: null });
 
@@ -41,7 +43,7 @@ async function open() {
     await t.writes.run(() => recordQuests(t.store, writer(next), [{ op: "show", quest: b?.quest ?? "", value: { shown } }]));
     await t.tie(next);
   };
-  return { t, journal, listHandle, oneRoute, a: a?.quest ?? "", b: b?.quest ?? "", show };
+  return { t, journal, journalRoute, listHandle, oneRoute, a: a?.quest ?? "", b: b?.quest ?? "", show };
 }
 
 describe("the journal", () => {
@@ -79,5 +81,28 @@ describe("the records", () => {
     expect(one.quest.id).toBe(q.a);
     expect(one.history.map((h) => h.op)).toEqual(["open", "what", "stage"]);
     await expect(callRoute(q.oneRoute, { params: { chat: CHAT, quest: "nobody" }, user: USER })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("a quest the world defines", () => {
+  test("shows a stage it was moved past with how it ended and why, from the move's own change, and is closed as its end stage ended it", async () => {
+    const q = await open();
+    const asked = await q.listHandle({ params: { chat: CHAT }, query: { limit: 50 }, user: USER });
+    // Not moved yet: no stage has a state, and the quest is open.
+    expect(asked.items.find((x) => x.id === "errand")).toMatchObject({ open: true, closed: null, stages: [{ id: "asked", state: null, why: null, current: true }, { id: "done", state: null, current: false }] });
+    const turn = await q.t.begin();
+    await q.t.writes.run(() => q.t.s.addChanges(turn.id, engine({ type: "stage", track: "errand", from: "asked", to: "done", why: "The letter reached the warden's hand." } as LedgerEvent)));
+    await q.t.tie(turn);
+    const moved = (await q.listHandle({ params: { chat: CHAT }, query: { limit: 50 }, user: USER })).items.find((x) => x.id === "errand");
+    expect(moved?.stages).toMatchObject([
+      { id: "asked", state: "met", why: "The letter reached the warden's hand.", current: false },
+      { id: "done", state: null, why: null, current: true },
+    ]);
+    expect(moved).toMatchObject({ open: false, closed: { outcome: "met", why: "The letter reached the warden's hand." } });
+    // The journal draws it the same way, and the record's history lists the move.
+    const journal: JournalAnswer = await callRoute(q.journalRoute, { params: { chat: CHAT }, user: USER });
+    expect(journal.quests.find((x) => x.id === "errand")?.stages[0]).toMatchObject({ state: "met", why: "The letter reached the warden's hand." });
+    const one: QuestAnswer = await callRoute(q.oneRoute, { params: { chat: CHAT, quest: "errand" }, user: USER });
+    expect(one.history).toMatchObject([{ op: "stage", value: { from: "asked", to: "done", state: "met", why: "The letter reached the warden's hand." } }]);
   });
 });
