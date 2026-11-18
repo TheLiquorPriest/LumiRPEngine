@@ -1,5 +1,6 @@
 ---
 description: lore_index_write as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing index lines for lore entries
 arguments:
   entries: The index lines, one for each entry you index, as many as you have in one call. An entry may carry any further field the indexer's instructions name, by that name; it is kept as you send it.
   entries.id: "The entry's id, as the batch shows it: e-12, w-31."
