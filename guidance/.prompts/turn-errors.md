@@ -8,7 +8,7 @@ stopped_mid_run: RPE stopped while this run was going on.
 player_stopped: The player stopped the turn.
 left_path: The turn left the chat's path.
 previous_run_limit: The next turn began, and this run had used the time it was given.
-no_lead: No agent is named to lead this chat's turns (lead: in RPE-global.yml or the chat's RPE.yml), so the turn was not played.
+no_lead: No agent is named to lead this chat's turns (turn.lead in RPE-global.yml or the chat's RPE.yml), so the turn was not played.
 no_lumiverse_sources: RPE is not set up for a Lumiverse, so it cannot read a character's sources.
 no_lumiverse_chat: RPE is not set up for a Lumiverse, so it has no chat to read.
 settle_running: A turn of this chat is going on. Settle it once that turn is over.
