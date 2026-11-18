@@ -123,13 +123,14 @@ const RESTART_WORDS: Readonly<Record<RestartState, ComponentChildren>> = {
   "by hand": "RPE was started by hand, so nothing starts it again: stop it and start it again",
 };
 
-/** What "Update now" did, in a sentence: the restart onto a new build that has passed its checks, or that there is none, or why the last one was refused. */
+/** What "Update now" did, in a sentence: the restart onto a new build that has passed its checks, or that it waits for the build still being checked, or that there is none, or why the last one was refused. */
 export function updateAnswer(builds: BuildsStatus): string {
   if (builds.broken !== null) {
     const at = builds.update?.stages.find((s) => s.state === "refused")?.stage;
     return `There is no new build to take: the last one was refused${at === undefined ? "" : ` at ${STOPPED_AT[at]}`} (${builds.broken}). RPE runs build ${builds.running}, as it did.`;
   }
-  if (builds.disk !== null && builds.disk !== builds.running) return builds.words;
+  // A press made while a new build is still arriving is remembered: RPE's own words say it will restart when the build is ready.
+  if (builds.restart === "waiting" || (builds.disk !== null && builds.disk !== builds.running)) return builds.words;
   return `There is no new build that has passed its checks: RPE runs build ${builds.running}.`;
 }
 

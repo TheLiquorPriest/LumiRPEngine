@@ -269,6 +269,9 @@ export class Builds {
   #ready: { build: string; hash: string } | null = null;
   #fellBack: string | null = null;
   #arriving: Promise<unknown> = Promise.resolve();
+  /** How many words of the extension that a new app file arrived are being taken now, and whether Update now was pressed while one was: the press is carried out once the build is ready. */
+  #arrivals = 0;
+  #pressed = false;
   /** The newest update heard of, stage by stage. */
   #update: UpdateProgress | null = null;
 
@@ -342,15 +345,31 @@ export class Builds {
    * hash is not taken. Whether it was taken, and where it stands, in words.
    */
   arrived(hash: string | null, now = false): Promise<{ taken: boolean; words: string }> {
+    this.#arrivals += 1;
     const run = this.#arriving.then(() => this.#arrive(hash, now));
     this.#arriving = run.catch(() => undefined);
-    return run;
+    // A press made while this was under way and that it could not carry out (the build was refused) is let go with it.
+    return run.finally(() => {
+      this.#arrivals -= 1;
+      if (this.#arrivals === 0) this.#unpress();
+    });
+  }
+
+  /** A remembered press of Update now is let go: the build it waited for was not taken, so there is nothing to restart onto. */
+  #unpress(): void {
+    if (!this.#pressed) return;
+    this.#pressed = false;
+    if (this.#restart === "waiting" && this.#ready === null) this.#restart = "none";
   }
 
   async #arrive(hash: string | null, now: boolean): Promise<{ taken: boolean; words: string }> {
     const { file, log, version } = this.deps;
     const copy = file?.copy;
-    const answer = (taken: boolean): { taken: boolean; words: string } => ({ taken, words: this.status().words });
+    const answer = (taken: boolean): { taken: boolean; words: string } => {
+      // A build not taken leaves nothing for a remembered press to restart onto: it is let go before the words are said.
+      if (!taken) this.#unpress();
+      return { taken, words: this.status().words };
+    };
     if (file === null || copy === undefined) {
       this.#refused = "RPE runs from no installed copy of its own, so it takes no app file the extension brings: restart it onto a new one by hand";
       this.#arrivedNow(this.#refused);
@@ -396,12 +415,17 @@ export class Builds {
     this.#refused = null;
     this.#ready = { build: fetched.build, hash: stated };
     this.#enter("restart");
-    log.info("RPE has a new build that starts, and will swap onto it.", { running: version, build: fetched.build });
-    if (!settings.restart && !now) this.#restart = "off";
+    // Update now pressed while this build arrived is carried out now, as the press is at any other time.
+    const pressed = now || this.#pressed;
+    this.#pressed = false;
+    if (pressed) log.info("RPE has a new build that starts, and restarts onto it now, as you pressed Update now.", { running: version, build: fetched.build });
+    else if (settings.restart) log.info("RPE has a new build that starts, and will restart onto it once no turn or job runs.", { running: version, build: fetched.build });
+    else log.info(`RPE has a new build that starts, and waits for you to press Update now: "${DEFS.restart.name}" is off, so RPE does not restart onto it by itself.`, { running: version, build: fetched.build });
+    if (!settings.restart && !pressed) this.#restart = "off";
     else if (!(await file.service())) this.#restart = "by hand";
     else {
       this.#restart = "waiting";
-      void this.#waitThenRestart(file, copy, now).catch((error: unknown) => {
+      void this.#waitThenRestart(file, copy, pressed).catch((error: unknown) => {
         this.#restart = "none";
         this.#leave(error instanceof Error ? error.message : String(error));
         log.error("RPE's restart onto its new build failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
@@ -413,14 +437,22 @@ export class Builds {
   /**
    * "Update now": reads the file again, and restarts onto a new build whatever `update.restart` says,
    * once no turn or job runs; an installed copy restarts at once onto the build checked and waiting.
-   * Run by hand, it cannot.
+   * Pressed while a new build is still arriving or being checked, an installed copy remembers it and
+   * restarts as soon as the build is ready (`#arrive`), the answer saying so. Run by hand, it cannot.
    */
   async now(): Promise<BuildsStatus> {
     const { file } = this.deps;
     if (file?.copy !== undefined) {
-      const ready = this.#ready;
-      if (ready === null) return this.status();
-      if (!(await file.service())) this.#restart = "by hand";
+      const service = await file.service();
+      // The build is not ready yet: where one is arriving or being checked, the press is remembered and carried out when it is (`#arrive`).
+      if (this.#ready === null) {
+        if (service && this.#arrivals > 0) {
+          this.#pressed = true;
+          this.#restart = "waiting";
+        }
+        return this.status();
+      }
+      if (!service) this.#restart = "by hand";
       else if (this.#restart !== "restarting") {
         this.#restart = "restarting";
         this.#swap(file, file.copy);
@@ -444,15 +476,17 @@ export class Builds {
     const agree = broken === null && (disk === null || disk === version) && (extension === null || extension === version);
     const parts = { running: version, disk, broken, extension, agree, restart: this.#restart };
     const update = this.#update === null ? null : { build: this.#update.build, stages: this.#update.stages.map((s) => ({ ...s })) };
-    return { ...parts, update, words: wordsOf(parts, copy, this.#extras(copy, disk)) };
+    // A remembered press is said in its own words (`#extras`), not as a restart that waits for the turns and jobs running.
+    return { ...parts, update, words: wordsOf({ ...parts, restart: this.#pressed ? "none" : parts.restart }, copy, this.#extras(copy, disk)) };
   }
 
-  /** What an installed copy adds to the words: that the extension's build is not taken until it says so with its hash, and what the pre-start step did. */
+  /** What an installed copy adds to the words: that the extension's build is not taken until it says so with its hash, what a remembered press of Update now waits for, and what the pre-start step did. */
   #extras(copy: boolean, disk: string | null): string[] {
     if (!copy) return [];
     const { version } = this.deps;
     const extras: string[] = [];
-    if (this.#extension !== null && this.#extension !== version && this.#ready === null && this.#refused === null && (disk === null || disk === version)) extras.push(NOT_TOLD);
+    if (this.#pressed) extras.push(`You pressed Update now: RPE will restart on ${this.#sourceBuild === null ? "the new build" : `build ${this.#sourceBuild}`} as soon as it has checked that it starts.`);
+    else if (this.#extension !== null && this.#extension !== version && this.#ready === null && this.#refused === null && (disk === null || disk === version)) extras.push(NOT_TOLD);
     if (this.#fellBack !== null) extras.push(this.#fellBack);
     return extras;
   }

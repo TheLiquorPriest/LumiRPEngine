@@ -50,14 +50,18 @@ describe("RPE's own copy takes a new build", () => {
   });
 
   /** RPE running as its installed copy, with a start test that answers `starts`, and a restart that runs what the app does after it has closed. */
-  function running(starts: { why: string | null }) {
+  function running(starts: { why: string | null }, over: { gate?: Promise<void>; checking?: () => void; restart?: boolean } = {}) {
     const state = { busy: 0, restarted: Promise.withResolvers<void>(), restarts: 0 };
-    const copy = copyUpdate(data, join(dist, "rpe.js"), async () => starts.why);
+    const copy = copyUpdate(data, join(dist, "rpe.js"), async () => {
+      over.checking?.();
+      await over.gate;
+      return starts.why;
+    });
     const file: AppFile = {
       path: join(appCopyPlaces(data).current, "rpe.js"),
       buildOf: async () => ({ failed: "not asked" }),
       startsOn: async () => null,
-      settings: async () => SETTINGS,
+      settings: async () => ({ ...SETTINGS, restart: over.restart ?? SETTINGS.restart }),
       service: async () => true,
       restart: (after) => {
         state.restarts++;
@@ -119,6 +123,27 @@ describe("RPE's own copy takes a new build", () => {
     await again.builds.now();
     await again.state.restarted.promise;
     expect(again.state.restarts).toBe(1);
+  });
+
+  test("Update now pressed while a new build is being checked is remembered and carried out when it is ready, though update.restart is off; the answer says so, and a press while it restarts changes nothing", async () => {
+    const stated = await build("new2");
+    const gate = Promise.withResolvers<void>();
+    const checking = Promise.withResolvers<void>();
+    const { builds, state } = running({ why: null }, { gate: gate.promise, checking: checking.resolve, restart: false });
+    await builds.start();
+    const arriving = builds.arrived(stated);
+    await checking.promise;
+    const pressed = await builds.now();
+    expect(pressed).toMatchObject({ restart: "waiting" });
+    expect(pressed.words).toContain("You pressed Update now: RPE will restart on build new2 as soon as it has checked that it starts.");
+    expect(state.restarts).toBe(0);
+    gate.resolve();
+    await arriving;
+    await state.restarted.promise;
+    expect(state.restarts).toBe(1);
+    expect(await current()).toContain("new2");
+    await builds.now();
+    expect(state.restarts).toBe(1);
   });
 
   test("a swapped-in build that never comes up is replaced by the known-good copy after update.startTries starts, and status says what happened", async () => {
