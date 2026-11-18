@@ -49,6 +49,9 @@ export function useAtOnce(chatId: ChatId): AtOnce {
         const result = request.type === "lre.fix" ? await app.request(request) : await app.request(request);
         if (!result || !("pending" in result)) return;
         setDone({ text, undo: result.undo ?? null, pending: result.pending });
+        // The notice over the list says what was done with its Undo, so the App's toast of the same change goes.
+        const edit = result.undo;
+        if (typeof edit === "string") app.toasts.update((all) => all.filter((toast) => toast.undo?.edit !== edit));
         landed?.();
       }),
     undo: () =>

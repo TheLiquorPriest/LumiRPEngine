@@ -262,6 +262,8 @@ export interface Toast {
   id: number;
   text: string;
   tone: "info" | "error";
+  /** A change of his made at once, which the toast offers to take back: its chat and the edit's id its Undo takes. */
+  undo?: { chat: ChatId; edit: string };
 }
 
 export interface DrawerState {
@@ -374,7 +376,8 @@ export interface App {
   host: HostBridge;
   overlays: Overlays;
   drafts: Store<Draft | null>;
-  toast(text: string, tone?: Toast["tone"]): void;
+  /** Shows a toast; `undo`, a change made at once that it offers to take back. */
+  toast(text: string, tone?: Toast["tone"], undo?: Toast["undo"]): void;
   /** Sends a request; on an error, shows it and resolves null. */
   request<K extends keyof ResultBodies>(body: Extract<RequestBody, { type: K }>): Promise<ResultBodies[K] | null>;
   /** Shows one of RPE's own pages (the Live page, a turn's page) where the shell shows its pages; absent where the App has no shell to ask. */

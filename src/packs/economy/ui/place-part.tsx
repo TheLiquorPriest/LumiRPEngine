@@ -176,6 +176,9 @@ export function PropertyHereSection(props: PlacePartProps) {
       const result = await app.request(editRequest(props.chatId, ops));
       if (!result) return;
       setDone({ text: d.whose === "mine" ? `${name} is your property.` : `${name} is a property, for sale.`, undo: result.undo, pending: result.pending });
+      // The notice here says what was made with its Undo, so the App's toast of the same change goes.
+      const edit = result.undo;
+      if (edit !== null) app.toasts.update((all) => all.filter((toast) => toast.undo?.edit !== edit));
       close();
     });
   };

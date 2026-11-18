@@ -11,7 +11,7 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
 import { diffCounts, diffRows, lineDiff } from "../shared/text-diff";
-import { useApp, useUi } from "./app";
+import { type Toast, useApp, useUi } from "./app";
 import { formatOdds } from "./format";
 import type { IconName } from "../ui/icons";
 import { Icon } from "../ui/icons";
@@ -284,13 +284,34 @@ export function Toasts(props: { surface: ToastSurface }) {
   return (
     <div ref={box} class={props.surface === "chat" ? "lre lre-toasts inline" : docked ? "lre lre-toasts docked" : "lre lre-toasts"} aria-live="polite" data-lre-toasts={props.surface}>
       {list.map((toast) => (
-        <div key={toast.id} class={toast.tone === "error" ? "lre-toast error" : "lre-toast"} role={toast.tone === "error" ? "alert" : "status"}>
+        <div key={toast.id} class={toast.tone === "error" ? "lre-toast error" : "lre-toast"} role={toast.tone === "error" ? "alert" : "status"} data-lre-toast-undo={toast.undo?.edit}>
           <Icon name={toast.tone === "error" ? "alert" : "info"} size={16} />
           <span style={{ flex: 1 }}>{toast.text}</span>
+          {toast.undo === undefined ? null : <ToastUndo undo={toast.undo} onDone={() => toasts.update((all) => all.filter((entry) => entry.id !== toast.id))} />}
           <IconButton icon="close" label="Dismiss" onClick={() => toasts.update((all) => all.filter((entry) => entry.id !== toast.id))} />
         </div>
       ))}
     </div>
+  );
+}
+
+/** A toast's Undo of the change it tells of: the change taken back by its edit's id, and the toast gone once it is. */
+function ToastUndo(props: { undo: NonNullable<Toast["undo"]>; onDone(): void }) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  return (
+    <Button
+      size="sm"
+      icon="undo"
+      busy={busy}
+      onClick={() =>
+        run(async () => {
+          if ((await app.request({ type: "lre.chip", chatId: props.undo.chat, chip: props.undo.edit, choice: "undo" })) !== null) props.onDone();
+        })
+      }
+    >
+      Undo
+    </Button>
   );
 }
 

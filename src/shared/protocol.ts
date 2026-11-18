@@ -891,8 +891,8 @@ export interface ResultBodies {
   "lre.state.resync": { accepted: true };
   "lre.restart": { start: boolean };
   "lre.page": { accepted: true };
-  /** The player's message the action plays as; for an action done at once, off screen (DESIGN §11), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight, `queued` what the held write waits on; `undo` its chip, null while pending); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
-  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean; queued?: QueuedOn; undo?: string | null } | { staged: boolean };
+  /** The player's message the action plays as; for an action done at once, off screen (DESIGN §11), its bookkeeping recorded on the head with no message and no reply (`pending` while a reply is in flight, `queued` what the held write waits on; `undo` its chip, null while pending; `said` what was done, in RPE's words); or, staged for the next message, whether it is staged now (false: the same tap cleared it). */
+  "lre.action": { messageId: MessageId } | { applied: true; pending: boolean; queued?: QueuedOn; undo?: string | null; said?: string } | { staged: boolean };
   /** With `pending`, `queued` says what the held write waits on (engine, page or reply), as on every write's answer. */
   "lre.chip": { applied: boolean; pending: boolean; queued?: QueuedOn; said?: string };
   "lre.view.open": { materialized: boolean; pending: boolean; queued?: QueuedOn };

@@ -89,7 +89,7 @@ export const calls: CallFile = {
         const reply = await tap(ctx, chat, { kind: "action", action: request.action, params: request.params, source: request.source, ...(request.text === undefined ? {} : { text: request.text }), ...(request.now === true ? { now: true } : {}), ...(request.tell === undefined ? {} : { tell: request.tell }) });
         // A press that does not manage: held for his next message (false: the same press again took it back), or played now as his message.
         if (reply.asked !== undefined) return "held" in reply.asked ? { staged: reply.asked.held !== null } : { messageId: reply.asked.message };
-        return { applied: true, pending: false, undo: reply.undo };
+        return { applied: true, pending: false, undo: reply.undo, ...(reply.words === "" ? {} : { said: reply.words }) };
       }
       case "lre.fix": {
         const chat = chatOf(request, ctx);

@@ -74,6 +74,22 @@ describe("a press that is part of the next message", () => {
   });
 });
 
+describe("a press that manages", () => {
+  test("is done at once with its Undo, and its answer says what was done in the words a press is shown in", async () => {
+    const bed = makeBed();
+    await bed.plays("modern_slice_of_life");
+    const pay = (await bed.state()).palette?.entries.find((e) => e.action === "pay");
+    const option = pay?.options.find((o) => o.disabled === undefined && o.next === undefined);
+    if (pay?.amount === undefined || option === undefined) throw new Error("the starter world's palette has no Pay to press");
+    const answer = await bed.service.tap(USER, CHAT, { kind: "action", action: "pay", params: { ...option.params, [pay.amount.param]: 1500 }, source: "palette" });
+    expect(answer).toMatchObject({ applied: true });
+    expect(answer.undo).not.toBeNull();
+    expect(answer.asked).toBeUndefined();
+    if (answer.reports.length > 0) expect(answer.words).toBe(words("applied_advised", { reports: answer.reports.join(" ") }));
+    else expect(answer.words).toStartWith(`Done: ${pay.label}, on ${option.label}`);
+  });
+});
+
 describe("Send now", () => {
   test("puts what waits in the chat as his message, in the words it was shown in, starts the reply, and it waits no more", async () => {
     const lv = lumiverse();

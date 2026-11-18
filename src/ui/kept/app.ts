@@ -14,7 +14,7 @@
 
 import { type App, type Draft, initialUi, type Overlays, playAt, type Toast, type UiState } from "../../frontend/app";
 import { ProtocolClient } from "../../frontend/protocol-client";
-import type { Send } from "../../frontend/registry";
+import type { RequestBody, Send } from "../../frontend/registry";
 import { buildCatalog, type UiCatalog } from "../../frontend/ui-registry";
 import type { ChatId } from "../../shared/ids";
 import type { ErrorMessage, ResultMessage } from "../../shared/protocol";
@@ -49,6 +49,9 @@ export const NOT_HERE = {
 export function attachedWords(world: string): string {
   return `${world} is attached to this chat.`;
 }
+
+/** What a change made at once says where RPE gives no words of it. */
+export const CHANGE_MADE = "Done: your change is made, as your own edit.";
 
 /** Only Play's map, place sheet, calendar and combat panels open an overlay; Build opens none, and this build has none to open. */
 export const NO_OVERLAYS: Overlays = {
@@ -206,19 +209,20 @@ export function keptApp(deps: KeptDeps): Kept {
   const say = (text: string): void => {
     if (!stopped && text !== "" && !said.get().includes(text)) said.update((all) => [...all, text]);
   };
-  const toast = (text: string, tone: Toast["tone"] = "info"): void => {
+  const toast = (text: string, tone: Toast["tone"] = "info", undo?: Toast["undo"]): void => {
     // Once the page is left, nothing more shows (the client answers what was still out as it stops); a refusal's words were blanked, and said on the page.
     if (stopped || text === "") return;
     const { toastsShown, errorToastMs, toastMs } = deps.settings();
     toastId += 1;
     const id = toastId;
-    toasts.update((all) => [...all.slice(Math.max(0, all.length - (toastsShown - 1))), { id, text, tone }]);
+    toasts.update((all) => [...all.slice(Math.max(0, all.length - (toastsShown - 1))), { id, text, tone, ...(undo === undefined ? {} : { undo }) }]);
     const handle = timers.setTimeout(
       () => {
         showing.delete(handle);
         toasts.update((all) => all.filter((entry) => entry.id !== id));
       },
-      tone === "error" ? errorToastMs : toastMs,
+      // One that offers an Undo stays as long as an error does, so there is time to press it.
+      tone === "error" || undo !== undefined ? errorToastMs : toastMs,
     );
     showing.add(handle);
   };
@@ -275,7 +279,11 @@ export function keptApp(deps: KeptDeps): Kept {
     }
     return answer;
   };
-  /** Sends a request; an error is shown, as a toast, or said on the page where it is RPE's refusal of a request it does not serve yet, and the request resolves null. */
+  /**
+   * Sends a request; an error is shown, as a toast, or said on the page where it is RPE's refusal of a request it does not serve yet, and
+   * the request resolves null. In Play, a change made at once as his own edit (a tap that manages, a ✎ fix, an edit) is told where it was
+   * made, in RPE's words of it, with its Undo (plan §10.10).
+   */
   const request: App["request"] = async (body) => {
     const message = await send(body);
     if (message.type === "lre.error") {
@@ -283,6 +291,11 @@ export function keptApp(deps: KeptDeps): Kept {
       if (refusal !== undefined) say(refusal);
       else toast(message.lint && message.lint.length > 0 ? `${message.message} (${message.lint.length} issue${message.lint.length === 1 ? "" : "s"})` : message.message, "error");
       return null;
+    }
+    const made: RequestBody = body;
+    if (deps.mode === "play" && (made.type === "lre.action" || made.type === "lre.fix" || made.type === "lre.edit")) {
+      const done = message.body as { undo?: string | null; said?: string };
+      if (typeof done.undo === "string") toast(done.said !== undefined && done.said !== "" ? done.said : CHANGE_MADE, "info", { chat: made.chatId, edit: done.undo });
     }
     return message.body as never;
   };

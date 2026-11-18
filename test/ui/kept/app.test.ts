@@ -5,7 +5,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
-import { chooseShowIds, type Kept, keptApp, showIdsChosen, type ToastSettings } from "../../../src/ui/kept/app";
+import { CHANGE_MADE, chooseShowIds, type Kept, keptApp, showIdsChosen, type ToastSettings } from "../../../src/ui/kept/app";
 import type { CallFile } from "../../../src/ui/kept/client";
 import { webHost } from "../../../src/ui/kept/host";
 import { createStore } from "../../../src/ui/store";
@@ -92,6 +92,21 @@ describe("the App kept for Build and Play", () => {
     expect(kept.app.toasts.get()).toHaveLength(1);
     timers.advance(1);
     expect(kept.app.toasts.get()).toEqual([]);
+    kept.stop();
+  });
+
+  test("in Play, a change made at once is told where it was made, in RPE's words, with its Undo; a press held for the next message is not", async () => {
+    const answers: unknown[] = [{ applied: true, pending: false, undo: "edit-1", said: "Done: Pay, on Marcus, $15.00." }, { staged: true }, { applied: true, pending: false, undo: "edit-2" }];
+    const actions: CallFile = { name: "actions", takes: (request) => request.type === "lre.action", serve: async () => answers.shift() as never };
+    const kept = keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "play", host: host(), timers: handTimers(), settings: () => SETTINGS, calls: [actions] });
+    const press = { type: "lre.action", chatId: "c1", action: "pay", params: {}, source: "palette" } as const;
+    await kept.app.request(press);
+    await kept.app.request(press);
+    await kept.app.request(press);
+    expect(kept.app.toasts.get().map((t) => [t.text, t.undo])).toEqual([
+      ["Done: Pay, on Marcus, $15.00.", { chat: "c1", edit: "edit-1" }],
+      [CHANGE_MADE, { chat: "c1", edit: "edit-2" }],
+    ]);
     kept.stop();
   });
 

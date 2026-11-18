@@ -20,6 +20,7 @@ lines:
   not_payee: "{{action}}: {{name}} isn't someone to pay"
   pays_no_one: "{{action}}: {{why}}"
   applied_advised: "Done, though the world's rules say: {{reports}}"
+  did_action: "Done: {{what}}."
   changes_nothing: "That changes nothing."
   no_quest: "no such quest"
   no_hint: "No hint to show yet."
