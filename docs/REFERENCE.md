@@ -250,13 +250,15 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |
-| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |
-| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default` | `2` | get up, wake up, get out of bed |
-| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |
-| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |
+| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default`: `relationships.appraise`, `castlife.book_invitation` | `1` | accept, sure, let's, count me in |
+| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default`: `castlife.satisfy`, `set` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |
+| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default`: `set` | `2` | get up, wake up, get out of bed |
+| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default`: `castlife.satisfy` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |
+| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default`: `castlife.to_bed`, `castlife.satisfy` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |
 
 ### Rules
 
@@ -322,10 +324,12 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `end_turn` | End turn | End your turn in a fight. |  |  | `default` | `0` | end my turn, end turn |
-| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |
+| `end_turn` | End turn | End your turn in a fight. |  |  | `default`: `combat.end_turn` | `0` | end my turn, end turn |
+| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default`: `combat.start` | `0` | start a fight, pick a fight, draw my weapon |
 
 ### Events
 
@@ -684,64 +688,66 @@ Extends `group`.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default` | `15` | apply for a credit card, apply for a loan, take out a loan |
-| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default` | `5` | buy, purchase, order, pick up a |
-| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default` | `2` | freeze my card, lock my card |
-| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | replace my card, order a new card |
-| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
-| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default` | `2` | unfreeze my card, unlock my card |
-| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |
-| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | deposit, pay in cash, bank the cash |
-| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |
-| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
-| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default` | `2` | exercise the option, exercise my calls, exercise my puts |
-| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
-| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
-| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | pause the standing order |
-| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default` | `2` | resume the standing order |
-| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default` | `2` | change the standing order, change the recurring payment |
-| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |
-| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |
-| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |
-| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
-| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default` | `15` | hire, take on, give a job to |
-| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default` | `5` | change their hours, cut their hours, more hours, full time, part time |
-| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default` | `5` | put on leave, give time off, send on leave |
-| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default` | `5` | promote, appoint, make them, move them to |
-| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
-| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default` | `5` | back from leave, back to work, end their leave |
-| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default` | `5` | change the job title, retitle |
-| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default` | `10` | end the lease, give notice, move out |
-| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default` | `20` | rent out, sign a lease, let the apartment |
-| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default` | `10` | lend money to, make a loan to, loan the company |
-| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default` | `2` | transfer, move money, put into savings |
-| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default` | `2` | set dues, membership fee, everyone chips in |
-| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default` | `2` | pay schedule, change payday, pay every other week |
-| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default` | `5` | share out, split the money, divide the purse, hand out |
-| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
-| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default` | `1` | pay, give money, send money, venmo |
-| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
-| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default` | `2` | drop the project, abandon the well, cancel the build |
-| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default` | `2` | pause the project, halt work, stop drilling |
-| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default` | `2` | resume the project, restart work |
-| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |
-| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default` | `60` | buy the house, buy the property, make an offer on |
-| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default` | `5` | put the house on the market, list the property, take it off the market |
-| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell the house, sell the property |
-| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default` | `1` | reinvest dividends, send dividends to, send the rent to |
-| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
-| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default` | `2` | i'd rather pay with |
-| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `30` | buy back shares, buy them out, buy back their stake |
-| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default` | `2` | add a share class, non-voting shares, change the votes |
-| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default` | `60` | take the company private, delist the company, go private, buy out the public |
-| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |
-| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |
-| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default` | `60` | sell my share of the business, sell the shop, sell my shares |
-| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |
-| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
-| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default` | `3` | withdraw, take out cash, hit the atm, get cash |
+| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default`: `economy.apply_credit` | `15` | apply for a credit card, apply for a loan, take out a loan |
+| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.buy` | `5` | buy, purchase, order, pick up a |
+| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | freeze my card, lock my card |
+| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_replace` | `2` | replace my card, order a new card |
+| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | report my card lost, my card was stolen, cancel my card |
+| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | unfreeze my card, unlock my card |
+| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default`: `economy.consent_dividend` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |
+| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.deposit` | `3` | deposit, pay in cash, bank the cash |
+| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default`: `economy.distribute` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |
+| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default`: `economy.donate` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |
+| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.exercise` | `2` | exercise the option, exercise my calls, exercise my puts |
+| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default`: `economy.flow_create` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
+| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | cancel the standing order, stop the recurring payment |
+| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | pause the standing order |
+| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | resume the standing order |
+| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default`: `economy.flow_update` | `2` | change the standing order, change the recurring payment |
+| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default`: `economy.invoice_issue` | `10` | send an invoice, invoice, bill them |
+| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default`: `economy.invoice_pay` | `5` | pay the invoice, settle the bill |
+| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default`: `economy.invoice_void` | `5` | void the invoice, cancel the invoice, write it off |
+| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default`: `economy.job_end` | `10` | fire, let go, quit, resign, hand in my notice |
+| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default`: `economy.hire` | `15` | hire, take on, give a job to |
+| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default`: `economy.job_hours` | `5` | change their hours, cut their hours, more hours, full time, part time |
+| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | put on leave, give time off, send on leave |
+| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default`: `economy.job_position` | `5` | promote, appoint, make them, move them to |
+| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default`: `economy.job_raise` | `5` | give a raise, raise the pay, pay more |
+| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | back from leave, back to work, end their leave |
+| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default`: `economy.job_title` | `5` | change the job title, retitle |
+| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default`: `economy.lease_end` | `10` | end the lease, give notice, move out |
+| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default`: `economy.lease_start` | `20` | rent out, sign a lease, let the apartment |
+| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default`: `economy.lend` | `10` | lend money to, make a loan to, loan the company |
+| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.move` | `2` | transfer, move money, put into savings |
+| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default`: `economy.dues` | `2` | set dues, membership fee, everyone chips in |
+| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default`: `economy.pay_schedule` | `2` | pay schedule, change payday, pay every other week |
+| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default`: `economy.share_out` | `5` | share out, split the money, divide the purse, hand out |
+| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default`: `economy.owner_draw` | `5` | take a draw, pay myself, take money out of the business |
+| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default`: `economy.transfer` | `1` | pay, give money, send money, venmo |
+| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.pay_card` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
+| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default`: `economy.project_drop` | `2` | drop the project, abandon the well, cancel the build |
+| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default`: `economy.project_pause` | `2` | pause the project, halt work, stop drilling |
+| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default`: `economy.project_resume` | `2` | resume the project, restart work |
+| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default`: `economy.project_start` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |
+| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default`: `economy.property_buy` | `60` | buy the house, buy the property, make an offer on |
+| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default`: `economy.property_list` | `5` | put the house on the market, list the property, take it off the market |
+| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.property_sell` | `60` | sell the house, sell the property |
+| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default`: `economy.route` | `1` | reinvest dividends, send dividends to, send the rent to |
+| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.set_autopay` | `2` | set up autopay, turn on autopay, turn off autopay |
+| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default`: `economy.set_pay_prefs` | `2` | i'd rather pay with |
+| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_buy_back` | `30` | buy back shares, buy them out, buy back their stake |
+| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_classes` | `2` | add a share class, non-voting shares, change the votes |
+| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.delist` | `60` | take the company private, delist the company, go private, buy out the public |
+| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_issue` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |
+| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default`: `economy.list` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |
+| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.stake_sell` | `60` | sell my share of the business, sell the shop, sell my shares |
+| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default`: `economy.consolidate` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |
+| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default`: `economy.trade` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |
+| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.withdraw` | `3` | withdraw, take out cash, hit the atm, get cash |
 
 ### Events
 
@@ -913,27 +919,29 @@ Extends `container`.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |
-| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |
-| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, give away, let keep |
-| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default` | `1` | give back, return, hand back |
-| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | hand, hand over, pass, toss |
-| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
-| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
-| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default` | `2` | put away, put back, tidy away |
-| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default` | `1` | put in, put into, stash in, pack in, store in |
-| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
-| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
-| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default` | `5` | search, look around, examine, look through, look inside, open, rummage |
-| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default` | `5` | change into, put on my, get dressed in, gear up |
-| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default` | `0` |  |
-| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default` | `0` |  |
-| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
-| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
-| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
-| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |
+| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default`: `gear.drop` | `1` | drop, put down, leave |
+| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default`: `gear.fetch` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |
+| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.give` | `1` | give, give away, let keep |
+| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default`: `gear.hand` | `1` | give back, return, hand back |
+| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.hand` | `1` | hand, hand over, pass, toss |
+| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default`: `gear.lend` | `2` | lend, loan, let borrow |
+| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default`: `gear.lose` | `1` | lost my, lose, can't find my, is gone, is missing |
+| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default`: `gear.put_away` | `2` | put away, put back, tidy away |
+| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default`: `gear.put_in` | `1` | put in, put into, stash in, pack in, store in |
+| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default`: `gear.retrieve` | `5` | take back, get back, reclaim |
+| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default`: `gear.remove` | `2` | take off, remove, unequip |
+| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default`: `gear.search` | `5` | search, look around, examine, look through, look inside, open, rummage |
+| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_apply` | `5` | change into, put on my, get dressed in, gear up |
+| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_drop` | `0` |  |
+| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default`: `gear.set_save` | `0` |  |
+| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default`: `gear.take` | `1` | take, pick up, grab |
+| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default`: `gear.take_piece` | `1` | take the, grab a, get a |
+| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default`: `gear.use` | `5` | use, apply |
+| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default`: `gear.wear` | `2` | wear, put on, equip |
 
 ### Proposals
 
@@ -1059,35 +1067,37 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default` | `10` | admit, take in as a member, welcome into |
-| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default` | `10` | appoint, make them foreman, promote |
-| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default` | `5` | approve it, sign off on it, okay the spend |
-| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default` | `2` | set the quorum, change the voting rules |
-| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default` | `10` | let them act for, delegate, give them authority |
-| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default` | `5` | deny the request, turn it down, withdraw my request |
-| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default` | `0` |  |
-| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |
-| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default` | `2` | set a goal, add to the plan |
-| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default` | `5` | leave the group, quit the club, resign from |
-| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |
-| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default` | `2` | withdraw the motion |
-| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default` | `2` | give an order, put them on it |
-| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default` | `2` | mark it done, drop the plan |
-| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default` | `2` | add a position, change the position |
-| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default` | `10` | throw out, expel, remove from the group |
-| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default` | `2` | rename, call it |
-| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |
-| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default` | `5` | revoke, take back their authority |
-| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default` | `5` | call them, give them the title |
-| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default` | `5` | vote for the motion, vote against, raise a hand for, abstain |
-| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default` | `2` | vote with, always vote for |
-| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |
-| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire a hand, take on a hand, hire them for the party |
-| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default` | `1` | call our party, name our group |
-| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default` | `1` | start a party purse, pool our money, a kitty for the party |
-| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default` | `1` | join my party, travel with me from now on, leave the party |
+| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default`: `orgs.admit` | `10` | admit, take in as a member, welcome into |
+| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default`: `orgs.appoint` | `10` | appoint, make them foreman, promote |
+| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default`: `orgs.answer` | `5` | approve it, sign off on it, okay the spend |
+| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default`: `orgs.decisions` | `2` | set the quorum, change the voting rules |
+| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default`: `orgs.delegate` | `10` | let them act for, delegate, give them authority |
+| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default`: `orgs.answer` | `5` | deny the request, turn it down, withdraw my request |
+| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default`: `orgs.entry` | `0` |  |
+| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default`: `orgs.found` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |
+| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default`: `orgs.plan_goal` | `2` | set a goal, add to the plan |
+| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default`: `orgs.leave` | `5` | leave the group, quit the club, resign from |
+| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default`: `orgs.merge` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |
+| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default`: `orgs.motion_end` | `2` | withdraw the motion |
+| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default`: `orgs.plan_order` | `2` | give an order, put them on it |
+| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default`: `orgs.plan_status` | `2` | mark it done, drop the plan |
+| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default`: `orgs.position` | `2` | add a position, change the position |
+| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default`: `orgs.remove` | `10` | throw out, expel, remove from the group |
+| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default`: `orgs.rename` | `2` | rename, call it |
+| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default`: `orgs.restructure` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |
+| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default`: `orgs.revoke` | `5` | revoke, take back their authority |
+| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default`: `orgs.title` | `5` | call them, give them the title |
+| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default`: `orgs.vote` | `5` | vote for the motion, vote against, raise a hand for, abstain |
+| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default`: `orgs.vote_rule` | `2` | vote with, always vote for |
+| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default`: `orgs.wind_up` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |
+| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default`: `orgs.party_hire` | `15` | hire a hand, take on a hand, hire them for the party |
+| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default`: `orgs.party_name` | `1` | call our party, name our group |
+| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default`: `orgs.party_purse` | `1` | start a party purse, pool our money, a kitty for the party |
+| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default`: `orgs.party_tier` | `1` | join my party, travel with me from now on, leave the party |
 
 ### Events
 
@@ -1177,10 +1187,12 @@ No fields of its own.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |
-| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default` | `5` | give a gift, surprise |
+| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default`: `relationships.appraise` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |
+| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default`: `relationships.appraise` | `5` | give a gift, surprise |
 
 ### Events
 
@@ -1218,9 +1230,11 @@ Version 1 · realism domain `sheets` · requires `space`.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |
+| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`; `great`; `success` | `5` | try to, attempt, check |
 
 ### Proposals
 
@@ -1344,10 +1358,12 @@ Extends `thing`.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
-| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
+| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default`: `move` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |
+| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default`: `space.step` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |
 
 ### Events
 
@@ -1385,9 +1401,11 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |
+| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default`: `story.answer` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |
 
 ### Events
 
@@ -1448,12 +1466,14 @@ Extends `container`.
 
 ### Actions
 
-| Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |
-| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |
-| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |
-| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |
+| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default`: `vehicles.drive` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |
+| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default`: `vehicles.refuel` | `10` | refuel, fill up, gas up, charge the car |
+| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `180` | repair, fix the truck, fix the car, get it towed |
+| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `60` | service, oil change, tune up |
 
 ### Panels and slots
 

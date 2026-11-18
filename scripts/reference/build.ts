@@ -210,9 +210,14 @@ function actionRows(actions: readonly PackAction[]): string[] {
     // A ref param a player's claim may fill says where the claimed thing appears, and one that pays an outside account for a receiver the story hasn't established names it (DESIGN §9.4).
     const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}${p.outside ? `, outside: ${p.outside}` : ""}`);
     const check = a.check === undefined ? "" : typeof a.check === "string" ? code(a.check) : code(a.check.dice);
-    return [code(a.id), filled(ACTION_WORDS.get(`action_${a.id}_label`) ?? a.id, a.words), filled(ACTION_WORDS.get(`action_${a.id}_description`) ?? "", a.words), params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
+    // Each outcome with the effects it carries, as the `act` operation applies them.
+    const outcomes = Object.keys(a.outcomes).sort(byText).map((o) => {
+      const effects = a.outcomes[o] ?? [];
+      return effects.length === 0 ? code(o) : `${code(o)}: ${codes(effects.map((e) => e.type))}`;
+    });
+    return [code(a.id), filled(ACTION_WORDS.get(`action_${a.id}_label`) ?? a.id, a.words), filled(ACTION_WORDS.get(`action_${a.id}_description`) ?? "", a.words), params.length === 0 ? "" : params.map(code).join(", "), check, outcomes.join("; "), code(a.duration), (a.lexicon ?? []).join(", ")];
   });
-  return table(["Action", "Label", "Description", "Parameters", "Check", "Outcomes", "Minutes", "Lexicon"], rows);
+  return table(["Action", "Label", "Description", "Parameters", "Check", "Outcomes and their effects", "Minutes", "Lexicon"], rows);
 }
 
 function tableRows(tables: readonly TableDef[]): string[] {
@@ -228,7 +233,7 @@ function packSection(rec: PackRecord): string[] {
   if (rec.relations.length > 0) out.push("### Relation types", "", ...relationRows(rec.relations), "");
   if (rec.effects.length > 0) out.push("### Effects", "", ...effectRows(rec.effects), "");
   if (rec.formulas.length > 0) out.push("### Formula functions", "", ...formulaRows(rec.formulas), "");
-  if (rec.actions.length > 0) out.push("### Actions", "", ...actionRows(rec.actions), "");
+  if (rec.actions.length > 0) out.push("### Actions", "", "Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.", "", ...actionRows(rec.actions), "");
   if (rec.rules.length > 0) out.push("### Rules", "", ...sortedBy(rec.rules, (r) => r.id).map((r) => `- ${code(r.id)}: on ${json(r.on)}`), "");
   if (rec.schedules.length > 0) out.push("### Schedules", "", ...sortedBy(rec.schedules, (s) => s.id).map((s) => `- ${code(s.id)}: sets ${code(s.target)} every ${s.recurrence.every}`), "");
   if (rec.events.length > 0 || rec.guards.length > 0) {

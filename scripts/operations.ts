@@ -10,6 +10,7 @@
 
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { createRegistry } from "../src/engine/registry-impl";
 import { OPERATION_PROPERTIES, OPERATIONS, SCENE_FROM_NOTHING } from "../src/iface/apply";
 import type { ToolSpec } from "../src/iface/kit";
 import { MAP_TOOLS } from "../src/iface/maptools";
@@ -18,6 +19,7 @@ import { PROVENANCE_PROPERTIES } from "../src/iface/source";
 import { ENGINE_TOOLS, FIXED_TOOLS } from "../src/iface/tools";
 import { shippedTexts, type ToolText, toolText } from "../src/iface/texts";
 import type { JsonObject, JsonValue } from "../src/shared/json";
+import { ALL_PACKS } from "../src/packs/index";
 
 const ROOT = resolve(import.meta.dir, "..");
 export const OPERATIONS_PATH = join(ROOT, "docs/operations.md");
@@ -172,19 +174,21 @@ const SKILL_FAMILIES: Readonly<Record<string, readonly string[]>> = {
 };
 const READS_IN: Readonly<Record<string, string>> = { items_access: "items-and-wardrobe", items_of: "items-and-wardrobe", orgs_list: "groups", orgs_read: "groups", people_regard: "ruleset-and-sheets", places_route: "places-and-maps", money_balances: "economy" };
 
-/** Per domain skill: the operations and engine tools its text names, the snake_case names it gives that no engine tool or operation has (RPH's tools among them), and the tools of its families it does not name. */
+/** Per domain skill: the operations and engine tools its text names, the packs' actions it names (which `act` carries out), the snake_case names it gives that are none of these (RPH's tools among them), and the tools of its families it does not name. */
 function skillsSection(): string[] {
   const known = new Set([...OPERATIONS.map((o) => o.name), ...ENGINE_TOOLS.map((t) => t.name)]);
-  const lines = ["## What each domain skill names", "", "For each domain skill: the everyday operations and engine tools its text names in backticks; the names with an underscore it gives that are no engine tool or operation (RPH's own tools among them: each one is for the skill's writer to check); and the engine tools of its families it does not name.", ""];
+  const actions = new Set(createRegistry(ALL_PACKS).actions.keys());
+  const lines = ["## What each domain skill names", "", "For each domain skill: the everyday operations and engine tools its text names in backticks; the packs' actions it names, which the `act` operation carries out; the names with an underscore it gives that are none of these (RPH's own tools among them: each one is for the skill's writer to check); and the engine tools of its families it does not name.", ""];
   for (const [skill, families] of Object.entries(SKILL_FAMILIES)) {
     const text = readFileSync(join(ROOT, "guidance/.skills", skill, "SKILL.md"), "utf8");
     const said = [...new Set([...text.matchAll(/`([a-z][a-z_]*)`/g)].map((m) => m[1] as string))];
     const named = said.filter((n) => known.has(n));
-    const unknown = said.filter((n) => !known.has(n) && n.includes("_"));
+    const acted = said.filter((n) => !known.has(n) && actions.has(n));
+    const unknown = said.filter((n) => !known.has(n) && !actions.has(n) && n.includes("_"));
     const mine = ENGINE_TOOLS.filter((t) => families.includes(t.family) || READS_IN[t.name] === skill).map((t) => t.name);
     const unsaid = mine.filter((n) => !said.includes(n));
     const list = (names: readonly string[]): string => (names.length === 0 ? "none" : names.map((n) => `\`${n}\``).join(", "));
-    lines.push(`### ${skill}`, "", `- Names: ${list(named)}.`, `- Names with no engine tool or operation of that name: ${list(unknown)}.`, `- Its families' tools it does not name: ${list(unsaid)}.`, "");
+    lines.push(`### ${skill}`, "", `- Names: ${list(named)}.`, `- Actions it names, carried out by \`act\`: ${list(acted)}.`, `- Names with no engine tool, operation or action of that name: ${list(unknown)}.`, `- Its families' tools it does not name: ${list(unsaid)}.`, "");
   }
   return lines;
 }
