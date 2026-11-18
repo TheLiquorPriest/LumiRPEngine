@@ -731,6 +731,8 @@ Nothing is pruned by a press alone: **Prune old turn folders**, **Prune closed s
 
 **Migration** moves you from the previous build: **A rehearsal** that reads its data and writes nothing, **The last real run** with its report, **The backup**, what is **Waiting on you**, **The switch** and **Going back**. Its steps are in [migration.md](migration.md).
 
+Where the last real run did not carry a chat that holds records of the previous build (that build's own reader or fold failed on it, or RPE's store refused what it gave), the page says so at its top: each such chat by its name, its character's and its id, with why, what of it RPE holds and what it does not, and what to do. `rpe migrate` and `rpe up` say the same ahead of their report and again last, and end with exit code 1 ([A chat it could not carry](migration.md#2-the-real-run)).
+
 ## What is not in this build
 
 Two things come with a later build:
