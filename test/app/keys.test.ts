@@ -134,7 +134,7 @@ describe("keys", () => {
     expect(await models(todays)).toBe(200);
     expect(await models(own)).toBe(401);
     expect(app.db.query("SELECT taken FROM provider_key").all()).toEqual([{ taken: 1 }]);
-    expect((await rpe(["status"])).out).toContain("provider taken from today's connection (taken 2026-11-13)");
+    expect((await rpe(["status"])).out).toContain("provider taken from the previous build's connection (taken 2026-11-13)");
   });
 
   test("after the swap rpe key provider makes no key and says why; before any swap it makes the one key and the one before stops", async () => {

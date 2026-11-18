@@ -111,7 +111,7 @@ CREATE INDEX page_token_expires ON page_token (expires);`);
   },
   {
     version: 4,
-    name: "the models each provider key taken at the swap opens",
+    name: "the models each provider key taken at the switch opens",
     // `models`: a key taken at the swap is paired with the model names of the connections that hold it (R-109), as a JSON list; null
     // for RPE's own key, which opens the models its own connection names, and for a key taken before a row named any.
     sql: "ALTER TABLE provider_key ADD COLUMN models TEXT;",

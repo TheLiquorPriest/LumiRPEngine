@@ -51,7 +51,7 @@ export function accountSystemctl(env: Env, uid: number | null): Systemctl {
   const run = accountProgram(env, uid);
   return async (args) => {
     const ran = await run("systemctl", ["--user", ...args]);
-    return ran.code === 127 ? { ...ran, err: "There is no systemctl on this machine's PATH: RPE's service, as today's runtime's, is a systemd user unit." } : ran;
+    return ran.code === 127 ? { ...ran, err: "There is no systemctl on this machine's PATH: RPE's service, as the previous runtime's, is a systemd user unit." } : ran;
   };
 }
 

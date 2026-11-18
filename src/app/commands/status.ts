@@ -67,7 +67,7 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
       if (ofKind.length === 0) return [`${kind} none`];
       return ofKind.map((key) => {
         const made = new Date(key.made).toISOString().slice(0, 10);
-        if (key.taken) return `${kind} taken from today's connection (taken ${made})`;
+        if (key.taken) return `${kind} taken from the previous build's connection (taken ${made})`;
         // RPE keeps only the provider key's last four characters; the others it keeps by when they were made and end.
         if (kind === "provider") return `${kind} ends ${key.last4} (made ${made})`;
         return `${kind} made ${made}${kind === "extension" ? ", which RPE remakes at every start" : key.ends === null ? ", no end" : `, runs out ${atWords(key.ends)}`}`;

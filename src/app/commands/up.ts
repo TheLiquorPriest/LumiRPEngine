@@ -161,7 +161,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
   const folders = runtimeFoldersOf(io.env, io.home);
   const runtime = switches.has("no-runtime") ? null : { configDir: flags["runtime-config"] ?? folders.configDir, dataDir: flags["runtime-data"] ?? folders.dataDir };
   const swapping = flags.lumiverse !== undefined || (lumiverse !== null && userId !== null && (await todaysRuntimeFound({ lumiverse, identifier, userId, runtime, ...(flags.runtime === undefined ? {} : { runtimeName: flags.runtime }) })));
-  if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined)) io.err("--runtime, --no-runtime, --runtime-config and --runtime-data say where today's build is, and rpe up found none of today's runtime of yours here: it is the install.");
+  if (!swapping && (switches.has("no-runtime") || flags.runtime !== undefined || flags["runtime-config"] !== undefined || flags["runtime-data"] !== undefined)) io.err("--runtime, --no-runtime, --runtime-config and --runtime-data say where the previous build is, and rpe up found none of the previous build's runtime of yours here: it is the install.");
 
   // Where Lumiverse's database file is, where this runs from the extension's own folder (or `--database` says): RPE then reads Lumiverse through it.
   const found = database ?? here?.database ?? null;
@@ -194,7 +194,7 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
     await installCopy(data, options.appFile, io.now());
   };
   if (swapping) {
-    if (lumiverse === null) throw new UsageError("rpe up needs Lumiverse's data folder to swap: --lumiverse <folder>.");
+    if (lumiverse === null) throw new UsageError("rpe up needs Lumiverse's data folder for the switch: --lumiverse <folder>.");
     return await swapUp({ flags, switches, paths, current, call, service, existing, unitText, lumiverse, prepare }, io, version);
   }
   if (portNote !== null) io.out(portNote);

@@ -28,7 +28,7 @@ async function unmark(ids: readonly string[], paths: DataPaths, config: AppConfi
   const call: LumiverseCall = (method, path, body) => session.request(method, path, body);
   for (const id of ids) {
     try {
-      if (await markConnection(call, id, false)) io.out(`Took RPE's mark off the connection ${id} in Lumiverse: nothing else of it was changed, and it is as it was before the swap.`);
+      if (await markConnection(call, id, false)) io.out(`Took RPE's mark off the connection ${id} in Lumiverse: nothing else of it was changed, and it is as it was before the switch.`);
     } catch (error) {
       io.out(`RPE's mark stays on the connection ${id} in Lumiverse: ${error instanceof Error ? error.message : String(error)}.`);
     }
@@ -70,7 +70,7 @@ export async function downCommand(argv: readonly string[], io: CliIO): Promise<n
         lumiverse.close();
       }
     } catch (error) {
-      io.out(`Lumiverse's chats could not be read at ${swap.lumiverse} (${error instanceof Error ? error.message : String(error)}): the chats moved onto RPE's connections since the swap are not named below.`);
+      io.out(`Lumiverse's chats could not be read at ${swap.lumiverse} (${error instanceof Error ? error.message : String(error)}): the chats moved onto RPE's connections since the switch are not named below.`);
     }
   }
   if (swap !== null && swap.taken.length > 0) await unmark(swap.taken, paths, config, io);

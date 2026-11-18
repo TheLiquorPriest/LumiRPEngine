@@ -27,7 +27,7 @@ export async function ownConnection(call: LumiverseCall, apiUrl: string, line: W
     });
   }
   const named = `"${settled.name}" (${settled.id})`;
-  if (settled.todays !== null) io.out(`The connection ${settled.todays} that RPE's config named is the one today's build made for its runtime: it is left as it is, for going back.`);
+  if (settled.todays !== null) io.out(`The connection ${settled.todays} that RPE's config named is the one the previous build made for its runtime: it is left as it is, for going back.`);
   if (settled.made) io.out(`Made RPE's connection in Lumiverse, ${named}: OpenAI-compatible, at ${apiUrl}, with a new provider key only it holds.`);
   else if (settled.changed.length > 0) io.out(`Brought RPE's connection in Lumiverse, ${named}, up to date: ${settled.changed.join(", ")}.`);
   else io.out(`RPE's connection in Lumiverse, ${named}, is already as it should be.`);
