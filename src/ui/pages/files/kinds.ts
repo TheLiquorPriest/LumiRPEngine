@@ -2,6 +2,7 @@
 // level, and the levels that hold it. A file the form makes is written through the same route as any other; where
 // RPE would refuse a place it says so in words, and the page shows them.
 
+import type { LayerLevel } from "../../../shared/api";
 import type { WriteLevel } from "./model";
 
 export interface FileKind {
@@ -12,14 +13,21 @@ export interface FileKind {
   named: boolean;
   /** The names a fixed kind may take, one to choose. */
   names?: readonly string[];
-  /** Its path below a level, from the name given. */
-  at(name: string): string;
+  /** Its path below a level, from the name given: a level's folder for the kind is the level's own (`guidanceFolder`). */
+  at(name: string, level: LayerLevel): string;
   /** The levels that hold it, with a chat open and with none. */
   levels(chat: string | null): WriteLevel[];
 }
 
 const ALL = (chat: string | null): WriteLevel[] => (chat === null ? ["global"] : ["global", "character", "chat"]);
 const GLOBAL_ONLY = (): WriteLevel[] => ["global"];
+/** The kinds with no folder at a character's level (RPE's `layout.ts`: a character level holds agents, rules and skills). */
+const NOT_CHARACTER = (chat: string | null): WriteLevel[] => (chat === null ? ["global"] : ["global", "chat"]);
+
+/** The folders of guidance a level keeps: the shipped and global levels under dot names (`.agents/`), a character's and a chat's under plain ones (`agents/`). */
+export function guidanceFolder(level: LayerLevel, kind: "agents" | "rules" | "skills" | "hooks"): string {
+  return level === "shipped" || level === "global" ? `.${kind}` : kind;
+}
 
 const INSTRUCTIONS = ["WORLD.md", "SIMULATION.md", "WRITING.md", "TURN.md", "PRESET.md", "SWIPE.md", "DELETE.md"] as const;
 
@@ -27,10 +35,10 @@ export const KINDS: readonly FileKind[] = [
   { id: "agents-md", words: "AGENTS.md, for every agent", named: false, at: () => "AGENTS.md", levels: (chat) => (chat === null ? [] : ["character", "chat"]) },
   { id: "instruction", words: "An instruction file (what the Author and the GM read)", named: true, names: INSTRUCTIONS, at: (name) => name, levels: ALL },
   { id: "own", words: "A file of your own, for an instructions: list", named: true, at: (name) => (name.endsWith(".md") ? name : `${name}.md`), levels: ALL },
-  { id: "rule", words: "A rule", named: true, at: (name) => `rules/${name.replace(/\.md$/, "")}.md`, levels: ALL },
-  { id: "skill", words: "A skill", named: true, at: (name) => `skills/${name}/SKILL.md`, levels: ALL },
-  { id: "agent", words: "An agent's definition", named: true, at: (name) => `agents/${name.replace(/\.md$/, "")}.md`, levels: ALL },
-  { id: "hooks", words: "A hook file", named: false, at: (_name) => "hooks/hooks.yml", levels: ALL },
+  { id: "rule", words: "A rule", named: true, at: (name, level) => `${guidanceFolder(level, "rules")}/${name.replace(/\.md$/, "")}.md`, levels: ALL },
+  { id: "skill", words: "A skill", named: true, at: (name, level) => `${guidanceFolder(level, "skills")}/${name}/SKILL.md`, levels: ALL },
+  { id: "agent", words: "An agent's definition", named: true, at: (name, level) => `${guidanceFolder(level, "agents")}/${name.replace(/\.md$/, "")}.md`, levels: ALL },
+  { id: "hooks", words: "A hook file", named: false, at: (_name, level) => `${guidanceFolder(level, "hooks")}/hooks.yml`, levels: NOT_CHARACTER },
   { id: "prompt", words: "A prompt part", named: true, at: (name) => `.prompts/${name.replace(/\.md$/, "")}.md`, levels: GLOBAL_ONLY },
   { id: "tool-guide", words: "A tool's guide", named: true, at: (name) => `.tools/${name.replace(/\.md$/, "")}.md`, levels: GLOBAL_ONLY },
   { id: "tool-manifest", words: "A tool manifest (mcp.json, an HTTP tool, a command tool)", named: true, at: (name) => `.tools/${name.replace(/\.json$/, "")}.json`, levels: GLOBAL_ONLY },

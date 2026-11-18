@@ -4,12 +4,13 @@
 // the other levels' (`entryAt`) and, where RPH was asked, RPH's standing of it (`withStanding`).
 
 import { join } from "node:path";
-import type { LayerLevel } from "rp-harness/contract";
+import type { Layer, LayerLevel } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { readText } from "../app/disk";
-import { entryAt, type ListingContext, type TreeFileEntry } from "./catalog";
+import { entryAt, kindAt, type ListingContext, type TreeFileEntry } from "./catalog";
 import { walk } from "./files";
-import { entriesOf, levelBase, locate, viewPath } from "./view";
+import { NOTES_FOLDER } from "./layout";
+import { entriesOf, type Located, levelBase, locate, viewPath } from "./view";
 
 /** One entry of a listing: a folder, or a file with its entry. */
 export interface Listed {
@@ -44,6 +45,16 @@ function levelsOf(ctx: ListingContext): LayerLevel[] {
   return ctx.layers.map((l) => l.level).filter((level) => levelBase(ctx.loc, level) !== null);
 }
 
+/**
+ * Whether `at` is one of its level's standard folders: a folder of guidance (`.agents/` at the shipped and global levels, `agents/` at a
+ * character's and a chat's) or a notes folder. A level has none of them until something is written in it, which is no fault of the path.
+ */
+function isStandardFolder(layers: readonly Layer[], at: Located): boolean {
+  const layer = layers.find((l) => l.level === at.level);
+  const [first] = at.rest;
+  return layer !== undefined && at.rest.length === 1 && (kindAt(layer, first) !== undefined || (first === NOTES_FOLDER && (at.level === "global" || at.level === "chat")));
+}
+
 /** The page of a sorted list that follows `after` (the key of the last entry of the page before), and where the next starts. */
 function pageOf<T>(all: readonly T[], keyOf: (item: T) => string, ask: PageAsk): { items: T[]; next: string | null } {
   const from = ask.after === undefined ? 0 : all.findIndex((i) => keyOf(i) > (ask.after as string));
@@ -61,7 +72,11 @@ export async function listFolder(ctx: ListingContext, folder: string, ask: PageA
   const top = folder === "" || folder === ".";
   const at = await locate(loc, top ? "" : folder);
   if (!at.ok) throw new RouteError(at.reason === "invalid" ? 400 : 404, `The tree has no folder ${folder} that a page can reach.`);
-  if (!top && at.at.is !== "folder") throw new RouteError(404, `The tree has no folder ${folder}.`);
+  if (!top && at.at.is !== "folder") {
+    // A standard folder its level has not made yet holds nothing: listed as empty, not refused.
+    if (at.at.is === "none" && isStandardFolder(ctx.layers, at.at)) return { folder: at.at.path, items: [], next: null, levels: levelsOf(ctx), stopped: null };
+    throw new RouteError(404, `The tree has no folder ${folder}.`);
+  }
   const names: { name: string; folder: boolean; level: LayerLevel; rest: string[]; disk: string }[] = [];
   if (at.at.disk !== null) {
     for (const e of await entriesOf(loc, at.at.level, at.at.rest, at.at.disk)) names.push({ ...e, level: at.at.level, rest: [...at.at.rest, e.name], disk: join(at.at.disk, e.name) });

@@ -14,6 +14,7 @@ import { Badge, Banner, Button, Disclosure, Section } from "../../../frontend/co
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, LEVEL_WORDS, num } from "../../words";
+import { guidanceFolder } from "../files/kinds";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
 import type { SettingsShown } from "../settings";
 import type { RowActions } from "../settings/row";
@@ -213,7 +214,7 @@ function ChangeSection(props: AgentOpenProps) {
     press("copy", async () => {
       const name = copyAs.trim();
       if (name === "") throw new Error("Name the new agent.");
-      const made = await files.copy(agent.path, `@global/agents/${name}.md`);
+      const made = await files.copy(agent.path, `@global/${guidanceFolder("global", "agents")}/${name}.md`);
       setSaid(`Copied to ${made.path}: a new agent of yours named ${name}; open its file to change its name field.`);
       props.onChanged();
     });

@@ -13,6 +13,7 @@ import { useSelect } from "../../store";
 import { useUiSetting } from "../../ui-settings";
 import type { RuleView } from "../../../shared/api";
 import { counted, errorWords, LEVEL_WORDS, when } from "../../words";
+import { guidanceFolder } from "../files/kinds";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
 import { FiringLine } from "./firings";
 import { namesOf, ruleFileOf, triggerWords } from "./header";
@@ -266,11 +267,11 @@ export function RuleOpen(props: RuleOpenProps) {
         <div class="lre-inline rpe-wrap">
           {isExample ? (
             <>
-              <Button size="sm" busy={busy === "copy"} onClick={() => copy(`@global/rules/${rule.name}.md`)}>
+              <Button size="sm" busy={busy === "copy"} onClick={() => copy(`@global/${guidanceFolder("global", "rules")}/${rule.name}.md`)}>
                 Copy it into force for every chat
               </Button>
               {chat === null ? null : (
-                <Button size="sm" variant="ghost" busy={busy === "copy"} onClick={() => copy(`rules/${rule.name}.md`)}>
+                <Button size="sm" variant="ghost" busy={busy === "copy"} onClick={() => copy(`${guidanceFolder("chat", "rules")}/${rule.name}.md`)}>
                   Copy it into force for this chat
                 </Button>
               )}

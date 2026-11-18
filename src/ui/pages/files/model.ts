@@ -38,6 +38,8 @@ export function folderOf(path: string): string {
 
 /** The Files page's calls to RPE, for the chat it shows. */
 export interface FilesCalls {
+  /** The chat the calls are for; null: the shipped level and yours alone. */
+  readonly chat: string | null;
   /** One folder's entries a page at a time, or (with `search`) every level searched by name and by text. */
   folder(folder: string, search: string | null, after: string | undefined, limit: number): Promise<TreeListedReply>;
   /** A piece of a file: `length` bytes from byte `offset`. */
@@ -62,6 +64,7 @@ export function filesCalls(client: Pick<RpeClient, "call">, chat: string | null)
   const query = chat === null ? {} : { chat };
   const body = chat === null ? {} : { chat };
   return {
+    chat,
     folder: (folder, search, after, limit) => client.call("GET /api/v1/files-list", {}, { query: { ...query, ...(search === null ? { folder } : { search }), limit, ...(after === undefined ? {} : { after }) } }),
     read: (path, offset, length) => client.call("GET /api/v1/files/*", { "*": path }, { query: { ...query, offset, length } }),
     diff: (path) => client.call("GET /api/v1/files-diff/*", { "*": path }, { query }),
@@ -253,8 +256,8 @@ export function filesControl(calls: FilesCalls, limits: () => FilesLimits, onCha
     );
   };
   const readAgents = (): void => {
-    // The definitions of each level the view holds, merged by name.
-    const levels = ["@shipped/agents", "@global/agents", "agents"];
+    // The definitions of each level the view holds, merged by name: the shipped and the global level keep theirs in `.agents`, a character's and a chat's in `agents`. A chat's two stand only with a chat open; one with no folder yet is read as empty.
+    const levels = ["@shipped/.agents", "@global/.agents", ...(calls.chat === null ? [] : ["@character/agents", "agents"])];
     Promise.all(levels.map((folder) => calls.folder(folder, null, undefined, 1000).then((got) => got.items, () => [] as TreeListed[]))).then((lists) => {
       const names = lists.flat().flatMap((item) => (item.entry?.item?.startsWith("agents/") === true ? [item.entry.item.slice("agents/".length)] : []));
       show({ ...shown, agents: [...new Set(names)].sort() });

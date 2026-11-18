@@ -114,8 +114,8 @@ describe("the Files page", () => {
     expect(page.calls).toContain("move:@global/imported/agents/x.md>@global/.agents/x.md");
     // A rule is made at the chat's own level at its top, at yours under its own folder; AGENTS.md has a place only in a chat's levels.
     const rule = KINDS.find((k) => k.id === "rule");
-    expect(viewPathAt("chat", rule?.at("engine-silent") ?? "")).toBe("rules/engine-silent.md");
-    expect(viewPathAt("global", rule?.at("engine-silent") ?? "")).toBe("@global/rules/engine-silent.md");
+    expect(viewPathAt("chat", rule?.at("engine-silent", "chat") ?? "")).toBe("rules/engine-silent.md");
+    expect(viewPathAt("global", rule?.at("engine-silent", "global") ?? "")).toBe("@global/.rules/engine-silent.md");
     expect(KINDS.find((k) => k.id === "agents-md")?.levels(null)).toEqual([]);
     expect(elements(page.tree).some((e) => e.props["data-open"] === "@global/imported/agents/x.md")).toBe(true);
   });

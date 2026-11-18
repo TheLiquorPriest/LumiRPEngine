@@ -40,7 +40,7 @@ export function NewFile(props: MakeActions & { chat: string | null; shown: Files
   const at = (level !== "" && levels.includes(level) ? level : (levels[0] ?? "")) as WriteLevel | "";
   const given = kind.names === undefined ? name.trim() : fixed === "" ? (kind.names[0] ?? "") : fixed;
   const ready = at !== "" && (kind.named ? given !== "" : true);
-  const below = ready ? kind.at(given) : "";
+  const below = ready ? kind.at(given, at) : "";
   return (
     <Section title="New" id="new">
       <form
@@ -99,7 +99,7 @@ export function NewFile(props: MakeActions & { chat: string | null; shown: Files
         <label class="lre-check">
           <input type="checkbox" checked={fromShipped} onChange={(event) => setFromShipped(event.currentTarget.checked)} /> <span>Start from the shipped file of its name, where there is one</span>
         </label>
-        <Button variant="primary" busy={props.shown.busy} disabled={!ready} onClick={() => at !== "" && props.onMake(viewPathAt(at, below), at, fromShipped ? shippedPathFor(below) : null)}>
+        <Button variant="primary" busy={props.shown.busy} disabled={!ready} onClick={() => at !== "" && props.onMake(viewPathAt(at, below), at, fromShipped ? shippedPathFor(kind.at(given, "shipped")) : null)}>
           Make the file
         </Button>
       </form>
