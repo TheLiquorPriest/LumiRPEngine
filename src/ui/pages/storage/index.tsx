@@ -11,7 +11,7 @@ import { Badge, Banner, Button, Disclosure, PageHeader, Row, Section } from "../
 import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
 import { bytesWords, counted, when } from "../../words";
-import { NO_STORAGE, type PruneShown, type StorageControl, storageCalls, storageControl, type StorageShown } from "./model";
+import { type MakingBackup, NO_STORAGE, type PruneShown, type StorageControl, storageCalls, storageControl, type StorageShown } from "./model";
 import { valueWords } from "../settings/model";
 import { useSettingMap } from "../settings/names";
 
@@ -92,11 +92,43 @@ function ChatLine(props: { chat: ChatStorageRow; open: boolean; onNotes(chat: st
             <Button size="sm" variant="ghost" onClick={() => props.onPrune({ what: "sessions", chat: chat.chat }, `Closed sessions' files of ${chat.folder}`)}>
               Prune closed sessions' files
             </Button>
+            <Button size="sm" variant="ghost" onClick={() => props.onPrune({ what: "versions", chat: chat.chat }, `Note versions of ${chat.folder} past how far back they are kept`)}>
+              Prune note versions past what is kept
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => props.onPrune({ what: "suggestions", chat: chat.chat }, `Decided suggestions of ${chat.folder} past the number kept`)}>
+              Prune decided suggestions past what is kept
+            </Button>
           </>
         )}
       </div>
     </li>
   );
+}
+
+/** What each kind of place a prune takes from is counted in, and the words that name a place that is no file (the plan's own path of one reads as a chat's id). */
+const ITEM_WORDS: Readonly<Record<string, { unit: string; label: string | null }>> = {
+  suggestions: { unit: "decided suggestion", label: "Decided suggestions past the number kept" },
+  "note-versions": { unit: "note version", label: "Note versions past how far back they are kept" },
+  "chat-rows": { unit: "database row", label: null },
+  "derived-rows": { unit: "database row", label: null },
+};
+
+/** What a prune says when it finds nothing to take, by what it was asked to prune. */
+const EMPTY: Readonly<Record<StoragePruneAsk["what"], string>> = {
+  turns: "Nothing would go: nothing is old enough, or every turn and open session is still in use.",
+  sessions: "Nothing would go: every session of the chat is open or in use.",
+  chat: "Nothing would go: nothing of the deleted chat is left.",
+  backup: "Nothing would go.",
+  suggestions: "Nothing would go: no decided suggestion is past the number kept.",
+  versions: "Nothing would go: no note version is past how far back they are kept.",
+  rows: "Nothing would go: the deleted chat holds no rows.",
+  derived: "Nothing would go: the chat holds no snapshots, vectors or caches.",
+};
+
+/** The unit a plan counts in: that of its places where they agree, else items. */
+function unitOf(items: readonly { kind: string }[]): string {
+  const units = new Set(items.map((item) => ITEM_WORDS[item.kind]?.unit ?? "file"));
+  return units.size === 1 ? [...units][0] ?? "item" : "item";
 }
 
 function PruneQuestion(props: { prune: PruneShown; onConfirm(): void; onDismiss(): void }) {
@@ -111,16 +143,16 @@ function PruneQuestion(props: { prune: PruneShown; onConfirm(): void; onDismiss(
             <span>Asking RPE what it would take…</span>
           ) : null
         ) : plan.files === 0 && plan.items.length === 0 ? (
-          <span>{prune.done === null ? "Nothing would go: nothing is old enough, or every turn and open session is still in use." : "It took nothing."}</span>
+          <span>{prune.done === null ? EMPTY[prune.ask.what] : "It took nothing."}</span>
         ) : (
           <>
             <span>
-              {prune.done === null ? "This would take" : "It took"} {counted(plan.files, "file")}, {bytesWords(plan.bytes)}:
+              {prune.done === null ? "This would take" : "It took"} {counted(plan.files, unitOf(plan.items))}, {bytesWords(plan.bytes)}:
             </span>
             <ul class="rpe-reports">
               {plan.items.map((item) => (
                 <li key={`${item.kind}-${item.path}`}>
-                  {item.path} · {counted(item.files, "file")} · {bytesWords(item.bytes)}
+                  {ITEM_WORDS[item.kind]?.label ?? item.path} · {counted(item.files, ITEM_WORDS[item.kind]?.unit ?? "file")} · {bytesWords(item.bytes)}
                 </li>
               ))}
             </ul>
@@ -141,10 +173,50 @@ function PruneQuestion(props: { prune: PruneShown; onConfirm(): void; onDismiss(
   );
 }
 
-function BackupsSection(props: { backups: readonly BackupShown[]; onPrune(ask: StoragePruneAsk, title: string): void }) {
-  if (props.backups.length === 0) return null;
+/** What a backup made now would hold, said before it is made, and what it made once it is. */
+function BackupQuestion(props: { making: MakingBackup; onMake(): void; onDismiss(): void }) {
+  const { making } = props;
+  const { plan, made } = making;
+  const links = (skipped: readonly string[]): string => (skipped.length === 0 ? "" : ` Left out, being links: ${skipped.join(", ")}.`);
+  return (
+    <Banner tone="info" icon={made === null ? "info" : "check"} title={made === null ? "Make a backup now" : "Backup made"}>
+      <div class="lre-stack" data-making-backup>
+        {making.problem === null ? null : <span data-backup-problem>{making.problem}</span>}
+        {made !== null ? (
+          <span>
+            Made {made.name} in the backups folder: {bytesWords(made.bytes)}, the database and {counted(made.files, "file")} of the tree.{links(made.skipped)}
+          </span>
+        ) : plan === null ? (
+          making.busy ? (
+            <span>Asking RPE what it would make…</span>
+          ) : null
+        ) : (
+          <span>
+            This would make one archive, {plan.name}, in the backups folder: the database (up to {bytesWords(plan.database)}) and {counted(plan.files, "file")} of the tree, {bytesWords(plan.bytes)}.{links(plan.skipped)}
+          </span>
+        )}
+        <div class="lre-inline">
+          {made === null && plan !== null ? (
+            <Button busy={making.busy} onClick={props.onMake}>
+              Yes, make it
+            </Button>
+          ) : null}
+          <Button variant="ghost" onClick={props.onDismiss}>
+            {made === null ? "No" : "Close"}
+          </Button>
+        </div>
+      </div>
+    </Banner>
+  );
+}
+
+function BackupsSection(props: { backups: readonly BackupShown[]; onPrune(ask: StoragePruneAsk, title: string): void; onAskBackup(): void }) {
   return (
     <Section title="Backups and copies of the database" id="backups">
+      <div class="lre-inline rpe-wrap">
+        <Button onClick={props.onAskBackup}>Make a backup now</Button>
+      </div>
+      {props.backups.length === 0 ? <p class="lre-muted rpe-line">The backups folder holds none yet.</p> : null}
       <ul class="rpe-plain lre-stack">
         {props.backups.map((b) => (
           <li key={b.name} class="rpe-entry" data-backup={b.name}>
@@ -170,6 +242,9 @@ export interface StorageViewProps {
   onPrune(ask: StoragePruneAsk, title: string): void;
   onConfirm(): void;
   onDismiss(): void;
+  onAskBackup(): void;
+  onMakeBackup(): void;
+  onDismissBackup(): void;
 }
 
 export function StorageView(props: StorageViewProps) {
@@ -179,6 +254,7 @@ export function StorageView(props: StorageViewProps) {
     <div class="lre-stack rpe-page" data-page="storage">
       <PageHeader title="Storage" subtitle="What RPE keeps, how much, and for how long." />
       {shown.prune === null ? null : <PruneQuestion prune={shown.prune} onConfirm={props.onConfirm} onDismiss={props.onDismiss} />}
+      {shown.making === null ? null : <BackupQuestion making={shown.making} onMake={props.onMakeBackup} onDismiss={props.onDismissBackup} />}
       <KindsSection shown={shown} settings={props.settings ?? null} onSetting={props.onSetting} />
       <Section title="Everything" id="totals">
         {totals === null ? (
@@ -247,7 +323,7 @@ export function StorageView(props: StorageViewProps) {
           )}
         </Section>
       )}
-      <BackupsSection backups={shown.backups?.items ?? []} onPrune={props.onPrune} />
+      <BackupsSection backups={shown.backups?.items ?? []} onPrune={props.onPrune} onAskBackup={props.onAskBackup} />
     </div>
   );
 }
@@ -276,6 +352,9 @@ export function StoragePage() {
       onPrune={(ask, title) => control?.ask(ask, title)}
       onConfirm={() => control?.confirm()}
       onDismiss={() => control?.dismiss()}
+      onAskBackup={() => control?.askBackup()}
+      onMakeBackup={() => control?.makeBackup()}
+      onDismissBackup={() => control?.dismissBackup()}
     />
   );
 }

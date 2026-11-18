@@ -3,7 +3,7 @@
 // time; the notes agents lean on; the backups and copies of the database; and pruning on request, told first:
 // a dry run says what would go and gives a plan standing for exactly that, and the prune takes exactly that.
 
-import type { BackupsReply, NotesReply, StorageKindsReply, StoragePruneAsk, StoragePruneReply, StorageReply } from "../../../shared/api";
+import type { BackupMadeReply, BackupPlan, BackupsReply, NotesReply, StorageKindsReply, StoragePruneAsk, StoragePruneReply, StorageReply } from "../../../shared/api";
 import type { RpeClient } from "../../client";
 import { errorWords } from "../../words";
 
@@ -13,6 +13,8 @@ export interface StorageCalls {
   notes(chat: string): Promise<NotesReply>;
   backups(): Promise<BackupsReply>;
   prune(ask: StoragePruneAsk): Promise<StoragePruneReply>;
+  backupPlan(): Promise<BackupPlan>;
+  makeBackup(): Promise<BackupMadeReply>;
 }
 
 export function storageCalls(client: Pick<RpeClient, "call">): StorageCalls {
@@ -22,6 +24,8 @@ export function storageCalls(client: Pick<RpeClient, "call">): StorageCalls {
     notes: (chat) => client.call("GET /api/v1/storage/notes", {}, { query: { chat } }),
     backups: () => client.call("GET /api/v1/backups", {}),
     prune: (ask) => client.call("POST /api/v1/storage-prune", {}, { body: ask }),
+    backupPlan: () => client.call("GET /api/v1/backups/next", {}),
+    makeBackup: () => client.call("POST /api/v1/backups", {}),
   };
 }
 
@@ -34,6 +38,14 @@ export interface PruneShown {
   busy: boolean;
   /** What a prune took, once it did. */
   done: StoragePruneReply | null;
+  problem: string | null;
+}
+
+/** A backup made on a press, said first: what RPE says it would hold (null while it waits for the answer), and once made, what it made. */
+export interface MakingBackup {
+  plan: BackupPlan | null;
+  busy: boolean;
+  made: BackupMadeReply | null;
   problem: string | null;
 }
 
@@ -51,9 +63,11 @@ export interface StorageShown {
   notes: NotesReply | null;
   notesProblem: string | null;
   prune: PruneShown | null;
+  /** A backup the page asked to make now. */
+  making: MakingBackup | null;
 }
 
-export const NO_STORAGE: StorageShown = { kinds: null, kindsProblem: null, chats: null, more: false, loading: true, problem: null, backups: null, chat: null, notes: null, notesProblem: null, prune: null };
+export const NO_STORAGE: StorageShown = { kinds: null, kindsProblem: null, chats: null, more: false, loading: true, problem: null, backups: null, chat: null, notes: null, notesProblem: null, prune: null, making: null };
 
 export interface StorageControl {
   /** Reads the next page of chats. */
@@ -66,6 +80,12 @@ export interface StorageControl {
   confirm(): void;
   /** Drops the question, or the answer to a prune. */
   dismiss(): void;
+  /** Asks what a backup made now would hold; nothing is made until `makeBackup`. */
+  askBackup(): void;
+  /** Makes the backup that was said. */
+  makeBackup(): void;
+  /** Drops the question, or the answer to a backup. */
+  dismissBackup(): void;
   refresh(): void;
   stop(): void;
 }
@@ -154,6 +174,37 @@ export function storageControl(calls: StorageCalls, limit: () => number, onChang
     },
     dismiss() {
       show({ prune: null });
+    },
+    askBackup() {
+      const asking: MakingBackup = { plan: null, busy: true, made: null, problem: null };
+      show({ making: asking });
+      calls.backupPlan().then(
+        (plan) => {
+          if (shown.making === asking) show({ making: { ...asking, plan, busy: false } });
+        },
+        (error: unknown) => {
+          if (shown.making === asking) show({ making: { ...asking, busy: false, problem: errorWords(error) } });
+        },
+      );
+    },
+    makeBackup() {
+      const now = shown.making;
+      if (now === null || now.plan === null || now.busy || now.made !== null) return;
+      const making: MakingBackup = { ...now, busy: true, problem: null };
+      show({ making });
+      calls.makeBackup().then(
+        (made) => {
+          if (shown.making !== making) return;
+          show({ making: { ...making, busy: false, made } });
+          refresh();
+        },
+        (error: unknown) => {
+          if (shown.making === making) show({ making: { ...making, busy: false, problem: errorWords(error) } });
+        },
+      );
+    },
+    dismissBackup() {
+      show({ making: null });
     },
     refresh,
     stop() {

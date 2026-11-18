@@ -90,6 +90,24 @@ export interface Arrived {
   words: string;
 }
 
+/** A backup made: its name in the backups folder, its size, how many files of the tree it holds beside the database, its sha256 and the links in the tree it left out. */
+export interface BackupMadeReply {
+  name: string;
+  bytes: number;
+  files: number;
+  sha256: string;
+  skipped: string[];
+}
+
+/** What a backup made now would hold, said before it is made: the name it would have, the database's size as its file stands now, how many files of the tree and how many bytes they take, and the links in the tree it leaves out (a backup holds what is in the folder, not what a link points to). */
+export interface BackupPlan {
+  name: string;
+  database: number;
+  files: number;
+  bytes: number;
+  skipped: string[];
+}
+
 /** A file of the backups folder: its name, its kind (a copy of the database taken before a new version's migrations, an archive `rpe backup` made, or the migration's backup of today's data), its size and when it was made. */
 export interface BackupShown {
   name: string;
@@ -4186,6 +4204,26 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: BackupsReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Makes a backup now: the archive `rpe backup` makes, of the database (copied whole by SQLite while RPE runs) and the file tree, in the backups folder, readable by you alone and never written over another. Refused where the database is not there yet, or an archive of that second exists. */
+  "POST /api/v1/backups": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: BackupMadeReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** What a backup made now would hold, said first: its name, the database's size, how many files of the tree and how many bytes, and the links it leaves out. */
+  "GET /api/v1/backups/next": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: undefined;
+    reply: BackupPlan;
     paged: false;
     long: false;
     joined: false;

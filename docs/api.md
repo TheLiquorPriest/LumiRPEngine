@@ -3344,6 +3344,32 @@ Every copy of the database taken before a migration, every archive rpe backup ma
 | Body | none |
 | Reply | [`BackupsReply`](#backupsreply) |
 
+### `POST /api/v1/backups`
+
+Makes a backup now: the archive `rpe backup` makes, of the database (copied whole by SQLite while RPE runs) and the file tree, in the backups folder, readable by you alone and never written over another. Refused where the database is not there yet, or an archive of that second exists.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`BackupMadeReply`](#backupmadereply) |
+
+### `GET /api/v1/backups/next`
+
+What a backup made now would hold, said first: its name, the database's size, how many files of the tree and how many bytes, and the links it leaves out.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | none |
+| Body | none |
+| Reply | [`BackupPlan`](#backupplan) |
+
 ### `GET /api/v1/command/busy`
 
 How many turns and jobs run now: what a later `rpe up` waits to be none before it restarts RPE's service.
@@ -3860,6 +3886,34 @@ export interface Arrived {
   taken: boolean;
   /** Where it stands. */
   words: string;
+}
+```
+
+### `BackupMadeReply`
+
+A backup made: its name in the backups folder, its size, how many files of the tree it holds beside the database, its sha256 and the links in the tree it left out.
+
+```ts
+export interface BackupMadeReply {
+  name: string;
+  bytes: number;
+  files: number;
+  sha256: string;
+  skipped: string[];
+}
+```
+
+### `BackupPlan`
+
+What a backup made now would hold, said before it is made: the name it would have, the database's size as its file stands now, how many files of the tree and how many bytes they take, and the links in the tree it leaves out (a backup holds what is in the folder, not what a link points to).
+
+```ts
+export interface BackupPlan {
+  name: string;
+  database: number;
+  files: number;
+  bytes: number;
+  skipped: string[];
 }
 ```
 

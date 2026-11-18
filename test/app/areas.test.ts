@@ -109,7 +109,7 @@ describe("each area registers from a file of its own", () => {
     // The app's own area adds the Settings routes, over the whole registry, once every area is mounted, and when it mounts the backups list, the service's routes (how many turns and jobs run, an app file's arrival) and the sign-in's (the proof, the trade, the Lumiverse sign-in, the sign-out).
     expect({ name: "app", routes: (added.get("app") ?? []).sort() }).toEqual({
       name: "app",
-      routes: ["GET /api/v1/backups", "GET /api/v1/command/busy", "GET /api/v1/service", "GET /api/v1/service/log", "GET /api/v1/service/timings", "GET /api/v1/settings", "GET /api/v1/status/proof", "GET /api/v1/switches", "POST /api/v1/ext/arrived", "POST /api/v1/service/restart", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
+      routes: ["GET /api/v1/backups", "GET /api/v1/backups/next", "GET /api/v1/command/busy", "GET /api/v1/service", "GET /api/v1/service/log", "GET /api/v1/service/timings", "GET /api/v1/settings", "GET /api/v1/status/proof", "GET /api/v1/switches", "POST /api/v1/backups", "POST /api/v1/ext/arrived", "POST /api/v1/service/restart", "POST /api/v1/signin/end", "POST /api/v1/signin/lumiverse", "POST /api/v1/signin/session", "PUT /api/v1/settings"],
     });
     expect({ name: "store", routes: added.get("store") ?? [] }).toEqual({ name: "store", routes: [] });
     // The iface area adds the one route of a level's typed systems.

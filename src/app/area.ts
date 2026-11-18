@@ -5,7 +5,7 @@
 
 import type { LumiverseAccounts } from "./accounts";
 import type { App, Area } from "./app";
-import { backupsRoute } from "./backups-route";
+import { backupsRoutes } from "./backups-route";
 import { installFacts, SERVER_SETTINGS } from "./config";
 import { PAGE_SETTINGS } from "./page-settings";
 import { serviceRoutes, type TurnsTimed } from "./service-routes";
@@ -42,7 +42,7 @@ export function appArea(takes?: AppTakes): Area {
           mount: (at: App) => {
             takes.opened(at);
             at.routes.add("service", serviceRoutes(at, takes.turns));
-            at.routes.add("backups", [backupsRoute(at.paths.backups)]);
+            at.routes.add("backups", backupsRoutes(at.paths, at.now));
             at.routes.add("switches", switchesRoutes(at.db, () => at.hooks.listFiles()));
             at.routes.add("signin", signinRoutes(signinDeps(at, takes.accounts ?? null)));
           },
