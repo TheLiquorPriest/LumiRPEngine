@@ -18,7 +18,7 @@ import type { LintIssue } from "../../shared/lint";
 import type { WorldCollection, WorldPart } from "../../shared/world";
 import { placeCapsOf, playedKinds, type KindDef, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute, EntityGroup } from "../app";
-import { LorePinsSection } from "./lore-pins";
+import { LorePinsKept } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
 import { Badge, Banner, Button, Empty, Field, IconButton, IdText, JsonView, List, ListRow, PageHeader, SaveBar, Section, useBusy } from "../components";
 import { humanize } from "../format";
@@ -750,7 +750,7 @@ export function MapOwned(props: { worldId: string; collection: WorldCollection; 
       <Section title="As stored">
         <JsonView value={props.value} />
       </Section>
-      {props.collection === "places" ? <LorePinsSection target="places" id={props.id} /> : null}
+      {props.collection === "places" ? <LorePinsKept target="places" id={props.id} /> : null}
     </div>
   );
 }
@@ -837,7 +837,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
             );
           })
         : null}
-      {!isNew && (props.collection === "places" || (props.collection === "entities" && isCharacter(formDoc, value))) ? <LorePinsSection target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
+      {!isNew && (props.collection === "places" || (props.collection === "entities" && isCharacter(formDoc, value))) ? <LorePinsKept target={props.collection === "entities" ? "characters" : "places"} id={id} /> : null}
       {props.children}
       <SaveBar>
         <Button variant="primary" disabled={!changed && !isNew} busy={busy} onClick={save}>

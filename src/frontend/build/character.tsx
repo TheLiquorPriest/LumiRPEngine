@@ -23,7 +23,7 @@ import { employerPicker, entityPatch, GROUP_LABEL, relationGroups, type Employer
 import { deleteItem, go, ItemHeader } from "./chrome";
 import { CheckField, FormGroup, ItemRow, RefPicker, type RefOption } from "./form-kit";
 import { useHeld } from "./held";
-import { LorePinsSection } from "./lore-pins";
+import { LorePinsKept } from "./lore-pins";
 import { COLLECTION_SPECS } from "./schema";
 import { DefInput, kindFields, lintAt, SchemaFields, worldIdentifiers, type FormCtx } from "./schema-form";
 import { kindIs } from "./selector-editor";
@@ -119,7 +119,7 @@ export function CharacterPage(props: EditorProps) {
       <Section title="Secrets">
         <SchemaFields specs={COLLECTION_SPECS.entities.filter((s) => SECRET_KEYS.has(s.key))} value={value} ctx={ctx} onChange={setValue} />
       </Section>
-      <LorePinsSection target="characters" id={id} />
+      <LorePinsKept target="characters" id={id} />
       <Disclosure summary="All fields">
         <SchemaFields specs={COLLECTION_SPECS.entities} value={value} ctx={ctx} onChange={setValue} />
       </Disclosure>

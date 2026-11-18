@@ -1,35 +1,28 @@
 // Build → Entities and Places, Change the selected (DESIGN §4.1): one change for everyone picked in
 // the list, written to the draft as a JSON Patch worked out from the draft as it stands, so only what
-// changes is written, in chunks of `EDIT_OPS_MAX` operations. Entities take a tier, a domain's level
-// override and a lore pin; places a default scene type and a lore pin. Every control starts empty
-// ("Choose…"), so nothing applies until a value is picked, and each card says how those it reaches
-// stand now. An entity's tier, level and pins reach the people picked unless widened to everything
-// picked. A place a map draws keeps the map's scene type; its pins are the world's, so they're set
-// here as for any place.
+// changes is written, in chunks of `EDIT_OPS_MAX` operations. Entities take a tier and a domain's
+// level override; places a default scene type. Every control starts empty ("Choose…"), so nothing
+// applies until a value is picked, and each card says how those it reaches stand now. An entity's
+// tier and level reach the people picked unless widened to everything picked. A place a map draws
+// keeps the map's scene type. Lore pins are not offered: nothing RPE runs reads them.
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useMemo, useState } from "preact/hooks";
+import { useId, useState } from "preact/hooks";
 import type { DomainId, Level } from "../../shared/ids";
 import { DOMAINS } from "../../shared/ids";
 import { hasOwn } from "../../shared/json";
-import { lorePinKey, lorePinsOf } from "../../shared/lore";
-import type { LoreBookEntryView, LoreBookView } from "../../shared/lore-views";
-import type { LorePin, WorldDoc } from "../../shared/world";
+import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import type { DraftChange } from "../batch";
 import { draftPatch, mixOf, sendInChunks } from "../batch";
 import { Banner, Button, Field, HostSwitch, Section, useBusy } from "../components";
 import { DOMAIN_LABEL, LEVEL_LABEL } from "../../shared/ids";
 import { useSelect } from "../../ui/store";
-import { bookLabels } from "./book-lore";
 import { draftSend } from "./draft";
 import { FormSheet } from "./form-kit";
 import { kindIs } from "./selector-editor";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
-
-/** The picker's choice of a whole book rather than one of its entries; no host entry id looks like it. */
-const WHOLE_BOOK = "lre:whole-book";
 
 /** Who an entity change reaches among those picked: the people (a kind that is or extends a person), or every one picked when `everything`. Places take every change. */
 export function draftTargets(doc: WorldDoc, collection: "entities" | "places", ids: readonly string[], everything: boolean): string[] {
@@ -38,13 +31,13 @@ export function draftTargets(doc: WorldDoc, collection: "entities" | "places", i
 }
 
 /** One change's card: its controls, how those it reaches stand now, and its button, off until a value is chosen and someone picked fits it. */
-function ChangeCard(props: { title: string; now: string | null; ready: boolean; reach: number; busy: boolean; icon?: "check" | "pin"; verb: string; onApply(): void; children: ComponentChildren }) {
+function ChangeCard(props: { title: string; now: string | null; ready: boolean; reach: number; busy: boolean; verb: string; onApply(): void; children: ComponentChildren }) {
   return (
     <Section title={props.title}>
       <div class="lre-stack">
         {props.children}
         {props.now ? <p class="lre-batch-now">Now: {props.now}</p> : null}
-        <Button variant="primary" icon={props.icon ?? "check"} disabled={props.busy || !props.ready || props.reach === 0} onClick={props.onApply}>
+        <Button variant="primary" icon="check" disabled={props.busy || !props.ready || props.reach === 0} onClick={props.onApply}>
           {!props.ready ? props.verb : props.reach === 0 ? "None of them fit" : `${props.verb} for ${props.reach}`}
         </Button>
       </div>
@@ -61,31 +54,15 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
   const [domain, setDomain] = useState<DomainId | null>(null);
   const [level, setLevel] = useState<Level | "tier" | null>(null);
   const [sceneType, setSceneType] = useState("");
-  const [lore, setLore] = useState("");
-  const [books, setBooks] = useState<LoreBookView[] | null>(null);
-  const labels = useMemo(() => bookLabels(books ?? []), [books]);
-  const [book, setBook] = useState("");
-  const [entries, setEntries] = useState<LoreBookEntryView[] | null>(null);
-  const [entry, setEntry] = useState("");
   // Whether a card widens past the people picked to every entity picked.
-  const [all, setAll] = useState({ tier: false, level: false, pin: false });
-  const ids = { tier: useId(), domain: useId(), level: useId(), scene: useId(), scenes: useId(), lore: useId(), book: useId(), entry: useId() };
-  useEffect(() => {
-    void app.request({ type: "lre.lore", op: "books", ...(app.client.getState().chatId ? { chatId: app.client.getState().chatId ?? "" } : {}) }).then((body) => setBooks(body?.books ?? []));
-  }, []);
-  useEffect(() => {
-    setEntries(null);
-    setEntry("");
-    if (book === "") return;
-    void app.request({ type: "lre.lore", op: "entries", bookId: book }).then((body) => setEntries(body?.entries ?? []));
-  }, [book]);
+  const [all, setAll] = useState({ tier: false, level: false });
+  const ids = { tier: useId(), domain: useId(), level: useId(), scene: useId(), scenes: useId() };
   if (!draft) return null;
   const doc = draft.doc;
   const tiers = Object.entries(doc.tiers).sort(([, a], [, b]) => a.order - b.order);
   const scenes = [...new Set(Object.values(doc.places).flatMap((p) => (p.sceneType ? [p.sceneType] : [])))].sort();
-  const pin: LorePin | null = lore !== "" ? { lore } : book !== "" && entry !== "" ? (entry === WHOLE_BOOK ? { book } : { book, entry }) : null;
   const send = draftSend(app);
-  const reach = (card: "tier" | "level" | "pin") => draftTargets(doc, props.collection, props.ids, all[card]);
+  const reach = (card: "tier" | "level") => draftTargets(doc, props.collection, props.ids, all[card]);
   const others = props.ids.length - draftTargets(doc, props.collection, props.ids, false).length;
   const apply = (targets: readonly string[], change: DraftChange) =>
     run(async () => {
@@ -102,7 +79,7 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
       if (done.applied === done.of) props.onClose();
       else setOutcome(done.applied === 0 ? "Nothing was saved." : `${done.applied} of ${done.of} writes saved; the next was refused, so the rest weren't sent.`);
     });
-  const widen = (card: "tier" | "level" | "pin") =>
+  const widen = (card: "tier" | "level") =>
     props.collection === "entities" && others > 0 ? <HostSwitch checked={all[card]} label={others === 1 ? "Also the 1 picked that isn't a person" : `Also the ${others} picked that aren't people`} onChange={(checked) => setAll({ ...all, [card]: checked })} /> : null;
   const entity = (id: string) => (hasOwn(doc.entities, id) ? doc.entities[id] : undefined);
   const tierOf = (id: string | undefined) => (id === undefined ? "with no tier" : (doc.tiers[id]?.label ?? id));
@@ -110,7 +87,6 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
     const set = LEVELS.find((n) => domain !== null && n === entity(id)?.levels?.[domain]);
     return set === undefined ? "from the tier" : `set to ${set} · ${LEVEL_LABEL[set]}`;
   };
-  const pinned = (id: string): boolean => pin !== null && (lorePinsOf(doc)[props.collection === "entities" ? "characters" : "places"][id] ?? []).some((p) => lorePinKey(p) === lorePinKey(pin));
   const levelChange: DraftChange | null = domain === null || level === null ? null : { kind: "level", domain, level: level === "tier" ? null : level };
   const noun = props.collection === "entities" ? "entity" : "place";
   return (
@@ -178,46 +154,6 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
             </div>
           </Section>
         )}
-        <ChangeCard title="Pin lore" now={pin === null ? null : mixOf(reach("pin").map((id) => (pinned(id) ? "pinned already" : "not yet")))} ready={pin !== null} reach={reach("pin").length} busy={busy} icon="pin" verb="Pin it" onApply={() => pin && apply(reach("pin"), { kind: "pin", pin })}>
-          <p class="lre-build-note">Adds the pin to each one's Pinned lore, where it isn't pinned already. A chat uses it once you commit and Upgrade it.</p>
-          <Field label="One of the world's lore entries" for={ids.lore}>
-            <select id={ids.lore} class="lre-input" value={lore} onChange={(event) => (setLore(event.currentTarget.value), setBook(""))}>
-              <option value="">Choose an entry…</option>
-              {Object.values(doc.lore)
-                .sort((a, b) => a.title.localeCompare(b.title))
-                .map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.title || l.id}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Field label="Or from a World Info book" for={ids.book}>
-            <select id={ids.book} class="lre-input" value={book} onChange={(event) => (setBook(event.currentTarget.value), setLore(""))}>
-              <option value="">{books === null ? "Loading books…" : books.length === 0 ? "No World Info books" : "Choose a book…"}</option>
-              {(books ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {labels[b.id] ?? b.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {book !== "" ? (
-            <Field label="Entry" for={ids.entry}>
-              <select id={ids.entry} class="lre-input" value={entry} onChange={(event) => setEntry(event.currentTarget.value)}>
-                <option value="">{entries === null ? "Loading entries…" : "Choose the whole book or one entry…"}</option>
-                <option value={WHOLE_BOOK}>The whole book (its switched-on entries, new ones too)</option>
-                {(entries ?? []).map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.title || e.id}
-                    {e.disabled ? " (off in its book)" : ""}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
-          {widen("pin")}
-        </ChangeCard>
       </div>
     </FormSheet>
   );
