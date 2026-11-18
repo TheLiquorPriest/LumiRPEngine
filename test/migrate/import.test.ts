@@ -23,6 +23,7 @@ import { chatsToImport, importChats, type ChatToImport } from "../../src/migrate
 import { textHash } from "../../src/migrate/lumiverse-db";
 import type { ChatImportReport } from "../../src/migrate/report";
 import { MIGRATE_TABLES } from "../../src/migrate/tables";
+import { isRecord } from "../../src/shared/json";
 import { openToday, type Today } from "../../src/migrate/today";
 import { buildFixture, CHAT, treeSums, USER, type Fixture } from "./fixture";
 import { addPlayedChats, PLAYED, POV, type Played, type PlayedSwipe } from "./played";
@@ -180,6 +181,26 @@ describe("each chat into the store", () => {
     // Today's fold converted the dues as Keep asked; RPE's store keeps that state as the turn's start.
     expect(s.headState(PLAYED.planted).state.world.accounts.acct_harbour).toBe(250);
     for (const id of [PLAYED.classic, PLAYED.paused, PLAYED.discarded, PLAYED.deleted, PLAYED.branch]) expect({ id, differences: report(id)?.differences }).toEqual({ id, differences: [] });
+  });
+
+  test("a carried value changed by hand on its way into RPE is caught by the check: the chat is marked, the value named by its path, and the previous build's state kept as the start there", () => {
+    const c = chat(PLAYED.classic);
+    const t = target([c]);
+    try {
+      // The tin lantern's price carried at twice what today's fold paid for it.
+      const add = t.s.addChanges.bind(t.s);
+      t.s.addChanges = (turn, inputs, refused) => add(turn, inputs.map((input) => (input.op === "post" && isRecord(input.value) && input.value.memo === "Lantern" && Array.isArray(input.value.lines) ? { ...input, value: { ...input.value, lines: input.value.lines.map((l) => (isRecord(l) && typeof l.amount === "number" ? { ...l, amount: l.amount * 2 } : l)) } } : input)), refused);
+      const [r] = importChats({ store: t.store, s: t.s, db: t.db, registry, chats: [c], notOpened: [], present: new Set([c.chatId]), earlier: [], run: "run-by-hand" });
+      expect(r?.matched.swipes).toBeLessThan(r?.matched.of ?? 0);
+      const at = r?.differences.find((d) => d.at !== "head" && d.at.message === "pc-a2" && d.at.swipe === 0);
+      expect(at?.values).toContain("accounts/acct_mara");
+      expect(at?.kept).toBe(true);
+      // Kept as today's: the coin at that turn is what the untouched import (which matches today's fold) holds there.
+      const tin = t.s.swipes(PLAYED.classic, "pc-a2").find((turn) => turn.hash === textHash("A tin lantern changes hands."));
+      expect(t.s.stateAt(tin?.id ?? "").state.world.accounts.acct_mara).toBe(s.stateAt(turnOf({ chat: PLAYED.classic, message: "pc-a2", swipe: 0 })).state.world.accounts.acct_mara);
+    } finally {
+      t.db.close();
+    }
   });
 
   test("a chat whose head stands rebased and differs keeps today's state as the start at its head, and each swipe on its own path", () => {
