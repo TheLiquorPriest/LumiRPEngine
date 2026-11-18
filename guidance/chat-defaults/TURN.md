@@ -96,7 +96,7 @@ A chapter turns when the story would turn a page: a journey ends, a goal is won 
 - **A prefilled start.** The briefing gives it. Your reply continues from it: write only what follows.
 - **Someone who left comes back,** or a long time has passed for them. Decide what they did meanwhile, from their intention and whereabouts, and record it before they act.
 - **A past nobody has read closely.** When a turn touches it, read that range and record what you learn.
-- **A chat carried over from the old build.** The briefing says so. Trust the carried state.
+- **A chat carried over from the earlier build.** The briefing says so. Trust the carried state.
 - **A chat with no premise yet.** The story brief shows none. Write the premise and the contract from the card, the preset and `WORLD.md`, so that every turn after has one, and offer `WORLD.md`, `SIMULATION.md` and `WRITING.md` as suggestions.
 - **A principal's base is older than its source.** The briefing lists it. After the reply, redraw that part of the base from the source as it stands now, with `cast_update`.
 - **The chat's story choice,** where the briefing lists it. `story.from`: `everyone` makes every message story; `replies` only the replies, the player's own being direction for them; `lumiverse` follows Lumiverse's own switch. `story.newest`: `directive` makes the player's newest message direction for this reply, not story; `leave_out` leaves it out of the story.
