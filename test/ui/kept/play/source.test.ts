@@ -14,8 +14,8 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 50; i++) await Promise.resolve();
 }
 
-const FIRST = recordedView();
-const SECOND = recordedView({ at: LATER });
+const FIRST = await recordedView();
+const SECOND = await recordedView({ at: LATER });
 
 describe("the chat's state from RPE", () => {
   test("is read when the page opens, and held where today's state sync put its view", async () => {
