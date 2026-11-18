@@ -8,7 +8,7 @@ import { mkdir } from "node:fs/promises";
 import type { App, RunningServer } from "../../src/app";
 import { connectionRoutes, METHODS, route, shape } from "../../src/app";
 import { runCli } from "../../src/app/cli";
-import { Switches } from "../../src/app/switches";
+import { asCommand, listAllSwitches, listSwitches, type NamedNow, namedKey, setSwitch, Switches } from "../../src/app/switches";
 import { switchesRoutes } from "../../src/app/switches-routes";
 import { bearer, type Bed, cliIo, LUMIVERSE, makeBed, makeKey, NO_TAG_CHECKS, OWNER, testModelLayer, writeConfig } from "./helpers";
 
@@ -47,7 +47,7 @@ describe("the switches", () => {
             });
             a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => OWNER, a.log)]);
             // The app area's own route, as it registers it.
-            a.routes.add("switches", switchesRoutes(a.db, async () => {}));
+            a.routes.add("switches", switchesRoutes(a.db, async () => null));
           },
         },
       ],
@@ -157,6 +157,28 @@ describe("the switches", () => {
       expect(refused.status).toBeGreaterThanOrEqual(400);
     }
     expect(app.switches.list().map((s) => s.state)).toEqual(["waiting"]);
+  });
+
+  test("a thing whose file is gone leaves the list but keeps its switch for the file's return; a connection's address, no file's to name, stays; where the files were not looked at everything is listed", async () => {
+    const tool = { kind: "command-tool", name: "walk-tool", target: "sh tool.sh" } as const;
+    await app.switches.state(OWNER, tool);
+    await app.switches.state(OWNER, { kind: "hook", name: "kept", target: "echo kept" });
+    await app.switches.state(OWNER, { kind: "connection", name: "Main", target: "openai-compatible http://127.0.0.1:9/v1" });
+    await app.writes.run((db) => asCommand(db, () => setSwitch(db, OWNER, "walk-tool", "on", app.now())));
+    const names = (named: NamedNow | null) => listSwitches(app.db, OWNER, named).map((s) => `${s.name}:${s.state}`);
+    const both = { user: OWNER, names: new Set([namedKey("command-tool", "walk-tool"), namedKey("hook", "kept")]) };
+    expect(names(both)).toEqual(["Main:waiting", "kept:waiting", "walk-tool:on"]);
+    // The manifest is deleted: the tool leaves the list, and `rpe allow` finds nothing of that name.
+    const gone = { user: OWNER, names: new Set([namedKey("hook", "kept")]) };
+    expect(names(gone)).toEqual(["Main:waiting", "kept:waiting"]);
+    expect(app.switches.list(gone).map((s) => s.name)).toEqual(["Main", "kept"]);
+    expect(await app.writes.run((db) => asCommand(db, () => setSwitch(db, OWNER, "walk-tool", "off", app.now(), gone)))).toBeNull();
+    // It comes back as it was switched.
+    expect(names(both)).toEqual(["Main:waiting", "kept:waiting", "walk-tool:on"]);
+    // Another user's things are not judged by this RPE's files, and a look that could not read the files lists the registry whole.
+    await app.switches.state("user-other", { kind: "hook", name: "theirs", target: "echo theirs" });
+    expect(listAllSwitches(app.db, gone).map((s) => `${s.user}:${s.name}`)).toEqual(["user-other:theirs", `${OWNER}:Main`, `${OWNER}:kept`]);
+    expect(names(null)).toEqual(["Main:waiting", "kept:waiting", "walk-tool:on"]);
   });
 
   test("a name longer than switches.maxNameChars is refused and the setting named; raising the setting lets it in", async () => {

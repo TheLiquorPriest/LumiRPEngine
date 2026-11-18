@@ -3648,7 +3648,7 @@ Whose the page's credential is, and when it ends.
 
 ### `GET /api/v1/switches`
 
-Every thing that runs a command or calls out that the page's own user has listed, and whether it waits, is on or is off, with what it runs or calls, or the address its connection's key would go to. Only rpe allow and rpe deny on the server switch one; no page can.
+Every thing that runs a command or calls out that the page's own user has listed and a file of theirs names now, and whether it waits, is on or is off, with what it runs or calls, or the address its connection's key would go to. A thing whose file is gone is not listed, and is there again, as it was switched, when a file names it again. Only rpe allow and rpe deny on the server switch one; no page can.
 
 | | |
 |---|---|

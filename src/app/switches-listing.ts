@@ -4,9 +4,12 @@
 // scope's files name (`Harness.external.list`) and asks the registry (`switches.ts`) for each, which lists a thing it has not seen
 // for the user as waiting. This asks it to look at the files as they stand now: when RPE starts, before every read of the list
 // (`rpe allow`, `rpe status`, the page's list), and after a file of the kinds that can name such a thing is written through RPE's own
-// routes. A run asks the registry itself, as RPH reads the files for it, so what it would run is listed at that moment too.
+// routes. A run asks the registry itself, as RPH reads the files for it, so what it would run is listed at that moment too. What the look
+// finds the files naming is what the list shows: a thing whose file is gone leaves the list, and its switch stays in the registry, there
+// again, as it was set, when a file names it again.
 
-import type { ExternalApi, Log, Scope } from "rp-harness/contract";
+import type { ExternalApi, ExternalEntry, Log, Scope } from "rp-harness/contract";
+import { type NamedNow, namedKey } from "./switches";
 
 /** A file of the user's that landed through RPE's Files routes, as the tree's `written` hook tells it. */
 export interface SavedFile {
@@ -40,36 +43,49 @@ export function namesWhatRuns(path: string): boolean {
 }
 
 export interface SwitchesListing {
-  /** Lists what the user's files name, the shared levels and every chat's, as they stand now; resolves once it has looked, whatever it found. */
-  look(): Promise<void>;
+  /**
+   * Lists what the user's files name, the shared levels and every chat's, as they stand now; resolves once it has looked, whatever it found,
+   * with what the files name now (the list shows nothing else of what a file names): null where no user is set or a scope's files could not
+   * be read, when the list shows what the registry holds.
+   */
+  look(): Promise<NamedNow | null>;
   /** Lists what a chat's (or the shared levels') files name after one was written, when it can have named something. */
   written(saved: SavedFile): Promise<void>;
 }
 
 export function switchesListing(deps: SwitchesListingDeps): SwitchesListing {
-  const list = async (user: string, chat: string | null): Promise<void> => {
+  const list = async (user: string, chat: string | null): Promise<ExternalEntry[] | null> => {
     try {
-      await deps.external().list(deps.scope(user, chat));
+      return await deps.external().list(deps.scope(user, chat));
     } catch (error) {
       // The read that asked has what it has whatever this finds: a listing that failed is told, and made again at the next look.
       deps.log().warn("What the files name that runs a command or calls out could not be listed.", { chat, error: error instanceof Error ? error.message : String(error) });
+      return null;
     }
   };
-  const lookAll = async (): Promise<void> => {
+  const lookAll = async (): Promise<NamedNow | null> => {
     const user = deps.owner();
-    if (user === null) return;
-    await list(user, null);
+    if (user === null) return null;
+    const names = new Set<string>();
+    let whole = true;
+    const take = async (chat: string | null): Promise<void> => {
+      const found = await list(user, chat);
+      if (found === null) whole = false;
+      else for (const thing of found) names.add(namedKey(thing.kind, thing.name));
+    };
+    await take(null);
     const chats = [...deps.chats(user)];
     await Promise.all(
       Array.from({ length: Math.min(AT_ONCE, chats.length) }, async () => {
-        for (let chat = chats.pop(); chat !== undefined; chat = chats.pop()) await list(user, chat);
+        for (let chat = chats.pop(); chat !== undefined; chat = chats.pop()) await take(chat);
       }),
     );
+    return whole ? { user, names } : null;
   };
   // One look at a time. A call that comes while one is under way may have written its file after that look read it: it waits for a look that starts after it, which every call that comes meanwhile shares.
-  let under: Promise<void> | null = null;
-  let after: Promise<void> | null = null;
-  const look = (): Promise<void> => {
+  let under: Promise<NamedNow | null> | null = null;
+  let after: Promise<NamedNow | null> | null = null;
+  const look = (): Promise<NamedNow | null> => {
     if (under === null) {
       const done = lookAll().finally(() => {
         under = null;

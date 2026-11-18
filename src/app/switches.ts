@@ -74,28 +74,51 @@ export function switchDigest(kind: string, what: string): string {
   return createHash("sha256").update(`${kind}\n${what}`).digest("hex");
 }
 
-/** Each name's newest definition listed for `user`, by name. */
-export function listSwitches(db: Database, user: string): SwitchEntry[] {
-  const newest = new Map<string, SwitchEntry>();
-  for (const row of db.query<SwitchEntry, [string]>("SELECT user, name, kind, what, state, listed, changed FROM switch WHERE user = ? ORDER BY name, listed, rowid").all(user)) newest.set(row.name, row);
-  return [...newest.values()];
+/**
+ * What the files name now, as the last look at them found it (`switches-listing.ts`): each thing by its kind and name, for the user this
+ * RPE belongs to. A thing whose file is gone, or no longer names it, is not here.
+ */
+export interface NamedNow {
+  user: string;
+  names: ReadonlySet<string>;
 }
 
-/** Each user's own: every name's newest definition for each user the registry lists a thing for, by user and name. */
-export function listAllSwitches(db: Database): SwitchEntry[] {
+/** How a thing is told apart in what the files name: its kind and its name. */
+export function namedKey(kind: string, name: string): string {
+  return `${kind}\n${name}`;
+}
+
+/**
+ * Whether a thing is listed: what a file names must be named by one now, so a thing whose file is gone is left out of the list (its switch is
+ * kept, and is there again when a file names it again); a connection's address is no file's to name, and another user's things are not judged
+ * by this RPE's files. Where the files were not looked at (`named` null), everything the registry holds is listed.
+ */
+export function isNamed(row: Pick<SwitchEntry, "user" | "kind" | "name">, named: NamedNow | null): boolean {
+  return named === null || row.user !== named.user || row.kind === "connection" || named.names.has(namedKey(row.kind, row.name));
+}
+
+/** Each name's newest definition listed for `user`, by name, those the files name now (every one where `named` is null). */
+export function listSwitches(db: Database, user: string, named: NamedNow | null = null): SwitchEntry[] {
+  const newest = new Map<string, SwitchEntry>();
+  for (const row of db.query<SwitchEntry, [string]>("SELECT user, name, kind, what, state, listed, changed FROM switch WHERE user = ? ORDER BY name, listed, rowid").all(user)) newest.set(row.name, row);
+  return [...newest.values()].filter((row) => isNamed(row, named));
+}
+
+/** Each user's own: every name's newest definition for each user the registry lists a thing for, by user and name, those the files name now (every one where `named` is null). */
+export function listAllSwitches(db: Database, named: NamedNow | null = null): SwitchEntry[] {
   const newest = new Map<string, SwitchEntry>();
   for (const row of db.query<SwitchEntry, []>("SELECT user, name, kind, what, state, listed, changed FROM switch ORDER BY user, name, listed, rowid").all()) newest.set(JSON.stringify([row.user, row.name]), row);
-  return [...newest.values()];
+  return [...newest.values()].filter((row) => isNamed(row, named));
 }
 
 /**
  * The command line's switch: sets the newest definition listed for `user` under `name` on or off and
- * returns it; null when nothing of that name is listed for him. For the command line's own
+ * returns it; null when nothing of that name is listed for him (a thing the files no longer name is not listed). For the command line's own
  * connection: on the server's, the guard refuses it.
  */
-export function setSwitch(db: Database, user: string, name: string, state: "on" | "off", now: number): SwitchEntry | null {
+export function setSwitch(db: Database, user: string, name: string, state: "on" | "off", now: number, named: NamedNow | null = null): SwitchEntry | null {
   const row = db.query<SwitchEntry & { id: number }, [string, string]>("SELECT rowid AS id, user, name, kind, what, state, listed, changed FROM switch WHERE user = ? AND name = ? ORDER BY listed DESC, rowid DESC LIMIT 1").get(user, name);
-  if (row === null) return null;
+  if (row === null || !isNamed(row, named)) return null;
   db.run("UPDATE switch SET state = ?, changed = ? WHERE rowid = ?", [state, now, row.id]);
   const { id: _id, ...entry } = row;
   return { ...entry, state, changed: now };
@@ -114,9 +137,9 @@ export class Switches implements SwitchesPort {
     private readonly nameLength: number = LIMIT_DEFAULTS.switches.nameLength,
   ) {}
 
-  /** What is listed for the user this RPE belongs to. */
-  list(): SwitchEntry[] {
-    return listSwitches(this.db, this.user);
+  /** What is listed for the user this RPE belongs to: every thing the registry holds, or with `named` those the files name now. */
+  list(named: NamedNow | null = null): SwitchEntry[] {
+    return listSwitches(this.db, this.user, named);
   }
 
   /**

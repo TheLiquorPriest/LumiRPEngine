@@ -7,6 +7,7 @@
 
 import type { AgentRef, HostTool, RunScope, UserSessionScope } from "rp-harness/contract";
 import type { Setting } from "./setting-list";
+import type { NamedNow } from "./switches";
 
 /** A view an agent is given by name, beyond the turn's own: its text; null for a name that is none of the area's own. A job of no chat asks it too. */
 export type ViewHook = (scope: RunScope, agent: AgentRef, ref: string) => Promise<string | null>;
@@ -22,8 +23,8 @@ export type JobToolsHook = (scope: UserSessionScope) => Promise<HostTool[]>;
 // biome-ignore lint/suspicious/noEmptyInterface: each lane is added by the door's file, which owns its types
 export interface DoorFills {}
 
-/** Lists what the user's files name that runs a command or calls out, as the files stand now, so that the registry holds each as waiting before anything reads it. */
-export type ListFilesHook = () => Promise<void>;
+/** Lists what the user's files name that runs a command or calls out, as the files stand now, so that the registry holds each as waiting before anything reads it; says what the files name now, null where that is not known. */
+export type ListFilesHook = () => Promise<NamedNow | null>;
 
 /** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before the route answers: a chat Lumiverse does not have is refused in words. */
 export type ChatNamedHook = (user: string, chat: string) => Promise<void>;
@@ -97,7 +98,11 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
     },
     jobTools: async (scope) => (await Promise.all(tools.map((t) => t(scope)))).flat(),
     listFiles: async () => {
-      await Promise.all(listers.map((look) => look()));
+      const found = await Promise.all(listers.map((look) => look()));
+      const first = found[0];
+      // What every area that looks found the files naming; where one could not look, or none did, the list shows what the registry holds.
+      if (first === undefined || first === null || !found.every((n) => n !== null && n.user === first.user)) return null;
+      return { user: first.user, names: new Set(found.flatMap((n) => (n === null ? [] : [...n.names]))) };
     },
     ...(chatNamed === null ? {} : { chatNamed: chatNamed.hook }),
     door: door as DoorFills,

@@ -49,7 +49,7 @@ export function appArea(takes?: AppTakes): Area {
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.
           mounted: (at: App) => at.routes.add("settings", settingsRoutes({ settings: at.settings, facts: () => installFacts(at.config, at.paths), ...takes.settings(at) })),
           // The server listens: what the user's files already name that runs a command or calls out is listed as waiting.
-          started: () => listing?.look(),
+          started: async () => void (await listing?.look()),
         }),
   };
 }

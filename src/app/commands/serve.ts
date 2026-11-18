@@ -69,7 +69,7 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
     const stop = io.stopped();
     io.out(`RPE ${options.version} listens on ${running.url} (data folder: ${paths.root}).`);
     if (!currentKeys(app.db, app.auth.owner).some((k) => k.kind === "provider")) io.out(`There is no provider key yet: make one with ${runLine(io, paths, "key", "provider")}`);
-    const waiting = app.switches.list().filter((s) => s.state === "waiting").length;
+    const waiting = app.switches.list(await app.hooks.listFiles()).filter((s) => s.state === "waiting").length;
     if (waiting > 0) io.out(`${waiting} waiting to be switched on: \`${runLine(io, paths, "status")}\` lists them.`);
     // The file as it is once RPE listens: a build put there while it started is noticed now.
     await Promise.race([app.builds.check(), stop]);
