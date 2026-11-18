@@ -7,13 +7,12 @@
 // on follows the chat's out-of-play settings for its group (`taps.tell.*`): a payment to someone else from
 // the amount they set, a fix of things as hand-overs or things, every other correction told. An Undo is
 // told as the undo of what it undid: an edit of his, when that edit was told; a change a turn made, always.
-// The words are the notices part's; each change is said as the turn's card says it: in the GM view's words
-// (`changeLine`), else by its kind in the play answers' words, and never as it is written.
+// The words are the notices part's; each change is said as the turn's card says it (`changeSaid`): in the GM
+// view's words, else by its kind in the play answers' words, and never as it is written.
 
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";
-import { changeLine } from "../play/due";
 import { playAnswers } from "../play/service";
 import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import { fixGroupOf, type OffstageSettings, toldByDefault } from "../shared/offstage";
@@ -21,6 +20,7 @@ import { parseItemFix, type ItemFix } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
 import type { ChangeRow, Part, UserStore } from "../store";
 import { RPE_GUIDANCE } from "../tree";
+import { changeSaid } from "./card-words";
 
 /** An edit of his placed before a turn, as its `player_edit` line's fields. */
 export interface OwnerEditTold {
@@ -64,18 +64,15 @@ function pressedOf(request: JsonValue | undefined, registry: Registry, world: Wo
   return isRecord(request.fix) && typeof request.fix.label === "string" && request.fix.label !== "" ? request.fix.label : null;
 }
 
-/** Words as a sentence of a line: its first letter a capital, and its end a stop. */
-const sentence = (words: string): string => {
-  const said = words.charAt(0).toUpperCase() + words.slice(1);
-  return /[.!?…]$/.test(said) ? said : `${said}.`;
-};
+/** Words as a sentence of a line: its end a stop. */
+const sentence = (words: string): string => (/[.!?…]$/.test(words) ? words : `${words}.`);
 
-/** Changes in words (see the head of this file), each once; with how many of them have no words of either kind. */
+/** Changes in words, as the turn's card says them (`changeSaid`), each once; with how many of them have no words of either kind. */
 function saidOf(changes: readonly ChangeRow[], answers: Part, registry: Registry, world: WorldDoc | undefined, state: WorldState): { words: string[]; unworded: number } {
   const words = new Set<string>();
   let unworded = 0;
   for (const c of changes) {
-    const said = (world === undefined ? undefined : changeLine(registry, world, state, c.op, c.value)) ?? own(answers.keys, c.op);
+    const said = changeSaid(answers, registry, world, state, c);
     if (said === undefined) unworded += 1;
     else words.add(sentence(said));
   }

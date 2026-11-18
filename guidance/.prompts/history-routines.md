@@ -4,7 +4,7 @@ format: lines
 keys:
   plan_label_*, plan_reason_*, plan_word_they: the day plan the engine lays for someone - each block's name (sleep, breakfast, time out, see friends, a holiday, a birthday, a meeting, an errand, a visit, work, an order), the reasons given for it (utility is the score it won among the options; name is who chose where it was a close call), and plan_word_they for a person whose name is not known
   reason_*: why a block is in a day plan when a person's own plan or an order put it there (reason_an_order, reason_their_own_plan), and why a plan was dropped (reason_routine_only, reason_no_time_for_it)
-  castlife_decided, castlife_skip: a choice a person's routine made (choice), and a skip planned for people (plans, note)
+  castlife_decided, castlife_skip: a choice a person's routine made (choice), and a skip planned for people (plans, how many people's days it planned, one where that is one; note)
   fault_*: what is wrong with a routine, a block of one, routine settings or needs settings as written (the problems a write, a proposal or a lint lists) - each is filled with what it names
   castlife_in_chat: a change to someone's routine or schedule in this chat, as the GM reads it - what (the sentence below), story (set where the story made it)
   castlife_follow: how someone follows their routine in this chat - name, parts (the follow_* lines, read as a list); castlife_follow_world when none is set
@@ -13,7 +13,7 @@ keys:
   castlife_schedule_label: a schedule as a phrase - schedule, sets (what it sets, the schedule_sets_* lines); castlife_schedule_world, castlife_schedule_off, castlife_schedule_own say what happened to it - name, label
 ---
 castlife_decided: decided {{choice}}
-castlife_skip: skip planned for {{plans}}{{#note}} ({{note}}){{/note}}
+castlife_skip: The time skip planned {{#plans}}{{plans}} {{#one}}person's day{{/one}}{{^one}}people's days{{/one}}{{/plans}}{{^plans}}no one's day{{/plans}}{{#note}} ({{note}}){{/note}}
 castlife_in_chat: {{what}} in this chat ({{#story}}from the story{{/story}}{{^story}}set by the GM{{/story}})
 castlife_follow_world: {{name}} follows their routine as the world sets it again
 castlife_follow: {{name}} {{parts}}

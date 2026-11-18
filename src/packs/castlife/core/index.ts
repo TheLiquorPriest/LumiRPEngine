@@ -1360,7 +1360,11 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       mutableSlice(state, "castlife").skipPlan = structuredClone(e.data);
     },
     // The GM's line only: what someone did in a skip is no player's news.
-    describe: (e, _ctx, viewer) => (viewer !== undefined ? "" : say("castlife_skip", { plans: Array.isArray(e.data.plans) ? e.data.plans.length : 0, ...(typeof e.data.note === "string" ? { note: e.data.note } : {}) })),
+    describe: (e, _ctx, viewer) => {
+      if (viewer !== undefined) return "";
+      const plans = Array.isArray(e.data.plans) ? e.data.plans.length : 0;
+      return say("castlife_skip", { plans, one: plans === 1, ...(typeof e.data.note === "string" ? { note: e.data.note } : {}) });
+    },
   },
   {
     // One block of someone's routine in this chat (`routine_block`, or the story's): the block whole, or null to drop the chat's change.

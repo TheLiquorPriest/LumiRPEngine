@@ -83,7 +83,7 @@ test("the turn a job's changes take effect at is told the job finished, with its
   await play(b, null);
   await play(b, "I count my coins.");
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  const told = `A job finished: ${JOB} (steward). Its brief: Tally the bar's stock. Its report: The stock is short by a cask. Took effect now: set`;
+  const told = `A job finished: ${JOB} (steward). Its brief: Tally the bar's stock. Its report: The stock is short by a cask. Took effect now: Bram's mood is now sour (about Bram).`;
   expect(sent[0]).not.toContain(told);
   expect(sent[1]).toContain(told);
   expect(sent[2]).toContain(told);
@@ -130,7 +130,8 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
   const second = await play(b, "I order a drink.");
   await play(b, "I count my coins.");
   const told = JSON.stringify(b.model.requests.at(-2)?.messages);
-  expect(told).toContain(`A job finished: ${id(briefs.done)} (historian). Its brief: ${briefs.done} Its report: Bram's mood is recorded as sour. Took effect now: set on entity:bram,`);
+  // Each change in words, by the names it is about, never its operation and value as kept.
+  expect(told).toContain(`A job finished: ${id(briefs.done)} (historian). Its brief: ${briefs.done} Its report: Bram's mood is recorded as sour. Took effect now: Bram's mood is now sour (about Bram).`);
   expect(told).toContain(`A job failed before it finished: ${id(briefs.failed)} (historian). Its brief: ${briefs.failed}`);
   expect(told).toContain(`A job was cancelled before it finished: ${id(briefs.cancelled)} (historian). Its brief: ${briefs.cancelled}`);
   expect(told.match(/A job finished/g)).toHaveLength(1);

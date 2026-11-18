@@ -22,14 +22,18 @@ export async function engineAnswers(guidance: string): Promise<Lines> {
 }
 
 /**
- * A change in words: as the GM view words it where it is an event of the world (with the names the world has at `state`); else, or where
- * that is bookkeeping only, the kind of change it is, in the play answers' words for kinds.
+ * A change in words, as the turn's card and the briefing's "since the last turn" say it: as the GM view words it where it is an event of the
+ * world (with the names the world has at `state`); else, or where that is bookkeeping only, the kind of change it is, in the play answers'
+ * words for kinds; its first letter a capital. None where neither has words for it.
  */
+export function changeSaid(part: Part, registry: Registry, world: WorldDoc | undefined, state: WorldState | undefined, change: { op: string; value: JsonValue }): string | undefined {
+  const said = (world === undefined || state === undefined ? undefined : changeLine(registry, world, state, change.op, change.value)) ?? own(part.keys, change.op);
+  return said === undefined || said.trim() === "" ? undefined : said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+/** A change in words on the turn's card (`changeSaid`); the play answers' line for a change they have no words for, where neither has any. */
 export function changeWords(part: Part, registry: Registry, world: WorldDoc | undefined, state: WorldState | undefined, change: { op: string; value: JsonValue }): string {
-  const line = world === undefined || state === undefined ? undefined : changeLine(registry, world, state, change.op, change.value);
-  if (line !== undefined) return line;
-  const kind = own(part.keys, change.op) ?? answerWords(part, "card_change_unknown");
-  return kind.charAt(0).toUpperCase() + kind.slice(1);
+  return changeSaid(part, registry, world, state, change) ?? answerWords(part, "card_change_unknown");
 }
 
 /**

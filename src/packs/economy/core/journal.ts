@@ -520,5 +520,5 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     describe: () => say("money_interest_period"),
   },
   // A decline recorded by an older build: it moves nothing.
-  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => say("money_declined", { memo: str(e, "memo") }) },
+  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => undefined, describe: (e) => say("money_declined", { memo: str(e, "memo"), reason: str(e, "reason") }) },
 ];

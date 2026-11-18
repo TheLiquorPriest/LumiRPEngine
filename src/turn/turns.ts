@@ -39,13 +39,15 @@ import { knowledgeChange, type Lore, type LoreIndex, loreLines, loreMapFields, t
 import { placeLinesAt } from "../places";
 import { tidyHolds } from "../play/path-events";
 import type { ActivatedRead } from "../lore/indexing";
-import { isRecord } from "../shared/json";
+import { isRecord, type JsonValue } from "../shared/json";
+import { playAnswers } from "../play/service";
 import { type ChangeRow, clockRecorded, type DueSource, type MapText, type PathReport, type Report, type ShownMessage, type Store, type TreeView, type TurnRow, type UserStore, worldState } from "../store";
 import { aboutOf } from "../store/fold";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
-import { type ChatFolders, mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
+import { type ChatFolders, mergeTurnRecord, type Pruned, RPE_GUIDANCE, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
+import { changeSaid } from "./card-words";
 import { type Attempt, type AttemptFeedback, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import { ownerEditsBefore } from "./owner-changes";
@@ -1823,7 +1825,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     for (const s of of("swiped")) add("swiped", notices?.line("swipe_shown", { message: s.message }), s.to !== null ? { turn: s.to } : {});
     // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it, the stretch named by
     // message numbers as an unplayed stretch is. What that flip stopped from applying, change by change: what it was about (the things it
-    // names, by their names at the chat's head), its operation, its value, the message of the turn it came from, and why, each report code
+    // names, by their names at the chat's head), the change in words, the message of the turn it came from, and why, each report code
     // in the notices part's words (its `keys`), while they fit `briefing.notAppliedTokens`; the rest counted (the world state lists them all).
     const keys = isRecord(notices?.header.keys) ? notices.header.keys : {};
     let headView: TreeView | undefined;
@@ -1832,10 +1834,18 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       const view = headView;
       return refs.map((ref) => view.nameOf(ref) ?? ref).join(", ");
     };
-    for (const f of of("flipped")) {
+    // A change these rows name is said as the turn's card says it (`changeSaid`), with the names the world has at the chat's head, and
+    // never as it is written; read only where a row has one to say.
+    const flipped = of("flipped");
+    const ended = again ? [] : jobsEndedBetween(this.#d.store.db, user, chat, (turn.parent === null ? null : store.turn(turn.parent))?.created ?? Number.MIN_SAFE_INTEGER, turn.created);
+    const answers = flipped.length > 0 || ended.length > 0 ? await playAnswers(RPE_GUIDANCE) : null;
+    const head = answers === null ? null : store.headState(chat).state.world;
+    const headDoc = head === null ? undefined : this.#d.store.env.worlds(head.revision);
+    const wordsOf = (change: { op: string; value: JsonValue }): string | undefined => (answers === null || head === null ? undefined : changeSaid(answers, this.#d.store.env.registry, headDoc, head, change));
+    for (const f of flipped) {
       const from = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.from);
       const to = f.stretch === null || f.stretch === undefined ? undefined : place.get(f.stretch.to);
-      const listed: { about?: string; op: string; value: string; message: number | string; why: string }[] = [];
+      const listed: { about?: string; words?: string; message: number | string; why: string }[] = [];
       let spent = 0;
       let left = 0;
       for (const s of f.stopped ?? []) {
@@ -1843,8 +1853,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const tiedTo = store.turn(s.turn)?.message ?? null;
         const why = [...new Set(s.codes)].map((code) => (typeof keys[code] === "string" ? keys[code] : code)).join("; ");
         const about = change === undefined ? "" : namesOf(aboutOf(this.#d.store.env, change.op, change.value));
-        const entry = { ...(about !== "" ? { about } : {}), op: s.op, value: change === undefined ? "" : JSON.stringify(change.value), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
-        const cost = found.tokens(`${about} ${entry.message} ${entry.op} ${entry.value} ${entry.why}`);
+        const words = wordsOf({ op: s.op, value: change?.value ?? null });
+        const entry = { ...(about !== "" ? { about } : {}), ...(words !== undefined ? { words } : {}), message: tiedTo === null ? s.turn : (place.get(tiedTo) ?? tiedTo), why };
+        const cost = found.tokens(`${about} ${entry.message} ${words ?? ""} ${entry.why}`);
         if (spent + cost > notAppliedBudget) {
           left++;
           continue;
@@ -1922,7 +1933,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (tied.status === "cut" && last.kind !== "settle") add("cut-short", notices?.line("cut_short", { message: tied.message }), { turn: last.turn });
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
-    if (!again) for (const job of this.#jobsEnded(user, turn, { keys, place, tokens: found.tokens, budget: found.jobBudget })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
+    for (const job of this.#jobsEnded(user, turn, ended, { keys, place, tokens: found.tokens, budget: found.jobBudget, say: wordsOf, names: namesOf })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
     // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed by its name and what it changed,
     // in words; a swipe of the turn told them is told them again, a continue is not.
     if (!again) {
@@ -1955,23 +1966,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The jobs whose end a turn is told (plan §10.9, §13.5): each job of the chat whose end the store recorded after the turn before it
-   * on its own line began, and before it began itself, so that it is the first turn to begin after the job ended, where what the job
-   * recorded takes effect; one a turn started, only on a line that holds that turn. Each with the notice of how it ended and that
-   * notice's data: the job, the definition it ran as, its brief, its report, and what it recorded, change by change: what the change
-   * is about, its operation and value, and for one that did not take effect why, each report code in the notices part's words (its
-   * `keys`), with the later turn whose value stands (by its message's number) where one does. Each job's changes are listed while
-   * they fit `briefing.jobTokens`; the rest are counted, and the Jobs page lists them all.
+   * The jobs whose end a turn is told (plan §10.9, §13.5): each of `ended` (the jobs of the chat whose end the store recorded after the
+   * turn before it on its own line began, and before it began itself, so that it is the first turn to begin after the job ended, where
+   * what the job recorded takes effect); one a turn started, only on a line that holds that turn. Each with the notice of how it ended and
+   * that notice's data: the job, the definition it ran as, its brief, its report, and what it recorded, change by change: the change in
+   * words (`say`), what it is about by name (`names`), and for one that did not take effect why, each report code in the notices part's
+   * words (its `keys`), with the later turn whose value stands (by its message's number) where one does. Each job's changes are listed
+   * while they fit `briefing.jobTokens`; the rest are counted, and the Jobs page lists them all.
    */
   #jobsEnded(
     user: string,
     turn: TurnRow,
-    told: { keys: Record<string, unknown>; place: ReadonlyMap<string, number>; tokens: (text: string) => number; budget: number },
+    ended: ReturnType<typeof jobsEndedBetween>,
+    told: { keys: Record<string, unknown>; place: ReadonlyMap<string, number>; tokens: (text: string) => number; budget: number; say: (change: { op: string; value: JsonValue }) => string | undefined; names: (refs: readonly string[]) => string },
   ): { turn: string | null; line: string; fields: JsonObject }[] {
-    const store = this.#d.store.user(user);
-    const parent = turn.parent === null ? null : store.turn(turn.parent);
-    const ended = jobsEndedBetween(this.#d.store.db, user, turn.chat, parent?.created ?? Number.MIN_SAFE_INTEGER, turn.created);
     if (ended.length === 0) return [];
+    const store = this.#d.store.user(user);
     const placed = new Map<string, { change: ChangeRow; about: string[]; applied: boolean; reports: Report[] }[]>();
     for (const c of store.changesBefore(turn.id)) {
       if (c.change.job === null) continue;
@@ -1988,7 +1998,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       let spent = 0;
       let more = 0;
       for (const c of placed.get(view.id) ?? []) {
-        const entry: JsonObject = { op: c.change.op, about: c.about.join(", "), value: JSON.stringify(c.change.value) };
+        const words = told.say(c.change);
+        const about = told.names(c.about);
+        const entry: JsonObject = { ...(words !== undefined ? { words } : {}), ...(about !== "" ? { about } : {}) };
         if (!c.applied) {
           entry.why = [...new Set(c.reports.map((r) => r.code))].map((code) => (typeof told.keys[code] === "string" ? told.keys[code] : code)).join("; ");
           const later = c.reports.find((r) => r.code === "later_value")?.values?.turn;
