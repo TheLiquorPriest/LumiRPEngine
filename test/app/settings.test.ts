@@ -347,8 +347,9 @@ test("PUT at the chat level for a chat RPE has never played writes its RPE.yml, 
   expect(chatFile(b)).toBe(file);
   expect(await windowAtNextTurn(b)).toBe(5);
 
-  // A chat Lumiverse does not have is no folder made.
+  // A chat Lumiverse does not have is not taken on: no row, no folder.
   const unknown = await settings<{ error: string }>(b, "PUT", "", { level: "chat", chat: "chat-nowhere", key: "history.window", value: 5 });
-  expect(unknown).toEqual({ status: 404, body: { error: "Lumiverse has no chat chat-nowhere of yours." } });
+  expect(unknown).toEqual({ status: 404, body: { error: "Lumiverse has no such chat of yours, so RPE holds nothing of it." } });
   expect(b.turns.chats.folders(USER, "chat-nowhere")).toBeNull();
+  expect(b.turns.store.user(USER).chat("chat-nowhere")).toBeNull();
 });
