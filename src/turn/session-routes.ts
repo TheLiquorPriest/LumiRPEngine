@@ -8,6 +8,7 @@
 // newest turn, and then RPH is told with that turn (`sessions.close` by the user), so the turn's Undo, a swipe or a delete of that
 // turn takes the closing back. Nothing is closed while a turn of the chat runs, since that turn reads the record the close changes.
 
+import type { Database } from "bun:sqlite";
 import type { Carry, CompactionView, Log, SessionView } from "rp-harness/contract";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "../app";
 import type { WriteQueue } from "../app/database";
@@ -46,11 +47,35 @@ const sessionFields = {
 const sessionBase = shape.object(sessionFields);
 type SessionMirrored = Holds<Exactly<Infer<typeof sessionBase>, SessionView>>;
 
+const sessionClosing = shape.named(
+  "SessionClosing",
+  "What closed a closed session and when: you (your own close), a turn (a scene changing at it), the end of an agent's or a talk's run, or the end of a job; and the time, in milliseconds since 1970, null where RPE holds none (a session its own record does not date).",
+  shape.object({ by: shape.oneOf("you", "turn", "run", "job"), at: nullable(N) }),
+);
+
 const sessionShown = shape.named(
   "SessionShown",
-  "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.",
-  shape.object({ ...sessionFields, scene: opt(T) }),
+  "A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), what closed it and when, a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.",
+  shape.object({ ...sessionFields, scene: opt(T), closing: opt(sessionClosing) }),
 );
+
+/**
+ * What closed a closed session and when, from RPE's own records, since RPH's view has no time of closing: your own close is dated by the change that
+ * closed the scene in the story record; a job's end by the job's record; a turn's or a run's by the end of the turn's run that closed it (its start
+ * where it has no end). Nothing for an open session. A session no record dates is given without a time.
+ */
+export function closingOf(db: Database, user: string, view: SessionView, scene: string | undefined): Infer<typeof sessionClosing> | undefined {
+  if (view.state !== "closed") return undefined;
+  if (view.by === "user") {
+    const change = scene === undefined || scene === "" ? null : db.query<{ created: number }, [string, string]>("SELECT created FROM change WHERE user = ? AND lane = 'story' AND by = 'player' AND json_extract(value, '$.item') = ? AND json_extract(value, '$.value.close') = 1 ORDER BY id DESC LIMIT 1").get(user, scene);
+    return { by: "you", at: change?.created ?? null };
+  }
+  if (view.closedBy === undefined) return { by: view.kind === "scene" ? "turn" : "run", at: null };
+  const job = db.query<{ ended: number | null }, [string, string]>("SELECT ended FROM job WHERE user = ? AND id = ?").get(user, view.closedBy);
+  if (job !== null) return { by: "job", at: job.ended };
+  const run = db.query<{ at: number | null }, [string, string]>("SELECT COALESCE(ended, received) AS at FROM turn_run WHERE user = ? AND turn = ? ORDER BY received DESC LIMIT 1").get(user, view.closedBy);
+  return { by: view.kind === "scene" ? "turn" : "run", at: run?.at ?? null };
+}
 
 const compactionShown = shape.named(
   "CompactionShown",
@@ -205,10 +230,11 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       throw new RouteError(409, error instanceof Error ? error.message : String(error));
     }
   };
-  /** A session as the page shows it: RPH's view, and for a scene's session the id of the scene it was opened for. */
+  /** A session as the page shows it: RPH's view, for a scene's session the id of the scene it was opened for, and for a closed one what closed it and when. */
   const shown = (user: string, view: SessionView): Infer<typeof sessionShown> => {
     const scene = view.kind === "scene" ? turns.store.user(user).session(view.id)?.scene : undefined;
-    return scene === undefined || scene === "" ? view : { ...view, scene };
+    const closing = closingOf(turns.store.db, user, view, scene);
+    return { ...view, ...(scene === undefined || scene === "" ? {} : { scene }), ...(closing === undefined ? {} : { closing }) };
   };
   /** The page size the turns of a session are listed in: RPH's `sessions.page`, at the global level. */
   const pageDef = harnessSettings().find((s) => s.key === "sessions.page");

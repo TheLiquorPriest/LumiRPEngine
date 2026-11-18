@@ -13,7 +13,7 @@ import { usePaged, useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
 import { counted, cut, when } from "../../words";
 import { MeasurementSection } from "./measurement";
-import { parentWords, SessionOpen } from "./open";
+import { closingWords, parentWords, SessionOpen } from "./open";
 import { replyOf } from "../../client";
 
 export { parentWords } from "./open";
@@ -45,7 +45,7 @@ function SessionLine(props: { session: SessionShown; name: string; open: boolean
             <span class="lre-listrow-title">{props.name}</span>
             <span class="lre-listrow-sub lre-num">
               {counted(session.turns, "turn")} · opened {when(session.opened)}
-              {session.state === "closed" ? (session.by === "user" ? " · you closed it" : session.closedBy === undefined ? "" : " · closed by a turn") : ""}
+              {session.state === "closed" ? ` · ${closingWords(session)}` : ""}
               {session.from === undefined ? "" : " · forked"}
               {parentWords(session) === "" ? "" : ` · ${parentWords(session)}`}
             </span>

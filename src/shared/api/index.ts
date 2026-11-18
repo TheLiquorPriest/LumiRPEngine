@@ -2858,6 +2858,12 @@ export interface SessionClosed {
   change: number | null;
 }
 
+/** What closed a closed session and when: you (your own close), a turn (a scene changing at it), the end of an agent's or a talk's run, or the end of a job; and the time, in milliseconds since 1970, null where RPE holds none (a session its own record does not date). */
+export interface SessionClosing {
+  by: "you" | "turn" | "run" | "job";
+  at: number | null;
+}
+
 /** What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why. */
 export interface SessionCompactAnswer {
   session: SessionShown;
@@ -2898,7 +2904,7 @@ export interface SessionReply {
   webKey: { made: number; ends: number | null } | null;
 }
 
-/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
+/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), what closed it and when, a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
 export interface SessionShown {
   id: string;
   user: string;
@@ -2917,6 +2923,7 @@ export interface SessionShown {
   held?: { hook: string; reason: string };
   hooked?: string;
   scene?: string;
+  closing?: SessionClosing;
 }
 
 /** A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first. */

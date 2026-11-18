@@ -25,7 +25,8 @@ describe("the sessions list", () => {
     expect(sessionName(SESSIONS[0] as SessionShown, names, 1)).toBe("The ferry");
     expect(sessionName(SESSIONS[2] as SessionShown, names, 3)).toBe("Scene 3");
     const tree = expand(h(SessionsView, { sessions: SESSIONS, scenes: names, openId: null, loading: false, problem: null, onOpen: () => undefined }));
-    expect(textOf(tree)).toContain("you closed it");
+    expect(textOf(tree)).toContain("closed by you");
+    expect(textOf(expand(h(SessionsView, { sessions: [{ id: "j1", user: "u", chat: "c", kind: "job", state: "closed", opened: 400, turns: 1, closedBy: "job-1", closing: { by: "job", at: 1_800_000_000_000 } }], scenes: names, openId: null, loading: false, problem: null, onOpen: () => undefined })))).toContain("closed by the end of its job on");
     expect(elements(tree).filter((e) => e.props["data-session-line"] !== undefined).map((e) => e.props["data-session-line"])).toEqual(["s3", "s2", "s1", "a1"]);
   });
 
