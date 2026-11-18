@@ -195,7 +195,7 @@ describe("the Author's own files ask for no step and are true", () => {
     expect(flat(SHIPPED.get(".prompts/prompt-frame.md") ?? "")).toContain("contract");
   });
 
-  test.skip("its header names its writer, and the writer is the narrator, whose definition holds no tool and reads only WRITING", async () => {
+  test("its header names its writer, and the writer is the narrator, whose definition holds no tool and reads only WRITING", async () => {
     expect((await set.guidance().definition("author"))?.writer).toBe("narrator");
     const narrator = await set.guidance().definition("narrator");
     expect(narrator).toMatchObject({ tools: [], reads: ["WRITING"] });
@@ -224,9 +224,14 @@ describe("the Author's own files ask for no step and are true", () => {
 });
 
 describe("the Author's stack", () => {
+  // Waits for the owner's word (the Author's stack is the owner's to keep small): the stack stands at 25,964 characters of instructions, rules and
+  // definition, 464 over the ceiling above, after four additions of 17 Nov made on purpose: a panel's request naming an action (3719ebb5e), an
+  // unmet requirement among the reports to let stand (6de4a1a7a), a secret never named in anything the Author writes (ae982b9d5), and a carried
+  // turn owing no perception (d54996dbe). Raise the ceiling, or cut the texts; the measure below is the one the ceiling was kept by.
   test.skip("as RPH's loader builds it from the shipped set, is no larger than E.7's 21,003 characters", async () => {
     const stack = await set.guidance().stack("author");
-    const opening = stack.entries.filter((entry) => entry.where === "opening" && entry.left === undefined);
+    // What the ceiling counts: the instruction files, the rules and the definition. The guides, tool descriptions and skills' index the harness lists too are built at run time.
+    const opening = stack.entries.filter((entry) => entry.where === "opening" && entry.left === undefined && ["instruction", "rule", "definition"].includes(entry.kind));
     const size = opening.reduce((sum, entry) => sum + (entry.text?.length ?? 0), 0);
     expect(size).toBeLessThanOrEqual(STACK_CEILING);
     // The rest of the opening block is measured and reported beside it (the reply contract; the skills' index and the tool guide are built at run time).

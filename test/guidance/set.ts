@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, relative, sep } from "node:path";
 import { loadGuidance, type Guidance } from "../../src/app/guidance";
+import { createHarness } from "rp-harness";
 import { SHIPPED_GUIDANCE } from "rp-harness/helpers";
 import type { FactDef, FactValue, LayerLevel, Scope } from "rp-harness/contract";
 import { createFolderHost, type FolderHost } from "rp-harness/hosts/folder";
@@ -55,14 +56,14 @@ export function placeOf(rpePath: string): string {
 }
 
 /**
- * What RPH's own loader gave beside the parts (its problems, rules, definitions and stack) and RPE's host reads no more (`src/app/guidance.ts`
- * reads parts only): the tests marked `test.skip` for hardening still read them, and come back when the set is laid under a harness.
+ * What RPH's own loader gives beside the parts (its problems, rules, definitions and stack), which RPE's host reads no more (`src/app/guidance.ts`
+ * reads parts only): read through RPH's harness over the same host (`openSet`).
  */
 export interface LoaderGuidance extends Guidance {
   problems(): Promise<{ path: string; message: string }[]>;
   rules(): Promise<{ name: string; path: string; inForce: boolean; why?: string }[]>;
   definition(name: string): Promise<{ model?: string; effort?: string; tools: string[]; reads: string[]; outOfReach: string[]; writer?: string } | undefined>;
-  stack(agent: string): Promise<{ entries: { where: string; left?: unknown; text?: string }[] }>;
+  stack(agent: string): Promise<{ entries: { kind: string; where: string; left?: unknown; text?: string }[] }>;
 }
 
 export interface OpenSet {
@@ -106,10 +107,25 @@ export async function openSet(texts: ReadonlyMap<string, string>, options: SetOp
   const facts = (values: Record<string, FactValue>): void => writeFileSync(join(dir, "host", "facts.json"), JSON.stringify({ defs: options.defs ?? [], values: { [CHAT]: values } }));
   facts({});
   const host = await createFolderHost({ dir, user: USER });
+  // RPH's harness over the same host gives what the loader's own reading of the set gives besides the parts: the problems it finds, the rules in force, each definition and each agent's stack.
+  const harness = createHarness(host);
+  const guidance = (): LoaderGuidance => ({
+    ...loadGuidance(host.files, SCOPE),
+    problems: async () => (await harness.problems(SCOPE)).map((p) => ({ path: p.path, message: p.message })),
+    rules: async () => (await harness.rules.list(SCOPE)).map((r) => ({ name: r.name, path: r.path, inForce: r.inForce, ...(r.why === undefined ? {} : { why: r.why }) })),
+    definition: async (name) => {
+      const listed = (await harness.definitions.list(SCOPE)).find((d) => d.name === name);
+      if (listed === undefined) return undefined;
+      // What a definition keeps out of its agents' reach is its header's `out_of_reach:`; the listing does not carry it.
+      const outOfReach = split(texts.get(`.agents/${name}.md`) ?? "").header?.out_of_reach;
+      return { ...(listed.model === undefined ? {} : { model: listed.model }), ...(listed.effort === undefined ? {} : { effort: listed.effort }), tools: listed.tools, reads: listed.reads, outOfReach: Array.isArray(outOfReach) ? outOfReach.map(String) : [], ...(listed.writer === undefined ? {} : { writer: listed.writer }) };
+    },
+    stack: async (agent) => ({ entries: await harness.definitions.stack(SCOPE, agent) }),
+  });
   return {
     host,
     scope: SCOPE,
-    guidance: () => loadGuidance(host.files, SCOPE) as LoaderGuidance,
+    guidance,
     put,
     facts,
     close: async () => {
