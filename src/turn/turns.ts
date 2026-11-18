@@ -21,7 +21,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "../app/guidance";
-import type { Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, TurnRequest, Usage } from "rp-harness/contract";
+import type { AgentRef, Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, ThinkingPiece, TurnRequest, Usage } from "rp-harness/contract";
 import { reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { Feedback } from "../adapter/lumiverse/feedback";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
@@ -31,7 +31,7 @@ import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
 import { type LiveHub, liveKind, shape } from "../app";
-import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type MemorySearch, type SourceReader } from "../cast";
+import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, chatLine, findCharacter, type MemorySearch, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
 import { mapView, mapWording } from "../iface";
@@ -154,12 +154,29 @@ export const NO_SESSION = "none";
 
 /**
  * How a run's reply ends where none went out whole: the reply-errors part's lines; whether `reply.lastText` sends the Author's last
- * plain text in their place; and, for a reply asked for whole, its hold in milliseconds from its arrival, null for none.
+ * plain text in their place; and, for a reply asked for whole, its hold in milliseconds from its arrival, null for none. And the line
+ * that heads a stretch of an agent's thinking in the chat's thinking block; null where the run's reply goes to no chat (a Settle now),
+ * which then takes no thinking.
  */
 interface Ending {
   errors: LinesPart | undefined;
   lastText: boolean;
   hold: number | null;
+  heading: ((agent: AgentRef) => string | undefined) | null;
+}
+
+/** The definitions the progress part's `thinking` row names by their own words; any other agent is named by its definition. */
+const THINKERS: Readonly<Record<string, true>> = { author: true, gm: true, narrator: true, character: true };
+
+/**
+ * The line that heads a stretch of `agent`'s thinking: the progress part's `thinking` row, filled with whose it is (`is.<definition>`,
+ * or `is.other`) and its name: the character's it plays, by `character`, or its definition's. A character agent whose character cannot
+ * be found is named by its definition, as another agent is.
+ */
+export function thinkingHeading(progress: LinesPart | undefined, agent: AgentRef, character: (id: string) => string | null): string | undefined {
+  const played = agent.plays === undefined ? null : character(agent.plays);
+  const kind = agent.definition === "character" && played === null ? "other" : Object.hasOwn(THINKERS, agent.definition) ? agent.definition : "other";
+  return progress?.line("thinking", { is: { [kind]: true }, name: played ?? agent.definition });
 }
 
 /**
@@ -815,7 +832,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       };
       // The projection book follows the story once the run's work is over, beside the chat, never on the reply's path.
       void over.promise.then(() => this.#project(user, chat));
-      await this.#run(run, request, out, signal, { errors: lines(errors), lastText: settings.lastText, hold: tagged.whole === true ? (tagged.hold ?? null) : null }, afterFolder);
+      // Each stretch of an agent's thinking is headed in the progress part's words, a character by the name the cast gives it in this chat.
+      const progressLines = lines(progress);
+      const heading = (agent: AgentRef): string | undefined => thinkingHeading(progressLines, agent, (id) => findCharacter(this.#d.store.db, user, chatLine(this.#d.store.user(user), chat), id)?.name ?? null);
+      await this.#run(run, request, out, signal, { errors: lines(errors), lastText: settings.lastText, hold: tagged.whole === true ? (tagged.hold ?? null) : null, heading }, afterFolder);
       const early = this.#early.get(tag.generation);
       if (early !== undefined) {
         this.#early.delete(tag.generation);
@@ -1181,7 +1201,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         throw error;
       }
       void over.promise.then(() => this.#project(user, chat));
-      void this.#run(run, request, NO_CHAT, new AbortController().signal, { errors: lines(errors), lastText: settings.lastText, hold: null }, over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
+      void this.#run(run, request, NO_CHAT, new AbortController().signal, { errors: lines(errors), lastText: settings.lastText, hold: null, heading: null }, over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
       return { turn: turn.id, run: run.id };
     } finally {
       intake.done();
@@ -1965,12 +1985,24 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       run.withoutIntent = run.intent?.to == null;
       if (run.traceRun !== null) live.publish(run.chat, { kind: "released", data: { run: run.traceRun, at: run.released } });
     };
+    const { heading } = ending;
     const sink: ReplySink = {
       progress: (line) => {
         out.progress(line);
         piece({ line: run.progress.length, progress: line });
         run.progress.push(line);
       },
+      // The agents' thinking goes into the chat's thinking block as it is written, a stretch at a time under its agent's name, as the
+      // harness gives it (`progress.thinking`). It is not kept with the run's progress lines: each call's thinking is in the trace.
+      ...(heading === null
+        ? {}
+        : {
+            thinking: (thought: ThinkingPiece) => {
+              const head = thought.first ? heading(thought.agent) : undefined;
+              if (head !== undefined) out.progress(head);
+              out.reasoning(thought.text);
+            },
+          }),
       content: (delta) => {
         if (run.firstWord === null) run.firstWord = clock.now();
         released();

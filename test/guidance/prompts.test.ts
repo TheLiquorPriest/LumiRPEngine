@@ -296,6 +296,10 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(written(part)).not.toMatch(ASKS);
     // A call made again: what broke it, the wait and the try, as RPH fills the row (its turn's `call_failed`).
     expect(part.line("retrying", { failure: "connection", is: { connection: true }, seconds: 1, next: 2, most: 3 })).toBe("A call to the model failed (the connection broke). Trying again in 1s, try 2 of 3.");
+    // Each stretch of an agent's thinking under its name, as the door fills the row: by its definition, a character by its name.
+    expect(part.line("thinking", { is: { gm: true }, name: "gm" })).toBe("The GM thinks:");
+    expect(part.line("thinking", { is: { character: true }, name: "Wren Hale" })).toBe("Wren Hale thinks:");
+    expect(part.line("thinking", { is: { other: true }, name: "keeper" })).toBe("The keeper thinks:");
   });
 
   test("notices.md words each notice an agent or the player can be shown, as a fact that fills in and asks for nothing", async () => {

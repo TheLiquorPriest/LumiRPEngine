@@ -121,14 +121,28 @@ const HARNESS_ROWS: Readonly<Record<string, string>> = Object.freeze({
 export const HARNESS_ROW_KEYS: readonly string[] = Object.keys(HARNESS_ROWS);
 
 /**
+ * RPE's own words for a setting of RPH's whose words RPH must keep for any host: here, whose thinking goes into Lumiverse's
+ * thinking block, named by RPE's own agents and what RPE's pages do with it (the owner's word of 18 Nov: nothing runs silent).
+ */
+const HARNESS_WORDS: Readonly<Record<string, { readonly name: string; readonly about: string }>> = {
+  "progress.thinking": {
+    name: "Thinking in the chat",
+    about:
+      "Whose thinking goes into the chat's thinking block as it is written, between the progress lines: lines, the progress lines alone; lead, the Author's thinking; all, as shipped so that nothing runs silent, every agent's of the turn, each stretch under its name (the Author, the GM, a character by its name, the narrator). The engine's agents can think about what the story has not shown you yet, which RPE's own pages keep behind the spoiler gate, and Lumiverse keeps the thinking with the message.",
+  },
+};
+
+/**
  * RPH's settings as the registry lists them: RPH's list as RPH exports it, each with its default,
- * what it takes, its name and its line, and when a change to it is in force (a job's settings when
- * the next job starts, every other at the next turn, since RPH reads its settings as each begins).
+ * what it takes, its name and its line (RPE's own words where it has them), and when a change to it is
+ * in force (a job's settings when the next job starts, every other at the next turn, since RPH reads its
+ * settings as each begins).
  */
 export function harnessSettings(list: readonly SettingDef[] = RPH_SETTINGS): Setting[] {
   return list.map((def) => {
     const row = HARNESS_ROWS[def.key];
-    return { ...def, name: def.name ?? def.key, about: def.about ?? "", effect: def.key.startsWith("jobs.") ? "use" : "turn", ...(row !== undefined ? { row } : {}) };
+    const words = HARNESS_WORDS[def.key];
+    return { ...def, name: words?.name ?? def.name ?? def.key, about: words?.about ?? def.about ?? "", effect: def.key.startsWith("jobs.") ? "use" : "turn", ...(row !== undefined ? { row } : {}) };
   });
 }
 
