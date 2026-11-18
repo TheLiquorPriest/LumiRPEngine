@@ -1,6 +1,7 @@
 // The line under each reply (plan §14, PlanChatUI-3 item 2): when and where it happened, what the turn did in
-// each lane (story, engine, each opening its short list), and a link to its Turn page. It follows the swipe
-// shown, is asked for only the rows Lumiverse has mounted (`../replies.ts`), and draws once per message in
+// each lane (story, engine, each opening its short list), the turn's marks (edited, interrupted and the rest),
+// each a short word whose meaning shows on hover and when pressed, and a link to its Turn page. It follows the
+// swipe shown, is asked for only the rows Lumiverse has mounted (`../replies.ts`), and draws once per message in
 // either display mode. A reply made without RPE says so; a migrated reply names the engine that played it. A
 // reply whose turn's record was not finished (its run failed or was stopped once the reply had begun to go out)
 // says why, with Settle now where that settles it (plan §10.10).
@@ -12,6 +13,7 @@ import { MessageChips } from "../../../frontend/chips";
 import type { Readable } from "../../store";
 import { chatPlay } from "../chat-play";
 import { type LaneShown, type ReplyLine, type RepliesState, repliesOf } from "../replies";
+import { MARK_BADGES, markWords } from "../../pages/turns/sections/marks";
 import type { FrameEnv, SurfaceDef } from "../surface";
 import { errorWords } from "../../words";
 import { messageOfScope } from "./working";
@@ -44,6 +46,45 @@ function Lane(props: { lane: LaneShown }) {
             <li key={at}>{line}</li>
           ))}
         </ul>
+      ) : null}
+    </span>
+  );
+}
+
+/** A mark as the line under a reply shows it: its short word, and what it means, in the Turns page's own words. */
+export interface MarkShown {
+  kind: string;
+  word: string;
+  meaning: string;
+}
+
+/** A reply's marks, each kind once, in the order they were set; a kind the page has no words for is shown by its name. */
+export function marksShown(marks: readonly { kind: string }[]): MarkShown[] {
+  const kinds = [...new Set(marks.map((m) => m.kind))];
+  return kinds.map((kind) => {
+    if (!Object.hasOwn(MARK_BADGES, kind)) return { kind, word: kind, meaning: `A mark this page has no words for: ${kind}.` };
+    const known = kind as keyof typeof MARK_BADGES;
+    return { kind, word: MARK_BADGES[known], meaning: markWords({ kind: known, message: null }) };
+  });
+}
+
+/** One mark: its word, its meaning on hover, and pressed, the meaning said under it with a way to the turn's page. */
+function Mark(props: { mark: MarkShown; onTurn: (() => void) | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span class="rpe-chat-lane" data-rpe-mark={props.mark.kind}>
+      <button type="button" class="rpe-chat-line-btn rpe-chat-line-mark" title={props.mark.meaning} aria-expanded={open} onClick={() => setOpen(!open)}>
+        {props.mark.word}
+      </button>
+      {open ? (
+        <span class="rpe-chat-lane-list" role="note">
+          {props.mark.meaning}{" "}
+          {props.onTurn === null ? null : (
+            <button type="button" class="rpe-chat-line-btn" onClick={props.onTurn}>
+              See it on the turn's page
+            </button>
+          )}
+        </span>
       ) : null}
     </span>
   );
@@ -108,7 +149,9 @@ function Line(props: { env: FrameEnv; message: string }) {
       {line.lanes.map((lane) => (
         <Lane key={lane.lane} lane={lane} />
       ))}
-      {chat === null || line.unfinished === null ? null : <Unfinished env={props.env} chat={chat} why={line.unfinished.why} settle={line.unfinished.settle} />}
+      {marksShown(line.marks).map((mark) => (
+        <Mark key={mark.kind} mark={mark} onTurn={chat === null || turn === null ? null : () => props.env.open({ page: "turns", chat, at: [turn] })} />
+      ))}
       {chat === null || turn === null ? null : (
         <button type="button" class="rpe-chat-line-btn rpe-chat-line-turn" onClick={() => props.env.open({ page: "turns", chat, at: [turn] })}>
           Turn

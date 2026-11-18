@@ -38,6 +38,7 @@ export const CHAT_SURFACES_CSS = `
 .rpe-chat-line-btn{border:1px solid var(--lre-hairline);background:var(--lre-subtle);color:inherit;border-radius:var(--lre-r-pill);font:inherit;min-height:24px;padding:0 var(--lre-s2);cursor:pointer}
 .rpe-chat-line-btn:disabled{cursor:default;opacity:.7}
 .rpe-chat-line-turn{margin-left:auto}
+.rpe-chat-line-mark{color:var(--lre-warn)}
 .rpe-chat-line-unfinished{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);color:var(--lre-warn)}
 .rpe-chat-lane{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start}
 .rpe-chat-lane-list{margin:var(--lre-s1) 0 0;padding-left:1.2em;color:var(--lre-fg);font-size:var(--lre-fs-sm);overflow-wrap:anywhere}

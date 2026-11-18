@@ -2,8 +2,8 @@ import type { TurnMark } from "../../../../shared/api";
 import { when } from "../../../words";
 import type { TurnSection } from "../types";
 
-/** What a mark on a turn says, in words: why this turn is not as plainly its run as the others. */
-export function markWords(mark: TurnMark): string {
+/** What a mark on a turn says, in words: why this turn is not as plainly its run as the others; the message it concerns where one is named. */
+export function markWords(mark: Pick<TurnMark, "kind" | "message">): string {
   const on = mark.message === null ? "" : ` (message ${mark.message})`;
   if (mark.kind === "interrupted") return `RPE restarted while a run of this turn went on; what it had staged was dropped${on}.`;
   if (mark.kind === "saved-otherwise") return `What Lumiverse saved is not what was released, beyond the prefill in front and a continue's join${on}.`;
