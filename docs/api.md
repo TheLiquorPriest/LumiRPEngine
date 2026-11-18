@@ -4977,7 +4977,7 @@ export interface ConnectionShown {
   serialTools?: true;
   /** Message threads are on. */
   messageThreads?: true;
-  /** How many times a call that failed before any answer arrived is tried again; 2 when absent. */
+  /** How many times a failed call on it is made again, whenever in the call it failed (a request passed through with no turn: only before any answer came); calls.retries when absent. */
   retries?: number;
   /** What the user entered as each model's limits, by model id. */
   limits?: { [key: string]: ModelLimitsEntry };
