@@ -21,7 +21,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { FactId, KnowledgeFact } from "../../../shared/minds";
-import { fillText, knowledgeText, knowledgeThreshold, knowledgeTracked, parseFactId, revealsFact } from "../../../shared/minds";
+import { knowledgeLine, knowledgeThreshold, knowledgeTracked, parseFactId, revealsFact } from "../../../shared/minds";
 import { loreIsSecret } from "../../../shared/lore";
 import { applyMarks } from "../../../shared/secret-marks";
 import type { FeedScope } from "../../../shared/world";
@@ -114,12 +114,12 @@ export function knowledgeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
         return h !== undefined && h.keptFrom === undefined && holdingLine(claim(fact, id), h, words) === line;
       });
       if (alike) {
-        out.push({ text: fillText(knowledgeText(settings, "everyoneHere"), { line }), known: "pov", group: id });
+        out.push({ text: knowledgeLine(settings, "everyoneHere", { line }), known: "pov", group: id });
         continue;
       }
     }
     for (const { who, h } of holders) {
-      const text = fillText(knowledgeText(settings, "person"), { name: who === pov ? "You" : name(who), line: holdingLine(claim(h.fact, id), h.holding, words) });
+      const text = knowledgeLine(settings, "person", { name: who === pov ? "You" : name(who), line: holdingLine(claim(h.fact, id), h.holding, words) });
       if (yours !== undefined) out.push(kept ? { text, known: "pov", secret: { keptFrom: kept.keptFrom, known: [...new Set([...kept.known, who])] }, group: id } : { text, known: "pov", group: id });
       // A secret line says whom it is kept from: whom its holder keeps it from, and the player character, whom it is beyond.
       else if (keptFromIt(h.holding, pov) || secret(id, h.fact)) {
@@ -132,7 +132,7 @@ export function knowledgeLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
     if (mine && (mine.secret || mine.about || mine.recent))
       for (const who of others) {
         if (own(holdingsOf(slice, who), id) !== undefined) continue;
-        const text = fillText(knowledgeText(settings, "notKnown"), { name: name(who), claim: claim(mine.fact, id) });
+        const text = knowledgeLine(settings, "notKnown", { name: name(who), claim: claim(mine.fact, id) });
         out.push(kept ? { text, known: "pov", secret: kept, group: id } : { text, known: "pov", group: id });
       }
   }

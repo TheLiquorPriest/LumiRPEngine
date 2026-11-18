@@ -10,6 +10,7 @@ import { hashParts } from "./hash";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, FieldId, MessageId, PlaceId, StageId, TrackId } from "./ids";
 import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
+import { say } from "../engine/lines";
 
 // ---------------------------------------------------------------- fidelity
 
@@ -481,68 +482,18 @@ export function knowledgeLimitRange(limit: KnowledgeLimit): readonly [number, nu
 }
 
 /**
- * Every text knowledge sends a model besides the knowledge step's own prompt (which is
- * `minds.prompts.knowledge`, as each minds step's), by id, with its shipped wording: what a mind is
- * told of its own holdings, the words a holding reads in (for a mind, the narrator's Who knows what
- * and the knowledge step alike), and the knowledge step's context: its headings, and that a fact it
- * lists is one fact however it is worded (`stepReuse`). The user's own wording wins
- * (`KnowledgeSettings.prompts`); one left out, or emptied, reads as shipped (`knowledgeText`). `{{…}}`
- * are the placeholders each fills.
+ * Every text knowledge sends a model, by id: what a holding reads in (known, suspected, disbelieved, unsure, how they came by it,
+ * whom they keep it from, and the narrator's Who knows what lines), as lines of the shipped history-minds file
+ * (`knowledge_<id>`). The user's own wording wins (`KnowledgeSettings.prompts`); one left out, or emptied, reads as shipped
+ * (`knowledgeText`). `{{…}}` are the placeholders each fills.
  */
-export const KNOWLEDGE_TEXTS = Object.freeze({
-  mindTitle: "What you know",
-  mindLead: "The facts you hold and how you came by them. You know only these and what is in front of you: never act on, hint at or guess anything that isn't here.",
-  known: "{{claim}} ({{how}})",
-  suspected: "Suspects: {{claim}} ({{how}}, about {{percent}}% sure)",
-  disbelieved: "Doesn't believe: {{claim}} ({{how}})",
-  unsure: "Unsure whether: {{claim}} ({{how}})",
-  keeps: "keeps it from {{whom}}",
-  everyone: "everyone",
-  authored: "from the start",
-  witnessed: "saw it",
-  told: "told by {{by}}",
-  inferred: "worked it out",
-  guessed: "a guess",
-  person: "{{name}}: {{line}}",
-  notKnown: "{{name}} doesn't know: {{claim}}",
-  everyoneHere: "Everyone here: {{line}}",
-  stepHappened: "What happened this turn",
-  stepPresent: "Who could perceive it",
-  stepPeople: "What each of them already knows, and has witnessed lately",
-  stepFacts: "Facts in play (reuse these by id)",
-  stepMade: "Facts this turn already made (reuse these by id)",
-  stepReuse: "A fact listed above is one fact however it is worded: when what someone learns here is one of them, in its words or in others, have them learn that fact by its id, and never make it again as a new fact. Make a new fact only of what none of them says.",
-  stepBudget: "What this turn can still record: {{facts}} new facts (this chat has room for {{chat}} more) and {{learnings}} learnings. A new fact counts only once someone learns it, so make one only for someone to learn.",
-  stepPerson: "{{name}} (id: {{id}})",
-  stepYou: '{{name}} (id: {{id}}; the player character, "you")',
-  stepSaid: "{{name}} said or did: {{text}}",
-  stepStory: "The story, as written: {{text}}",
-  stepThroughout: "there throughout",
-  stepLeft: "there from the start, but not at its end: witnessed none of it, though they may be told",
-  stepCame: "came in during the turn, or was met at its end: witnessed none of it, though they may be told",
-  stepOpen: "(an open question)",
-  stepFalse: "(false)",
-  stepPinned: "Pinned lore",
-  stepTraits: "Is like:",
-  stepHolds: "Holds:",
-  stepNothing: "nothing the story tracks yet",
-  stepWitnessed: "Witnessed lately:",
-  stepSomeone: "someone",
-  stepAnswer: [
-    "- facts: only the few new facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Each one short sentence, with a ref of your own (n1, n2…) the lists below use; matters: why it matters and to whom, in a few words (a fact without it is dropped); about: the people or places it concerns; truth: true, false (a lie or a false rumour) or open (an open question, such as who did something).",
-    '- learned: who came to know a fact this turn, and how. witnessed: it happened, was said aloud or was shown in front of them, so everyone there throughout perceived it, the player character included; missed: only those there who didn\'t, such as someone out of earshot of a whisper, asleep or looking away ("you" for the player character); leave it out when no one did. told: who: whom they told; by: who told them, who must already know it. keptFrom: only when the turn shows they mean to keep it from someone, or "everyone"; leave it out otherwise.',
-    "- inferred: something one person (never the player character) could work out or guess this turn: confidence from 0 to 1; evidence: the ids of facts they hold and the refs of lines from their own witness log it rests on, at least one; belief: true, false or uncertain.",
-    "- doubted: a fact someone (never the player character) held that this turn makes them doubt: their confidence now, from 0 to 1, and what they now take it to be.",
-    "Use empty lists for anything the turn didn't give.",
-  ].join("\n"),
-} as const);
-export type KnowledgeTextId = keyof typeof KNOWLEDGE_TEXTS;
-export const KNOWLEDGE_TEXT_IDS = Object.keys(KNOWLEDGE_TEXTS) as KnowledgeTextId[];
+export const KNOWLEDGE_TEXT_IDS = ["known", "suspected", "disbelieved", "unsure", "keeps", "everyone", "authored", "witnessed", "told", "inferred", "guessed", "person", "notKnown", "everyoneHere"] as const;
+export type KnowledgeTextId = (typeof KNOWLEDGE_TEXT_IDS)[number];
 
-/** A knowledge text as this user has it: their own wording, else the shipped one. */
-export function knowledgeText(settings: Pick<KnowledgeSettings, "prompts">, id: KnowledgeTextId): string {
+/** A knowledge text as this user has it, its placeholders filled: their own wording, else the shipped line `knowledge_<id>`. */
+export function knowledgeLine(settings: Pick<KnowledgeSettings, "prompts">, id: KnowledgeTextId, values: Readonly<Record<string, string>> = {}): string {
   const own = settings.prompts[id];
-  return own !== undefined && own.trim() !== "" ? own : KNOWLEDGE_TEXTS[id];
+  return own !== undefined && own.trim() !== "" ? fillText(own, values) : say(`knowledge_${id}`, values);
 }
 
 /** A text with its `{{name}}` placeholders filled in one pass; a placeholder with no value is left as written. */
@@ -1649,9 +1600,6 @@ export interface MindMoment {
   skip?: string;
 }
 
-/** How a time skip's calls (its plan, its beats, the minds in it) are given the player's words for the span: their directive, which comes first. */
-export const SKIP_FILL_HEAD = "What the player's message says the player character does in this time, in their words (it comes first):";
-
 /**
  * How one mind of a GM's run went (DESIGN §24.9): GM data, never on a player surface. `pinned`
  * lists the pinned lore it was given, by its own title, with what was cut or left out to fit.
@@ -1684,169 +1632,9 @@ export interface MindsRunView {
   undo: string | null;
 }
 
-// ---------------------------------------------------------------- built-in prompts
-
 /**
- * The built-in instructions for each minds step (DESIGN §24.5): who the model is and how it thinks.
- * The user's own prompt for the purpose wins, then a world template; `{{character}}` is the character's
- * name and `{{world}}` the world's. Whichever is used, the engine appends the purpose's answer format
- * (`MIND_ANSWER_FORMATS`), which no template replaces, then the preset's `RPEngine · <purpose>`
- * block; the character's scoped context follows as the user message.
- */
-export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Object.freeze({
-  mind: [
-    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
-    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue.",
-  ].join("\n"),
-  memory:
-    "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places.",
-  ].join("\n"),
-  consolidate:
-    "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
-  knowledge: [
-    "You keep track of who knows what in the roleplay world {{world}}. Below is a turn that just happened, as it was written: what was said and done, who could perceive it, the facts already in play, and what each person already knows, has witnessed lately and is like.",
-    "The story itself is what everyone who was there knows of the scene: never restate it. Record only the few facts, usually none and at most one or two, that would change what someone does, says, hides, or believes about another person: a secret, a revelation or a lie; something a person would act on, hide, trade, or be hurt or helped by; a promise or debt that rests on it; an open question someone is pursuing. Something said or done in plain view is a fact only when it is one of these; the rest the story holds. Small talk, advice and description are never facts. Say of each fact why it matters and to whom.",
-    "Everyone there throughout witnessed what happened in front of them (seeing it, hearing it said aloud, reading it), the player character included: name only who missed something, such as a whisper out of earshot, or someone asleep or looking away. Whoever was there for only part of the turn, or wasn't there, witnessed none of it. Someone may also be told something by someone who already knows it, or work something out, or guess at it, from what they already hold or witnessed: say how sure they are, and what it rests on. Note anyone the turn makes doubt something they held.",
-    "A fact is one short, plain claim. Reuse a fact already listed, by its id, rather than restating it. Never give anyone what they couldn't have learned here, and never reveal a secret they don't hold.",
-  ].join("\n"),
-});
-
-/**
- * The knowledge step's answer shape (DESIGN §24.11, a fixed output contract, §16), its third version:
- * each new fact says why it matters and to whom (`matters`); a witnessed learning names who missed it
- * (`missed`), everyone else there throughout perceiving it; a told one names whom it was told to
- * (`who`) and by whom. The engine reads these keys whatever its instructions say, and reads the
- * earlier versions' learnings beside them (`checkKnowledge`): the first's witnessed ones, which name
- * each witness (`who`), and the second's; a new fact without `matters` is dropped, in any version.
- */
-export const KNOWLEDGE_ANSWER_SHAPE =
-  'Answer with JSON only: {"facts": [{"ref": "n1", "claim": "...", "matters": "why it matters, and to whom", "about": ["a name"], "truth": "true"}], "learned": [{"fact": "a fact id or n1", "how": "witnessed", "missed": ["a name"], "keptFrom": ["a name"]}, {"fact": "a fact id or n2", "how": "told", "who": ["a name"], "by": "a name", "keptFrom": ["a name"]}], "inferred": [{"who": "a name", "fact": "a fact id or n1", "confidence": 0.5, "evidence": ["a fact id or a witness ref"], "belief": "true"}], "doubted": [{"who": "a name", "fact": "a fact id", "confidence": 0.3, "belief": "uncertain"}]}';
-
-/**
- * Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote
- * them, then what each part may run to (`answerLengths`), which the lengths in Settings say, so no
- * format words a length or a count of its own.
- */
-export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
-  mind: [
-    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "mood": "...", "interrupt": {"reason": "..."}}',
-    "- monologue: their private reasoning in the first person.",
-    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
-    "- intent: what they mean to do next, in one sentence.",
-    '- reactions: short conditional reactions ("if pressed about the cellar, changes the subject").',
-    "- mood: one or two words.",
-    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
-  ].join("\n"),
-  memory: [
-    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: the things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
-    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
-    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
-    '- plans: only what this turn states they will do later: said aloud, agreed with someone, or scheduled in the story as written; never a guess at what they might do. Each {"what": "...", "kind": "errand|meet|visit|work|rest|leisure|pay|lend|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3, "amount": 20}, with local times; priority 1 (whenever it fits) to 5 (it must happen); kind pay or lend, with amount, when they mean to hand someone money, and no amount otherwise.',
-    "- told: what they told whom in this turn, in a few words each.",
-    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
-    "Use empty lists for anything the turn didn't give.",
-  ].join("\n"),
-  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  consolidate: 'Answer with JSON only: {"summary": "..."}: plain prose, in their own perspective.',
-  knowledge: `${KNOWLEDGE_ANSWER_SHAPE}\n${KNOWLEDGE_TEXTS.stepAnswer}`,
-});
-
-/** The knowledge step's answer format as this user has it: its JSON shape, which is fixed (§16), then their own wording of what each list holds (`stepAnswer`). */
-export function knowledgeAnswerFormat(settings: Pick<KnowledgeSettings, "prompts">): string {
-  return `${KNOWLEDGE_ANSWER_SHAPE}\n${knowledgeText(settings, "stepAnswer")}`;
-}
-
-/**
- * The memory step's answer once the chat tracks knowledge (DESIGN §24.11, a fixed output contract
- * read beside the first, §16): the same, without `told`. The knowledge step is then telling's only
- * writer, as the listener's holding and `told` witness entry.
- */
-export const MEMORY_ANSWER_V2: string = MIND_ANSWER_FORMATS.memory
-  .replace(', "told": [{"to": ["a name"], "what": "..."}]', "")
-  .split("\n")
-  .filter((line) => !line.startsWith("- told:"))
-  .join("\n");
-
-/** A number as the lengths read it to a model and to the user: grouped, as "2,000". */
-function counted(n: number): string {
-  return n.toLocaleString("en-US");
-}
-
-/**
- * What a minds step's answer may run to (DESIGN §24.5), as its model is told after the answer
- * format, whoever worded that, so it writes to it: each text's most characters and each list's most
- * items, from the user's lengths (Settings → Minds → Lengths) and, for the knowledge step, the
- * longest claim it may write (`claimChars`). While the chat tracks knowledge (`knowing`) the memory
- * step records no telling, so its line leaves `told` out. The engine keeps an answer to them,
- * cutting a longer text at a word and a longer list after its last item kept.
- */
-export function answerLengths(purpose: MindPurpose, settings: Pick<MindsSettings, "lengths" | "knowledge">, knowing = false): string {
-  const l = settings.lengths;
-  const list = (what: string, count: number, each: number, part = ""): string => `${what}, up to ${counted(count)}, each${part} ${counted(each)}`;
-  const parts =
-    purpose === "mind"
-      ? [`monologue ${counted(l.monologue)}`, `depiction ${counted(l.depiction)}`, `intent ${counted(l.intent)}`, list("reactions", l.reactions, l.reaction), `mood ${counted(l.mood)}`, `an interrupt's reason ${counted(l.interrupt)}`]
-      : purpose === "memory"
-        ? [list("notes", l.notes, l.note), list("commitments", l.commitments, l.commitment), list("plans", l.plans, l.plan, " one's what"), ...(knowing ? [] : [list("told", l.tolds, l.told)]), `summary ${counted(l.summary)}`]
-        : purpose === "consolidate"
-          ? [`summary ${counted(l.summary)}`]
-          : purpose === "skip"
-            ? [`each beat's reason ${counted(l.reason)}`]
-            : [`each claim ${counted(settings.knowledge.claimChars)}, and why it matters ${counted(settings.knowledge.claimChars)}`];
-  return `The engine keeps each part to its length in characters and cuts anything longer, so write within them: ${parts.join("; ")}.`;
-}
-
-/**
- * What a minds step cut of one answer to the lengths it was told (`answerLengths`): of each text,
+ * What a minds step cut of one answer to the lengths it was told: of each text,
  * how many it cut; of each list, how many items it left out past the most it keeps. A knowledge
  * answer's claims and why they matter count under `claim` and `matters`.
  */
 export type MindCuts = Partial<Record<MindLengthKey | "claim" | "matters", number>>;
-
-/** What each cut is called, one and many. */
-const CUT_NOUNS: Readonly<Record<keyof MindCuts, readonly [string, string]>> = {
-  monologue: ["monologue", "monologues"],
-  depiction: ["depiction", "depictions"],
-  intent: ["intent", "intents"],
-  reaction: ["reaction", "reactions"],
-  reactions: ["reaction", "reactions"],
-  mood: ["mood", "moods"],
-  interrupt: ["interrupt's reason", "interrupts' reasons"],
-  note: ["note", "notes"],
-  notes: ["note", "notes"],
-  commitment: ["commitment", "commitments"],
-  commitments: ["commitment", "commitments"],
-  plan: ["plan", "plans"],
-  plans: ["plan", "plans"],
-  told: ["thing told", "things told"],
-  tolds: ["thing told", "things told"],
-  summary: ["summary", "summaries"],
-  reason: ["beat's reason", "beats' reasons"],
-  gmIntent: ["intent", "intents"],
-  claim: ["claim", "claims"],
-  matters: ["reason a fact matters", "reasons facts matter"],
-};
-
-/**
- * What a call's trace and the host log say an answer lost to the lengths it was told (DESIGN
- * §24.5): each text cut, to how many characters, and each list's items left out, past how many,
- * with where to raise them; null when it lost nothing.
- */
-export function cutsNote(cuts: Readonly<MindCuts>, settings: Pick<MindsSettings, "lengths" | "knowledge">): string | null {
-  const keys = [...MIND_TEXT_LENGTHS, ...MIND_LIST_COUNTS, "claim", "matters"] as const;
-  const parts = keys.flatMap((key) => {
-    const n = cuts[key] ?? 0;
-    if (n <= 0) return [];
-    const noun = CUT_NOUNS[key][n === 1 ? 0 : 1];
-    if (key === "claim" || key === "matters") return [`${n} ${noun} cut to ${counted(settings.knowledge.claimChars)} characters`];
-    return [isListCount(key) ? `${n} ${noun} left out past the ${counted(settings.lengths[key])} kept` : `${n} ${noun} cut to ${counted(settings.lengths[key])} characters`];
-  });
-  if (parts.length === 0) return null;
-  // A knowledge answer's claims are Knowledge's limit to raise; every other cut is a length's.
-  const claims = keys.every((key) => (cuts[key] ?? 0) <= 0 || key === "claim" || key === "matters");
-  return `Its answer ran past the lengths it was told: ${parts.join("; ")}. Raise ${claims ? "A fact's claim in Settings → Minds → Knowledge" : "them in Settings → Minds → Lengths"} to keep more.`;
-}

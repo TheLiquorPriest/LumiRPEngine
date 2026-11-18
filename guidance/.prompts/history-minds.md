@@ -36,3 +36,17 @@ mind_truth: {{claim}} is now {{#open}}an open question{{/open}}{{^open}}{{truth}
 mind_tracking_on: Knowledge tracking is on
 mind_tracking_off: Knowledge tracking is off
 mind_threshold: , a holding revealing its fact from {{pct}}% sure
+knowledge_known: {{claim}} ({{how}})
+knowledge_suspected: Suspects: {{claim}} ({{how}}, about {{percent}}% sure)
+knowledge_disbelieved: Doesn't believe: {{claim}} ({{how}})
+knowledge_unsure: Unsure whether: {{claim}} ({{how}})
+knowledge_keeps: keeps it from {{whom}}
+knowledge_everyone: everyone
+knowledge_authored: from the start
+knowledge_witnessed: saw it
+knowledge_told: told by {{by}}
+knowledge_inferred: worked it out
+knowledge_guessed: a guess
+knowledge_person: {{name}}: {{line}}
+knowledge_notKnown: {{name}} doesn't know: {{claim}}
+knowledge_everyoneHere: Everyone here: {{line}}

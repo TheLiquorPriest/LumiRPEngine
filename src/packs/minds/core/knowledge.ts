@@ -8,7 +8,7 @@
 
 import type { EntityId, MessageId } from "../../../shared/ids";
 import type { FactId, Holding, KnowledgeFact, KnowledgeSettings, KnowledgeTextId, MindsSlice } from "../../../shared/minds";
-import { fillText, knowledgeText, knowledgeTracked, liveLoreIdOfWiFact, parseFactId } from "../../../shared/minds";
+import { knowledgeLine, knowledgeTracked, liveLoreIdOfWiFact, parseFactId } from "../../../shared/minds";
 import { loreSourceOf } from "../../../shared/lore";
 import type { WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
@@ -92,13 +92,12 @@ export interface HoldingWords {
  * the narrator and the knowledge step, each the user's own wording where they set one.
  */
 export function holdingLine(claim: string, h: Holding, words: HoldingWords): string {
-  const text = (id: KnowledgeTextId): string => knowledgeText(words.texts, id);
-  const how = fillText(text(h.how), { by: h.by === null ? "" : words.nameOf(h.by) });
+  const how = knowledgeLine(words.texts, h.how, { by: h.by === null ? "" : words.nameOf(h.by) });
   const template: KnowledgeTextId = h.belief === "false" ? "disbelieved" : h.belief === "uncertain" ? "unsure" : isSuspicion(h, words.threshold) ? "suspected" : "known";
-  const line = fillText(text(template), { claim, how, percent: String(Math.round(h.confidence * 100)) });
+  const line = knowledgeLine(words.texts, template, { claim, how, percent: String(Math.round(h.confidence * 100)) });
   if (h.keptFrom === undefined) return line;
-  const whom = h.keptFrom === "everyone" ? text("everyone") : h.keptFrom.map(words.nameOf).join(", ");
-  return `${line}; ${fillText(text("keeps"), { whom })}`;
+  const whom = h.keptFrom === "everyone" ? knowledgeLine(words.texts, "everyone") : h.keptFrom.map(words.nameOf).join(", ");
+  return `${line}; ${knowledgeLine(words.texts, "keeps", { whom })}`;
 }
 
 /**
