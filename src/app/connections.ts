@@ -379,7 +379,12 @@ export function connectionRoutes(api: ConnectionsApi, checks: TagChecks, owner: 
       handle: async ({ params, signal }) => {
         const user = owner();
         const test = await api.test(user, params.id, signal);
-        if (!test.ok) return { ...test, limits: null };
+        if (!test.ok) {
+          // A test that fails is said in the log, with the connection by its name and what its provider said (its key taken out).
+          const name = (await api.list(user)).connections.find((c) => c.id === params.id)?.name ?? params.id;
+          log.warn(`The test of the connection ${name} failed: ${test.error}`, { connection: name, error: test.error });
+          return { ...test, limits: null };
+        }
         const read = await limitsOf(api, log, user, params.id, test.model);
         return { ...test, limits: read.limits, limitsProblem: read.problem };
       },

@@ -32,8 +32,15 @@ import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
 import type { AnyShape, CallAuth, DeclaredRoute, FormProblem, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
 import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
+import { RefusedSignIns } from "./refusals";
+import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
 import type { ChatNamedHook } from "./hooks";
+
+/** The address a request came from, as the socket says it; words for where none can be read. */
+function addressOf(server: Server<LiveSocketData> | null, request: Request): string {
+  return server?.requestIP(request)?.address ?? "an address RPE could not read";
+}
 
 /** A route whose path names a chat first: the chat is taken on before it answers. */
 const CHAT_ROUTE = /^\/api\/v1\/chats\/:chat(\/|$)/;
@@ -315,6 +322,7 @@ async function answerDeclared(route: DeclaredRoute<any, any, any, any, any, any>
 
 export function startServer(parts: ServerParts): RunningServer {
   const { config, auth, log } = parts;
+  const refused = new RefusedSignIns({ log, seconds: config.auth.refusedSignInSeconds });
   const table = parts.routes.fix();
   // Made at each start and kept nowhere: a cursor is good for the server that gave it.
   const cursorKey = randomBytes(32);
@@ -362,7 +370,11 @@ export function startServer(parts: ServerParts): RunningServer {
     // route is the owner's own call: only his account can open it.
     const user = auth.owner;
     const call = auth.answer(route.access, credentialOf(request), on);
-    if (call === null) return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "page" | "provider" | "extension"]), origin);
+    if (call === null) {
+      // A token RPE does not accept on a page's call is told in the log, by the address it came from and never the token.
+      if (route.access === "page" && on === "tcp") refused.refused(addressOf(server, request), "token");
+      return withCors(refusal(path, 401, ACCESS_WORDS[route.access as "page" | "provider" | "extension"]), origin);
+    }
     // Every request's body is held to its route's limit, whatever its method. Bun hands no route the body of a
     // GET or a HEAD, and no route takes one, so what such a request's headers say of a body refuses it.
     let bytes: Uint8Array<ArrayBuffer> | null = null;
@@ -400,6 +412,8 @@ export function startServer(parts: ServerParts): RunningServer {
       const asked: Asked = { path, params: rest === null ? params : { ...params, "*": rest.decoded ?? "" }, search: url.searchParams, user, auth: call, bytes, signal: request.signal, json: json(true), later };
       return withCors(await answerDeclared(route, asked, cursorKey), origin);
     } catch (error) {
+      // A Lumiverse sign-in that RPE or Lumiverse refused is told in the log, by the address it came from and never its password.
+      if (route.path === LUMIVERSE_SIGNIN_PATH && error instanceof RouteError && (error.status === 401 || error.status === 403 || error.status === 429)) refused.refused(addressOf(server, request), "account");
       return withCors(failure(error, path, at, placed.area), origin);
     }
   };
@@ -489,6 +503,7 @@ export function startServer(parts: ServerParts): RunningServer {
     loopback: `http://127.0.0.1:${listening}`,
     commandSocket: socket,
     stop: async () => {
+      refused.flush();
       await Promise.all([server.stop(true), beside?.stop(true), command?.stop(true)]);
     },
   };

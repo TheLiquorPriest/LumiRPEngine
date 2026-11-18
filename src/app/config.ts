@@ -142,6 +142,8 @@ export interface AppConfig {
     signInTries: number;
     /** How long RPE sends no password to Lumiverse after `signInTries` wrong ones, in minutes. */
     signInPauseMinutes: number;
+    /** Seconds over which the sign-ins to the web app that one address was refused are told as one line of the log, with their count. */
+    refusedSignInSeconds: number;
   };
   live: {
     /** Events held for one slow reader of one chat; past it the oldest it has not taken are dropped, and it is told which. */
@@ -219,7 +221,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   origins: [],
   hosts: [],
   server: { bodyBytes: 1024 * 1024, providerBodyBytes: 32 * 1024 * 1024, preflightSeconds: 600, workerParseBytes: 1024 * 1024, idleSeconds: 60, headroomBytes: 1024 * 1024, answerKeepSeconds: 300 },
-  auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null, webSessionMinutes: 30, nonceSeconds: 60, signInTries: 4, signInPauseMinutes: 15 },
+  auth: { pageTokenMinutes: 30, commandLineSeconds: 60, webKeyDays: null, webSessionMinutes: 30, nonceSeconds: 60, signInTries: 4, signInPauseMinutes: 15, refusedSignInSeconds: 60 },
   live: { queueEvents: 512, messageBytes: 64 * 1024, follows: 64, chatIdChars: 200, sockets: 64 },
   database: { busyMs: 5000, sliceMs: 10, copiesKept: 3, pieceBytes: 1024 * 1024 },
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
@@ -262,6 +264,7 @@ export const SERVER_SETTING_DEFS = {
   nonceSeconds: { key: "auth.nonceSeconds", default: D.auth.nonceSeconds, takes: whole(1), advice: [{ above: 3600, says: "RPE remembers every page's nonces for over an hour." }], levels: GLOBAL, perConnection: false, name: "A page's nonce is remembered", about: "Seconds RPE remembers a nonce a page sent for its proof that this is RPE; the same nonce is not answered twice within them.", effect: "start" },
   signInTries: { key: "auth.signInTries", default: D.auth.signInTries, takes: whole(1), advice: [{ above: 4, says: "Lumiverse locks RPE's own address out after 5 wrong passwords." }], levels: GLOBAL, perConnection: false, name: "Wrong Lumiverse passwords tried", about: "Wrong Lumiverse passwords RPE sends Lumiverse before it pauses; at most 4, below the 5 after which Lumiverse locks RPE's own address out.", effect: "start" },
   signInPauseMinutes: { key: "auth.signInPauseMinutes", default: D.auth.signInPauseMinutes, takes: whole(1), advice: [{ above: 24 * 60, says: "After wrong passwords RPE sends Lumiverse none for over a day." }], levels: GLOBAL, perConnection: false, name: "Pause after wrong Lumiverse passwords", about: "Minutes RPE sends Lumiverse no password after the wrong ones the setting before allows.", effect: "start" },
+  refusedSignInSeconds: { key: "auth.refusedSignInSeconds", default: D.auth.refusedSignInSeconds, takes: whole(1), advice: [{ above: 24 * 3600, says: "A sign-in that was refused is told in the log only after over a day." }], levels: GLOBAL, perConnection: false, name: "Refused sign-ins in one log line", about: "Seconds over which the sign-ins to the web app that one address was refused are told in one line of RPE's log, with how many there were.", effect: "start" },
   queueEvents: { key: "liveSocket.queueEvents", default: D.live.queueEvents, takes: whole(1), advice: [{ above: 1_000_000, says: "Over a million events are held in RPE's memory for one slow page." }], levels: GLOBAL, perConnection: false, name: "Events held for a slow page", about: "Events the live socket holds for one slow page following one chat; past it the oldest are dropped, and the page is told which.", effect: "start" },
   messageBytes: { key: "liveSocket.maxMessageBytes", default: D.live.messageBytes, takes: whole(1), advice: [{ below: 256, says: "A page's own messages on the live socket (a follow, a renewal) take up to 256 bytes, and are refused." }, { above: 16 * 1024 * 1024, says: "A page may send a message this large, held whole in memory." }], levels: GLOBAL, perConnection: false, name: "Largest live message", about: "Bytes of the largest message a page may send on the live socket.", effect: "start" },
   follows: { key: "liveSocket.maxFollows", default: D.live.follows, takes: whole(1), advice: [{ above: 100_000, says: "One page may follow over 100,000 chats at once." }], levels: GLOBAL, perConnection: false, name: "Chats one live socket follows", about: "The most chats one page's live socket may follow at once; your jobs and your own events count as one each.", effect: "start" },
@@ -423,7 +426,7 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     origins: checkedSetting(read, s.origins, listOf(origin), D.origins, log),
     hosts: checkedSetting(read, s.hosts, listOf(hostName), D.hosts, log),
     server: { bodyBytes: n(s.bodyBytes), providerBodyBytes: n(s.providerBodyBytes), preflightSeconds: n(s.preflightSeconds), workerParseBytes: n(s.workerParseBytes), idleSeconds: n(s.idleSeconds), headroomBytes: n(s.headroomBytes), answerKeepSeconds: n(s.answerKeepSeconds) },
-    auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null, webSessionMinutes: n(s.webSessionMinutes), nonceSeconds: n(s.nonceSeconds), signInTries: n(s.signInTries), signInPauseMinutes: n(s.signInPauseMinutes) },
+    auth: { pageTokenMinutes: n(s.pageTokenMinutes), commandLineSeconds: n(s.commandLineSeconds), webKeyDays: read.value(s.webKeyDays) as number | null, webSessionMinutes: n(s.webSessionMinutes), nonceSeconds: n(s.nonceSeconds), signInTries: n(s.signInTries), signInPauseMinutes: n(s.signInPauseMinutes), refusedSignInSeconds: n(s.refusedSignInSeconds) },
     live: { queueEvents: n(s.queueEvents), messageBytes: n(s.messageBytes), follows: n(s.follows), chatIdChars: n(s.chatIdChars), sockets: n(s.sockets) },
     database: { busyMs: n(s.busyMs), sliceMs: n(s.sliceMs), copiesKept: n(s.copiesKept), pieceBytes: n(s.pieceBytes) },
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
@@ -529,8 +532,8 @@ export function configOf(raw: unknown, env: Env, where: string, limits: AppLimit
     ],
   });
   // The web sessions' own settings were never in config.json: they are the settings' alone.
-  const { webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes } = l.auth;
-  const config: AppConfig = { ...read, auth: { ...read.auth, webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes }, service: structuredClone(l.service), switches: { ...l.switches }, workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
+  const { webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes, refusedSignInSeconds } = l.auth;
+  const config: AppConfig = { ...read, auth: { ...read.auth, webSessionMinutes, nonceSeconds, signInTries, signInPauseMinutes, refusedSignInSeconds }, service: structuredClone(l.service), switches: { ...l.switches }, workers: { ...l.workers }, index: { ...l.index }, fromEnvironment: [] };
   const set = (name: string): string | undefined => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;

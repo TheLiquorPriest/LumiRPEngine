@@ -705,6 +705,7 @@ The server, sign-in and tokens, the database, the command line, the service and 
 | `auth.nonceSeconds` | `60` seconds | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | A page's nonce is remembered: Seconds RPE remembers a nonce a page sent for its proof that this is RPE; the same nonce is not answered twice within them. Above 3600: RPE remembers every page's nonces for over an hour. |
 | `auth.signInTries` | `4` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Wrong Lumiverse passwords tried: Wrong Lumiverse passwords RPE sends Lumiverse before it pauses; at most 4, below the 5 after which Lumiverse locks RPE's own address out. Above 4: Lumiverse locks RPE's own address out after 5 wrong passwords. |
 | `auth.signInPauseMinutes` | `15` minutes | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Pause after wrong Lumiverse passwords: Minutes RPE sends Lumiverse no password after the wrong ones the setting before allows. Above 1440: After wrong passwords RPE sends Lumiverse none for over a day. |
+| `auth.refusedSignInSeconds` | `60` seconds | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Refused sign-ins in one log line: Seconds over which the sign-ins to the web app that one address was refused are told in one line of RPE's log, with how many there were. Above 86400: A sign-in that was refused is told in the log only after over a day. |
 
 ### The live socket
 
