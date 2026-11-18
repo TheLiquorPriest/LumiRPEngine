@@ -1,5 +1,6 @@
 ---
 description: dream as the model is told it - what the tool does, and what each of its arguments is.
+doing: dreaming
 arguments:
   keep: "The ids of memories that mattered: each weighs more, and fades more slowly."
   fade: "The ids of memories to let fade at once: each keeps only part of its strength."

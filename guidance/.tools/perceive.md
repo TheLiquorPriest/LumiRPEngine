@@ -1,5 +1,6 @@
 ---
 description: perceive as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing down what reached each character
 arguments:
   perceptions: The perceptions, written in order, in one write.
   perceptions.who: "The character, by name or id. Someone the cast does not hold yet is added, not yet cast."

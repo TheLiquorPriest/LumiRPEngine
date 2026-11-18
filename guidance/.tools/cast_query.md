@@ -1,5 +1,6 @@
 ---
 description: cast_query as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking up a character's record
 arguments:
   who: "The character, by name or id. Leave it out for who is in the cast, and as what; with part knowledge, for who knows what the words or the secret name."
   part: "Which part: sources, base, casting, growth, mind, relationships, knowledge, history, perceptions, or away (where a principal out of view is and what it means to do). Leave it out for every part."

@@ -1,5 +1,6 @@
 ---
 description: cast_update as the model is told it - what the tool does, and what each of its arguments is.
+doing: updating a character's record
 arguments:
   operations: The operations, written in order, in one write.
   operations.op: "The operation: cast, bind, base, growth, history, relationship, away, knowledge or filed."

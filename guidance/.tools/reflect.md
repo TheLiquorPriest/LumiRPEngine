@@ -1,5 +1,6 @@
 ---
 description: reflect as the model is told it - what the tool does, and what each of its arguments is.
+doing: reflecting on what happened
 arguments:
   from: "The ids of the memories it comes from."
   text: "The realization, in your own words."

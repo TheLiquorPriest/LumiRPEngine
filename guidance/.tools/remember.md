@@ -1,5 +1,6 @@
 ---
 description: remember as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing down memories
 arguments:
   memories: The memories, written in order, in one write.
   memories.id: "A memory of yours to change, by its id. Leave it out to make a new one."
