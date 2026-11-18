@@ -50,7 +50,7 @@ export function openingBalances(entity: EntityId, ctx: ReadContext, claimed?: Se
   if (lines.length > 0) {
     const total = lines.reduce((a, l) => a + l.amount, 0);
     const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
-    if (all.length >= 2) out.push({ type: "post", lines: all, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
+    if (all.length >= 2) out.push({ type: "post", lines: all, memo: say("memo_opening_balances") }, { type: FINANCE_EVENTS.txn, data: { memo: say("memo_opening_balance"), kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
   }
   if (closed.length > 0) out.push({ type: FINANCE_EVENTS.open, data: { accounts: closed } });
   return out;
@@ -228,7 +228,7 @@ export function materializeMoney(entity: EntityId, ctx: ReadContext, rng: Rng, v
     { account: id("card"), amount: -owed },
   ].filter((l) => l.amount !== 0);
   const total = lines.reduce((a, l) => a + l.amount, 0);
-  if (lines.length > 0) out.push({ type: "post", lines: [...lines, { account: ext, amount: -total }], memo: "Opening balances" });
+  if (lines.length > 0) out.push({ type: "post", lines: [...lines, { account: ext, amount: -total }], memo: say("memo_opening_balances") });
   out.push({ type: FINANCE_EVENTS.open, data: { accounts: [id("cash"), id("checking"), id("savings"), id("card")] } });
   return out;
 }

@@ -235,8 +235,8 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
   if (!to) return reject("no_account", say("why_party_has_no_account_the_money_could", { party: labelOf(ctx, x.party) }));
   const unusable = api.mayUse(ctx, x.party, to, "into");
   if (unusable) return unusable;
-  const part = `${units !== undefined ? `${units} units (${Math.round(share * 100) / 100}%)` : `${Math.round(share * 100) / 100}%`} of ${name}`;
-  const memo = price > 0 ? `Sold ${part} for ${formatMoney(price, ctx.world.currency)}` : `Gave ${part} away`;
+  const part = say(units !== undefined ? "memo_part_units" : "memo_part_share", { units, pct: Math.round(share * 100) / 100, name });
+  const memo = price > 0 ? say("memo_sold_part_for", { part, price: formatMoney(price, ctx.world.currency) }) : say("memo_gave_part_away", { part });
   const events: LedgerEvent[] = [];
   if (price > 0) {
     const paid = x.buyer ? api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "investment" }) : api.post(ctx, [{ account: api.outside(`buyer:${x.business}`), amount: -price }, { account: to, amount: price }], { memo, kind: "sale", category: "investment" });

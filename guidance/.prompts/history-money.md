@@ -2,6 +2,7 @@
 description: The sentences the money writes into the chat's history and the world's notices - a credit decision, a card's statement and each stage of a late payment, a standing payment that went out, came in or did not go through, a loan paid off, a payday and its payslip, a late invoice, a bond or an option at its end, a project's step that waits for its money, and the lines of the money summary and the books (accounts, prices, taxes, dividends, a business's sales and draws, an asset's depreciation). One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
+  memo_*: the memo written into the books with a posting (a deposit, a fee, a bill paid, a sale, a tax, a share out, an opening balance, a reversal) - each is filled with what it names
   credit_approved: an application for credit that was approved - product, apr (absent where no rate), limit (absent where none)
   credit_declined: an application for credit that was declined - product, reason (one of the credit_why lines)
   credit_why_charged_off: why, when a recent charge-off is on the report
@@ -140,3 +141,63 @@ cash_rule_machine: In this chat, cash needs a machine or a branch
 cash_rule_free: In this chat, cash needs no machine
 asset_closed: {{asset}} closed {{on}} at {{price}}
 asset_month_end: {{asset}}'s month-end closes
+memo_cash_deposit_where: Cash deposit{{where}}
+memo_cash_deposit: Cash deposit
+memo_name_loan_paid_out: {{name}}: loan paid out
+memo_name_replacement: {{name}} replacement
+memo_walk_in_customers: Walk-in customers
+memo_walk_in_takings: Walk-in takings
+memo_sales_tax: Sales tax
+memo_trust_distribution: Trust distribution
+memo_profit_distribution: Profit distribution
+memo_suppliers: Suppliers
+memo_invoice_memo: Invoice: {{memo}}
+memo_owner_s_draw: Owner's draw
+memo_name_cash_advance_interest: {{name}} cash advance interest
+memo_name_annual_fee: {{name}} annual fee
+memo_name_late_fee: {{name}} late fee
+memo_name_monthly_fee: {{name}} monthly fee
+memo_name_interest: {{name}} interest
+memo_name_rewards: {{name}} rewards
+memo_returned_payment_fee: Returned payment fee
+memo_opening_balance_changed: Opening balance changed
+memo_living_costs: Living costs
+memo_correction: Correction
+memo_payment: Payment
+memo_transfer: Transfer
+memo_loan_payment_received: {{loan}}: payment received
+memo_overdraft_transfer_from_link: Overdraft transfer from {{link}}
+memo_overdraft_fee: Overdraft fee
+memo_cash_advance_fee: Cash advance fee
+memo_cash_you_said_you_had: Cash you said you had
+memo_opening_balances: Opening balances
+memo_opening_balance: Opening balance
+memo_name_mortgage_paid_off: {{name}}: mortgage paid off
+memo_bought_memo: Bought {{memo}}
+memo_share_out_from_org: Share out from {{org}}
+memo_unemployment_tax: Unemployment tax
+memo_corporate_income_tax: Corporate income tax
+memo_foundation_excise_tax_year: Foundation excise tax, {{year}}
+memo_lent_money_to_borrowername: Lent {{money}} to {{borrowerName}}
+memo_borrowed_money_from_lendername: Borrowed {{money}} from {{lenderName}}
+memo_bought_name_for_price: Bought {{name}} for {{price}}
+memo_label_strike_for_units_under: {{label}}: {{strike}} for {{units}} {{under}}
+memo_memo_refunded: {{memo}} refunded
+memo_memo_reversed: {{memo}} reversed
+memo_cash_withdrawal: Cash withdrawal{{#where}} {{where}}{{/where}}{{#fees}} ({{fees}} in fees){{/fees}}
+memo_business_invoice: {{business}} invoice
+memo_payroll_gross_withheld: Payroll: {{gross}} gross, {{withheld}} withheld
+memo_payroll: Payroll
+memo_grant_to: Grant to {{to}}
+memo_donation_to: Donation to {{to}}
+memo_name_kind_reinvested: {{name}} {{kind}} reinvested: {{amount}}
+memo_stolen_with: Stolen with {{item}}
+memo_lost_with: Lost with {{item}}
+memo_memo_paid_from_instead: {{memo}}: paid from {{from}} instead
+memo_part_units: {{units}} units ({{pct}}%) of {{name}}
+memo_part_share: {{pct}}% of {{name}}
+memo_sold_part_for: Sold {{part}} for {{price}}
+memo_gave_part_away: Gave {{part}} away
+memo_penalty_year: {{tax}}, {{year}}
+memo_invoice: Invoice
+memo_sale: Sale

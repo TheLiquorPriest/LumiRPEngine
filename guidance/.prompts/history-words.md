@@ -2,6 +2,7 @@
 description: The single words and phrases the other lines are filled with, and the joiners of a list - a delinquency stage, an account's status, an entry on a credit report, a pay basis, what was done to a card or a standing payment, a party tier, how a holding is held and believed, whose a line is, an organization's type, a role, how a thing is worn, a season's mood, where a fact came from, how a party tier is treated, what a vote or an answer says, and how a motion ended. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
+  word_penalty_*: the tax named in a penalty tax's memo (word_penalty_phc, word_penalty_aet)
   list_and: how a list is read, the last item after the others - head (the others, with commas), last; list_or reads a choice the same way
   word_*, mind_how_*, mind_belief_*: the single words and phrases the lines above are filled with (a delinquency stage, an account's status, an entry on a credit report, a pay basis, what was done to a card or a standing payment, a party tier, how a holding is held and believed, whose a line is)
 ---
@@ -94,3 +95,5 @@ word_tier_ally: party ally
 word_whose_you: Your
 word_whose: {{name}}'s
 list_or: {{head}} or {{last}}
+word_penalty_phc: Personal holding company tax
+word_penalty_aet: Accumulated earnings tax

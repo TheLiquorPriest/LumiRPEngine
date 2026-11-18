@@ -186,8 +186,8 @@ function walkInPosting(ctx: ReadContext, api: FinanceApi, business: EntityId, at
     { account: api.outside(`customers:${business}`), amount: -(cents + tax) },
     { account: deposit, amount: cents + tax },
   ];
-  const extra: LedgerEvent[] = [{ type: "economy.sale", data: { business, cents, tax, cogs: Math.round((cents * (100 - marginOf(ctx.state, business))) / 100), takings: 0, payer: "", memo: "Walk-in customers", category: "sales", walkin: true } }, ...commissions(ctx, business, cents, worked)];
-  return { cents: cents + tax, lines, memo: "Walk-in takings", kind: "sale", category: "sales", extra };
+  const extra: LedgerEvent[] = [{ type: "economy.sale", data: { business, cents, tax, cogs: Math.round((cents * (100 - marginOf(ctx.state, business))) / 100), takings: 0, payer: "", memo: say("memo_walk_in_customers"), category: "sales", walkin: true } }, ...commissions(ctx, business, cents, worked)];
+  return { cents: cents + tax, lines, memo: say("memo_walk_in_takings"), kind: "sale", category: "sales", extra };
 }
 
 /** The monthly payments that settle a business's payables: its suppliers on the 10th, the sales tax it collected on the 20th. */
@@ -207,7 +207,7 @@ export function settlePosting(ctx: ReadContext, api: FinanceApi, business: Entit
   const cents = payablesOf(ctx.state, business)[what];
   if (!deposit || cents <= 0) return null;
   const to = what === "sales_tax" ? salesTaxAccount(api, taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)) : api.outside(`suppliers:${business}`);
-  return { cents, lines: [{ account: deposit, amount: -cents }, { account: to, amount: cents }], memo: what === "sales_tax" ? "Sales tax" : "Suppliers", kind: "payment", category: what === "sales_tax" ? "sales_tax" : "cogs", extra: [{ type: "economy.remit", data: { business, what, cents } }] };
+  return { cents, lines: [{ account: deposit, amount: -cents }, { account: to, amount: cents }], memo: what === "sales_tax" ? say("memo_sales_tax") : say("memo_suppliers"), kind: "payment", category: what === "sales_tax" ? "sales_tax" : "cogs", extra: [{ type: "economy.remit", data: { business, what, cents } }] };
 }
 
 // ---------------------------------------------------------------- invoices
@@ -248,7 +248,7 @@ export function readInvoice(ctx: Pick<ReadContext, "registry" | "world" | "state
   const lateFee = Math.max(0, Math.round(numOf(f.late_fee)));
   const paid = Math.max(0, Math.round(numOf(f.paid)));
   const party = customer !== "" && own(ctx.state.entities, customer) && !isGone(ctx.state, customer) ? customer : null;
-  return { id, business, customer, party, cents, memo: strOf(f.memo, "Invoice"), issued, due, state, paid, late_fee: lateFee, left: state === "open" || state === "late" ? Math.max(0, cents + lateFee - paid) : 0, fees: Math.round(numOf(f.fees)) };
+  return { id, business, customer, party, cents, memo: strOf(f.memo, say("memo_invoice")), issued, due, state, paid, late_fee: lateFee, left: state === "open" || state === "late" ? Math.max(0, cents + lateFee - paid) : 0, fees: Math.round(numOf(f.fees)) };
 }
 
 export function invoiceIds(ctx: Pick<ReadContext, "registry" | "world" | "state">): EntityId[] {
@@ -374,7 +374,7 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
     const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
     const cal = calendarOf(ctx.world);
     const due = dateText(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
-    const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
+    const memo = strOf(args.memo).trim() || say("memo_business_invoice", { business: labelOf(ctx, business) });
     const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
     const entity: EntityDef = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
     return [{ type: "spawn", entity }];
@@ -392,7 +392,7 @@ function payInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   const deposit = operatingAccount(api, ctx, inv.business);
   return actAs(ctx, { by, party: inv.party ?? payer, power: "money.spend", amount: inv.left, line: () => say("org_log_paid_business_s_invoice_for_left", { business: labelOf(ctx, inv.business), left: moneyWords(ctx, inv.left) }), names: [inv.business] }, () => {
     if (by !== "" && inv.party && by !== inv.party && api.paysFor(ctx, by, inv.business, inv.party, deposit ?? undefined)) return reject("not_owner", say("why_party_pays_for_itself_not_for_pov", { party: shownLabel(ctx, ctx.world.pov, inv.party), pov: shownLabel(ctx, ctx.world.pov, by) }));
-    const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", payer });
+    const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: say("memo_invoice_memo", { memo: inv.memo }), kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: say("memo_invoice_memo", { memo: inv.memo }), kind: "payment", category: "invoice", payer });
     if (!Array.isArray(paid)) return paid;
     return unit(paid, invoiceSettled(inv, inv.left));
   });
@@ -447,7 +447,7 @@ function ownerDraw(ctx: EffectContext, api: FinanceApi, args: Record<string, Jso
   if (!(cents > 0)) return reject("bad_amount", say("why_a_draw_needs_an_amount"));
   const from = operatingAccount(api, ctx, business);
   if (!from) return reject("no_account", say("why_business_has_no_account_to_draw_on", { business: labelOf(ctx, business) }));
-  const paid = api.pay(ctx, { from, to: owner, cents, memo: "Owner's draw", kind: "income", category: "draw" });
+  const paid = api.pay(ctx, { from, to: owner, cents, memo: say("memo_owner_s_draw"), kind: "income", category: "draw" });
   if (!Array.isArray(paid)) return paid;
   return unit(paid, [{ type: "economy.payout", data: { business, what: "draw", cents } }]);
 }
@@ -545,7 +545,7 @@ function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
     if (!d) return reject("no_owners", trust ? say("why_business_has_no_beneficiaries_with_a_share", { business: labelOf(ctx, business) }) : say("why_business_has_no_owners_with_a_share", { business: labelOf(ctx, business) }));
     total = d.paid;
     if (d.lines.length === 0) return d.extra;
-    const posted = api.post(ctx, d.lines, { memo: trust ? "Trust distribution" : "Profit distribution", kind: "income", category: "distribution" });
+    const posted = api.post(ctx, d.lines, { memo: trust ? say("memo_trust_distribution") : say("memo_profit_distribution"), kind: "income", category: "distribution" });
     if (!Array.isArray(posted)) return posted;
     return unit(posted, d.extra);
   });
@@ -636,7 +636,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const sales: JournalLine[] = (Array.isArray(salesList) ? salesList : [])
     .map((raw, i) => ({ raw: objOf(raw), i }))
     .reverse()
-    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
+    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, say("memo_sale")), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
   const invoices = allInvoices(ctx)
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
@@ -729,7 +729,7 @@ export function registerBusiness(r: FinanceRegistry): void {
   r.amount("invoice", (ctx, flow) => {
     const inv = readInvoice(ctx, strOf("provider" in flow.amount ? objOf(flow.amount.args).invoice : undefined, flow.link ?? ""));
     if (!inv || inv.left <= 0) return null;
-    return { cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", extra: invoiceSettled(inv, inv.left) };
+    return { cents: inv.left, memo: say("memo_invoice_memo", { memo: inv.memo }), kind: "payment", category: "invoice", extra: invoiceSettled(inv, inv.left) };
   });
   r.amount("distribution", (ctx, flow, at) => {
     const business = strOf("provider" in flow.amount ? objOf(flow.amount.args).business : undefined, flow.link ?? "");
@@ -737,7 +737,7 @@ export function registerBusiness(r: FinanceRegistry): void {
     if (!f) return null;
     const period = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
     const d = distribution(ctx, api, business, undistributed(api, ctx, business, period.from, period.to, numOf(f.distribution_pct)));
-    return d ? { cents: d.paid, lines: d.lines, memo: "Profit distribution", kind: "income", category: "distribution", extra: d.extra } : null;
+    return d ? { cents: d.paid, lines: d.lines, memo: say("memo_profit_distribution"), kind: "income", category: "distribution", extra: d.extra } : null;
   });
   core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
 

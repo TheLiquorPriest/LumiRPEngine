@@ -116,8 +116,8 @@ function lendNow(api: FinanceApi, ctx: ReadContext, a: Record<string, JsonValue>
     { type: "spawn", entity: { id: note, kind: "account", name: `Loan to ${borrowerName}`, tier: "background", fields: noteFields, relations: [] } },
     { type: "spawn", entity: { id: loan, kind: "account", name: `Loan from ${lenderName}`, tier: "background", fields: loanFields, relations: [] } },
     { type: FINANCE_EVENTS.open, data: { accounts: [note, loan] } },
-    ...posting([{ account: source, amount: -cents }, { account: note, amount: cents }], { memo: `Lent ${money} to ${borrowerName}`, kind: "transfer", category: "lending", counterparty: borrower, payer: lender }),
-    ...posting([{ account: loan, amount: -cents }, { account: into, amount: cents }], { memo: `Borrowed ${money} from ${lenderName}`, kind: "deposit", category: "loan", counterparty: borrower, payer: lender }),
+    ...posting([{ account: source, amount: -cents }, { account: note, amount: cents }], { memo: say("memo_lent_money_to_borrowername", { money, borrowerName }), kind: "transfer", category: "lending", counterparty: borrower, payer: lender }),
+    ...posting([{ account: loan, amount: -cents }, { account: into, amount: cents }], { memo: say("memo_borrowed_money_from_lendername", { money, lenderName }), kind: "deposit", category: "loan", counterparty: borrower, payer: lender }),
   ];
   // Whoever acts for an organization borrowing must hold its `money.borrow`; its History tells it.
   const borrowed = borrows ? actAs(ctx, { by, party: borrower, power: "money.borrow", line: () => say("org_log_borrowed_money_from_lendername", { money: money, lenderName: lenderName }), names: [lender] }, () => []) : [];
@@ -143,7 +143,7 @@ export function sweepNote(run: Run, note: EntityId, at: number): void {
     const named = strOf(own(ctx.state.entities, note)?.fields.collect_into);
     const into = named !== "" && statusOf(ctx.state, named) !== "closed" && holdersOf(ctx.state, named).includes(lender) ? named : depositAccount(ctx, lender);
     if (into === null) return;
-    run.emit(asUnit(posting([{ account: note, amount: -paid }, { account: into, amount: paid }], { memo: `${labelOf(ctx, loan)}: payment received`, kind: "payment", category: "lending", counterparty: lender, payer: borrower, at })));
+    run.emit(asUnit(posting([{ account: note, amount: -paid }, { account: into, amount: paid }], { memo: say("memo_loan_payment_received", { loan: labelOf(ctx, loan) }), kind: "payment", category: "lending", counterparty: lender, payer: borrower, at })));
   }
   if (owed > 0 || balance(run.ctx.state, note) > 0) return;
   run.emit([

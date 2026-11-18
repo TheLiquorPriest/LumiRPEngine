@@ -532,7 +532,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
       const inv = readInvoice(w.ctx, id);
       if (!inv || inv.party !== business || inv.left <= 0) continue;
       const deposit = operatingAccount(api, w.ctx, inv.business);
-      const paid = api.pay(w.ctx, { from: gather, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) });
+      const paid = api.pay(w.ctx, { from: gather, to: inv.business, cents: inv.left, memo: say("memo_invoice_memo", { memo: inv.memo }), kind: "payment", category: "invoice", method: "account", ...(deposit ? { deposit } : {}) });
       const failed = isRejection(paid) ? paid : applied(w, [...paid, ...invoiceSettled(inv, inv.left)]);
       if (failed) return failed;
     }
@@ -789,7 +789,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   const due = optionalService(w.ctx, "economy.unemployment_due")?.(w.ctx, business) ?? null;
   if (due && due.cents > 0) {
     // Booked as payroll by the payment's own record, as the quarterly flow books it.
-    const posted = api.post(w.ctx, due.lines, { memo: "Unemployment tax", kind: "payment", category: "payroll" });
+    const posted = api.post(w.ctx, due.lines, { memo: say("memo_unemployment_tax"), kind: "payment", category: "payroll" });
     if (isRejection(posted)) return reject("insolvent", say("why_name_cant_pay_its_unemployment_tax_cents", { name: name, cents: money(due.cents) }));
     const failed = applied(w, [...posted, ...due.events]);
     if (failed) return failed;
@@ -798,7 +798,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   const tax = taxStillOwed(api, w.ctx, business);
   if (tax) {
     const from = gatheringAccount(api, w.ctx, business);
-    const posted = from ? api.post(w.ctx, [{ account: from, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], { memo: "Corporate income tax", kind: "payment", category: "business_tax" }) : null;
+    const posted = from ? api.post(w.ctx, [{ account: from, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], { memo: say("memo_corporate_income_tax"), kind: "payment", category: "business_tax" }) : null;
     if (!posted || isRejection(posted)) return reject("insolvent", say("why_name_cant_pay_its_income_tax_cents", { name: name, cents: money(tax.cents) }));
     const failed = applied(w, [...posted, ...tax.extra]);
     if (failed) return failed;

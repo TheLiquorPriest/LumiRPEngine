@@ -177,7 +177,7 @@ function donateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string, Jso
   const grant = isGrant(ctx, to);
   const method = strOf(a.method);
   // The memo is the caller's words (an agent's tool gives them from its files); a player's own gift keeps the engine's.
-  const memo = typeof a.memo === "string" ? a.memo : `${grant ? "Grant" : "Donation"} to ${labelOf(ctx, to)}`;
+  const memo = typeof a.memo === "string" ? a.memo : say(grant ? "memo_grant_to" : "memo_donation_to", { to: labelOf(ctx, to) });
   return actAs(ctx, { by, party: from, power: "money.spend", target: to, amount: cents, line: () => say("org_log_grantedgave_to_cents", { to: labelOf(ctx, to), cents: moneyWords(ctx, cents), if_grant: !!(grant) }), names: [to] }, () => {
     const itself = from === to;
     const paid = itself ? [] : api.pay(ctx, { from, to, cents, memo, kind: "payment", category: "donations", ...(method !== "" ? { method } : {}) });

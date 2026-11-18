@@ -528,7 +528,7 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
     disposals.push(disposal(x.property, s.party, 100, Math.round((price * (shares[s.party] ?? 0)) / 100), `Sold ${e.name}`));
   });
   if (sellers.length === 0 && net > 0) lines.push({ account: api.outside(`seller:${x.property}`), amount: net });
-  const posted = api.post(ctx, lines.filter((l) => l.amount !== 0), { memo: `Bought ${e.name} for ${money(price)}`, kind: "purchase", category: "property" });
+  const posted = api.post(ctx, lines.filter((l) => l.amount !== 0), { memo: say("memo_bought_name_for_price", { name: e.name, price: money(price) }), kind: "purchase", category: "property" });
   if (isRejection(posted)) return posted;
   const today = dateText(ctx.world, ctx.state.clock);
   return unit([
@@ -565,7 +565,7 @@ function priceOwned(api: FinanceApi, ctx: EffectContext | ReadContext, x: { part
     { account: from, amount: -price },
     { account: api.outside(`seller:${x.property}`), amount: price },
   ];
-  const posted = api.post(ctx, lines, { memo: `Bought ${e.name} for ${formatMoney(price, ctx.world.currency)}`, kind: "purchase", category: "property" });
+  const posted = api.post(ctx, lines, { memo: say("memo_bought_name_for_price", { name: e.name, price: formatMoney(price, ctx.world.currency) }), kind: "purchase", category: "property" });
   if (isRejection(posted)) return posted;
   return unit([
     ...posted,
@@ -720,7 +720,7 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
     if (isRejection(paid)) return paid;
     events.push(...paid);
     if (owed > 0) {
-      const payoff = api.post(ctx, [{ account: to, amount: -owed }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))], { memo: `${e.name}: mortgage paid off`, kind: "payment", category: "property", unchecked: true });
+      const payoff = api.post(ctx, [{ account: to, amount: -owed }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))], { memo: say("memo_name_mortgage_paid_off", { name: e.name }), kind: "payment", category: "property", unchecked: true });
       if (isRejection(payoff)) return payoff;
       events.push(...payoff);
     }

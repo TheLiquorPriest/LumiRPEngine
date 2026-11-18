@@ -709,7 +709,7 @@ export function overdraftEvents(ctx: ReadContext, account: EntityId, total: numb
       { account: link, amount: -moved },
       { account, amount: moved },
     ];
-    return { before: posting(lines, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
+    return { before: posting(lines, { memo: say("memo_overdraft_transfer_from_link", { link: labelOf(ctx, link) }), kind: "transfer", category: "transfer", at }), after: [] };
   }
   const fee = accountFeature(ctx, account, "fees") && overdraftFeesToday(ctx, account) < 3 ? p.fees.overdraft : 0;
   if (fee <= 0) return { before: [], after: [] };
@@ -717,7 +717,7 @@ export function overdraftEvents(ctx: ReadContext, account: EntityId, total: numb
     { account, amount: -fee },
     { account: bankSide(p.institution), amount: fee },
   ];
-  return { before: [], after: posting(lines, { memo: "Overdraft fee", kind: "fee", category: "overdraft", at }) };
+  return { before: [], after: posting(lines, { memo: say("memo_overdraft_fee"), kind: "fee", category: "overdraft", at }) };
 }
 
 /** What a sale at a till brings with it: the first sale hook that names a seller or tax there. */
@@ -884,8 +884,8 @@ function chargeGiven(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, raw
   if (opts.terms !== undefined) {
     const od = picked !== null ? overdraftEvents(ctx, source, cents + tax, at) : { before: [], after: [] };
     const advance = picked !== null && traitsOf(ctx, source)?.revolving === true && traitsOf(ctx, dest.account)?.liability !== true ? cashAdvanceFee(ctx, source, cents) : 0;
-    const fee = advance > 0 ? posting([{ account: source, amount: -advance }, { account: bankSide(productOf(ctx, source)?.institution ?? ""), amount: advance }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", at }) : [];
-    const taxed = tax > 0 ? posting([{ account: source, amount: -tax }, { account: sold?.taxAccount ?? dest.account, amount: tax }], { memo: "Sales tax", kind: "fee", category: "tax", payer, at }) : [];
+    const fee = advance > 0 ? posting([{ account: source, amount: -advance }, { account: bankSide(productOf(ctx, source)?.institution ?? ""), amount: advance }], { memo: say("memo_cash_advance_fee"), kind: "fee", category: "cash_advance", at }) : [];
+    const taxed = tax > 0 ? posting([{ account: source, amount: -tax }, { account: sold?.taxAccount ?? dest.account, amount: tax }], { memo: say("memo_sales_tax"), kind: "fee", category: "tax", payer, at }) : [];
     opts.terms.before.push(...asUnit(od.before), ...asUnit(fee));
     opts.terms.after.push(...asUnit(taxed), ...(sold?.extra ?? []), ...asUnit(od.after));
   }
@@ -968,7 +968,7 @@ export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: numb
     { account: to, amount: c },
   ];
   const p = productOf(ctx, from);
-  const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: "Cash advance fee", kind: "fee", category: "cash_advance", ...(opts.at !== undefined ? { at: opts.at } : {}) }) : [];
+  const charged = fee > 0 ? posting([{ account: from, amount: -fee }, { account: bankSide(p?.institution ?? ""), amount: fee }], { memo: say("memo_cash_advance_fee"), kind: "fee", category: "cash_advance", ...(opts.at !== undefined ? { at: opts.at } : {}) }) : [];
   const out: LedgerEvent[] = [...charged, { type: "post", lines, memo, ...(debt ? { overdraw: true as const } : {}) }];
   if (toTraits.liability) out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
   out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: advance ? "cash_advance" : "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.named ? { named: opts.named } : {}), ...(opts.story ? { story: true } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
@@ -1085,7 +1085,7 @@ export function loseWith(ctx: ReadContext, item: EntityId, thief?: EntityId): Le
     let inside = false;
     for (let cur: string | undefined = own(s.entities, id)?.relations.find((r) => r.type === "in")?.to, guard = 0; cur && guard < 16 && !inside; cur = own(s.entities, cur)?.relations.find((r) => r.type === "in")?.to, guard++) inside = cur === item;
     if (!inside) continue;
-    const memo = thief ? `Stolen with ${own(s.entities, item)?.name ?? item}` : `Lost with ${own(s.entities, item)?.name ?? item}`;
+    const memo = say(thief ? "memo_stolen_with" : "memo_lost_with", { item: own(s.entities, item)?.name ?? item });
     const dest = thief ? payeeSide(ctx, { payee: thief }, cents) : { account: external("lost"), extra: [] };
     const lines: PostingLine[] = [
       { account: id, amount: -cents },
@@ -1116,7 +1116,7 @@ export function setCash(ctx: ReadContext, holder: EntityId, cents: number): Ledg
     left += take;
   }
   lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
-  return asUnit(posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" }));
+  return asUnit(posting(lines, { memo: say("memo_correction"), kind: "adjustment", category: "correction" }));
 }
 
 /**
@@ -1133,7 +1133,7 @@ export function claimCash(ctx: ReadContext, holder: EntityId, cents: number): { 
     { account: into, amount: c },
     { account: CORRECTION_ACCOUNT, amount: -c },
   ];
-  return { entity: into, events: asUnit(posting(lines, { memo: "Cash you said you had", kind: "adjustment", category: "correction" })) };
+  return { entity: into, events: asUnit(posting(lines, { memo: say("memo_cash_you_said_you_had"), kind: "adjustment", category: "correction" })) };
 }
 
 /**
@@ -1269,7 +1269,7 @@ export function paidFrom(ctx: ReadContext, events: readonly LedgerEvent[], viewe
  */
 export function reversedAs(post: Pick<PostEvent, "lines" | "memo">): { memo: string; kind: TxnKind } {
   const fee = post.lines.some((l) => l.account.startsWith(BANK_PREFIX));
-  return { memo: `${post.memo} ${fee ? "refunded" : "reversed"}`, kind: fee ? "refund" : "transfer" };
+  return { memo: say(fee ? "memo_memo_refunded" : "memo_memo_reversed", { memo: post.memo }), kind: fee ? "refund" : "transfer" };
 }
 
 /**
@@ -1291,7 +1291,7 @@ export function otherWay(ctx: ReadContext, events: readonly LedgerEvent[]): { fr
   const ways = [...(paid.named ? idSources(ctx, paid.payer, paid.named, []) : []), ...(["savings", "card", "checking", "cash"] as const).flatMap((method) => sourcesToTry(ctx, paid.payer, paid.total, { method, till: true }, []))];
   const way = ways.find((s) => !touched.has(s.account) && covers(ctx, s, paid.total, false));
   if (!way) return reject("declined", say("why_no_other_way_to_pay_covers_it"));
-  const memo = `${paid.post.memo}: paid from ${labelOf(ctx, way.account)} instead`;
+  const memo = say("memo_memo_paid_from_instead", { memo: paid.post.memo, from: labelOf(ctx, way.account) });
   const lines: PostingLine[] = [
     { account: way.account, amount: -paid.total },
     { account: paid.account, amount: paid.total },

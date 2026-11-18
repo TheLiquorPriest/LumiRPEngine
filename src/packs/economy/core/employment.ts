@@ -1202,7 +1202,7 @@ export function payrollPosting(ctx: ReadContext, api: FinanceApi, flow: Flow, at
   // Nothing earned (a period on leave, out of season, no shifts): the record moves on, nothing posts.
   if (check.gross === 0) return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
   const withheld = taxTotal(check.taxes) + check.deductions.reduce((a, d) => a + d.cents, 0);
-  const memo = withheld > 0 ? `Payroll: ${api.money(ctx, check.gross)} gross, ${api.money(ctx, withheld)} withheld` : "Payroll";
+  const memo = withheld > 0 ? say("memo_payroll_gross_withheld", { gross: api.money(ctx, check.gross), withheld: api.money(ctx, withheld) }) : say("memo_payroll");
   const note = api.note(ctx, job.worker, "bill", "payday", { net: api.money(ctx, check.net), ...(withheld > 0 ? { gross: api.money(ctx, check.gross) } : {}) });
   // The employer's unemployment taxes on this pay (ORG-SPEC §3.11, Phase 5), accrued with it and paid each quarter.
   const accrued = unemploymentAccrual(api, ctx, job.party, job.worker, check.futaWages, at, () => paidHereThisYear(ctx, job, at));

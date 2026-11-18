@@ -144,7 +144,7 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
   for (const [i, who] of to.entries()) {
     const share = i === 0 ? cents - each * (to.length - 1) : each;
     if (share <= 0) continue;
-    const paid = api.pay(ctx, { from, to: who, cents: share, memo: `Share out from ${labelOf(ctx, org)}`, kind: "transfer", category: "share_out" });
+    const paid = api.pay(ctx, { from, to: who, cents: share, memo: say("memo_share_out_from_org", { org: labelOf(ctx, org) }), kind: "transfer", category: "share_out" });
     if (!Array.isArray(paid)) return paid;
     out.push(...paid);
   }

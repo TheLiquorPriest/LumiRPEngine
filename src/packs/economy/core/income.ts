@@ -124,7 +124,7 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
   const route = routeOf(ctx.state, holding);
   const price = priceOf(ctx, a, at);
   if (route.reinvest && price > 0 && !last) {
-    const memo = `${name} ${kind} reinvested: ${formatMoney(cents, ctx.world.currency)}`;
+    const memo = say("memo_name_kind_reinvested", { name, kind, amount: formatMoney(cents, ctx.world.currency) });
     return {
       cents,
       lines: [

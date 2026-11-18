@@ -144,7 +144,7 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
       { account: to, amount: strike },
     ];
   }
-  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under.symbol ?? under.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
+  const posted = api.post(ctx, lines, { memo: say("memo_label_strike_for_units_under", { label, strike: money(strike), units: unitsText(units), under: under.symbol ?? under.label }), kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
   if (isRejection(posted)) return posted;
   return unit([...events, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
 }

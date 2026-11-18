@@ -114,7 +114,7 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
     const cents = lines.reduce((a, l) => a + l.amount, 0);
     return cents > 0 ? posting([{ account, amount: -cents }, ...lines], { memo, kind: "fee", category }) : [];
   };
-  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
+  const memo = say("memo_cash_withdrawal", { where: where || undefined, fees: fees > 0 ? money(ctx, fees) : undefined });
   // Fees first, so the cash is checked against what they leave: a rebased view that can't cover it drops the unit, fees and all.
   // Cash from a credit account is a cash advance, which runs its own interest from the day it's drawn.
   return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...(card ? { card } : {}) }), ...extra]);
@@ -152,9 +152,9 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
     { account: wallet, amount: -cents },
     { account, amount: cents },
   ];
-  const events: LedgerEvent[] = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
+  const events: LedgerEvent[] = posting(lines, { memo: say("memo_cash_deposit_where", { where }), kind: "deposit", category: "transfer" });
   if (traitsOf(ctx, account)?.liability) events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
-  if (held) events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
+  if (held) events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: say("memo_cash_deposit") } });
   return asUnit(events);
 }
 
@@ -198,7 +198,7 @@ export function replaceCard(ctx: EffectContext, who: EntityId, card: EntityId): 
   }
   const account = strOf(e.fields.account);
   const p = productOf(ctx, account);
-  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees")) out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
+  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees")) out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: say("memo_name_replacement", { name: e.name }), kind: "fee", category: "card_replacement" }));
   return asUnit(out);
 }
 
@@ -547,7 +547,7 @@ export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] 
   const out: LedgerEvent[] = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
   if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
     const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
-    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: spec.memo ?? `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
+    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: spec.memo ?? say("memo_name_loan_paid_out", { name: spec.name }), kind: "deposit", category: "loan" }));
   }
   if (spec.card && (t.revolving || t.transactional)) {
     const cardId = `${id}_card`;

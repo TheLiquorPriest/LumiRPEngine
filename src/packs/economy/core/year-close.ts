@@ -223,7 +223,6 @@ export function earningsAndProfits(state: Readonly<WorldState>, business: Entity
   return numOf(last.rec.ep) - consentDividends(state, business, last.year);
 }
 
-const PENALTY_WORDS = { phc: "Personal holding company tax", aet: "Accumulated earnings tax" } as const;
 
 // ---------------------------------------------------------------- foundations
 
@@ -499,7 +498,7 @@ export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void
     const tax = penaltyTaxFor(ctx, party, year);
     const payer = payerOf(api, ctx, party);
     if (!tax || tax.cents <= 0 || !payer) return null;
-    const memo = `${PENALTY_WORDS[tax.kind]}, ${year}`;
+    const memo = say("memo_penalty_year", { tax: say(`word_penalty_${tax.kind}`), year });
     return { cents: tax.cents, lines: [{ account: payer, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], memo, kind: "payment", category: "business_tax", extra: [{ type: PENALTY_TAX, data: { party, year, kind: tax.kind, cents: tax.cents } }] };
   });
   r.amount("foundation_tax", (ctx, flow, at): FlowPosting | null => {
@@ -508,7 +507,7 @@ export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void
     const due = foundationTaxFor(ctx, org, year);
     const payer = payerOf(api, ctx, org);
     if (!due || due.cents <= 0 || !payer) return null;
-    return { cents: due.cents, lines: [{ account: payer, amount: -due.cents }, { account: api.outside("tax:federal"), amount: due.cents }], memo: `Foundation excise tax, ${year}`, kind: "payment", category: "excise_tax", extra: [{ type: FOUNDATION_TAX, data: { org, year, excise: due.excise, tax: due.tax, cents: due.cents } }] };
+    return { cents: due.cents, lines: [{ account: payer, amount: -due.cents }, { account: api.outside("tax:federal"), amount: due.cents }], memo: say("memo_foundation_excise_tax_year", { year }), kind: "payment", category: "excise_tax", extra: [{ type: FOUNDATION_TAX, data: { org, year, excise: due.excise, tax: due.tax, cents: due.cents } }] };
   });
   // A foundation's page warns of its taxes falling due and of a payout still to grant.
   r.view((ctx, party) => {

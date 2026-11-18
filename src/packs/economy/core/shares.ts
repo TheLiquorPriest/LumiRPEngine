@@ -226,7 +226,7 @@ function issueShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] 
       const unusable = api.mayUse(ctx, to, from, "from");
       if (unusable) return unusable;
     }
-    const paid = api.pay(ctx, { from: from || to, to: business, cents: price.cents, memo: `Bought ${memo}`, deposit, kind: "purchase", category: "investment" });
+    const paid = api.pay(ctx, { from: from || to, to: business, cents: price.cents, memo: say("memo_bought_memo", { memo }), deposit, kind: "purchase", category: "investment" });
     if (!Array.isArray(paid)) return paid;
     events.push(...(to === party ? stamped(paid, by, party) : paid));
   }

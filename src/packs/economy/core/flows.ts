@@ -741,7 +741,7 @@ function bounceFee(ctx: ReadContext, flow: Flow, cents: number, at: number, over
     { account: side.account, amount: -p.fees.nsf },
     { account: `economy.external:bank:${p.institution || "bank"}`, amount: p.fees.nsf },
   ];
-  return asUnit(posting(lines, { memo: "Returned payment fee", kind: "fee", category: "nsf", flow: flow.id, at }));
+  return asUnit(posting(lines, { memo: say("memo_returned_payment_fee"), kind: "fee", category: "nsf", flow: flow.id, at }));
 }
 
 /**

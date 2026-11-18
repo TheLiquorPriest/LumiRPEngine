@@ -24,6 +24,7 @@ import { noteOf, sweepNote } from "./notes";
 import type { LineFields } from "../../../engine/lines";
 import { accountLevel, asUnit, isParty, posting, toggles, notice } from "./pay";
 import type { Run } from "./run";
+import { say } from "../../../engine/lines";
 
 /** Statements close and deposit interest posts in the bank's morning batch; payments are due by the end of the due day. */
 const STATEMENT_MINUTE = 9 * 60 - 30;
@@ -235,8 +236,8 @@ export function revolvingCharges(ctx: ReadContext, account: EntityId, at: number
 /** Posts a period's interest and its cash advance interest; returns the interest it counts (the advance's only where it posted). */
 function postCharges(run: Run, account: EntityId, institution: string, charges: { interest: number; advance: number }, at: number): number {
   const name = labelOf(run.ctx, account);
-  if (charges.interest > 0) run.emit(asUnit(posting(bankLines(account, institution, charges.interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
-  const advance = charges.advance > 0 && run.emit(asUnit(posting(bankLines(account, institution, charges.advance), { memo: `${name} cash advance interest`, kind: "interest", category: "interest", at }))).length > 0 ? charges.advance : 0;
+  if (charges.interest > 0) run.emit(asUnit(posting(bankLines(account, institution, charges.interest), { memo: say("memo_name_interest", { name }), kind: "interest", category: "interest", at })));
+  const advance = charges.advance > 0 && run.emit(asUnit(posting(bankLines(account, institution, charges.advance), { memo: say("memo_name_cash_advance_interest", { name }), kind: "interest", category: "interest", at }))).length > 0 ? charges.advance : 0;
   return charges.interest + advance;
 }
 
@@ -252,12 +253,12 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
   const interest = postCharges(run, account, p.institution, charges, at);
   let fees = 0;
   if (feature(ctx, account, "fees") && p.fees.annual > 0 && annualFeeDue(ctx, account, at)) {
-    if (run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.annual), { memo: `${name} annual fee`, kind: "fee", category: "annual_fee", at }))).length > 0) fees += p.fees.annual;
+    if (run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.annual), { memo: say("memo_name_annual_fee", { name }), kind: "fee", category: "annual_fee", at }))).length > 0) fees += p.fees.annual;
   }
   const spent = accrualOf(ctx.state, account)?.spent ?? 0;
   if (p.rewards_pct > 0 && spent > 0) {
     const rewards = Math.round((spent * p.rewards_pct) / 100);
-    if (rewards > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -rewards }, { account, amount: rewards }], { memo: `${name} rewards`, kind: "rewards", category: "rewards", at })));
+    if (rewards > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -rewards }, { account, amount: rewards }], { memo: say("memo_name_rewards", { name }), kind: "rewards", category: "rewards", at })));
   }
   const owed = Math.max(0, -balance(ctx.state, account));
   const principal = Math.max(0, owed - interest - fees);
@@ -327,7 +328,7 @@ function billInstallment(run: Run, account: EntityId, at: number): void {
     // Its interest is the lender's as much as the borrower's: equal and opposite on the note.
     const lines = note === null ? bankLines(account, p.institution, interest) : [{ account, amount: -interest }, { account: note, amount: interest }];
     const sides = note === null ? {} : { counterparty: holdersOf(ctx.state, note)[0] ?? note, payer: holdersOf(ctx.state, account)[0] ?? account };
-    run.emit(asUnit(posting(lines, { memo: `${name} interest`, kind: "interest", category: "interest", ...sides, at })));
+    run.emit(asUnit(posting(lines, { memo: say("memo_name_interest", { name }), kind: "interest", category: "interest", ...sides, at })));
   }
   const total = owed + interest;
   const payment = typeof e.fields.payment === "number" && e.fields.payment > 0 ? e.fields.payment : Math.round(amortized(owed, rate, months));
@@ -374,7 +375,7 @@ function dueCheck(run: Run, account: EntityId, at: number): void {
     const base = cycle.lates > 0 ? p.fees.late_repeat : p.fees.late_first;
     // A late fee never exceeds the minimum payment it is charged for (Regulation Z).
     fee = Math.min(base, cycle.minimum);
-    if (fee > 0) run.emit(asUnit(posting(bankLines(account, p.institution, fee), { memo: `${name} late fee`, kind: "fee", category: "late_fee", at })));
+    if (fee > 0) run.emit(asUnit(posting(bankLines(account, p.institution, fee), { memo: say("memo_name_late_fee", { name }), kind: "fee", category: "late_fee", at })));
   }
   const penalty = cycle.penalty || ((stage === "60" || stage === "90" || stage === "120" || stage === "collections") && p.penalty_apr_pct > 0);
   const counters = { late30: (cycle.late30 ?? 0) + (stage === "30" ? 1 : 0), late60: (cycle.late60 ?? 0) + (stage === "60" ? 1 : 0), late90: (cycle.late90 ?? 0) + (stage === "90" ? 1 : 0) };
@@ -407,9 +408,9 @@ function monthEnd(run: Run, account: EntityId, at: number): void {
   const name = labelOf(ctx, account);
   const average = feature(ctx, account, "average_daily") && p.interest === "average_daily" ? averageBalance(ctx.state, account, at) : balance(ctx.state, account);
   const interest = depositInterest(ctx, account, at);
-  if (interest > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -interest }, { account, amount: interest }], { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  if (interest > 0) run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -interest }, { account, amount: interest }], { memo: say("memo_name_interest", { name }), kind: "interest", category: "interest", at })));
   if (feature(ctx, account, "fees") && p.fees.maintenance > 0 && Math.min(balance(ctx.state, account), average) < p.fees.maintenance_waive) {
-    run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.maintenance), { memo: `${name} monthly fee`, kind: "fee", category: "maintenance", at })));
+    run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.maintenance), { memo: say("memo_name_monthly_fee", { name }), kind: "fee", category: "maintenance", at })));
   }
   run.emit([{ type: FINANCE_EVENTS.accrue, data: { account, at } }]);
 }
