@@ -31,7 +31,7 @@ import { UI_PACKS } from "../../../src/frontend/packs";
 import { buildCatalog } from "../../../src/frontend/ui-registry";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { buildNeedsView, dayPlan, needValue } from "../../../src/packs/castlife/core/index";
-import { decodeNeedsView, NeedsPanel } from "../../../src/packs/castlife/ui/needs";
+import { decodeNeedsView, needLine, NEEDS_TOLD, NeedsPanel } from "../../../src/packs/castlife/ui/needs";
 import type { PanelProps } from "../../../src/frontend/registry";
 import { propsOf } from "../../support/tree";
 import type { StateView } from "../../../src/shared/state-view";
@@ -141,6 +141,21 @@ describe("Needs in Play", () => {
       expect(lines[i]).toContain(row.pressing ? row.label : String(row.tell));
     });
     expect(rows.find((r) => r.need === "fatigue")?.tell).toBe(60);
+  });
+
+  test("the panel names no narrator: it says what presses and what the Author's world state tells", () => {
+    const w = setup((world) => {
+      world.needs = { hunger: { tell: 25 } };
+    });
+    to(w, w.state.clock + 120);
+    const view = buildNeedsView(w.ctx) as unknown as JsonValue;
+    const rows = decodeNeedsView(view) ?? [];
+    const said = rows.map(needLine);
+    for (const line of said) expect(line).not.toMatch(/narrator/i);
+    const hungry = rows.find((r) => r.need === "hunger");
+    expect(hungry === undefined ? "" : needLine(hungry)).toStartWith(`You're ${hungry?.label}.`);
+    const tree = NeedsPanel({ chatId: "c", view, state: {} as StateView, send: async () => ({}) } as unknown as PanelProps);
+    expect(propsOf(tree, "p").some((p) => p.children === NEEDS_TOLD)).toBe(true);
   });
 });
 
