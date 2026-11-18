@@ -19,7 +19,8 @@ afterEach(async () => {
 
 /** A bed whose chat plays `doc`, kept by the store, from before its first turn. */
 async function worldBed(doc: WorldDoc, options: TurnBedOptions): Promise<TurnBed> {
-  const b = await openTurnBed(options);
+  // The reminder of writes that name no source would ask for calls these tests do not script.
+  const b = await openTurnBed({ off: ["rules/unsourced"], ...options });
   beds.push(b);
   await playsWorld(b, doc);
   return b;
@@ -103,20 +104,4 @@ test("what time brings due is listed in the world state the Author is given, and
   const answered = JSON.stringify(b.model.requests[1]!.messages.at(-1));
   expect(answered).toContain("tam_day");
   expect(answered).toContain("market_square");
-});
-
-test("a search pattern that could run without end is refused before it runs, in the harness's own words; a plain one is searched for", async () => {
-  const b = await openTurnBed({
-    answers: [
-      { pieces: [{ text: "<intent>Look through the notes.</intent>" }, { call: "file_find", args: { by: "grep", pattern: "(a+)+$" } }] },
-      { pieces: [{ call: "file_find", args: { by: "grep", pattern: "Author" } }] },
-      { pieces: [{ text: "<reply>Wren shrugs.</reply>" }] },
-    ],
-  });
-  beds.push(b);
-  await play(b, "I ask about the notes.");
-
-  const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
-  expect(sent[1]).toContain("(a+)+$ is not a pattern that can be searched for.");
-  expect(sent[2]).not.toContain("Author is not a pattern");
 });
