@@ -663,7 +663,10 @@ export class PlayService {
   private async leftWords(left: readonly Report[], took: boolean): Promise<string> {
     const lines = [await this.words(took ? "undone_some" : "undone_none")];
     for (const l of left) {
-      const said = await this.words(l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept", typeof l.values?.on === "string" ? { on: l.values.on } : {}, { parts: [String(l.values?.op ?? "")] });
+      // A kind that cannot be taken back by its nature says why, in the words of its own line; one that only lacks an undo, or whose thing changed since, says that.
+      const nature = typeof l.values?.why === "string" ? await this.words(`nature_${l.values.why}`) : "";
+      const line = nature !== "" ? "undone_left_nature" : l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept";
+      const said = await this.words(line, { ...(typeof l.values?.on === "string" ? { on: l.values.on } : {}), ...(nature !== "" ? { why: nature } : {}) }, { parts: [String(l.values?.op ?? "")] });
       lines.push(said.charAt(0).toUpperCase() + said.slice(1));
     }
     return [...new Set(lines)].filter((line) => line !== "").join(SENTENCES);

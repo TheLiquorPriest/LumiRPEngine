@@ -93,7 +93,7 @@ Taxonomy and life states:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.bump`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unlist`, `engine.unmaterialized`, `engine.world`, `engine.world_back`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.bump`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.put`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unlist`, `engine.unmaterialized`, `engine.world`, `engine.world_back`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.
 
 ### Relation types
 
