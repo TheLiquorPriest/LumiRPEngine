@@ -1349,7 +1349,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * before, held by the attempt being replaced: its empty new swipe, which may bear the same date, is no edit of that attempt. What the
    * comparison found is kept with the chat in the same write, under the turn then at the head of its path (`since.ts`): should the
    * intake end before the harness takes its request, the next turn is told it. A message of the player's he edited since RPE last read
-   * it, or one that now stands on the path where RPE held none, marks every turn after it (plan §10.10, R-25). Then the turns that left
+   * it, or one that now stands on the path where RPE held none, marks every turn after it (plan §10.10, R-25); a reply whose text now
+   * differs from what was saved when its turn was tied marks that turn edited, with the message (plan §6.3). Then the turns that left
    * the path are told (`#left`).
    */
   async #compare(user: string, chat: string, steps: readonly LvStep[], writing: string | null, replaced: string | null, heardUpTo: number): Promise<void> {
@@ -1381,6 +1382,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         const at = path.findIndex((e) => e.message === m.message);
         if (at >= 0) this.#d.marks.set(db, user, path.slice(at + 1).flatMap((e) => (e.turn === null ? [] : [e.turn])), m.kind, this.#d.clock.now(), m.message);
       }
+      // A reply edited since its turn was tied: the turn is flagged edited where the difference is found (plan §6.3).
+      for (const e of compared.edited) this.#d.marks.set(db, user, [e.turn], "edited-reply", this.#d.clock.now(), e.message);
       return compared;
     }, "comparing the chat's path with its turns");
     await this.#left(user, chat, report, replaced, before?.turn ?? null);

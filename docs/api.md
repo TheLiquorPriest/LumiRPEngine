@@ -9399,11 +9399,11 @@ export interface TurnLoreRow {
 
 ### `TurnMark`
 
-A mark a turn carries apart from its run's status: interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not what was released, beyond the prefill in front and a continue's join), or standing on a message of the player's he edited, or inserted before it, since it was played; with that message, and when the mark was set.
+A mark a turn carries apart from its run's status: interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not what was released, beyond the prefill in front and a continue's join), edited (its own reply was edited in the chat after it was saved, the Author told the text before and after at the next turn), or standing on a message of the player's he edited, or inserted before it, since it was played; with that message, and when the mark was set.
 
 ```ts
 export interface TurnMark {
-  kind: "interrupted" | "saved-otherwise" | "edited-message" | "inserted-message";
+  kind: "interrupted" | "saved-otherwise" | "edited-reply" | "edited-message" | "inserted-message";
   message: string | null;
   at: number;
 }

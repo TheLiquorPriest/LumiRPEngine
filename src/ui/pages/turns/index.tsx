@@ -27,6 +27,7 @@ import { readFolder } from "./folder";
 import { laterWords, LaterRuns } from "./later";
 import { type ReviewShown, useReview } from "./review";
 import { CarriedRecord, ENGINE_WORDS } from "./sections/carried";
+import { MARK_BADGES, markWords } from "./sections/marks";
 import { TURN_SECTIONS } from "./sections/list";
 import { type FolderShown, NO_FOLDER, type RequestShown, type TurnParts, type TurnSection } from "./types";
 
@@ -79,6 +80,11 @@ function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOp
           <span class="lre-inline">
             {props.carried === undefined ? null : <Badge title={carriedWords(props.carried)}>carried</Badge>}
             {turn.onPath ? null : <Badge>off the path</Badge>}
+            {[...new Map(turn.marks.map((mark) => [mark.kind, mark])).values()].map((mark) => (
+              <Badge key={mark.kind} title={markWords(mark)}>
+                {MARK_BADGES[mark.kind]}
+              </Badge>
+            ))}
             <Badge tone={status.tone}>{status.words}</Badge>
           </span>
         </span>

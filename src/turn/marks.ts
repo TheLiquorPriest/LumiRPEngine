@@ -1,17 +1,18 @@
-// The marks a turn carries, each a mark of its own apart from its run's status (plan §10.8, §10.10, R-25):
+// The marks a turn carries, each a mark of its own apart from its run's status (plan §6.3, §10.8, §10.10, R-25):
 // interrupted (RPE restarted while a run of it went on), saved otherwise (what Lumiverse saved is not
-// what was released, beyond the prefill in front and a continue's join), and standing on a message of
-// the player's he edited, or inserted before it, since the turn was played (with which message and
-// when). Kept by turn in the harness database (`turn_mark`), every row carrying the user; given with the
-// turn in the chat's list and in its detail.
+// what was released, beyond the prefill in front and a continue's join), its own reply edited in the chat
+// after it was saved (with that message and when it was found), and standing on a message of the player's
+// he edited, or inserted before it, since the turn was played (with which message and when). Kept by turn
+// in the harness database (`turn_mark`), every row carrying the user; given with the turn in the chat's list
+// and in its detail.
 
 import type { Database } from "bun:sqlite";
 import type { WriteQueue } from "../app";
 
 /** What a mark says of its turn. */
-export type MarkKind = "interrupted" | "saved-otherwise" | "edited-message" | "inserted-message";
+export type MarkKind = "interrupted" | "saved-otherwise" | "edited-reply" | "edited-message" | "inserted-message";
 
-/** One mark of a turn: its kind, the player's message it names (for an edited or inserted one; null for the rest), and when it was set. */
+/** One mark of a turn: its kind, the message it names (the edited reply, or the player's edited or inserted one; null for the rest), and when it was set. */
 export interface TurnMark {
   kind: MarkKind;
   message: string | null;
