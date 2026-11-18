@@ -39,6 +39,19 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
 
 const tableThere = (db: Database, name: string): boolean => db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
 
+/** The held request a chat's staged change of the previous build is carried as. */
+const stagedId = (chat: string): string => `carried:${chat}:staged`;
+
+/**
+ * Whether a chat's carried staged change waits no longer: a turn that still stands took it with his next message, or he dropped it (its
+ * request is gone). It waits while its request is held, or while the turn that took it was dropped (the request waits again).
+ */
+export function stagedTaken(db: Database, user: string, chat: string): boolean {
+  if (!tableThere(db, "request")) return false;
+  const row = db.query<{ turn: string | null; status: string | null }, [string, string]>("SELECT r.turn, t.status FROM request r LEFT JOIN turn t ON t.user = r.user AND t.id = r.turn WHERE r.user = ? AND r.id = ?").get(user, stagedId(chat));
+  return row === null || (row.turn !== null && row.status !== null && row.status !== "dropped");
+}
+
 /**
  * Carries these things of `chats` (the chats this run imported or replaced) into the turn lane's tables, inside one transaction.
  * `s` is the user's store holding the imported turns, which says what turn each reply is tied to.
@@ -114,7 +127,7 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
     if (isRecord(staged) && text(staged.action) !== null) {
       const source = text(staged.source);
       const asked = { action: staged.action as string, values: isRecord(staged.request) ? staged.request : {}, from: FROM.find((f) => f === source) ?? "panel", what: text(staged.label) ?? (staged.action as string), on: null };
-      wrote.push(() => db.run("INSERT OR REPLACE INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, 'panel', ?, 0, NULL, NULL, ?)", [user, `carried:${chat}:staged`, chat, JSON.stringify(asked), now]));
+      wrote.push(() => db.run("INSERT OR REPLACE INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, 'panel', ?, 0, NULL, NULL, ?)", [user, stagedId(chat), chat, JSON.stringify(asked), now]));
       out.staged++;
     }
 

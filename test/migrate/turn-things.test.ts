@@ -4,11 +4,13 @@
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
+import type { Database } from "bun:sqlite";
 import { migrate } from "../../src/migrate/migrate";
+import { migrationPage } from "../../src/migrate/page";
 import type { MigrationReport } from "../../src/migrate/report";
 import { HARNESS_MIGRATIONS, keepCarriedRun } from "../../src/turn";
 import { buildFixture, CHAT, STRAY, USER, type Fixture } from "./fixture";
-import { look, turnOf } from "./look";
+import { look, pageInput, turnOf } from "./look";
 import { TREE as tree } from "./tree";
 import { rm } from "node:fs/promises";
 
@@ -53,4 +55,24 @@ test("each panel request, review card, staged change and approval is on the turn
     { id: `carried:${CHAT.harness}:approval:lore_search`, turn: rows.ran, kind: "approval", source: "import" },
   ]);
   expect(report.carried?.turnThings).toMatchObject({ tables: true, requests: 1, staged: 1, chips: 1, approvals: 1 });
+});
+
+test("the Migration page's line of the staged change follows its held request: done once a turn that stands takes it, waiting again when that turn is dropped, done when he drops it", () => {
+  const staged = (db: Database): unknown => migrationPage(pageInput(db, fixture, data)).waiting.find((w) => w.kind === "staged" && w.chat === CHAT.classic);
+  look(data, (db) => {
+    const id = `carried:${CHAT.classic}:staged`;
+    expect(staged(db)).toEqual({ kind: "staged", chat: CHAT.classic, staged: 1, done: false });
+    // Taken with his next message by a turn, as the turn lane tells it.
+    const turn = turnOf(db, CHAT.classic, "m-c4", 0);
+    db.run("UPDATE request SET turn = ? WHERE user = ? AND id = ?", [turn, USER, id]);
+    expect(staged(db)).toEqual({ kind: "staged", chat: CHAT.classic, staged: 1, done: true });
+    // That turn dropped: the request waits again.
+    const status = db.query<{ status: string }, [string, string]>("SELECT status FROM turn WHERE user = ? AND id = ?").get(USER, turn)?.status ?? "";
+    db.run("UPDATE turn SET status = 'dropped' WHERE user = ? AND id = ?", [USER, turn]);
+    expect(staged(db)).toEqual({ kind: "staged", chat: CHAT.classic, staged: 1, done: false });
+    db.run("UPDATE turn SET status = ? WHERE user = ? AND id = ?", [status, USER, turn]);
+    // Dropped by him: the request is gone, and nothing is left to do.
+    db.run("DELETE FROM request WHERE user = ? AND id = ?", [USER, id]);
+    expect(staged(db)).toEqual({ kind: "staged", chat: CHAT.classic, staged: 1, done: true });
+  });
 });

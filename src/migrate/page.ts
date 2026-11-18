@@ -28,6 +28,7 @@ import { failedChats, readFailure } from "./failures";
 import type { RuntimeFolders } from "./runtime-folders";
 import type { OwnerRow } from "./setting-list";
 import { answersOf, chatRecord, importedChats, lastReport } from "./tables";
+import { stagedTaken } from "./turn-things";
 
 /** Which report a page reads: the last real run's, or the rehearsal started from the page. */
 export type ReportOf = "run" | "rehearsal";
@@ -299,7 +300,9 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
       out.waiting.push({ kind: "paused", chat: c.chatId, questions: w.questions, answered: answer?.choice ?? null, done: answer !== null });
     }
   }
-  for (const c of report.chats) if (c.waiting.staged > 0) out.waiting.push({ kind: "staged", chat: c.chatId, staged: c.waiting.staged, done: false });
+  // A staged change is done once a turn that stands took its held request, or he dropped it; only where the run carried it as one.
+  const carriedChat = (chat: string): boolean => (report.imports ?? []).some((i) => i.chatId === chat && i.outcome !== "not imported");
+  for (const c of report.chats) if (c.waiting.staged > 0) out.waiting.push({ kind: "staged", chat: c.chatId, staged: c.waiting.staged, done: carriedChat(c.chatId) && stagedTaken(input.db, input.user, c.chatId) });
   for (const c of report.chats) {
     const w = c.waiting;
     if (w.chips > 0 || w.rollback) out.waiting.push({ kind: "chat", chat: c.chatId, chips: w.chips, reviewCards: w.reviewCards, rollback: w.rollback, done: false });
