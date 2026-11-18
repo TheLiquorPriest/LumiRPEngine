@@ -24,11 +24,11 @@ export function linesOf(state: Running): number {
   return state.breaks + (state.complete ? 0 : 1);
 }
 
-/** How many files' states are kept: the ones touched last. */
-const KEPT = 256;
-
 export class RunningFiles {
   readonly #kept = new Map<string, Running>();
+
+  /** `most`: how many files' states are kept, the ones touched last (`files.hashStatesKept`). */
+  constructor(private readonly most: number) {}
 
   /** The state of the file if it is still as RPE left it. */
   valid(disk: string, info: { size: number; mtimeMs: number }): Running | undefined {
@@ -43,7 +43,7 @@ export class RunningFiles {
   keep(disk: string, state: Running): void {
     this.#kept.delete(disk);
     this.#kept.set(disk, state);
-    if (this.#kept.size > KEPT) this.#kept.delete(this.#kept.keys().next().value as string);
+    if (this.#kept.size > this.most) this.#kept.delete(this.#kept.keys().next().value as string);
   }
 
   /** Reads the file whole once, as a stream, for its hash and its lines; the state is kept. */

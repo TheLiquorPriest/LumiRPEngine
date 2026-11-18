@@ -49,7 +49,7 @@ import { type ChatRow, openStore, STATE_SEARCH_SETTING_DEFS, StateIndex, type St
 import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
-import { type ChatFolders, chatPlacer, CHATS_FOLDER, GeneratedFiles, NO_CHAT, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { type ChatFolders, chatPlacer, CHATS_FOLDER, GeneratedFiles, NO_CHAT, promptMapFields, pruneChat, retentionOf, TREE_SETTING_DEFS, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { Approvals } from "./approvals";
 import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
@@ -367,6 +367,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
         place,
         // A grep's pattern runs on the worker pool, ended at `files.grepMs` even inside one line.
         workers: app.workers,
+        // Read once, at RPE's start: the setting at the global level.
+        hashStatesKept: globalConfig(app.paths.files, app.log).value(TREE_SETTING_DEFS.hashStates) as number,
         async turnFolder(scope) {
           const turn = scope.turn === undefined ? null : store.user(scope.user).turn(scope.turn);
           return turn === null || turn.chat !== scope.chat ? null : turnFolderName(turn.depth + 1, turn.id);

@@ -574,6 +574,7 @@ The agents' files, which are in force, notes, suggestions and what is kept on di
 | `files.list.page` | `200` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Entries a Files page lists: Files and folders the Files page lists in one page of a folder, or of a search, when it asks for no number. |
 | `files.list.maxPage` | `1000` | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Most entries a Files page lists: The most files and folders one page of the Files page's listing gives, whatever number it asks for. |
 | `files.readLines` | `500` lines | RPE-global.yml or a chat's RPE.yml | at its next use | beyond Appendix D.1, for the owner's approval | Lines of a file read at once: Lines of a file the Files page reads in one go when it names none: a long file is read a part at a time, never whole. |
+| `files.hashStatesKept` | `256` | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Files whose hash RPE keeps in hand: How many files RPE keeps the running hash, size and lines of, those it touched last, a few hundred bytes each: an append to one of them, such as a session file or a transcript, costs only what it appends; a file past them is read whole once when next appended to. |
 
 ### Notes
 

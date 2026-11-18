@@ -13,7 +13,7 @@ import { type GrepLines, grepLines, TaskTimedOut, type Workers } from "../app";
 import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
 import { areaOf, MOUNTS, NO_CHAT } from "./layout";
-import { treeSettingsOf } from "./settings";
+import { TREE_DEFAULTS, treeSettingsOf } from "./settings";
 import { scan } from "./ranged";
 import { linesOf, RunningFiles } from "./running";
 import { type ChatLocation, entriesOf, fileKey, kindOf, type Located, locate, type Lookup, ownerRefusalFor, placesOf, refusalFor, safeId, treeLayers, viewPath, writableFor } from "./view";
@@ -46,6 +46,8 @@ export interface TreeFilesDeps {
   now(): number;
   /** The pool the pattern of a grep runs on, so that one that never returns holds up no one: its thread is ended when the grep's time is out. Without one a grep runs where it is called and stops between lines. */
   workers?: Workers;
+  /** How many files' running hash, size and lines are kept in hand (`files.hashStatesKept`); its default when absent. */
+  hashStatesKept?: number;
 }
 
 /** RPE's file port, and where a chat's turn folder is on disk for the parts of RPE that write it. */
@@ -191,7 +193,7 @@ async function apply(at: Located & { disk: string }, op: FileOp, running: Runnin
 
 export function treeFiles(deps: TreeFilesDeps): TreeFiles {
   /** What RPE knows of the files it has appended to or read a range of: their hash, size and lines. */
-  const running = new RunningFiles();
+  const running = new RunningFiles(deps.hashStatesKept ?? TREE_DEFAULTS.hashStates);
   function check(scope: RunScope | UserScope): void {
     if (scope.user !== deps.user) throw new Error(`This RPE belongs to the Lumiverse user ${JSON.stringify(deps.user)}, not ${JSON.stringify(scope.user)}.`);
     const run = runOf(scope);

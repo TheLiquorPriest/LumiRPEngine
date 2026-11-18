@@ -52,6 +52,8 @@ export const TREE_DEFAULTS = Object.freeze({
   chatsListed: 50,
   /** Hours between checks of the kept sizes against the disk. */
   recheckHours: 6,
+  /** How many files' running hash, size and lines RPE keeps in hand, those it touched last (each a few hundred bytes), so an append costs only what it appends. */
+  hashStates: 256,
 });
 
 export type TreeSettings = { -readonly [K in keyof typeof TREE_DEFAULTS]: number };
@@ -95,6 +97,16 @@ export const TREE_SETTING_DEFS = {
   suggestionsDecidedKept: { key: "suggestions.decidedKept", default: TREE_DEFAULTS.suggestionsDecidedKept, takes: { type: "whole", least: 0 }, perConnection: false, name: "Decided suggestions kept", about: "How many accepted and dismissed suggestions of a chat are kept, the oldest going after each decision and when the Storage page prunes them.", effect: "use" },
   chatsListed: { key: "storage.page", default: TREE_DEFAULTS.chatsListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Chats a Storage page lists", about: "Chats the Storage page lists in one page, with what each takes on the disk and in the database.", effect: "use" },
   recheckHours: { key: "storage.recheckHours", default: TREE_DEFAULTS.recheckHours, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hours between checks of the kept sizes", about: "How often what each chat's folder takes, as RPE keeps it, is checked against the disk in the background, so an edit made in your own editor shows.", effect: "use" },
+  hashStates: {
+    key: "files.hashStatesKept",
+    default: TREE_DEFAULTS.hashStates,
+    takes: { type: "whole", least: 1 },
+    perConnection: false,
+    levels: ["shipped", "global"],
+    name: "Files whose hash RPE keeps in hand",
+    about: "How many files RPE keeps the running hash, size and lines of, those it touched last, a few hundred bytes each: an append to one of them, such as a session file or a transcript, costs only what it appends; a file past them is read whole once when next appended to.",
+    effect: "start",
+  },
 } as const satisfies NumberSettings<keyof TreeSettings>;
 
 /** A name of a file in force as the files layer reads it: an instruction file by its own name, anything else by its folder and name. */
