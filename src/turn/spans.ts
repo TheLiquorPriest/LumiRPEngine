@@ -1,7 +1,8 @@
 // What a turn's run keeps of its lead's own writing as it arrives (plan §4.7, §17.1, R-185), from RPH's trace: the intent record's
 // own time, from RPH's `intent_began` (its first token) to its `intent` (its last), and the thinking before the first output of each of
 // the lead's model calls on the reply's path (those begun before the release). With them, every agent's lore lookups in the run, its
-// `lore_search` and `lore_read` calls as each began, kept with what the run spent. A run is known by RPH's own id for it, from its
+// `lore_search` and `lore_read` calls as each began, kept with what the run spent; and the lead's model call as it stands (`leadCall`):
+// its newest failure since a call last ended whole, and the call under way. A run is known by RPH's own id for it, from its
 // `run_started`. Nothing here waits for, holds or orders anything RPH does: it only notes when things came.
 
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
@@ -53,18 +54,22 @@ export class RunTimes {
     else if (event.kind === "intent") run.intent = { from: run.intent?.from ?? record.at, to: record.at };
     else if (event.kind === "call_started") {
       run.firstCall ??= record.at;
+      run.leadCall.open = { heard: false };
       if (run.released === null) calls.set(event.call, { thinking: null, lastThought: record.at, output: false });
     } else if (event.kind === "call_ended") {
+      run.leadCall.open = null;
+      if (event.error === undefined) run.leadCall.failed = null;
       // A call whose only output was a tool call (the record written to its file) ended its thinking where its last thought came.
       const call = calls.get(event.call);
       if (call !== undefined && !call.output && call.thinking !== null && (event.text !== "" || event.toolCalls.length > 0)) this.#output(followed, call);
-    }
+    } else if (event.kind === "call_failed") run.leadCall.failed = { tries: event.tries, failure: event.failure };
   }
 
   /** A piece of a model call's streaming text or thinking, as it came. */
   delta(delta: TraceDelta): void {
     const followed = this.#followed.get(delta.run);
     if (followed === undefined || delta.agent !== followed.lead) return;
+    if ((delta.thinking !== undefined && delta.thinking !== "") || (delta.text !== undefined && delta.text !== "")) followed.run.leadCall.open = { heard: true };
     const call = followed.calls.get(delta.call);
     if (call === undefined || call.output) return;
     if (delta.thinking !== undefined && delta.thinking !== "") {

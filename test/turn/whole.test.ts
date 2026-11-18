@@ -51,3 +51,18 @@ test("the chat's lower limit ends it first: a turn's time of one second under a 
   const run = b.turns.runs.byGeneration(USER, out.generationId!);
   expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "time", per: "turn" } }, reply: "" });
 });
+
+test("a whole request its hold stops while its call is being made again, with nothing of the reply written, says so: the hold, the tries and what broke the last", async () => {
+  const never = gate();
+  // The first try meets a fault of the provider's server and is made again at once; the second never answers.
+  const b = await wholeBed(2_000, { answers: [{ pieces: [], end: { error: "502: Bad gateway." } }, { pieces: [{ hold: never }] }], global: "calls:\n  retryWaitSeconds: 0\n" });
+  b.host.send(CHAT, "I climb the stairs.");
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+
+  const said = 'No reply came within 2 seconds, your setting "Whole reply hold" for a reply asked for whole, so the turn was stopped there: the model\'s call had been made 2 times, and the last try that failed met a fault of the provider\'s server, and the model\'s provider had sent nothing yet for the call under way.';
+  expect(out.error).toBe(said);
+  await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
+  const run = b.turns.runs.byGeneration(USER, out.generationId!);
+  expect(run).toMatchObject({ status: "stopped", stoppedBy: { hold: 2_000 }, reply: "" });
+  expect(b.logged.filter((l) => l.fields?.run === run?.id && l.level === "warn").map((l) => l.message)).toEqual([`A turn's run ended stopped where it stood: ${said}`]);
+});

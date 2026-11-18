@@ -7,7 +7,7 @@
 // own, kept beside the earlier ones, and the turn as the pages show it is its latest run.
 
 import type { Database } from "bun:sqlite";
-import type { LimitHit, ReplyError, RunOutcome, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
+import type { CallFailureKind, LimitHit, ReplyError, RunOutcome, RunStatus, TraceRecord, TurnKind, Usage } from "rp-harness/contract";
 import type { Writes } from "./kv";
 
 /** Where a run stands: going on, or how it ended. */
@@ -176,6 +176,15 @@ export interface Lookups {
   reads: number;
 }
 
+/**
+ * The lead's model call as RPH's trace tells it (`spans.ts`): the newest failure of its calls since one of them last ended whole, with
+ * the times that call had been made then and what broke it; and the call under way, with whether any of its answer (text or thinking) came.
+ */
+export interface LeadCall {
+  failed: { tries: number; failure: CallFailureKind } | null;
+  open: { heard: boolean } | null;
+}
+
 /** A run going on now: its record, what stops it, and when it is over. */
 export interface Run extends RunRecord {
   readonly stop: AbortController;
@@ -183,6 +192,8 @@ export interface Run extends RunRecord {
   readonly over: Promise<void>;
   /** When the lead's first model call went out, as RPH's trace told it; null before. Kept in the turn's record (`turn.json`), not here. */
   firstCall: number | null;
+  /** The lead's model call as it stands now, for the words of a stop at the hold of a reply asked for whole. Kept nowhere. */
+  leadCall: LeadCall;
 }
 
 interface RunRow {

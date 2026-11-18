@@ -225,6 +225,18 @@ export function replyErrorWords(e: ReplyError, errors: LinesPart | undefined, af
   return errors?.line(after ? `${code}-after` : code, fields) ?? "";
 }
 
+/**
+ * The line of a reply asked for whole that its hold stopped before a word of it was written (`hold`): the hold, in seconds, and how the
+ * lead's model call stood (`run.leadCall`): the times it was made, the one under way counted, where one of them failed, what broke the last
+ * that failed, and whether the one under way had had no answer yet. "" where the part has no such line, or the hold did not stop the run.
+ */
+function holdWords(run: Pick<Run, "stoppedBy" | "leadCall">, errors: LinesPart | undefined): string {
+  if (run.stoppedBy === null || !("hold" in run.stoppedBy)) return "";
+  const { failed, open } = run.leadCall;
+  const broke = failed === null ? {} : { tries: failed.tries + (open !== null ? 1 : 0), is: { [failed.failure === "too-long" ? "tooLong" : failed.failure]: true } };
+  return errors?.line("hold", { seconds: Math.round(run.stoppedBy.hold / 1000), ...broke, ...(open !== null && !open.heard ? { waiting: true } : {}) }) ?? "";
+}
+
 /** The connection the harness runs a lead's definition on for the scope (`definitions.list`'s `runsOn`), by its id: null for his default, or where none resolves. */
 export async function leadConnection(definitions: Pick<DefinitionsApi, "list">, scope: Scope, lead: string | null): Promise<string | null> {
   if (lead === null) return null;
@@ -715,6 +727,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
+        leadCall: { failed: null, open: null },
       };
       // The run is held in the one write that keeps it: a panel's tap, refused while a run of the chat is held, lands before it or not at all.
       await this.#d.writes
@@ -1191,6 +1204,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         stop: new AbortController(),
         over: over.promise,
         firstCall: null,
+        leadCall: { failed: null, open: null },
       };
       await this.#d.writes
         .run((db) => {
@@ -2082,9 +2096,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
           return;
         }
         // The message Lumiverse keeps shows the same line in its thinking, filled with no detail: a thrown error's or a provider's own
-        // words go out as the error alone, since what is kept in the thinking can reach a later prompt.
+        // words go out as the error alone, since what is kept in the thinking can reach a later prompt. A stop at the hold of a reply asked
+        // for whole says so, with how the Author's model call stood, which holds no provider's words.
+        const held = holdWords(run, ending.errors);
         const { detail: _detail, ...plain } = e;
-        out.error(replyErrorWords(e, ending.errors), replyErrorWords(plain, ending.errors));
+        out.error(held || replyErrorWords(e, ending.errors), held || replyErrorWords(plain, ending.errors));
         replied.resolve();
       },
     };
@@ -2171,7 +2187,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (run.status === "released" && run.stoppedBy === null) return;
     if (run.kind === "settle" && run.status === "no-reply") return;
     const e = run.error;
-    const why = e === null ? `no reason was given (the run's status is ${run.status})` : replyErrorWords(e, errors, run.released !== null || run.kind === "settle") || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+    const held = run.released === null ? holdWords(run, errors) : "";
+    const why = held !== "" ? held : e === null ? `no reason was given (the run's status is ${run.status})` : replyErrorWords(e, errors, run.released !== null || run.kind === "settle") || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
     const how = run.stoppedBy !== null ? "stopped where it stood" : run.status === "limit" ? "at a limit" : run.status === "no-reply" ? "with no reply" : run.status === "stopped" ? "stopped" : "failed";
     const fields = { turn: run.turn, run: run.id, chat: run.chat, kind: run.kind, generation: run.generation, status: run.status };
     if (run.status === "stopped" && run.stoppedBy === null) this.#d.log.info(`A turn's run ended ${how}: ${why}`, fields);
