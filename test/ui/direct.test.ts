@@ -331,8 +331,8 @@ describe("every route the pages call, through the client, on RPE as composed", (
         }
       }
       expect(wrong).toEqual([]);
-      // A read of what the bed has answers; one is refused only for what the bed does not hold: a character or a file named by a param of its path, a world (the bed's chat plays none), a turn a migration carried, or a value its query is given that the bed does not have.
-      const lacks = /plays no world|not one a migration carried/;
+      // A read of what the bed has answers; one is refused only for what the bed does not hold: a character or a file named by a param of its path, a world (the bed's chat plays none), a turn a migration carried, a failure a migration kept for a chat it looked at (17bd0fe8b), or a value its query is given that the bed does not have.
+      const lacks = /plays no world|not one a migration carried|No record of a failure is kept/;
       const queried = (key: string): boolean => {
         const d = table.get(key)?.declared;
         return d !== undefined && "query" in d && Object.keys(d.query).length > 0;

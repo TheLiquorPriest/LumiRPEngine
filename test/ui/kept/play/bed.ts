@@ -78,5 +78,7 @@ export function recordedRpe(chat: string, first: StateView): RecordedRpe {
 
 /** The trace record of a run of the chat beginning or ending, as the turn lane publishes it: only what the page reads of it, so not a whole record. */
 export function runTrace(kind: "run_started" | "run_ended"): Pick<LiveEvent, "kind" | "data"> {
-  return { kind: "trace", data: { run: "run-1", seq: 1, event: { kind } } } as unknown as Pick<LiveEvent, "kind" | "data">;
+  // A run's end carries how it ended (`outcome`), which the line reads to tell a failure from any other end.
+  const event = kind === "run_ended" ? { kind, outcome: { status: "released", released: true, usage: { calls: 1, input: 1, cacheRead: 0, cacheWrite: 0, output: 1 } } } : { kind };
+  return { kind: "trace", data: { run: "run-1", seq: 1, event } } as unknown as Pick<LiveEvent, "kind" | "data">;
 }
