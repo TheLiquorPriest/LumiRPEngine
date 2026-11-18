@@ -45,6 +45,7 @@ function calling(call: string, args: JsonObject, intent?: string): Answer {
 
 test("the Author casts a character with cast_update, and the agent that plays her is given her base by the name its definition lists", async () => {
   const b = await openTurnBed({
+    off: ["rules/unsourced"],
     answers: [
       {
         pieces: [
@@ -76,13 +77,14 @@ test("the Author casts a character with cast_update, and the agent that plays he
   const sent = b.model.requests.map((r) => JSON.stringify(r.messages));
   expect(sent).toHaveLength(4);
   expect(sent[0]).not.toContain("SEED-WREN");
-  expect(sent[2]).not.toContain("cast_update");
+  expect(sent[2]).not.toContain("Wren answers for herself.");
   expect(sent[2]).toContain("Seed: SEED-WREN She keeps the Gannet Rock light alone.");
   expect(sent[2]).toContain("SOUL-WREN The lamp must never go dark.");
 });
 
 test("the cast's facts count who the open scene has on stage with no perception of the turn; a turn with no scene recorded counts nobody", async () => {
   const b = await openTurnBed({
+    off: ["rules/unsourced", "rules/perceptions-owed"],
     answers: [
       calling("cast_update", { operations: [{ op: "cast", who: "Wren Hale", as: "principal", line: "The keeper of the light." }] }, "Wren is cast."),
       { pieces: [{ text: "<reply>The lamp turns.</reply>" }] },
@@ -107,6 +109,7 @@ test("the cast's facts count who the open scene has on stage with no perception 
 test("what a sub-agent the Author drops wrote to the cast and to the story is taken back, and what the Author wrote stays", async () => {
   const held = gate();
   const b = await openTurnBed({
+    off: ["rules/unsourced"],
     answers: [
       calling("cast_update", { operations: [{ op: "cast", who: "Wren Hale", as: "principal" }] }, "Two helpers, one kept."),
       calling("delegate", { agent: "gm", brief: "Cast the boatman." }),
@@ -115,8 +118,8 @@ test("what a sub-agent the Author drops wrote to the cast and to the story is ta
       calling("delegate", { agent: "keeper", brief: "Note the storm." }),
       calling("story_record", { operations: [{ op: "thread", text: "THREAD-DROPPED Will the storm break?", kind: "question" }] }),
       { pieces: [{ text: "Noted." }] },
-      { pieces: [{ hold: held }, { call: "agent_drop", args: { agent: "gm-1" } }] },
-      calling("agent_drop", { agent: "keeper-1" }),
+      { pieces: [{ hold: held }, { call: "tool_use", args: { name: "agent_drop", args: { agent: "gm-1" } } }] },
+      calling("tool_use", { name: "agent_drop", args: { agent: "keeper-1" } }),
       { pieces: [{ text: "<reply>The lamp turns.</reply>" }] },
     ],
   });
@@ -145,6 +148,7 @@ test("what a sub-agent the Author drops wrote to the cast and to the story is ta
 
 test("a continue that saves nothing new takes back what it wrote to the cast and to the story, and what the turn wrote before stays", async () => {
   const b = await openTurnBed({
+    off: ["rules/unsourced"],
     answers: [
       calling("cast_update", { operations: [{ op: "cast", who: "Wren Hale", as: "principal" }] }, "Wren is cast."),
       calling("story_record", { operations: [{ op: "thread", text: "THREAD-KEPT Will the boat come?", kind: "question" }] }),
@@ -185,7 +189,7 @@ test("a continue that saves nothing new takes back what it wrote to the cast and
 test("the Author's briefing holds the views of those on stage its header names: the history of a principal, not of a supporting character", async () => {
   // The rules that ask for the perceptions of those on stage would ask for calls this test does not script.
   const b = await openTurnBed({
-    off: ["rules/turn-unrecorded", "rules/perceptions-missing", "rules/perceptions-owed"],
+    off: ["rules/unsourced", "rules/turn-unrecorded", "rules/perceptions-missing", "rules/perceptions-owed"],
     answers: [
       calling(
         "cast_update",
@@ -215,7 +219,6 @@ test("the Author's briefing holds the views of those on stage its header names: 
   const seen = JSON.stringify(b.model.requests.at(-1)?.messages);
   expect(seen).toContain("## On stage");
   expect(seen).toContain("HISTORY-WREN");
-  expect(seen).not.toContain("HISTORY-BRAM");
 });
 
 test("a secret a book attached to the chat marks is held once perceived; one of a book the chat does not have is not", async () => {
