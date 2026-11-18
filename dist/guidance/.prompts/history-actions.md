@@ -478,98 +478,102 @@ action_how_many: How many
 action_with_names: with {{names}}
 action_from_place: from {{place}}
 action_check_label: Check
-action_check_description: Roll a skill or an ability against a difficulty or against someone, with the total worked out from the sheet.
-action_check_param_skill: Skill or ability
-action_check_param_difficulty: Difficulty (a number, or one of the ruleset's difficulties)
+action_check_description: Roll a skill or an ability for someone, against a difficulty or against another's roll. It takes names, not numbers: who rolls, the skill or ability, and the difficulty (one of the ruleset's by name, or a number the story sets) or whom they roll against. The total is read from the sheet (ranks, ability, class skill, armour, size, traits, conditions and effects), and the roll is recorded with where each part came from. To rule it without dice, give the outcome success or failure.
+action_check_param_skill: Skill or ability (by name)
+action_check_param_difficulty: Difficulty (one of the ruleset's by name, or a number the story sets)
 action_check_param_vs: Against (someone who rolls against it)
 action_check_param_vs_skill: Their skill (left out: the same)
-action_check_param_take: Take 10 or 20 in place of the roll
-action_check_param_aid: Helped by
-action_check_param_mods: Other modifiers (a number, its type and why)
+action_check_param_take: Take 10 or 20 in place of the roll, where the ruleset has such a number to take
+action_check_param_aid: Helped by (each rolls the same check, and the ruleset says what a helper adds)
+action_check_param_mods: A circumstance the sheet does not have (a number, its type and why: +2 circumstance: high ground)
+action_check_param_boost: Spend a point on the roll (an action point, where the ruleset has them): its dice are added
 action_save_label: Save
-action_save_description: Roll a save against a difficulty, with the total worked out from the sheet.
-action_save_param_save: Save
-action_save_param_difficulty: Difficulty
+action_save_description: Roll a save for someone, and for others who make the same one. It takes who saves, which save and the difficulty (one of the ruleset's by name, or a number the effect sets), and reads the total from the sheet, with the ruleset's rule for the natural die. Each roll is recorded with where its parts came from. To rule it without dice, give the outcome success or failure.
+action_save_param_save: Which save (by name)
+action_save_param_difficulty: Difficulty (one of the ruleset's by name, or a number the effect sets)
 action_save_param_also: Others who make the same save
-action_save_param_mods: Other modifiers (a number, its type and why)
+action_save_param_mods: A circumstance the sheet does not have (a number, its type and why)
+action_save_param_boost: Spend a point on the roll (an action point, where the ruleset has them): its dice are added
 action_attack_label: Attack
-action_attack_description: Attack someone with a weapon in hand or one's own attack: the roll against their defence, a critical and the damage, all worked out from both sheets.
+action_attack_description: Attack someone with a weapon or one of one's own attacks. It takes who attacks, the target and, unless it is what is readied, what with. It reads the rest: the weapon's row, the attack total, the target's defence (flat-footed until it has acted in a fight), the range from the grid, the natural die's rule, a threat and its confirming roll, the damage with its multiplier, the target's reduction and resistances, and the round spent from the magazine. The hit points and the states they leave the target in are then set. It is recorded as one attack, and into the fight under way. To rule it without dice, give the outcome hit, miss or critical: the damage of a hit is rolled all the same.
 action_attack_param_target: Target
-action_attack_param_with: With (a weapon in hand or one's own attack; left out: what is readied)
+action_attack_param_with: With (a weapon held or carried, one of its own attacks, or a weapon of the ruleset; left out: what is readied)
 action_attack_param_full: Every attack the base attack gives
 action_attack_param_touch: Against touch defence
-action_attack_param_held: Held (one hand, two hands or the off hand)
-action_attack_param_shots: Shots (single, double, burst or automatic)
+action_attack_param_held: Held (as the ruleset names it, such as one, two or off; left out: as the weapon's row has it)
+action_attack_param_shots: Shots (as the ruleset names them, such as single, double, burst or auto)
 action_attack_param_nonlethal: Nonlethal
 action_attack_param_concealment: Concealment (the miss chance in percent)
-action_attack_param_mods: Other modifiers (a number, its type and why)
+action_attack_param_distance: How far apart they stand, in the world's units, where no map gives it
+action_attack_param_mods: A circumstance the sheet does not have (a number, its type, what it changes and why: +4 cover to ac: behind the wall)
+action_attack_param_boost: Spend a point on the first attack's roll (an action point, where the ruleset has them): its dice are added
 action_harm_label: Harm
-action_harm_description: Take hit points off someone, several, or everyone in an area, with a save for half or none where one is given.
-action_harm_param_amount: Amount (a number or dice)
-action_harm_param_type: Damage type
+action_harm_description: Take hit points off someone, off several, or off everyone in an area, for harm no weapon gives: a fall, a fire, a trap, a ruling. It takes who is harmed (or a centre and a radius on the grid), the harm as dice or as a number the story gives, its type, and a save with its difficulty for half or none. It reads each one's saving total, reduction and resistance to the type, and the states the hit points leave them in. Each is recorded with its own harm.
+action_harm_param_amount: Amount (dice such as 2d6, or a number the story gives)
+action_harm_param_type: Type of harm (what a reduction or a resistance is read against)
 action_harm_param_nonlethal: Nonlethal
-action_harm_param_targets: Who is harmed (left out: the one named)
-action_harm_param_centre: Centre of an area
+action_harm_param_targets: Who else is harmed (left out: the one named)
+action_harm_param_centre: Centre of an area (everyone within the radius on the grid is harmed)
 action_harm_param_radius: Radius of the area
-action_harm_param_save: Save
-action_harm_param_difficulty: Difficulty of the save
-action_harm_param_half: A save halves it (left out: a save takes none)
+action_harm_param_save: Save (each one rolls it)
+action_harm_param_difficulty: Difficulty of the save (one of the ruleset's by name, or a number the harm sets)
+action_harm_param_half: A save that is made halves it (left out: it takes none)
 action_harm_param_why: Why
 action_heal_label: Heal
-action_heal_description: Give back hit points, take off nonlethal harm, give temporary hit points, or stabilise someone dying.
-action_heal_param_amount: Amount (a number or dice)
+action_heal_description: Give back hit points, take off nonlethal harm, give temporary hit points, or make someone who is dying stable. It takes who, the amount as dice or as a number the story gives, and which of these; hit points are held to the most the sheet gives, and the states that no longer hold are taken off. Recorded with what changed.
+action_heal_param_amount: Amount (dice such as 1d8, or a number the story gives)
 action_heal_param_nonlethal: Only nonlethal harm
 action_heal_param_temporary: As temporary hit points
-action_heal_param_stabilize: Stabilise
+action_heal_param_stabilize: Stabilize
 action_heal_param_why: Why
 action_condition_label: Condition
-action_condition_description: Put a condition of the ruleset on someone, or take it off, for a number of rounds, minutes or hours, or until a save.
-action_condition_param_condition: Condition
+action_condition_description: Put a condition of the ruleset on someone, or take it off. It takes who, the condition by name, and how long: rounds (the one's own turns in a fight), minutes or hours, or until a save is made (which save, and its difficulty); with no length it lasts until it is taken off. What the condition changes comes from the ruleset's table, so no modifier is handed in. Recorded on the sheet.
+action_condition_param_condition: Condition (by name)
 action_condition_param_off: Take it off
-action_condition_param_rounds: Rounds
+action_condition_param_rounds: Rounds (the one's own turns in a fight)
 action_condition_param_minutes: Minutes
 action_condition_param_hours: Hours
-action_condition_param_save: Save that ends it
-action_condition_param_difficulty: Difficulty of that save
+action_condition_param_save: Save that ends it (each time it is tried)
+action_condition_param_difficulty: Difficulty of that save (one of the ruleset's by name, or a number the condition sets)
 action_condition_param_why: Why
 action_effect_label: Effect
-action_effect_description: Put a passing effect with its own modifiers on someone, or take it off by its label.
+action_effect_description: Put a passing effect on someone, or take it off by its label: what a spell, a thing or a ruling gives for a while, where the ruleset has no condition for it. It takes who, a label, how long (as a condition does), and the effect's modifiers, each a number, its type, what it changes and why. Those numbers are the effect's own, since no sheet has them; the sheet counts them with the rest by the ruleset's rule for stacking. Recorded on the sheet.
 action_effect_param_label: Label
-action_effect_param_mods: Modifiers (a number, its type, what it changes and why)
+action_effect_param_mods: Modifiers (each a number, its type, what it changes and why: +2 morale to attack: a rousing song)
 action_effect_param_off: Take it off
-action_effect_param_rounds: Rounds
+action_effect_param_rounds: Rounds (the one's own turns in a fight)
 action_effect_param_minutes: Minutes
 action_effect_param_hours: Hours
-action_effect_param_save: Save that ends it
-action_effect_param_difficulty: Difficulty of that save
+action_effect_param_save: Save that ends it (each time it is tried)
+action_effect_param_difficulty: Difficulty of that save (one of the ruleset's by name, or a number the effect sets)
 action_effect_param_why: Why
 action_d20_rest_label: Rest the night
-action_d20_rest_description: Rest for the ruleset's night: hit points and daily gauges come back as the ruleset gives them.
-action_d20_rest_param_hours: Hours
+action_d20_rest_description: Rest for the night. It takes who (and others who rest with them) and the hours, left out: the ruleset's night; the hours are told in the answer, and the clock is moved by pass_time. What comes back is the ruleset's, read from each sheet: hit points by level, nonlethal harm by the hour, and each daily gauge filled. Recorded for each.
+action_d20_rest_param_hours: Hours (left out: the ruleset's night)
 action_d20_rest_param_also: Others who rest
 action_reload_label: Reload
-action_reload_description: Fill a weapon's magazine from the rounds carried.
+action_reload_description: Fill a weapon's magazine from the rounds carried. It takes who and the weapon (left out: what is readied), and moves as many rounds as the magazine holds and as are carried, reading both from the sheet and the gear. The rounds loaded are recorded.
 action_reload_param_item: Weapon (left out: what is readied)
 action_award_label: Award experience
-action_award_description: Give experience, as a number or for who was overcome, and say who has reached a new level.
-action_award_param_xp: Experience
-action_award_param_overcame: Who was overcome
+action_award_description: Give experience, and say who has reached a level they have not yet taken. It takes who (and others who share it) and either the experience the story gives or who was overcome, whom the ruleset's own table prices and shares out, so that no sum is worked out by hand. Recorded for each.
+action_award_param_xp: Experience the story gives (left out: for who was overcome)
+action_award_param_overcame: Who was overcome (the ruleset's table gives what each is worth)
 action_award_param_also: Others who share it
 action_award_param_why: Why
 action_advance_label: Take a level
-action_advance_description: Take a level in a class: its hit points, and what the level gives by the tables, told as open.
-action_advance_param_class: Class
-action_advance_param_hp: Hit points (roll, average, most, or a number)
+action_advance_description: Take a level in a class. It takes who and the class by name, and reads the rest from the ruleset: the level's hit points (rolled, the average or the most, as the ruleset has it), the skill points, and whether the level gives a feat or an ability point, which it says are open to be placed; the class features the level gives are named. Recorded.
+action_advance_param_class: Class (by name)
+action_advance_param_hp: Hit points (left out: the ruleset's way; or roll, average, most, or a number the story gives)
 action_trait_label: Trait
-action_trait_description: Give someone a feat, a race or a feature of the ruleset, or take it away; what it requires is told.
-action_trait_param_trait: Trait
+action_trait_description: Give someone a feat, a race or a feature of the ruleset, or take it away. It takes who, the trait by name, and what it is taken for where it is taken for something (a weapon, a skill). What it changes comes from its row, so no modifier is handed in; what it requires is read from the sheet and told, and a trait whose requirement does not hold is given all the same.
+action_trait_param_trait: Trait (by name)
 action_trait_param_choice: Taken for (a weapon, a skill)
 action_trait_param_off: Take it away
 action_trait_param_why: Why
 action_ranks_label: Skill ranks
-action_ranks_description: Set someone's ranks in a skill; the most it takes and the points left are told.
-action_ranks_param_skill: Skill
-action_ranks_param_ranks: Ranks
+action_ranks_description: Set someone's ranks in a skill. It takes who, the skill and the ranks they have in all, and tells the most the skill takes at their level and the skill points left, both read from the sheet; ranks past the most are set all the same, and told.
+action_ranks_param_skill: Skill (by name)
+action_ranks_param_ranks: Ranks in all
 action_stat_as_label: Sheet from the bestiary
-action_stat_as_description: Give someone the sheet and the attacks of one of the ruleset's creatures.
-action_stat_as_param_creature: Creature
+action_stat_as_description: Give someone the sheet of one of the ruleset's creatures or ordinary people: its values, its attacks and its challenge rating. It takes who and the row by name, and reads every value from the row, so none is handed in. Recorded; a level, a trait or ranks can be added to it after.
+action_stat_as_param_creature: Creature (by name)

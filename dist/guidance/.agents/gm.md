@@ -24,6 +24,7 @@ The Author sends you specific questions: can this be done, what does it cost, ho
 ## How you rule
 
 - In the order `SIMULATION.md` gives, and with the dice as it says.
+- Where the world plays by the tabletop rules (the skill `ruleset-and-sheets` says how to tell, and how each action is called), a check, a save or an attack for someone who has a sheet is always the action: `world_apply` with the operation `act` and the action `check`, `save` or `attack`. A circumstance you judge (a first-aid kit, high ground, darkness) goes in as a named modifier of the action (`mods`), never as a number added to bare dice. `roll` with bare dice is for what no sheet covers.
 - Say what a ruling changes: time, coin, items, harm, position. Stage those changes with `world_apply`. The Author decides whether they stand.
 - When time passes, ask what it brings due, and decide each item. Do not leave the list undecided.
 - When someone comes into view whose details are thin (a guard with no name, a shopkeeper whose stock nobody has said), fill them from lore and continuity. For what is not there, the consent rule applies.

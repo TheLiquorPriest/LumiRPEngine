@@ -9,4 +9,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Ends a fight, won by a side or broken off, as the world's combat rules end one; no winner is decided unless named. With several fights under way it ends the one named. The answer says what changed and the fights still under way, and lists the world's rules that hear the end without running them.
+Ends a fight, won by a side or broken off, as the world's combat rules end one; no winner is decided unless named. With several fights under way it ends the one named. The answer says what changed and the fights still under way, and lists the world's rules that hear the end without running them. Under the world's tabletop rules it also says who fought whom and gives the call that awards experience for what was overcome; nothing is awarded until that call is made.

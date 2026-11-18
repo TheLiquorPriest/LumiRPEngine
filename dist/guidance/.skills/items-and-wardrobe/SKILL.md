@@ -25,6 +25,12 @@ All through `world_apply`:
 
 A thing used up (a potion drunk, arrows shot, a candle burned) is one operation that says how much is left.
 
+## A weapon or armour, where the world has the tabletop rules
+
+When a weapon or armour comes into someone's hands (bought, given, found), make it the catalog's own item, found by its name. It has its numbers already (a weapon's damage, threat range and magazine, an armour's bonus), so the sheet reads it and `attack` works with it at once; a thing you name yourself as a plain item has none of them. `spawn` it with `type` the catalog's own: a type the catalog does not have is answered with the nearest by name. If the catalog lacks the weapon or armour the story needs, add it first as a row of the rules' weapons or armour table with `rules_add`, in one call (the skill `ruleset-and-sheets` says how), and the thing's `catalog` is that row's id.
+
+Rounds for a firearm are things carried too: the catalog's own rounds, a quantity of them, given or bought like any other thing. `reload` fills the magazine from them. The skill `ruleset-and-sheets` says how to tell that the rules are on.
+
 ## What someone is wearing
 
 The world state shows what each person present wears and carries. Prose that contradicts it breaks the scene.

@@ -12,4 +12,4 @@ arguments:
   precision: "How exact: exact, approximate, vague or unknown."
   standing: "How it stands: established, proposed or assumed."
 ---
-Starts a fight between the two sides named, or adds people to one under way. A fight is exactly the people named, at the place named or where they all stand; no one is added, and no initiative is rolled unless asked. The answer gives the fights as they now stand: the sides, the order, whose turn it is and the round, and lists the world's rules that hear the start without running them.
+Starts a fight between the two sides named, or adds people to one under way. A fight is exactly the people named, at the place named or where they all stand; no one is added, and no initiative is rolled unless asked, or, where the world's tabletop rules are on and no order is given, from each fighter's sheet. The answer gives the fights as they now stand: the sides, the order, whose turn it is and the round, and lists the world's rules that hear the start without running them.

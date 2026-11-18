@@ -1211,7 +1211,7 @@ var lre_world_v1_schema_default = {
     strings: { type: "array", items: { type: "string" } },
     expr: { title: "a formula", type: "string", description: "a formula in the expression language" },
     level: { type: "integer", minimum: 0, maximum: 4 },
-    domain: { enum: ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"] },
+    domain: { enum: ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets", "d20"] },
     domainLevels: {
       type: "object",
       additionalProperties: false,
@@ -1224,7 +1224,8 @@ var lre_world_v1_schema_default = {
         space: { $ref: "#/$defs/level" },
         calendar: { $ref: "#/$defs/level" },
         weather: { $ref: "#/$defs/level" },
-        sheets: { $ref: "#/$defs/level" }
+        sheets: { $ref: "#/$defs/level" },
+        d20: { $ref: "#/$defs/level" }
       }
     },
     band: { enum: ["principal", "supporting", "background"] },
@@ -2005,7 +2006,8 @@ var lre_world_v1_schema_default = {
             space: { $ref: "#/$defs/level" },
             calendar: { $ref: "#/$defs/level" },
             weather: { $ref: "#/$defs/level" },
-            sheets: { $ref: "#/$defs/level" }
+            sheets: { $ref: "#/$defs/level" },
+            d20: { $ref: "#/$defs/level" }
           }
         },
         tierCaps: {
@@ -3699,6 +3701,26 @@ function naturalSplit(notation) {
   for (const g of parsed.groups.slice(1))
     rest = convolve(rest, groupDist(g, work), work);
   return { sign: die.sign, natural: finish(groupDist({ ...die, sign: 1 }, work)), rest: finish(rest) };
+}
+function probAtLeast(d, t) {
+  if (t <= d.min)
+    return 1;
+  if (t > d.max)
+    return 0;
+  let made = 0n;
+  for (let i = t - d.min;i < d.counts.length; i++)
+    made += d.counts[i];
+  return share(made, d.outcomes);
+}
+function probAtMost(d, t) {
+  if (t >= d.max)
+    return 1;
+  if (t < d.min)
+    return 0;
+  let made = 0n;
+  for (let i = 0;i <= t - d.min; i++)
+    made += d.counts[i];
+  return share(made, d.outcomes);
 }
 
 // src/engine/holidays.ts
@@ -19021,6 +19043,11 @@ var spacePack = {
         return null;
       const squares = between(ground.drawn, ground.moving, x, y);
       return squares === null ? null : squares * (ground.drawn.scale.unit === "feet" ? ground.drawn.scale.feet : ground.drawn.scale.metres);
+    });
+    r.formula("grid_unit", (ctx, a) => {
+      const place2 = placeOfEntity(ctx.state, String(a ?? ""));
+      const ground = place2 === null ? null : groundAt(ctx, place2);
+      return ground === null ? null : ground.drawn.scale.unit;
     });
     r.formula("on_grid", (ctx, thing) => {
       const e = own(ctx.state.entities, String(thing ?? ""));
@@ -39992,7 +40019,7 @@ function checkView(a, retry) {
   const v = a.verdict;
   const rolls = !v || v.roll;
   const verdict = !v || v.roll ? null : v.why === "impossible" ? "Too hard to try" : v.why === "story" ? v.chance === null ? "The story decides" : `The story decides (odds ${Math.round(v.chance * 100)}%)` : v.why === "retry" ? retry === "once" ? "Retry needs a new scene" : "Retry needs a change" : "No roll needed";
-  const parts = [verdict ?? "", c && rolls ? c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "" : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "");
+  const parts = [verdict ?? "", c && rolls ? c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "" : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : "", a.missing ?? ""].filter((p) => p !== "");
   return { ...parts.length > 0 ? { detail: parts.join(" · ") } : {}, ...a.odds && (rolls || v?.why === "story") ? { odds: Object.entries(a.odds).map(([outcome, p]) => ({ outcome, p })) } : {} };
 }
 
@@ -48144,7 +48171,7 @@ var sheetsPack = {
         return conditions.length > 0 ? [say("feed_you_are_conditions", { conditions: conditions.map((c) => c.label.toLowerCase()).join(", ") })] : [];
       }
     });
-    r.view({ panel: "sheets.you", build: (ctx) => buildSheetView(ctx) });
+    r.view({ panel: "sheets.you", build: (ctx) => optionalQuery(ctx, "d20.on")?.(ctx) === true ? null : buildSheetView(ctx) });
     r.proposal({
       type: "condition",
       boundField: "list",
@@ -48556,6 +48583,142 @@ function emptyBestiary() {
   return { id: BESTIARY_TABLE, pack: "combat", schema: BESTIARY_SCHEMA, revision: hashJson({ schema: BESTIARY_SCHEMA, columns: BESTIARY_COLUMNS, rows: rows2 }), label: "Bestiary", columns: BESTIARY_COLUMNS, rows: rows2 };
 }
 
+// src/shared/d20.ts
+var D20_PACK = "d20";
+var D20_FIELDS = {
+  classes: "classes",
+  ranks: "ranks",
+  traits: "d20_traits",
+  conditions: "conditions",
+  effects: "d20_effects",
+  attacks: "d20_attacks",
+  size: "size",
+  hitDice: "hit_dice",
+  loaded: "loaded",
+  enhancement: "enhancement",
+  modifiers: "modifiers",
+  row: "d20_row"
+};
+var text4 = (optional = false, doc) => ({ type: "text", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
+var int = (optional = false, doc) => ({ type: "int", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
+var json = (optional = false, doc) => ({ type: "json", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
+var texts = (optional = false, doc) => ({ type: "list", of: "text", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
+var bool = (optional = false, doc) => ({ type: "bool", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
+var D20_COLUMNS = {
+  skills: {
+    label: text4(),
+    ability: text4(false, "The ability whose modifier the skill adds"),
+    trained: bool(true, "Used only by those with a rank in it"),
+    armor: bool(true, "Armour's check penalty applies")
+  },
+  classes: {
+    label: text4(),
+    hit_die: int(false, "Sides of the die each level of it rolls for hit points"),
+    tracks: json(false, "The tracks table's column each progression reads: attack, each save, and any more a ruleset names"),
+    skill_points: int(false, "Skill points each level, before the ruleset adds its own share"),
+    class_skills: texts(true, "The skills rows that are its class skills"),
+    proficiency: texts(true, "What its levels make its wielder proficient with: a weapons row's proficiency or the row itself"),
+    features: json(true, "The traits rows each level gives, by level")
+  },
+  tracks: {},
+  traits: {
+    label: text4(),
+    kind: text4(false, "What it is: a feat, a race, a class feature, a template"),
+    text: text4(true, "What it does, in words"),
+    modifiers: json(true, "Its modifiers"),
+    grants: json(true, "What it grants besides: proficiency, class skills, a gauge's size"),
+    requires: text4(true, "A formula with self that should hold to take it: reported, never enforced")
+  },
+  conditions: {
+    label: text4(),
+    text: text4(true, "What it does, in words"),
+    modifiers: json(true, "Its modifiers"),
+    flags: texts(true, "What holds while under it, as the procedures read them")
+  },
+  sizes: {
+    label: text4(),
+    order: int(false, "Its place from the smallest, for damage by size"),
+    modifiers: json(true, "Its modifiers")
+  },
+  weapons: {
+    label: text4(),
+    damage: json(false, "Its damage dice by its wielder's size, or one notation for all"),
+    threat: int(false, "The lowest natural die that threatens a critical"),
+    multiplier: int(false, "What a critical multiplies its damage by"),
+    range: int(true, "Its range increment, in the world's units"),
+    proficiency: text4(true, "What it takes to be proficient with it; left out or empty, nothing"),
+    held: text4(false, "How it is held or used: light, one, two, thrown, projectile"),
+    types: texts(true, "Its damage types"),
+    nonlethal: bool(true, "Its harm is nonlethal"),
+    fire: texts(true, "The fire modes a weapon that fires has"),
+    magazine: int(true, "Rounds its magazine holds"),
+    magazine_kind: text4(true, "What kind of magazine it takes: reloading it costs `costs['reload.<kind>']` of a fight's budgets, else `costs.reload`"),
+    area: int(true, "An area weapon's burst: its radius, in the world's units"),
+    save: json(true, "The save of those in its area: {save, dc, half}"),
+    modifiers: json(true, "Its own modifiers")
+  },
+  armor: {
+    label: text4(),
+    bonus: int(false, "What it adds to defence"),
+    type: text4(false, "The bonus's type: armour or shield"),
+    max_dex: int(true, "The most of the Dexterity modifier that still counts to defence"),
+    check: int(true, "Its check penalty, a number of 0 or less"),
+    modifiers: json(true, "Its own modifiers besides")
+  },
+  creatures: {
+    name: text4(),
+    kind: text4(),
+    tier: text4(true),
+    fields: json(false, "The sheet's values, by field"),
+    attacks: json(true, "Its own attacks"),
+    cr: text4(true, "Its challenge rating, a row of the challenges table"),
+    carries: texts(true),
+    description: text4(true)
+  },
+  experience: {
+    xp: int(false, "The experience the level needs; a ruleset with several tracks names its columns in `levels`")
+  },
+  challenges: {
+    xp: int(true, "What overcoming it is worth, shared among those who did"),
+    by_level: json(true, "What it is worth to each who overcame it, by their level")
+  },
+  difficulties: {
+    label: text4(),
+    dc: int(),
+    text: text4(true)
+  }
+};
+function d20Schema(role) {
+  return `lre-table/d20.${role}/v1`;
+}
+function totalLabel(rules, name) {
+  const label2 = rules.labels !== undefined && hasOwn(rules.labels, name) ? rules.labels[name] : undefined;
+  return label2 !== undefined && label2 !== "" ? label2 : name;
+}
+function saveLabel(rules, save) {
+  const label2 = totalLabel(rules, `save.${save}`);
+  return label2 === `save.${save}` ? save : label2;
+}
+var D20_ACTIONS = ["check", "save", "attack", "harm", "heal", "condition", "effect", "d20_rest", "reload", "award", "advance", "trait", "ranks", "stat_as"];
+var D20_EVENTS = {
+  check: "d20.check",
+  save: "d20.save",
+  attack: "d20.attack",
+  harm: "d20.harm",
+  heal: "d20.heal",
+  condition: "d20.condition",
+  effect: "d20.effect",
+  rest: "d20.rest",
+  reload: "d20.reload",
+  award: "d20.award",
+  advance: "d20.advance",
+  trait: "d20.trait",
+  ranks: "d20.ranks",
+  statAs: "d20.stat_as",
+  state: "d20.state",
+  upkeep: "d20.upkeep"
+};
+
 // src/shared/tables.ts
 function tableChoices(table) {
   if (!table || typeof table.rows !== "object" || table.rows === null)
@@ -48565,8 +48728,8 @@ function tableChoices(table) {
     return { key, label: typeof label2 === "string" && label2.trim() !== "" ? label2 : key.replace(/_/g, " ") };
   });
 }
-function tableRowKey(table, text4) {
-  const said3 = text4.trim().toLowerCase();
+function tableRowKey(table, text5) {
+  const said3 = text5.trim().toLowerCase();
   const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said3 || c.label.toLowerCase() === said3);
   return hit ? hit.key : null;
 }
@@ -48744,16 +48907,21 @@ function actionOdds(reg, world, state2, req) {
   const usable = ready && !("code" in ready) ? ready : null;
   const counts2 = usable ? checkCounts(usable) : null;
   const odds = counts2 ? oddsOf(counts2) : null;
+  const theirs = !def && p.action.pack === D20_PACK ? optionalService(ctx, "d20.odds")?.(ctx, p.action.id, p.actor, p.params) ?? null : null;
+  const packed = theirs !== null && "chances" in theirs ? theirs : null;
   const spend = combatSpend(ctx, p.actor, p.action);
   const refused3 = Array.isArray(spend) ? null : spend;
   return {
     available: unmet2 === null && refused3 === null && usable === ready,
     failed: unmet2 ?? refused3 ?? (ready && "code" in ready ? ready : null),
-    odds,
-    modifier: usable?.modifier ?? 0,
-    check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
+    odds: packed?.chances ?? odds,
+    modifier: packed?.modifier ?? usable?.modifier ?? 0,
+    check: packed ? { notation: packed.notation, advantage: 0, dc: packed.dc, opponent: packed.opponent } : usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && counts2 ? verdictOf(policyFor(world, state2, p.action, p.actor), { registry: reg, world, state: state2, action: p.action, actor: p.actor, params: p.params, ready: usable, counts: counts2 }) : null
+    verdict: usable && counts2 ? verdictOf(policyFor(world, state2, p.action, p.actor), { registry: reg, world, state: state2, action: p.action, actor: p.actor, params: p.params, ready: usable, counts: counts2 }) : null,
+    ...packed?.lines ? { lines: packed.lines } : {},
+    ...packed?.spent ? { spent: packed.spent } : {},
+    ...theirs !== null && "missing" in theirs ? { missing: theirs.missing } : {}
   };
 }
 function resolveAction(reg, w, req, rng, opts = {}) {
@@ -48989,7 +49157,8 @@ function readEncounter(raw) {
   for (const e of Array.isArray(raw.log) ? raw.log : []) {
     if (!isRecord(e) || typeof e.actor !== "string")
       continue;
-    log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null });
+    const told2 = Array.isArray(e.told) ? e.told.filter((t) => typeof t === "string" && t !== "") : [];
+    log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null, ...told2.length > 0 ? { told: told2 } : {} });
   }
   const calm = objOf(raw.calm);
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers3(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
@@ -49658,9 +49827,13 @@ function paletteEncounter(ctx) {
 }
 function logLines(ctx, enc, gm) {
   return enc.log.map((e) => {
-    const who = nameOf4(ctx, e.actor, gm) ?? "someone";
-    const target = e.target ? ` → ${nameOf4(ctx, e.target, gm) ?? "someone"}` : "";
-    return `${who.charAt(0).toUpperCase()}${who.slice(1)}: ${e.action}${target}${e.outcome ? ` (${e.outcome.replace(/_/g, " ")})` : ""}`;
+    const who = nameOf4(ctx, e.actor, gm);
+    const whom = e.target ? nameOf4(ctx, e.target, gm) : null;
+    if (e.told !== undefined && who !== null && (e.target === null || whom !== null))
+      return e.told.join(" ");
+    const target = e.target ? ` → ${whom ?? "someone"}` : "";
+    const name = who ?? "someone";
+    return `${name.charAt(0).toUpperCase()}${name.slice(1)}: ${e.action}${target}${e.outcome ? ` (${e.outcome.replace(/_/g, " ")})` : ""}`;
   });
 }
 function buildEncounterView(ctx, opts = {}) {
@@ -49976,7 +50149,8 @@ var events2 = [
       if (!enc)
         return;
       const target = typeof e.data.target === "string" ? e.data.target : null;
-      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
+      const told2 = Array.isArray(e.data.told) ? e.data.told.filter((t) => typeof t === "string" && t !== "") : [];
+      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null, ...told2.length > 0 ? { told: told2 } : {} };
       const struck = enc.calm.struck || attacks(ctx, enc, entry.actor, strOf(e.data.action), target);
       writeEncounter(state2, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });
     },
@@ -50068,7 +50242,10 @@ var combatPack = {
         if (enc.order[enc.turn]?.id !== who)
           return reject23("not_your_turn", who === ctx.world.pov ? say("why_it_isnt_your_turn") : say("why_it_isnt_actor_s_turn", { actor: labelOf(ctx, who) }));
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject23("no_one", say("why_no_one_is_left_to_take_a"));
+        if (!next)
+          return reject23("no_one", say("why_no_one_is_left_to_take_a"));
+        const actor2 = strOf(next.type === "combat.turn" && "data" in next ? next.data.actor : undefined);
+        return [next, ...optionalService(ctx, "d20.upkeep")?.(ctx, actor2, ctx.rng.fork("upkeep")) ?? []];
       }
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts2(a.cost) ?? {} } }) });
@@ -50112,6 +50289,14 @@ var combatPack = {
     });
     r.formula("encounter_round", (ctx) => encounterOf(ctx.state)?.round ?? 0);
     r.formula("budget_left", (ctx, e, budget) => own(fighterArg(ctx, e)?.f.left ?? {}, String(budget ?? "")) ?? 0);
+    r.formula("has_acted", (ctx, e) => {
+      const id = String(e ?? "");
+      const enc = fightsOf(ctx.state).find((f) => fighterOf(f, id) !== undefined);
+      if (!enc)
+        return null;
+      const at = enc.order.findIndex((f) => f.id === id);
+      return enc.round > 1 || at <= enc.turn || enc.log.some((l) => l.actor === id);
+    });
     r.action({
       id: "fight",
       pack: PACK5,
@@ -50277,7 +50462,7 @@ function openCommitments(c) {
 var str18 = (v) => typeof v === "string";
 var finite3 = (v) => typeof v === "number" && Number.isFinite(v);
 var ids = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
-var texts = ids;
+var texts2 = ids;
 function bad(reason) {
   return { code: "bad_event", reason };
 }
@@ -50338,7 +50523,7 @@ function validMind(data) {
   const { at, place: place2, level, moment, reason, monologue, depiction, intent, reactions, plans, mood: mood2, interrupt, withheld } = data;
   if (!finite3(at) || !(place2 === null || str18(place2)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str18(reason))
     return bad(say("why_a_mind_needs_its_clock_place_level"));
-  if (!str18(monologue) || !str18(depiction) || !str18(intent) || !texts(reactions) || plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))
+  if (!str18(monologue) || !str18(depiction) || !str18(intent) || !texts2(reactions) || plans !== undefined && (!Array.isArray(plans) || !plans.every((p) => isPlan(p))))
     return bad(say("why_a_mind_needs_its_monologue_depiction_intent"));
   if (!(mood2 === null || str18(mood2)) || !(interrupt === null || isRecord(interrupt) && str18(interrupt.reason)) || typeof withheld !== "boolean")
     return bad(say("why_a_minds_mood_interrupt_or_withheld_flag"));
@@ -50364,7 +50549,7 @@ var mind = {
       monologue: str18(d.monologue) ? d.monologue : "",
       depiction: str18(d.depiction) ? d.depiction : "",
       intent: str18(d.intent) ? d.intent : "",
-      reactions: texts(d.reactions) ? [...d.reactions] : [],
+      reactions: texts2(d.reactions) ? [...d.reactions] : [],
       plans: plans.map((p) => p.id),
       mood: str18(d.mood) ? d.mood : null,
       interrupt: isRecord(d.interrupt) && str18(d.interrupt.reason) ? d.interrupt.reason : null,
@@ -50433,7 +50618,7 @@ var memory = {
 };
 var presence = {
   type: MINDS_EVENTS.presence,
-  validate: (e) => finite3(e.data.at) && (e.data.msg === null || str18(e.data.msg)) && (e.data.place === null || str18(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad(say("why_a_presence_record_needs_its_clock_message")),
+  validate: (e) => finite3(e.data.at) && (e.data.msg === null || str18(e.data.msg)) && (e.data.place === null || str18(e.data.place)) && ids(e.data.who) && texts2(e.data.saw) ? null : bad(say("why_a_presence_record_needs_its_clock_message")),
   apply: (e, state2) => {
     const d = e.data;
     const at = finite3(d.at) ? d.at : state2.clock;
@@ -50443,7 +50628,7 @@ var presence = {
     s.presence.push({ msg: str18(d.msg) ? d.msg : null, at, place: place2, who: [...who] });
     if (s.presence.length > MINDS_KEEP.presence)
       s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
-    const saw = texts(d.saw) ? d.saw : [];
+    const saw = texts2(d.saw) ? d.saw : [];
     for (const id of who) {
       const c = writeCharacter(state2, id);
       c.lastPresent = at;
@@ -50627,7 +50812,7 @@ function isHolding(v) {
   if (!isRecord(v) || typeof v.how !== "string" || !HOLDING_HOWS.includes(v.how))
     return false;
   const since = v.since;
-  return (v.by === null || str18(v.by) && v.by !== "") && (v.how !== "told" || v.by !== null) && texts(v.evidence) && v.evidence.every((ref2) => isWitnessRef(ref2) || parseFactId(ref2) !== null) && isRecord(since) && (since.msg === null || str18(since.msg)) && finite3(since.at) && typeof v.belief === "string" && HOLDING_BELIEFS.includes(v.belief) && isConfidence(v.confidence) && (v.keptFrom === undefined || v.keptFrom === "everyone" || someIds(v.keptFrom));
+  return (v.by === null || str18(v.by) && v.by !== "") && (v.how !== "told" || v.by !== null) && texts2(v.evidence) && v.evidence.every((ref2) => isWitnessRef(ref2) || parseFactId(ref2) !== null) && isRecord(since) && (since.msg === null || str18(since.msg)) && finite3(since.at) && typeof v.belief === "string" && HOLDING_BELIEFS.includes(v.belief) && isConfidence(v.confidence) && (v.keptFrom === undefined || v.keptFrom === "everyone" || someIds(v.keptFrom));
 }
 function holdingOf(v, self) {
   const keptFrom = keptFromOf(v.keptFrom, self);
@@ -50832,8 +51017,8 @@ function mindsOn(ctx) {
 function reject24(code, reason) {
   return { code, reason };
 }
-function tidy(text4) {
-  return text4.replace(/\s+/g, " ").trim();
+function tidy(text5) {
+  return text5.replace(/\s+/g, " ").trim();
 }
 function gmText(v, max, kept4, what) {
   if (typeof v !== "string" || v.trim() === "")
@@ -50985,9 +51170,9 @@ function mindEdit(ctx, op, lengths) {
     const said3 = op.text === undefined ? undefined : gmText(op.text, lengths?.gmIntent, c.intent?.text, "Your intent for them");
     if (typeof said3 === "object" && said3 !== null)
       return said3;
-    const text4 = said3 === undefined ? c.intent?.text ?? "" : said3 ?? "";
+    const text5 = said3 === undefined ? c.intent?.text ?? "" : said3 ?? "";
     const approach = op.approach === undefined ? c.intent?.approach ?? null : op.approach;
-    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text4 === "" && approach === null ? null : { text: text4, approach } } }];
+    return [{ type: MINDS_EVENTS.intent, data: { entity: op.entity, intent: text5 === "" && approach === null ? null : { text: text5, approach } } }];
   }
   const value = op.value;
   if (op.part === "note") {
@@ -51023,8 +51208,8 @@ function mindCandidates(ctx) {
   return Object.keys(state2.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state2.entities, id)?.kind ?? "", "person") && !isGone(state2, id) && acts(world, state2, id));
 }
 var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
-function words3(text4) {
-  return text4.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+function words3(text5) {
+  return text5.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 function singlesOut(word) {
   return word.length >= 3 && !NAME_FILLER[word];
@@ -51123,13 +51308,13 @@ function pendingWith(ctx, id) {
   n += optionalQuery(ctx, "orgs.open_orders")?.(ctx, id) ?? 0;
   return n;
 }
-function fidelityOf(ctx, texts2, config3 = worldMindsOf(ctx.world)) {
+function fidelityOf(ctx, texts3, config3 = worldMindsOf(ctx.world)) {
   const { registry: reg, world, state: state2 } = ctx;
   const pov = world.pov;
   const w = config3.weights;
   const here = placeOfEntity(state2, pov);
-  const said3 = words3(`${texts2.user}
-${texts2.reply}`);
+  const said3 = words3(`${texts3.user}
+${texts3.reply}`);
   const refs = worldRefs(world);
   const tracks = liveTracks(world, state2);
   const regard = optionalQuery(ctx, "regard");
@@ -51371,22 +51556,22 @@ function knowledgeLines(ctx, scope) {
       }
     }
     for (const { who, h } of holders) {
-      const text4 = knowledgeLine(settings, "person", { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words4) });
+      const text5 = knowledgeLine(settings, "person", { name: who === pov ? "You" : name(who), line: holdingLine(claim2(h.fact, id), h.holding, words4) });
       if (yours !== undefined)
-        out.push(kept4 ? { text: text4, known: "pov", secret: { keptFrom: kept4.keptFrom, known: [...new Set([...kept4.known, who])] }, group: id } : { text: text4, known: "pov", group: id });
+        out.push(kept4 ? { text: text5, known: "pov", secret: { keptFrom: kept4.keptFrom, known: [...new Set([...kept4.known, who])] }, group: id } : { text: text5, known: "pov", group: id });
       else if (keptFromIt(h.holding, pov) || secret(id, h.fact)) {
         const keeps = h.holding.keptFrom;
-        out.push({ text: text4, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
+        out.push({ text: text5, known: "scene", who: name(who), secret: { keptFrom: keeps === "everyone" ? "everyone" : [...new Set([...keeps ?? [], pov])], known: [who] }, group: id });
       } else
-        out.push({ text: text4, known: "scene", who: name(who), group: id });
+        out.push({ text: text5, known: "scene", who: name(who), group: id });
     }
     const mine = holders.find((x) => x.who === pov)?.h;
     if (mine && (mine.secret || mine.about || mine.recent))
       for (const who of others) {
         if (own(holdingsOf(slice2, who), id) !== undefined)
           continue;
-        const text4 = knowledgeLine(settings, "notKnown", { name: name(who), claim: claim2(mine.fact, id) });
-        out.push(kept4 ? { text: text4, known: "pov", secret: kept4, group: id } : { text: text4, known: "pov", group: id });
+        const text5 = knowledgeLine(settings, "notKnown", { name: name(who), claim: claim2(mine.fact, id) });
+        out.push(kept4 ? { text: text5, known: "pov", secret: kept4, group: id } : { text: text5, known: "pov", group: id });
       }
   }
   return out;
@@ -51403,7 +51588,7 @@ function buildKnownView(ctx) {
   const secrets = unrevealedSecrets(reg, world, state2);
   const hidden = hiddenNameCheck(reg, world, state2, world.pov, { stages: false });
   const name = (id) => povMayKnow(reg, world, state2, id) ? own(state2.entities, id)?.name ?? id : "someone";
-  const worded = (text4) => findLeaks(text4, secrets).length > 0 || hidden(text4) ? say("mind_unworded") : text4;
+  const worded = (text5) => findLeaks(text5, secrets).length > 0 || hidden(text5) ? say("mind_unworded") : text5;
   const secret = worldSecrets(ctx);
   const sure = knowledgeThreshold(slice2);
   const items = Object.entries(holdingsOf(slice2, world.pov)).sort(([a, x], [b, y]) => y.since.at - x.since.at || (a < b ? -1 : 1)).map(([fact, h]) => {
@@ -51639,8 +51824,8 @@ var MINDS_LINTS = [
 ];
 
 // src/packs/minds/core/section.ts
-function clause(text4) {
-  return text4.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+function clause(text5) {
+  return text5.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
 }
 function mindLines(ctx) {
   const { registry: reg, world, state: state2 } = ctx;
@@ -51651,13 +51836,13 @@ function mindLines(ctx) {
   const here = placeOfEntity(state2, pov);
   const secrecy = worldMindsOf(world).secrecy;
   let check2 = null;
-  const safe = (text4) => {
+  const safe = (text5) => {
     if (!check2) {
       const secrets = unrevealedSecrets(reg, world, state2);
       const hidden = hiddenNameCheck(reg, world, state2, pov);
       check2 = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
     }
-    return check2(text4);
+    return check2(text5);
   };
   const out = [];
   for (const id of Object.keys(slice2.chars).sort()) {
@@ -51716,7 +51901,7 @@ var mindsPack = {
     r.query("minds.minded", minded);
     r.query("minds.on", mindsOn);
     r.query("minds.intent", (ctx, who) => (readCharacter(ctx.state, who).intent?.text ?? "") !== "");
-    r.query("minds.fidelity", (ctx, texts2) => fidelityOf(ctx, texts2));
+    r.query("minds.fidelity", (ctx, texts3) => fidelityOf(ctx, texts3));
     r.query("minds.knowing", () => KNOWLEDGE_DEFAULTS);
     r.renderer({ slot: MINDS_SLOT, label: "What the characters' minds are on", render: (ctx) => mindLines(ctx).map((l) => l.line) });
     r.renderer({ slot: KNOWLEDGE_SLOT, label: "Who knows what", render: (ctx) => knowledgeLines(ctx, "player").map((l) => l.text), feed: knowledgeLines });
@@ -51767,9 +51952,9 @@ var ORGS_SPENT = "orgs.spent";
 var LOG_KEPT = 40;
 var SPENT_MONTHS_KEPT = 13;
 var MONTH2 = /^\d{4}-\d{2}$/;
-function orgLog(ctx, org, text4, opts = {}) {
+function orgLog(ctx, org, text5, opts = {}) {
   const names = [...new Set(opts.names ?? [])].map((id) => ({ id, name: own(ctx.state.entities, id)?.name ?? id }));
-  return { type: ORGS_LOG, data: { org, text: text4, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
+  return { type: ORGS_LOG, data: { org, text: text5, at: ctx.state.clock, ...opts.by ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {}, ...opts.power ? { power: opts.power } : {}, visibility: "secret" } };
 }
 function actNames(ctx, act2) {
   const out = [];
@@ -51951,8 +52136,8 @@ function entryChange(ctx, a) {
     ...keys === undefined ? [] : [keys === null ? say("org_log_its_keys_as_the_world_has_them") : keys.length === 0 ? say("org_log_no_keys") : say("org_log_keys_pov", { pov: listOf(keys.map((k) => keyWords(ctx, k, pov))) })]
   ].join("; ");
   const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place2) ? own(ctx.world.places, place2)?.name ?? place2 : actor2 !== null ? say("org_log_a_place") : say("org_log_a_place_2");
-  const text4 = say("org_log_actor_set_where_said", { actor: actor2 !== null ? labelOf(ctx, actor2) : undefined, where, said: said3, if_actor: actor2 !== null });
-  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text4, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
+  const text5 = say("org_log_actor_set_where_said", { actor: actor2 !== null ? labelOf(ctx, actor2) : undefined, where, said: said3, if_actor: actor2 !== null });
+  const logs = (org !== "" ? [org] : holdersOf6(ctx, place2)).map((o) => orgLog(ctx, o, text5, actor2 !== null ? { by: actor2, names: [actor2] } : {}));
   return [{ type: ORGS_ENTRY, data }, ...logs];
 }
 function str20(e, key) {
@@ -52283,22 +52468,22 @@ function parseOrgOp(o) {
 function refuse2(code, reason2) {
   return { code, reason: reason2 };
 }
-function plainWords(text4) {
-  return text4.trim().replace(/^=+\s*/, "");
+function plainWords(text5) {
+  return text5.trim().replace(/^=+\s*/, "");
 }
-function historyLine(org, text4, opts = {}) {
+function historyLine(org, text5, opts = {}) {
   const names = [...new Set((opts.names ?? []).filter((id) => id !== ""))];
-  return { type: "orgs.note", args: { org, text: plainWords(text4), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
+  return { type: "orgs.note", args: { org, text: plainWords(text5), ...opts.by !== undefined && opts.by !== "" ? { by: opts.by } : {}, ...names.length > 0 ? { names } : {} } };
 }
-function withWhy(text4, why) {
+function withWhy(text5, why) {
   const reason2 = plainWords(why ?? "");
-  return reason2 === "" || text4 === "" ? text4 : `${text4}: ${reason2}`;
+  return reason2 === "" || text5 === "" ? text5 : `${text5}: ${reason2}`;
 }
 function flagged(ctx, by, org, power, did) {
   if (by === undefined || by === "" || by === org || orgTypeOf(ctx, org) === null || orgPower(ctx, by, org, power) !== null)
     return [];
-  const text4 = plainWords(say("org_log_who_did_though_who_may_not_power", { who: labelOf(ctx, by), did, power: powerWords[power], org: labelOf(ctx, org) }));
-  return text4 === "" ? [] : [{ type: "note", args: { text: text4, visibility: "secret" } }];
+  const text5 = plainWords(say("org_log_who_did_though_who_may_not_power", { who: labelOf(ctx, by), did, power: powerWords[power], org: labelOf(ctx, org) }));
+  return text5 === "" ? [] : [{ type: "note", args: { text: text5, visibility: "secret" } }];
 }
 function positionNamed(ctx, org, said3) {
   const key = said3.trim().toLowerCase().replace(/\s+/g, " ");
@@ -52374,8 +52559,8 @@ function compileOrgOp(ctx, op) {
       if (!job)
         return [{ type: "orgs.appoint", args: { org: op.org, who: op.who, position: op.position ?? "", why: plainWords(op.why) } }];
       const title = op.position === null ? null : positionsOf(ctx, op.org).find((p) => p.id === op.position)?.title ?? op.position;
-      const text4 = title === null ? say("org_log_who_no_longer_holds_a_position", { who: name(op.who) }) : say("org_log_appointed_who_title", { who: name(op.who), title });
-      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text4, op.why), { names: [op.who] })];
+      const text5 = title === null ? say("org_log_who_no_longer_holds_a_position", { who: name(op.who) }) : say("org_log_appointed_who_title", { who: name(op.who), title });
+      return [{ type: "economy.job_position", args: { job: job.id, position: op.position ?? "" } }, historyLine(op.org, withWhy(text5, op.why), { names: [op.who] })];
     }
     case "title": {
       const bad2 = orgProblem(ctx, op.org);
@@ -52426,11 +52611,11 @@ function compileOrgOp(ctx, op) {
         return until;
       const fields = { powers: op.powers, ...op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}, ...op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}, ...op.accounts !== undefined ? { accounts: op.accounts } : {}, by: op.by };
       const limits2 = [...op.payment !== undefined && op.payment > 0 ? [say("org_log_currency_a_payment", { currency: money4(ctx, op.payment) })] : [], ...op.month !== undefined && op.month > 0 ? [say("org_log_currency_a_month", { currency: money4(ctx, op.month) })] : []];
-      const text4 = say("org_op_let", { by: name(op.by), to: name(op.to), powers: op.powers.map((p) => powerWords[p]).join(", "), limits: limits2.length > 0 ? listOf(limits2) : undefined, until: op.until !== undefined ? op.until.slice(0, 10) : undefined });
+      const text5 = say("org_op_let", { by: name(op.by), to: name(op.to), powers: op.powers.map((p) => powerWords[p]).join(", "), limits: limits2.length > 0 ? listOf(limits2) : undefined, until: op.until !== undefined ? op.until.slice(0, 10) : undefined });
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...until !== undefined ? { until } : {} } },
-        historyLine(op.org, text4, { by: op.by, names: [op.by, op.to] }),
+        historyLine(op.org, text5, { by: op.by, names: [op.by, op.to] }),
         ...flagged(ctx, op.by, op.org, "delegate", say("org_log_let_name_act_for_org", { name: name(op.to), org: name(op.org) })),
         ...lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, say("org_log_let_name_lacking", { name: name(op.to), lacking: powerWords[lacking] })) : []
       ];
@@ -52634,8 +52819,8 @@ function motionIn(raw) {
     return null;
   const what = objOf(raw.what);
   const id = strOf(raw.id);
-  const text4 = strOf(raw.text);
-  if (id === "" || text4 === "" || strOf(what.type) === "")
+  const text5 = strOf(raw.text);
+  if (id === "" || text5 === "" || strOf(what.type) === "")
     return null;
   const votes = {};
   for (const [who, v] of Object.entries(objOf(raw.votes))) {
@@ -52646,7 +52831,7 @@ function motionIn(raw) {
   const num8 = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
   return {
     id,
-    text: text4,
+    text: text5,
     what: { type: strOf(what.type), args: objOf(what.args) },
     by: strOf(raw.by),
     ...strOf(raw.party) !== "" ? { party: strOf(raw.party) } : {},
@@ -52745,10 +52930,10 @@ function carryOut(ctx, rng, org, id, what) {
   return def.resolve({ ...what.args }, { ...ctx, rng, params: {}, effect: { type: what.type, args: { ...what.args } }, carried: { org, motion: id } });
 }
 function ended(ctx, org, m, status, why, tally, by) {
-  const text4 = status === "passed" ? say("org_log_carried_by_vote_why_text", { why: why.replace(/^carried: /, ""), text: m.text }) : status === "withdrawn" ? say("org_log_withdrew_the_motion_text", { text: m.text }) : say("org_log_the_motion_failed_why_text", { why, text: m.text });
+  const text5 = status === "passed" ? say("org_log_carried_by_vote_why_text", { why: why.replace(/^carried: /, ""), text: m.text }) : status === "withdrawn" ? say("org_log_withdrew_the_motion_text", { text: m.text }) : say("org_log_the_motion_failed_why_text", { why, text: m.text });
   return [
     { type: ORGS_MOTION_END, data: { org, id: m.id, status, why, result: tally, at: ctx.state.clock, ...by !== undefined && by !== "" ? { by } : {}, visibility: povIn(ctx, m) ? "public" : "secret" } },
-    orgLog(ctx, org, text4, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
+    orgLog(ctx, org, text5, { ...by !== undefined && by !== "" ? { by } : {}, names: [m.by, ...Object.keys(m.electorate), ...actNames(ctx, m.what)].filter((id) => id !== "") })
   ];
 }
 function settle4(ctx, rng, org, m, final) {
@@ -53246,9 +53431,9 @@ function openAndFund(ctx, w, f, o) {
   const stamp = f.founder === f.by || f.by === "" ? {} : { by: f.by, as: f.founder };
   return applyAll2(w, paid.map((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) ? { ...e, data: { ...e.data, category: o.category, ...stamp } } : e)) ?? account;
 }
-function foundedLines(w, f, id, text4, theirs) {
+function foundedLines(w, f, id, text5, theirs) {
   const by = f.by !== "" ? { by: f.by } : {};
-  return f.founder === f.by ? [orgLog(w.ctx, id, text4, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text4, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
+  return f.founder === f.by ? [orgLog(w.ctx, id, text5, { by: f.by, names: [f.by] })] : [orgLog(w.ctx, id, text5, { ...by, names: [f.founder] }), orgLog(w.ctx, f.founder, theirs, by)];
 }
 function spending(ctx, f, source, beneficiary) {
   if (f.by === "" || f.founder === f.by || f.cents <= 0)
@@ -53465,8 +53650,8 @@ function restructureEvents2(ctx, a) {
   if (!Array.isArray(events3) || events3.length === 0)
     return events3;
   const from = events3.flatMap((e) => e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : [])[0] ?? "";
-  const text4 = say("org_log_became_structure_taxed_as_one_from_from", { structure: structureWords[structure] ?? structure, from: dateWords(ctx, from), if_from: from !== "" });
-  return [...events3, orgLog(ctx, org, text4, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text4}`, { by, names: [org] })] : []];
+  const text5 = say("org_log_became_structure_taxed_as_one_from_from", { structure: structureWords[structure] ?? structure, from: dateWords(ctx, from), if_from: from !== "" });
+  return [...events3, orgLog(ctx, org, text5, by !== "" ? { by } : {}), ...party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text5}`, { by, names: [org] })] : []];
 }
 function registerFound(r) {
   r.effect({ type: "orgs.found", args: ["type", "name", "kind?", "cents?", "from?", "structure?", "units?", "classes?", "trustee?", "beneficiary?", "revocable?", "purpose?", "until?", "founder?", "by?"], gm: true, resolve: (a, ctx) => foundEvents(ctx, a) });
@@ -53517,8 +53702,8 @@ function registerFound(r) {
 // src/packs/orgs/core/view.ts
 var TYPE_ORDER = ["household", "company", "group", "trust", "party"];
 var HOW_ORDER = ["owner", "leader", "member", "staff", "core", "companion", "hired", "ally"];
-function dateWords(ctx, text4) {
-  return dayWords(ctx.world, text4);
+function dateWords(ctx, text5) {
+  return dayWords(ctx.world, text5);
 }
 function partyIdOf(ctx) {
   const pov = ctx.world.pov;
@@ -53725,10 +53910,10 @@ function trustOf(page) {
   if (!subject.exists || subject.type !== "trust")
     return null;
   const f = own(ctx.state.entities, subject.id)?.fields ?? {};
-  const text4 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-  const settlor = text4(f.settlor);
-  const until = text4(f.until);
-  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text4(f.purpose), until: until === null ? null : dateWords(ctx, until), decide: trusteesDecideIn(f) };
+  const text5 = (v) => typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+  const settlor = text5(f.settlor);
+  const until = text5(f.until);
+  return { settlor: settlor === null ? null : page.ref(settlor), revocable: f.revocable === true, purpose: text5(f.purpose), until: until === null ? null : dateWords(ctx, until), decide: trusteesDecideIn(f) };
 }
 function historyOf(page) {
   const { ctx, subject, viewer } = page;
@@ -53739,7 +53924,7 @@ function historyOf(page) {
   const cal = calendarOf(ctx.world);
   return orgHistory(ctx.state, subject.id).filter((line) => seesMoney || line.power === undefined || !money5.includes(line.power)).map((line) => ({
     at: formatClock(cal, line.at),
-    text: (line.names ?? []).reduce((text4, n) => page.seen(n.id) ? text4 : text4.split(n.name).join("someone"), line.text),
+    text: (line.names ?? []).reduce((text5, n) => page.seen(n.id) ? text5 : text5.split(n.name).join("someone"), line.text),
     by: line.by === undefined ? null : page.ref(line.by)
   }));
 }
@@ -54009,9 +54194,9 @@ function heldLimits(ctx, by, org, power) {
   return { limits: undefined, below: undefined };
 }
 var SCOPED2 = ["members.admit", "members.remove", "members.appoint", "staff.hire", "staff.fire", "staff.pay"];
-function withWhy2(text4, a) {
+function withWhy2(text5, a) {
   const why = strOf(a.why).trim();
-  return why === "" || text4 === "" ? text4 : `${text4}: ${why}`;
+  return why === "" || text5 === "" ? text5 : `${text5}: ${why}`;
 }
 function actedBy(by, power) {
   return by === "" ? {} : { by, ...power !== null ? { power } : {} };
@@ -54103,8 +54288,8 @@ function appointMember(ctx, a) {
   if (isRejection11(linked))
     return linked;
   const left = positionsOf(ctx, org).find((p) => p.id === was)?.title ?? was;
-  const text4 = position ? say("org_log_appointed_who_title", { who: labelOf(ctx, who), title: position.title }) : say("org_log_who_no_longer_holds_left", { who: labelOf(ctx, who), left });
-  return [...linked, orgLog(ctx, org, withWhy2(text4, a), { ...actedBy(by, "members.appoint"), names: [who] })];
+  const text5 = position ? say("org_log_appointed_who_title", { who: labelOf(ctx, who), title: position.title }) : say("org_log_who_no_longer_holds_left", { who: labelOf(ctx, who), left });
+  return [...linked, orgLog(ctx, org, withWhy2(text5, a), { ...actedBy(by, "members.appoint"), names: [who] })];
 }
 function titleMember(ctx, a) {
   const org = orgOf(ctx, a);
@@ -54153,7 +54338,7 @@ function setPosition2(ctx, a) {
   if (isRejection11(powers))
     return powers;
   const num8 = (k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? Math.round(a[k]) : undefined;
-  const text4 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
+  const text5 = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
   const limits2 = { ...before?.limits ?? {}, ...num8("payment") !== undefined ? { payment: num8("payment") } : {}, ...num8("month") !== undefined ? { month: num8("month") } : {} };
   if (limits2.payment === 0)
     delete limits2.payment;
@@ -54170,10 +54355,10 @@ function setPosition2(ctx, a) {
     title: strOf(a.title).trim() || before?.title || id.replace(/_/g, " "),
     powers,
     ...num8("seats") !== undefined ? { seats: num8("seats") } : {},
-    ...text4("reports_to") !== undefined ? { reports_to: text4("reports_to") } : {},
-    ...text4("scope") !== undefined ? { scope: text4("scope") } : {},
+    ...text5("reports_to") !== undefined ? { reports_to: text5("reports_to") } : {},
+    ...text5("scope") !== undefined ? { scope: text5("scope") } : {},
     ...Object.keys(limits2).length > 0 ? { limits: limits2 } : {},
-    ...text4("successor") !== undefined ? { successor: text4("successor") } : {},
+    ...text5("successor") !== undefined ? { successor: text5("successor") } : {},
     ...typeof a.default === "boolean" ? { default: a.default } : {}
   });
   if (!next)
@@ -54193,12 +54378,12 @@ function setPosition2(ctx, a) {
 function endOfDay2(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return Math.round(v);
-  const text4 = strOf(v).trim();
-  if (text4 === "")
+  const text5 = strOf(v).trim();
+  if (text5 === "")
     return;
   try {
     const cal = calendarOf(ctx.world);
-    return clockAt(cal, dayIndexOfText(cal, text4.slice(0, 10)) + 1, 0) - 1;
+    return clockAt(cal, dayIndexOfText(cal, text5.slice(0, 10)) + 1, 0) - 1;
   } catch {
     return refuse5("bad_date", say("why_until_is_a_date_yyyy_mm_dd"));
   }
@@ -54700,12 +54885,12 @@ function noteIn(v) {
 }
 function common(o) {
   const id = strOf(o.id);
-  const text4 = strOf(o.text).trim();
+  const text5 = strOf(o.text).trim();
   const source = strOf(o.source);
-  if (id === "" || text4 === "" || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
+  if (id === "" || text5 === "" || !isPlanStatus(o.status) || !PLAN_SOURCES.includes(source) || typeof o.at !== "number")
     return null;
   const last = noteIn(o.last);
-  return { id, text: text4, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
+  return { id, text: text5, status: o.status, source, at: o.at, ...strOf(o.by) !== "" ? { by: strOf(o.by) } : {}, ...last ? { last } : {} };
 }
 function goalIn(o) {
   const base = common(o);
@@ -54896,30 +55081,30 @@ function idsOf2(v) {
 function whenOf(ctx, v) {
   if (typeof v === "number" && Number.isFinite(v))
     return v;
-  const text4 = strOf(v).trim();
-  if (text4 === "")
+  const text5 = strOf(v).trim();
+  if (text5 === "")
     return null;
   try {
-    return clockOfLocal(calendarOf(ctx.world), text4.replace(" ", "T"));
+    return clockOfLocal(calendarOf(ctx.world), text5.replace(" ", "T"));
   } catch {
-    return { code: "bad_args", reason: say("why_text_isnt_a_date_and_time_yyyy", { text: text4 }) };
+    return { code: "bad_args", reason: say("why_text_isnt_a_date_and_time_yyyy", { text: text5 }) };
   }
 }
 function windowOf(v) {
-  const text4 = strOf(v).trim();
-  if (text4 === "")
+  const text5 = strOf(v).trim();
+  if (text5 === "")
     return null;
-  return text4 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text4) ? text4 : { code: "bad_args", reason: say("why_a_goals_window_is_today_or_a", { text: text4 }) };
+  return text5 === "today" || /^\d{4}-\d{2}-\d{2}$/.test(text5) ? text5 : { code: "bad_args", reason: say("why_a_goals_window_is_today_or_a", { text: text5 }) };
 }
-function words4(text4) {
-  const t = text4.trim();
+function words4(text5) {
+  const t = text5.trim();
   return t === "" ? { code: "bad_args", reason: say("why_what_it_is_in_words") } : t;
 }
 function isRejection12(v) {
   return typeof v === "object" && v !== null && "code" in v && "reason" in v;
 }
-function newId2(ctx, prefix, org, text4, n) {
-  return `${prefix}_${hashParts(org, text4, String(ctx.state.clock), String(n)).slice(0, 8)}`;
+function newId2(ctx, prefix, org, text5, n) {
+  return `${prefix}_${hashParts(org, text5, String(ctx.state.clock), String(n)).slice(0, 8)}`;
 }
 function keeps(a, key) {
   return a[key] === undefined || a[key] === null;
@@ -54935,15 +55120,15 @@ function goalEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.goals.find((g) => g.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id }) };
-  const text4 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
-  if (isRejection12(text4))
-    return text4;
+  const text5 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
+  if (isRejection12(text5))
+    return text5;
   const window = keeps(a, "window") && was ? was.window ?? null : windowOf(a.window);
   if (isRejection12(window))
     return window;
   const where = keeps(a, "where") && was ? was.where ?? "" : strOf(a.where).trim();
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
-  const goal = { id: was?.id ?? newId2(ctx, "g", org, text4, plan2.goals.length), text: text4, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
+  const goal = { id: was?.id ?? newId2(ctx, "g", org, text5, plan2.goals.length), text: text5, ...window !== null ? { window } : {}, ...where !== "" ? { where } : {}, status, ...was?.by ?? by ? { by: was?.by ?? by } : {}, source: was?.source ?? sourceOf3(a), at: was?.at ?? ctx.state.clock, ...was?.last ? { last: was.last } : {} };
   return [{ type: ORGS_GOAL, data: { org, goal, visibility: "secret" } }];
 }
 function orderEvents(ctx, a) {
@@ -54957,9 +55142,9 @@ function orderEvents(ctx, a) {
   const was = id === "" ? undefined : plan2.orders.find((o) => o.id === id);
   if (id !== "" && !was)
     return { code: "not_found", reason: say("why_nothing_on_the_plan_is_id", { id }) };
-  const text4 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
-  if (isRejection12(text4))
-    return text4;
+  const text5 = keeps(a, "text") && was ? was.text : words4(strOf(a.text));
+  if (isRejection12(text5))
+    return text5;
   const to = keeps(a, "to") && was ? was.to : idsOf2(a.to);
   if (to.length === 0)
     return { code: "bad_args", reason: say("why_whom_the_order_is_for") };
@@ -54979,11 +55164,11 @@ function orderEvents(ctx, a) {
   const status = isPlanStatus(a.status) ? a.status : was?.status ?? "open";
   const relaid = !was || (was.when ?? null) !== when3 || (was.where ?? "") !== where || [...was.to].sort().join(",") !== [...to].sort().join(",") || when3 === null && status === "under_way" && was.status !== "under_way";
   const order = {
-    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text4}`, plan2.orders.length),
+    id: was?.id ?? newId2(ctx, "o", org, `${to.join(",")}:${text5}`, plan2.orders.length),
     ...goal !== "" ? { goal } : {},
     to,
     ...lead !== "" ? { lead } : {},
-    text: text4,
+    text: text5,
     ...where !== "" ? { where } : {},
     ...when3 !== null ? { when: when3 } : {},
     status,
@@ -55247,18 +55432,18 @@ function offerOf(ctx, p) {
     return { code: "not_found", reason: named === "" ? say("why_who_offers_it") : say("why_no_one_you_know_is_named", { named }) };
   if (isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who))
     return { code: "not_acting", reason: say("why_who_cant_take_it_on", { who: labelOf(ctx, who) }) };
-  const text4 = words4(strOf(p.offer));
-  if (isRejection12(text4))
-    return text4;
+  const text5 = words4(strOf(p.offer));
+  if (isRejection12(text5))
+    return text5;
   const said3 = strOf(p.said).trim().slice(0, PLAN_LIMITS.text);
   if (said3 === "")
     return { code: "bad_proposal", reason: say("why_it_quotes_the_storys_words") };
   const when3 = whenOf(ctx, p.when);
   if (isRejection12(when3))
     return when3;
-  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text4.toLowerCase()))
+  if (planOf3(ctx.state, org).orders.some((o) => isPlanStatusLive(o.status) && o.to.includes(who) && o.text.toLowerCase() === text5.toLowerCase()))
     return { code: "already", reason: say("why_its_on_the_plan_already") };
-  return { org, who, text: text4, where: strOf(p.where).trim(), when: when3, said: said3 };
+  return { org, who, text: text5, where: strOf(p.where).trim(), when: when3, said: said3 };
 }
 var AGENDA_CHANNEL = {
   type: "agenda",
@@ -55512,7 +55697,7 @@ function employment(ctx, p) {
   const why = quoted2(p);
   const name = (id) => labelOf(ctx, id);
   const flag2 = (org2, power, did) => by === undefined || org2 === null || by === who ? [] : flagged(ctx, by, org2, power, did);
-  const line = (org2, text4) => org2 === null ? [] : [historyLine(org2, withWhy(text4, why), { names: [who] })];
+  const line = (org2, text5) => org2 === null ? [] : [historyLine(org2, withWhy(text5, why), { names: [who] })];
   if (change2 === "hired") {
     const org2 = employerNamed(ctx, strOf(p.org));
     if (org2 === null)
@@ -55531,8 +55716,8 @@ function employment(ctx, p) {
     const basis = strOf(p.basis);
     const hire2 = { type: "economy.hire", args: { business: org2, worker: who, ...title !== "" ? { title } : {}, ...position !== null ? { position } : {}, ...basis !== "" ? { basis } : {}, ...rate !== undefined ? { rate } : {}, ...hours !== undefined ? { hours_per_week: hours } : {} } };
     const as = title !== "" ? title : position !== null ? positionsOf(ctx, org2).find((x) => x.id === position)?.title ?? "" : "";
-    const text4 = say("org_log_hired_who_as_title", { who: name(who), title: as, if_title: as !== "" });
-    return { effects: [hire2, ...line(orgTypeOf(ctx, org2) !== null ? org2 : null, text4), ...flag2(org2, "staff.hire", say("org_log_hired_who", { who: name(who) }))] };
+    const text5 = say("org_log_hired_who_as_title", { who: name(who), title: as, if_title: as !== "" });
+    return { effects: [hire2, ...line(orgTypeOf(ctx, org2) !== null ? org2 : null, text5), ...flag2(org2, "staff.hire", say("org_log_hired_who", { who: name(who) }))] };
   }
   const job = jobNamed(ctx, who, p);
   if (typeof job !== "string")
@@ -56156,8 +56341,8 @@ function builtInSectionsOf(world) {
     return section && !own2.includes(slot) ? [section] : [];
   });
 }
-function sectionTemplateProblem(text4) {
-  return text4.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
+function sectionTemplateProblem(text5) {
+  return text5.includes(LINES_MARKER) ? null : `it must hold ${LINES_MARKER}, where the section's lines go`;
 }
 
 // src/packs/orgs/core/seats.ts
@@ -56237,8 +56422,8 @@ function succeed(ctx, org) {
       if (seatedBy === null)
         continue;
       taken.add(who);
-      const text4 = say(was ? "seat_succeeds" : "seat_taken", { who: name(who), ...was ? { was: name(was.who) } : {}, title: p.title });
-      const unit3 = [...seatedBy, ...text4 === "" ? [] : [orgLog(ctx, org, text4, { names: was ? [who, was.who] : [who] })]];
+      const text5 = say(was ? "seat_succeeds" : "seat_taken", { who: name(who), ...was ? { was: name(was.who) } : {}, title: p.title });
+      const unit3 = [...seatedBy, ...text5 === "" ? [] : [orgLog(ctx, org, text5, { names: was ? [who, was.who] : [who] })]];
       if (belongsTo(ctx, ctx.world.pov, org)) {
         const told2 = canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, who) ? name(who) : null;
         unit3.push(...signalOf2("incident", "seat_incident", { ...told2 !== null ? { who: told2 } : {}, title: p.title, org: orgName }, { entity: org }));
@@ -56419,11 +56604,11 @@ function orgAlerts(ctx, org, viewer) {
   out.push(...decisionAlerts(ctx, org, viewer));
   return out.length > 0 ? out : null;
 }
-function dayClock(ctx, text4) {
-  if (text4 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text4))
+function dayClock(ctx, text5) {
+  if (text5 === null || !/^\d{4}-\d{2}-\d{2}$/.test(text5))
     return null;
   const cal = calendarOf(ctx.world);
-  return clockAt(cal, dayIndexOfText(cal, text4), 0);
+  return clockAt(cal, dayIndexOfText(cal, text5), 0);
 }
 function orgComing(ctx, org, viewer) {
   const type = orgTypeOf(ctx, org);
@@ -56494,8 +56679,8 @@ function titlesOn(ctx) {
   return feed.include === undefined || feed.include.includes(TITLES_SOURCE);
 }
 var TITLES_SOURCE = "titles";
-function lowerFirst(text4) {
-  return /^\p{Lu}\p{Ll}/u.test(text4) ? `${text4.charAt(0).toLowerCase()}${text4.slice(1)}` : text4;
+function lowerFirst(text5) {
+  return /^\p{Lu}\p{Ll}/u.test(text5) ? `${text5.charAt(0).toLowerCase()}${text5.slice(1)}` : text5;
 }
 var TITLES_KEPT = 2;
 var bareTitles = () => new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
@@ -56581,8 +56766,8 @@ function tierEvents(ctx, by, who, tier) {
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked))
     return linked;
-  const text4 = now === null ? say("org_log_by_added_name_to_the_party_as", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) }) : say("org_log_by_made_name_tier_of_the_party", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) });
-  return [...linked, orgLog(ctx, party, text4, { by, names: [by, who] })];
+  const text5 = now === null ? say("org_log_by_added_name_to_the_party_as", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) }) : say("org_log_by_made_name_tier_of_the_party", { by: labelOf(ctx, by), name: e.name, tier: aTier(tier) });
+  return [...linked, orgLog(ctx, party, text5, { by, names: [by, who] })];
 }
 function sinceOf(ctx, who) {
   const since = own(ctx.state.entities, who)?.relations.find((r) => r.type === PARTY_RELATION && r.to === ctx.world.pov)?.fields?.since;
@@ -57183,129 +57368,6 @@ var orgsPack = {
 };
 var core_default13 = orgsPack;
 
-// src/shared/d20.ts
-var D20_PACK = "d20";
-var D20_FIELDS = {
-  classes: "classes",
-  ranks: "ranks",
-  traits: "d20_traits",
-  conditions: "conditions",
-  effects: "d20_effects",
-  attacks: "d20_attacks",
-  size: "size",
-  hitDice: "hit_dice",
-  loaded: "loaded",
-  enhancement: "enhancement",
-  modifiers: "modifiers"
-};
-var text4 = (optional = false, doc) => ({ type: "text", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
-var int = (optional = false, doc) => ({ type: "int", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
-var json = (optional = false, doc) => ({ type: "json", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
-var texts2 = (optional = false, doc) => ({ type: "list", of: "text", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
-var bool = (optional = false, doc) => ({ type: "bool", ...optional ? { optional } : {}, ...doc !== undefined ? { doc } : {} });
-var D20_COLUMNS = {
-  skills: {
-    label: text4(),
-    ability: text4(false, "The ability whose modifier the skill adds"),
-    trained: bool(true, "Used only by those with a rank in it"),
-    armor: bool(true, "Armour's check penalty applies")
-  },
-  classes: {
-    label: text4(),
-    hit_die: int(false, "Sides of the die each level of it rolls for hit points"),
-    tracks: json(false, "The tracks table's column each progression reads: attack, each save, and any more a ruleset names"),
-    skill_points: int(false, "Skill points each level, before the ruleset adds its own share"),
-    class_skills: texts2(true, "The skills rows that are its class skills"),
-    proficiency: texts2(true, "What its levels make its wielder proficient with: a weapons row's proficiency or the row itself"),
-    features: json(true, "The traits rows each level gives, by level")
-  },
-  tracks: {},
-  traits: {
-    label: text4(),
-    kind: text4(false, "What it is: a feat, a race, a class feature, a template"),
-    text: text4(true, "What it does, in words"),
-    modifiers: json(true, "Its modifiers"),
-    grants: json(true, "What it grants besides: proficiency, class skills, a gauge's size"),
-    requires: text4(true, "A formula with self that should hold to take it: reported, never enforced")
-  },
-  conditions: {
-    label: text4(),
-    text: text4(true, "What it does, in words"),
-    modifiers: json(true, "Its modifiers"),
-    flags: texts2(true, "What holds while under it, as the procedures read them")
-  },
-  sizes: {
-    label: text4(),
-    order: int(false, "Its place from the smallest, for damage by size"),
-    modifiers: json(true, "Its modifiers")
-  },
-  weapons: {
-    label: text4(),
-    damage: json(false, "Its damage dice by its wielder's size, or one notation for all"),
-    threat: int(false, "The lowest natural die that threatens a critical"),
-    multiplier: int(false, "What a critical multiplies its damage by"),
-    range: int(true, "Its range increment, in the world's units"),
-    proficiency: text4(false, "What it takes to be proficient with it"),
-    held: text4(false, "How it is held or used: light, one, two, thrown, projectile"),
-    types: texts2(true, "Its damage types"),
-    nonlethal: bool(true, "Its harm is nonlethal"),
-    fire: texts2(true, "The fire modes a weapon that fires has"),
-    magazine: int(true, "Rounds its magazine holds"),
-    area: int(true, "An area weapon's burst: its radius, in the world's units"),
-    save: json(true, "The save of those in its area: {save, dc, half}"),
-    modifiers: json(true, "Its own modifiers")
-  },
-  armor: {
-    label: text4(),
-    bonus: int(false, "What it adds to defence"),
-    type: text4(false, "The bonus's type: armour or shield"),
-    max_dex: int(true, "The most of the Dexterity modifier that still counts to defence"),
-    check: int(true, "Its check penalty, a number of 0 or less"),
-    modifiers: json(true, "Its own modifiers besides")
-  },
-  creatures: {
-    name: text4(),
-    kind: text4(),
-    tier: text4(true),
-    fields: json(false, "The sheet's values, by field"),
-    attacks: json(true, "Its own attacks"),
-    cr: text4(true, "Its challenge rating, a row of the challenges table"),
-    carries: texts2(true),
-    description: text4(true)
-  },
-  experience: {
-    xp: int(false, "The experience the level needs; a ruleset with several tracks names its columns in `levels`")
-  },
-  challenges: {
-    xp: int(true, "What overcoming it is worth, shared among those who did"),
-    by_level: json(true, "What it is worth to each who overcame it, by their level")
-  },
-  difficulties: {
-    label: text4(),
-    dc: int(),
-    text: text4(true)
-  }
-};
-var D20_ACTIONS = ["check", "save", "attack", "harm", "heal", "condition", "effect", "d20_rest", "reload", "award", "advance", "trait", "ranks", "stat_as"];
-var D20_EVENTS = {
-  check: "d20.check",
-  save: "d20.save",
-  attack: "d20.attack",
-  harm: "d20.harm",
-  heal: "d20.heal",
-  condition: "d20.condition",
-  effect: "d20.effect",
-  rest: "d20.rest",
-  reload: "d20.reload",
-  award: "d20.award",
-  advance: "d20.advance",
-  trait: "d20.trait",
-  ranks: "d20.ranks",
-  statAs: "d20.stat_as",
-  state: "d20.state",
-  upkeep: "d20.upkeep"
-};
-
 // src/packs/d20/core/actions.ts
 var TEXT = { type: "text" };
 var MAYBE_TEXT = { type: "text", optional: true };
@@ -57326,15 +57388,15 @@ function action(id, params, outcomes, minutes2, more = {}) {
   return { id, pack: "d20", params, requires: [ON], outcomes: out, duration: minutes2, ...more };
 }
 var D20_ACTION_DEFS = [
-  action("check", { skill: TEXT, difficulty: MAYBE_TEXT, vs: MAYBE_SOMEONE, vs_skill: MAYBE_TEXT, take: MAYBE_TEXT, aid: SEVERAL, mods: MODS }, ["success", "failure"], "1", {
+  action("check", { skill: TEXT, difficulty: MAYBE_TEXT, vs: MAYBE_SOMEONE, vs_skill: MAYBE_TEXT, take: MAYBE_TEXT, aid: SEVERAL, mods: MODS, boost: MAYBE_YES }, ["success", "failure"], "1", {
     lexicon: ["roll for", "make a check", "use my skill"],
     observable: "puts a skill to use"
   }),
-  action("save", { save: TEXT, difficulty: TEXT, also: SEVERAL, mods: MODS }, ["success", "failure"], "0", {
+  action("save", { save: TEXT, difficulty: TEXT, also: SEVERAL, mods: MODS, boost: MAYBE_YES }, ["success", "failure"], "0", {
     lexicon: ["make a save", "resist"],
     observable: "braces against it"
   }),
-  action("attack", { target: SOMEONE2, with: MAYBE_TEXT, full: MAYBE_YES, touch: MAYBE_YES, held: MAYBE_TEXT, shots: MAYBE_TEXT, nonlethal: MAYBE_YES, concealment: MAYBE_NUMBER, mods: MODS }, ["hit", "miss", "critical"], "0", { lexicon: ["attack", "strike at", "shoot at", "swing at"], observable: "attacks" }),
+  action("attack", { target: SOMEONE2, with: MAYBE_TEXT, full: MAYBE_YES, touch: MAYBE_YES, held: MAYBE_TEXT, shots: MAYBE_TEXT, nonlethal: MAYBE_YES, concealment: MAYBE_NUMBER, distance: MAYBE_NUMBER, mods: MODS, boost: MAYBE_YES }, ["hit", "miss", "critical"], "0", { lexicon: ["attack", "strike at", "shoot at", "swing at"], observable: "attacks" }),
   action("harm", { amount: TEXT, type: MAYBE_TEXT, nonlethal: MAYBE_YES, targets: SEVERAL, centre: MAYBE_SOMEONE, radius: MAYBE_NUMBER, ...SAVE, half: MAYBE_YES, why: MAYBE_TEXT }, [], "0"),
   action("heal", { amount: MAYBE_TEXT, nonlethal: MAYBE_YES, temporary: MAYBE_YES, stabilize: MAYBE_YES, why: MAYBE_TEXT }, [], "0"),
   action("condition", { condition: TEXT, off: MAYBE_YES, ...LENGTH, ...SAVE, why: MAYBE_TEXT }, [], "0"),
@@ -57466,7 +57528,11 @@ function sizeOf2(ctx, rules, who) {
   return typeof s === "string" && s !== "" ? s : rules.defaultSize;
 }
 function rowIdOf(ctx, thing) {
-  const c = fieldsOf2(ctx, thing).catalog;
+  const fields = fieldsOf2(ctx, thing);
+  const said3 = fields[D20_FIELDS.row];
+  if (typeof said3 === "string" && said3 !== "")
+    return said3;
+  const c = fields.catalog;
   return typeof c === "string" && c !== "" ? c : thing;
 }
 function gearOn(ctx, who) {
@@ -57492,28 +57558,53 @@ function thingModifiers(ctx, thing) {
 
 // src/packs/d20/core/modifiers.ts
 var reading = 0;
+var situations = new WeakMap;
+function inSituation(ctx, situation, fn) {
+  const before = situations.get(ctx);
+  const now = { ...situation, unknown: false };
+  situations.set(ctx, now);
+  try {
+    return { value: fn(), unknownDistance: now.unknown };
+  } finally {
+    if (before)
+      situations.set(ctx, before);
+    else
+      situations.delete(ctx);
+  }
+}
+var DISTANCE = /\bdistance\b(?!\s*\()/;
 function worked(ctx, who, v, fallback) {
   if (typeof v === "number")
     return v;
   if (reading > 6)
     return fallback;
+  const sit = situations.get(ctx);
+  const other = sit === undefined ? undefined : who === sit.who ? sit.target : who === sit.target ? sit.who : undefined;
+  if (sit !== undefined && other !== undefined && sit.distance === null && typeof v === "string" && DISTANCE.test(v)) {
+    sit.unknown = true;
+    return fallback;
+  }
   reading++;
   try {
-    return evalExpr(v, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who } }), fallback);
+    const bindings = other !== undefined ? { self: who, target: other } : { self: who };
+    return evalExpr(v, scopeEnv({ reg: ctx.registry, ctx, bindings, ...other !== undefined && sit?.distance !== null && sit?.distance !== undefined ? { vars: { distance: sit.distance } } : {} }), fallback);
   } finally {
     reading--;
   }
 }
-function modifiersOf(ctx, rules, who, given = []) {
+function modifiersOf(ctx, rules, who, given = [], wants = () => true) {
   const out = [];
   const add = (mods, source, from, choice) => {
     for (const m of mods) {
-      if (m.when !== undefined && !worked(ctx, who, m.when, false))
+      const to = choice !== undefined ? m.to.replace("{choice}", choice) : m.to;
+      if (!wants(to))
         continue;
-      const value = Number(worked(ctx, who, m.value, 0));
+      const chosen = (v) => choice !== undefined && typeof v === "string" ? v.replaceAll("{choice}", choice) : v;
+      if (m.when !== undefined && !worked(ctx, who, chosen(m.when), false))
+        continue;
+      const value = Number(worked(ctx, who, chosen(m.value), 0));
       if (!Number.isFinite(value))
         continue;
-      const to = choice !== undefined ? m.to.replace("{choice}", choice) : m.to;
       out.push({ to, value, type: typeof m.type === "string" && m.type !== "" ? m.type : null, source, from, ...m.note !== undefined ? { note: m.note } : {}, ...m.limit === true ? { limit: true } : {}, ...Array.isArray(m.bypass) ? { bypass: m.bypass } : {}, counted: true });
     }
   };
@@ -57572,7 +57663,7 @@ function bears(to, names) {
 }
 function stacked(ctx, rules, who, to, filter, given = []) {
   const names = namesOf4(to);
-  const mods = modifiersOf(ctx, rules, who, given).filter((m) => m.limit !== true && m.value !== 0 && bears(m.to, names) && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
+  const mods = modifiersOf(ctx, rules, who, given, (t) => bears(t, names)).filter((m) => m.limit !== true && m.value !== 0 && (filter === undefined || filter.types.includes(m.type ?? "untyped") === filter.keep));
   const stack = new Set(rules.bonuses.stack);
   const best = new Map;
   for (const m of mods) {
@@ -57595,8 +57686,8 @@ function sumOf(mods) {
 }
 function limitOf2(ctx, rules, who, name) {
   let low = null;
-  for (const m of modifiersOf(ctx, rules, who))
-    if (m.limit === true && m.to === name && (low === null || m.value < low))
+  for (const m of modifiersOf(ctx, rules, who, [], (t) => t === name))
+    if (m.limit === true && (low === null || m.value < low))
       low = m.value;
   return low;
 }
@@ -57642,14 +57733,17 @@ function termWords(ctx, who, n, value, vars) {
   const v = signed(value);
   const lit = (i) => {
     const a = n.k === "call" ? n.args[i] : undefined;
-    if (a?.k === "str")
+    if (!a)
+      return "";
+    if (a.k === "str")
       return a.v;
-    if (a?.k === "id" && a.path.length === 1) {
+    if (a.k === "id" && a.path.length === 1) {
       const bound = own(vars, a.path[0] ?? "");
       if (typeof bound === "string")
         return bound;
     }
-    return a ? sourceOf4(a) : "";
+    const worked2 = runProgram({ source: "", root: a, nodeCount: 64 }, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who }, vars }));
+    return typeof worked2 === "string" && worked2 !== "" ? worked2 : sourceOf4(a);
   };
   if (n.k === "num")
     return say("d20_part_base", { value: v });
@@ -57672,6 +57766,14 @@ function termWords(ctx, who, n, value, vars) {
         return say("d20_part_total", { value: v, name: lit(1) });
       case "limit":
         return say("d20_part_limit", { value: v, name: lit(1) });
+      case "min":
+      case "max": {
+        const env = scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who }, vars });
+        const won = n.args.find((a) => Number(runProgram({ source: "", root: a, nodeCount: 64 }, env)) === value);
+        if (won)
+          return termWords(ctx, who, won, value, vars);
+        break;
+      }
     }
   }
   return say("d20_part_formula", { value: v, formula: sourceOf4(n) });
@@ -57796,7 +57898,7 @@ var D20_FORMULAS = {
   total: withRules(0, (ctx, rules, [who, name, key]) => totalOf2(ctx, rules, str24(who), str24(name), key === undefined || key === null ? {} : { key, skill: key, weapon: key })),
   has_trait: withRules(false, (ctx, rules, [who, id]) => traitsHeld(ctx, rules, str24(who)).some((t) => t.id === str24(id))),
   under: withRules(false, (ctx, _rules, [who, id]) => conditionsHeld(ctx, str24(who)).some((c) => c.id === str24(id))),
-  size_mod: withRules(0, (ctx, rules, [who, to]) => modifiersOf(ctx, rules, str24(who)).reduce((n, m) => n + (m.source === "size" && m.to === str24(to) ? m.value : 0), 0)),
+  size_mod: withRules(0, (ctx, rules, [who, to]) => modifiersOf(ctx, rules, str24(who), [], (t) => t === str24(to)).reduce((n, m) => n + (m.source === "size" ? m.value : 0), 0)),
   rest_minutes: withRules(0, (_ctx, rules, [hours]) => 60 * (numberIn(hours ?? null) ?? rules.hp.rest.hours))
 };
 
@@ -57867,6 +57969,11 @@ class Scratch {
   name(id) {
     return labelOf(this.ctx, id);
   }
+  hpWords(who, line, from, to) {
+    const words5 = say(line, { from, to });
+    const banded = optionalQuery(this.ctx, "combat.hp_line")?.(this.ctx, { type: "set", entity: who, field: this.rules.hp.field, value: to });
+    return { words: words5, shown: banded === undefined ? words5 : banded ?? "" };
+  }
 }
 function reject25(code, reason2) {
   return { code, reason: reason2 };
@@ -57919,6 +58026,43 @@ function difficultyOf2(ctx, rules, said3) {
 }
 function d20(rng) {
   return rollDice(DIE, rng).total;
+}
+function boostDice(ctx, rules, who) {
+  if (!rules.boost)
+    return "";
+  const v = evalExpr(rules.boost.dice, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who } }), "");
+  return typeof v === "string" ? v.trim() : "";
+}
+function canBoost(s, who, action2) {
+  const b = s.rules.boost;
+  return b !== undefined && b.rolls.includes(action2) && s.number(who, b.gauge) > 0 && boostDice(s.ctx, s.rules, who) !== "";
+}
+function boostOf(s, who, action2, p, rng, notes) {
+  if (!yes(p.boost))
+    return null;
+  const b = s.rules.boost;
+  if (!b || !b.rolls.includes(action2)) {
+    notes.push(say("d20_no_boost", { action: action2 }));
+    return null;
+  }
+  const kind = own(s.ctx.state.entities, who)?.kind ?? "";
+  const def = fieldDef(s.ctx.registry, s.ctx.world, kind, b.gauge);
+  const gauge = def?.label ?? b.gauge;
+  const left = s.number(who, b.gauge);
+  if (left <= 0)
+    notes.push(say("d20_boost_empty", { who: s.name(who), gauge }));
+  const floor = fieldBounds(s.ctx.registry, s.ctx, who, def).min;
+  s.set(who, b.gauge, floor !== undefined ? Math.max(floor, left - 1) : left - 1);
+  const dice = boostDice(s.ctx, s.rules, who);
+  try {
+    const rolled = rollDice(dice, rng).total;
+    return { total: rolled, words: say("d20_boost", { gauge, dice, rolled }) };
+  } catch (e) {
+    if (!(e instanceof DiceError))
+      throw e;
+    notes.push(say("d20_boost_unread", { dice }));
+    return null;
+  }
 }
 function amountRolled(said3, rng) {
   const n = numberIn(said3 ?? null);
@@ -57976,7 +58120,7 @@ function settle5(s, who) {
   let moved3 = null;
   if (life !== undefined && now !== life)
     moved3 = life;
-  else if (life === undefined && lives.has(now))
+  else if (life === undefined && now !== ALIVE && lives.has(now))
     moved3 = ALIVE;
   if (moved3 !== null)
     s.life(who, moved3);
@@ -57988,6 +58132,13 @@ function settle5(s, who) {
     told: say("d20_state", { ...on.length > 0 ? { on: on.map(label2).join(", ") } : {}, ...off.length > 0 ? { off: off.map(label2).join(", ") } : {}, ...moved3 !== null ? { life: moved3 } : {} })
   });
 }
+var plain4 = (words5) => ({ words: words5, shown: words5 });
+function joined3(parts, by) {
+  return { words: parts.map((p) => p.words).filter((x) => x !== "").join(by), shown: parts.map((p) => p.shown).filter((x) => x !== "").join(by) };
+}
+function toldOf(said3) {
+  return { told: said3.words, ...said3.shown !== said3.words ? { shown: said3.shown } : {} };
+}
 function harmOne(s, who, amount, nonlethal, rng) {
   const rules = s.rules;
   const hp = hpOf2(s, who);
@@ -57995,35 +58146,35 @@ function harmOne(s, who, amount, nonlethal, rng) {
   if (nonlethal) {
     const before = s.number(who, rules.hp.nonlethal);
     s.set(who, rules.hp.nonlethal, before + amount);
-    parts.push(say("d20_harm_nonlethal", { from: before, to: before + amount }));
+    parts.push(plain4(say("d20_harm_nonlethal", { from: before, to: before + amount })));
   } else {
     const temp = s.number(who, rules.hp.temporary);
     const absorbed = Math.min(Math.max(0, temp), amount);
     if (absorbed > 0) {
       s.set(who, rules.hp.temporary, temp - absorbed);
-      parts.push(say("d20_harm_temporary", { absorbed, left: temp - absorbed }));
+      parts.push(plain4(say("d20_harm_temporary", { absorbed, left: temp - absorbed })));
     }
     let to = hp.now - (amount - absorbed);
     if (hp.min !== undefined)
       to = Math.max(hp.min, to);
     s.set(who, rules.hp.field, to);
-    parts.push(say("d20_harm_hp", { from: hp.now, to }));
+    parts.push(s.hpWords(who, "d20_harm_hp", hp.now, to));
     const massive = rules.hp.massive;
     if (massive && s.holds(massive.when, who, { amount })) {
       const dc = typeof massive.dc === "number" ? massive.dc : s.eval(massive.dc, who, { amount });
       const save = rollSave(s, who, massive.save, dc, [], rng.fork("massive"));
-      parts.push(say("d20_harm_massive", { save: save.words }));
+      parts.push(plain4(say("d20_harm_massive", { save: save.words })));
       if (save.outcome === "failure") {
         let set = s.eval(massive.hp, who, { amount });
         if (hp.min !== undefined)
           set = Math.max(hp.min, set);
         s.set(who, rules.hp.field, set);
-        parts.push(say("d20_harm_hp", { from: to, to: set }));
+        parts.push(s.hpWords(who, "d20_harm_hp", to, set));
       }
     }
   }
   settle5(s, who);
-  return { from: hp.now, to: s.number(who, rules.hp.field), words: parts.join(", ") };
+  return { from: hp.now, to: s.number(who, rules.hp.field), ...joined3(parts, ", ") };
 }
 function stoppedBy(s, who, types, physical) {
   const mods = stacked(s.ctx, s.rules, who, ["reduction", ...types.map((t) => `resist.${t}`)].join(","));
@@ -58042,75 +58193,91 @@ function stoppedBy(s, who, types, physical) {
   const words5 = [reduction > 0 ? say("d20_reduction", { amount: reduction, from }) : "", resist > 0 ? say("d20_resistance", { amount: resist, from: rfrom }) : ""].filter((w) => w !== "").join(", ");
   return { amount: reduction + resist, words: words5 };
 }
-function rollSave(s, who, said3, dc, given, rng, ruled) {
+function savePlan(s, who, said3, given) {
   const rules = s.rules;
   const id = saveNamed(rules, said3) ?? said3;
   const e = explain(s.ctx, rules, who, `save.${id}`);
   const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, `save.${id}`, undefined, given)) - sumOf(stacked(s.ctx, rules, who, `save.${id}`)) : 0;
   const parts = [e ? partsWords(e) : "", ...given.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }))].filter((p) => p !== "").join(", ");
-  const bonus = (e?.total ?? 0) + extra;
+  return { id, bonus: (e?.total ?? 0) + extra, parts };
+}
+function rollSave(s, who, said3, dc, given, rng, ruled, spent = null) {
+  const rules = s.rules;
+  const { id, bonus, parts } = savePlan(s, who, said3, given);
   if (ruled === "success" || ruled === "failure")
-    return { save: id, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: id, outcome: say(`d20_outcome_${ruled}`) }) };
+    return { save: id, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: saveLabel(rules, id), outcome: say(`d20_outcome_${ruled}`) }) };
   const natural = d20(rng);
-  const total = natural + bonus;
+  const total = natural + bonus + (spent?.total ?? 0);
   let outcome = total >= dc ? "success" : "failure";
   if (rules.save.autoFail !== undefined && natural <= rules.save.autoFail)
     outcome = "failure";
   if (rules.save.autoSucceed !== undefined && natural >= rules.save.autoSucceed)
     outcome = "success";
-  return { save: id, natural, total, outcome, parts, words: say("d20_roll", { natural, bonus: signed(bonus), total, dc, outcome: say(`d20_outcome_${outcome}`) }) };
+  return { save: id, natural, total, outcome, parts, words: say("d20_roll", { natural, bonus: signed(bonus), ...spent ? { boost: spent.words } : {}, total, dc, outcome: say(`d20_outcome_${outcome}`) }) };
 }
-var check2 = (s, who, p, rng, ruled) => {
+function checkPlan(s, who, p) {
   const rules = s.rules;
   const said3 = text5(p.skill);
   const skill = rowOf3(s.ctx, rules, "skills", said3);
   const ability = skill ? null : abilityNamed(s.ctx, rules, who, said3);
   if (!skill && ability === null)
     return reject25("d20_no_skill", say("why_d20_no_skill", { said: said3, skills: Object.keys(rowsOf(s.ctx, rules, "skills")).join(", "), abilities: rules.abilities.join(", ") }));
-  const given = givenMods(p.mods, skill ? `skill.${skill.id}` : `ability_check.${ability ?? ""}`);
+  const name = skill ? `skill.${skill.id}` : `ability_check.${ability ?? ""}`;
+  const given = givenMods(p.mods, name);
   const explainOf = (id) => {
     if (skill)
       return explain(s.ctx, rules, id, "skill", { skill: skill.id, key: skill.id, weapon: skill.id }) ?? { total: 0, parts: [] };
     const m = modOf(s.ctx, rules, id, ability ?? "");
-    return { total: m, parts: [{ value: m, words: say("d20_part_ability", { value: signed(m), ability: ability ?? "" }) }] };
+    const mods = stacked(s.ctx, rules, id, name);
+    return { total: m + sumOf(mods), parts: [{ value: m, words: say("d20_part_ability", { value: signed(m), ability: ability ?? "" }) }, ...mods.length > 0 ? [{ value: sumOf(mods), words: mods.map(modWords).join(", "), mods }] : []] };
   };
   const mine = explainOf(who);
-  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, skill ? `skill.${skill.id}` : "check", undefined, given)) - sumOf(stacked(s.ctx, rules, who, skill ? `skill.${skill.id}` : "check")) : 0;
+  const extra = given.length > 0 ? sumOf(stacked(s.ctx, rules, who, name, undefined, given)) - sumOf(stacked(s.ctx, rules, who, name)) : 0;
   const notes = [];
   if (skill && skill.row.trained === true && (own(ranksOf(s.ctx, who), skill.id) ?? 0) <= 0)
     notes.push(say("d20_untrained", { skill: labelOfRow(skill.row, skill.id) }));
-  let aid = 0;
-  const aided = [];
-  for (const helper of ids2(p.aid)) {
-    if (helper === who || !own(s.ctx.state.entities, helper))
-      continue;
-    const theirs = explainOf(helper);
-    const roll = d20(rng.fork(`aid:${helper}`));
-    const ok = roll + theirs.total >= rules.check.aid.dc;
-    if (ok)
-      aid += rules.check.aid.bonus;
-    aided.push(say("d20_aid", { who: s.name(helper), total: roll + theirs.total, dc: rules.check.aid.dc, outcome: say(`d20_outcome_${ok ? "success" : "failure"}`) }));
-  }
-  const bonus = mine.total + extra + aid;
-  const dc = difficultyOf2(s.ctx, rules, p.difficulty);
+  const helpers = ids2(p.aid).filter((helper) => helper !== who && own(s.ctx.state.entities, helper)).map((helper) => ({ id: helper, total: explainOf(helper).total }));
   const take = text5(p.take) === "" ? undefined : own(rules.check.take, text5(p.take));
   if (text5(p.take) !== "" && take === undefined)
     notes.push(say("d20_no_take", { take: text5(p.take), takes: Object.keys(rules.check.take).join(", ") }));
+  const vs = text5(p.vs);
+  let against = null;
+  if (vs !== "" && own(s.ctx.state.entities, vs)) {
+    const theirSkill = text5(p.vs_skill) === "" ? skill : rowOf3(s.ctx, rules, "skills", text5(p.vs_skill));
+    against = { who: vs, theirs: theirSkill ? explain(s.ctx, rules, vs, "skill", { skill: theirSkill.id, key: theirSkill.id }) ?? { total: 0, parts: [] } : explainOf(vs) };
+  }
+  return { what: skill ? labelOfRow(skill.row, skill.id) : ability ?? "", mine, extra, given, notes, helpers, dc: difficultyOf2(s.ctx, rules, p.difficulty), take: take ? { said: text5(p.take), value: take.value } : null, vs: against };
+}
+var check2 = (s, who, p, rng, ruled) => {
+  const rules = s.rules;
+  const plan2 = checkPlan(s, who, p);
+  if ("code" in plan2)
+    return plan2;
+  const { dc, take, vs } = plan2;
+  let aid = 0;
+  const aided = [];
+  for (const helper of plan2.helpers) {
+    const roll = d20(rng.fork(`aid:${helper.id}`));
+    const ok = roll + helper.total >= rules.check.aid.dc;
+    if (ok)
+      aid += rules.check.aid.bonus;
+    aided.push(say("d20_aid", { who: s.name(helper.id), total: roll + helper.total, dc: rules.check.aid.dc, outcome: say(`d20_outcome_${ok ? "success" : "failure"}`) }));
+  }
+  const bonus = plan2.mine.total + plan2.extra + aid;
   let natural = null;
   let total = bonus;
   let outcome = "rolled";
   let against = null;
-  const vs = text5(p.vs);
+  let spent = null;
   if (ruled === "success" || ruled === "failure")
     outcome = ruled;
   else {
     natural = take ? take.value : d20(rng.fork("check"));
-    total = natural + bonus;
-    if (vs !== "" && own(s.ctx.state.entities, vs)) {
-      const theirSkill = text5(p.vs_skill) === "" ? skill : rowOf3(s.ctx, rules, "skills", text5(p.vs_skill));
-      const theirs = theirSkill ? explain(s.ctx, rules, vs, "skill", { skill: theirSkill.id, key: theirSkill.id }) ?? { total: 0, parts: [] } : explainOf(vs);
-      against = d20(rng.fork("vs")) + theirs.total;
-      outcome = total > against || total === against && bonus >= theirs.total ? "success" : "failure";
+    spent = boostOf(s, who, "check", p, rng.fork("boost"), plan2.notes);
+    total = natural + bonus + (spent?.total ?? 0);
+    if (vs) {
+      against = d20(rng.fork("vs")) + vs.theirs.total;
+      outcome = total > against || total === against && bonus >= vs.theirs.total ? "success" : "failure";
     } else if (dc !== null)
       outcome = total >= dc ? "success" : "failure";
     if (!take && natural !== null && rules.check.autoFail !== undefined && natural <= rules.check.autoFail)
@@ -58118,77 +58285,115 @@ var check2 = (s, who, p, rng, ruled) => {
     if (!take && natural !== null && rules.check.autoSucceed !== undefined && natural >= rules.check.autoSucceed)
       outcome = "success";
   }
-  const parts = [partsWords(mine), ...given.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true })), ...aid !== 0 ? [say("d20_part_aid", { value: signed(aid) })] : []].filter((x) => x !== "").join(", ");
+  const parts = [partsWords(plan2.mine), ...plan2.given.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true })), ...aid !== 0 ? [say("d20_part_aid", { value: signed(aid) })] : []].filter((x) => x !== "").join(", ");
   s.record(D20_EVENTS.check, {
     who,
-    what: skill ? labelOfRow(skill.row, skill.id) : ability ?? "",
+    what: plan2.what,
     ...natural !== null ? { natural } : {},
     total,
     ...parts !== "" ? { parts } : {},
+    ...spent ? { boost: spent.words } : {},
     ...dc !== null ? { dc } : {},
-    ...vs !== "" && against !== null ? { vs, against } : {},
-    ...take ? { take: text5(p.take) } : {},
+    ...vs && against !== null ? { vs: vs.who, against } : {},
+    ...take ? { take: take.said } : {},
     ...aided.length > 0 ? { aided: aided.join("; ") } : {},
-    ...notes.length > 0 ? { notes: notes.join("; ") } : {},
+    ...plan2.notes.length > 0 ? { notes: plan2.notes.join("; ") } : {},
     outcome,
     ...ruled !== undefined ? { ruled: true } : {}
   });
   return null;
 };
-var save = (s, who, p, rng, ruled) => {
+function saveCall(s, who, p) {
   const rules = s.rules;
   const id = saveNamed(rules, text5(p.save));
   if (id === null)
-    return reject25("d20_no_save", say("why_d20_no_save", { said: text5(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)).join(", ") }));
+    return reject25("d20_no_save", say("why_d20_no_save", { said: text5(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => saveLabel(rules, k.slice(5))).join(", ") }));
   const dc = difficultyOf2(s.ctx, rules, p.difficulty);
   if (dc === null)
     return reject25("d20_no_difficulty", say("why_d20_no_difficulty", { said: text5(p.difficulty) }));
-  for (const one of andAlso(who, p.also, s.ctx)) {
-    const r = rollSave(s, one, id, dc, givenMods(p.mods, `save.${id}`), rng.fork(`save:${one}`), ruled);
-    s.record(D20_EVENTS.save, { who: one, save: id, ...r.natural !== null ? { natural: r.natural } : {}, total: r.total, ...r.parts !== "" ? { parts: r.parts } : {}, dc, outcome: r.outcome, ...ruled !== undefined ? { ruled: true } : {} });
+  return { id, dc, savers: andAlso(who, p.also, s.ctx), given: givenMods(p.mods, `save.${id}`) };
+}
+var save = (s, who, p, rng, ruled) => {
+  const call = saveCall(s, who, p);
+  if ("code" in call)
+    return call;
+  const { id, dc } = call;
+  const notes = [];
+  for (const one of call.savers) {
+    const spent = one === who && ruled === undefined ? boostOf(s, who, "save", p, rng.fork("boost"), notes) : null;
+    const r = rollSave(s, one, id, dc, call.given, rng.fork(`save:${one}`), ruled, spent);
+    s.record(D20_EVENTS.save, { who: one, save: id, ...r.natural !== null ? { natural: r.natural } : {}, total: r.total, ...r.parts !== "" ? { parts: r.parts } : {}, ...spent ? { boost: spent.words } : {}, dc, outcome: r.outcome, ...ruled !== undefined ? { ruled: true } : {}, ...one === who && notes.length > 0 ? { notes: notes.join("; ") } : {} });
   }
   return null;
 };
+function carriedBy2(s, who) {
+  const out = [...gearOn(s.ctx, who).readied];
+  const walk3 = (holder, depth2) => {
+    if (depth2 > 6)
+      return;
+    for (const id of contentsOf(s.ctx.state, holder)) {
+      if (!out.includes(id))
+        out.push(id);
+      walk3(id, depth2 + 1);
+    }
+  };
+  walk3(who, 0);
+  return out;
+}
+function asWeapon(s, id) {
+  const rid = rowIdOf(s.ctx, id);
+  const row = own(rowsOf(s.ctx, s.rules, "weapons"), rid);
+  return row ? { label: s.name(id), item: id, rowId: rid, row, natural: null } : null;
+}
+function notAWeapon(s, who, thing) {
+  const rows2 = rowsOf(s.ctx, s.rules, "weapons");
+  const words5 = new Set(s.name(thing).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((x) => x.length > 1));
+  const near = Object.entries(rows2).filter(([id, row]) => `${id} ${labelOfRow(row, id)}`.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((x) => words5.has(x)));
+  const named = (near.length > 0 ? near : Object.entries(rows2)).slice(0, 8).map(([id, row]) => `${labelOfRow(row, id)} [${id}]`);
+  const call = JSON.stringify({ op: "set", at: s.name(thing), key: D20_FIELDS.row, value: near[0]?.[0] ?? Object.keys(rows2)[0] ?? "" });
+  return reject25("d20_not_a_weapon", say("why_d20_not_a_weapon", { thing: s.name(thing), who: s.name(who), call, rows: named.join(", ") }));
+}
 function weaponOf(s, who, said3) {
   const rules = s.rules;
-  const weapons = rowsOf(s.ctx, rules, "weapons");
-  const carried = () => {
-    const out = [];
-    const walk3 = (holder, depth2) => {
-      if (depth2 > 6)
-        return;
-      for (const id of contentsOf(s.ctx.state, holder)) {
-        out.push(id);
-        walk3(id, depth2 + 1);
-      }
-    };
-    walk3(who, 0);
-    return out;
-  };
-  const asThing = (id) => {
-    const rid = rowIdOf(s.ctx, id);
-    const row = own(weapons, rid);
-    return row ? { label: s.name(id), item: id, rowId: rid, row, natural: null } : null;
-  };
   const naturals = naturalAttacks(s.ctx, who);
+  const nothing = reject25("d20_no_weapon", say("why_d20_no_weapon", { who: s.name(who), said: said3 }));
   if (said3 !== "") {
     const lower = said3.toLowerCase();
-    const thing = [...gearOn(s.ctx, who).readied, ...carried()].find((id) => s.name(id).toLowerCase() === lower || id === said3);
+    const thing = carriedBy2(s, who).find((id) => s.name(id).toLowerCase() === lower || id === said3);
     if (thing !== undefined)
-      return asThing(thing);
+      return asWeapon(s, thing) ?? notAWeapon(s, who, thing);
     const nat = naturals.find((a) => a.label.toLowerCase() === lower);
     if (nat)
-      return { label: nat.label, item: null, rowId: "", row: null, natural: nat };
+      return { label: nat.label, item: null, rowId: weaponKey(nat), row: null, natural: nat };
     const row = rowOf3(s.ctx, rules, "weapons", said3);
-    return row ? { label: labelOfRow(row.row, row.id), item: null, rowId: row.id, row: row.row, natural: null } : null;
+    return row ? { label: labelOfRow(row.row, row.id), item: null, rowId: row.id, row: row.row, natural: null } : nothing;
   }
-  for (const id of gearOn(s.ctx, who).readied) {
-    const w = asThing(id);
+  const readied2 = gearOn(s.ctx, who).readied;
+  for (const id of carriedBy2(s, who)) {
+    const w = asWeapon(s, id);
     if (w)
       return w;
   }
   const first = naturals[0];
-  return first ? { label: first.label, item: null, rowId: "", row: null, natural: first } : null;
+  if (first)
+    return { label: first.label, item: null, rowId: weaponKey(first), row: null, natural: first };
+  const inHand = readied2[0];
+  return inHand !== undefined ? notAWeapon(s, who, inHand) : nothing;
+}
+function armedWith(s, who) {
+  const weapons = [];
+  const unarmed = [];
+  const readied2 = gearOn(s.ctx, who).readied;
+  for (const id of carriedBy2(s, who)) {
+    const w = asWeapon(s, id);
+    if (w)
+      weapons.push(w);
+    else if (readied2.includes(id))
+      unarmed.push(id);
+  }
+  for (const nat of naturalAttacks(s.ctx, who))
+    weapons.push({ label: nat.label, item: null, rowId: weaponKey(nat), row: null, natural: nat });
+  return { weapons, unarmed };
 }
 function damageDice(w, size) {
   if (w.natural)
@@ -58206,12 +58411,17 @@ function damageDice(w, size) {
   }
   return "";
 }
+function weaponKey(natural) {
+  return natural.label.toLowerCase();
+}
+function threatFrom(ctx, rules, who, w) {
+  const own2 = w.natural?.threat ?? numberIn(w.row?.threat ?? null) ?? rules.attack.autoHit;
+  return w.rowId === "" ? own2 : own2 - sumOf(stacked(ctx, rules, who, `threat.weapon.${w.rowId}`));
+}
 function proficient(s, who, w) {
-  if (!w.row)
+  if (!w.row || textIn(w.row.proficiency) === "")
     return true;
-  const want = [textIn(w.row.proficiency), w.rowId].filter((x) => x !== "");
-  if (want.length === 0)
-    return true;
+  const want = [textIn(w.row.proficiency), w.rowId];
   const classes = rowsOf(s.ctx, s.rules, "classes");
   for (const cls of Object.keys(classesOf(s.ctx, who)))
     if (wordsIn(own(classes, cls)?.proficiency).some((x) => want.includes(x)))
@@ -58241,26 +58451,47 @@ function around(s, centre, radius) {
     return typeof d === "number" && d <= radius;
   })()).sort();
 }
-var attack = (s, who, p, rng, ruled) => {
-  const rules = s.rules;
-  const a = rules.attack;
+function attackPlan(s, who, p) {
   const target = text5(p.target);
   if (!own(s.ctx.state.entities, target))
     return reject25("d20_no_target", say("why_d20_no_target", { said: target }));
   const w = weaponOf(s, who, text5(p.with));
-  if (w === null)
-    return reject25("d20_no_weapon", say("why_d20_no_weapon", { who: s.name(who), said: text5(p.with) }));
+  if ("code" in w)
+    return w;
+  return planWith(s, who, w, p, target);
+}
+function farWords(s, who, amount, measured) {
+  const spoken2 = Math.abs(amount) >= 10 ? Math.round(amount) : Math.round(amount * 10) / 10;
+  const unit3 = measured ? s.ctx.registry.formulas.get("grid_unit")?.(s.ctx, who) : null;
+  return unit3 === "feet" || unit3 === "metres" ? say(`d20_far_${unit3}`, { amount: spoken2 }) : String(spoken2);
+}
+function planWith(s, who, w, p, target) {
+  const rules = s.rules;
+  const a = rules.attack;
   const notes = [];
-  const told2 = [];
+  const distanceFn = s.ctx.registry.formulas.get("distance");
+  const grid = target !== null && distanceFn ? distanceFn(s.ctx, who, target) : null;
+  const apart = typeof grid === "number" ? grid : numberIn(p.distance ?? null);
+  const situation = target !== null ? { who, target, distance: apart } : null;
+  let unknown = false;
+  const situated = (fn) => {
+    if (situation === null)
+      return fn();
+    const r = inSituation(s.ctx, situation, fn);
+    if (r.unknownDistance)
+      unknown = true;
+    return r.value;
+  };
   const held3 = text5(p.held) !== "" ? text5(p.held) : w.natural ? w.natural.held ?? "one" : textIn(w.row?.held);
   const ranged = held3 === "projectile" || held3 === "thrown" || held3 === "ranged";
   const totalName = w.natural?.total ?? (ranged ? a.totals.ranged : a.totals.melee);
-  const vars = { weapon: w.rowId, key: w.rowId };
+  const vars = { weapon: w.rowId, key: w.rowId, ...apart !== null ? { distance: apart } : {} };
+  const bindings = target !== null ? { target } : {};
   const given = givenMods(p.mods, "attack");
   const toAc = given.filter((m) => m.to === "ac" || m.to.startsWith("ac."));
   const toRoll = given.filter((m) => !toAc.includes(m) && !m.to.startsWith("damage"));
   const toDamage = given.filter((m) => m.to.startsWith("damage"));
-  const roll = explain(s.ctx, rules, who, totalName, vars) ?? { total: 0, parts: [] };
+  const roll = situated(() => explain(s.ctx, rules, who, totalName, vars, bindings)) ?? { total: 0, parts: [] };
   const extras = [];
   const enh = w.item ? thingNumber(s.ctx, w.item, D20_FIELDS.enhancement) : 0;
   if (enh !== 0)
@@ -58278,54 +58509,98 @@ var attack = (s, who, p, rng, ruled) => {
   for (const g of toRoll)
     extras.push({ value: Number(g.value), words: modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }) });
   const increment = numberIn(w.row?.range ?? null);
-  const distanceFn = s.ctx.registry.formulas.get("distance");
-  const apart = distanceFn ? distanceFn(s.ctx, who, target) : null;
-  if (ranged && increment !== null && increment > 0 && typeof apart === "number") {
+  if (ranged && increment !== null && increment > 0 && apart !== null) {
     const steps = Math.max(0, Math.ceil(apart / increment) - 1);
     const most = held3 === "thrown" ? a.increments.thrown : a.increments.projectile;
     if (steps + 1 > most)
-      notes.push(say("d20_out_of_range", { distance: apart, most: most * increment }));
+      notes.push(say("d20_out_of_range", { distance: farWords(s, who, apart, typeof grid === "number"), most: farWords(s, who, most * increment, typeof grid === "number") }));
     if (steps > 0)
-      extras.push({ value: steps * a.incrementPenalty, words: say("d20_part_range", { value: signed(steps * a.incrementPenalty), distance: apart, increments: steps }) });
+      extras.push({ value: steps * a.incrementPenalty, words: say("d20_part_range", { value: signed(steps * a.incrementPenalty), distance: farWords(s, who, apart, typeof grid === "number"), increments: steps }) });
   }
   const shotName = text5(p.shots);
   const shot = shotName === "" ? undefined : own(a.shots, shotName);
   if (shotName !== "" && shot === undefined)
     notes.push(say("d20_no_shot", { said: shotName, shots: Object.keys(a.shots).join(", ") }));
+  const lacks = shot?.trait !== undefined && !traitsTaken(s.ctx, who).some((t) => t.id === shot.trait);
+  const untrained = lacks && shot?.without !== undefined;
   if (shot) {
     if (!wordsIn(w.row?.fire).includes(shot.needs))
       notes.push(say("d20_shot_not_fired", { weapon: w.label, shot: shotName }));
-    if (shot.trait !== undefined && !traitsTaken(s.ctx, who).some((t) => t.id === shot.trait))
-      notes.push(say("d20_shot_needs_trait", { shot: shotName, trait: labelOfRow(own(rowsOf(s.ctx, rules, "traits"), shot.trait), shot.trait) }));
-    if (shot.attack !== undefined && shot.attack !== 0)
-      extras.push({ value: shot.attack, words: say("d20_part_shot", { value: signed(shot.attack), shot: shotName }) });
+    const trait = shot.trait === undefined ? "" : labelOfRow(own(rowsOf(s.ctx, rules, "traits"), shot.trait), shot.trait);
+    if (lacks)
+      notes.push(untrained ? say("d20_shot_without_trait", { shot: shotName, trait }) : say("d20_shot_needs_trait", { shot: shotName, trait }));
+    const added = untrained ? shot.without?.attack : shot.attack;
+    if (added !== undefined && added !== 0)
+      extras.push({ value: added, words: say("d20_part_shot", { value: signed(added), shot: shotName }) });
   }
   const magazine = numberIn(w.row?.magazine ?? null);
-  const spend = shot?.rounds ?? (magazine !== null ? 1 : 0);
-  if (w.item && magazine !== null && spend > 0) {
+  const base = situated(() => totalOf2(s.ctx, rules, who, a.totals.base, vars, bindings));
+  const further = yes(p.full) && !w.natural && base >= a.iterative.from ? Math.floor((base - a.iterative.from) / a.iterative.step) + 1 : 0;
+  const threat = situated(() => threatFrom(s.ctx, rules, who, w));
+  const damageBonus = situated(() => totalOf2(s.ctx, rules, who, a.totals.damage, vars, bindings)) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0);
+  if (unknown)
+    notes.push(say("d20_no_distance"));
+  return {
+    target: target ?? "",
+    w,
+    ranged,
+    situation,
+    toAc,
+    roll,
+    extras,
+    extra: extras.reduce((n, x) => n + x.value, 0),
+    rollParts: [partsWords(roll), ...extras.map((x) => x.words)].filter((x) => x !== "").join(", "),
+    nonlethal,
+    notes,
+    shot,
+    shotDice: shot && !untrained ? shot.dice ?? 0 : 0,
+    magazine,
+    spend: shot?.rounds ?? (magazine !== null ? 1 : 0),
+    dice: damageDice(w, sizeOf2(s.ctx, rules, who)),
+    types: w.natural?.types ?? wordsIn(w.row?.types),
+    threatFrom: threat,
+    multiplier: w.natural?.multiplier ?? numberIn(w.row?.multiplier ?? null) ?? 1,
+    strength: Math.floor((own(a.strengthShare, held3) ?? 0) * modOf(s.ctx, rules, who, a.strength)),
+    damageBonus,
+    offsets: [0, ...Array.from({ length: further }, (_, i) => -(i + 1) * a.iterative.step)],
+    touch: yes(p.touch),
+    concealment: numberIn(p.concealment ?? null) ?? 0
+  };
+}
+function defenceOf(s, plan2) {
+  const flat = flatFooted(s, plan2.target);
+  const sit = plan2.situation;
+  const vars = { vs: plan2.ranged ? "ranged" : "melee", ...sit !== null && sit.distance !== null ? { distance: sit.distance } : {} };
+  const read = () => explain(s.ctx, s.rules, plan2.target, plan2.touch ? "ac.touch" : flat ? "ac.flat" : "ac", vars, sit !== null ? { target: sit.who } : {});
+  const r = sit !== null ? inSituation(s.ctx, sit, read) : { value: read(), unknownDistance: false };
+  const ac = r.value ?? { total: 0, parts: [] };
+  return { flat, ac, defence: ac.total + plan2.toAc.reduce((m, g) => m + Number(g.value), 0), unknownDistance: r.unknownDistance };
+}
+var attack = (s, who, p, rng, ruled) => {
+  const rules = s.rules;
+  const a = rules.attack;
+  const plan2 = attackPlan(s, who, p);
+  if ("code" in plan2)
+    return plan2;
+  const { target, w, shot, notes, dice, types, nonlethal, strength, damageBonus, touch: touch2, concealment } = plan2;
+  const told2 = [];
+  if (w.item && plan2.magazine !== null && plan2.spend > 0) {
     const loaded = thingNumber(s.ctx, w.item, D20_FIELDS.loaded);
-    if (loaded < spend)
-      notes.push(say("d20_magazine_short", { weapon: w.label, loaded, spend }));
-    s.set(w.item, D20_FIELDS.loaded, Math.max(0, loaded - spend));
-    told2.push(say("d20_rounds_spent", { spent: Math.min(loaded, spend), left: Math.max(0, loaded - spend) }));
+    if (loaded < plan2.spend)
+      notes.push(say("d20_magazine_short", { weapon: w.label, loaded, spend: plan2.spend }));
+    s.set(w.item, D20_FIELDS.loaded, Math.max(0, loaded - plan2.spend));
+    told2.push(plain4(say("d20_rounds_spent", { spent: Math.min(loaded, plan2.spend), left: Math.max(0, loaded - plan2.spend) })));
   }
-  const size = sizeOf2(s.ctx, rules, who);
-  const dice = damageDice(w, size);
-  const types = w.natural?.types ?? wordsIn(w.row?.types);
-  const threatFrom = w.natural?.threat ?? numberIn(w.row?.threat ?? null) ?? a.autoHit;
-  const multiplier = w.natural?.multiplier ?? numberIn(w.row?.multiplier ?? null) ?? 1;
-  const strength = Math.floor((own(a.strengthShare, held3) ?? 0) * modOf(s.ctx, rules, who, a.strength));
-  const damageBonus = totalOf2(s.ctx, rules, who, a.totals.damage, vars) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0);
   const rollDamage = (mult, r) => {
     let rolled = 0;
     let notation = dice;
     try {
       for (let i = 0;i < mult; i++)
         rolled += rollDice(dice, r.fork(`dice:${i}`)).total;
-      if (shot?.dice !== undefined && shot.dice > 0) {
+      if (plan2.shotDice > 0) {
         const g = parseDice(dice).groups[0];
         if (g) {
-          const more = `${shot.dice * g.count}d${g.sides}`;
+          const more = `${plan2.shotDice * g.count}d${g.sides}`;
           rolled += rollDice(more, r.fork("shot")).total;
           notation = `${dice}+${more}`;
         }
@@ -58338,40 +58613,50 @@ var attack = (s, who, p, rng, ruled) => {
     return { total, words: say("d20_damage", { dice: notation, rolled, ...mult > 1 ? { times: mult } : {}, ...strength !== 0 ? { strength: signed(strength * mult) } : {}, ...damageBonus !== 0 ? { bonus: signed(damageBonus * mult) } : {}, total }) };
   };
   if (shot?.area !== undefined && shot.save !== undefined && shot.dc !== undefined) {
+    if (shot.defence !== undefined) {
+      let hits;
+      if (ruled === "hit" || ruled === "miss" || ruled === "critical") {
+        hits = ruled !== "miss";
+        told2.push(plain4(say("d20_area_ruled", { outcome: say(`d20_outcome_${ruled}`) })));
+      } else {
+        const natural = d20(rng.fork("area-roll"));
+        const spent = boostOf(s, who, "attack", p, rng.fork("boost"), notes);
+        const bonus = plan2.roll.total + plan2.extra;
+        const total = natural + bonus + (spent?.total ?? 0);
+        hits = natural <= a.autoMiss ? false : natural >= a.autoHit ? true : total >= shot.defence;
+        told2.push(plain4(say("d20_area_roll", { natural, bonus: signed(bonus), ...plan2.rollParts !== "" ? { parts: plan2.rollParts } : {}, ...spent ? { boost: spent.words } : {}, total, defence: shot.defence, outcome: say(`d20_outcome_${hits ? "hit" : "miss"}`) })));
+      }
+      if (!hits) {
+        s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined3(told2, "; ")), ...notes.length > 0 ? { notes: notes.join("; ") } : {} });
+        return null;
+      }
+    }
     for (const one of around(s, target, shot.area / 2)) {
       if (one === who)
         continue;
       const sv = rollSave(s, one, shot.save, shot.dc, [], rng.fork(`area:${one}`));
       if (sv.outcome === "success") {
-        told2.push(say("d20_area_saved", { who: s.name(one), save: sv.words }));
+        told2.push(plain4(say("d20_area_saved", { who: s.name(one), save: sv.words })));
         continue;
       }
       const dmg = rollDamage(1, rng.fork(`area-damage:${one}`));
       const stop = stoppedBy(s, one, types, true);
       const amount = Math.max(0, dmg.total - stop.amount);
       const h = harmOne(s, one, amount, nonlethal, rng.fork(`area-harm:${one}`));
-      told2.push(say("d20_area_hit", { who: s.name(one), save: sv.words, damage: dmg.words, ...stop.words !== "" ? { stopped: stop.words } : {}, harm: h.words }));
+      const hit = (harm) => say("d20_area_hit", { who: s.name(one), save: sv.words, damage: dmg.words, ...stop.words !== "" ? { stopped: stop.words } : {}, harm });
+      told2.push({ words: hit(h.words), shown: hit(h.shown) });
     }
-    s.record(D20_EVENTS.attack, { who, target, with: w.label, told: told2.join("; "), ...notes.length > 0 ? { notes: notes.join("; ") } : {} });
+    s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined3(told2, "; ")), ...notes.length > 0 ? { notes: notes.join("; ") } : {} });
     return null;
   }
-  const base = totalOf2(s.ctx, rules, who, a.totals.base, vars);
-  const further = yes(p.full) && !w.natural && base >= a.iterative.from ? Math.floor((base - a.iterative.from) / a.iterative.step) + 1 : 0;
-  const offsets = [0, ...Array.from({ length: further }, (_, i) => -(i + 1) * a.iterative.step)];
-  const extra = extras.reduce((n, x) => n + x.value, 0);
-  const rollParts = [partsWords(roll), ...extras.map((x) => x.words)].filter((x) => x !== "").join(", ");
-  const touch2 = yes(p.touch);
-  const concealment = numberIn(p.concealment ?? null) ?? 0;
-  offsets.forEach((offset, n) => {
+  plan2.offsets.forEach((offset, n) => {
     if (n > 0 && s.number(target, rules.hp.field) <= (hpOf2(s, target).min ?? -Infinity))
       return;
     const r = rng.fork(`attack:${n}`);
-    const flat = flatFooted(s, target);
-    const acName = touch2 ? "ac.touch" : flat ? "ac.flat" : "ac";
-    const ac = explain(s.ctx, rules, target, acName, { vs: ranged ? "ranged" : "melee" }) ?? { total: 0, parts: [] };
-    const acExtra = toAc.reduce((m, g) => m + Number(g.value), 0);
-    const defence = ac.total + acExtra;
-    const bonus = roll.total + extra + offset;
+    const { flat, ac, defence, unknownDistance } = defenceOf(s, plan2);
+    if (unknownDistance && !notes.includes(say("d20_no_distance")))
+      notes.push(say("d20_no_distance"));
+    const bonus = plan2.roll.total + plan2.extra + offset;
     let outcome;
     let natural = null;
     let words5;
@@ -58380,11 +58665,12 @@ var attack = (s, who, p, rng, ruled) => {
       words5 = say("d20_attack_ruled", { outcome: say(`d20_outcome_${ruled}`) });
     } else {
       natural = d20(r.fork("roll"));
-      const total = natural + bonus;
+      const spent = n === 0 ? boostOf(s, who, "attack", p, rng.fork("boost"), notes) : null;
+      const total = natural + bonus + (spent?.total ?? 0);
       const hits = natural <= a.autoMiss ? false : natural >= a.autoHit ? true : total >= defence;
       outcome = hits ? "hit" : "miss";
       let confirm = "";
-      if (hits && natural >= threatFrom) {
+      if (hits && natural >= plan2.threatFrom) {
         if (!a.confirm)
           outcome = "critical";
         else {
@@ -58402,18 +58688,19 @@ var attack = (s, who, p, rng, ruled) => {
           confirm = [confirm, say("d20_concealed", { rolled: chance, chance: concealment })].filter((x) => x !== "").join(", ");
         }
       }
-      words5 = say("d20_attack_roll", { natural, bonus: signed(bonus), ...n === 0 && rollParts !== "" ? { parts: rollParts } : {}, ...offset !== 0 ? { offset: signed(offset) } : {}, total, defence, ...n === 0 ? { defence_parts: [partsWords(ac), ...toAc.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }))].filter((x) => x !== "").join(", ") } : {}, ...flat ? { flat: true } : {}, ...touch2 ? { touch: true } : {}, outcome: say(`d20_outcome_${outcome}`), ...confirm !== "" ? { confirm } : {} });
+      words5 = say("d20_attack_roll", { natural, bonus: signed(bonus), ...n === 0 && plan2.rollParts !== "" ? { parts: plan2.rollParts } : {}, ...spent ? { boost: spent.words } : {}, ...offset !== 0 ? { offset: signed(offset) } : {}, total, defence, ...n === 0 ? { defence_parts: [partsWords(ac), ...plan2.toAc.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...g.note !== undefined ? { note: g.note } : {}, counted: true }))].filter((x) => x !== "").join(", ") } : {}, ...flat ? { flat: true } : {}, ...touch2 ? { touch: true } : {}, outcome: say(`d20_outcome_${outcome}`), ...confirm !== "" ? { confirm } : {} });
     }
+    let line = plain4(words5);
     if (outcome !== "miss") {
-      const dmg = rollDamage(outcome === "critical" ? multiplier : 1, r.fork("damage"));
+      const dmg = rollDamage(outcome === "critical" ? plan2.multiplier : 1, r.fork("damage"));
       const stop = stoppedBy(s, target, types, true);
       const amount = Math.max(0, dmg.total - stop.amount);
       const h = harmOne(s, target, amount, nonlethal, r.fork("harm"));
-      words5 = [words5, dmg.words, stop.words, h.words].filter((x) => x !== "").join("; ");
+      line = joined3([plain4(words5), plain4(dmg.words), plain4(stop.words), { words: h.words, shown: h.shown }], "; ");
     }
-    told2.push(say("d20_attack_one", { n: n + 1, words: words5 }));
+    told2.push({ words: say("d20_attack_one", { n: n + 1, words: line.words }), shown: say("d20_attack_one", { n: n + 1, words: line.shown }) });
   });
-  s.record(D20_EVENTS.attack, { who, target, with: w.label, told: told2.join(" "), ...notes.length > 0 ? { notes: notes.join("; ") } : {} });
+  s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined3(told2, " ")), ...notes.length > 0 ? { notes: notes.join("; ") } : {} });
   return null;
 };
 var harm = (s, who, p, rng) => {
@@ -58427,7 +58714,7 @@ var harm = (s, who, p, rng) => {
     targets = [who];
   const id = text5(p.save) === "" ? null : saveNamed(rules, text5(p.save));
   if (text5(p.save) !== "" && id === null)
-    return reject25("d20_no_save", say("why_d20_no_save", { said: text5(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)).join(", ") }));
+    return reject25("d20_no_save", say("why_d20_no_save", { said: text5(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => saveLabel(rules, k.slice(5))).join(", ") }));
   const dc = difficultyOf2(s.ctx, rules, p.difficulty);
   const rolled = amountRolled(p.amount, rng.fork("amount"));
   if (rolled === null)
@@ -58438,17 +58725,17 @@ var harm = (s, who, p, rng) => {
     const parts = [];
     if (id !== null && dc !== null) {
       const sv = rollSave(s, one, id, dc, [], rng.fork(`save:${one}`));
-      parts.push(sv.words);
+      parts.push(plain4(sv.words));
       if (sv.outcome === "success")
         amount = yes(p.half) ? Math.floor(amount / 2) : 0;
     }
     const stop = type === "" ? { amount: 0, words: "" } : stoppedBy(s, one, [type], false);
     if (stop.words !== "")
-      parts.push(stop.words);
+      parts.push(plain4(stop.words));
     amount = Math.max(0, amount - stop.amount);
     const h = harmOne(s, one, amount, yes(p.nonlethal), rng.fork(`harm:${one}`));
-    parts.push(h.words);
-    s.record(D20_EVENTS.harm, { who: one, amount, ...rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}, ...type !== "" ? { type } : {}, ...yes(p.nonlethal) ? { nonlethal: true } : {}, ...one !== who ? { by: who } : {}, ...text5(p.why) !== "" ? { why: text5(p.why) } : {}, told: parts.join(", ") });
+    parts.push({ words: h.words, shown: h.shown });
+    s.record(D20_EVENTS.harm, { who: one, amount, ...rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}, ...type !== "" ? { type } : {}, ...yes(p.nonlethal) ? { nonlethal: true } : {}, ...one !== who ? { by: who } : {}, ...text5(p.why) !== "" ? { why: text5(p.why) } : {}, ...toldOf(joined3(parts, ", ")) });
   }
   return null;
 };
@@ -58462,28 +58749,29 @@ var heal = (s, who, p, rng) => {
     const before = s.number(who, rules.hp.temporary);
     const to = Math.max(before, rolled.total);
     s.set(who, rules.hp.temporary, to);
-    parts.push(say("d20_heal_temporary", { from: before, to }));
+    parts.push(plain4(say("d20_heal_temporary", { from: before, to })));
   } else if (yes(p.nonlethal)) {
     const before = s.number(who, rules.hp.nonlethal);
     const to = Math.max(0, before - rolled.total);
     s.set(who, rules.hp.nonlethal, to);
-    parts.push(say("d20_heal_nonlethal", { from: before, to }));
+    parts.push(plain4(say("d20_heal_nonlethal", { from: before, to })));
   } else if (rolled.total > 0) {
     const hp = hpOf2(s, who);
     const to = Math.min(hp.max ?? Infinity, hp.now + rolled.total);
     s.set(who, rules.hp.field, to);
-    parts.push(say("d20_heal_hp", { from: hp.now, to }));
+    parts.push(s.hpWords(who, "d20_heal_hp", hp.now, to));
   }
   if (yes(p.stabilize) && rules.hp.dying) {
     const list = conditionsHeld(s.ctx, who);
     if (!list.some((c) => c.id === rules.hp.dying?.stable)) {
       const raw = own(s.ctx.state.entities, who)?.fields[D20_FIELDS.conditions];
       s.set(who, D20_FIELDS.conditions, [...Array.isArray(raw) ? raw : [], { id: rules.hp.dying.stable }]);
-      parts.push(say("d20_stabilized"));
+      parts.push(plain4(say("d20_stabilized")));
     }
   }
   settle5(s, who);
-  s.record(D20_EVENTS.heal, { who, ...rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}, told: parts.join(", ") || say("d20_nothing_changed"), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
+  const said3 = joined3(parts, ", ");
+  s.record(D20_EVENTS.heal, { who, ...rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}, ...toldOf(said3.words !== "" ? said3 : plain4(say("d20_nothing_changed"))), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
   return null;
 };
 function lengthOf(s, p) {
@@ -58493,8 +58781,8 @@ function lengthOf(s, p) {
   const dc = difficultyOf2(s.ctx, s.rules, p.difficulty);
   return { ...minutes2 > 0 ? { until: s.ctx.state.clock + Math.round(minutes2) } : {}, ...rounds !== null && rounds > 0 ? { rounds: Math.round(rounds) } : {}, ...id !== null && dc !== null ? { save: { save: id, dc } } : {} };
 }
-function lengthWords2(l, clock) {
-  return say("d20_length", { ...l.rounds !== undefined ? { rounds: l.rounds } : {}, ...l.until !== undefined ? { minutes: l.until - clock } : {}, ...l.save !== undefined ? { save: l.save.save, dc: l.save.dc } : {} });
+function lengthWords2(s, l) {
+  return say("d20_length", { ...l.rounds !== undefined ? { rounds: l.rounds } : {}, ...l.until !== undefined ? { minutes: l.until - s.ctx.state.clock } : {}, ...l.save !== undefined ? { save: saveLabel(s.rules, l.save.save), dc: l.save.dc } : {} });
 }
 var condition = (s, who, p) => {
   const rules = s.rules;
@@ -58512,8 +58800,8 @@ var condition = (s, who, p) => {
   }
   const l = lengthOf(s, p);
   s.set(who, D20_FIELDS.conditions, [...rest, { id: hit.id, ...l, ...text5(p.why) !== "" ? { why: text5(p.why) } : {} }]);
-  const mods = modifiersIn(hit.row.modifiers).map((m) => `${typeof m.value === "number" ? signed(m.value) : m.value} ${m.type ?? ""} ${m.to}`.replace(/\s+/g, " ").trim());
-  s.record(D20_EVENTS.condition, { who, told: say("d20_condition_on", { condition: label2, ...mods.length > 0 ? { mods: mods.join(", ") } : {}, ...textIn(hit.row.text) !== "" ? { text: textIn(hit.row.text) } : {}, length: lengthWords2(l, s.ctx.state.clock) }), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
+  const mods = modifiersIn(hit.row.modifiers).map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to }));
+  s.record(D20_EVENTS.condition, { who, told: say("d20_condition_on", { condition: label2, ...mods.length > 0 ? { mods: mods.join(", ") } : {}, ...textIn(hit.row.text) !== "" ? { text: textIn(hit.row.text) } : {}, length: lengthWords2(s, l) }), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
   return null;
 };
 var effect = (s, who, p) => {
@@ -58535,7 +58823,7 @@ var effect = (s, who, p) => {
   const l = lengthOf(s, p);
   const held3 = { label: label2, modifiers: mods, ...l, ...text5(p.why) !== "" ? { why: text5(p.why) } : {} };
   s.set(who, D20_FIELDS.effects, [...rest, held3]);
-  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label: label2, mods: mods.map((m) => `${signed(Number(m.value))}${m.type !== undefined ? ` ${m.type}` : ""} to ${m.to}`).join(", "), length: lengthWords2(l, s.ctx.state.clock) }), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
+  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label: label2, mods: mods.map((m) => say("d20_mod_to", { value: signed(Number(m.value)), type: m.type ?? "", to: m.to })).join(", "), length: lengthWords2(s, l) }), ...text5(p.why) !== "" ? { why: text5(p.why) } : {} });
   return null;
 };
 var rest = (s, who, p) => {
@@ -58576,32 +58864,28 @@ var rest = (s, who, p) => {
   return null;
 };
 function ammoOf2(s, item) {
-  const row = own(own(s.ctx.world.tables, "gear.items")?.rows ?? {}, rowIdOf(s.ctx, item));
-  const ammo = row?.ammo;
-  return typeof ammo === "string" && ammo !== "" ? ammo : null;
+  const rows2 = own(s.ctx.world.tables, "gear.items")?.rows ?? {};
+  const ammo = own(rows2, rowIdOf(s.ctx, item))?.ammo;
+  return typeof ammo === "string" && ammo !== "" ? { id: ammo, name: labelOfRow(own(rows2, ammo), ammo) } : null;
+}
+function reloaded(s, who, said3) {
+  if (said3 === "")
+    return armedWith(s, who).weapons.find((x) => x.item !== null && numberIn(x.row?.magazine ?? null) !== null) ?? null;
+  const w = weaponOf(s, who, said3);
+  return "code" in w ? null : w;
 }
 var reload = (s, who, p) => {
-  const rules = s.rules;
-  const w = weaponOf(s, who, text5(p.item));
+  const said3 = text5(p.item);
+  const w = reloaded(s, who, said3);
   const magazine = w ? numberIn(w.row?.magazine ?? null) : null;
   if (!w || !w.item || magazine === null)
-    return reject25("d20_no_magazine", say("why_d20_no_magazine", { who: s.name(who), said: text5(p.item) }));
+    return reject25("d20_no_magazine", say("why_d20_no_magazine", { who: s.name(who), said: said3 }));
   const loaded = thingNumber(s.ctx, w.item, D20_FIELDS.loaded);
   const want = Math.max(0, magazine - loaded);
   const ammo = ammoOf2(s, w.item);
   let moved3 = 0;
   if (ammo !== null) {
-    const stacks = [];
-    const walk3 = (holder, depth2) => {
-      if (depth2 > 6)
-        return;
-      for (const id of contentsOf(s.ctx.state, holder)) {
-        if (own(s.ctx.state.entities, id)?.fields.catalog === ammo)
-          stacks.push(id);
-        walk3(id, depth2 + 1);
-      }
-    };
-    walk3(who, 0);
+    const stacks = carriedBy2(s, who).filter((id) => id !== w.item && rowIdOf(s.ctx, id) === ammo.id);
     for (const id of stacks) {
       if (moved3 >= want)
         break;
@@ -58614,13 +58898,15 @@ var reload = (s, who, p) => {
     }
   }
   s.set(w.item, D20_FIELDS.loaded, loaded + moved3);
-  s.record(D20_EVENTS.reload, { who, item: w.item, told: say("d20_reloaded", { from: loaded, to: loaded + moved3, magazine, ...moved3 < want ? { short: want - moved3 } : {} }) });
+  s.record(D20_EVENTS.reload, { who, item: w.item, told: say("d20_reloaded", { from: loaded, to: loaded + moved3, magazine, ...moved3 < want ? { short: want - moved3, ...ammo !== null ? { ammo: `${ammo.name} [${ammo.id}]` } : { no_ammo: true } } : {} }) });
   return null;
 };
 function levelForXp(s, xp) {
+  const thresholds = own(s.ctx.world.ruleset?.progression ?? {}, s.rules.levels.progression)?.thresholds;
+  const column = thresholds !== undefined && !Array.isArray(thresholds) ? thresholds.column : "xp";
   let level = 0;
   for (const [key, row] of Object.entries(rowsOf(s.ctx, s.rules, "experience"))) {
-    const need2 = numberIn(row.xp);
+    const need2 = numberIn(row[column] ?? null);
     const at = Number(key);
     if (need2 !== null && Number.isFinite(at) && xp >= need2 && at > level)
       level = at;
@@ -58649,7 +58935,7 @@ var award = (s, who, p) => {
         continue;
       for (const one of all) {
         const byLevel = isRecord(row.by_level) ? numberIn(row.by_level[String(levelsOf(s.ctx, one))] ?? null) : null;
-        const share2 = byLevel ?? Math.floor((numberIn(row.xp) ?? 0) / all.length);
+        const share2 = Math.floor((byLevel ?? numberIn(row.xp) ?? 0) / all.length);
         each.set(one, (each.get(one) ?? 0) + share2);
       }
     }
@@ -58676,6 +58962,9 @@ var advance4 = (s, who, p, rng) => {
   const said3 = text5(p.hp);
   const before = numberIn(own(s.ctx.state.entities, who)?.fields[D20_FIELDS.hitDice] ?? null) ?? 0;
   const first = before === 0;
+  const featAt = rules.levels.featAt;
+  const counted2 = Array.isArray(featAt) ? featAt.filter((l) => l === total).length : featAt !== undefined ? evalExpr(featAt, scopeEnv({ reg: s.ctx.registry, ctx: s.ctx, bindings: { self: who }, vars: { level: total } }), 0) : null;
+  const feats = counted2 === null ? first || rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0 ? 1 : 0 : counted2 === true ? 1 : typeof counted2 === "number" ? Math.max(0, Math.floor(counted2)) : 0;
   const way = said3 === "" ? first && rules.levels.firstMost ? "most" : rules.levels.hitPoints : said3;
   let kept4;
   if (numberIn(said3) !== null)
@@ -58706,7 +58995,7 @@ var advance4 = (s, who, p, rng) => {
       die,
       way,
       points,
-      ...first || rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0 ? { feat: true } : {},
+      ...feats > 0 ? { feats } : {},
       ...rules.levels.abilityEvery > 0 && total % rules.levels.abilityEvery === 0 ? { ability: true } : {},
       ...features.length > 0 ? { features: features.map((f) => labelOfRow(own(traits2, f), f)).join(", ") } : {}
     })
@@ -58800,14 +59089,235 @@ var D20_PROCEDURES = D20_ACTIONS.map((id) => ({
   args: ["who", "ruled?"],
   resolve: (args, ctx) => run(id, args, ctx)
 }));
+function upkeep(base, who, rng) {
+  const rules = rulesOf3(base.world);
+  if (rules === null || !isOn(base) || !own(base.state.entities, who))
+    return [];
+  const s = new Scratch({ ...base, rng, params: {} }, rules);
+  const told2 = [];
+  const dying = rules.hp.dying;
+  const held3 = conditionsHeld(s.ctx, who);
+  if (dying && held3.some((c) => c.id === dying.state) && !held3.some((c) => c.id === dying.stable)) {
+    const ready = readyCheck(s.ctx.registry, s.ctx, dying.roll, { self: who, actor: who });
+    if (!("code" in ready)) {
+      const rolled = rollCheck(ready, rng.fork("stabilize"));
+      if (passOutcomes(dying.roll, ready.bands).includes(rolled.outcome)) {
+        const raw = own(s.ctx.state.entities, who)?.fields[D20_FIELDS.conditions];
+        s.set(who, D20_FIELDS.conditions, [...Array.isArray(raw) ? raw : [], { id: dying.stable }]);
+        told2.push(plain4(say("d20_upkeep_stable", { total: rolled.total })));
+      } else {
+        const hp = hpOf2(s, who);
+        const to = hp.min !== undefined ? Math.max(hp.min, hp.now - dying.lose) : hp.now - dying.lose;
+        s.set(who, rules.hp.field, to);
+        const left = s.hpWords(who, "d20_harm_hp", hp.now, to);
+        const lost = (hpWords) => say("d20_upkeep_lost", { total: rolled.total, lost: hp.now - to, hp: hpWords });
+        told2.push({ words: lost(left.words), shown: lost(left.shown) });
+      }
+    }
+  }
+  for (const field of [D20_FIELDS.conditions, D20_FIELDS.effects]) {
+    const raw = own(s.ctx.state.entities, who)?.fields[field];
+    if (!Array.isArray(raw))
+      continue;
+    let changed = false;
+    const next = [];
+    for (const item of raw) {
+      if (!isRecord(item)) {
+        next.push(item);
+        continue;
+      }
+      const name = typeof item.label === "string" && field === D20_FIELDS.effects ? item.label : labelOfRow(own(rowsOf(s.ctx, rules, "conditions"), text5(item.id)), text5(item.id));
+      const save2 = isRecord(item.save) && typeof item.save.save === "string" && typeof item.save.dc === "number" ? { save: item.save.save, dc: item.save.dc } : null;
+      if (save2 !== null) {
+        const r = rollSave(s, who, save2.save, save2.dc, [], rng.fork(`ends:${name}`));
+        if (r.outcome === "success") {
+          changed = true;
+          told2.push(plain4(say("d20_upkeep_saved", { name, save: r.words })));
+          continue;
+        }
+      }
+      if (typeof item.rounds === "number") {
+        changed = true;
+        if (item.rounds <= 1) {
+          told2.push(plain4(say("d20_upkeep_ended", { name })));
+          continue;
+        }
+        next.push({ ...item, rounds: item.rounds - 1 });
+        continue;
+      }
+      next.push(item);
+    }
+    if (changed)
+      s.set(who, field, next);
+  }
+  settle5(s, who);
+  if (told2.length > 0)
+    s.record(D20_EVENTS.upkeep, { who, ...toldOf(joined3(told2, "; ")) });
+  return s.events;
+}
+
+// src/packs/d20/core/odds.ts
+function onDie(bands, dice = DIE) {
+  return { id: "d20", dice, bands };
+}
+function withBoost(boost) {
+  return boost === "" ? DIE : `${DIE}+${boost}`;
+}
+function dieBands(autoFail, autoSucceed, margin) {
+  return [
+    ...autoSucceed !== undefined ? [{ outcome: "success", natural: { min: autoSucceed } }] : [],
+    ...autoFail !== undefined ? [{ outcome: "failure", natural: { max: autoFail } }] : [],
+    { outcome: "success", margin: { min: margin } },
+    { outcome: "failure" }
+  ];
+}
+function weighed(parts) {
+  const out = {};
+  for (const { w, chances } of parts)
+    for (const [o, x] of Object.entries(chances))
+      out[o] = (out[o] ?? 0) + w * x;
+  return out;
+}
+function spendable2(s, who, action2) {
+  return canBoost(s, who, action2) ? boostDice(s.ctx, s.rules, who) : "";
+}
+function checkChances(s, who, p) {
+  const plan2 = checkPlan(s, who, p);
+  if ("code" in plan2)
+    return { missing: plan2.reason };
+  const { dc, take, vs } = plan2;
+  if (dc === null && vs === null)
+    return { missing: say("why_d20_odds_no_difficulty") };
+  const c = s.rules.check;
+  const die = diceDistribution(DIE);
+  let reached2 = [1];
+  for (const h of plan2.helpers) {
+    const q = probAtLeast(die, c.aid.dc - h.total);
+    const was = reached2;
+    reached2 = [...was, 0].map((w, k) => w * (1 - q) + (k > 0 ? (was[k - 1] ?? 0) * q : 0));
+  }
+  const one = (bonus, boost2) => {
+    if (take) {
+      const total = take.value + bonus;
+      if (boost2 === "") {
+        const won = vs ? probAtMost(die, total - vs.theirs.total - (bonus >= vs.theirs.total ? 0 : 1)) : total >= (dc ?? 0) ? 1 : 0;
+        return { success: won, failure: 1 - won };
+      }
+      if (vs)
+        return checkOdds(fixedCheck(onDie(dieBands(undefined, undefined, bonus >= vs.theirs.total ? 0 : 1), boost2), { modifier: total, against: { dice: DIE, modifier: vs.theirs.total }, opponent: vs.who }));
+      return checkOdds(fixedCheck(onDie(dieBands(undefined, undefined, 0), boost2), { modifier: total, dc }));
+    }
+    if (vs)
+      return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, bonus >= vs.theirs.total ? 0 : 1), withBoost(boost2)), { modifier: bonus, against: { dice: DIE, modifier: vs.theirs.total }, opponent: vs.who }));
+    return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, 0), withBoost(boost2)), { modifier: bonus, dc }));
+  };
+  const base = plan2.mine.total + plan2.extra;
+  const boost = spendable2(s, who, "check");
+  const all = (spent) => weighed(reached2.map((w, k) => ({ w, chances: one(base + k * c.aid.bonus, spent) })));
+  return {
+    chances: all(""),
+    ...boost !== "" ? { spent: all(boost) } : {},
+    modifier: base,
+    notation: take ? String(take.value) : vs ? opposedDice(DIE, DIE) : DIE,
+    dc: vs ? null : dc,
+    opponent: vs?.who ?? null
+  };
+}
+function saveChances(s, who, p) {
+  const call = saveCall(s, who, p);
+  if ("code" in call)
+    return { missing: call.reason };
+  const sv = s.rules.save;
+  const odds = (bonus, boost2) => checkOdds(fixedCheck(onDie(dieBands(sv.autoFail, sv.autoSucceed, 0), withBoost(boost2)), { modifier: bonus, dc: call.dc }));
+  const lines = call.savers.map((one) => {
+    const { bonus } = savePlan(s, one, call.id, call.given);
+    return { who: one, modifier: bonus, against: call.dc, chances: odds(bonus, "") };
+  });
+  const first = lines[0];
+  const boost = spendable2(s, who, "save");
+  return {
+    chances: first?.chances ?? {},
+    ...first && boost !== "" ? { spent: odds(first.modifier, boost) } : {},
+    modifier: first?.modifier ?? 0,
+    notation: DIE,
+    dc: call.dc,
+    opponent: null,
+    ...lines.length > 1 ? { lines } : {}
+  };
+}
+function attackChances(s, who, p) {
+  const plan2 = attackPlan(s, who, p);
+  if ("code" in plan2)
+    return { missing: plan2.reason };
+  const a = s.rules.attack;
+  const boost = spendable2(s, who, "attack");
+  const hits = (bonus, defence2, dice) => checkOdds(fixedCheck(onDie([{ outcome: "miss", natural: { max: a.autoMiss } }, { outcome: "hit", natural: { min: a.autoHit } }, { outcome: "hit", margin: { min: 0 } }, { outcome: "miss" }], dice), { modifier: bonus, dc: defence2 })).hit ?? 0;
+  const shot = plan2.shot;
+  if (shot?.area !== undefined && shot.save !== undefined && shot.dc !== undefined) {
+    if (shot.defence === undefined)
+      return null;
+    const bonus = plan2.roll.total + plan2.extra;
+    const hit = hits(bonus, shot.defence, DIE);
+    const spent = boost !== "" ? hits(bonus, shot.defence, withBoost(boost)) : null;
+    return { chances: { hit, miss: 1 - hit }, ...spent !== null ? { spent: { hit: spent, miss: 1 - spent } } : {}, modifier: bonus, notation: DIE, dc: shot.defence, opponent: null };
+  }
+  const { defence } = defenceOf(s, plan2);
+  const concealed = plan2.concealment > 0 ? probAtMost(diceDistribution(PERCENT), plan2.concealment) : 0;
+  const chancesOf = (bonus, dice) => {
+    const first = checkOdds(fixedCheck(onDie([
+      { outcome: "miss", natural: { max: a.autoMiss } },
+      { outcome: "threat", natural: { min: Math.max(a.autoHit, plan2.threatFrom) } },
+      { outcome: "hit", natural: { min: a.autoHit } },
+      { outcome: "threat", natural: { min: plan2.threatFrom }, margin: { min: 0 } },
+      { outcome: "hit", margin: { min: 0 } },
+      { outcome: "miss" }
+    ], dice), { modifier: bonus, dc: defence }));
+    const threat = first.threat ?? 0;
+    const confirmed = a.confirm ? hits(bonus, defence, DIE) : 1;
+    const critical = threat * confirmed * (1 - concealed);
+    const hit = ((first.hit ?? 0) + threat * (1 - confirmed)) * (1 - concealed);
+    return { threat, chances: { hit, critical, miss: Math.max(0, 1 - hit - critical) } };
+  };
+  const lines = plan2.offsets.map((offset, n) => {
+    const bonus = plan2.roll.total + plan2.extra + offset;
+    const { chances, threat } = chancesOf(bonus, DIE);
+    return { n: n + 1, modifier: bonus, against: defence, threat, chances };
+  });
+  const head = lines[0];
+  return {
+    chances: head?.chances ?? {},
+    ...head && boost !== "" ? { spent: chancesOf(head.modifier, withBoost(boost)).chances } : {},
+    modifier: head?.modifier ?? 0,
+    notation: DIE,
+    dc: defence,
+    opponent: plan2.target,
+    ...lines.length > 1 ? { lines } : {}
+  };
+}
+function d20Odds(ctx, action2, who, params) {
+  const rules = rulesOf3(ctx.world);
+  if (rules === null || !isOn(ctx) || !own(ctx.state.entities, who))
+    return null;
+  const s = new Scratch({ ...ctx, rng: createRng("d20.odds"), params: {} }, rules);
+  if (action2 === "check")
+    return checkChances(s, who, params);
+  if (action2 === "save")
+    return saveChances(s, who, params);
+  if (action2 === "attack")
+    return attackChances(s, who, params);
+  return null;
+}
 
 // src/packs/d20/core/records.ts
 var NAMED = { who: true, target: true, item: true, by: true, aided: true, vs: true };
-function fieldsOf3(e, ctx) {
+function fieldsOf3(e, ctx, player) {
   const out = {};
+  const rules = rulesOf3(ctx.world);
   const word = (key, v) => {
     if (key === "outcome" && typeof v === "string")
       return say(`d20_outcome_${v}`) || v;
+    if (key === "save" && typeof v === "string" && rules !== null)
+      return saveLabel(rules, v);
     if (typeof v === "string")
       return own(NAMED, key) && own(ctx.state.entities, v) ? labelOf(ctx, v) : v;
     if (typeof v === "number" || typeof v === "boolean")
@@ -58817,7 +59327,9 @@ function fieldsOf3(e, ctx) {
     return null;
   };
   for (const [key, v] of Object.entries(e.data)) {
-    const w = v === undefined ? null : word(key, v);
+    if (key === "shown")
+      continue;
+    const w = v === undefined ? null : word(key, player && key === "told" && typeof e.data.shown === "string" ? e.data.shown : v);
     if (w !== null && w !== "")
       out[key] = w;
   }
@@ -58831,11 +59343,154 @@ function record4(type) {
     apply: () => {
       return;
     },
-    describe: (e, ctx) => say(`ev_${type.replace(".", "_")}`, fieldsOf3(e, ctx)),
+    describe: (e, ctx, viewer) => say(`ev_${type.replace(".", "_")}`, fieldsOf3(e, ctx, viewer !== undefined)),
+    told: true,
     ...own(ROLLS, type) ? { irreversible: "roll" } : { reverse: () => [] }
   };
 }
 var D20_RECORDS = Object.values(D20_EVENTS).map(record4);
+
+// src/packs/d20/core/sheet.ts
+function line(ctx, who, name, vars = {}) {
+  const rules = rulesOf3(ctx.world);
+  const e = rules ? explain(ctx, rules, who, name, vars) : null;
+  return e ? { total: e.total, parts: partsWords(e) } : null;
+}
+function weapons(ctx, who, name) {
+  const rules = rulesOf3(ctx.world);
+  if (!rules)
+    return [];
+  const s = new Scratch({ ...ctx, rng: createRng("d20.sheet"), params: {} }, rules);
+  const { weapons: held3, unarmed } = armedWith(s, who);
+  const out = held3.map((w) => {
+    const plan2 = planWith(s, who, w, {}, null);
+    const bonus = plan2.strength + plan2.damageBonus;
+    const magazine = numberIn(w.row?.magazine ?? null);
+    const range = numberIn(w.row?.range ?? null);
+    return {
+      with: w.item !== null ? name(w.item) : w.label,
+      attack: { total: plan2.roll.total + plan2.extra, parts: plan2.rollParts },
+      damage: `${plan2.dice}${bonus !== 0 ? signed(bonus) : ""}`,
+      threat: plan2.threatFrom,
+      multiplier: plan2.multiplier,
+      ...range !== null ? { range } : {},
+      ...plan2.types.length > 0 ? { types: plan2.types.join(", ") } : {},
+      ...magazine !== null && w.item !== null ? { rounds: say("d20_sheet_rounds", { loaded: thingNumber(ctx, w.item, D20_FIELDS.loaded), magazine }) } : {},
+      ...wordsIn(w.row?.fire).length > 0 ? { fire: wordsIn(w.row?.fire).join(", ") } : {}
+    };
+  });
+  for (const id of unarmed)
+    out.push({ with: name(id), attack: null, damage: "", threat: 0, multiplier: 0, missing: notAWeapon(s, who, id).reason });
+  return out;
+}
+function left(ctx, rules, held3) {
+  return say("d20_length", { ...held3.rounds !== undefined ? { rounds: held3.rounds } : {}, ...held3.until !== undefined ? { minutes: Math.max(0, held3.until - ctx.state.clock) } : {}, ...held3.save !== undefined ? { save: saveLabel(rules, held3.save.save), dc: held3.save.dc } : {} });
+}
+function sheetOf(ctx, who, name, opts = {}) {
+  const rules = rulesOf3(ctx.world);
+  if (!rules)
+    return null;
+  const reg = ctx.registry;
+  const e = own(ctx.state.entities, who);
+  const kind = e?.kind ?? "";
+  const def = (field) => e ? fieldDef(reg, ctx.world, kind, field) : undefined;
+  const fix = (field, value, bounds = {}) => {
+    const d = opts.fixes === true ? def(field) : undefined;
+    return d ? fixOf(who, field, d, own(e?.fields ?? {}, field) ?? value, { ...d.min !== undefined ? { min: d.min } : {}, ...d.max !== undefined ? { max: d.max } : {}, ...bounds }) : undefined;
+  };
+  const abilities = rules.abilities.map((ab) => {
+    const f = fix(ab, numberIn(own(e?.fields ?? {}, ab) ?? null) ?? scoreOf2(ctx, rules, who, ab));
+    return { ability: def(ab)?.label ?? ab, score: scoreOf2(ctx, rules, who, ab), mod: signed(modOf(ctx, rules, who, ab)), ...f ? { fix: f } : {} };
+  });
+  const saves = Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => ({ save: saveLabel(rules, k.slice(5)), ...line(ctx, who, k) }));
+  const ranks2 = ranksOf(ctx, who);
+  const skills = Object.entries(rowsOf(ctx, rules, "skills")).filter(([id, row]) => row.trained !== true || (own(ranks2, id) ?? 0) > 0).map(([id, row]) => ({ skill: labelOfRow(row, id), ranks: own(ranks2, id) ?? 0, ...isClassSkill(ctx, rules, who, id) ? { class_skill: true } : {}, ...line(ctx, who, "skill", { skill: id, key: id, weapon: id }) }));
+  const hpDef = def(rules.hp.field);
+  const hpNow = numberIn(scopeEnv({ reg, ctx, bindings: { self: who } }).lookup(["self", rules.hp.field]) ?? null) ?? 0;
+  const hpMax = hpDef?.pool ? poolMax(reg, ctx, who, hpDef.pool) : null;
+  const temporary = numberIn(own(e?.fields ?? {}, rules.hp.temporary) ?? null) ?? 0;
+  const nonlethal = numberIn(own(e?.fields ?? {}, rules.hp.nonlethal) ?? null) ?? 0;
+  const conditionsTable = rowsOf(ctx, rules, "conditions");
+  const traitsTable = rowsOf(ctx, rules, "traits");
+  const classesTable = rowsOf(ctx, rules, "classes");
+  const held3 = conditionsHeld(ctx, who);
+  const state2 = rules.hp.states.map((s) => s.condition ?? s.id).filter((c) => held3.some((h) => h.id === c)).map((c) => labelOfRow(own(conditionsTable, c), c)).join(", ");
+  const nowFix = hpDef?.pool ? fix(rules.hp.field, hpNow, { min: poolMin(reg, ctx, who, hpDef.pool), ...hpMax !== null ? { max: hpMax } : {} }) : undefined;
+  const temporaryFix = fix(rules.hp.temporary, temporary);
+  const nonlethalFix = fix(rules.hp.nonlethal, nonlethal);
+  const hpFix = { ...nowFix ? { now: nowFix } : {}, ...temporaryFix ? { temporary: temporaryFix } : {}, ...nonlethalFix ? { nonlethal: nonlethalFix } : {} };
+  const progression = own(ctx.world.ruleset?.progression ?? {}, rules.levels.progression);
+  const progress = progression ? progressOf(reg, ctx, who, progression) : null;
+  const xpFix = progression && progress ? fix(progression.xpField, progress.xp) : undefined;
+  const daily = rules.hp.rest.daily.flatMap((field) => {
+    const d = def(field);
+    if (!d?.pool)
+      return [];
+    const most = poolMax(reg, ctx, who, d.pool);
+    const now = numberIn(own(e?.fields ?? {}, field) ?? null) ?? most ?? 0;
+    const f = fix(field, now, { min: poolMin(reg, ctx, who, d.pool), ...most !== null ? { max: most } : {} });
+    return [{ gauge: d.label ?? field, now, most, ...f ? { fix: f } : {} }];
+  });
+  return {
+    who: name(who),
+    ...isOn(ctx) ? {} : { off: true },
+    classes: Object.entries(classesOf(ctx, who)).map(([c, l]) => `${labelOfRow(own(classesTable, c), c)} ${l}`).join(", "),
+    levels: levelsOf(ctx, who),
+    size: labelOfRow(own(rowsOf(ctx, rules, "sizes"), sizeOf2(ctx, rules, who)), sizeOf2(ctx, rules, who)),
+    abilities,
+    defence: { ac: line(ctx, who, "ac"), touch: line(ctx, who, "ac.touch"), flat_footed: line(ctx, who, "ac.flat") },
+    initiative: line(ctx, who, "initiative"),
+    weapons: weapons(ctx, who, name),
+    saves,
+    skills,
+    hp: {
+      now: hpNow,
+      ...hpMax !== null ? { most: hpMax } : {},
+      ...temporary !== 0 ? { temporary } : {},
+      ...nonlethal !== 0 ? { nonlethal } : {},
+      ...state2 !== "" ? { state: state2 } : {},
+      ...Object.keys(hpFix).length > 0 ? { fix: hpFix } : {}
+    },
+    ...progress ? { experience: { level: progress.level, xp: progress.xp, next: progress.next, ...xpFix ? { fix: xpFix } : {} } } : {},
+    conditions: held3.map((c) => ({ condition: labelOfRow(own(conditionsTable, c.id), c.id), left: left(ctx, rules, c), ...textIn(own(conditionsTable, c.id)?.text) !== "" ? { does: textIn(own(conditionsTable, c.id)?.text) } : {} })),
+    effects: effectsHeld(ctx, who).map((x) => ({ effect: x.label, mods: x.modifiers.map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to })).join(", "), left: left(ctx, rules, x) })),
+    ...daily.length > 0 ? { daily } : {},
+    traits: traitsHeld(ctx, rules, who).map((t) => {
+      const row = own(traitsTable, t.id);
+      const label2 = labelOfRow(row, t.id);
+      return { trait: t.choice !== undefined ? `${label2} (${t.choice})` : label2, ...textIn(row?.kind) !== "" ? { kind: textIn(row?.kind) } : {}, ...textIn(row?.text) !== "" ? { does: textIn(row?.text) } : {} };
+    })
+  };
+}
+function sheetsView(ctx) {
+  const rules = rulesOf3(ctx.world);
+  if (!rules || !isOn(ctx))
+    return null;
+  const pov = ctx.world.pov;
+  const name = (id) => labelOf(ctx, id);
+  const you = sheetOf(ctx, pov, name, { fixes: true });
+  if (!you)
+    return null;
+  const reg = ctx.registry;
+  const here = placeOfEntity(ctx.state, pov);
+  const fighting = new Set((encounterOf(ctx.state)?.order ?? []).map((f) => f.id));
+  const combat = rulesOf(ctx.world);
+  const people = [];
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    if (id === pov || isGone(ctx.state, id) || !rules.kinds.some((k) => kindIs(reg, ctx.world, e.kind, k)))
+      continue;
+    if (!fighting.has(id) && (here === null || placeOfEntity(ctx.state, id) !== here))
+      continue;
+    if (!canSeeEntity(reg, ctx.world, ctx.state, pov, id) || !canSeeField(reg, ctx.world, ctx.state, pov, id, rules.hp.field))
+      continue;
+    const sheet = sheetOf(ctx, id, name);
+    if (!sheet)
+      continue;
+    const seen = combat ? hpSeen(ctx, combat, id) : null;
+    people.push({ ...sheet, id, ...seen !== null && "wound" in seen ? { hp: { wound: seen.wound, ...sheet.hp.state !== undefined ? { state: sheet.hp.state } : {} } } : {} });
+  }
+  return { you, people };
+}
 
 // src/packs/d20/core/index.ts
 var d20Pack = {
@@ -58853,6 +59508,10 @@ var d20Pack = {
       r.effect(def);
     for (const def of D20_ACTION_DEFS)
       r.action(def);
+    r.service("d20.upkeep", upkeep);
+    r.service("d20.odds", d20Odds);
+    r.query("d20.on", (ctx) => isOn(ctx));
+    r.view({ panel: "d20.sheet", build: (ctx) => sheetsView(ctx) });
   }
 };
 var core_default14 = d20Pack;
@@ -90566,12 +91225,3756 @@ var modern_slice_of_life_default = {
   start: { place: "harbor_street_114", at: "2026-09-14T06:15" }
 };
 
+// src/shared/profiles/parts.ts
+var ABILITIES = [
+  { id: "str", label: "Strength" },
+  { id: "dex", label: "Dexterity" },
+  { id: "con", label: "Constitution" },
+  { id: "int", label: "Intelligence" },
+  { id: "wis", label: "Wisdom" },
+  { id: "cha", label: "Charisma" }
+];
+function abilityFields() {
+  const out = {};
+  for (const a of ABILITIES)
+    out[a.id] = { type: "number", label: a.label, default: 10, min: 1, max: 30 };
+  for (const a of ABILITIES)
+    out[`${a.id}_mod`] = { type: "number", label: `${a.label} modifier`, derived: `floor((self.${a.id} - 10) / 2)` };
+  return out;
+}
+function levelFields(maxLevel) {
+  return {
+    level: { type: "number", label: "Level", default: 1, min: 1, ...maxLevel !== null ? { max: maxLevel } : {}, locked: true },
+    xp: { type: "number", label: "XP", default: 0, min: 0 }
+  };
+}
+function signed2(expr) {
+  return `(${expr} >= 0 ? '+' : '') + (${expr})`;
+}
+function abilityRows() {
+  return ABILITIES.map((a) => ({ formula: `self.${a.id} + ' (' + ${signed2(`self.${a.id}_mod`)} + ')'`, label: a.label }));
+}
+function profileTable(id, label2, columns, rows2) {
+  const schema = `lre-table/${id}/v1`;
+  return { id, pack: "sheets", schema, revision: hashJson({ schema, columns, rows: rows2 }), label: label2, columns, rows: rows2 };
+}
+function levelRows(row) {
+  const out = {};
+  for (let level = 1;level <= 20; level++)
+    out[String(level)] = row(level);
+  return out;
+}
+function skillTable(id, label2, skills) {
+  const rows2 = {};
+  for (const s of skills)
+    rows2[s.id] = { label: s.label, ability: s.ability };
+  return profileTable(id, label2, { label: { type: "text" }, ability: { type: "text", doc: "The modifier field the roll adds" } }, rows2);
+}
+var DIFFICULTY = "difficulty_of(params.difficulty)";
+var DIFFICULTY_PARAM = { type: "text", optional: true, label: "Difficulty (easy, moderate, hard, very hard or a number)" };
+var DEGREES = [
+  { outcome: "failure", margin: { max: -1 } },
+  { outcome: "success", margin: { min: 0, max: 9 } },
+  { outcome: "great", margin: { min: 10 } }
+];
+var ATTACK_BANDS = [
+  { outcome: "miss", natural: { max: 1 } },
+  { outcome: "critical", natural: { min: 20 } },
+  { outcome: "miss", margin: { max: -1 } },
+  { outcome: "hit", margin: { min: 0 } }
+];
+function damage(expr) {
+  return [{ type: "add", args: { entity: "target", field: "hp", delta: `=-max(1, ${expr})` } }];
+}
+function attemptCheck(id, modifier) {
+  return { id, dice: "d20", modifier, dc: DIFFICULTY, bands: DEGREES };
+}
+var INITIATIVE_BANDS = [{ outcome: "rolled" }];
+function skillAction(table) {
+  return {
+    id: "skill_check",
+    label: "Use a skill",
+    params: { skill: { type: "text", label: "Skill", table }, difficulty: DIFFICULTY_PARAM },
+    requires: [],
+    check: "skill",
+    outcomes: { failure: [], success: [], great: [] },
+    duration: "10",
+    lexicon: ["roll for", "skill check", "use my skill"],
+    observable: "puts a skill to use"
+  };
+}
+function saveAction(table) {
+  return {
+    id: "save_check",
+    label: "Make a save",
+    params: { save: { type: "text", label: "Save", table }, difficulty: DIFFICULTY_PARAM },
+    requires: [],
+    check: "save",
+    outcomes: { failure: [], success: [] },
+    duration: "1",
+    lexicon: ["make a save", "saving throw", "try to resist"],
+    observable: "braces against it"
+  };
+}
+function attackAction(hit, critical) {
+  return {
+    id: "attack",
+    label: "Attack",
+    params: { target: { type: "ref", label: "Target" } },
+    requires: ["is_foe(self, target)", "not is_down(target)"],
+    check: "attack",
+    outcomes: { critical: damage(critical), hit: damage(hit), miss: [] },
+    duration: "0",
+    lexicon: ["attack", "strike at", "shoot at", "swing at"],
+    observable: "attacks",
+    combat: { cost: { action: 1 }, role: "attack" }
+  };
+}
+function stanceAction(id, label2, budget) {
+  return {
+    id,
+    label: label2,
+    params: {},
+    requires: [],
+    outcomes: { default: [] },
+    duration: "0",
+    lexicon: [label2.toLowerCase(), "defend myself", "take cover"],
+    observable: "goes on the defensive",
+    combat: { cost: { action: 1, [budget]: 1 }, role: "defend" }
+  };
+}
+function holdsStance(who, budget) {
+  return `in_encounter(${who}) and budget_left(${who}, '${budget}') == 0`;
+}
+function restAction(label2, more = []) {
+  return {
+    id: "long_rest",
+    label: label2,
+    params: {},
+    requires: ["not in_encounter(self)"],
+    outcomes: { default: [{ type: "recover", args: { entity: "self", field: "hp" } }, ...more] },
+    duration: "480",
+    lexicon: ["rest for the night", "take a long rest"],
+    observable: "settles down to rest"
+  };
+}
+
+// src/shared/profiles/d20-common.ts
+var D20_ABILITY_IDS = ABILITIES.map((a) => a.id);
+var ABILITY_MOD = "floor((x - 10) / 2)";
+function mod2(to, value, more = {}) {
+  return { to, value: typeof value === "number" ? value + 0 : value, ...more };
+}
+function d20Table(role, id, label2, rows2, more = {}) {
+  const schema = d20Schema(role);
+  const columns = { ...D20_COLUMNS[role], ...more };
+  return { id, pack: "d20", schema, revision: hashJson({ schema, columns, rows: rows2 }), label: label2, columns, rows: rows2 };
+}
+function byLevel(top, row) {
+  const out = {};
+  for (let level = 1;level <= top; level++)
+    out[String(level)] = row(level);
+  return out;
+}
+function features(at) {
+  const out = {};
+  for (const [level, ids3] of Object.entries(at))
+    out[level] = ids3;
+  return out;
+}
+function trait2(label2, kind, text6, more = {}) {
+  return { label: label2, kind, text: text6, ...more.modifiers !== undefined ? { modifiers: more.modifiers } : {}, ...more.grants !== undefined ? { grants: more.grants } : {}, ...more.requires !== undefined ? { requires: more.requires } : {} };
+}
+function condition2(label2, text6, modifiers = [], flags = []) {
+  return { label: label2, text: text6, ...modifiers.length > 0 ? { modifiers } : {}, ...flags.length > 0 ? { flags } : {} };
+}
+var SIZES2 = [
+  { id: "fine", label: "Fine", ac: 8, space: 0.5, reach: 0 },
+  { id: "diminutive", label: "Diminutive", ac: 4, space: 1, reach: 0 },
+  { id: "tiny", label: "Tiny", ac: 2, space: 2.5, reach: 0 },
+  { id: "small", label: "Small", ac: 1, space: 5, reach: 5 },
+  { id: "medium", label: "Medium", ac: 0, space: 5, reach: 5 },
+  { id: "large", label: "Large", ac: -1, space: 10, reach: 10 },
+  { id: "huge", label: "Huge", ac: -2, space: 15, reach: 15 },
+  { id: "gargantuan", label: "Gargantuan", ac: -4, space: 20, reach: 20 },
+  { id: "colossal", label: "Colossal", ac: -8, space: 30, reach: 30 }
+];
+var SIZE_COLUMNS = {
+  space: { type: "number", doc: "The side of the square it fills, in feet" },
+  reach: { type: "int", doc: "How far it reaches with no weapon of reach, in feet" }
+};
+function sizeRows(others) {
+  const medium = SIZES2.findIndex((s) => s.id === "medium");
+  const out = {};
+  SIZES2.forEach((s, i) => {
+    out[s.id] = { label: s.label, order: i, modifiers: [mod2("ac", s.ac, { type: "size" }), mod2("attack", s.ac, { type: "size" }), ...others(i - medium)], space: s.space, reach: s.reach };
+  });
+  return out;
+}
+var LARGER = { "1": "1d2", "1d2": "1d3", "1d3": "1d4", "1d4": "1d6", "1d6": "1d8", "1d8": "2d6", "1d10": "2d8", "1d12": "3d6", "2d4": "2d6", "2d6": "3d6", "2d8": "3d8", "2d10": "4d8" };
+var WEAPON_COLUMNS = {
+  finesse: { type: "bool", optional: true, doc: "Its wielder's Dexterity may stand for Strength on the attack, with the trait that allows it" },
+  reach: { type: "int", optional: true, doc: "It strikes this far, in feet, and not at those beside its wielder" },
+  double: { type: "bool", optional: true, doc: "A weapon with two ends, each striking as a weapon of its own" }
+};
+function weapon(label2, small, medium, threat, multiplier, range, proficiency, held3, types, more = {}) {
+  const large = LARGER[medium] ?? medium;
+  return {
+    label: label2,
+    damage: { small, medium, large },
+    threat,
+    multiplier,
+    ...range !== null ? { range } : {},
+    proficiency,
+    held: held3,
+    types,
+    ...more.nonlethal ? { nonlethal: true } : {},
+    ...more.finesse ? { finesse: true } : {},
+    ...more.reach !== undefined ? { reach: more.reach } : {},
+    ...more.double ? { double: true } : {},
+    ...more.magazine !== undefined ? { magazine: more.magazine } : {},
+    ...more.modifiers !== undefined ? { modifiers: more.modifiers } : {}
+  };
+}
+var ARMOR_COLUMNS = {
+  weight: { type: "text", doc: "light, medium, heavy or shield" },
+  spell_failure: { type: "int", optional: true, doc: "The chance in a hundred that a spell cast with the hands fails in it" }
+};
+function armor(label2, weight, bonus, maxDex, check3, spellFailure, modifiers = []) {
+  return { label: label2, bonus, type: weight === "shield" ? "shield" : "armor", ...maxDex !== null ? { max_dex: maxDex } : {}, check: check3, weight, spell_failure: spellFailure, ...modifiers.length > 0 ? { modifiers } : {} };
+}
+function natural(label2, damage2, more = {}) {
+  return { label: label2, damage: damage2, ...more };
+}
+function difficulty(label2, dc, text6) {
+  return { label: label2, dc, text: text6 };
+}
+function dailyGauge(label2, max) {
+  return { type: "number", label: label2, min: 0, pool: { max } };
+}
+function d20Fields(opts) {
+  const out = {};
+  for (const a of ABILITIES)
+    out[a.id] = { type: "number", label: a.label, default: 10, min: 0, max: 99 };
+  return {
+    ...out,
+    hp: { type: "number", label: "Hit points", pool: { max: "hp_max", min: opts.hpFloor, recover: opts.rest } },
+    hp_max: { type: "number", label: "Most hit points", derived: "total(self, 'hp.max')" },
+    nonlethal: { type: "number", label: "Nonlethal harm", default: 0, min: 0 },
+    hp_temp: { type: "number", label: "Temporary hit points", default: 0, min: 0 },
+    xp: { type: "number", label: "Experience", default: 0, min: 0 },
+    level: { type: "number", label: "Level by experience", default: 1, min: 1, locked: true },
+    [D20_FIELDS.classes]: { type: "list", label: "Levels by class" },
+    [D20_FIELDS.ranks]: { type: "list", label: "Skill ranks" },
+    [D20_FIELDS.traits]: { type: "list", label: "Traits" },
+    [D20_FIELDS.effects]: { type: "list", label: "Effects" },
+    [D20_FIELDS.attacks]: { type: "list", label: "Own attacks" },
+    [D20_FIELDS.size]: { type: "text", label: "Size", table: opts.sizes },
+    [D20_FIELDS.hitDice]: { type: "number", label: "Hit dice kept", default: 0, min: 0 },
+    racial_hd: { type: "number", label: "Own hit dice", default: 0, min: 0 },
+    natural_armor: { type: "number", label: "Natural armour", default: 0, min: 0 },
+    base_speed: { type: "number", label: "Speed unarmoured", default: 30, min: 0 },
+    cr: { type: "text", label: "Challenge" },
+    ...opts.daily
+  };
+}
+function familyTotals(opts) {
+  const dex = "mod(self, 'dex') - max(0, mod(self, 'dex') - limit(self, 'max_dex', 99))";
+  const extra = opts.defence !== undefined ? ` + ${opts.defence}` : "";
+  const vs = "'ac,ac.' + vs";
+  const base = "class_sum(self, 'attack') + bonus(self, 'base_attack')";
+  const finesse = `(table('${opts.weapons}', weapon, 'finesse') ? ',attack.finesse' : '')`;
+  return {
+    ac: `10 + bonus_only(self, 'ac', 'armor') + bonus_only(self, 'ac', 'shield') + ${dex}${extra} + size_mod(self, 'ac') + bonus_without(self, ${vs}, 'armor,shield,size')`,
+    "ac.touch": `10 + ${dex}${extra} + size_mod(self, 'ac') + bonus_without(self, ${vs}, 'armor,shield,natural,size')`,
+    "ac.flat": `10 + bonus_only(self, 'ac', 'armor') + bonus_only(self, 'ac', 'shield') + min(0, mod(self, 'dex'), limit(self, 'max_dex', 0)) + (has_trait(self, 'uncanny_dodge') ? max(0, min(mod(self, 'dex'), limit(self, 'max_dex', 99))) : 0)${extra} + size_mod(self, 'ac') + bonus_without(self, ${vs}, 'armor,shield,size,dodge')`,
+    "attack.base": base,
+    "attack.melee": `${base} + mod(self, 'str') + size_mod(self, 'attack') + bonus_without(self, 'attack.melee,attack.weapon.' + weapon + ${finesse}, 'size')`,
+    "attack.ranged": `${base} + mod(self, 'dex') + size_mod(self, 'attack') + bonus_without(self, 'attack.ranged,attack.weapon.' + weapon, 'size')`,
+    damage: "bonus(self, 'damage.weapon.' + weapon)",
+    "save.fort": "class_sum(self, 'fort') + mod(self, 'con') + bonus(self, 'save.fort')",
+    "save.ref": "class_sum(self, 'ref') + mod(self, 'dex') + bonus(self, 'save.ref')",
+    "save.will": "class_sum(self, 'will') + mod(self, 'wis') + bonus(self, 'save.will')",
+    initiative: "mod(self, 'dex') + bonus(self, 'initiative')",
+    skill: `ranks(self, skill) + mod(self, table('${opts.skills}', skill, 'ability')) + bonus(self, 'skill.' + skill + (table('${opts.skills}', skill, 'armor') ? ',armor_check' : '')) + (table('${opts.skills}', skill, 'armor_times') == 2 ? bonus(self, 'armor_check') : 0)`,
+    "hp.max": "hit_dice(self) + mod(self, 'con') * (levels(self) + self.racial_hd) + bonus(self, 'hp')",
+    speed: "self.base_speed + bonus(self, 'speed')"
+  };
+}
+var SKILL_COLUMNS = {
+  armor_times: { type: "int", optional: true, doc: "How many times the armour's check penalty counts; absent, once" }
+};
+var D20_BUDGETS = {
+  standard: { label: "Standard action" },
+  move: { label: "Move action" },
+  full: { label: "Full-round action" },
+  swift: { label: "Swift action" },
+  immediate: { label: "Immediate action", per: "round", offTurn: true },
+  free: { label: "Free action", count: 10 }
+};
+var D20_COSTS = {
+  attack: { standard: 1 },
+  "attack.full": { standard: 1, move: 1, full: 1 },
+  reload: { move: 1 }
+};
+function d20Combat(down) {
+  return {
+    initiative: { id: "initiative", dice: "d20", modifier: "total(self, 'initiative')", bands: [{ outcome: "rolled" }] },
+    tieBreak: "total(self, 'initiative')",
+    economy: D20_BUDGETS,
+    hp: "hp",
+    down: { when: down },
+    showHp: "wounds"
+  };
+}
+var D20_SAVES = [
+  { id: "fort", label: "Fortitude" },
+  { id: "ref", label: "Reflex" },
+  { id: "will", label: "Will" }
+];
+var D20_SAVE_LABELS = Object.fromEntries(D20_SAVES.map((s) => [`save.${s.id}`, s.label]));
+function signedTotal(name, key) {
+  return signed2(key === undefined ? `total(self, '${name}')` : `total(self, '${name}', '${key}')`);
+}
+function abilityRows2() {
+  return ABILITIES.map((a) => ({ formula: `score(self, '${a.id}') + ' (' + ${signed2(`mod(self, '${a.id}')`)} + ')'`, label: a.label }));
+}
+function d20Sheet(opts) {
+  const sections = [
+    { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { field: "hp_temp" }, { field: "nonlethal" }, { progression: "level" }, { field: D20_FIELDS.classes }, { formula: "levels(self) + self.racial_hd", label: "Hit dice" }, ...opts.vitals ?? []] },
+    { id: "defence", label: opts.defence.label, rows: opts.defence.rows },
+    { id: "attack", label: "Attack", rows: opts.attack },
+    { id: "saves", label: "Saves", rows: opts.saves.map((s) => ({ formula: signedTotal(`save.${s.id}`), label: s.label })) },
+    { id: "abilities", label: "Abilities", rows: abilityRows2() },
+    { id: "skills", label: "Skills", rows: opts.skills.map((s) => ({ formula: signedTotal("skill", s.id), label: s.label })) }
+  ];
+  if (opts.daily.length > 0)
+    sections.push({ id: "daily", label: "Daily", rows: opts.daily.map((pool) => ({ pool })) });
+  sections.push({ id: "has", label: "Has and is under", rows: [{ field: D20_FIELDS.traits }, { field: D20_FIELDS.conditions }, { field: D20_FIELDS.effects }, { field: D20_FIELDS.attacks }] });
+  return { sections };
+}
+function skillsMod(value, skills, type) {
+  return skills.map((s) => mod2(`skill.${s}`, value, type !== undefined ? { type } : {}));
+}
+var BASE_ATTACK = "total(self, 'attack.base')";
+var UNARMOURED = "limit(self, 'armor_weight', 0) + limit(self, 'shield_worn', 0) == 0";
+function creatureType(label2, text6, attackRate, good, more = {}) {
+  const own2 = "self.racial_hd > 0";
+  const modifiers = [mod2("base_attack", `floor(self.racial_hd * ${attackRate})`, { note: "from its own hit dice" })];
+  for (const save2 of ["fort", "ref", "will"])
+    modifiers.push(mod2(`save.${save2}`, good.includes(save2) ? "2 + floor(self.racial_hd / 2)" : "floor(self.racial_hd / 3)", { when: own2, note: "base, from its own hit dice" }));
+  return trait2(label2, "creature type", text6, { modifiers: [...modifiers, ...more.modifiers ?? []], ...more.grants !== undefined ? { grants: more.grants } : {} });
+}
+function armorMods(weight, check3) {
+  const level = { light: 1, medium: 2, heavy: 3 }[weight];
+  return [
+    mod2("armor_weight", level, { limit: true, note: `${weight} armour` }),
+    ...weight !== "light" ? [mod2("speed", "self.base_speed >= 30 ? -10 : -5", { when: "not has_trait(self, 'dwarf')", note: `${weight} armour` })] : [],
+    ...check3 < 0 ? [mod2("attack", check3, { when: `not has_trait(self, 'armor_${weight}')`, note: "armour it is not trained in" })] : []
+  ];
+}
+function shieldMods(check3, training, more = []) {
+  return [mod2("shield_worn", 1, { limit: true }), mod2("attack", check3, { when: `not has_trait(self, '${training}')`, note: "a shield it is not trained with" }), ...more];
+}
+function wearing(label2, modifiers) {
+  return { label: label2, modifiers };
+}
+var TRACK_COLUMNS = { attack_good: { type: "int" }, attack_average: { type: "int" }, attack_poor: { type: "int" }, save_good: { type: "int" }, save_poor: { type: "int" } };
+var TRACK_ROWS = byLevel(20, (l) => ({ attack_good: l, attack_average: Math.floor(l * 3 / 4), attack_poor: Math.floor(l / 2), save_good: 2 + Math.floor(l / 2), save_poor: Math.floor(l / 3) }));
+var DIFFICULTIES = {
+  very_easy: difficulty("Very easy", 0, "Anyone does it with no effort."),
+  easy: difficulty("Easy", 5, "Hardly ever failed."),
+  average: difficulty("Average", 10, "The untrained do it as often as not."),
+  tough: difficulty("Tough", 15, "Wants training or luck."),
+  challenging: difficulty("Challenging", 20, "Beyond most of the untrained."),
+  formidable: difficulty("Formidable", 25, "Hard even for a practised hand."),
+  heroic: difficulty("Heroic", 30, "Only the best manage it."),
+  nearly_impossible: difficulty("Nearly impossible", 40, "A feat of legend.")
+};
+var HALF_SPEED = mod2("speed", "-floor(self.base_speed / 2)", { note: "half speed" });
+var NO_DEX = mod2("max_dex", 0, { limit: true, note: "loses its Dexterity bonus" });
+var DEX_ZERO = mod2("max_dex", -5, { limit: true, note: "Dexterity as 0" });
+var FEAR = [mod2("attack", -2), mod2("save", -2), mod2("skill", -2), mod2("ability_check", -2)];
+var SHARED_CONDITIONS = {
+  ability_damaged: condition2("Ability Damaged", "Points of an ability lost for now, one back a night: put on as an effect with a modifier to ability.<id>."),
+  ability_drained: condition2("Ability Drained", "Points of an ability lost for good: put on as an effect with a modifier to ability.<id>."),
+  charging: condition2("Charging", "+2 to its melee attack, -2 defence until its next turn.", [mod2("attack.melee", 2), mod2("ac", -2)]),
+  cowering: condition2("Cowering", "Frozen in fear: no actions, -2 defence and no Dexterity bonus to it.", [mod2("ac", -2), NO_DEX], ["no_actions", "flat"]),
+  dazed: condition2("Dazed", "No actions, though its defence stands.", [], ["no_actions"]),
+  dead: condition2("Dead", "Its life has left it.", [], ["no_actions", "dead"]),
+  down: condition2("Out of the Fight", "No longer standing in the fight."),
+  entangled: condition2("Entangled", "-2 to attack, -4 Dexterity, half speed, no running or charging.", [mod2("attack", -2), mod2("ability.dex", -4), HALF_SPEED], ["half_speed", "no_run"]),
+  exhausted: condition2("Exhausted", "-6 Strength and Dexterity, half speed, no running or charging; an hour's rest leaves it fatigued.", [mod2("ability.str", -6), mod2("ability.dex", -6), HALF_SPEED], ["half_speed", "no_run"]),
+  fatigued: condition2("Fatigued", "-2 Strength and Dexterity, no running or charging; eight hours' rest ends it.", [mod2("ability.str", -2), mod2("ability.dex", -2)], ["no_run"]),
+  fighting_defensively: condition2("Fighting Defensively", "-4 to attack, +2 dodge to defence until its next turn.", [mod2("attack", -4), mod2("ac", 2, { type: "dodge" })]),
+  flat_footed: condition2("Flat-Footed", "Caught unready: no Dexterity bonus to defence, no dodge bonus, no attacks of opportunity.", [NO_DEX], ["flat", "no_aoo"]),
+  frightened: condition2("Frightened", "Flees what frightens it, fighting only when cornered; -2 to attack, saves, skills and ability checks.", FEAR, ["flees"]),
+  helpless: condition2("Helpless", "Bound, asleep or paralysed: its Dexterity counts as 0 to defence, and melee attacks on it have +4; it can be slain with one blow.", [DEX_ZERO, mod2("ac.melee", -4)], ["helpless", "flat", "no_actions"]),
+  invisible: condition2("Invisible", "+2 to attack those who see normally, who lose their Dexterity bonus against it; attacks on it miss half the time.", [mod2("attack", 2)], ["unseen"]),
+  nauseated: condition2("Nauseated", "Only a move action a turn: no attacks, no spells.", [], ["move_only"]),
+  panicked: condition2("Panicked", "Drops what it holds and flees; cowers when cornered; -2 on saves, skills and ability checks.", [mod2("save", -2), mod2("skill", -2), mod2("ability_check", -2)], ["flees", "drops_held"]),
+  paralyzed: condition2("Paralysed", "Cannot move or act, only think: its Strength and Dexterity count as 0, and it is helpless.", [DEX_ZERO, mod2("ac.melee", -4)], ["helpless", "flat", "no_actions"]),
+  petrified: condition2("Turned to Stone", "Stone, unconscious, knowing nothing.", [], ["no_actions", "helpless"]),
+  prone: condition2("Prone", "On the ground: -4 to its melee attacks and no ranged ones but a crossbow's; -4 defence against melee, +4 against ranged attacks; standing is a move action.", [mod2("attack.melee", -4), mod2("ac.melee", -4), mod2("ac.ranged", 4)], ["no_ranged"]),
+  raging: condition2("Raging", "+4 Strength and Constitution, +2 morale on Will, -2 defence (+6, +6, +3 from the 11th barbarian level; +8, +8, +4 at the 20th); no skill that needs patience or calm.", [
+    mod2("ability.str", "class_level(self, 'barbarian') >= 20 ? 8 : class_level(self, 'barbarian') >= 11 ? 6 : 4", { type: "morale" }),
+    mod2("ability.con", "class_level(self, 'barbarian') >= 20 ? 8 : class_level(self, 'barbarian') >= 11 ? 6 : 4", { type: "morale" }),
+    mod2("save.will", "class_level(self, 'barbarian') >= 20 ? 4 : class_level(self, 'barbarian') >= 11 ? 3 : 2", { type: "morale" }),
+    mod2("ac", -2)
+  ]),
+  shaken: condition2("Shaken", "-2 to attack, saves, skills and ability checks.", FEAR),
+  sickened: condition2("Sickened", "-2 to attack, weapon damage, saves, skills and ability checks.", [...FEAR, mod2("damage", -2)]),
+  stable: condition2("Stable", "Below 0 hit points but no longer losing them; still unconscious.", [], ["no_actions"]),
+  stunned: condition2("Stunned", "Drops what it holds, no actions, -2 defence and no Dexterity bonus to it.", [mod2("ac", -2), NO_DEX], ["no_actions", "flat", "drops_held"]),
+  total_defense: condition2("Total Defence", "Does nothing but defend: +4 dodge to defence until its next turn.", [mod2("ac", 4, { type: "dodge" })], ["no_attack"]),
+  unconscious: condition2("Unconscious", "Knocked out: helpless, its Dexterity counting as 0 to defence.", [DEX_ZERO, mod2("ac.melee", -4)], ["helpless", "flat", "no_actions"])
+};
+var S = ["slashing"];
+var P = ["piercing"];
+var B = ["bludgeoning"];
+var PS = ["piercing", "slashing"];
+var BP2 = ["bludgeoning", "piercing"];
+var CORE_WEAPONS = {
+  unarmed_strike: weapon("Unarmed strike", "1d2", "1d3", 20, 2, null, "simple", "light", B, { nonlethal: true, finesse: true }),
+  gauntlet: weapon("Gauntlet", "1d2", "1d3", 20, 2, null, "simple", "light", B, { finesse: true }),
+  dagger: weapon("Dagger", "1d3", "1d4", 19, 2, 10, "simple", "light", PS, { finesse: true }),
+  belt_knife: weapon("Belt knife", "1d3", "1d4", 19, 2, 10, "simple", "light", PS, { finesse: true }),
+  punching_dagger: weapon("Punching dagger", "1d3", "1d4", 20, 3, null, "simple", "light", P, { finesse: true }),
+  spiked_gauntlet: weapon("Spiked gauntlet", "1d3", "1d4", 20, 2, null, "simple", "light", P, { finesse: true }),
+  light_mace: weapon("Light mace", "1d4", "1d6", 20, 2, null, "simple", "light", B, { finesse: true }),
+  sickle: weapon("Sickle", "1d4", "1d6", 20, 2, null, "simple", "light", S, { finesse: true }),
+  club: weapon("Club", "1d4", "1d6", 20, 2, 10, "simple", "one", B),
+  heavy_mace: weapon("Heavy mace", "1d6", "1d8", 20, 2, null, "simple", "one", B),
+  morningstar: weapon("Morningstar", "1d6", "1d8", 20, 2, null, "simple", "one", BP2),
+  shortspear: weapon("Shortspear", "1d4", "1d6", 20, 2, 20, "simple", "one", P),
+  longspear: weapon("Longspear", "1d6", "1d8", 20, 3, null, "simple", "two", P, { reach: 10 }),
+  quarterstaff: weapon("Quarterstaff", "1d4", "1d6", 20, 2, null, "simple", "two", B, { double: true }),
+  spear: weapon("Spear", "1d6", "1d8", 20, 3, 20, "simple", "two", P),
+  heavy_crossbow: weapon("Heavy crossbow", "1d8", "1d10", 19, 2, 120, "simple", "projectile", P),
+  light_crossbow: weapon("Light crossbow", "1d6", "1d8", 19, 2, 80, "simple", "projectile", P),
+  dart: weapon("Dart", "1d3", "1d4", 20, 2, 20, "simple", "thrown", P),
+  javelin: weapon("Javelin", "1d4", "1d6", 20, 2, 30, "simple", "thrown", P),
+  sling: weapon("Sling", "1d3", "1d4", 20, 2, 50, "simple", "projectile", B),
+  throwing_axe: weapon("Throwing axe", "1d4", "1d6", 20, 2, 10, "martial", "light", S, { finesse: true }),
+  light_hammer: weapon("Light hammer", "1d3", "1d4", 20, 2, 20, "martial", "light", B, { finesse: true }),
+  handaxe: weapon("Handaxe", "1d4", "1d6", 20, 3, null, "martial", "light", S, { finesse: true }),
+  kukri: weapon("Kukri", "1d3", "1d4", 18, 2, null, "martial", "light", S, { finesse: true }),
+  light_pick: weapon("Light pick", "1d3", "1d4", 20, 4, null, "martial", "light", P, { finesse: true }),
+  sap: weapon("Sap", "1d4", "1d6", 20, 2, null, "martial", "light", B, { nonlethal: true, finesse: true }),
+  short_sword: weapon("Short sword", "1d4", "1d6", 19, 2, null, "martial", "light", P, { finesse: true }),
+  battleaxe: weapon("Battleaxe", "1d6", "1d8", 20, 3, null, "martial", "one", S),
+  flail: weapon("Flail", "1d6", "1d8", 20, 2, null, "martial", "one", B),
+  longsword: weapon("Longsword", "1d6", "1d8", 19, 2, null, "martial", "one", S),
+  heavy_pick: weapon("Heavy pick", "1d4", "1d6", 20, 4, null, "martial", "one", P),
+  rapier: weapon("Rapier", "1d4", "1d6", 18, 2, null, "martial", "one", P, { finesse: true }),
+  scimitar: weapon("Scimitar", "1d4", "1d6", 18, 2, null, "martial", "one", S),
+  trident: weapon("Trident", "1d6", "1d8", 20, 2, 10, "martial", "one", P),
+  warhammer: weapon("Warhammer", "1d6", "1d8", 20, 3, null, "martial", "one", B),
+  falchion: weapon("Falchion", "1d6", "2d4", 18, 2, null, "martial", "two", S),
+  glaive: weapon("Glaive", "1d8", "1d10", 20, 3, null, "martial", "two", S, { reach: 10 }),
+  greataxe: weapon("Greataxe", "1d10", "1d12", 20, 3, null, "martial", "two", S),
+  greatclub: weapon("Greatclub", "1d8", "1d10", 20, 2, null, "martial", "two", B),
+  heavy_flail: weapon("Heavy flail", "1d8", "1d10", 19, 2, null, "martial", "two", B),
+  greatsword: weapon("Greatsword", "1d10", "2d6", 19, 2, null, "martial", "two", S),
+  guisarme: weapon("Guisarme", "1d6", "2d4", 20, 3, null, "martial", "two", S, { reach: 10 }),
+  halberd: weapon("Halberd", "1d8", "1d10", 20, 3, null, "martial", "two", PS),
+  lance: weapon("Lance", "1d6", "1d8", 20, 3, null, "martial", "two", P, { reach: 10 }),
+  ranseur: weapon("Ranseur", "1d6", "2d4", 20, 3, null, "martial", "two", P, { reach: 10 }),
+  scythe: weapon("Scythe", "1d6", "2d4", 20, 4, null, "martial", "two", PS),
+  longbow: weapon("Longbow", "1d6", "1d8", 20, 3, 100, "martial", "projectile", P),
+  composite_longbow: weapon("Composite longbow", "1d6", "1d8", 20, 3, 110, "martial", "projectile", P),
+  shortbow: weapon("Shortbow", "1d4", "1d6", 20, 3, 60, "martial", "projectile", P),
+  composite_shortbow: weapon("Composite shortbow", "1d4", "1d6", 20, 3, 70, "martial", "projectile", P),
+  kama: weapon("Kama", "1d4", "1d6", 20, 2, null, "exotic", "light", S, { finesse: true }),
+  nunchaku: weapon("Nunchaku", "1d4", "1d6", 20, 2, null, "exotic", "light", B, { finesse: true }),
+  sai: weapon("Sai", "1d3", "1d4", 20, 2, 10, "exotic", "light", B, { finesse: true }),
+  siangham: weapon("Siangham", "1d4", "1d6", 20, 2, null, "exotic", "light", P, { finesse: true }),
+  bastard_sword: weapon("Bastard sword", "1d8", "1d10", 19, 2, null, "exotic", "one", S),
+  dwarven_waraxe: weapon("Dwarven waraxe", "1d8", "1d10", 20, 3, null, "exotic", "one", S),
+  whip: weapon("Whip", "1d2", "1d3", 20, 2, null, "exotic", "one", S, { nonlethal: true, finesse: true, reach: 15 }),
+  orc_double_axe: weapon("Orc double axe", "1d6", "1d8", 20, 3, null, "exotic", "two", S, { double: true }),
+  spiked_chain: weapon("Spiked chain", "1d6", "2d4", 20, 2, null, "exotic", "two", P, { finesse: true, reach: 10 }),
+  dire_flail: weapon("Dire flail", "1d6", "1d8", 20, 2, null, "exotic", "two", B, { double: true }),
+  gnome_hooked_hammer: weapon("Gnome hooked hammer", "1d6", "1d8", 20, 3, null, "exotic", "two", BP2, { double: true }),
+  two_bladed_sword: weapon("Two-bladed sword", "1d6", "1d8", 19, 2, null, "exotic", "two", S, { double: true }),
+  dwarven_urgrosh: weapon("Dwarven urgrosh", "1d6", "1d8", 20, 3, null, "exotic", "two", PS, { double: true }),
+  bolas: weapon("Bolas", "1d3", "1d4", 20, 2, 10, "exotic", "thrown", B, { nonlethal: true }),
+  hand_crossbow: weapon("Hand crossbow", "1d3", "1d4", 19, 2, 30, "exotic", "projectile", P),
+  repeating_heavy_crossbow: weapon("Repeating heavy crossbow", "1d8", "1d10", 19, 2, 120, "exotic", "projectile", P, { magazine: 5 }),
+  repeating_light_crossbow: weapon("Repeating light crossbow", "1d6", "1d8", 19, 2, 80, "exotic", "projectile", P, { magazine: 5 }),
+  shuriken: weapon("Shuriken", "1", "1d2", 20, 2, 10, "exotic", "thrown", P)
+};
+var SHARED_FEATS = {
+  armor_light: trait2("Light Armour Training", "feat", "Light armour's check penalty does not fall on the wearer's attacks."),
+  armor_medium: trait2("Medium Armour Training", "feat", "Medium armour's check penalty does not fall on the wearer's attacks.", { requires: "has_trait(self, 'armor_light')" }),
+  armor_heavy: trait2("Heavy Armour Training", "feat", "Heavy armour's check penalty does not fall on the wearer's attacks.", { requires: "has_trait(self, 'armor_medium')" }),
+  shield_proficiency: trait2("Shield Training", "feat", "A shield's check penalty does not fall on its bearer's attacks."),
+  tower_shield_proficiency: trait2("Tower Shield Training", "feat", "A tower shield's check penalty does not fall on its bearer's attacks.", { requires: "has_trait(self, 'shield_proficiency')" }),
+  simple_weapon_proficiency: trait2("Simple Weapons", "feat", "No -4 to attack with a simple weapon.", { grants: { proficiency: ["simple"] } }),
+  martial_weapon_proficiency: trait2("Martial Weapon", "feat", "No -4 to attack with the martial weapon taken as its choice.", { grants: { proficiency: [] } }),
+  exotic_weapon_proficiency: trait2("Exotic Weapon", "feat", "No -4 to attack with the exotic weapon taken as its choice.", { grants: { proficiency: [] }, requires: `${BASE_ATTACK} >= 1` }),
+  combat_casting: trait2("Steady Casting", "feat", "+4 to cast on the defensive or while held without losing the spell."),
+  endurance: trait2("Endurance", "feat", "+4 on checks and saves against tiring: swimming, running, holding its breath, hunger, thirst, heat and cold."),
+  great_fortitude: trait2("Hardy", "feat", "+2 Fortitude.", { modifiers: [mod2("save.fort", 2)] }),
+  greater_weapon_focus: trait2("Favoured Weapon, Greater", "feat", "+1 more to attack with the weapon taken as its choice.", { modifiers: [mod2("attack.weapon.{choice}", 1)], requires: "class_level(self, 'fighter') >= 8" }),
+  improved_initiative: trait2("Quick Start", "feat", "+4 initiative.", { modifiers: [mod2("initiative", 4)] }),
+  improved_unarmed_strike: trait2("Trained Fists", "feat", "Its bare hands count as armed: striking with them gives no attack of opportunity, and their harm may be lethal with no -4."),
+  iron_will: trait2("Strong-Willed", "feat", "+2 Will.", { modifiers: [mod2("save.will", 2)] }),
+  lightning_reflexes: trait2("Quick to React", "feat", "+2 Reflex.", { modifiers: [mod2("save.ref", 2)] }),
+  mobility: trait2("Mobile", "feat", "+4 dodge to defence against attacks of opportunity for moving.", { requires: "has_trait(self, 'dodge')" }),
+  point_blank_shot: trait2("Close Shot", "feat", "+1 to attack and damage with a ranged weapon at 30 feet or nearer: name both as the attack's modifiers."),
+  precise_shot: trait2("Precise Shot", "feat", "No -4 for shooting at a foe in melee with an ally.", { requires: "has_trait(self, 'point_blank_shot')" }),
+  quick_draw: trait2("Quick Draw", "feat", "Draws a weapon as a free action.", { requires: `${BASE_ATTACK} >= 1` }),
+  rapid_shot: trait2("Rapid Shot", "feat", "With all its attacks, one more ranged attack at its highest bonus, and -2 on every one of them that round.", { requires: "score(self, 'dex') >= 13 and has_trait(self, 'point_blank_shot')" }),
+  run: trait2("Runner", "feat", "Runs five times its speed (four times in heavy armour)."),
+  spell_focus: trait2("School Focus", "feat", "+1 to the difficulty of saves against its spells of the kind taken as its choice."),
+  two_weapon_fighting: trait2("Two Weapons", "feat", "Fighting with a weapon in each hand costs -4 on each (-2 if the off-hand weapon is light), not -6 and -10 (-4 and -8): name them as the attacks' modifiers.", { requires: "score(self, 'dex') >= 15" }),
+  weapon_finesse: trait2("Finesse", "feat", "With a light weapon, a rapier, a whip or a spiked chain, Dexterity stands for Strength on the attack roll.", { modifiers: [mod2("attack.finesse", "max(0, mod(self, 'dex') - mod(self, 'str'))", { note: "Dexterity for Strength" })], requires: `${BASE_ATTACK} >= 1` }),
+  weapon_focus: trait2("Favoured Weapon", "feat", "+1 to attack with the weapon taken as its choice.", { modifiers: [mod2("attack.weapon.{choice}", 1)], requires: `${BASE_ATTACK} >= 1` }),
+  weapon_specialization: trait2("Weapon Mastery", "feat", "+2 to damage with the weapon taken as its choice.", { modifiers: [mod2("damage.weapon.{choice}", 2)], requires: "class_level(self, 'fighter') >= 4" })
+};
+var SHARED_FEATURES = {
+  one_simple_weapon: trait2("One Weapon", "class feature", "No -4 to attack with the one simple weapon taken as its choice.", { grants: { proficiency: [] } }),
+  expert_trade: trait2("Own Trade", "class feature", "Ten skills of its own choosing are its class skills; the class lists every skill, and the GM holds each expert to its ten."),
+  adept_spells: trait2("Hedge Spells", "class feature", "Casts a few divine spells a day, prepared from Wisdom; the GM rules which and how many."),
+  fast_movement: trait2("Fast Movement", "class feature", "+10 speed, except in heavy armour.", { modifiers: [mod2("speed", 10, { when: "limit(self, 'armor_weight', 0) < 3" })] }),
+  greater_rage: trait2("Greater Rage", "class feature", "Raging gives +6 Strength and Constitution and +3 Will (in the raging condition)."),
+  indomitable_will: trait2("Unbending Will", "class feature", "+4 on Will saves against charms and compulsions while raging."),
+  tireless_rage: trait2("Tireless Rage", "class feature", "Not fatigued when a rage ends."),
+  mighty_rage: trait2("Mighty Rage", "class feature", "Raging gives +8 Strength and Constitution and +4 Will (in the raging condition)."),
+  uncanny_dodge: trait2("Uncanny Dodge", "class feature", "Keeps its Dexterity bonus to defence when flat-footed or struck by a foe it cannot see."),
+  improved_uncanny_dodge: trait2("Hard to Flank", "class feature", "Cannot be flanked, except by a rogue four levels higher than its own levels in the classes that give it this."),
+  trap_sense: trait2("Trap Sense", "class feature", "+1 on Reflex saves and +1 dodge to defence against traps for every three levels of the class that gives it: name it against a trap."),
+  barbarian_reduction: trait2("Thick Skin", "class feature", "Harm of every kind loses 1, and 1 more each three levels after the 7th (5 at the 19th).", { modifiers: [mod2("reduction", "floor((class_level(self, 'barbarian') - 4) / 3)", { bypass: [] })] }),
+  animal_companion: trait2("Animal Companion", "class feature", "A loyal animal goes with it, growing stronger with its levels."),
+  nature_sense: trait2("Nature Sense", "class feature", "+2 Lore (nature) and Survival.", { modifiers: skillsMod(2, ["knowledge_nature", "survival"]) }),
+  wild_empathy: trait2("Way with Beasts", "class feature", "Calms animals: a check of d20 + its levels in the class + its Charisma modifier."),
+  woodland_stride: trait2("Woodland Stride", "class feature", "Moves through undergrowth at full speed and unharmed."),
+  trackless_step: trait2("Trackless Step", "class feature", "Leaves no trail in natural surroundings."),
+  resist_natures_lure: trait2("Resist the Wild's Lure", "class feature", "+4 on saves against the magic of fey."),
+  venom_immunity: trait2("Venom Immunity", "class feature", "No poison harms it."),
+  a_thousand_faces: trait2("A Thousand Faces", "class feature", "Changes its looks at will."),
+  timeless_body: trait2("Timeless Body", "class feature", "Age weakens it no more."),
+  fighter_bonus_feat: trait2("Fighting Feats", "class feature", "One more feat at the 1st level and each even level, of those for fighting."),
+  monk_unarmed: trait2("Hard Hands", "class feature", "Its unarmed strike deals 1d6 (1d8 from the 4th level, 1d10 from the 8th, 2d6 from the 12th, 2d8 from the 16th, 2d10 at the 20th): kept as its own attack."),
+  evasion: trait2("Evasion", "class feature", "A Reflex save that would halve harm takes none of it."),
+  improved_evasion: trait2("Improved Evasion", "class feature", "A failed Reflex save that would halve harm takes only half."),
+  still_mind: trait2("Still Mind", "class feature", "+2 on saves against charms and compulsions."),
+  monk_speed: trait2("Swift Feet", "class feature", "+10 speed for every three monk levels, with no armour and no shield.", { modifiers: [mod2("speed", "floor(class_level(self, 'monk') / 3) * 10", { when: UNARMOURED })] }),
+  slow_fall: trait2("Slow Fall", "class feature", "Within reach of a wall, falls as if 20 feet shorter, and 10 more every two levels."),
+  purity_of_body: trait2("Pure Body", "class feature", "No natural disease takes hold of it."),
+  diamond_body: trait2("Diamond Body", "class feature", "No poison harms it."),
+  abundant_step: trait2("Abundant Step", "class feature", "Steps from one place to another as by magic."),
+  diamond_soul: trait2("Diamond Soul", "class feature", "Spells must overcome 10 + its monk levels to touch it."),
+  quivering_palm: trait2("Quivering Palm", "class feature", "Once a week, a touch that can kill later at its word: Fortitude against 10 + half its monk levels + its Wisdom modifier."),
+  empty_body: trait2("Empty Body", "class feature", "Turns to a ghost's substance for a time each day."),
+  aura_of_good: trait2("Aura of Good", "class feature", "Shines with good to those who sense it."),
+  detect_evil: trait2("Sense Evil", "class feature", "Senses evil at will."),
+  divine_grace: trait2("Divine Grace", "class feature", "Its Charisma bonus adds to every save.", { modifiers: [mod2("save", "max(0, mod(self, 'cha'))", { note: "Charisma" })] }),
+  aura_of_courage: trait2("Aura of Courage", "class feature", "Fear does not touch it, and allies within 10 feet have +4 morale against fear."),
+  divine_health: trait2("Divine Health", "class feature", "No disease takes hold of it."),
+  swift_tracker: trait2("Swift Tracker", "class feature", "Follows tracks at its full speed with no penalty."),
+  camouflage: trait2("Camouflage", "class feature", "Hides in any natural surroundings."),
+  hide_in_plain_sight: trait2("Hide in Plain Sight", "class feature", "Hides in natural surroundings even while watched."),
+  sneak_attack: trait2("Sneak Attack", "class feature", "Against a foe that loses its Dexterity bonus to defence or is flanked, +1d6 damage at the 1st level and 1d6 more each two levels, not multiplied by a critical; ranged only within 30 feet: name the dice with the harm."),
+  familiar: trait2("Familiar", "class feature", "A small animal bound to it, which shares its senses and grows with its levels."),
+  scribe_scroll: trait2("Scroll Writing", "class feature", "Writes its spells down as scrolls."),
+  wizard_bonus_feat: trait2("Wizard Feats", "class feature", "One more feat at the 5th level and every fifth after, for spells or making magic items.")
+};
+var SHARED_CREATURE_TRAITS = {
+  animal: creatureType("Animal", "A beast: each of its own hit dice is a d8; they give three quarters of themselves in base attack, a good Fortitude and Reflex and a poor Will.", "3 / 4", ["fort", "ref"]),
+  humanoid: creatureType("Humanoid", "A person of some people: its own hit dice (d8s), if any, give three quarters in base attack, a good Reflex; trained with simple weapons.", "3 / 4", ["ref"], { grants: { proficiency: ["simple"] } }),
+  giant: creatureType("Giant", "A giant: each of its own hit dice is a d8; they give three quarters in base attack and a good Fortitude; trained with simple and martial weapons.", "3 / 4", ["fort"], { grants: { proficiency: ["simple", "martial"] } }),
+  natural_armor: trait2("Natural Armour", "quality", "Its hide, scales or bones add its natural armour to defence, though not against a touch.", { modifiers: [mod2("ac", "self.natural_armor", { type: "natural" })] }),
+  darkvision: trait2("Sees in the Dark", "quality", "Sees 60 feet with no light at all, without colour."),
+  low_light_vision: trait2("Sees in Dim Light", "quality", "Sees twice as far as a human by moonlight, torchlight and the like."),
+  light_sensitivity: trait2("Light-Shy", "quality", "In bright sunlight it is dazzled: -1 to attack and to what it sees."),
+  scent: trait2("Keen Nose", "quality", "Smells foes within 30 feet (farther downwind) and follows tracks by smell."),
+  trip_bite: trait2("Dragging Bite", "quality", "A bite that hits lets it try to trip the foe at once, with no attack of opportunity."),
+  skeleton_bones: trait2("Brittle Bones", "quality", "Harm of any type but bludgeoning loses 5 to its bones; cold does it no harm.", { modifiers: [mod2("reduction", 5, { bypass: ["bludgeoning"] }), mod2("resist.cold", 1000, { note: "no harm from cold" })] })
+};
+function improvedCritical(weapons2) {
+  return trait2("Keen Strikes", "feat", "The weapon taken as its choice threatens on twice as many numbers of the die (19-20 becomes 17-20).", {
+    modifiers: [mod2("threat.weapon.{choice}", `21 - table('${weapons2}', '{choice}', 'threat')`, { type: "keen", note: "twice the threat range" })],
+    requires: `${BASE_ATTACK} >= 8`
+  });
+}
+function experienceRows(top) {
+  return byLevel(top, (l) => ({ xp: 1000 * l * (l - 1) / 2 }));
+}
+function worth(level, cr) {
+  if (cr < level - 7)
+    return 0;
+  return Math.round(300 * level * 2 ** ((cr - level) / 2) / 25) * 25;
+}
+var CHALLENGE_ROWS = {};
+for (const [id, part] of [["1/10", 0.1], ["1/8", 0.125], ["1/6", 1 / 6], ["1/4", 0.25], ["1/3", 1 / 3], ["1/2", 0.5]]) {
+  CHALLENGE_ROWS[id] = { by_level: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i + 1), Math.round(worth(i + 1, 1) * part)])) };
+}
+for (let cr = 1;cr <= 20; cr++)
+  CHALLENGE_ROWS[String(cr)] = { by_level: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i + 1), worth(i + 1, cr)])) };
+var CLASSIC_MODERN_FEATS = {
+  acrobatic: trait2("Acrobatic", "feat", "+2 Jump and Tumble.", { modifiers: skillsMod(2, ["jump", "tumble"]) }),
+  alertness: trait2("Alert", "feat", "+2 Listen and Spot.", { modifiers: skillsMod(2, ["listen", "spot"]) }),
+  athletic: trait2("Athletic", "feat", "+2 Climb and Swim.", { modifiers: skillsMod(2, ["climb", "swim"]) }),
+  cleave: trait2("Follow-Through", "feat", "Once a round, dropping a foe in melee gives one more melee attack, at the same bonus, at another foe within reach.", { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
+  combat_expertise: trait2("Guarded Fighting", "feat", "Before attacking, it may take up to 5 (no more than its base attack) off its melee attacks and add as much dodge to defence until its next turn: name both as the attack's modifiers.", { requires: "score(self, 'int') >= 13" }),
+  combat_reflexes: trait2("Quick Reflexes", "feat", "As many more attacks of opportunity a round as its Dexterity modifier."),
+  dodge: trait2("Dodge", "feat", "+1 dodge to defence against the one foe it names each turn.", { modifiers: [mod2("ac", 1, { type: "dodge", note: "against the foe it names" })], requires: "score(self, 'dex') >= 13" }),
+  far_shot: trait2("Long Shot", "feat", "A projectile weapon's range increment is half again as long, a thrown weapon's twice as long.", { requires: "has_trait(self, 'point_blank_shot')" }),
+  stealthy: trait2("Stealthy", "feat", "+2 Hide and Move Quietly.", { modifiers: skillsMod(2, ["hide", "move_silently"]) }),
+  toughness: trait2("Tough", "feat", "+3 hit points.", { modifiers: [mod2("hp", 3)] }),
+  track: trait2("Tracker", "feat", "Follows tracks with Survival.")
+};
+
+// src/shared/profiles/classic.ts
+var T = {
+  skills: "classic.skills",
+  classes: "classic.classes",
+  tracks: "classic.tracks",
+  traits: "classic.traits",
+  conditions: "classic.conditions",
+  sizes: "classic.sizes",
+  weapons: "classic.weapons",
+  armor: "classic.armor",
+  creatures: "classic.creatures",
+  experience: "classic.experience",
+  challenges: "classic.challenges",
+  difficulties: "classic.difficulties"
+};
+var SKILLS = [
+  ["appraise", "Appraise", "int", false, 0],
+  ["balance", "Balance", "dex", false, 1],
+  ["bluff", "Deceive", "cha", false, 0],
+  ["climb", "Climb", "str", false, 1],
+  ["concentration", "Concentration", "con", false, 0],
+  ["craft", "Craft", "int", false, 0],
+  ["decipher_script", "Decipher Writing", "int", true, 0],
+  ["diplomacy", "Persuade", "cha", false, 0],
+  ["disable_device", "Disable Devices", "int", true, 0],
+  ["disguise", "Disguise", "cha", false, 0],
+  ["escape_artist", "Slip Free", "dex", false, 1],
+  ["forgery", "Forgery", "int", false, 0],
+  ["gather_information", "Gather Rumours", "cha", false, 0],
+  ["handle_animal", "Handle Animals", "cha", true, 0],
+  ["heal", "First Aid", "wis", false, 0],
+  ["hide", "Hide", "dex", false, 1],
+  ["intimidate", "Intimidate", "cha", false, 0],
+  ["jump", "Jump", "str", false, 1],
+  ["knowledge_arcana", "Lore (arcane)", "int", true, 0],
+  ["knowledge_architecture", "Lore (building)", "int", true, 0],
+  ["knowledge_dungeoneering", "Lore (underground)", "int", true, 0],
+  ["knowledge_geography", "Lore (lands)", "int", true, 0],
+  ["knowledge_history", "Lore (history)", "int", true, 0],
+  ["knowledge_local", "Lore (local)", "int", true, 0],
+  ["knowledge_nature", "Lore (nature)", "int", true, 0],
+  ["knowledge_nobility", "Lore (nobility)", "int", true, 0],
+  ["knowledge_religion", "Lore (religion)", "int", true, 0],
+  ["knowledge_planes", "Lore (other planes)", "int", true, 0],
+  ["listen", "Listen", "wis", false, 0],
+  ["move_silently", "Move Quietly", "dex", false, 1],
+  ["open_lock", "Pick Locks", "dex", true, 0],
+  ["perform", "Perform", "cha", false, 0],
+  ["profession", "Profession", "wis", true, 0],
+  ["ride", "Ride", "dex", false, 0],
+  ["search", "Search", "int", false, 0],
+  ["sense_motive", "Read People", "wis", false, 0],
+  ["sleight_of_hand", "Deft Hands", "dex", true, 1],
+  ["speak_language", "Languages", "int", true, 0],
+  ["spellcraft", "Spell Lore", "int", true, 0],
+  ["spot", "Spot", "wis", false, 0],
+  ["survival", "Survival", "wis", false, 0],
+  ["swim", "Swim", "str", false, 2],
+  ["tumble", "Tumble", "dex", true, 1],
+  ["use_magic_device", "Use Magic Items", "cha", true, 0],
+  ["use_rope", "Rope Work", "dex", false, 0]
+];
+var skillRows = {};
+for (const [id, label2, ability, trained, times] of SKILLS)
+  skillRows[id] = { label: label2, ability, ...trained ? { trained } : {}, ...times > 0 ? { armor: true } : {}, ...times > 1 ? { armor_times: times } : {} };
+var LORE = SKILLS.map(([id]) => id).filter((id) => id.startsWith("knowledge_"));
+function tracks(attack2, fort, ref2, will) {
+  return { attack: `attack_${attack2}`, fort: `save_${fort}`, ref: `save_${ref2}`, will: `save_${will}` };
+}
+var classRows = {
+  barbarian: {
+    label: "Barbarian",
+    hit_die: 12,
+    tracks: tracks("good", "good", "poor", "poor"),
+    skill_points: 4,
+    class_skills: ["climb", "craft", "handle_animal", "intimidate", "jump", "listen", "ride", "survival", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "fast_movement", "illiteracy", "rage"], 2: ["uncanny_dodge"], 3: ["trap_sense"], 5: ["improved_uncanny_dodge"], 7: ["barbarian_reduction"], 11: ["greater_rage"], 14: ["indomitable_will"], 17: ["tireless_rage"], 20: ["mighty_rage"] })
+  },
+  bard: {
+    label: "Bard",
+    hit_die: 6,
+    tracks: tracks("average", "poor", "good", "good"),
+    skill_points: 6,
+    class_skills: ["appraise", "balance", "bluff", "climb", "concentration", "craft", "decipher_script", "diplomacy", "disguise", "escape_artist", "gather_information", "hide", "jump", ...LORE, "listen", "move_silently", "perform", "profession", "sense_motive", "sleight_of_hand", "speak_language", "spellcraft", "swim", "tumble", "use_magic_device"],
+    proficiency: ["simple", "longsword", "rapier", "sap", "short_sword", "shortbow", "whip"],
+    features: features({ 1: ["armor_light", "shield_proficiency", "bardic_music", "bardic_knowledge"] })
+  },
+  cleric: {
+    label: "Cleric",
+    hit_die: 8,
+    tracks: tracks("average", "good", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["concentration", "craft", "diplomacy", "heal", "knowledge_arcana", "knowledge_history", "knowledge_religion", "knowledge_planes", "profession", "spellcraft"],
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency", "turn_undead"] })
+  },
+  druid: {
+    label: "Druid",
+    hit_die: 8,
+    tracks: tracks("average", "good", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["concentration", "craft", "diplomacy", "handle_animal", "heal", "knowledge_nature", "listen", "profession", "ride", "spellcraft", "spot", "survival", "swim"],
+    proficiency: ["club", "dagger", "dart", "quarterstaff", "scimitar", "sickle", "shortspear", "sling", "spear", "unarmed_strike"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "animal_companion", "nature_sense", "wild_empathy"], 2: ["woodland_stride"], 3: ["trackless_step"], 4: ["resist_natures_lure"], 5: ["wild_shape"], 9: ["venom_immunity"], 13: ["a_thousand_faces"], 15: ["timeless_body"] })
+  },
+  fighter: {
+    label: "Fighter",
+    hit_die: 10,
+    tracks: tracks("good", "good", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "intimidate", "jump", "ride", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency", "tower_shield_proficiency", "fighter_bonus_feat"] })
+  },
+  monk: {
+    label: "Monk",
+    hit_die: 8,
+    tracks: tracks("average", "good", "good", "good"),
+    skill_points: 4,
+    class_skills: ["balance", "climb", "concentration", "craft", "diplomacy", "escape_artist", "hide", "jump", "knowledge_arcana", "knowledge_religion", "listen", "move_silently", "perform", "profession", "sense_motive", "spot", "swim", "tumble"],
+    proficiency: ["club", "light_crossbow", "heavy_crossbow", "dagger", "handaxe", "javelin", "kama", "nunchaku", "quarterstaff", "sai", "shuriken", "siangham", "sling", "unarmed_strike"],
+    features: features({ 1: ["improved_unarmed_strike", "flurry_of_blows", "monk_unarmed", "monk_ac", "monk_bonus_feat"], 2: ["evasion"], 3: ["still_mind", "monk_speed"], 4: ["ki_strike", "slow_fall"], 5: ["purity_of_body"], 7: ["wholeness_of_body"], 9: ["improved_evasion"], 11: ["diamond_body"], 12: ["abundant_step"], 13: ["diamond_soul"], 15: ["quivering_palm"], 17: ["timeless_body"], 19: ["empty_body"], 20: ["perfect_self"] })
+  },
+  paladin: {
+    label: "Paladin",
+    hit_die: 10,
+    tracks: tracks("good", "good", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["concentration", "craft", "diplomacy", "handle_animal", "heal", "knowledge_nobility", "knowledge_religion", "profession", "ride", "sense_motive"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency", "aura_of_good", "detect_evil", "smite_evil"], 2: ["divine_grace", "lay_on_hands"], 3: ["aura_of_courage", "divine_health"], 4: ["turn_undead"], 5: ["special_mount"], 6: ["remove_disease"] })
+  },
+  ranger: {
+    label: "Ranger",
+    hit_die: 8,
+    tracks: tracks("good", "good", "good", "poor"),
+    skill_points: 6,
+    class_skills: ["climb", "concentration", "craft", "handle_animal", "heal", "hide", "jump", "knowledge_dungeoneering", "knowledge_geography", "knowledge_nature", "listen", "move_silently", "profession", "ride", "search", "spot", "survival", "swim", "use_rope"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "shield_proficiency", "favored_enemy", "track", "wild_empathy"], 2: ["combat_style"], 3: ["endurance"], 4: ["animal_companion"], 6: ["improved_combat_style"], 7: ["woodland_stride"], 8: ["swift_tracker"], 9: ["evasion"], 11: ["combat_style_mastery"], 13: ["camouflage"], 17: ["hide_in_plain_sight"] })
+  },
+  rogue: {
+    label: "Rogue",
+    hit_die: 6,
+    tracks: tracks("average", "poor", "good", "poor"),
+    skill_points: 8,
+    class_skills: ["appraise", "balance", "bluff", "climb", "craft", "decipher_script", "diplomacy", "disable_device", "disguise", "escape_artist", "forgery", "gather_information", "hide", "intimidate", "jump", "knowledge_local", "listen", "move_silently", "open_lock", "perform", "profession", "search", "sense_motive", "sleight_of_hand", "spot", "swim", "tumble", "use_magic_device", "use_rope"],
+    proficiency: ["simple", "hand_crossbow", "rapier", "sap", "shortbow", "short_sword"],
+    features: features({ 1: ["armor_light", "sneak_attack", "trapfinding"], 2: ["evasion"], 3: ["trap_sense"], 4: ["uncanny_dodge"], 8: ["improved_uncanny_dodge"], 10: ["rogue_special"] })
+  },
+  sorcerer: {
+    label: "Sorcerer",
+    hit_die: 4,
+    tracks: tracks("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["bluff", "concentration", "craft", "knowledge_arcana", "profession", "spellcraft"],
+    proficiency: ["simple"],
+    features: features({ 1: ["familiar"] })
+  },
+  wizard: {
+    label: "Wizard",
+    hit_die: 4,
+    tracks: tracks("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["concentration", "craft", "decipher_script", ...LORE, "profession", "spellcraft"],
+    proficiency: ["club", "dagger", "heavy_crossbow", "light_crossbow", "quarterstaff", "unarmed_strike"],
+    features: features({ 1: ["familiar", "scribe_scroll"], 5: ["wizard_bonus_feat"] })
+  },
+  warrior: {
+    label: "Warrior",
+    hit_die: 8,
+    tracks: tracks("good", "good", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "handle_animal", "intimidate", "jump", "ride", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] })
+  },
+  adept: {
+    label: "Adept",
+    hit_die: 6,
+    tracks: tracks("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["concentration", "craft", "handle_animal", "heal", ...LORE, "profession", "spellcraft", "survival"],
+    proficiency: ["simple"],
+    features: features({ 1: ["adept_spells"] })
+  },
+  aristocrat: {
+    label: "Aristocrat",
+    hit_die: 8,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["appraise", "bluff", "diplomacy", "disguise", "forgery", "gather_information", "handle_animal", "intimidate", ...LORE, "listen", "perform", "ride", "sense_motive", "speak_language", "spot", "swim", "survival"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] })
+  },
+  commoner: {
+    label: "Commoner",
+    hit_die: 4,
+    tracks: tracks("poor", "poor", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "jump", "listen", "profession", "ride", "spot", "swim", "use_rope"],
+    proficiency: ["unarmed_strike"]
+  },
+  expert: {
+    label: "Expert",
+    hit_die: 6,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 6,
+    class_skills: SKILLS.map(([id]) => id),
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "expert_trade"] })
+  }
+};
+var traitRows = {
+  ...SHARED_FEATS,
+  ...SHARED_FEATURES,
+  ...SHARED_CREATURE_TRAITS,
+  ...CLASSIC_MODERN_FEATS,
+  agile: trait2("Agile", "feat", "+2 Balance and Slip Free.", { modifiers: skillsMod(2, ["balance", "escape_artist"]) }),
+  animal_affinity: trait2("Way with Animals", "feat", "+2 Handle Animals and Ride.", { modifiers: skillsMod(2, ["handle_animal", "ride"]) }),
+  deceitful: trait2("Deceitful", "feat", "+2 Disguise and Forgery.", { modifiers: skillsMod(2, ["disguise", "forgery"]) }),
+  deft_hands: trait2("Nimble Hands", "feat", "+2 Deft Hands and Rope Work.", { modifiers: skillsMod(2, ["sleight_of_hand", "use_rope"]) }),
+  diehard: trait2("Hard to Kill", "feat", "Below 0 hit points it is stable at once, and it may act as one disabled instead of falling unconscious.", { requires: "has_trait(self, 'endurance')" }),
+  diligent: trait2("Diligent", "feat", "+2 Appraise and Decipher Writing.", { modifiers: skillsMod(2, ["appraise", "decipher_script"]) }),
+  improved_critical: improvedCritical(T.weapons),
+  improved_grapple: trait2("Wrestler", "feat", "+4 to grapple, and taking hold of a foe gives it no attack of opportunity.", { modifiers: [mod2("grapple", 4)], requires: "score(self, 'dex') >= 13 and has_trait(self, 'improved_unarmed_strike')" }),
+  investigator: trait2("Investigator", "feat", "+2 Gather Rumours and Search.", { modifiers: skillsMod(2, ["gather_information", "search"]) }),
+  magical_aptitude: trait2("Magic Knack", "feat", "+2 Spell Lore and Use Magic Items.", { modifiers: skillsMod(2, ["spellcraft", "use_magic_device"]) }),
+  negotiator: trait2("Negotiator", "feat", "+2 Persuade and Read People.", { modifiers: skillsMod(2, ["diplomacy", "sense_motive"]) }),
+  nimble_fingers: trait2("Light Fingers", "feat", "+2 Disable Devices and Pick Locks.", { modifiers: skillsMod(2, ["disable_device", "open_lock"]) }),
+  persuasive: trait2("Silver Tongue", "feat", "+2 Deceive and Intimidate.", { modifiers: skillsMod(2, ["bluff", "intimidate"]) }),
+  power_attack: trait2("Heavy Blows", "feat", "Before attacking, it may take up to its base attack off its melee attacks and add as much to damage (twice as much with a weapon in both hands, none with a light one): name both as the attack's modifiers.", { requires: "score(self, 'str') >= 13" }),
+  self_sufficient: trait2("Self-Reliant", "feat", "+2 First Aid and Survival.", { modifiers: skillsMod(2, ["heal", "survival"]) }),
+  skill_focus: trait2("Specialist", "feat", "+3 on the skill taken as its choice.", { modifiers: [mod2("skill.{choice}", 3)] }),
+  human: trait2("Human", "race", "Medium, speed 30. One more skill point each level (four more at the first) and one more feat at the first level.", { modifiers: [mod2("skill_points", 1, { note: "one more each level" })] }),
+  dwarf: trait2("Dwarf", "race", "Medium, speed 20, not slowed by armour. +2 Constitution, -2 Charisma; sees 60 feet in the dark; +2 on saves against poison and spells; +4 to stand against being pushed or tripped; +1 to attack orcs and goblins; +4 dodge against giants; +2 to appraise or craft stone and metal.", {
+    modifiers: [mod2("ability.con", 2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" })],
+    grants: { proficiency: ["dwarven_waraxe", "dwarven_urgrosh"] }
+  }),
+  elf: trait2("Elf", "race", "Medium, speed 30. +2 Dexterity, -2 Constitution; +2 Listen, Search and Spot; +2 on saves against charms, and no magic puts it to sleep; sees far in dim light; trained with longsword, rapier and bows.", {
+    modifiers: [mod2("ability.dex", 2, { type: "racial" }), mod2("ability.con", -2, { type: "racial" }), ...skillsMod(2, ["listen", "search", "spot"], "racial")],
+    grants: { proficiency: ["longsword", "rapier", "longbow", "composite_longbow", "shortbow", "composite_shortbow"] }
+  }),
+  gnome: trait2("Gnome", "race", "Small, speed 20. +2 Constitution, -2 Strength; +2 Listen; +2 on saves against illusions; +1 to attack goblins and kobolds; +4 dodge against giants; sees far in dim light.", {
+    modifiers: [mod2("ability.con", 2, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), mod2("skill.listen", 2, { type: "racial" })],
+    grants: { proficiency: ["gnome_hooked_hammer"] }
+  }),
+  half_elf: trait2("Half-Elf", "race", "Medium, speed 30. +1 Listen, Search and Spot; +2 Persuade and Gather Rumours; +2 on saves against charms, and no magic puts it to sleep; sees far in dim light.", {
+    modifiers: [...skillsMod(1, ["listen", "search", "spot"], "racial"), ...skillsMod(2, ["diplomacy", "gather_information"], "racial")]
+  }),
+  half_orc: trait2("Half-Orc", "race", "Medium, speed 30. +2 Strength, -2 Intelligence, -2 Charisma; sees 60 feet in the dark.", {
+    modifiers: [mod2("ability.str", 2, { type: "racial" }), mod2("ability.int", -2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" })]
+  }),
+  halfling: trait2("Halfling", "race", "Small, speed 20. +2 Dexterity, -2 Strength; +2 Climb, Jump, Listen and Move Quietly; +1 on every save, and +2 more against fear; +1 to attack with a thrown weapon or a sling.", {
+    modifiers: [mod2("ability.dex", 2, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), ...skillsMod(2, ["climb", "jump", "listen", "move_silently"], "racial"), mod2("save", 1, { type: "racial" })]
+  }),
+  goblin: trait2("Goblin", "race", "Small, speed 30. +2 Dexterity, -2 Strength, -2 Charisma; +4 Move Quietly and Ride; sees 60 feet in the dark.", {
+    modifiers: [mod2("ability.dex", 2, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" }), ...skillsMod(4, ["move_silently", "ride"], "racial")]
+  }),
+  orc: trait2("Orc", "race", "Medium, speed 30. +4 Strength, -2 Intelligence, -2 Wisdom, -2 Charisma; sees 60 feet in the dark; dazzled in bright sunlight.", {
+    modifiers: [mod2("ability.str", 4, { type: "racial" }), mod2("ability.int", -2, { type: "racial" }), mod2("ability.wis", -2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" })]
+  }),
+  undead: creatureType("Undead", "Dead and moving: each of its own hit dice is a d12 and gains nothing from Constitution, which it lacks (its score reads 10); they give half in base attack and a good Will. Critical hits, poison, sleep, paralysis, stunning, disease and anything that works on a mind do it nothing; trained with simple weapons.", "1 / 2", ["will"], { grants: { proficiency: ["simple"] } }),
+  zombie_flesh: trait2("Dead Flesh", "quality", "Harm of any type but slashing loses 5 to it. It takes only a move or a standard action each turn, never both, and never runs.", { modifiers: [mod2("reduction", 5, { bypass: ["slashing"] })] }),
+  illiteracy: trait2("Cannot Read", "class feature", "Cannot read or write until it spends 2 skill points to learn."),
+  rage: trait2("Rage", "class feature", "Once a fight, for 3 + its Constitution modifier rounds once raging: put on the raging condition, then fatigued when it ends. Uses a day: the Rage gauge (1, and 1 more at the 4th level and every 4th after)."),
+  bardic_music: trait2("Bardic Music", "class feature", "As many songs a day as its bard levels (the Bardic Music gauge): countersong; fascinate; inspire courage, +1 morale to allies' attack, weapon damage and saves against fear and charms (+2 at the 8th level, +3 at the 14th, +4 at the 20th); and more songs as it rises: put them on as effects."),
+  bardic_knowledge: trait2("Bardic Knowledge", "class feature", "Knows things of note: a check of its bard levels + its Intelligence modifier."),
+  turn_undead: trait2("Turn Undead", "class feature", "Drives off or destroys the undead: tries a day as the Turning gauge, 3 + its Charisma modifier."),
+  wild_shape: trait2("Wild Shape", "class feature", "Takes the shape of an animal and back, as often a day as the Wild Shape gauge: once at the 5th level, twice at the 6th, three times at the 7th, then more."),
+  flurry_of_blows: trait2("Flurry of Blows", "class feature", "With all its attacks, unarmed or with a monk's weapon, one more attack at its highest bonus and -2 on each (-1 at the 2nd level, none from the 5th; two more from the 11th): name them as the attack's modifiers."),
+  monk_ac: trait2("Unarmoured Defence", "class feature", "With no armour and no shield, its Wisdom bonus and 1 for every five monk levels add to defence, even flat-footed or against a touch.", {
+    modifiers: [mod2("ac", "max(0, mod(self, 'wis')) + floor(class_level(self, 'monk') / 5)", { when: UNARMOURED, note: "Wisdom and training" })]
+  }),
+  monk_bonus_feat: trait2("Monk Feats", "class feature", "One more feat at the 1st, 2nd and 6th levels, from a short list."),
+  ki_strike: trait2("Ki Strike", "class feature", "Its unarmed strikes pass through reduction that magic weapons pass (lawful from the 10th level, adamantine from the 16th)."),
+  wholeness_of_body: trait2("Wholeness of Body", "class feature", "Heals itself up to twice its monk levels in hit points a day: the Wholeness gauge."),
+  perfect_self: trait2("Perfect Self", "class feature", "Harm loses 10 to it, but not from magic weapons.", { modifiers: [mod2("reduction", 10, { bypass: ["magic"] })] }),
+  smite_evil: trait2("Smite Evil", "class feature", "On one melee attack against an evil foe, + its Charisma modifier to attack and + its paladin levels to damage: name both as the attack's modifiers. Uses a day: the Smite gauge (1, and 1 more each five levels)."),
+  lay_on_hands: trait2("Lay on Hands", "class feature", "Heals by touch up to its paladin levels times its Charisma bonus in hit points a day: the Lay on Hands gauge."),
+  special_mount: trait2("Called Mount", "class feature", "Calls a mount to its side, growing stronger with its levels."),
+  remove_disease: trait2("Cure Disease", "class feature", "Cures a disease once a week, and once more each three levels."),
+  favored_enemy: trait2("Favoured Enemy", "class feature", "Against a kind of foe it has chosen, +2 on Deceive, Listen, Read People, Spot and Survival and on weapon damage (more kinds and more bonus every five levels): name it against that foe."),
+  combat_style: trait2("Fighting Style", "class feature", "Archery (as Rapid Shot) or two weapons (as Two Weapons), only in light armour or none."),
+  improved_combat_style: trait2("Fighting Style, Improved", "class feature", "Its style's next feat, in light armour or none."),
+  combat_style_mastery: trait2("Fighting Style, Mastery", "class feature", "Its style's last feat, in light armour or none."),
+  trapfinding: trait2("Trapfinding", "class feature", "Finds and disarms traps of any difficulty, magic ones too."),
+  rogue_special: trait2("Rogue's Trick", "class feature", "At the 10th, 13th, 16th and 19th levels a trick or a feat: crippling strike, defensive roll, improved evasion, opportunist, skill mastery or a slippery mind.")
+};
+var BLIND_SKILLS = ["balance", "climb", "escape_artist", "hide", "jump", "move_silently", "open_lock", "ride", "search", "sleight_of_hand", "swim", "tumble", "use_rope"];
+var conditionRows = {
+  ...SHARED_CONDITIONS,
+  blinded: condition2("Blinded", "-2 defence and no Dexterity bonus to it; half speed; -4 on Search and most Strength and Dexterity skills; every foe has total concealment from it (half its attacks miss).", [mod2("ac", -2), NO_DEX, HALF_SPEED, ...skillsMod(-4, BLIND_SKILLS)], ["flat", "blind", "half_speed"]),
+  confused: condition2("Confused", "Each turn a roll of d% says what it does: 01-10 attacks whoever confused it, 11-20 acts as it would, 21-50 babbles, 51-70 flees, 71-100 attacks the nearest.", [], ["confused"]),
+  dazzled: condition2("Dazzled", "-1 to attack, Search and Spot.", [mod2("attack", -1), ...skillsMod(-1, ["search", "spot"])]),
+  deafened: condition2("Deafened", "-4 initiative; fails every Listen check; one spell in five with spoken words fails.", [mod2("initiative", -4)], ["deaf"]),
+  disabled: condition2("Disabled", "At 0 hit points: a move or a standard action a turn, not both, at half speed; a standard action or anything strenuous then costs 1 hit point.", [HALF_SPEED], ["one_action", "half_speed"]),
+  dying: condition2("Dying", "Below 0 hit points: unconscious, and loses 1 hit point at each of its turns unless a roll of 10 or less on d% steadies it.", [], ["no_actions", "helpless"]),
+  energy_drained: condition2("Drained of Life", "One level drained: -1 to attack, saves, skills and ability checks and -5 hit points; put on once for each level.", [mod2("attack", -1), mod2("save", -1), mod2("skill", -1), mod2("ability_check", -1), mod2("hp", -5)]),
+  fascinated: condition2("Fascinated", "Does nothing but watch; -4 on Listen and Spot; any threat ends it.", skillsMod(-4, ["listen", "spot"]), ["no_actions"]),
+  grappling: condition2("Grappling", "Held with a foe: no Dexterity bonus to defence against others; -4 to attack with anything but a light weapon or bare hands; no two-weapon fighting; threatens no one.", [NO_DEX], ["flat", "held"]),
+  incorporeal: condition2("Incorporeal", "Without a body: only magic weapons, spells and the like touch it, and even they miss half the time."),
+  pinned: condition2("Pinned", "Held down in a grapple: -4 defence and no Dexterity bonus to it against others; cannot move.", [mod2("ac", -4), NO_DEX], ["flat", "held"]),
+  staggered: condition2("Staggered", "Nonlethal harm equal to its hit points: a move or a standard action a turn, not both.", [], ["one_action"]),
+  turned: condition2("Turned", "Flees whoever turned it, cowering if it cannot.", [], ["flees"])
+};
+var armorRows = {
+  padded: armor("Padded armour", "light", 1, 8, 0, 5, armorMods("light", 0)),
+  leather: armor("Leather armour", "light", 2, 6, 0, 10, armorMods("light", 0)),
+  studded_leather: armor("Studded leather", "light", 3, 5, -1, 15, armorMods("light", -1)),
+  chain_shirt: armor("Chain shirt", "light", 4, 4, -2, 20, armorMods("light", -2)),
+  hide: armor("Hide armour", "medium", 3, 4, -3, 20, armorMods("medium", -3)),
+  scale_mail: armor("Scale mail", "medium", 4, 3, -4, 25, armorMods("medium", -4)),
+  chainmail: armor("Chainmail", "medium", 5, 2, -5, 30, armorMods("medium", -5)),
+  breastplate: armor("Breastplate", "medium", 5, 3, -4, 25, armorMods("medium", -4)),
+  splint_mail: armor("Splint mail", "heavy", 6, 0, -7, 40, armorMods("heavy", -7)),
+  banded_mail: armor("Banded mail", "heavy", 6, 1, -6, 35, armorMods("heavy", -6)),
+  half_plate: armor("Half-plate", "heavy", 7, 0, -7, 40, armorMods("heavy", -7)),
+  full_plate: armor("Full plate", "heavy", 8, 1, -6, 35, armorMods("heavy", -6)),
+  buckler: armor("Buckler", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  light_wooden_shield: armor("Light wooden shield", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  light_steel_shield: armor("Light steel shield", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  heavy_wooden_shield: armor("Heavy wooden shield", "shield", 2, null, -2, 15, shieldMods(-2, "shield_proficiency")),
+  heavy_steel_shield: armor("Heavy steel shield", "shield", 2, null, -2, 15, shieldMods(-2, "shield_proficiency")),
+  tower_shield: armor("Tower shield", "shield", 4, 2, -10, 50, shieldMods(-10, "tower_shield_proficiency", [mod2("attack", -2, { note: "the tower shield's bulk" })]))
+};
+var creatureRows = {
+  wolf: {
+    name: "Wolf",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 15,
+      con: 15,
+      int: 2,
+      wis: 12,
+      cha: 6,
+      racial_hd: 2,
+      hit_dice: 9,
+      hp: 13,
+      natural_armor: 2,
+      base_speed: 50,
+      size: "medium",
+      d20_traits: ["animal", "natural_armor", "low_light_vision", "scent", "trip_bite", "track", { id: "weapon_focus", choice: "bite" }],
+      ranks: { listen: 2, spot: 2, move_silently: 1 }
+    },
+    attacks: [natural("Bite", "1d6", { types: ["bludgeoning", "piercing", "slashing"], held: "two" })],
+    cr: "1",
+    description: "A grey hunter of the woods that runs in packs and drags its prey down by the leg."
+  },
+  goblin: {
+    name: "Goblin",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 11,
+      con: 12,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 4,
+      hp: 5,
+      base_speed: 30,
+      size: "small",
+      d20_traits: ["goblin", "humanoid", "darkvision", "alertness"],
+      d20_effects: [wearing("Leather armour and a light wooden shield", [mod2("ac", 2, { type: "armor" }), mod2("max_dex", 6, { limit: true }), mod2("ac", 1, { type: "shield" }), mod2("armor_check", -1)])],
+      ranks: { hide: 1, listen: 1, spot: 1, move_silently: 1 }
+    },
+    carries: ["morningstar", "javelin"],
+    cr: "1/3",
+    description: "A small, sharp-eared raider who fights from ambush and runs when the fight turns."
+  },
+  orc: {
+    name: "Orc",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 11,
+      con: 12,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 4,
+      hp: 5,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["orc", "humanoid", "darkvision", "light_sensitivity", "alertness"],
+      d20_effects: [wearing("Studded leather", [mod2("ac", 3, { type: "armor" }), mod2("max_dex", 5, { limit: true }), mod2("armor_check", -1)])],
+      ranks: { listen: 1, spot: 1 }
+    },
+    carries: ["falchion", "javelin"],
+    cr: "1/2",
+    description: "A tusked, heavy-shouldered brute who swings a great curved blade in both hands."
+  },
+  skeleton: {
+    name: "Skeleton",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 13,
+      con: 10,
+      int: 10,
+      wis: 10,
+      cha: 1,
+      racial_hd: 2,
+      hit_dice: 13,
+      hp: 13,
+      natural_armor: 2,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["undead", "natural_armor", "skeleton_bones", "darkvision", "improved_initiative", { id: "martial_weapon_proficiency", choice: "scimitar" }],
+      d20_effects: [wearing("A heavy steel shield", [mod2("ac", 2, { type: "shield" }), mod2("armor_check", -2)])]
+    },
+    attacks: [natural("Claw", "1d4", { types: ["slashing"] })],
+    carries: ["scimitar"],
+    cr: "1/3",
+    description: "Bones of a dead soldier, bound together by magic, doing as it was last told; it does not think."
+  },
+  zombie: {
+    name: "Zombie",
+    kind: "person",
+    fields: {
+      str: 12,
+      dex: 8,
+      con: 10,
+      int: 10,
+      wis: 10,
+      cha: 1,
+      racial_hd: 2,
+      hit_dice: 13,
+      hp: 16,
+      natural_armor: 2,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["undead", "natural_armor", "zombie_flesh", "darkvision", "toughness"]
+    },
+    attacks: [natural("Slam", "1d6", { types: ["bludgeoning"], held: "two" })],
+    carries: ["club"],
+    cr: "1/2",
+    description: "A dead body made to shamble and strike, slow and mindless, that keeps coming until it is cut apart."
+  },
+  ogre: {
+    name: "Ogre",
+    kind: "person",
+    fields: {
+      str: 21,
+      dex: 8,
+      con: 15,
+      int: 6,
+      wis: 10,
+      cha: 7,
+      racial_hd: 4,
+      hit_dice: 18,
+      hp: 29,
+      natural_armor: 5,
+      base_speed: 40,
+      size: "large",
+      d20_traits: ["giant", "natural_armor", "darkvision", "low_light_vision", "toughness", { id: "weapon_focus", choice: "greatclub" }],
+      d20_effects: [wearing("Hide armour", [mod2("ac", 3, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("armor_check", -3), mod2("speed", -10)])],
+      ranks: { climb: 3, listen: 2, spot: 2 }
+    },
+    carries: ["greatclub", "javelin"],
+    cr: "3",
+    description: "A huge, dull and hungry giant, twice a man's height, who clubs what it wants to eat."
+  },
+  bandit: {
+    name: "Bandit",
+    kind: "person",
+    fields: {
+      str: 12,
+      dex: 13,
+      con: 11,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 4,
+      hp: 4,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["human", "humanoid", "point_blank_shot", "stealthy"],
+      d20_effects: [wearing("Leather armour", [mod2("ac", 2, { type: "armor" }), mod2("max_dex", 6, { limit: true })])],
+      ranks: { intimidate: 4, climb: 2, ride: 2, hide: 1, move_silently: 1 }
+    },
+    carries: ["short_sword", "shortbow"],
+    cr: "1/2",
+    description: "A roadside robber with a short blade and a bow, bold in a band and quick to run alone."
+  },
+  guard: {
+    name: "Guard",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 11,
+      con: 12,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 4,
+      hp: 5,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["human", "humanoid", "alertness", { id: "weapon_focus", choice: "longsword" }],
+      d20_effects: [wearing("A chain shirt and a heavy wooden shield", [mod2("ac", 4, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("ac", 2, { type: "shield" }), mod2("armor_check", -4)])],
+      ranks: { intimidate: 4, ride: 4, listen: 1, spot: 1 }
+    },
+    carries: ["longsword", "light_crossbow"],
+    cr: "1/2",
+    description: "A town's or a lord's watchman in mail, with sword, shield and crossbow."
+  }
+};
+var DAILY2 = {
+  rage_uses: dailyGauge("Rage", "class_level(self, 'barbarian') > 0 ? 1 + floor(class_level(self, 'barbarian') / 4) : 0"),
+  bardic_music: dailyGauge("Bardic music", "class_level(self, 'bard')"),
+  turning: dailyGauge("Turning", "class_level(self, 'cleric') > 0 or class_level(self, 'paladin') >= 4 ? max(0, 3 + mod(self, 'cha')) : 0"),
+  wild_shape: dailyGauge("Wild shape", "class_level(self, 'druid') >= 18 ? 6 : class_level(self, 'druid') >= 14 ? 5 : class_level(self, 'druid') >= 10 ? 4 : class_level(self, 'druid') >= 7 ? 3 : class_level(self, 'druid') >= 6 ? 2 : class_level(self, 'druid') >= 5 ? 1 : 0"),
+  smite: dailyGauge("Smite", "class_level(self, 'paladin') > 0 ? 1 + floor(class_level(self, 'paladin') / 5) : 0"),
+  lay_on_hands: dailyGauge("Lay on hands", "class_level(self, 'paladin') >= 2 ? class_level(self, 'paladin') * max(0, mod(self, 'cha')) : 0"),
+  wholeness: dailyGauge("Wholeness of body", "class_level(self, 'monk') >= 7 ? 2 * class_level(self, 'monk') : 0")
+};
+var PER_DIE = "max(1, levels(self) + self.racial_hd)";
+var NEGATIVE = "self.hp < 0 and self.hp > -10";
+var D20 = {
+  abilities: [...D20_ABILITY_IDS],
+  mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
+  kinds: ["person"],
+  defaultSize: "medium",
+  bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
+  tables: { ...T },
+  totals: {
+    ...familyTotals({ skills: T.skills, weapons: T.weapons }),
+    grapple: "class_sum(self, 'attack') + bonus(self, 'base_attack') + mod(self, 'str') + size_mod(self, 'grapple') + bonus_without(self, 'grapple', 'size')"
+  },
+  check: { take: { "10": { value: 10, times: 1 }, "20": { value: 20, times: 20 } }, aid: { dc: 10, bonus: 2 } },
+  save: { autoFail: 1, autoSucceed: 20 },
+  attack: {
+    autoMiss: 1,
+    autoHit: 20,
+    confirm: true,
+    strength: "str",
+    strengthShare: { light: 1, one: 1, two: 1.5, off: 0.5, thrown: 1, projectile: 0 },
+    incrementPenalty: -2,
+    increments: { thrown: 5, projectile: 10 },
+    unskilled: -4,
+    nonlethal: -4,
+    secondary: -5,
+    iterative: { from: 6, step: 5 },
+    totals: { base: "attack.base", melee: "attack.melee", ranged: "attack.ranged", damage: "damage" },
+    shots: {}
+  },
+  hp: {
+    field: "hp",
+    nonlethal: "nonlethal",
+    temporary: "hp_temp",
+    states: [
+      { id: "dead", when: "self.hp <= -10", life: "dead" },
+      { id: "stable", when: `${NEGATIVE} and under(self, 'stable')` },
+      { id: "dying", when: `${NEGATIVE} and not under(self, 'stable')`, life: "dying" },
+      { id: "unconscious", when: `(${NEGATIVE}) or (self.hp >= 0 and self.nonlethal > self.hp)` },
+      { id: "disabled", when: "self.hp == 0" },
+      { id: "staggered", when: "self.hp > 0 and self.nonlethal == self.hp" }
+    ],
+    dying: { state: "dying", lose: 1, stable: "stable", roll: { id: "stabilize", dice: "1d100", bands: [{ outcome: "stable", max: 10 }, { outcome: "worse", min: 11 }], pass: ["stable"] } },
+    massive: { when: "amount >= 50", save: "fort", dc: 15, hp: "-10" },
+    rest: { hours: 8, hp: PER_DIE, nonlethal: PER_DIE, daily: Object.keys(DAILY2) }
+  },
+  costs: D20_COSTS,
+  levels: {
+    progression: "level",
+    hitPoints: "roll",
+    average: "floor(die / 2) + 1",
+    firstMost: true,
+    rankLimit: "(levels(self) + self.racial_hd + 3) / (class_skill(self, skill) ? 1 : 2)",
+    skillPoints: { plus: "mod(self, 'int') + bonus(self, 'skill_points')", min: 1, first: 4 },
+    featEvery: 3,
+    abilityEvery: 4,
+    experienceBy: "challenge"
+  }
+};
+var CLASSIC = {
+  id: "classic",
+  label: "Classic",
+  summary: "Classic fantasy on a d20: six abilities, eleven classes and five plain ones for common folk, with levels that add up, skills with ranks, feats and peoples as traits, bonuses that stack by type, defence read whole, by touch or flat-footed, weapons and armour with their own numbers, hit points down through dying to dead, and experience by challenge.",
+  fields: d20Fields({ hpFloor: -10, rest: PER_DIE, sizes: T.sizes, daily: DAILY2 }),
+  checks: {},
+  actions: {},
+  tables: {
+    [T.skills]: d20Table("skills", T.skills, "Classic skills", skillRows, SKILL_COLUMNS),
+    [T.classes]: d20Table("classes", T.classes, "Classic classes", classRows),
+    [T.tracks]: d20Table("tracks", T.tracks, "Classic progressions", TRACK_ROWS, TRACK_COLUMNS),
+    [T.traits]: d20Table("traits", T.traits, "Classic traits", traitRows),
+    [T.conditions]: d20Table("conditions", T.conditions, "Classic conditions", conditionRows),
+    [T.sizes]: d20Table("sizes", T.sizes, "Classic sizes", sizeRows((steps) => [mod2("grapple", steps * 4, { type: "size" }), mod2("skill.hide", steps * -4, { type: "size" })]), SIZE_COLUMNS),
+    [T.weapons]: d20Table("weapons", T.weapons, "Classic weapons", CORE_WEAPONS, WEAPON_COLUMNS),
+    [T.armor]: d20Table("armor", T.armor, "Classic armour and shields", armorRows, ARMOR_COLUMNS),
+    [T.creatures]: d20Table("creatures", T.creatures, "Classic creatures", creatureRows),
+    [T.experience]: d20Table("experience", T.experience, "Classic experience", experienceRows(20)),
+    [T.challenges]: d20Table("challenges", T.challenges, "Classic challenges", CHALLENGE_ROWS),
+    [T.difficulties]: d20Table("difficulties", T.difficulties, "Classic difficulties", DIFFICULTIES)
+  },
+  ruleset: {
+    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: T.experience, column: "xp" }, maxLevel: 20 } },
+    sheet: d20Sheet({
+      defence: {
+        label: "Defence",
+        rows: [
+          { formula: "total(self, 'ac')", label: "Armour Class" },
+          { formula: "total(self, 'ac.touch')", label: "Against a touch" },
+          { formula: "total(self, 'ac.flat')", label: "Flat-footed" },
+          { formula: signedTotal("initiative"), label: "Initiative" },
+          { formula: "total(self, 'speed')", label: "Speed" }
+        ]
+      },
+      attack: [
+        { formula: signedTotal("attack.base"), label: "Base attack" },
+        { formula: signedTotal("attack.melee"), label: "Melee" },
+        { formula: signedTotal("attack.ranged"), label: "Ranged" },
+        { formula: signedTotal("grapple"), label: "Grapple" }
+      ],
+      saves: D20_SAVES,
+      skills: SKILLS.map(([id, label2]) => ({ id, label: label2 })),
+      daily: Object.keys(DAILY2)
+    }),
+    minLevels: {},
+    adjudication: presetAdjudication("balanced"),
+    combat: d20Combat("self.hp < 0 or under(self, 'unconscious')"),
+    d20: D20
+  }
+};
+
+// src/packs/starters/fantasy_town_rules.ts
+function knife(owner2) {
+  return {
+    id: `${owner2}_knife`,
+    kind: "item",
+    name: "Belt knife",
+    tier: "background",
+    fields: { description: "A plain working knife in a worn leather sheath.", owner: owner2, weight_g: 180, slot: "waist", catalog: "belt_knife" },
+    relations: [
+      { type: "in", to: owner2 },
+      { type: "worn_by", to: owner2, fields: { slot: "waist" } }
+    ]
+  };
+}
+var MEDIUM = { size: "medium", base_speed: 30 };
+var FANTASY_TOWN_RULES = {
+  set: CLASSIC,
+  on: true,
+  sheets: {
+    pov: {
+      str: 14,
+      dex: 12,
+      con: 13,
+      int: 10,
+      wis: 11,
+      cha: 12,
+      ...MEDIUM,
+      classes: { fighter: 1 },
+      hit_dice: 10,
+      hp: 11,
+      xp: 0,
+      d20_traits: ["human", "alertness", "endurance", "improved_initiative"],
+      ranks: { ride: 4, handle_animal: 4, climb: 2, swim: 2 }
+    },
+    hollis_garrow: {
+      str: 8,
+      dex: 9,
+      con: 10,
+      int: 14,
+      wis: 12,
+      cha: 11,
+      ...MEDIUM,
+      classes: { expert: 3 },
+      hit_dice: 13,
+      hp: 13,
+      xp: 3000,
+      level: 3,
+      d20_traits: ["human", "negotiator", "diligent", "investigator"],
+      ranks: { appraise: 6, diplomacy: 6, sense_motive: 6, gather_information: 6, knowledge_local: 6, decipher_script: 6, profession: 6, bluff: 4, intimidate: 4, listen: 2, spot: 2 }
+    },
+    tamsin_reed: {
+      str: 15,
+      dex: 11,
+      con: 14,
+      int: 10,
+      wis: 11,
+      cha: 10,
+      ...MEDIUM,
+      classes: { expert: 2 },
+      hit_dice: 10,
+      hp: 14,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["human", "athletic", "endurance"],
+      ranks: { profession: 5, swim: 5, use_rope: 5, climb: 4, spot: 4, handle_animal: 4, intimidate: 3, listen: 3, knowledge_geography: 2 }
+    },
+    joss_tamber: {
+      str: 13,
+      dex: 8,
+      con: 13,
+      int: 10,
+      wis: 11,
+      cha: 11,
+      ...MEDIUM,
+      classes: { expert: 2 },
+      hit_dice: 10,
+      hp: 15,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["human", { id: "skill_focus", choice: "profession" }, "toughness"],
+      ranks: { profession: 5, craft: 5, appraise: 5, climb: 4, use_rope: 4, diplomacy: 4, sense_motive: 3, knowledge_local: 3, listen: 2 }
+    },
+    marta_dunmore: {
+      str: 15,
+      dex: 10,
+      con: 14,
+      int: 11,
+      wis: 11,
+      cha: 10,
+      ...MEDIUM,
+      classes: { expert: 3 },
+      hit_dice: 13,
+      hp: 19,
+      xp: 3000,
+      level: 3,
+      d20_traits: ["human", { id: "skill_focus", choice: "craft" }, "endurance", "great_fortitude"],
+      ranks: { craft: 6, appraise: 6, profession: 6, intimidate: 4, diplomacy: 4, sense_motive: 4, spot: 4, knowledge_local: 4, handle_animal: 4 }
+    },
+    ilsabet_vane: {
+      str: 7,
+      dex: 10,
+      con: 9,
+      int: 13,
+      wis: 16,
+      cha: 13,
+      ...MEDIUM,
+      classes: { expert: 3 },
+      hit_dice: 13,
+      hp: 10,
+      xp: 3000,
+      level: 3,
+      d20_traits: ["human", "alertness", "iron_will", "self_sufficient"],
+      ranks: { knowledge_religion: 6, knowledge_history: 6, heal: 6, sense_motive: 6, diplomacy: 6, spot: 6, listen: 6, decipher_script: 6 }
+    },
+    wren_aldous: {
+      str: 8,
+      dex: 12,
+      con: 10,
+      int: 13,
+      wis: 14,
+      cha: 12,
+      ...MEDIUM,
+      classes: { expert: 2 },
+      hit_dice: 10,
+      hp: 10,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["human", "self_sufficient", { id: "skill_focus", choice: "heal" }],
+      ranks: { heal: 5, profession: 5, knowledge_nature: 5, survival: 5, craft: 5, diplomacy: 4, gather_information: 4, sense_motive: 4, spot: 3 }
+    },
+    odo_kettleby: {
+      str: 10,
+      dex: 8,
+      con: 12,
+      int: 10,
+      wis: 10,
+      cha: 12,
+      ...MEDIUM,
+      classes: { expert: 2 },
+      hit_dice: 10,
+      hp: 12,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["human", "negotiator", "investigator"],
+      ranks: { profession: 5, gather_information: 5, diplomacy: 5, sense_motive: 5, appraise: 5, bluff: 4, listen: 3, spot: 3 }
+    },
+    pip_marlow: {
+      str: 10,
+      dex: 13,
+      con: 11,
+      int: 10,
+      wis: 10,
+      cha: 9,
+      ...MEDIUM,
+      classes: { commoner: 1 },
+      hit_dice: 4,
+      hp: 4,
+      xp: 0,
+      d20_traits: ["human", "athletic", "run", { id: "one_simple_weapon", choice: "belt_knife" }],
+      ranks: { swim: 4, use_rope: 4, profession: 4 }
+    },
+    bram_hesketh: {
+      str: 11,
+      dex: 10,
+      con: 12,
+      int: 10,
+      wis: 12,
+      cha: 10,
+      ...MEDIUM,
+      classes: { expert: 1 },
+      hit_dice: 6,
+      hp: 7,
+      xp: 0,
+      d20_traits: ["human", "alertness", "self_sufficient"],
+      ranks: { profession: 4, handle_animal: 4, listen: 4, spot: 4, survival: 4, knowledge_geography: 4, heal: 4 }
+    }
+  },
+  things: ["tamsin_reed", "joss_tamber", "marta_dunmore", "wren_aldous", "odo_kettleby", "pip_marlow", "bram_hesketh"].map(knife)
+};
+
+// src/shared/profiles/modern.ts
+var T2 = {
+  skills: "modern.skills",
+  classes: "modern.classes",
+  tracks: "modern.tracks",
+  traits: "modern.traits",
+  conditions: "modern.conditions",
+  sizes: "modern.sizes",
+  weapons: "modern.weapons",
+  armor: "modern.armor",
+  creatures: "modern.creatures",
+  experience: "modern.experience",
+  challenges: "modern.challenges",
+  difficulties: "modern.difficulties"
+};
+function pick2(from, ids3) {
+  const out = {};
+  for (const id of ids3) {
+    const row = from[id];
+    if (row !== undefined)
+      out[id] = row;
+  }
+  return out;
+}
+var LORE2 = [
+  ["arcane_lore", "the occult"],
+  ["art", "art"],
+  ["behavioral_sciences", "behavioural sciences"],
+  ["business", "business"],
+  ["civics", "civics"],
+  ["current_events", "current events"],
+  ["earth_life_sciences", "earth and life sciences"],
+  ["history", "history"],
+  ["physical_sciences", "physical sciences"],
+  ["popular_culture", "popular culture"],
+  ["streetwise", "the streets"],
+  ["tactics", "tactics"],
+  ["technology", "technology"],
+  ["theology_philosophy", "faith and philosophy"]
+];
+var CRAFTS = [
+  ["chemical", "chemicals", true],
+  ["electronic", "electronics", true],
+  ["mechanical", "machines", true],
+  ["pharmaceutical", "medicines", true],
+  ["structural", "building", false],
+  ["visual_art", "visual art", false],
+  ["writing", "writing", false]
+];
+var SKILLS2 = [
+  ["balance", "Balance", "dex", false, true],
+  ["bluff", "Deceive", "cha", false, false],
+  ["climb", "Climb", "str", false, true],
+  ["computer_use", "Computers", "int", false, false],
+  ["concentration", "Concentration", "con", false, false],
+  ...CRAFTS.map(([id, words5, trained]) => [`craft_${id}`, `Craft (${words5})`, "int", trained, false]),
+  ["decipher_script", "Decipher Writing", "int", true, false],
+  ["demolitions", "Explosives", "int", true, false],
+  ["diplomacy", "Persuade", "cha", false, false],
+  ["disable_device", "Disable Devices", "int", true, false],
+  ["disguise", "Disguise", "cha", false, false],
+  ["drive", "Drive", "dex", false, false],
+  ["escape_artist", "Slip Free", "dex", false, true],
+  ["forgery", "Forgery", "int", false, false],
+  ["gamble", "Gamble", "wis", false, false],
+  ["gather_information", "Gather Rumours", "cha", false, false],
+  ["handle_animal", "Handle Animals", "cha", true, false],
+  ["hide", "Hide", "dex", false, true],
+  ["intimidate", "Intimidate", "cha", false, false],
+  ["investigate", "Investigate", "int", true, false],
+  ["jump", "Jump", "str", false, true],
+  ...LORE2.map(([id, words5]) => [`knowledge_${id}`, `Lore (${words5})`, "int", true, false]),
+  ["listen", "Listen", "wis", false, false],
+  ["move_silently", "Move Quietly", "dex", false, true],
+  ["navigate", "Navigate", "int", false, false],
+  ["perform", "Perform", "cha", false, false],
+  ["pilot", "Pilot", "dex", true, false],
+  ["profession", "Profession", "wis", false, false],
+  ["read_write_language", "Read and Write Languages", "int", true, false],
+  ["repair", "Repair", "int", true, false],
+  ["research", "Research", "int", false, false],
+  ["ride", "Ride", "dex", false, false],
+  ["search", "Search", "int", false, false],
+  ["sense_motive", "Read People", "wis", false, false],
+  ["sleight_of_hand", "Deft Hands", "dex", true, true],
+  ["speak_language", "Languages", "int", true, false],
+  ["spot", "Spot", "wis", false, false],
+  ["survival", "Survival", "wis", false, false],
+  ["swim", "Swim", "str", false, true],
+  ["treat_injury", "First Aid", "wis", false, false],
+  ["tumble", "Tumble", "dex", true, true]
+];
+var skillRows2 = {};
+for (const [id, label2, ability, trained, armor2] of SKILLS2)
+  skillRows2[id] = { label: label2, ability, ...trained ? { trained } : {}, ...armor2 ? { armor: armor2 } : {} };
+var SKILL_LABEL = Object.fromEntries(SKILLS2.map(([id, label2]) => [id, label2]));
+var lore = (...ids3) => ids3.map((id) => `knowledge_${id}`);
+var craft = (...ids3) => ids3.map((id) => `craft_${id}`);
+var ALL_LORE = LORE2.map(([id]) => `knowledge_${id}`);
+var ALL_CRAFT = CRAFTS.map(([id]) => `craft_${id}`);
+var LANGUAGES = ["profession", "read_write_language", "speak_language"];
+var GOOD_SAVE = [1, 2, 2, 2, 3, 3, 4, 4, 4, 5];
+var DEFENCE = { low: [0, 1, 1, 1, 2, 2, 2, 3, 3, 3], mid: [1, 2, 2, 3, 3, 3, 4, 4, 5, 5], high: [3, 4, 4, 5, 5, 6, 6, 7, 7, 8] };
+var REPUTATION = { least: [0, 0, 0, 0, 1, 1, 1, 1, 2, 2], low: [0, 0, 1, 1, 1, 2, 2, 2, 3, 3], mid: [1, 1, 1, 2, 2, 2, 3, 3, 3, 4], high: [2, 2, 2, 3, 3, 3, 4, 4, 4, 5] };
+var trackRows = byLevel(10, (l) => ({
+  attack_good: l,
+  attack_average: Math.floor(l * 3 / 4),
+  attack_poor: Math.floor(l / 2),
+  save_good: GOOD_SAVE[l - 1] ?? 0,
+  save_poor: Math.floor(l / 3),
+  defence_low: DEFENCE.low[l - 1] ?? 0,
+  defence_mid: DEFENCE.mid[l - 1] ?? 0,
+  defence_high: DEFENCE.high[l - 1] ?? 0,
+  reputation_least: REPUTATION.least[l - 1] ?? 0,
+  reputation_low: REPUTATION.low[l - 1] ?? 0,
+  reputation_mid: REPUTATION.mid[l - 1] ?? 0,
+  reputation_high: REPUTATION.high[l - 1] ?? 0
+}));
+var TRACK_COLUMNS2 = Object.fromEntries(Object.keys(trackRows["1"] ?? {}).map((c) => [c, { type: "int" }]));
+function tracks2(attack2, fort, ref2, will, defence, reputation) {
+  return { attack: `attack_${attack2}`, fort: `save_${fort}`, ref: `save_${ref2}`, will: `save_${will}`, defence: `defence_${defence}`, reputation: `reputation_${reputation}` };
+}
+var TALENTS_AND_FEATS = features(Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i + 1, [(i + 1) % 2 === 1 ? "talent" : "class_bonus_feat"]])));
+function classRow2(label2, die, track, points, skills) {
+  return { label: label2, hit_die: die, tracks: track, skill_points: points, class_skills: [...skills, ...LANGUAGES], proficiency: ["simple"], features: TALENTS_AND_FEATS };
+}
+var classRows2 = {
+  strong: classRow2("Strong", 8, tracks2("good", "good", "poor", "poor", "mid", "least"), 3, ["climb", ...craft("structural"), "handle_animal", "jump", ...lore("current_events", "popular_culture", "streetwise", "tactics"), "repair", "swim"]),
+  fast: classRow2("Fast", 8, tracks2("average", "poor", "good", "poor", "high", "low"), 5, ["balance", ...craft("mechanical"), "drive", "escape_artist", "hide", ...lore("current_events", "popular_culture", "streetwise"), "move_silently", "pilot", "ride", "sleight_of_hand", "tumble"]),
+  tough: classRow2("Tough", 10, tracks2("average", "good", "poor", "poor", "mid", "low"), 3, ["climb", "concentration", ...craft("mechanical", "structural"), "drive", "intimidate", ...lore("current_events", "popular_culture", "streetwise"), "ride", "spot", "survival"]),
+  smart: classRow2("Smart", 6, tracks2("poor", "poor", "poor", "good", "low", "mid"), 9, ["computer_use", ...ALL_CRAFT, "decipher_script", "demolitions", "disable_device", "forgery", "investigate", ...ALL_LORE, "navigate", "repair", "research", "search"]),
+  dedicated: classRow2("Dedicated", 6, tracks2("average", "good", "poor", "good", "mid", "mid"), 5, [...craft("pharmaceutical", "visual_art", "writing"), "gamble", "investigate", ...ALL_LORE, "listen", "sense_motive", "spot", "survival", "treat_injury"]),
+  charismatic: classRow2("Charismatic", 6, tracks2("poor", "good", "good", "poor", "low", "high"), 7, [
+    "bluff",
+    ...craft("visual_art", "writing"),
+    "diplomacy",
+    "disguise",
+    "gather_information",
+    "handle_animal",
+    "intimidate",
+    ...lore("arcane_lore", "art", "behavioral_sciences", "business", "civics", "current_events", "popular_culture", "streetwise", "theology_philosophy"),
+    "perform"
+  ])
+};
+var HELPLESS = "limit(self, 'defended', 99) == 0";
+var DEFENDED = "limit(self, 'defended', 99) > 0";
+var has = (id) => `has_trait(self, '${id}')`;
+var all = (...ids3) => ids3.map(has).join(" and ");
+function occupation(label2, count, skills, feats = [], more = []) {
+  const names = skills.map((s) => SKILL_LABEL[s] ?? s).join(", ");
+  const feat = feats.length > 0 ? ` One more feat: ${feats.join(" or ")}.` : "";
+  return trait2(label2, "occupation", `${count === 1 ? "One" : count === 2 ? "Two" : "Three"} of ${names} become class skills: take it once with each as its choice; one already a class skill has +1 instead.${feat}`, {
+    modifiers: [mod2("skill.{choice}", 1, { type: "competence", when: "class_skill(self, '{choice}')", note: "already a class skill" }), ...more]
+  });
+}
+var traitRows2 = {
+  ...pick2(SHARED_FEATS, ["simple_weapon_proficiency", "endurance", "great_fortitude", "improved_initiative", "iron_will", "lightning_reflexes", "mobility", "precise_shot", "quick_draw", "run", "weapon_focus"]),
+  ...CLASSIC_MODERN_FEATS,
+  ...pick2(SHARED_FEATURES, ["evasion", "uncanny_dodge"]),
+  ...pick2(SHARED_CREATURE_TRAITS, ["animal", "natural_armor", "low_light_vision", "scent", "trip_bite"]),
+  personal_firearms_proficiency: trait2("Personal Firearms", "feat", "No -4 to attack with a handgun or a longarm.", { grants: { proficiency: ["personal_firearms"] } }),
+  advanced_firearms_proficiency: trait2("Automatic Fire", "feat", "No -4 on automatic fire's roll against defence 10 for the square.", { requires: has("personal_firearms_proficiency") }),
+  exotic_firearms_proficiency: trait2("Heavy Weapon", "feat", "No -4 to attack with the heavy weapons taken as its choice: heavy_machine_guns, rocket_launchers or grenade_launchers.", { grants: { proficiency: [] }, requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
+  archaic_weapons_proficiency: trait2("Old Weapons", "feat", "No -4 to attack with a sword, a bow or another weapon of before guns.", { grants: { proficiency: ["archaic"] } }),
+  exotic_melee_weapon_proficiency: trait2("Exotic Melee Weapon", "feat", "No -4 to attack with the exotic melee weapon taken as its choice.", { grants: { proficiency: [] }, requires: `${BASE_ATTACK} >= 1` }),
+  armor_light: trait2("Light Armour Training", "feat", "Light armour's whole bonus counts to defence; without the training only its lesser bonus does."),
+  armor_medium: trait2("Medium Armour Training", "feat", "Medium armour's whole bonus counts to defence; without the training only its lesser bonus does.", { requires: has("armor_light") }),
+  armor_heavy: trait2("Heavy Armour Training", "feat", "Heavy armour's whole bonus counts to defence; without the training only its lesser bonus does.", { requires: has("armor_medium") }),
+  double_tap: trait2("Double Tap", "feat", "With a semi-automatic weapon, two rounds at one foe: -2 to attack, one more die of damage (the shot `double`); without it the second round is wasted.", { requires: `score(self, 'dex') >= 13 and ${has("point_blank_shot")}` }),
+  point_blank_shot: trait2("Close Shot", "feat", "+1 to attack and damage with a ranged weapon at 30 feet or nearer.", {
+    modifiers: [mod2("attack.ranged", 1, { when: "distance <= 30", note: "30 feet or nearer" }), mod2("damage.ranged", 1, { when: "distance <= 30", note: "30 feet or nearer" })]
+  }),
+  burst_fire: trait2("Burst Fire", "feat", "With an automatic weapon, five rounds at one foe: -4 to attack, two more dice of damage (the shot `burst`); without it the rounds add nothing.", { requires: `score(self, 'wis') >= 13 and ${all("personal_firearms_proficiency", "advanced_firearms_proficiency")}` }),
+  strafe: trait2("Strafe", "feat", "Automatic fire on a line of four squares in place of a square of two by two: name who stands in the line and give them the harm with a Reflex save against 15.", { requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
+  quick_reload: trait2("Quick Reload", "feat", "Puts in a box magazine or a speed loader as a free action, and loads a cylinder or an internal magazine as a move action.", { requires: `${BASE_ATTACK} >= 1` }),
+  dead_aim: trait2("Dead Aim", "feat", "A full round of aiming, not moving or struck, gives +2 to the next ranged attack: name it as the attack's modifier.", { requires: `score(self, 'wis') >= 13 and ${has("far_shot")}` }),
+  shot_on_the_run: trait2("Shot on the Run", "feat", "Moves before and after a ranged attack, no farther in all than its speed.", { requires: `score(self, 'dex') >= 13 and ${all("point_blank_shot", "dodge", "mobility")}` }),
+  skip_shot: trait2("Skip Shot", "feat", "Bounces a shot off a smooth surface within 10 feet of the foe: -2 to attack, one die less of damage, and the foe's cover counts for nothing.", { requires: all("point_blank_shot", "precise_shot") }),
+  drive_by_attack: trait2("Drive-By", "feat", "Takes no penalty for a vehicle's speed on its attacks, and a driver attacks at any point of the move."),
+  power_attack: trait2("Heavy Blows", "feat", "Before attacking, it may take up to its base attack off its melee attacks and add as much to damage: name both as the attack's modifiers.", { requires: "score(self, 'str') >= 13" }),
+  two_weapon_fighting: trait2("Two Weapons", "feat", "Fighting with a weapon in each hand costs -4 on each (-2 if the off-hand weapon is light), not -6 and -10 (-4 and -8): name them as the attacks' modifiers.", { requires: "score(self, 'dex') >= 13" }),
+  weapon_finesse: trait2("Finesse", "feat", "With the light melee weapon taken as its choice, Dexterity stands for Strength on the attack roll.", {
+    modifiers: [mod2("attack.weapon.{choice}", "max(0, mod(self, 'dex') - mod(self, 'str'))", { note: "Dexterity for Strength" })],
+    requires: `${BASE_ATTACK} >= 1`
+  }),
+  brawl: trait2("Brawler", "feat", "+1 to attack unarmed, and its fists deal 1d6 nonlethal: name the dice with the harm.", { modifiers: [mod2("attack.weapon.unarmed_strike", 1)] }),
+  improved_brawl: trait2("Brawler, Improved", "feat", "+2 to attack unarmed, and its fists deal 1d8 nonlethal: name the dice with the harm.", { modifiers: [mod2("attack.weapon.unarmed_strike", 1)], requires: `${BASE_ATTACK} >= 3 and ${has("brawl")}` }),
+  combat_martial_arts: trait2("Fighting Art", "feat", "Its fists count as armed and deal 1d4 lethal or nonlethal, its choice: name the dice with the harm.", { requires: `${BASE_ATTACK} >= 1` }),
+  defensive_martial_arts: trait2("Guarded Stance", "feat", "+1 dodge to defence against melee attacks.", { modifiers: [mod2("ac.melee", 1, { type: "dodge" })] }),
+  improved_damage_threshold: trait2("Hard to Fell", "feat", "+3 to its damage threshold; taken again, 3 more.", { modifiers: [mod2("damage_threshold", 3)] }),
+  renown: trait2("Known Name", "feat", "+3 Reputation.", { modifiers: [mod2("reputation", 3)] }),
+  low_profile: trait2("Low Profile", "feat", "-3 Reputation: fewer know its face.", { modifiers: [mod2("reputation", -3)] }),
+  attentive: trait2("Attentive", "feat", "+2 Investigate and Read People.", { modifiers: skillsMod(2, ["investigate", "sense_motive"]) }),
+  cautious: trait2("Careful Hands", "feat", "+2 Explosives and Disable Devices.", { modifiers: skillsMod(2, ["demolitions", "disable_device"]) }),
+  deceptive: trait2("Deceptive", "feat", "+2 Deceive and Disguise.", { modifiers: skillsMod(2, ["bluff", "disguise"]) }),
+  focused: trait2("Focused", "feat", "+2 Balance and Concentration.", { modifiers: skillsMod(2, ["balance", "concentration"]) }),
+  gearhead: trait2("Gearhead", "feat", "+2 Computers and Repair.", { modifiers: skillsMod(2, ["computer_use", "repair"]) }),
+  guide: trait2("Guide", "feat", "+2 Navigate and Survival.", { modifiers: skillsMod(2, ["navigate", "survival"]) }),
+  medical_expert: trait2("Medic", "feat", "+2 Craft (medicines) and First Aid.", { modifiers: skillsMod(2, ["craft_pharmaceutical", "treat_injury"]) }),
+  meticulous: trait2("Meticulous", "feat", "+2 Forgery and Search.", { modifiers: skillsMod(2, ["forgery", "search"]) }),
+  nimble: trait2("Nimble", "feat", "+2 Slip Free and Deft Hands.", { modifiers: skillsMod(2, ["escape_artist", "sleight_of_hand"]) }),
+  studious: trait2("Studious", "feat", "+2 Decipher Writing and Research.", { modifiers: skillsMod(2, ["decipher_script", "research"]) }),
+  trustworthy: trait2("Trustworthy", "feat", "+2 Persuade and Gather Rumours.", { modifiers: skillsMod(2, ["diplomacy", "gather_information"]) }),
+  vehicle_expert: trait2("Driver", "feat", "+2 Drive and Pilot.", { modifiers: skillsMod(2, ["drive", "pilot"]) }),
+  talent: trait2("Talent", "class feature", "One talent of the class that gave this level: take it as a trait."),
+  class_bonus_feat: trait2("Class Feat", "class feature", "One more feat of those the class that gave this level offers."),
+  extreme_effort: trait2("Extreme Effort", "talent", "+2 on a Strength check that takes a full round: name it.", { requires: "class_level(self, 'strong') >= 1" }),
+  improved_extreme_effort: trait2("Extreme Effort, Improved", "talent", "+2 more on that check (+4).", { requires: has("extreme_effort") }),
+  advanced_extreme_effort: trait2("Extreme Effort, Advanced", "talent", "+2 more on that check (+6).", { requires: has("improved_extreme_effort") }),
+  ignore_hardness: trait2("Break Through", "talent", "Ignores 2 of an object's hardness when it strikes it.", { requires: "class_level(self, 'strong') >= 1" }),
+  improved_ignore_hardness: trait2("Break Through, Improved", "talent", "Ignores 2 more (4).", { requires: has("ignore_hardness") }),
+  advanced_ignore_hardness: trait2("Break Through, Advanced", "talent", "Ignores 2 more (6).", { requires: has("improved_ignore_hardness") }),
+  melee_smash: trait2("Melee Smash", "talent", "+1 melee damage.", { modifiers: [mod2("damage.melee", 1)], requires: "class_level(self, 'strong') >= 1" }),
+  improved_melee_smash: trait2("Melee Smash, Improved", "talent", "+1 more melee damage (+2).", { modifiers: [mod2("damage.melee", 1)], requires: has("melee_smash") }),
+  advanced_melee_smash: trait2("Melee Smash, Advanced", "talent", "+1 more melee damage (+3).", { modifiers: [mod2("damage.melee", 1)], requires: has("improved_melee_smash") }),
+  uncanny_dodge_2: trait2("Cannot Be Flanked", "talent", "No one gains for flanking it.", { requires: has("uncanny_dodge") }),
+  defensive_roll: trait2("Defensive Roll", "talent", "Once a day, a blow that would leave it at 0 hit points or less asks for a Reflex save against the harm; made, it takes half (the Defensive Roll gauge).", { requires: has("evasion") }),
+  opportunist: trait2("Opportunist", "talent", "Spends an action point to strike at a foe another has just hit, as an attack of opportunity.", { requires: has("evasion") }),
+  increased_speed: trait2("Quick Feet", "talent", "+5 speed.", { modifiers: [mod2("speed", 5)], requires: "class_level(self, 'fast') >= 1" }),
+  improved_increased_speed: trait2("Quick Feet, Improved", "talent", "+5 more speed (+10).", { modifiers: [mod2("speed", 5)], requires: has("increased_speed") }),
+  advanced_increased_speed: trait2("Quick Feet, Advanced", "talent", "+5 more speed (+15).", { modifiers: [mod2("speed", 5)], requires: has("improved_increased_speed") }),
+  damage_reduction_1: trait2("Hard Skin", "talent", "Harm of every kind from a weapon loses 1.", { modifiers: [mod2("reduction", 1, { bypass: [] })], requires: `${has("remain_conscious")} or ${has("energy_resistance")}` }),
+  damage_reduction_2: trait2("Hard Skin, Improved", "talent", "Harm from a weapon loses 2.", { modifiers: [mod2("reduction", 2, { bypass: [] })], requires: has("damage_reduction_1") }),
+  damage_reduction_3: trait2("Hard Skin, Advanced", "talent", "Harm from a weapon loses 3.", { modifiers: [mod2("reduction", 3, { bypass: [] })], requires: has("damage_reduction_2") }),
+  energy_resistance: trait2("Resistant", "talent", "Harm of the kind taken as its choice (acid, cold, electricity, fire or sonic) loses as much as its Constitution modifier; taken once for each kind.", {
+    modifiers: [mod2("resist.{choice}", "max(0, mod(self, 'con'))", { note: "Constitution" })],
+    requires: "class_level(self, 'tough') >= 1"
+  }),
+  remain_conscious: trait2("Stays Up", "talent", "Below 0 hit points but above -10 it may keep acting, as one disabled, for a round; then it falls.", { requires: "class_level(self, 'tough') >= 1" }),
+  robust: trait2("Robust", "talent", "As many more hit points as its Tough levels.", { modifiers: [mod2("hp", "class_level(self, 'tough')")], requires: has("remain_conscious") }),
+  second_wind: trait2("Second Wind", "talent", "Spends an action point for as many hit points back as its Constitution modifier.", { requires: has("remain_conscious") }),
+  stamina: trait2("Stamina", "talent", "Heals twice as fast with rest.", { requires: has("robust") }),
+  savant: trait2("Savant", "talent", "+ its Smart levels on the skill taken as its choice.", { modifiers: [mod2("skill.{choice}", "class_level(self, 'smart')")], requires: "class_level(self, 'smart') >= 1" }),
+  linguist: trait2("Linguist", "talent", "+ its Smart levels on reading or understanding a language it does not know.", { requires: has("savant") }),
+  exploit_weakness: trait2("Exploit Weakness", "talent", "After a round of watching a foe, it uses Intelligence for Strength or Dexterity on its attacks against it: name the difference as the attack's modifier.", { requires: "class_level(self, 'smart') >= 1" }),
+  plan: trait2("Plan", "talent", "Before a fight, a check against 10 gives allies who follow the plan +1 to +3 on their checks for it: put it on as an effect.", { requires: "class_level(self, 'smart') >= 1" }),
+  trick: trait2("Trick", "talent", "A ruse against one foe: a contest of Intelligence against its Intelligence or Wisdom, won, leaves it unable to act for a round.", { requires: "class_level(self, 'smart') >= 1" }),
+  empathy: trait2("Empathy", "talent", "After a minute of watching someone, + its Dedicated levels on Deceive, Persuade, Handle Animals, Intimidate, Perform and Read People with them: name it.", { requires: "class_level(self, 'dedicated') >= 1" }),
+  improved_aid_another: trait2("Better Help", "talent", "Its help gives one more than others' does: name it.", { requires: has("empathy") }),
+  intuition: trait2("Intuition", "talent", "A Will save against 15 tells it whether a thing it is about to do is a good or a bad idea.", { requires: has("empathy") }),
+  healing_knack: trait2("Healing Knack", "talent", "+2 First Aid.", { modifiers: skillsMod(2, ["treat_injury"]), requires: "class_level(self, 'dedicated') >= 1" }),
+  healing_touch_1: trait2("Healing Touch", "talent", "2 more hit points back from its first aid kit or its surgery.", { requires: has("healing_knack") }),
+  healing_touch_2: trait2("Healing Touch, Improved", "talent", "2 more again (4).", { requires: has("healing_touch_1") }),
+  skill_emphasis: trait2("Skill Emphasis", "talent", "+3 on the skill taken as its choice.", { modifiers: [mod2("skill.{choice}", 3)], requires: "class_level(self, 'dedicated') >= 1" }),
+  aware: trait2("Aware", "talent", "Adds its base Will to Listen and Spot against being surprised: name it.", { requires: has("skill_emphasis") }),
+  faith: trait2("Faith", "talent", "Adds its Wisdom modifier to a roll it spends an action point on: name it.", { requires: has("skill_emphasis") }),
+  cool_under_pressure: trait2("Cool Under Pressure", "talent", "Takes 10 under pressure on as many skills as 3 + its Wisdom modifier, chosen when it takes this.", { requires: has("faith") }),
+  charm: trait2("Charm", "talent", "+ its Charismatic levels on its Charisma skills with those of one sex: name it.", { requires: "class_level(self, 'charismatic') >= 1" }),
+  favor: trait2("Favour", "talent", "A check of d20 + its Charismatic levels asks a favour of someone it knows; the GM sets how hard.", { requires: has("charm") }),
+  captivate: trait2("Captivate", "talent", "Holds one listener's whole attention for a few rounds: a Will save against 10 + its Charismatic levels + its Charisma modifier resists it.", { requires: has("favor") }),
+  fast_talk: trait2("Fast Talk", "talent", "+ its Charismatic levels on Deceive, Persuade and Gather Rumours.", {
+    modifiers: ["bluff", "diplomacy", "gather_information"].map((s) => mod2(`skill.${s}`, "class_level(self, 'charismatic')", { type: "competence" })),
+    requires: "class_level(self, 'charismatic') >= 1"
+  }),
+  dazzle: trait2("Dazzle", "talent", "A Charisma check against a foe's Will save leaves it -1 to attack, checks and saves for a few rounds: put it on as an effect.", { requires: has("fast_talk") }),
+  coordinate: trait2("Coordinate", "talent", "A Charisma check against 10 gives allies who can hear it + its Charismatic levels (+1 to +3) on one task: put it on as an effect.", { requires: "class_level(self, 'charismatic') >= 1" }),
+  inspiration: trait2("Inspire", "talent", "A full round of words gives allies +2 morale on saves, attacks and damage for a few rounds: put it on as an effect.", { requires: has("coordinate") }),
+  greater_inspiration: trait2("Inspire, Greater", "talent", "As Inspire, +3 in place of +2.", { requires: has("inspiration") }),
+  occupation_academic: occupation("Scholar", 3, ["computer_use", "craft_writing", "decipher_script", "gather_information", "investigate", ...ALL_LORE, "research", "search"]),
+  occupation_adventurer: occupation("Adventurer", 2, ["climb", "demolitions", "disable_device", "drive", "escape_artist", "intimidate", "jump", ...lore("streetwise", "tactics"), "move_silently", "navigate", "pilot", "survival", "swim", "treat_injury"], ["Old Weapons", "Brawler", "Personal Firearms"]),
+  occupation_athlete: occupation("Athlete", 2, ["climb", "jump", "ride", "swim", "tumble"], ["Old Weapons", "Athletic", "Brawler"]),
+  occupation_blue_collar: occupation("Trades", 3, [...craft("electronic", "mechanical", "structural"), "drive", "handle_animal", "intimidate", "repair"]),
+  occupation_celebrity: occupation("Celebrity", 1, ["bluff", ...craft("visual_art", "writing"), "diplomacy", "disguise", "perform"], [], [mod2("reputation", 1, { note: "well known" })]),
+  occupation_creative: occupation("Artist", 3, ["bluff", "computer_use", ...craft("visual_art", "writing"), "disguise", "forgery", ...lore("art"), "perform", "spot"]),
+  occupation_criminal: occupation("Criminal", 2, ["disable_device", "gather_information", "hide", ...lore("streetwise"), "move_silently", "sleight_of_hand"], ["Brawler", "Personal Firearms"]),
+  occupation_dilettante: occupation("Idle Rich", 1, ["gamble", "intimidate", ...lore("current_events", "popular_culture"), "ride", "spot"]),
+  occupation_doctor: occupation("Doctor", 2, [...craft("pharmaceutical"), "computer_use", ...lore("behavioral_sciences", "earth_life_sciences", "technology"), "search", "treat_injury"]),
+  occupation_emergency_services: occupation("Rescue Worker", 2, ["balance", "climb", "computer_use", "drive", "jump", ...lore("behavioral_sciences", "earth_life_sciences"), "search", "swim", "treat_injury"]),
+  occupation_entrepreneur: occupation("Businessperson", 2, ["bluff", "diplomacy", "gamble", ...lore("business", "current_events", "streetwise", "technology")]),
+  occupation_investigative: occupation("Investigator", 2, ["computer_use", ...craft("visual_art", "writing"), "decipher_script", "forgery", "gather_information", "investigate", ...lore("behavioral_sciences", "civics", "earth_life_sciences", "streetwise"), "research", "search", "sense_motive"], ["Brawler", "Personal Firearms"]),
+  occupation_law_enforcement: occupation("Police", 2, ["diplomacy", "drive", "gather_information", "intimidate", ...lore("behavioral_sciences", "civics", "earth_life_sciences", "streetwise", "tactics"), "listen"], ["Fighting Art", "Light Armour Training", "Personal Firearms"]),
+  occupation_military: occupation("Soldier", 2, ["climb", "demolitions", "drive", "hide", ...lore("tactics"), "move_silently", "navigate", "pilot", "survival", "swim"], ["Brawler", "Fighting Art", "Light Armour Training", "Personal Firearms"]),
+  occupation_religious: occupation("Clergy", 2, ["decipher_script", ...lore("arcane_lore", "art", "behavioral_sciences", "history", "streetwise", "theology_philosophy"), "listen", "sense_motive"]),
+  occupation_rural: occupation("Country", 2, ["balance", "climb", "drive", "handle_animal", "repair", "ride", "survival", "swim"], ["Brawler", "Personal Firearms"]),
+  occupation_student: occupation("Student", 3, ["computer_use", ...ALL_CRAFT, ...ALL_LORE, "perform", "research"]),
+  occupation_technician: occupation("Technician", 3, ["computer_use", ...craft("chemical", "electronic", "mechanical", "structural"), ...lore("business", "earth_life_sciences", "physical_sciences", "technology"), "repair", "research"]),
+  occupation_white_collar: occupation("Office", 2, ["computer_use", "diplomacy", ...lore("behavioral_sciences", "business", "civics", "theology_philosophy"), "research"])
+};
+var DEFENCELESS = [DEX_ZERO, mod2("defended", 0, { limit: true, note: "no class or armour defence" })];
+var BLIND_SKILLS2 = ["balance", "climb", "escape_artist", "hide", "jump", "move_silently", "search", "sleight_of_hand", "swim", "tumble"];
+var conditionRows2 = {
+  ...Object.fromEntries(Object.entries(SHARED_CONDITIONS).filter(([id]) => id !== "raging")),
+  blinded: condition2("Blinded", "Sees nothing: no Dexterity bonus to defence, half speed, -4 on Search and most Strength and Dexterity skills; every foe has total concealment from it (half its attacks miss).", [NO_DEX, HALF_SPEED, ...skillsMod(-4, BLIND_SKILLS2)], ["flat", "blind", "half_speed"]),
+  blown_away: condition2("Blown Away", "Knocked down and rolled 1d4 x 10 feet by the wind, taking 1d4 nonlethal each 10 feet: put prone on too."),
+  checked: condition2("Held Back", "The wind keeps it from moving against it."),
+  deafened: condition2("Deafened", "-4 initiative; fails every Listen check.", [mod2("initiative", -4)], ["deaf"]),
+  disabled: condition2("Disabled", "At 0 hit points: a move or an attack action a turn, not both, at half speed; an attack or anything strenuous then costs 1 hit point.", [HALF_SPEED], ["one_action", "half_speed"]),
+  dying: condition2("Dying", "Below 0 hit points: unconscious, and each of its turns a Fortitude save against 20 steadies it, else it loses 1 hit point.", [], ["no_actions", "helpless"]),
+  grappling: condition2("Grappled", "Held with a foe: nothing but a bare-handed or light weapon's attack, or breaking free; no Dexterity bonus to defence against others.", [NO_DEX], ["flat", "held"]),
+  helpless: condition2("Helpless", "Bound, asleep or paralysed: defence is 5 + size, with no Dexterity, class or armour bonus; it can be slain with one blow.", DEFENCELESS, ["helpless", "flat", "no_actions"]),
+  paralyzed: condition2("Paralysed", "Cannot move or act, only think: its Strength and Dexterity count as 0, and it is helpless.", DEFENCELESS, ["helpless", "flat", "no_actions"]),
+  pinned: condition2("Pinned", "Held down in a grapple: -4 defence against melee and no Dexterity bonus to it; cannot move.", [mod2("ac.melee", -4), NO_DEX], ["flat", "held"]),
+  prone: condition2("Prone", "On the ground: -4 to its melee attacks, -2 to its ranged ones; -4 defence against melee, +4 against ranged attacks from beyond the next square; standing is a move action.", [mod2("attack.melee", -4), mod2("attack.ranged", -2), mod2("ac.melee", -4), mod2("ac.ranged", 4)]),
+  unconscious: condition2("Unconscious", "Knocked out: helpless, defence 5 + size.", DEFENCELESS, ["helpless", "flat", "no_actions"])
+};
+var MODERN_WEAPON_COLUMNS = {
+  ...WEAPON_COLUMNS,
+  size: { type: "text", optional: true, doc: "The weapon's own size: tiny and small are light, large takes two hands, huge two hands and a rest" },
+  hands: { type: "text", optional: true, doc: "How it is held: one, two, or two braced on a rest or a mount" },
+  splash: { type: "int", optional: true, doc: "Harm to everyone within 5 feet of where it bursts" },
+  text: { type: "text", optional: true, doc: "What it does beyond its numbers, in words" }
+};
+var BALLISTIC = ["ballistic"];
+var FIRE = { single: ["single"], semi: ["single", "semi"], select: ["single", "semi", "auto"], auto: ["auto"] };
+var NO_CRITICAL = 21;
+function gun(label2, damage2, range, fire2, magazine, kind, size, hands, more = {}) {
+  return {
+    label: label2,
+    damage: damage2,
+    threat: more.threat ?? 20,
+    multiplier: more.multiplier ?? 2,
+    ...range !== null ? { range } : {},
+    proficiency: more.proficiency ?? "personal_firearms",
+    held: "projectile",
+    types: more.types ?? BALLISTIC,
+    ...fire2.length > 0 ? { fire: [...fire2] } : {},
+    ...magazine !== null ? { magazine } : {},
+    ...kind !== null ? { magazine_kind: kind } : {},
+    ...more.area !== undefined ? { area: more.area } : {},
+    ...more.save !== undefined ? { save: more.save } : {},
+    size,
+    hands,
+    ...more.text !== undefined ? { text: more.text } : {},
+    ...more.modifiers !== undefined ? { modifiers: more.modifiers } : {}
+  };
+}
+var handgun = (label2, damage2, range, fire2, magazine, kind, size, more = {}) => gun(label2, damage2, range, fire2, magazine, kind, size, "one", more);
+var longarm = (label2, damage2, range, fire2, magazine, kind, size, more = {}) => gun(label2, damage2, range, fire2, magazine, kind, size, size === "huge" ? "two, braced" : "two", more);
+var SHOTGUN = "Its damage drops by 1 for each range increment past the first.";
+var LONGARM = "-4 to attack a foe in the next square.";
+function melee(label2, damage2, threat, proficiency, held3, types, size, more = {}) {
+  return {
+    label: label2,
+    damage: damage2,
+    threat,
+    multiplier: 2,
+    ...more.range !== undefined ? { range: more.range } : {},
+    proficiency,
+    held: held3,
+    types,
+    ...more.nonlethal ? { nonlethal: true } : {},
+    ...more.finesse ? { finesse: true } : {},
+    size,
+    hands: held3 === "two" ? "two" : "one",
+    ...more.text !== undefined ? { text: more.text } : {}
+  };
+}
+function blast(label2, damage2, types, radius, dc, range, size, text6, more = {}) {
+  return {
+    label: label2,
+    damage: damage2,
+    threat: more.threat ?? NO_CRITICAL,
+    multiplier: more.threat !== undefined ? 2 : 1,
+    ...range !== null ? { range } : {},
+    proficiency: "",
+    held: "thrown",
+    types,
+    ...radius !== null ? { area: radius } : {},
+    ...dc !== null ? { save: { save: "ref", dc, half: true } } : {},
+    ...more.splash !== undefined ? { splash: more.splash } : {},
+    size,
+    hands: "one",
+    text: text6
+  };
+}
+var S2 = ["slashing"];
+var P2 = ["piercing"];
+var B2 = ["bludgeoning"];
+var weaponRows = {
+  pistol_9mm: handgun("Pistol, 9mm", "2d6", 40, FIRE.semi, 15, "box", "small"),
+  pistol_9mm_compact: handgun("Pistol, 9mm, pocket", "2d6", 30, FIRE.semi, 8, "box", "tiny"),
+  pistol_9mm_high_capacity: handgun("Pistol, 9mm, high-capacity", "2d6", 30, FIRE.semi, 17, "box", "small"),
+  pistol_10mm: handgun("Pistol, 10mm", "2d6", 40, FIRE.semi, 15, "box", "small"),
+  pistol_10mm_slim: handgun("Pistol, 10mm, slim", "2d6", 30, FIRE.semi, 9, "box", "small"),
+  pistol_45: handgun("Pistol, .45", "2d6", 30, FIRE.semi, 7, "box", "small"),
+  pistol_32: handgun("Pistol, .32", "2d4", 30, FIRE.semi, 7, "box", "small"),
+  pistol_50: handgun("Pistol, .50 magnum", "2d8", 40, FIRE.semi, 8, "box", "medium"),
+  derringer: handgun("Derringer, two-shot", "2d6", 10, FIRE.single, 2, "internal", "tiny"),
+  revolver_22: handgun("Revolver, .22", "2d4", 20, FIRE.semi, 6, "cylinder", "tiny"),
+  revolver_38: handgun("Revolver, .38", "2d6", 30, FIRE.semi, 6, "cylinder", "small"),
+  revolver_357: handgun("Revolver, .357 magnum", "2d6", 40, FIRE.semi, 6, "cylinder", "medium"),
+  revolver_44: handgun("Revolver, .44 magnum", "2d8", 30, FIRE.semi, 6, "cylinder", "medium"),
+  machine_pistol_9mm: handgun("Machine pistol, 9mm", "2d6", 40, FIRE.select, 32, "box", "medium"),
+  machine_pistol_9mm_compact: handgun("Machine pistol, 9mm, compact", "2d6", 30, FIRE.select, 20, "box", "medium"),
+  machine_pistol_45: handgun("Machine pistol, .45", "2d6", 40, FIRE.select, 30, "box", "medium"),
+  machine_pistol_32: handgun("Machine pistol, .32", "2d4", 40, FIRE.select, 20, "box", "medium"),
+  assault_rifle_556: longarm("Assault rifle, 5.56mm", "2d8", 80, FIRE.select, 30, "box", "large", { text: LONGARM }),
+  carbine_556: longarm("Carbine, 5.56mm", "2d8", 60, FIRE.select, 30, "box", "large", { text: LONGARM }),
+  rifle_ar15: longarm("Rifle, semi-automatic 5.56mm", "2d8", 80, FIRE.semi, 30, "box", "large", { text: LONGARM }),
+  assault_rifle_762r: longarm("Assault rifle, 7.62mm short", "2d8", 70, FIRE.select, 30, "box", "large", { text: LONGARM }),
+  battle_rifle_762: longarm("Battle rifle, 7.62mm", "2d10", 90, FIRE.select, 20, "box", "large", { text: LONGARM }),
+  smg_9mm: longarm("Submachine gun, 9mm", "2d6", 50, FIRE.select, 30, "box", "large", { text: LONGARM }),
+  smg_9mm_short: longarm("Submachine gun, 9mm, short", "2d6", 40, FIRE.select, 15, "box", "medium", { text: LONGARM }),
+  smg_9mm_20: longarm("Submachine gun, 9mm, 20 rounds", "2d6", 40, FIRE.select, 20, "box", "large", { text: LONGARM }),
+  sniper_rifle_762: longarm("Sniper rifle, 7.62mm", "2d10", 90, FIRE.semi, 5, "box", "large", { text: LONGARM }),
+  sniper_rifle_50: longarm("Sniper rifle, .50", "2d12", 120, FIRE.semi, 11, "box", "huge", { text: LONGARM }),
+  rifle_hunting_308: longarm("Hunting rifle, bolt-action", "2d10", 80, FIRE.single, 5, "internal", "large", { text: LONGARM }),
+  rifle_lever_action: longarm("Rifle, lever-action", "2d10", 90, FIRE.semi, 6, "internal", "large", { text: LONGARM }),
+  rifle_22: longarm("Rifle, .22", "2d4", 50, FIRE.semi, 10, "box", "large", { text: LONGARM }),
+  shotgun_12ga: longarm("Shotgun, pump-action 12 gauge", "2d8", 30, FIRE.single, 6, "internal", "large", { text: `${SHOTGUN} ${LONGARM}` }),
+  shotgun_12ga_semi: longarm("Shotgun, semi-automatic 12 gauge", "2d8", 40, FIRE.semi, 7, "internal", "large", { text: `${SHOTGUN} ${LONGARM}` }),
+  shotgun_12ga_box: longarm("Shotgun, 12 gauge, box-fed", "2d8", 30, FIRE.semi, 5, "box", "large", { text: `${SHOTGUN} ${LONGARM}` }),
+  shotgun_10ga: longarm("Shotgun, pump-action 10 gauge", "2d10", 30, FIRE.single, 5, "internal", "large", { text: `${SHOTGUN} ${LONGARM}` }),
+  shotgun_sawed_off: longarm("Shotgun, sawed-off", "2d8", 10, FIRE.semi, 2, "internal", "medium", { text: `${SHOTGUN} Loaded full, both barrels at once: -2 to attack and one more die, both shells (the shot \`double\`, which needs no feat with it).` }),
+  machine_gun_medium: longarm("Machine gun, medium", "2d10", 100, FIRE.auto, 100, "linked", "huge", { text: `Fires only automatic. A belt of linked rounds feeds it. ${LONGARM}` }),
+  machine_gun_heavy: gun("Machine gun, heavy", "2d12", 110, FIRE.auto, 100, "linked", "huge", "two, mounted", { proficiency: "heavy_machine_guns", text: "Fires only automatic, from a mount. A belt of linked rounds feeds it." }),
+  rocket_launcher: gun("Rocket launcher, light", "10d6", 150, FIRE.single, 1, "internal", "large", "two", {
+    proficiency: "rocket_launchers",
+    types: [],
+    threat: NO_CRITICAL,
+    multiplier: 1,
+    area: 10,
+    save: { save: "ref", dc: 18, half: true },
+    text: "Readying the tube is a move action; it arms only 30 feet or more away, and is thrown away once fired. Its rocket bursts as an explosive does: name the square and give its harm to all within 10 feet. It ignores 10 of an object's hardness."
+  }),
+  grenade_launcher: gun("Grenade launcher", "3d6", 70, FIRE.single, 1, "internal", "large", "two", {
+    proficiency: "grenade_launchers",
+    types: S2,
+    threat: NO_CRITICAL,
+    multiplier: 1,
+    area: 10,
+    save: { save: "ref", dc: 15, half: true },
+    text: "Fires a 40mm grenade at a square, as an explosive thrown farther: its harm is the round's (a fragmentation round's here)."
+  }),
+  compound_bow: gun("Compound bow", "1d8", 40, [], null, null, "large", "two", { proficiency: "archaic", types: P2, modifiers: [mod2("damage.weapon.compound_bow", "mod(self, 'str')", { note: "Strength" })], text: "Adds its archer's Strength to damage." }),
+  crossbow: gun("Crossbow", "1d10", 40, FIRE.single, 1, "internal", "medium", "two", { proficiency: "simple", types: P2, threat: 19, text: "Loading a bolt is a move action." }),
+  flamethrower: gun("Flamethrower", "3d6", null, FIRE.single, 10, "internal", "large", "two", {
+    proficiency: "",
+    types: ["fire"],
+    threat: NO_CRITICAL,
+    multiplier: 1,
+    save: { save: "ref", dc: 15, half: true },
+    text: "No attack roll: a line 5 feet wide and 30 long, everyone in it harmed, a Reflex save against 15 for half (cover adds to the save). Name who stands in the line. What it harms burns for 1d6 a round until put out."
+  }),
+  javelin: melee("Javelin", "1d6", 20, "simple", "thrown", P2, "medium", { range: 30, text: "In the hand, it is always used untrained." }),
+  pepper_spray: gun("Pepper spray", "0", 5, FIRE.single, 1, "internal", "tiny", "one", { proficiency: "simple", types: [], threat: NO_CRITICAL, multiplier: 1, text: "A touch attack (say touch), no farther than 5 increments: a hit asks for a Fortitude save against 15, or blinded for 1d4 rounds." }),
+  shuriken: melee("Throwing star", "1", 20, "archaic", "thrown", P2, "tiny", { range: 10 }),
+  taser: gun("Taser", "1d4", 5, FIRE.single, 1, "internal", "small", "one", { proficiency: "simple", types: ["electricity"], threat: NO_CRITICAL, multiplier: 1, text: "A hit asks for a Fortitude save against 15, or paralysed for 1d6 rounds. Reloading it takes a full round." }),
+  whip: gun("Whip", "1d2", 15, [], null, null, "small", "one", { proficiency: "simple", types: S2, text: "Reaches 15 feet and no farther, with no penalty for range; trips with a touch attack, and adds +2 to disarm." }),
+  unarmed_strike: CORE_WEAPONS.unarmed_strike ?? {},
+  club: CORE_WEAPONS.club ?? {},
+  brass_knuckles: melee("Brass knuckles", "1d4", 20, "simple", "light", B2, "tiny"),
+  cleaver: melee("Cleaver", "1d6", 19, "simple", "light", S2, "small"),
+  knife: melee("Knife", "1d4", 19, "simple", "light", P2, "tiny", { range: 10, finesse: true }),
+  hunting_knife: melee("Hunting knife", "1d4", 19, "simple", "light", P2, "tiny", { range: 10, finesse: true }),
+  pocketknife: melee("Pocketknife", "1d4", 19, "simple", "light", P2, "tiny", { finesse: true }),
+  metal_baton: melee("Baton", "1d6", 19, "simple", "one", B2, "medium"),
+  baton_expandable: melee("Expandable baton", "1d6", 19, "simple", "one", B2, "medium"),
+  tonfa: melee("Side-handle baton", "1d6", 20, "simple", "one", B2, "medium"),
+  sap: melee("Sap", "1d6", 20, "simple", "light", B2, "small", { nonlethal: true }),
+  stun_gun: melee("Stun gun", "1d3", 20, "simple", "light", ["electricity"], "tiny", { text: "A touch (say touch): a hit asks for a Fortitude save against 15, or paralysed for 1d4 rounds." }),
+  pistol_whip: melee("Pistol, as a club", "1d4", 20, "simple", "light", B2, "small"),
+  rifle_butt: melee("Rifle butt", "1d6", 20, "simple", "two", B2, "large"),
+  hatchet: melee("Hatchet", "1d6", 20, "archaic", "light", S2, "small", { range: 10 }),
+  machete: melee("Machete", "1d6", 19, "archaic", "light", S2, "small"),
+  straight_razor: melee("Straight razor", "1d4", 19, "archaic", "light", S2, "tiny", { finesse: true }),
+  sword_cane: melee("Sword cane", "1d6", 18, "archaic", "one", P2, "medium"),
+  longsword: melee("Longsword", "1d8", 19, "archaic", "one", S2, "medium"),
+  rapier: melee("Rapier", "1d6", 18, "archaic", "one", P2, "medium", { finesse: true }),
+  spear: melee("Spear", "1d8", 20, "archaic", "two", P2, "large", { range: 20 }),
+  quarterstaff: { ...melee("Quarterstaff", "1d6", 20, "archaic", "two", B2, "large"), double: true },
+  kukri: melee("Kukri", "1d4", 18, "exotic_melee", "light", S2, "small"),
+  nunchaku: melee("Nunchaku", "1d6", 20, "exotic_melee", "light", B2, "small"),
+  chainsaw: melee("Chainsaw", "3d6", 20, "exotic_melee", "two", S2, "large", { text: "Starting it is a move action." }),
+  grenade_fragmentation: blast("Fragmentation grenade", "4d6", S2, 20, 15, 10, "tiny", "Pulling the pin is a free action."),
+  grenade_40mm: blast("40mm fragmentation round", "3d6", S2, 10, 15, null, "tiny", "Fired only from a grenade launcher, and arms only 40 feet or more away."),
+  plastic_explosive: blast("Plastic explosive, one block", "4d6", ["concussion"], 10, 18, null, "small", "Each block more adds 2d6 and 2 feet; joining them is an Explosives check against 15. It needs a detonator."),
+  detonating_cord: blast("Detonating cord, 50 feet", "2d6", ["fire"], null, 12, null, "medium", "Laid through up to ten squares, it harms everyone in each; doubled back in one square, +1d6 for each 5 feet more, 4d6 more at most. It needs a detonator."),
+  dynamite: blast("Dynamite, one stick", "2d6", ["concussion"], 5, 15, 10, "tiny", "Each stick more within the first's burst adds 1d6 (10d6 at most) and 5 feet (20 at most). Lighting the fuse is a move action."),
+  grenade_smoke: blast("Smoke grenade", "0", [], null, null, 10, "small", "Smoke fills the four squares about it, then 10 feet, then 15: total concealment inside (half of attacks through it miss), gone after ten rounds, sooner in wind."),
+  grenade_tear_gas: blast("Tear gas grenade", "0", [], null, null, 10, "small", "Gas spreads 5, 10, then 15 feet over three rounds: a Fortitude save against 15 each round inside, or nauseated while inside and 1d6 rounds after; a gas mask keeps it out, a wet cloth gives +2. Gone after ten rounds, four in a moderate wind, one in a strong one."),
+  grenade_thermite: blast("Thermite grenade", "6d6", ["fire"], 5, 12, 10, "small", "Burns through what it lies on."),
+  grenade_white_phosphorus: blast("White phosphorus grenade", "2d6", ["fire"], 20, 12, 10, "small", "Those it harms take 1d6 fire more the next round and may catch fire; it smokes within 5 feet."),
+  acid_flask: blast("Acid, a flask", "1d6", ["acid"], null, null, 10, "tiny", "A touch attack (say touch) at one foe: the harm to it, 1 to all within 5 feet; thrown at a square, only the splash.", { splash: 1, threat: 20 }),
+  fire_bottle: blast("Fire bottle", "1d6", ["fire"], null, null, 10, "small", "Lighting the rag is a move action; it bursts in two rounds or when it strikes. A touch attack (say touch) at one foe: the harm to it, 1 to all within 5 feet, and 1d6 fire more the next round to the one struck.", { splash: 1, threat: 20 })
+};
+var SHOTGUNS = ["shotgun_12ga", "shotgun_12ga_semi", "shotgun_12ga_box", "shotgun_10ga", "shotgun_sawed_off"];
+for (const [id, row] of Object.entries(weaponRows)) {
+  const more = [];
+  if (row.proficiency === "personal_firearms" && String(row.hands).startsWith("two"))
+    more.push(mod2(`attack.weapon.${id}`, -4, { when: "distance <= 5", note: "a longarm at the next square" }));
+  if (SHOTGUNS.includes(id))
+    more.push(mod2(`damage.weapon.${id}`, `-max(0, ceil(distance / ${Number(row.range)}) - 1)`, { note: "shot spreading with range" }));
+  if (more.length > 0)
+    row.modifiers = [...Array.isArray(row.modifiers) ? row.modifiers : [], ...more];
+}
+var MODERN_ARMOR_COLUMNS = {
+  weight: ARMOR_COLUMNS.weight ?? { type: "text" },
+  kind: { type: "text", optional: true, doc: "impromptu, concealable, tactical or archaic" },
+  unskilled_bonus: { type: "int", doc: "What it adds to defence for a wearer without its training" },
+  speed: { type: "int", doc: "The speed it leaves a wearer whose speed is 30 feet" }
+};
+function vest(label2, weight, kind, bonus, unskilled, maxDex, check3, speed) {
+  const level = { light: 1, medium: 2, heavy: 3 }[weight];
+  return {
+    label: label2,
+    bonus,
+    type: "armor",
+    max_dex: maxDex,
+    check: check3,
+    weight,
+    kind,
+    unskilled_bonus: unskilled,
+    speed,
+    modifiers: [
+      mod2("armor_weight", level, { limit: true, note: `${weight} armour` }),
+      ...unskilled < bonus ? [mod2("ac", unskilled - bonus, { type: "armor", when: `not has_trait(self, 'armor_${weight}') and ${DEFENDED}`, note: "worn without its training" })] : [],
+      mod2("ac", -bonus, { type: "armor", when: HELPLESS, note: "helpless" }),
+      ...speed < 30 ? [mod2("speed", speed === 25 ? -5 : "self.base_speed >= 30 ? -10 : -5", { note: label2 })] : []
+    ]
+  };
+}
+var armorRows2 = {
+  leather_jacket: vest("Leather jacket", "light", "impromptu", 1, 1, 8, 0, 30),
+  leather_armor: vest("Leather armour", "light", "archaic", 2, 1, 6, 0, 30),
+  undercover_shirt: vest("Undercover shirt", "light", "concealable", 2, 1, 7, 0, 30),
+  pouch_vest: vest("Pull-up pouch vest", "light", "concealable", 2, 1, 6, -1, 30),
+  undercover_vest: vest("Undercover vest", "light", "concealable", 3, 1, 5, -2, 30),
+  concealable_vest: vest("Concealable vest", "medium", "concealable", 4, 2, 4, -3, 25),
+  chainmail_shirt: vest("Chainmail shirt", "medium", "archaic", 5, 2, 2, -5, 20),
+  light_duty_vest: vest("Light-duty vest", "medium", "tactical", 5, 2, 3, -4, 25),
+  tactical_vest: vest("Tactical vest", "medium", "tactical", 6, 2, 2, -5, 25),
+  special_response_vest: vest("Special response vest", "heavy", "tactical", 7, 3, 1, -6, 20),
+  plate_mail: vest("Plate armour", "heavy", "archaic", 8, 3, 1, -6, 20),
+  forced_entry_suit: vest("Forced-entry suit", "heavy", "tactical", 9, 3, 0, -8, 20),
+  body_armor_soft: vest("Soft body armour vest", "light", "concealable", 3, 1, 5, -2, 30),
+  plate_carrier: vest("Plate carrier", "heavy", "tactical", 7, 3, 1, -6, 20),
+  helmet_ballistic: { ...vest("Ballistic helmet", "light", "tactical", 1, 1, 8, 0, 30), modifiers: [mod2("armor_weight", 1, { limit: true, note: "light armour" })] }
+};
+function wears(label2, bonus, maxDex, check3, speed = 0) {
+  return wearing(label2, [mod2("ac", bonus, { type: "armor" }), mod2("max_dex", maxDex, { limit: true }), ...check3 < 0 ? [mod2("armor_check", check3)] : [], ...speed < 0 ? [mod2("speed", speed)] : []]);
+}
+var ORDINARY = { action_points: 0, base_speed: 30, size: "medium" };
+var creatureRows2 = {
+  police_officer: {
+    name: "Police officer",
+    kind: "person",
+    fields: {
+      ...ORDINARY,
+      str: 12,
+      dex: 14,
+      con: 13,
+      int: 10,
+      wis: 12,
+      cha: 10,
+      classes: { tough: 2 },
+      hit_dice: 16,
+      hp: 18,
+      d20_traits: ["personal_firearms_proficiency", "armor_light", "point_blank_shot", "remain_conscious", { id: "occupation_law_enforcement", choice: "drive" }, { id: "occupation_law_enforcement", choice: "intimidate" }],
+      d20_effects: [wears("Soft body armour vest", 3, 5, -2)],
+      ranks: { drive: 5, intimidate: 5, spot: 5 }
+    },
+    carries: ["pistol_9mm", "baton_expandable", "pepper_spray"],
+    cr: "1",
+    description: "A patrol officer in a vest under the uniform shirt, with a pistol, a baton and pepper spray, and a radio to call for more."
+  },
+  thug: {
+    name: "Thug",
+    kind: "person",
+    fields: {
+      ...ORDINARY,
+      str: 15,
+      dex: 12,
+      con: 13,
+      int: 8,
+      wis: 10,
+      cha: 10,
+      classes: { strong: 1 },
+      hit_dice: 8,
+      hp: 9,
+      d20_traits: ["brawl", "personal_firearms_proficiency", "melee_smash", { id: "occupation_criminal", choice: "hide" }, { id: "occupation_criminal", choice: "knowledge_streetwise" }],
+      d20_effects: [wears("Leather jacket", 1, 8, 0)],
+      ranks: { climb: 4, jump: 2, knowledge_streetwise: 2 }
+    },
+    carries: ["revolver_38", "brass_knuckles"],
+    cr: "1/2",
+    description: "Hired muscle in a leather jacket, quick with his fists and slower to draw the cheap revolver in his waistband."
+  },
+  security_guard: {
+    name: "Security guard",
+    kind: "person",
+    fields: {
+      ...ORDINARY,
+      str: 13,
+      dex: 11,
+      con: 14,
+      int: 10,
+      wis: 12,
+      cha: 9,
+      classes: { tough: 1 },
+      hit_dice: 10,
+      hp: 12,
+      d20_traits: ["personal_firearms_proficiency", "armor_light", "remain_conscious"],
+      d20_effects: [wears("Soft body armour vest", 3, 5, -2)],
+      ranks: { spot: 4, intimidate: 4, drive: 4 }
+    },
+    carries: ["pistol_9mm", "baton_expandable"],
+    cr: "1/2",
+    description: "A guard on a night round of a warehouse or an office block, with a holstered pistol he hopes never to draw."
+  },
+  soldier: {
+    name: "Soldier",
+    kind: "person",
+    fields: {
+      ...ORDINARY,
+      str: 14,
+      dex: 13,
+      con: 13,
+      int: 10,
+      wis: 12,
+      cha: 8,
+      classes: { strong: 3 },
+      hit_dice: 18,
+      hp: 21,
+      d20_traits: ["personal_firearms_proficiency", "advanced_firearms_proficiency", "armor_light", "armor_medium", "melee_smash", "improved_melee_smash", { id: "occupation_military", choice: "hide" }, { id: "occupation_military", choice: "navigate" }],
+      d20_effects: [wears("Tactical vest", 6, 2, -5, -5)],
+      ranks: { climb: 6, jump: 6, knowledge_tactics: 6 }
+    },
+    carries: ["assault_rifle_556", "pistol_9mm", "grenade_fragmentation"],
+    cr: "2",
+    description: "An infantry soldier in a tactical vest, with an assault rifle, a sidearm and a grenade, trained to fire in bursts."
+  },
+  bystander: {
+    name: "Bystander",
+    kind: "person",
+    fields: {
+      ...ORDINARY,
+      str: 10,
+      dex: 10,
+      con: 10,
+      int: 11,
+      wis: 10,
+      cha: 12,
+      classes: { charismatic: 1 },
+      hit_dice: 6,
+      hp: 6,
+      d20_traits: ["alertness", "trustworthy", "fast_talk"],
+      ranks: { diplomacy: 4, bluff: 4, gather_information: 4, knowledge_current_events: 4, knowledge_popular_culture: 4, perform: 4, profession: 4 }
+    },
+    cr: "1/4",
+    description: "Someone going about the day, who talks easily and wants no part of a fight."
+  },
+  guard_dog: {
+    name: "Guard dog",
+    kind: "person",
+    fields: {
+      str: 15,
+      dex: 15,
+      con: 15,
+      int: 2,
+      wis: 12,
+      cha: 6,
+      racial_hd: 2,
+      hit_dice: 9,
+      hp: 13,
+      natural_armor: 4,
+      base_speed: 40,
+      size: "medium",
+      action_points: 0,
+      d20_traits: ["animal", "natural_armor", "low_light_vision", "scent", "trip_bite", "alertness"],
+      ranks: { listen: 2, spot: 2, jump: 2, survival: 1 }
+    },
+    attacks: [natural("Bite", "1d6", { types: P2, held: "two" })],
+    cr: "1",
+    description: "A big trained dog kept to guard a yard, that bites and drags an intruder down by the leg."
+  }
+};
+var difficultyRows = {
+  ...DIFFICULTIES,
+  superheroic: difficulty("Superheroic", 35, "Beyond nearly everyone.")
+};
+var DAILY3 = {
+  defensive_roll: dailyGauge("Defensive roll", "has_trait(self, 'defensive_roll') ? 1 : 0")
+};
+var LEVEL = "max(self.level, levels(self))";
+var PER_LEVEL = "max(1, levels(self) + self.racial_hd)";
+var NEGATIVE2 = "self.hp < 0 and self.hp > -10";
+var CLASS_DEFENCE = "min(class_sum(self, 'defence'), limit(self, 'defended', 99))";
+var SHOTS = {
+  single: { needs: "single", rounds: 1 },
+  double: { needs: "semi", rounds: 2, attack: -2, dice: 1, trait: "double_tap", without: { attack: 0 } },
+  burst: { needs: "auto", rounds: 5, attack: -4, dice: 2, trait: "burst_fire", without: { attack: 0 } },
+  auto: { needs: "auto", rounds: 10, area: 10, save: "ref", dc: 15, defence: 10, trait: "advanced_firearms_proficiency", without: { attack: -4 } }
+};
+var FULL_ROUND = { standard: 1, move: 1, full: 1 };
+var HELD = `table('${T2.weapons}', weapon, 'held')`;
+var D202 = {
+  abilities: [...D20_ABILITY_IDS],
+  mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
+  kinds: ["person"],
+  defaultSize: "medium",
+  bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
+  tables: { ...T2 },
+  totals: {
+    ...familyTotals({ skills: T2.skills, weapons: T2.weapons, defence: CLASS_DEFENCE }),
+    damage: `bonus(self, 'damage.weapon.' + weapon + (${HELD} == 'projectile' or ${HELD} == 'thrown' ? ',damage.ranged' : ',damage.melee'))`,
+    grapple: "class_sum(self, 'attack') + bonus(self, 'base_attack') + mod(self, 'str') + size_mod(self, 'grapple') + bonus_without(self, 'grapple', 'size')",
+    reputation: "class_sum(self, 'reputation') + bonus(self, 'reputation')",
+    damage_threshold: "score(self, 'con') + bonus(self, 'damage_threshold')",
+    action_dice: `${LEVEL} >= 15 ? 3 : ${LEVEL} >= 8 ? 2 : 1`
+  },
+  check: { take: { "10": { value: 10, times: 1 }, "20": { value: 20, times: 20 } }, aid: { dc: 10, bonus: 2 } },
+  save: { autoFail: 1, autoSucceed: 20 },
+  attack: {
+    autoMiss: 1,
+    autoHit: 20,
+    confirm: true,
+    strength: "str",
+    strengthShare: { light: 1, one: 1, two: 1.5, off: 0.5, thrown: 1, projectile: 0 },
+    incrementPenalty: -2,
+    increments: { thrown: 5, projectile: 10 },
+    unskilled: -4,
+    nonlethal: -4,
+    secondary: -5,
+    iterative: { from: 6, step: 5 },
+    totals: { base: "attack.base", melee: "attack.melee", ranged: "attack.ranged", damage: "damage" },
+    shots: SHOTS
+  },
+  hp: {
+    field: "hp",
+    nonlethal: "nonlethal",
+    temporary: "hp_temp",
+    states: [
+      { id: "dead", when: "self.hp <= -10", life: "dead" },
+      { id: "stable", when: `${NEGATIVE2} and under(self, 'stable')` },
+      { id: "dying", when: `${NEGATIVE2} and not under(self, 'stable')`, life: "dying" },
+      { id: "unconscious", when: NEGATIVE2 },
+      { id: "disabled", when: "self.hp == 0" }
+    ],
+    dying: {
+      state: "dying",
+      lose: 1,
+      stable: "stable",
+      roll: {
+        id: "stabilize",
+        dice: "1d20",
+        modifier: "total(self, 'save.fort')",
+        dc: "20",
+        bands: [{ outcome: "worse", natural: { max: 1 } }, { outcome: "stable", natural: { min: 20 } }, { outcome: "stable", margin: { min: 0 } }, { outcome: "worse" }],
+        pass: ["stable"]
+      }
+    },
+    massive: { when: "amount >= total(self, 'damage_threshold') and self.hp >= 0", save: "fort", dc: 15, hp: "-1" },
+    rest: { hours: 8, hp: PER_LEVEL, nonlethal: PER_LEVEL, daily: Object.keys(DAILY3) }
+  },
+  boost: { gauge: "action_points", dice: "total(self, 'action_dice') + 'd6kh1'", rolls: ["check", "save", "attack"] },
+  costs: {
+    ...D20_COSTS,
+    "reload.box": { move: 1 },
+    "reload.cylinder": FULL_ROUND,
+    "reload.internal": FULL_ROUND,
+    "reload.linked": FULL_ROUND
+  },
+  levels: {
+    progression: "level",
+    hitPoints: "roll",
+    average: "floor(die / 2) + 1",
+    firstMost: true,
+    rankLimit: "(levels(self) + self.racial_hd + 3) / (class_skill(self, skill) ? 1 : 2)",
+    skillPoints: { plus: "mod(self, 'int') + bonus(self, 'skill_points')", min: 1, first: 4 },
+    featEvery: 3,
+    featAt: [1, 1, 3, 6, 9, 12, 15, 18],
+    abilityEvery: 4,
+    experienceBy: "challenge"
+  }
+};
+var BUDGETS = Object.fromEntries(Object.entries(D20_BUDGETS).filter(([id]) => id !== "swift" && id !== "immediate").map(([id, b]) => [id, id === "standard" ? { ...b, label: "Attack action" } : b]));
+var MODERN = {
+  id: "modern",
+  label: "Modern",
+  summary: "Present-day adventure on a d20: six abilities, six classes with levels that add up, a defence of Dexterity, class, armour and size, skills with ranks, feats, talents and occupations as traits, firearms with single shots, double taps, bursts and automatic fire, modern armour and explosives, action points each level gives, Reputation, a damage threshold, hit points down through dying to dead, and experience by challenge.",
+  fields: {
+    ...d20Fields({ hpFloor: -10, rest: PER_LEVEL, sizes: T2.sizes, daily: DAILY3 }),
+    action_points: { type: "number", label: "Action points", min: 0, pool: { max: `5 * ${LEVEL} + floor(${LEVEL} * ${LEVEL} / 4)` } }
+  },
+  checks: {},
+  actions: {},
+  tables: {
+    [T2.skills]: d20Table("skills", T2.skills, "Modern skills", skillRows2),
+    [T2.classes]: d20Table("classes", T2.classes, "Modern classes", classRows2),
+    [T2.tracks]: d20Table("tracks", T2.tracks, "Modern progressions", trackRows, TRACK_COLUMNS2),
+    [T2.traits]: d20Table("traits", T2.traits, "Modern traits", traitRows2),
+    [T2.conditions]: d20Table("conditions", T2.conditions, "Modern conditions", conditionRows2),
+    [T2.sizes]: d20Table("sizes", T2.sizes, "Modern sizes", sizeRows((steps) => [mod2("grapple", steps * 4, { type: "size" }), mod2("skill.hide", steps * -4, { type: "size" })]), SIZE_COLUMNS),
+    [T2.weapons]: d20Table("weapons", T2.weapons, "Modern weapons", weaponRows, MODERN_WEAPON_COLUMNS),
+    [T2.armor]: d20Table("armor", T2.armor, "Modern armour", armorRows2, MODERN_ARMOR_COLUMNS),
+    [T2.creatures]: d20Table("creatures", T2.creatures, "Modern people and animals", creatureRows2),
+    [T2.experience]: d20Table("experience", T2.experience, "Modern experience", experienceRows(20)),
+    [T2.challenges]: d20Table("challenges", T2.challenges, "Modern challenges", CHALLENGE_ROWS),
+    [T2.difficulties]: d20Table("difficulties", T2.difficulties, "Modern difficulties", difficultyRows)
+  },
+  ruleset: {
+    progression: {
+      level: {
+        label: "Level",
+        xpField: "xp",
+        levelField: "level",
+        thresholds: { table: T2.experience, column: "xp" },
+        maxLevel: 20,
+        onLevel: [{ type: "add", args: { entity: "self", field: "action_points", delta: "=5 + floor(level / 2)" } }]
+      }
+    },
+    sheet: d20Sheet({
+      defence: {
+        label: "Defence",
+        rows: [
+          { formula: "total(self, 'ac')", label: "Defence" },
+          { formula: "total(self, 'ac.touch')", label: "Against a touch" },
+          { formula: "total(self, 'ac.flat')", label: "Flat-footed" },
+          { formula: signedTotal("initiative"), label: "Initiative" },
+          { formula: "total(self, 'speed')", label: "Speed" },
+          { formula: "total(self, 'damage_threshold')", label: "Damage threshold" }
+        ]
+      },
+      attack: [
+        { formula: signedTotal("attack.base"), label: "Base attack" },
+        { formula: signedTotal("attack.melee"), label: "Melee" },
+        { formula: signedTotal("attack.ranged"), label: "Ranged" },
+        { formula: signedTotal("grapple"), label: "Grapple" }
+      ],
+      saves: D20_SAVES,
+      skills: SKILLS2.map(([id, label2]) => ({ id, label: label2 })),
+      daily: Object.keys(DAILY3),
+      vitals: [{ pool: "action_points" }, { formula: "total(self, 'action_dice') + 'd6'", label: "Action point dice" }, { formula: signedTotal("reputation"), label: "Reputation" }]
+    }),
+    minLevels: {},
+    adjudication: presetAdjudication("balanced"),
+    combat: { ...d20Combat("self.hp < 0 or under(self, 'unconscious')"), economy: BUDGETS },
+    d20: D202
+  }
+};
+
+// src/packs/starters/modern_slice_of_life_rules.ts
+var MEDIUM2 = { size: "medium", base_speed: 30 };
+var ORDINARY2 = { ...MEDIUM2, action_points: 0 };
+var MODERN_SLICE_OF_LIFE_RULES = {
+  set: MODERN,
+  on: true,
+  sheets: {
+    pov: {
+      str: 12,
+      dex: 13,
+      con: 12,
+      int: 14,
+      wis: 11,
+      cha: 10,
+      ...MEDIUM2,
+      classes: { smart: 1 },
+      hit_dice: 6,
+      hp: 7,
+      xp: 0,
+      level: 1,
+      d20_traits: ["gearhead", "vehicle_expert", { id: "savant", choice: "repair" }, { id: "occupation_blue_collar", choice: "craft_mechanical" }, { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "repair" }],
+      ranks: { repair: 4, craft_mechanical: 4, craft_electronic: 4, disable_device: 4, knowledge_technology: 4, search: 4, profession: 4, computer_use: 2, research: 2, navigate: 2, knowledge_current_events: 2, investigate: 2, drive: 2, spot: 2, swim: 2 }
+    },
+    marcus_delgado: {
+      str: 10,
+      dex: 11,
+      con: 11,
+      int: 15,
+      wis: 13,
+      cha: 13,
+      ...ORDINARY2,
+      classes: { smart: 2 },
+      hit_dice: 10,
+      hp: 10,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["gearhead", "trustworthy", "vehicle_expert", { id: "savant", choice: "repair" }, { id: "occupation_blue_collar", choice: "repair" }, { id: "occupation_blue_collar", choice: "craft_mechanical" }, { id: "occupation_blue_collar", choice: "drive" }],
+      ranks: { repair: 5, craft_mechanical: 5, craft_electronic: 5, disable_device: 5, knowledge_business: 5, knowledge_technology: 5, search: 5, profession: 5, computer_use: 3, research: 3, diplomacy: 2, drive: 2, sense_motive: 2, bluff: 2 }
+    },
+    danny_okafor: {
+      str: 11,
+      dex: 14,
+      con: 11,
+      int: 14,
+      wis: 10,
+      cha: 11,
+      ...ORDINARY2,
+      classes: { fast: 1, smart: 1 },
+      hit_dice: 12,
+      hp: 12,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["gearhead", "vehicle_expert", "increased_speed", { id: "savant", choice: "repair" }, { id: "occupation_blue_collar", choice: "craft_mechanical" }, { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "repair" }],
+      ranks: { repair: 5, craft_mechanical: 5, drive: 5, disable_device: 4, profession: 4, navigate: 3, knowledge_popular_culture: 3, knowledge_technology: 3, sleight_of_hand: 3, balance: 2, computer_use: 2 }
+    },
+    priya_nair: {
+      str: 10,
+      dex: 11,
+      con: 12,
+      int: 14,
+      wis: 12,
+      cha: 13,
+      ...ORDINARY2,
+      classes: { smart: 1, charismatic: 1 },
+      hit_dice: 10,
+      hp: 12,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["trustworthy", "studious", { id: "savant", choice: "knowledge_business" }, "coordinate", { id: "occupation_white_collar", choice: "computer_use" }, { id: "occupation_white_collar", choice: "knowledge_business" }],
+      ranks: { knowledge_business: 5, research: 5, computer_use: 5, knowledge_civics: 5, diplomacy: 5, gather_information: 5, profession: 5, craft_writing: 3, knowledge_current_events: 3, investigate: 3, bluff: 2, sense_motive: 2, drive: 2, perform: 2, spot: 1 }
+    },
+    jess_kowalczyk: {
+      str: 10,
+      dex: 12,
+      con: 11,
+      int: 12,
+      wis: 13,
+      cha: 15,
+      ...ORDINARY2,
+      classes: { charismatic: 1 },
+      hit_dice: 6,
+      hp: 6,
+      xp: 0,
+      level: 1,
+      d20_traits: ["trustworthy", "guide", "fast_talk", { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "intimidate" }, { id: "occupation_blue_collar", choice: "handle_animal" }],
+      ranks: { bluff: 4, diplomacy: 4, gather_information: 4, knowledge_current_events: 4, knowledge_streetwise: 4, profession: 4, intimidate: 2, sense_motive: 2, navigate: 2, drive: 2 }
+    },
+    maddie_kowalczyk: {
+      str: 10,
+      dex: 13,
+      con: 12,
+      int: 12,
+      wis: 13,
+      cha: 13,
+      ...ORDINARY2,
+      classes: { fast: 1 },
+      hit_dice: 8,
+      hp: 9,
+      xp: 0,
+      level: 1,
+      d20_traits: ["alertness", "athletic", "increased_speed", { id: "occupation_student", choice: "knowledge_popular_culture" }, { id: "occupation_student", choice: "research" }, { id: "occupation_student", choice: "computer_use" }],
+      ranks: { hide: 4, move_silently: 4, knowledge_popular_culture: 4, tumble: 2, balance: 2, sleight_of_hand: 2, spot: 2, navigate: 2, swim: 2 }
+    },
+    dale_whitcomb: {
+      str: 12,
+      dex: 10,
+      con: 13,
+      int: 11,
+      wis: 14,
+      cha: 10,
+      ...ORDINARY2,
+      classes: { tough: 2 },
+      hit_dice: 16,
+      hp: 18,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["vehicle_expert", "guide", "endurance", "remain_conscious", { id: "occupation_rural", choice: "drive" }, { id: "occupation_rural", choice: "survival" }],
+      ranks: { drive: 5, survival: 5, spot: 5 }
+    },
+    helen_kowalczyk: {
+      str: 8,
+      dex: 9,
+      con: 10,
+      int: 12,
+      wis: 14,
+      cha: 13,
+      ...ORDINARY2,
+      classes: { dedicated: 1 },
+      hit_dice: 6,
+      hp: 6,
+      xp: 0,
+      level: 1,
+      d20_traits: ["alertness", "attentive", "empathy", { id: "occupation_entrepreneur", choice: "diplomacy" }, { id: "occupation_entrepreneur", choice: "knowledge_business" }],
+      ranks: { sense_motive: 4, listen: 4, spot: 4, knowledge_current_events: 4, profession: 4, knowledge_popular_culture: 2, diplomacy: 2 }
+    },
+    nora_whitfield: {
+      str: 10,
+      dex: 11,
+      con: 12,
+      int: 13,
+      wis: 14,
+      cha: 11,
+      ...ORDINARY2,
+      classes: { dedicated: 2 },
+      hit_dice: 10,
+      hp: 12,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["medical_expert", "attentive", "endurance", "healing_knack", { id: "occupation_doctor", choice: "treat_injury" }, { id: "occupation_doctor", choice: "craft_pharmaceutical" }],
+      ranks: { treat_injury: 5, craft_pharmaceutical: 5, knowledge_earth_life_sciences: 5, sense_motive: 5, spot: 5, listen: 3, profession: 2 }
+    },
+    sam_reyes: {
+      str: 12,
+      dex: 14,
+      con: 13,
+      int: 10,
+      wis: 12,
+      cha: 10,
+      ...ORDINARY2,
+      classes: { tough: 2 },
+      hit_dice: 16,
+      hp: 18,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["personal_firearms_proficiency", "armor_light", "point_blank_shot", "remain_conscious", { id: "occupation_law_enforcement", choice: "drive" }, { id: "occupation_law_enforcement", choice: "intimidate" }],
+      ranks: { drive: 5, intimidate: 5, spot: 5 }
+    }
+  }
+};
+
+// src/packs/starters/mystery_manor_rules.ts
+var MEDIUM3 = { size: "medium", base_speed: 30 };
+var ORDINARY3 = { ...MEDIUM3, action_points: 0 };
+var MYSTERY_MANOR_RULES = {
+  set: MODERN,
+  on: false,
+  sheets: {
+    pov: {
+      str: 10,
+      dex: 12,
+      con: 11,
+      int: 15,
+      wis: 13,
+      cha: 11,
+      ...MEDIUM3,
+      classes: { smart: 1 },
+      hit_dice: 6,
+      hp: 6,
+      xp: 0,
+      level: 1,
+      d20_traits: ["meticulous", "studious", { id: "savant", choice: "knowledge_art" }, { id: "occupation_academic", choice: "knowledge_art" }, { id: "occupation_academic", choice: "knowledge_history" }, { id: "occupation_academic", choice: "research" }],
+      ranks: { knowledge_art: 4, knowledge_history: 4, search: 4, investigate: 4, research: 4, decipher_script: 4, forgery: 4, profession: 4, craft_visual_art: 2, knowledge_arcane_lore: 2, knowledge_business: 2, spot: 2, sense_motive: 2, listen: 2 }
+    },
+    sir_alaric: {
+      str: 12,
+      dex: 8,
+      con: 9,
+      int: 15,
+      wis: 11,
+      cha: 15,
+      ...ORDINARY3,
+      classes: { smart: 1, charismatic: 1 },
+      hit_dice: 10,
+      hp: 8,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["trustworthy", "studious", { id: "savant", choice: "knowledge_history" }, "charm", { id: "occupation_dilettante", choice: "spot" }],
+      ranks: { knowledge_history: 5, knowledge_art: 5, research: 5, diplomacy: 5, profession: 5, search: 3, decipher_script: 3, bluff: 3, perform: 3, knowledge_business: 3, intimidate: 3, gather_information: 3, craft_mechanical: 3, navigate: 2, knowledge_earth_life_sciences: 2 }
+    },
+    lady_honoria: {
+      str: 9,
+      dex: 11,
+      con: 11,
+      int: 12,
+      wis: 14,
+      cha: 15,
+      ...ORDINARY3,
+      classes: { charismatic: 2 },
+      hit_dice: 10,
+      hp: 10,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["trustworthy", "iron_will", "alertness", "coordinate", { id: "occupation_dilettante", choice: "spot" }],
+      ranks: { diplomacy: 5, bluff: 5, gather_information: 5, knowledge_current_events: 5, profession: 5, intimidate: 4, knowledge_art: 4, perform: 3, sense_motive: 2, spot: 2 }
+    },
+    rupert_thorne: {
+      str: 13,
+      dex: 14,
+      con: 12,
+      int: 9,
+      wis: 10,
+      cha: 14,
+      ...ORDINARY3,
+      classes: { fast: 1, charismatic: 1 },
+      hit_dice: 12,
+      hp: 14,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["personal_firearms_proficiency", "deceptive", "evasion", "charm", { id: "occupation_military", choice: "drive" }, { id: "occupation_military", choice: "knowledge_tactics" }],
+      ranks: { drive: 5, bluff: 5, ride: 3, diplomacy: 3, gather_information: 2, knowledge_tactics: 2, hide: 2 }
+    },
+    verity_lorne: {
+      str: 9,
+      dex: 13,
+      con: 10,
+      int: 14,
+      wis: 15,
+      cha: 10,
+      ...ORDINARY3,
+      classes: { smart: 1 },
+      hit_dice: 6,
+      hp: 6,
+      xp: 0,
+      level: 1,
+      d20_traits: ["alertness", "meticulous", { id: "savant", choice: "search" }, { id: "occupation_white_collar", choice: "research" }, { id: "occupation_white_collar", choice: "knowledge_business" }],
+      ranks: { research: 4, search: 4, investigate: 4, craft_writing: 4, forgery: 4, decipher_script: 4, knowledge_business: 4, knowledge_civics: 4, profession: 4, spot: 2, listen: 2, sense_motive: 2, hide: 2 }
+    },
+    julian_ashcombe: {
+      str: 10,
+      dex: 10,
+      con: 12,
+      int: 15,
+      wis: 14,
+      cha: 16,
+      ...ORDINARY3,
+      classes: { smart: 1, charismatic: 1 },
+      hit_dice: 10,
+      hp: 12,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["trustworthy", "deceptive", { id: "savant", choice: "knowledge_civics" }, "fast_talk", { id: "occupation_white_collar", choice: "knowledge_civics" }, { id: "occupation_white_collar", choice: "research" }],
+      ranks: { knowledge_civics: 5, knowledge_business: 5, research: 5, diplomacy: 5, bluff: 5, gather_information: 5, profession: 5, decipher_script: 3, forgery: 3, investigate: 3, knowledge_history: 3, intimidate: 2, craft_writing: 2, sense_motive: 2 }
+    },
+    dr_lionel_farrant: {
+      str: 11,
+      dex: 10,
+      con: 11,
+      int: 15,
+      wis: 13,
+      cha: 11,
+      ...ORDINARY3,
+      classes: { dedicated: 2 },
+      hit_dice: 10,
+      hp: 10,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["medical_expert", "attentive", "studious", "healing_knack", { id: "occupation_doctor", choice: "treat_injury" }, { id: "occupation_doctor", choice: "craft_pharmaceutical" }],
+      ranks: { treat_injury: 5, craft_pharmaceutical: 5, knowledge_earth_life_sciences: 5, knowledge_behavioral_sciences: 5, investigate: 5, spot: 3, sense_motive: 3, listen: 2, profession: 2 }
+    },
+    gideon_pell: {
+      str: 11,
+      dex: 12,
+      con: 11,
+      int: 11,
+      wis: 15,
+      cha: 14,
+      ...ORDINARY3,
+      classes: { dedicated: 2 },
+      hit_dice: 10,
+      hp: 10,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["alertness", "attentive", "stealthy", "empathy", { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "intimidate" }, { id: "occupation_blue_collar", choice: "repair" }],
+      ranks: { spot: 5, listen: 5, sense_motive: 5, profession: 5, knowledge_current_events: 3, diplomacy: 2 }
+    },
+    mrs_marsh: {
+      str: 12,
+      dex: 10,
+      con: 14,
+      int: 10,
+      wis: 14,
+      cha: 11,
+      ...ORDINARY3,
+      classes: { dedicated: 1 },
+      hit_dice: 6,
+      hp: 8,
+      xp: 0,
+      level: 1,
+      d20_traits: ["iron_will", "alertness", "empathy", { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "handle_animal" }, { id: "occupation_blue_collar", choice: "repair" }],
+      ranks: { profession: 4, spot: 4, sense_motive: 4, listen: 4, gather_information: 2, knowledge_current_events: 2 }
+    },
+    nell_sparrow: {
+      str: 9,
+      dex: 14,
+      con: 10,
+      int: 9,
+      wis: 13,
+      cha: 10,
+      ...ORDINARY3,
+      classes: { fast: 1 },
+      hit_dice: 8,
+      hp: 8,
+      xp: 0,
+      level: 1,
+      d20_traits: ["alertness", "stealthy", "increased_speed", { id: "occupation_blue_collar", choice: "drive" }, { id: "occupation_blue_collar", choice: "handle_animal" }, { id: "occupation_blue_collar", choice: "repair" }],
+      ranks: { hide: 4, move_silently: 4, balance: 2, sleight_of_hand: 2, spot: 2, listen: 2 }
+    },
+    constable_hobbs: {
+      str: 13,
+      dex: 10,
+      con: 13,
+      int: 10,
+      wis: 13,
+      cha: 10,
+      ...ORDINARY3,
+      classes: { tough: 1, dedicated: 1 },
+      hit_dice: 14,
+      hp: 16,
+      xp: 1000,
+      level: 2,
+      d20_traits: ["attentive", "endurance", "remain_conscious", "empathy", { id: "occupation_law_enforcement", choice: "intimidate" }, { id: "occupation_law_enforcement", choice: "knowledge_civics" }],
+      ranks: { spot: 5, sense_motive: 4, investigate: 3, intimidate: 3, survival: 2 }
+    }
+  }
+};
+
+// src/shared/profiles/classic-revised.ts
+var T3 = {
+  skills: "classic_revised.skills",
+  classes: "classic_revised.classes",
+  tracks: "classic_revised.tracks",
+  traits: "classic_revised.traits",
+  conditions: "classic_revised.conditions",
+  sizes: "classic_revised.sizes",
+  weapons: "classic_revised.weapons",
+  armor: "classic_revised.armor",
+  creatures: "classic_revised.creatures",
+  experience: "classic_revised.experience",
+  challenges: "classic_revised.challenges",
+  difficulties: "classic_revised.difficulties"
+};
+var SKILLS3 = [
+  ["acrobatics", "Acrobatics", "dex", false, true],
+  ["appraise", "Appraise", "int", false, false],
+  ["bluff", "Deceive", "cha", false, false],
+  ["climb", "Climb", "str", false, true],
+  ["craft", "Craft", "int", false, false],
+  ["diplomacy", "Persuade", "cha", false, false],
+  ["disable_device", "Disable Devices", "dex", true, true],
+  ["disguise", "Disguise", "cha", false, false],
+  ["escape_artist", "Slip Free", "dex", false, true],
+  ["fly", "Fly", "dex", false, true],
+  ["handle_animal", "Handle Animals", "cha", true, false],
+  ["heal", "First Aid", "wis", false, false],
+  ["intimidate", "Intimidate", "cha", false, false],
+  ["knowledge_arcana", "Lore (arcane)", "int", true, false],
+  ["knowledge_dungeoneering", "Lore (underground)", "int", true, false],
+  ["knowledge_engineering", "Lore (building)", "int", true, false],
+  ["knowledge_geography", "Lore (lands)", "int", true, false],
+  ["knowledge_history", "Lore (history)", "int", true, false],
+  ["knowledge_local", "Lore (local)", "int", true, false],
+  ["knowledge_nature", "Lore (nature)", "int", true, false],
+  ["knowledge_nobility", "Lore (nobility)", "int", true, false],
+  ["knowledge_planes", "Lore (other planes)", "int", true, false],
+  ["knowledge_religion", "Lore (religion)", "int", true, false],
+  ["linguistics", "Languages", "int", true, false],
+  ["perception", "Perception", "wis", false, false],
+  ["perform", "Perform", "cha", false, false],
+  ["profession", "Profession", "wis", true, false],
+  ["ride", "Ride", "dex", false, true],
+  ["sense_motive", "Read People", "wis", false, false],
+  ["sleight_of_hand", "Deft Hands", "dex", true, true],
+  ["spellcraft", "Spell Lore", "int", true, false],
+  ["stealth", "Stealth", "dex", false, true],
+  ["survival", "Survival", "wis", false, false],
+  ["swim", "Swim", "str", false, true],
+  ["use_magic_device", "Use Magic Items", "cha", true, false]
+];
+var skillRows3 = {};
+for (const [id, label2, ability, trained, acp] of SKILLS3)
+  skillRows3[id] = { label: label2, ability, ...trained ? { trained } : {}, ...acp ? { armor: true } : {} };
+var LORE3 = SKILLS3.map(([id]) => id).filter((id) => id.startsWith("knowledge_"));
+function tracks3(attack2, fort, ref2, will) {
+  return { attack: `attack_${attack2}`, fort: `save_${fort}`, ref: `save_${ref2}`, will: `save_${will}` };
+}
+var classRows3 = {
+  barbarian: {
+    label: "Barbarian",
+    hit_die: 12,
+    tracks: tracks3("good", "good", "poor", "poor"),
+    skill_points: 4,
+    class_skills: ["acrobatics", "climb", "craft", "handle_animal", "intimidate", "knowledge_nature", "perception", "ride", "survival", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "fast_movement", "rage"], 2: ["rage_power", "uncanny_dodge"], 3: ["trap_sense"], 5: ["improved_uncanny_dodge"], 7: ["barbarian_reduction"], 11: ["greater_rage"], 14: ["indomitable_will"], 17: ["tireless_rage"], 20: ["mighty_rage"] })
+  },
+  bard: {
+    label: "Bard",
+    hit_die: 8,
+    tracks: tracks3("average", "poor", "good", "good"),
+    skill_points: 6,
+    class_skills: ["acrobatics", "appraise", "bluff", "climb", "craft", "diplomacy", "disguise", "escape_artist", "intimidate", ...LORE3, "linguistics", "perception", "perform", "profession", "sense_motive", "sleight_of_hand", "spellcraft", "stealth", "use_magic_device"],
+    proficiency: ["simple", "longsword", "rapier", "sap", "short_sword", "shortbow", "whip"],
+    features: features({ 1: ["armor_light", "shield_proficiency", "bardic_knowledge", "bardic_performance"], 2: ["versatile_performance", "well_versed"], 5: ["lore_master"], 10: ["jack_of_all_trades"] })
+  },
+  cleric: {
+    label: "Cleric",
+    hit_die: 8,
+    tracks: tracks3("average", "good", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["appraise", "craft", "diplomacy", "heal", "knowledge_arcana", "knowledge_history", "knowledge_nobility", "knowledge_planes", "knowledge_religion", "linguistics", "profession", "sense_motive", "spellcraft"],
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "cleric_aura", "channel_energy", "domains"] })
+  },
+  druid: {
+    label: "Druid",
+    hit_die: 8,
+    tracks: tracks3("average", "good", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["climb", "craft", "fly", "handle_animal", "heal", "knowledge_geography", "knowledge_nature", "perception", "profession", "ride", "spellcraft", "survival", "swim"],
+    proficiency: ["club", "dagger", "dart", "quarterstaff", "scimitar", "scythe", "sickle", "shortspear", "sling", "spear", "unarmed_strike"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "nature_bond", "nature_sense", "wild_empathy"], 2: ["woodland_stride"], 3: ["trackless_step"], 4: ["resist_natures_lure", "wild_shape"], 9: ["venom_immunity"], 13: ["a_thousand_faces"], 15: ["timeless_body"] })
+  },
+  fighter: {
+    label: "Fighter",
+    hit_die: 10,
+    tracks: tracks3("good", "good", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "intimidate", "knowledge_dungeoneering", "knowledge_engineering", "profession", "ride", "survival", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency", "tower_shield_proficiency", "fighter_bonus_feat"], 2: ["bravery"], 3: ["armor_training"], 5: ["weapon_training"], 19: ["armor_mastery"], 20: ["weapon_mastery"] })
+  },
+  monk: {
+    label: "Monk",
+    hit_die: 8,
+    tracks: tracks3("average", "good", "good", "good"),
+    skill_points: 4,
+    class_skills: ["acrobatics", "climb", "craft", "escape_artist", "intimidate", "knowledge_history", "knowledge_religion", "perception", "perform", "profession", "ride", "sense_motive", "stealth", "swim"],
+    proficiency: ["club", "light_crossbow", "heavy_crossbow", "dagger", "handaxe", "javelin", "kama", "nunchaku", "quarterstaff", "sai", "shortspear", "short_sword", "shuriken", "siangham", "sling", "unarmed_strike"],
+    features: features({ 1: ["improved_unarmed_strike", "flurry_of_blows", "stunning_fist", "monk_unarmed", "monk_ac", "monk_bonus_feat"], 2: ["evasion"], 3: ["monk_speed", "maneuver_training", "still_mind"], 4: ["ki_pool", "slow_fall"], 5: ["high_jump", "purity_of_body"], 7: ["wholeness_of_body"], 9: ["improved_evasion"], 11: ["diamond_body"], 12: ["abundant_step"], 13: ["diamond_soul"], 15: ["quivering_palm"], 17: ["timeless_body", "tongue_of_sun_and_moon"], 19: ["empty_body"], 20: ["perfect_self"] })
+  },
+  paladin: {
+    label: "Paladin",
+    hit_die: 10,
+    tracks: tracks3("good", "good", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["craft", "diplomacy", "handle_animal", "heal", "knowledge_nobility", "knowledge_religion", "profession", "ride", "sense_motive", "spellcraft"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency", "aura_of_good", "detect_evil", "smite_evil"], 2: ["divine_grace", "lay_on_hands"], 3: ["aura_of_courage", "divine_health", "mercy"], 4: ["channel_positive"], 5: ["divine_bond"], 8: ["aura_of_resolve"], 11: ["aura_of_justice"], 14: ["aura_of_faith"], 17: ["aura_of_righteousness"], 20: ["holy_champion"] })
+  },
+  ranger: {
+    label: "Ranger",
+    hit_die: 10,
+    tracks: tracks3("good", "good", "good", "poor"),
+    skill_points: 6,
+    class_skills: ["climb", "craft", "handle_animal", "heal", "intimidate", "knowledge_dungeoneering", "knowledge_geography", "knowledge_nature", "perception", "profession", "ride", "spellcraft", "stealth", "survival", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "shield_proficiency", "favored_enemy", "track", "wild_empathy"], 2: ["combat_style"], 3: ["endurance", "favored_terrain"], 4: ["hunters_bond"], 7: ["woodland_stride"], 8: ["swift_tracker"], 9: ["evasion"], 11: ["quarry"], 12: ["camouflage"], 16: ["improved_evasion"], 17: ["hide_in_plain_sight"], 19: ["improved_quarry"], 20: ["master_hunter"] })
+  },
+  rogue: {
+    label: "Rogue",
+    hit_die: 8,
+    tracks: tracks3("average", "poor", "good", "poor"),
+    skill_points: 8,
+    class_skills: ["acrobatics", "appraise", "bluff", "climb", "craft", "diplomacy", "disable_device", "disguise", "escape_artist", "intimidate", "knowledge_dungeoneering", "knowledge_local", "linguistics", "perception", "perform", "profession", "sense_motive", "sleight_of_hand", "stealth", "swim", "use_magic_device"],
+    proficiency: ["simple", "hand_crossbow", "rapier", "sap", "shortbow", "short_sword"],
+    features: features({ 1: ["armor_light", "sneak_attack", "trapfinding"], 2: ["evasion", "rogue_talent"], 3: ["trap_sense"], 4: ["uncanny_dodge"], 8: ["improved_uncanny_dodge"], 10: ["advanced_talents"], 20: ["master_strike"] })
+  },
+  sorcerer: {
+    label: "Sorcerer",
+    hit_die: 6,
+    tracks: tracks3("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["appraise", "bluff", "craft", "fly", "intimidate", "knowledge_arcana", "profession", "spellcraft", "use_magic_device"],
+    proficiency: ["simple"],
+    features: features({ 1: ["bloodline", "eschew_materials"] })
+  },
+  wizard: {
+    label: "Wizard",
+    hit_die: 6,
+    tracks: tracks3("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["appraise", "craft", "fly", ...LORE3, "linguistics", "profession", "spellcraft"],
+    proficiency: ["club", "dagger", "heavy_crossbow", "light_crossbow", "quarterstaff", "unarmed_strike"],
+    features: features({ 1: ["arcane_bond", "arcane_school", "scribe_scroll"], 5: ["wizard_bonus_feat"] })
+  },
+  warrior: {
+    label: "Warrior",
+    hit_die: 10,
+    tracks: tracks3("good", "good", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "intimidate", "profession", "ride", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] })
+  },
+  adept: {
+    label: "Adept",
+    hit_die: 6,
+    tracks: tracks3("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["craft", "handle_animal", "heal", ...LORE3, "profession", "spellcraft", "survival"],
+    proficiency: ["simple"],
+    features: features({ 1: ["adept_spells"] })
+  },
+  aristocrat: {
+    label: "Aristocrat",
+    hit_die: 8,
+    tracks: tracks3("average", "poor", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["appraise", "bluff", "craft", "diplomacy", "disguise", "handle_animal", "intimidate", ...LORE3, "linguistics", "perception", "perform", "profession", "ride", "sense_motive", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] })
+  },
+  commoner: {
+    label: "Commoner",
+    hit_die: 6,
+    tracks: tracks3("poor", "poor", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "perception", "profession", "ride", "swim"],
+    proficiency: ["unarmed_strike"]
+  },
+  expert: {
+    label: "Expert",
+    hit_die: 8,
+    tracks: tracks3("average", "poor", "poor", "good"),
+    skill_points: 6,
+    class_skills: SKILLS3.map(([id]) => id),
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "expert_trade"] })
+  }
+};
+function honed(skills) {
+  return skills.map((s) => mod2(`skill.${s}`, `ranks(self, '${s}') >= 10 ? 4 : 2`));
+}
+var MANOEUVRE = "+2 to that manoeuvre and to its defence against it, and it gives no attack of opportunity: name it with the manoeuvre.";
+var traitRows3 = {
+  ...SHARED_FEATS,
+  ...SHARED_FEATURES,
+  ...SHARED_CREATURE_TRAITS,
+  acrobatic: trait2("Acrobatic", "feat", "+2 Acrobatics and Fly (+4 on each from 10 ranks).", { modifiers: honed(["acrobatics", "fly"]) }),
+  alertness: trait2("Alert", "feat", "+2 Perception and Read People (+4 on each from 10 ranks).", { modifiers: honed(["perception", "sense_motive"]) }),
+  animal_affinity: trait2("Way with Animals", "feat", "+2 Handle Animals and Ride (+4 on each from 10 ranks).", { modifiers: honed(["handle_animal", "ride"]) }),
+  athletic: trait2("Athletic", "feat", "+2 Climb and Swim (+4 on each from 10 ranks).", { modifiers: honed(["climb", "swim"]) }),
+  deceitful: trait2("Deceitful", "feat", "+2 Deceive and Disguise (+4 on each from 10 ranks).", { modifiers: honed(["bluff", "disguise"]) }),
+  deft_hands: trait2("Nimble Hands", "feat", "+2 Disable Devices and Deft Hands (+4 on each from 10 ranks).", { modifiers: honed(["disable_device", "sleight_of_hand"]) }),
+  magical_aptitude: trait2("Magic Knack", "feat", "+2 Spell Lore and Use Magic Items (+4 on each from 10 ranks).", { modifiers: honed(["spellcraft", "use_magic_device"]) }),
+  persuasive: trait2("Silver Tongue", "feat", "+2 Persuade and Intimidate (+4 on each from 10 ranks).", { modifiers: honed(["diplomacy", "intimidate"]) }),
+  self_sufficient: trait2("Self-Reliant", "feat", "+2 First Aid and Survival (+4 on each from 10 ranks).", { modifiers: honed(["heal", "survival"]) }),
+  stealthy: trait2("Stealthy", "feat", "+2 Slip Free and Stealth (+4 on each from 10 ranks).", { modifiers: honed(["escape_artist", "stealth"]) }),
+  skill_focus: trait2("Specialist", "feat", "+3 on the skill taken as its choice, +6 from 10 ranks in it.", { modifiers: [mod2("skill.{choice}", "ranks(self, '{choice}') >= 10 ? 6 : 3")] }),
+  dodge: trait2("Dodge", "feat", "+1 dodge to defence.", { modifiers: [mod2("ac", 1, { type: "dodge" })], requires: "score(self, 'dex') >= 13" }),
+  toughness: trait2("Tough", "feat", "+3 hit points, and 1 more for each hit die past the 3rd.", { modifiers: [mod2("hp", "max(3, levels(self) + self.racial_hd)")] }),
+  fleet: trait2("Fleet", "feat", "+5 speed in light armour or none.", { modifiers: [mod2("speed", 5, { when: "limit(self, 'armor_weight', 0) <= 1" })] }),
+  power_attack: trait2("Heavy Blows", "feat", "Before attacking, it may take 1 off its melee attacks for 2 more damage (3 with a weapon in both hands), and 1 and 2 more for every 4 points of base attack: name both as the attack's modifiers.", { requires: `score(self, 'str') >= 13 and ${BASE_ATTACK} >= 1` }),
+  deadly_aim: trait2("Deadly Aim", "feat", "Before attacking, it may take 1 off its ranged attacks for 2 more damage, and 1 and 2 more for every 4 points of base attack: name both as the attack's modifiers.", { requires: `score(self, 'dex') >= 13 and ${BASE_ATTACK} >= 1` }),
+  combat_expertise: trait2("Guarded Fighting", "feat", "Before attacking, it may take 1 off its melee attacks for +1 dodge to defence until its next turn, and 1 more each for every 4 points of base attack: name both as the attack's modifiers.", { requires: "score(self, 'int') >= 13" }),
+  combat_reflexes: trait2("Quick Reflexes", "feat", "As many more attacks of opportunity a round as its Dexterity modifier, and it makes them while flat-footed."),
+  cleave: trait2("Follow-Through", "feat", "As a standard action, one melee attack; if it hits, one more at the same bonus at another foe within reach; -2 defence until its next turn.", { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
+  vital_strike: trait2("Vital Strike", "feat", "One attack as a standard action rolls the weapon's damage dice twice: name the extra dice with the harm.", { requires: `${BASE_ATTACK} >= 6` }),
+  far_shot: trait2("Long Shot", "feat", "-1 for each range increment past the first, not -2: name the difference as the attack's modifier.", { requires: "has_trait(self, 'point_blank_shot')" }),
+  diehard: trait2("Hard to Kill", "feat", "Below 0 hit points it is stable at once and stays awake, acting as one disabled.", { requires: "has_trait(self, 'endurance')" }),
+  greater_weapon_specialization: trait2("Weapon Mastery, Greater", "feat", "+2 more to damage with the weapon taken as its choice.", { modifiers: [mod2("damage.weapon.{choice}", 2)], requires: "class_level(self, 'fighter') >= 12" }),
+  improved_critical: improvedCritical(T3.weapons),
+  improved_grapple: trait2("Wrestler", "feat", MANOEUVRE, { requires: "score(self, 'dex') >= 13 and has_trait(self, 'improved_unarmed_strike')" }),
+  improved_trip: trait2("Tripper", "feat", MANOEUVRE, { requires: "score(self, 'int') >= 13 and has_trait(self, 'combat_expertise')" }),
+  improved_disarm: trait2("Disarmer", "feat", MANOEUVRE, { requires: "score(self, 'int') >= 13 and has_trait(self, 'combat_expertise')" }),
+  improved_bull_rush: trait2("Shoving", "feat", MANOEUVRE, { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
+  improved_sunder: trait2("Breaker", "feat", MANOEUVRE, { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
+  human: trait2("Human", "race", "Medium, speed 30. +2 to the ability taken as its choice; one more feat at the first level; one more skill rank each level.", { modifiers: [mod2("ability.{choice}", 2, { type: "racial" }), mod2("skill_points", 1, { note: "one more each level" })] }),
+  dwarf: trait2("Dwarf", "race", "Medium, speed 20, never slowed by armour or load. +2 Constitution and Wisdom, -2 Charisma; sees 60 feet in the dark; +2 on saves against poison and spells; +4 dodge against giants; +1 to attack orcs and goblins; +4 to its defence against being pushed or tripped; +2 Perception for stonework.", {
+    modifiers: [mod2("ability.con", 2, { type: "racial" }), mod2("ability.wis", 2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" })],
+    grants: { proficiency: ["battleaxe", "heavy_pick", "warhammer", "dwarven_waraxe", "dwarven_urgrosh"] }
+  }),
+  elf: trait2("Elf", "race", "Medium, speed 30. +2 Dexterity and Intelligence, -2 Constitution; +2 Perception; no magic puts it to sleep, +2 on saves against charms; +2 to overcome spell resistance; sees far in dim light; trained with longswords, rapiers and bows.", {
+    modifiers: [mod2("ability.dex", 2, { type: "racial" }), mod2("ability.int", 2, { type: "racial" }), mod2("ability.con", -2, { type: "racial" }), mod2("skill.perception", 2, { type: "racial" })],
+    grants: { proficiency: ["longsword", "rapier", "longbow", "composite_longbow", "shortbow", "composite_shortbow", "elven_curve_blade"] }
+  }),
+  gnome: trait2("Gnome", "race", "Small, speed 20. +2 Constitution and Charisma, -2 Strength; +2 Perception; +2 on saves against illusions; +1 to attack goblins and reptile-folk; +4 dodge against giants; sees far in dim light.", {
+    modifiers: [mod2("ability.con", 2, { type: "racial" }), mod2("ability.cha", 2, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), mod2("skill.perception", 2, { type: "racial" })],
+    grants: { proficiency: ["gnome_hooked_hammer"] }
+  }),
+  half_elf: trait2("Half-Elf", "race", "Medium, speed 30. +2 to the ability taken as its choice; +2 Perception; no magic puts it to sleep, +2 on saves against charms; Specialist as a feat at the first level; two favoured classes; sees far in dim light.", {
+    modifiers: [mod2("ability.{choice}", 2, { type: "racial" }), mod2("skill.perception", 2, { type: "racial" })]
+  }),
+  half_orc: trait2("Half-Orc", "race", "Medium, speed 30. +2 to the ability taken as its choice; +2 Intimidate; sees 60 feet in the dark; once a day fights on for a round below 0 hit points; trained with greataxes and falchions.", {
+    modifiers: [mod2("ability.{choice}", 2, { type: "racial" }), mod2("skill.intimidate", 2, { type: "racial" })],
+    grants: { proficiency: ["greataxe", "falchion"] }
+  }),
+  halfling: trait2("Halfling", "race", "Small, speed 20. +2 Dexterity and Charisma, -2 Strength; +1 on every save, and +2 more against fear; +2 Perception, Acrobatics and Climb; trained with slings.", {
+    modifiers: [mod2("ability.dex", 2, { type: "racial" }), mod2("ability.cha", 2, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), mod2("save", 1, { type: "racial" }), ...skillsMod(2, ["perception", "acrobatics", "climb"], "racial")],
+    grants: { proficiency: ["sling", "halfling_sling_staff"] }
+  }),
+  goblin: trait2("Goblin", "race", "Small, speed 30. +4 Dexterity, -2 Strength and Charisma; +4 Ride and Stealth; sees 60 feet in the dark.", {
+    modifiers: [mod2("ability.dex", 4, { type: "racial" }), mod2("ability.str", -2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" }), ...skillsMod(4, ["ride", "stealth"], "racial")]
+  }),
+  orc: trait2("Orc", "race", "Medium, speed 30. +4 Strength, -2 Intelligence, Wisdom and Charisma; sees 60 feet in the dark; dazzled in bright light; once a day fights on for a round below 0 hit points; trained with greataxes and falchions.", {
+    modifiers: [mod2("ability.str", 4, { type: "racial" }), mod2("ability.int", -2, { type: "racial" }), mod2("ability.wis", -2, { type: "racial" }), mod2("ability.cha", -2, { type: "racial" })],
+    grants: { proficiency: ["greataxe", "falchion"] }
+  }),
+  favored_class: trait2("Favoured Class", "race", "+1 hit point for each level in the class taken as its choice.", { modifiers: [mod2("hp", "class_level(self, '{choice}')", { note: "its favoured class" })] }),
+  favored_class_skills: trait2("Favoured Class, Skills", "race", "Taken in place of Favoured Class: one more skill rank for each level in the class taken as its choice, given with the ranks it buys."),
+  animal: creatureType("Animal", "A beast: each of its own hit dice is a d8; they give three quarters of themselves in base attack, a good Fortitude and Reflex and a poor Will; Acrobatics, Climb, Fly, Perception, Stealth and Swim are its class skills.", "3 / 4", ["fort", "ref"], {
+    grants: { class_skills: ["acrobatics", "climb", "fly", "perception", "stealth", "swim"] }
+  }),
+  giant: creatureType("Giant", "A giant: each of its own hit dice is a d8; they give three quarters in base attack and a good Fortitude; trained with simple and martial weapons; Climb, Intimidate and Perception are its class skills.", "3 / 4", ["fort"], {
+    grants: { proficiency: ["simple", "martial"], class_skills: ["climb", "intimidate", "perception"] }
+  }),
+  undead: creatureType("Undead", "Dead and moving: each of its own hit dice is a d8; they give three quarters in base attack and a good Will. It lacks Constitution (its score reads 10) and takes Charisma in its place for hit points and Fortitude; it is destroyed at 0 hit points. Critical hits, poison, sleep, paralysis, stunning, disease and anything that works on a mind do it nothing.", "3 / 4", ["will"], {
+    grants: { proficiency: ["simple"] },
+    modifiers: [mod2("save.fort", "mod(self, 'cha')", { note: "Charisma for Constitution" }), mod2("hp", "mod(self, 'cha') * self.racial_hd", { note: "Charisma for Constitution" })]
+  }),
+  zombie_flesh: trait2("Dead Flesh", "quality", "Harm of any type but slashing loses 5 to it; it is staggered always: a move or a standard action a turn, never both.", { modifiers: [mod2("reduction", 5, { bypass: ["slashing"] })] }),
+  ferocity: trait2("Ferocity", "quality", "Below 0 hit points it fights on as one disabled until it is dead."),
+  rage: trait2("Rage", "class feature", "For as many rounds a day as the Rage gauge holds (4 + its Constitution modifier, and 2 more each level past the 1st): put on the raging condition, then fatigued twice as long when it ends."),
+  rage_power: trait2("Rage Power", "class feature", "A power at the 2nd level and each even level after, used while raging."),
+  bardic_knowledge: trait2("Bardic Knowledge", "class feature", "Half its bard levels (at least 1) added to every Lore check, and Lore checks open to it untrained.", {
+    modifiers: LORE3.map((s) => mod2(`skill.${s}`, "max(1, floor(class_level(self, 'bard') / 2))"))
+  }),
+  bardic_performance: trait2("Bardic Performance", "class feature", "As many rounds a day as the Performance gauge holds: countersong, distraction, fascinate, inspire courage (+1 morale to allies' attack, weapon damage and saves against fear and charms; +1 more at the 5th level and every 6th after), and more as it rises: put them on as effects."),
+  versatile_performance: trait2("Versatile Performance", "class feature", "A kind of performance stands for two other skills it names."),
+  well_versed: trait2("Well-Versed", "class feature", "+4 on saves against sound and bardic magic."),
+  lore_master: trait2("Lore Master", "class feature", "Takes 10 on any Lore check, and once a day takes 20."),
+  jack_of_all_trades: trait2("Jack of All Trades", "class feature", "Uses any skill untrained."),
+  cleric_aura: trait2("Aura of Faith", "class feature", "Its god's nature shines from it to those who sense it."),
+  channel_energy: trait2("Channel Energy", "class feature", "Heals or harms all within 30 feet: 1d6 at the 1st level and 1d6 more each two levels, a Will save against 10 + half its cleric levels + its Charisma modifier for half; uses a day: the Channel gauge, 3 + its Charisma modifier."),
+  domains: trait2("Domains", "class feature", "Two domains of its god, each with powers and spells of its own."),
+  nature_bond: trait2("Nature Bond", "class feature", "An animal companion, or a cleric's domain of nature."),
+  wild_shape: trait2("Wild Shape", "class feature", "Takes the shape of an animal and back, as often a day as the Wild Shape gauge: once at the 4th level and once more each two levels after."),
+  bravery: trait2("Bravery", "class feature", "+1 on Will saves against fear at the 2nd level, and 1 more every four levels after: name it against fear."),
+  armor_training: trait2("Armour Training", "class feature", "From the 3rd level, armour's check penalty is 1 less and its most Dexterity 1 more, and 1 more of each every four levels; full speed in medium armour from the 3rd, in heavy from the 7th: the GM names the most Dexterity.", {
+    modifiers: [mod2("armor_check", "floor((class_level(self, 'fighter') + 1) / 4)", { when: "limit(self, 'armor_weight', 0) > 0", note: "armour training" })]
+  }),
+  weapon_training: trait2("Weapon Training", "class feature", "From the 5th level, +1 to attack and damage with the weapon taken as its choice, and 1 more every four levels after.", {
+    modifiers: [mod2("attack.weapon.{choice}", "floor((class_level(self, 'fighter') - 1) / 4)"), mod2("damage.weapon.{choice}", "floor((class_level(self, 'fighter') - 1) / 4)")]
+  }),
+  armor_mastery: trait2("Armour Mastery", "class feature", "In armour or with a shield, harm of every kind loses 5.", { modifiers: [mod2("reduction", 5, { bypass: [], when: "limit(self, 'armor_weight', 0) + limit(self, 'shield_worn', 0) > 0" })] }),
+  weapon_mastery: trait2("Weapon Mastery, Perfect", "class feature", "With one weapon: its threats are criticals without a confirming roll, its multiplier is one more, and it cannot be taken from its hand."),
+  flurry_of_blows: trait2("Flurry of Blows", "class feature", "With all its attacks, unarmed or with a monk's weapon, one more attack at its highest bonus, all at its monk levels for base attack and -2 each; more attacks at the 8th and 15th levels: name them as the attack's modifiers."),
+  stunning_fist: trait2("Stunning Fist", "class feature", "An unarmed hit that also stuns the foe a round unless it makes Fortitude against 10 + half its hit dice + its Wisdom modifier; uses a day: the Stunning Fist gauge."),
+  monk_ac: trait2("Unarmoured Defence", "class feature", "With no armour and no shield, its Wisdom bonus and 1 for every four monk levels add to defence and to its manoeuvre defence, even flat-footed or against a touch.", {
+    modifiers: [mod2("ac", "max(0, mod(self, 'wis')) + floor(class_level(self, 'monk') / 4)", { when: UNARMOURED, note: "Wisdom and training" })]
+  }),
+  monk_bonus_feat: trait2("Monk Feats", "class feature", "One more feat at the 1st and 2nd levels and every four levels after, from a short list."),
+  maneuver_training: trait2("Manoeuvre Training", "class feature", "Its monk levels stand for its base attack in its manoeuvre bonus.", { modifiers: [mod2("cmb", "class_level(self, 'monk') - floor(class_level(self, 'monk') * 3 / 4)", { note: "monk levels for base attack" })] }),
+  ki_pool: trait2("Ki Pool", "class feature", "Points a day (the Ki gauge: half its monk levels + its Wisdom modifier) spent for one more attack in a flurry, +20 speed for a round, or +4 dodge for a round; its strikes pass reduction as magic weapons."),
+  high_jump: trait2("High Jump", "class feature", "Its monk levels added to jumping, which it always does with a run."),
+  wholeness_of_body: trait2("Wholeness of Body", "class feature", "Heals itself its monk levels in hit points for 2 ki points."),
+  tongue_of_sun_and_moon: trait2("Every Tongue", "class feature", "Speaks with any living creature."),
+  perfect_self: trait2("Perfect Self", "class feature", "Harm loses 10 to it, but not from chaotic weapons.", { modifiers: [mod2("reduction", 10, { bypass: ["chaotic"] })] }),
+  smite_evil: trait2("Smite Evil", "class feature", "As a swift action against an evil foe: + its Charisma modifier to attack and to defence against that foe, + its paladin levels to damage, until the foe falls: name them as the attack's modifiers. Uses a day: the Smite gauge (1, and 1 more each three levels)."),
+  lay_on_hands: trait2("Lay on Hands", "class feature", "Heals by touch 1d6 for every two paladin levels; uses a day: the Lay on Hands gauge, half its paladin levels + its Charisma modifier."),
+  mercy: trait2("Mercy", "class feature", "Its laying on of hands also ends a condition it chose (one more each three levels)."),
+  channel_positive: trait2("Channel Light", "class feature", "Spends two uses of laying on hands to heal as a cleric of its level does."),
+  divine_bond: trait2("Divine Bond", "class feature", "A weapon made holy for a time each day, or a called mount."),
+  aura_of_resolve: trait2("Aura of Resolve", "class feature", "No charm touches it, and allies within 10 feet have +4 morale against charms."),
+  aura_of_justice: trait2("Aura of Justice", "class feature", "Lends its smiting to allies within 10 feet."),
+  aura_of_faith: trait2("Aura of Faith", "class feature", "Its weapons and allies' within 10 feet strike as good."),
+  aura_of_righteousness: trait2("Aura of Righteousness", "class feature", "Harm loses 5 to it, but not from evil weapons; no compulsion touches it.", { modifiers: [mod2("reduction", 5, { bypass: ["evil"] })] }),
+  holy_champion: trait2("Holy Champion", "class feature", "Harm loses 10 to it, but not from evil weapons; its smiting can banish.", { modifiers: [mod2("reduction", 10, { bypass: ["evil"] })] }),
+  favored_enemy: trait2("Favoured Enemy", "class feature", "Against a kind of foe it has chosen, +2 on Deceive, Lore, Perception, Read People and Survival and on attack and weapon damage (more kinds and more bonus every five levels): name it against that foe."),
+  favored_terrain: trait2("Favoured Ground", "class feature", "In a kind of land it has chosen, +2 initiative and on Lore, Perception, Stealth and Survival (more lands every five levels): name it there."),
+  track: trait2("Tracker", "class feature", "Half its ranger levels (at least 1) added to Survival to follow tracks: name it then."),
+  combat_style: trait2("Fighting Style", "class feature", "Archery or two weapons: a feat of its style at the 2nd level and every four after, in any armour."),
+  hunters_bond: trait2("Hunter's Bond", "class feature", "An animal companion, or a bond with its allies that lends them half its favoured-enemy bonus."),
+  quarry: trait2("Quarry", "class feature", "One foe at a time: +2 to attack it, and its threats on that foe are criticals without a confirming roll."),
+  improved_quarry: trait2("Quarry, Improved", "class feature", "+4 to attack its quarry."),
+  master_hunter: trait2("Master Hunter", "class feature", "Its favoured enemies may die from a single blow."),
+  trapfinding: trait2("Trapfinding", "class feature", "Half its rogue levels (at least 1) added to Perception to find traps and to Disable Devices; it disarms magic traps too: name it then."),
+  rogue_talent: trait2("Rogue Talent", "class feature", "A talent at the 2nd level and every even level after."),
+  advanced_talents: trait2("Advanced Talents", "class feature", "From the 10th level a talent may be one of the advanced ones."),
+  master_strike: trait2("Master Strike", "class feature", "A sneak attack may also put the foe to sleep, paralyse it or slay it: Fortitude against 10 + half its rogue levels + its Intelligence modifier."),
+  bloodline: trait2("Bloodline", "class feature", "The power in its blood: a class skill, spells, feats and powers by level."),
+  eschew_materials: trait2("Spells Without Means", "class feature", "Casts its spells without their cheap materials."),
+  arcane_bond: trait2("Arcane Bond", "class feature", "A familiar, or a bonded thing through which it casts one spell more a day."),
+  arcane_school: trait2("Arcane School", "class feature", "A school of magic: one spell more a day of it at each level, two other schools harder to cast.")
+};
+var BLIND_SKILLS3 = ["acrobatics", "climb", "disable_device", "escape_artist", "fly", "ride", "sleight_of_hand", "stealth", "swim", "perception"];
+var conditionRows3 = {
+  ...SHARED_CONDITIONS,
+  bleed: condition2("Bleeding", "Loses the named hit points at the start of each of its turns until First Aid of 15 or any healing stops it; bleeds of one kind do not add up.", [], ["bleeding"]),
+  blinded: condition2("Blinded", "-2 defence and no Dexterity bonus to it; -4 on most Strength and Dexterity skills and on Perception against another; every foe has total concealment from it (half its attacks miss); faster than half speed needs Acrobatics of 10.", [mod2("ac", -2), NO_DEX, ...skillsMod(-4, BLIND_SKILLS3)], ["flat", "blind"]),
+  broken: condition2("Broken", "Of a thing: a weapon has -2 to attack and damage and a critical only on 20, x2; armour or a shield gives half its bonus and twice its check penalty."),
+  confused: condition2("Confused", "Each turn a roll of d% says what it does: 01-25 acts as it would, 26-50 babbles, 51-75 strikes itself for 1d8 + its Strength modifier, 76-100 attacks the nearest; it cannot tell friend from foe.", [], ["confused"]),
+  dazzled: condition2("Dazzled", "-1 to attack and to Perception by sight.", [mod2("attack", -1), mod2("skill.perception", -1)]),
+  deafened: condition2("Deafened", "-4 initiative and on Perception against another; hears nothing; one spell in five with spoken words fails.", [mod2("initiative", -4), mod2("skill.perception", -4)], ["deaf"]),
+  disabled: condition2("Disabled", "At 0 hit points: a move or a standard action a turn, not both, at half speed, besides swift, immediate and free actions; a standard action or anything strenuous then costs 1 hit point.", [HALF_SPEED], ["one_action", "half_speed"]),
+  dying: condition2("Dying", "Below 0 hit points: unconscious, and at each of its turns a check of d20 + its Constitution modifier + its (negative) hit points against 10 steadies it; failing, it loses 1 hit point.", [], ["no_actions", "helpless"]),
+  energy_drained: condition2("Drained of Life", "One level drained: -1 to attack, manoeuvres and their defence, saves, skills and ability checks, and -5 hit points; put on once for each level.", [mod2("attack", -1), mod2("cmd", -1), mod2("save", -1), mod2("skill", -1), mod2("ability_check", -1), mod2("hp", -5)]),
+  fascinated: condition2("Fascinated", "Does nothing but watch; -4 on Perception; any threat ends it.", [mod2("skill.perception", -4)], ["no_actions"]),
+  grappled: condition2("Grappled", "Held: cannot move; -4 Dexterity; -2 to attack and to manoeuvres but grappling and escaping; no two-handed actions; no attacks of opportunity.", [mod2("ability.dex", -4), mod2("attack", -2)], ["held", "no_aoo"]),
+  incorporeal: condition2("Incorporeal", "Without a body: takes half harm from magic weapons and spells, and full from force and from other bodiless things."),
+  pinned: condition2("Pinned", "Held down: cannot move, -4 defence and no Dexterity bonus to it; only words and thought.", [mod2("ac", -4), NO_DEX], ["flat", "held"]),
+  staggered: condition2("Staggered", "At 0 hit points or nonlethal harm equal to its hit points: a move or a standard action a turn, not both, besides swift, immediate and free actions.", [], ["one_action"])
+};
+var weaponRows2 = {
+  ...CORE_WEAPONS,
+  blowgun: weapon("Blowgun", "1", "1d2", 20, 2, 20, "simple", "projectile", ["piercing"]),
+  starknife: weapon("Starknife", "1d3", "1d4", 20, 3, 20, "martial", "light", ["piercing"], { finesse: true }),
+  elven_curve_blade: weapon("Elven curve blade", "1d8", "1d10", 18, 2, null, "exotic", "two", ["slashing"], { finesse: true }),
+  halfling_sling_staff: weapon("Halfling sling staff", "1d6", "1d8", 20, 3, 80, "exotic", "projectile", ["bludgeoning"])
+};
+var armorRows3 = {
+  padded: armor("Padded armour", "light", 1, 8, 0, 5, armorMods("light", 0)),
+  leather: armor("Leather armour", "light", 2, 6, 0, 10, armorMods("light", 0)),
+  studded_leather: armor("Studded leather", "light", 3, 5, -1, 15, armorMods("light", -1)),
+  chain_shirt: armor("Chain shirt", "light", 4, 4, -2, 20, armorMods("light", -2)),
+  hide: armor("Hide armour", "medium", 4, 4, -3, 20, armorMods("medium", -3)),
+  scale_mail: armor("Scale mail", "medium", 5, 3, -4, 25, armorMods("medium", -4)),
+  chainmail: armor("Chainmail", "medium", 6, 2, -5, 30, armorMods("medium", -5)),
+  breastplate: armor("Breastplate", "medium", 6, 3, -4, 25, armorMods("medium", -4)),
+  splint_mail: armor("Splint mail", "heavy", 7, 0, -7, 40, armorMods("heavy", -7)),
+  banded_mail: armor("Banded mail", "heavy", 7, 1, -6, 35, armorMods("heavy", -6)),
+  half_plate: armor("Half-plate", "heavy", 8, 0, -7, 40, armorMods("heavy", -7)),
+  full_plate: armor("Full plate", "heavy", 9, 1, -6, 35, armorMods("heavy", -6)),
+  buckler: armor("Buckler", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  light_wooden_shield: armor("Light wooden shield", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  light_steel_shield: armor("Light steel shield", "shield", 1, null, -1, 5, shieldMods(-1, "shield_proficiency")),
+  heavy_wooden_shield: armor("Heavy wooden shield", "shield", 2, null, -2, 15, shieldMods(-2, "shield_proficiency")),
+  heavy_steel_shield: armor("Heavy steel shield", "shield", 2, null, -2, 15, shieldMods(-2, "shield_proficiency")),
+  tower_shield: armor("Tower shield", "shield", 4, 2, -10, 50, shieldMods(-10, "tower_shield_proficiency", [mod2("attack", -2, { note: "the tower shield's bulk" })]))
+};
+function manoeuvreSize(steps) {
+  return steps === 0 ? 0 : Math.sign(steps) * 2 ** (Math.abs(steps) - 1);
+}
+var creatureRows3 = {
+  wolf: {
+    name: "Wolf",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 15,
+      con: 15,
+      int: 2,
+      wis: 12,
+      cha: 6,
+      racial_hd: 2,
+      hit_dice: 9,
+      hp: 13,
+      natural_armor: 2,
+      base_speed: 50,
+      size: "medium",
+      d20_traits: ["animal", "natural_armor", "low_light_vision", "scent", "trip_bite", { id: "skill_focus", choice: "perception" }],
+      ranks: { perception: 1, stealth: 1 }
+    },
+    attacks: [natural("Bite", "1d6", { types: ["bludgeoning", "piercing", "slashing"], held: "two" })],
+    cr: "1",
+    description: "A grey hunter of the woods that runs in packs and drags its prey down by the leg."
+  },
+  goblin: {
+    name: "Goblin",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 11,
+      con: 12,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 5,
+      hp: 6,
+      base_speed: 30,
+      size: "small",
+      d20_traits: ["goblin", "humanoid", "darkvision", "improved_initiative"],
+      d20_effects: [wearing("Leather armour and a light wooden shield", [mod2("ac", 2, { type: "armor" }), mod2("max_dex", 6, { limit: true }), mod2("ac", 1, { type: "shield" }), mod2("armor_check", -1)])],
+      ranks: { ride: 1, stealth: 1 }
+    },
+    carries: ["short_sword", "shortbow"],
+    cr: "1/3",
+    description: "A small, sharp-eared raider who fights from ambush and runs when the fight turns."
+  },
+  orc: {
+    name: "Orc",
+    kind: "person",
+    fields: {
+      str: 13,
+      dex: 9,
+      con: 12,
+      int: 9,
+      wis: 10,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 5,
+      hp: 6,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["orc", "humanoid", "darkvision", "light_sensitivity", "ferocity", { id: "weapon_focus", choice: "falchion" }],
+      d20_effects: [wearing("Hide armour", [mod2("ac", 4, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("armor_check", -3), mod2("speed", -10)])],
+      ranks: { intimidate: 1 }
+    },
+    carries: ["falchion", "javelin"],
+    cr: "1/3",
+    description: "A tusked, heavy-shouldered brute who swings a great curved blade in both hands."
+  },
+  skeleton: {
+    name: "Skeleton",
+    kind: "person",
+    fields: {
+      str: 15,
+      dex: 14,
+      con: 10,
+      int: 10,
+      wis: 10,
+      cha: 10,
+      racial_hd: 1,
+      hit_dice: 4,
+      hp: 4,
+      natural_armor: 2,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["undead", "natural_armor", "skeleton_bones", "darkvision", "improved_initiative", { id: "martial_weapon_proficiency", choice: "scimitar" }],
+      d20_effects: [wearing("A broken chain shirt", [mod2("ac", 2, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("armor_check", -4)])]
+    },
+    attacks: [natural("Claw", "1d4", { types: ["slashing"] }), natural("Claw", "1d4", { types: ["slashing"] })],
+    carries: ["scimitar"],
+    cr: "1/3",
+    description: "Bones of a dead soldier, bound together by magic, doing as it was last told; it does not think."
+  },
+  zombie: {
+    name: "Zombie",
+    kind: "person",
+    fields: {
+      str: 17,
+      dex: 10,
+      con: 10,
+      int: 10,
+      wis: 10,
+      cha: 10,
+      racial_hd: 2,
+      hit_dice: 9,
+      hp: 12,
+      natural_armor: 2,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: ["undead", "natural_armor", "zombie_flesh", "darkvision", "toughness"]
+    },
+    attacks: [natural("Slam", "1d6", { types: ["bludgeoning"], held: "two" })],
+    cr: "1/2",
+    description: "A dead body made to shamble and strike, slow and mindless, that keeps coming until it is cut apart."
+  },
+  ogre: {
+    name: "Ogre",
+    kind: "person",
+    fields: {
+      str: 21,
+      dex: 8,
+      con: 15,
+      int: 6,
+      wis: 10,
+      cha: 7,
+      racial_hd: 4,
+      hit_dice: 18,
+      hp: 30,
+      natural_armor: 5,
+      base_speed: 40,
+      size: "large",
+      d20_traits: ["giant", "natural_armor", "darkvision", "low_light_vision", "iron_will", "toughness"],
+      d20_effects: [wearing("Hide armour", [mod2("ac", 4, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("armor_check", -3), mod2("speed", -10)])],
+      ranks: { climb: 2, perception: 2 }
+    },
+    carries: ["greatclub", "javelin"],
+    cr: "3",
+    description: "A huge, dull and hungry giant, twice a man's height, who clubs what it wants to eat."
+  },
+  bandit: {
+    name: "Bandit",
+    kind: "person",
+    fields: {
+      str: 11,
+      dex: 13,
+      con: 11,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 5,
+      hp: 5,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: [{ id: "human", choice: "str" }, "humanoid", "point_blank_shot", "stealthy"],
+      d20_effects: [wearing("Leather armour", [mod2("ac", 2, { type: "armor" }), mod2("max_dex", 6, { limit: true })])],
+      ranks: { intimidate: 1, climb: 1, stealth: 1 }
+    },
+    carries: ["short_sword", "shortbow"],
+    cr: "1/3",
+    description: "A roadside robber with a short blade and a bow, bold in a band and quick to run alone."
+  },
+  guard: {
+    name: "Guard",
+    kind: "person",
+    fields: {
+      str: 11,
+      dex: 11,
+      con: 12,
+      int: 10,
+      wis: 9,
+      cha: 8,
+      classes: { warrior: 1 },
+      hit_dice: 5,
+      hp: 6,
+      base_speed: 30,
+      size: "medium",
+      d20_traits: [{ id: "human", choice: "str" }, "humanoid", "alertness", { id: "weapon_focus", choice: "longsword" }],
+      d20_effects: [wearing("A chain shirt and a heavy wooden shield", [mod2("ac", 4, { type: "armor" }), mod2("max_dex", 4, { limit: true }), mod2("ac", 2, { type: "shield" }), mod2("armor_check", -4)])],
+      ranks: { intimidate: 1, ride: 1, perception: 1 }
+    },
+    carries: ["longsword", "light_crossbow"],
+    cr: "1/3",
+    description: "A town's or a lord's watchman in mail, with sword, shield and crossbow."
+  }
+};
+var XP_TRACKS = [
+  [0, 0, 0],
+  [3000, 2000, 1300],
+  [7500, 5000, 3300],
+  [14000, 9000, 6000],
+  [23000, 15000, 1e4],
+  [35000, 23000, 15000],
+  [53000, 35000, 23000],
+  [77000, 51000, 34000],
+  [115000, 75000, 50000],
+  [160000, 105000, 71000],
+  [235000, 155000, 105000],
+  [330000, 220000, 145000],
+  [475000, 315000, 210000],
+  [665000, 445000, 295000],
+  [955000, 635000, 425000],
+  [1350000, 890000, 600000],
+  [1900000, 1300000, 850000],
+  [2700000, 1800000, 1200000],
+  [3850000, 2550000, 1700000],
+  [5350000, 3600000, 2400000]
+];
+var experienceRows2 = byLevel(20, (l) => {
+  const [slow, xp, fast] = XP_TRACKS[l - 1] ?? [0, 0, 0];
+  return { xp, slow, fast };
+});
+var CHALLENGE_XP = {
+  "1/8": 50,
+  "1/6": 65,
+  "1/4": 100,
+  "1/3": 135,
+  "1/2": 200,
+  "1": 400,
+  "2": 600,
+  "3": 800,
+  "4": 1200,
+  "5": 1600,
+  "6": 2400,
+  "7": 3200,
+  "8": 4800,
+  "9": 6400,
+  "10": 9600,
+  "11": 12800,
+  "12": 19200,
+  "13": 25600,
+  "14": 38400,
+  "15": 51200,
+  "16": 76800,
+  "17": 102400,
+  "18": 153600,
+  "19": 204800,
+  "20": 307200,
+  "21": 409600,
+  "22": 614400,
+  "23": 819200,
+  "24": 1228800,
+  "25": 1638400
+};
+var challengeRows = Object.fromEntries(Object.entries(CHALLENGE_XP).map(([cr, xp]) => [cr, { xp }]));
+var DAILY4 = {
+  rage_rounds: dailyGauge("Rage", "class_level(self, 'barbarian') > 0 ? 4 + mod(self, 'con') + 2 * (class_level(self, 'barbarian') - 1) : 0"),
+  bardic_performance: dailyGauge("Performance", "class_level(self, 'bard') > 0 ? 4 + mod(self, 'cha') + 2 * (class_level(self, 'bard') - 1) : 0"),
+  channel_energy: dailyGauge("Channel", "class_level(self, 'cleric') > 0 ? max(0, 3 + mod(self, 'cha')) : 0"),
+  wild_shape: dailyGauge("Wild shape", "class_level(self, 'druid') >= 4 ? floor((class_level(self, 'druid') - 2) / 2) : 0"),
+  smite: dailyGauge("Smite", "class_level(self, 'paladin') > 0 ? 1 + floor((class_level(self, 'paladin') - 1) / 3) : 0"),
+  lay_on_hands: dailyGauge("Lay on hands", "class_level(self, 'paladin') >= 2 ? max(0, floor(class_level(self, 'paladin') / 2) + mod(self, 'cha')) : 0"),
+  ki_pool: dailyGauge("Ki", "class_level(self, 'monk') >= 4 ? max(0, floor(class_level(self, 'monk') / 2) + mod(self, 'wis')) : 0"),
+  stunning_fist: dailyGauge("Stunning fist", "has_trait(self, 'stunning_fist') ? max(class_level(self, 'monk'), floor((levels(self) + self.racial_hd) / 4)) : 0")
+};
+var PER_DIE2 = "max(1, levels(self) + self.racial_hd)";
+var UNDEAD = "has_trait(self, 'undead')";
+var NEGATIVE3 = `self.hp < 0 and self.hp > -score(self, 'con') and not ${UNDEAD}`;
+var STEADY = "(under(self, 'stable') or has_trait(self, 'diehard'))";
+var family = familyTotals({ skills: T3.skills, weapons: T3.weapons });
+var D203 = {
+  abilities: [...D20_ABILITY_IDS],
+  mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
+  kinds: ["person"],
+  defaultSize: "medium",
+  bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
+  tables: { ...T3 },
+  totals: {
+    ...family,
+    skill: `${family.skill} + (class_skill(self, skill) and ranks(self, skill) >= 1 ? 3 : 0)`,
+    cmb: "class_sum(self, 'attack') + bonus(self, 'base_attack') + mod(self, size_mod(self, 'cmb') <= -2 ? 'dex' : 'str') + size_mod(self, 'cmb') + bonus_without(self, 'cmb,attack.melee.maneuver', 'size')",
+    cmd: "10 + class_sum(self, 'attack') + bonus(self, 'base_attack') + mod(self, 'str') + mod(self, 'dex') - max(0, mod(self, 'dex') - limit(self, 'max_dex', 99)) + size_mod(self, 'cmd') + bonus_only(self, 'ac,ac.melee', 'circumstance,deflection,dodge,insight,luck,morale,profane,sacred,untyped') + bonus_without(self, 'cmd', 'size')"
+  },
+  check: { take: { "10": { value: 10, times: 1 }, "20": { value: 20, times: 20 } }, aid: { dc: 10, bonus: 2 } },
+  save: { autoFail: 1, autoSucceed: 20 },
+  attack: {
+    autoMiss: 1,
+    autoHit: 20,
+    confirm: true,
+    strength: "str",
+    strengthShare: { light: 1, one: 1, two: 1.5, off: 0.5, thrown: 1, projectile: 0 },
+    incrementPenalty: -2,
+    increments: { thrown: 5, projectile: 10 },
+    unskilled: -4,
+    nonlethal: -4,
+    secondary: -5,
+    iterative: { from: 6, step: 5 },
+    totals: { base: "attack.base", melee: "attack.melee", ranged: "attack.ranged", damage: "damage" },
+    shots: {}
+  },
+  hp: {
+    field: "hp",
+    nonlethal: "nonlethal",
+    temporary: "hp_temp",
+    states: [
+      { id: "dead", when: `self.hp <= -score(self, 'con') or (${UNDEAD} and self.hp <= 0)`, life: "dead" },
+      { id: "stable", when: `${NEGATIVE3} and ${STEADY}` },
+      { id: "dying", when: `${NEGATIVE3} and not ${STEADY}`, life: "dying" },
+      { id: "unconscious", when: `(${NEGATIVE3} and not has_trait(self, 'diehard')) or (self.hp >= 0 and self.nonlethal > self.hp)` },
+      { id: "disabled", when: `self.hp == 0 or (${NEGATIVE3} and has_trait(self, 'diehard'))` },
+      { id: "staggered", when: `(self.hp == 0 and not ${UNDEAD}) or (self.hp > 0 and self.nonlethal == self.hp)` }
+    ],
+    dying: {
+      state: "dying",
+      lose: 1,
+      stable: "stable",
+      roll: { id: "stabilize", dice: "d20", modifier: "mod(self, 'con') + self.hp", dc: "10", bands: [{ outcome: "stable", natural: { min: 20 } }, { outcome: "stable", margin: { min: 0 } }, { outcome: "worse" }], pass: ["stable"] }
+    },
+    massive: null,
+    rest: { hours: 8, hp: PER_DIE2, nonlethal: PER_DIE2, daily: Object.keys(DAILY4) }
+  },
+  costs: D20_COSTS,
+  levels: {
+    progression: "level",
+    hitPoints: "roll",
+    average: "floor(die / 2) + 1",
+    firstMost: true,
+    rankLimit: "levels(self) + self.racial_hd",
+    skillPoints: { plus: "mod(self, 'int') + bonus(self, 'skill_points')", min: 1, first: 1 },
+    featEvery: 2,
+    featAt: "level % 2 == 1",
+    abilityEvery: 4,
+    experienceBy: "challenge"
+  }
+};
+var CLASSIC_REVISED = {
+  id: "classic_revised",
+  label: "Classic Revised",
+  summary: "The later revision of the Classic rules: a shorter skill list with a bonus for trained class skills, one bonus and one defence for every combat manoeuvre, hit points down to minus the Constitution score with a check to steady the dying, a feat at every odd level, favoured classes, and three experience tracks.",
+  fields: d20Fields({ hpFloor: "-score(self, 'con')", rest: PER_DIE2, sizes: T3.sizes, daily: DAILY4 }),
+  checks: {},
+  actions: {},
+  tables: {
+    [T3.skills]: d20Table("skills", T3.skills, "Classic Revised skills", skillRows3),
+    [T3.classes]: d20Table("classes", T3.classes, "Classic Revised classes", classRows3),
+    [T3.tracks]: d20Table("tracks", T3.tracks, "Classic Revised progressions", TRACK_ROWS, TRACK_COLUMNS),
+    [T3.traits]: d20Table("traits", T3.traits, "Classic Revised traits", traitRows3),
+    [T3.conditions]: d20Table("conditions", T3.conditions, "Classic Revised conditions", conditionRows3),
+    [T3.sizes]: d20Table("sizes", T3.sizes, "Classic Revised sizes", sizeRows((steps) => [mod2("cmb", manoeuvreSize(steps), { type: "size" }), mod2("cmd", manoeuvreSize(steps), { type: "size" }), mod2("skill.stealth", steps * -4, { type: "size" }), mod2("skill.fly", steps * -2, { type: "size" })]), SIZE_COLUMNS),
+    [T3.weapons]: d20Table("weapons", T3.weapons, "Classic Revised weapons", weaponRows2, WEAPON_COLUMNS),
+    [T3.armor]: d20Table("armor", T3.armor, "Classic Revised armour and shields", armorRows3, ARMOR_COLUMNS),
+    [T3.creatures]: d20Table("creatures", T3.creatures, "Classic Revised creatures", creatureRows3),
+    [T3.experience]: d20Table("experience", T3.experience, "Classic Revised experience", experienceRows2, { slow: { type: "int", doc: "The slow track" }, fast: { type: "int", doc: "The fast track" } }),
+    [T3.challenges]: d20Table("challenges", T3.challenges, "Classic Revised challenges", challengeRows),
+    [T3.difficulties]: d20Table("difficulties", T3.difficulties, "Classic Revised difficulties", DIFFICULTIES)
+  },
+  ruleset: {
+    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: T3.experience, column: "xp" }, maxLevel: 20 } },
+    sheet: d20Sheet({
+      defence: {
+        label: "Defence",
+        rows: [
+          { formula: "total(self, 'ac')", label: "Armour Class" },
+          { formula: "total(self, 'ac.touch')", label: "Against a touch" },
+          { formula: "total(self, 'ac.flat')", label: "Flat-footed" },
+          { formula: "total(self, 'cmd')", label: "Manoeuvre defence" },
+          { formula: signedTotal("initiative"), label: "Initiative" },
+          { formula: "total(self, 'speed')", label: "Speed" }
+        ]
+      },
+      attack: [
+        { formula: signedTotal("attack.base"), label: "Base attack" },
+        { formula: signedTotal("attack.melee"), label: "Melee" },
+        { formula: signedTotal("attack.ranged"), label: "Ranged" },
+        { formula: signedTotal("cmb"), label: "Manoeuvre bonus" }
+      ],
+      saves: D20_SAVES,
+      skills: SKILLS3.map(([id, label2]) => ({ id, label: label2 })),
+      daily: Object.keys(DAILY4)
+    }),
+    minLevels: {},
+    adjudication: presetAdjudication("balanced"),
+    combat: d20Combat("under(self, 'unconscious') or under(self, 'dead')"),
+    d20: D203
+  }
+};
+
+// src/shared/profiles/custom.ts
+var CUSTOM = {
+  id: "custom",
+  label: "Custom",
+  summary: "A minimal start to build on: one stat, one check, an HP pool and a progression with no levels yet.",
+  fields: {
+    skill: { type: "number", label: "Skill", default: 0, min: 0, max: 10 },
+    hp: { type: "number", label: "HP", pool: { max: "10 + self.skill * 2" } },
+    ...levelFields(null)
+  },
+  checks: {
+    challenge: { id: "challenge", dice: "d20", modifier: "self.skill", dc: DIFFICULTY }
+  },
+  actions: {
+    try_something: { id: "try_something", label: "Try something", params: { difficulty: DIFFICULTY_PARAM }, requires: [], check: "challenge", outcomes: { failure: [], success: [] }, duration: "10", lexicon: ["try something", "give it a go"], observable: "gives it a go" },
+    attack: {
+      id: "attack",
+      label: "Attack",
+      params: { target: { type: "ref", label: "Target" } },
+      requires: ["is_foe(self, target)", "not is_down(target)"],
+      check: { id: "attack", dice: "d20", modifier: "self.skill", dc: "10 + target.skill" },
+      outcomes: { success: [{ type: "add", args: { entity: "target", field: "hp", delta: "=-roll('1d6')" } }], failure: [] },
+      duration: "0",
+      lexicon: ["attack", "strike at"],
+      observable: "attacks",
+      combat: { cost: { action: 1 }, role: "attack" }
+    }
+  },
+  tables: {},
+  ruleset: {
+    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: [0] } },
+    sheet: { sections: [{ id: "character", label: "Character", rows: [{ field: "skill" }, { pool: "hp" }, { progression: "level" }] }] },
+    minLevels: { sheets: 3 },
+    adjudication: presetAdjudication("balanced"),
+    combat: { initiative: { id: "initiative", dice: "d20", modifier: "self.skill", bands: INITIATIVE_BANDS }, economy: { action: { label: "Action" } }, hp: "hp" }
+  }
+};
+
+// src/shared/profiles/fifth.ts
+var SKILLS4 = [
+  { id: "athletics", label: "Athletics", ability: "str_mod" },
+  { id: "acrobatics", label: "Acrobatics", ability: "dex_mod" },
+  { id: "sleight_of_hand", label: "Deft Hands", ability: "dex_mod" },
+  { id: "stealth", label: "Stealth", ability: "dex_mod" },
+  { id: "investigation", label: "Investigation", ability: "int_mod" },
+  { id: "lore", label: "Lore", ability: "int_mod" },
+  { id: "insight", label: "Read People", ability: "wis_mod" },
+  { id: "medicine", label: "Medicine", ability: "wis_mod" },
+  { id: "perception", label: "Perception", ability: "wis_mod" },
+  { id: "survival", label: "Survival", ability: "wis_mod" },
+  { id: "deception", label: "Deception", ability: "cha_mod" },
+  { id: "intimidation", label: "Intimidation", ability: "cha_mod" },
+  { id: "performance", label: "Performance", ability: "cha_mod" },
+  { id: "persuasion", label: "Persuasion", ability: "cha_mod" }
+];
+var XP = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 1e5, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];
+var proficientIn = (ability) => `(self.save_prof_1 == ${ability} or self.save_prof_2 == ${ability}) ? self.proficiency : 0`;
+var proficiencies = {};
+for (const s of SKILLS4)
+  proficiencies[s.id] = { type: "number", label: s.label, default: 0, min: 0, max: 2 };
+var abilityIds = ABILITIES.map((a) => a.id);
+var FIFTH = {
+  id: "fifth",
+  label: "Fifth",
+  summary: "Heroic fantasy on a d20: one training bonus that grows with level for your trained skills and saves, advantage, an armor score, and short and long rests that spend and regain healing dice.",
+  fields: {
+    ...abilityFields(),
+    ...levelFields(20),
+    proficiency: { type: "number", label: "Proficiency bonus", derived: "table('fifth.levels', self.level, 'proficiency')" },
+    save_prof_1: { type: "enum", label: "Proficient save", values: abilityIds, default: "con" },
+    save_prof_2: { type: "enum", label: "Second proficient save", values: abilityIds, default: "wis" },
+    hit_die: { type: "number", label: "Hit die", default: 8, min: 6, max: 12 },
+    max_hp: { type: "number", label: "Max HP", derived: "max(1, self.hit_die + self.con_mod + (self.level - 1) * max(1, floor(self.hit_die / 2) + 1 + self.con_mod))" },
+    hp: { type: "number", label: "HP", pool: { max: "max_hp" } },
+    hit_dice: { type: "number", label: "Hit dice", pool: { max: "level", recover: "max(1, floor(self.level / 2))" } },
+    armor: { type: "number", label: "Armor (base AC)", default: 10, min: 0 },
+    ac: { type: "number", label: "Armor Class", derived: "self.armor + self.dex_mod" },
+    attack_bonus: { type: "number", label: "Attack bonus", derived: "self.proficiency + max(self.str_mod, self.dex_mod)" },
+    damage: { type: "dice", label: "Damage", default: "1d8" },
+    ...proficiencies
+  },
+  checks: {
+    skill: attemptCheck("skill", "field(self, table('fifth.skills', skill, 'ability')) + field(self, skill) * self.proficiency"),
+    save: { id: "save", dice: "d20", modifier: `field(self, save + '_mod') + (${proficientIn("save")})`, dc: DIFFICULTY },
+    attack: { id: "attack", dice: "d20", modifier: "self.attack_bonus", advantage: `${holdsStance("target", "dodge")} ? -1 : 0`, dc: "target.ac", bands: ATTACK_BANDS, pass: ["hit", "critical"] },
+    initiative: { id: "initiative", dice: "d20", modifier: "self.dex_mod", bands: INITIATIVE_BANDS }
+  },
+  actions: {
+    skill_check: skillAction("fifth.skills"),
+    save_check: saveAction("fifth.saves"),
+    attack: attackAction("roll(self.damage) + max(self.str_mod, self.dex_mod)", "roll(self.damage) + roll(self.damage) + max(self.str_mod, self.dex_mod)"),
+    dodge: stanceAction("dodge", "Dodge", "dodge"),
+    short_rest: {
+      id: "short_rest",
+      label: "Short rest (spend a hit die)",
+      params: {},
+      requires: ["not in_encounter(self)", "self.hit_dice >= 1"],
+      outcomes: {
+        default: [
+          { type: "add", args: { entity: "self", field: "hit_dice", delta: -1 } },
+          { type: "recover", args: { entity: "self", field: "hp", amount: "=max(1, roll('1d' + self.hit_die) + self.con_mod)" } }
+        ]
+      },
+      duration: "60",
+      lexicon: ["take a short rest", "catch my breath"],
+      observable: "takes a breather"
+    },
+    long_rest: restAction("Long rest", [{ type: "recover", args: { entity: "self", field: "hit_dice" } }])
+  },
+  tables: {
+    "fifth.levels": profileTable("fifth.levels", "Fifth levels", { xp: { type: "int", doc: "XP the level needs" }, proficiency: { type: "int", doc: "Proficiency bonus" } }, levelRows((level) => ({ xp: XP[level - 1] ?? 0, proficiency: 2 + Math.floor((level - 1) / 4) }))),
+    "fifth.skills": skillTable("fifth.skills", "Fifth skills", SKILLS4),
+    "fifth.saves": skillTable("fifth.saves", "Fifth saves", ABILITIES.map((a) => ({ id: a.id, label: a.label, ability: `${a.id}_mod` })))
+  },
+  ruleset: {
+    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: "fifth.levels", column: "xp" }, maxLevel: 20, onLevel: [{ type: "add", args: { entity: "self", field: "hit_dice", delta: 1 } }] } },
+    sheet: {
+      sections: [
+        { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { pool: "hit_dice" }, { progression: "level" }, { formula: "self.ac", label: "Armor Class" }, { formula: signed2("self.proficiency"), label: "Proficiency" }, { formula: signed2("self.dex_mod"), label: "Initiative" }] },
+        { id: "abilities", label: "Abilities", rows: abilityRows() },
+        { id: "saves", label: "Saves", rows: ABILITIES.map((a) => ({ formula: signed2(`self.${a.id}_mod + (${proficientIn(`'${a.id}'`)})`), label: a.label })) },
+        { id: "skills", label: "Skills", rows: SKILLS4.map((s) => ({ formula: signed2(`self.${s.ability} + self.${s.id} * self.proficiency`), label: s.label })) }
+      ]
+    },
+    minLevels: { sheets: 3 },
+    adjudication: { ...presetAdjudication("balanced"), preset: "custom", description: { weight: "advantage", max: 2, advantageAt: 2 } },
+    combat: { initiative: "initiative", economy: { action: { label: "Action" }, dodge: { label: "Dodge" } }, hp: "hp" }
+  }
+};
+
+// src/shared/profiles/index.ts
+var PROFILES = { modern: MODERN, classic: CLASSIC, classic_revised: CLASSIC_REVISED, fifth: FIFTH, custom: CUSTOM };
+var PROFILE_IDS = ["modern", "classic", "classic_revised", "fifth", "custom"];
+function profileOf(id) {
+  const found = PROFILE_IDS.find((p) => p === id);
+  return found ? PROFILES[found] : null;
+}
+function kindOf(world, packKinds, id) {
+  return hasOwn(world.kinds, id) ? world.kinds[id] : hasOwn(packKinds, id) ? packKinds[id] : undefined;
+}
+function upChain(world, packKinds, kind, visit2) {
+  let id = kind;
+  for (let guard = 0;id !== undefined && guard < 32; guard++) {
+    const def = kindOf(world, packKinds, id);
+    if (!def)
+      return;
+    const found = visit2(id, def);
+    if (found !== undefined)
+      return found;
+    id = def.extends;
+  }
+  return;
+}
+function words5(id) {
+  const text6 = id.replace(/[._]/g, " ");
+  return text6.charAt(0).toUpperCase() + text6.slice(1);
+}
+function rulesetIn(doc) {
+  const ruleset = isRecord(doc.ruleset) ? doc.ruleset : {};
+  doc.ruleset = ruleset;
+  return ruleset;
+}
+function rulesetPart(world, key) {
+  const part = isRecord(world.ruleset) ? world.ruleset[key] : undefined;
+  return isRecord(part) ? part : undefined;
+}
+function fieldKinds(world, profile) {
+  const named = (profile.ruleset.d20?.kinds ?? []).filter((k, i, all2) => k !== "" && all2.indexOf(k) === i);
+  if (named.length > 0)
+    return named;
+  const pov = hasOwn(world.entities, world.pov) ? world.entities[world.pov] : undefined;
+  return [pov?.kind ?? "person"];
+}
+function slotsOf(world, profile, packKinds) {
+  const kinds = [];
+  const slots = [];
+  const several = fieldKinds(world, profile).length > 1;
+  for (const kindId of fieldKinds(world, profile)) {
+    const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
+    const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
+    const label2 = ownKind?.label ?? packKind?.label ?? words5(kindId);
+    kinds.push({ id: kindId, label: label2, copied: !ownKind });
+    const kindIn = (doc) => {
+      const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
+      if (existing)
+        return existing;
+      const copy = { id: kindId, label: label2, ...packKind?.extends !== undefined ? { extends: packKind.extends } : {}, fields: structuredClone(packKind?.fields ?? {}) };
+      doc.kinds[kindId] = copy;
+      return copy;
+    };
+    for (const [id, def] of Object.entries(profile.fields)) {
+      const name = def.label ?? words5(id);
+      slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: several ? `${name} (${label2})` : name, mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { kind: kindId, id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
+    }
+  }
+  for (const [id, def] of Object.entries(profile.checks)) {
+    slots.push({ path: `checks.${id}`, group: "checks", label: words5(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
+  }
+  for (const [id, def] of Object.entries(profile.actions)) {
+    slots.push({ path: `actions.${id}`, group: "actions", label: def.label, mine: hasOwn(world.actions, id) ? world.actions[id] : undefined, theirs: def, write: (doc) => void (doc.actions[id] = structuredClone(def)) });
+  }
+  for (const [id, def] of Object.entries(profile.tables)) {
+    slots.push({ path: `tables.${id}`, group: "tables", label: def.label, mine: hasOwn(world.tables, id) ? world.tables[id] : undefined, theirs: def, write: (doc) => void (doc.tables[id] = structuredClone(def)) });
+  }
+  const rs = profile.ruleset;
+  const progression = rulesetPart(world, "progression");
+  for (const [id, def] of Object.entries(rs.progression)) {
+    slots.push({
+      path: `ruleset.progression.${id}`,
+      group: "ruleset",
+      label: `Progression: ${def.label}`,
+      mine: progression && hasOwn(progression, id) ? progression[id] : undefined,
+      theirs: def,
+      write: (doc) => {
+        const r = rulesetIn(doc);
+        r.progression = { ...isRecord(r.progression) ? r.progression : {}, [id]: structuredClone(def) };
+      }
+    });
+  }
+  slots.push({ path: "ruleset.sheet", group: "ruleset", label: "Sheet layout", mine: rulesetPart(world, "sheet"), theirs: rs.sheet, write: (doc) => void (rulesetIn(doc).sheet = structuredClone(rs.sheet)) });
+  const floors = rulesetPart(world, "minLevels");
+  for (const [domain, level] of Object.entries(rs.minLevels)) {
+    slots.push({
+      path: `ruleset.minLevels.${domain}`,
+      group: "ruleset",
+      label: `Level floor: ${words5(domain)} ${String(level)}`,
+      mine: floors && hasOwn(floors, domain) ? floors[domain] : undefined,
+      theirs: level,
+      write: (doc) => {
+        const r = rulesetIn(doc);
+        r.minLevels = { ...isRecord(r.minLevels) ? r.minLevels : {}, [domain]: level };
+      }
+    });
+  }
+  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words5(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
+  slots.push({ path: "ruleset.combat", group: "ruleset", label: "Combat rules", mine: rulesetPart(world, "combat"), theirs: rs.combat, write: (doc) => void (rulesetIn(doc).combat = structuredClone(rs.combat)) });
+  const d202 = rs.d20;
+  if (d202 !== undefined)
+    slots.push({ path: "ruleset.d20", group: "ruleset", label: "Tabletop rules", mine: rulesetPart(world, "d20"), theirs: d202, write: (doc) => void (rulesetIn(doc).d20 = structuredClone(d202)) });
+  return { kinds, slots };
+}
+function statusOf2(slot) {
+  if (slot.mine === undefined)
+    return "add";
+  return hashJson(slot.mine) === hashJson(slot.theirs) ? "same" : "conflict";
+}
+function lastWrote(world, profile, packKinds) {
+  const last = profileOf(isRecord(world.ruleset) ? world.ruleset.profile : undefined);
+  if (last === null || last.id === profile.id)
+    return null;
+  return { label: last.label, at: new Map(slotsOf(world, last, packKinds).slots.map((s) => [s.path, hashJson(s.theirs)])) };
+}
+function fitted(def, v) {
+  switch (def.type) {
+    case "number":
+    case "money":
+    case "duration": {
+      if (typeof v !== "number" || !Number.isFinite(v))
+        return null;
+      const lo = Math.max(def.min ?? -Infinity, def.pool ? typeof def.pool.min === "string" ? -Infinity : def.pool.min ?? 0 : -Infinity);
+      const n = Math.min(def.max ?? Infinity, Math.max(lo, v));
+      return n === v ? undefined : n;
+    }
+    case "bool":
+      return typeof v === "boolean" ? undefined : null;
+    case "enum":
+      return typeof v === "string" && (def.values ?? []).includes(v) ? undefined : null;
+    case "list":
+      return Array.isArray(v) ? undefined : null;
+    default:
+      return typeof v === "string" ? undefined : null;
+  }
+}
+function planOf4(world, profile, packKinds, choices) {
+  const { kinds, slots } = slotsOf(world, profile, packKinds);
+  const last = lastWrote(world, profile, packKinds);
+  const items = slots.map((slot) => {
+    const status = statusOf2(slot);
+    if (status === "conflict" && last !== null && last.at.get(slot.path) === hashJson(slot.mine))
+      return { path: slot.path, group: slot.group, label: `${slot.label} (in place of ${last.label}'s)`, status: "add" };
+    return { path: slot.path, group: slot.group, label: slot.label, status };
+  });
+  const write = slots.filter((slot, i) => {
+    const status = items[i]?.status;
+    return status === "add" || status === "conflict" && choices[slot.path] === "profile";
+  });
+  const taken = new Map(kinds.map((k) => [k.id, new Map]));
+  for (const slot of write)
+    if (slot.field)
+      taken.get(slot.field.kind)?.set(slot.field.id, slot.field.def);
+  const values = [];
+  let people = 0;
+  for (const [id, e] of Object.entries(world.entities)) {
+    const under = upChain(world, packKinds, e.kind, (k) => taken.has(k) ? k : undefined);
+    if (under === undefined)
+      continue;
+    people++;
+    for (const [field, def] of taken.get(under) ?? []) {
+      if (def.derived !== undefined || !hasOwn(e.fields, field))
+        continue;
+      if (upChain(world, packKinds, e.kind, (k, d) => k === under ? false : hasOwn(d.fields, field) ? true : undefined) === true)
+        continue;
+      const from = e.fields[field];
+      if (from === undefined)
+        continue;
+      const to = fitted(def, from);
+      if (to !== undefined)
+        values.push({ entity: id, name: e.name, field, from, to });
+    }
+  }
+  const kind = kinds[0] ?? { id: "person", label: words5("person"), copied: true };
+  return { plan: { profile: profile.id, kind, kinds, items, people, values }, write };
+}
+function planProfile(world, profile, packKinds, choices = {}) {
+  return planOf4(world, profile, packKinds, choices).plan;
+}
+function applyProfile(world, profile, packKinds, choices = {}) {
+  const { plan: plan2, write } = planOf4(world, profile, packKinds, choices);
+  const doc = structuredClone(world);
+  for (const slot of write)
+    slot.write(doc);
+  for (const v of plan2.values) {
+    const fields = doc.entities[v.entity]?.fields;
+    if (!fields)
+      continue;
+    if (v.to === null)
+      delete fields[v.field];
+    else
+      fields[v.field] = v.to;
+  }
+  rulesetIn(doc).profile = profile.id;
+  return doc;
+}
+
+// src/packs/starters/rules.ts
+var LAYER = "d20";
+var ON2 = 1;
+function withRules2(doc, rules) {
+  const out = applyProfile(doc, rules.set, {});
+  const rs = out.ruleset;
+  if (rs !== undefined) {
+    if (doc.ruleset?.sheet === undefined)
+      delete rs.sheet;
+    else
+      rs.sheet = structuredClone(doc.ruleset.sheet);
+  }
+  out.packs[LAYER] ??= { version: 1, config: {} };
+  out.realism.levels[LAYER] = rules.on ? ON2 : 0;
+  for (const thing of rules.things ?? []) {
+    if (Object.hasOwn(out.entities, thing.id))
+      throw new Error(`starter ${doc.id}: ${thing.id} is there already`);
+    out.entities[thing.id] = structuredClone(thing);
+  }
+  for (const [id, sheet] of Object.entries(rules.sheets)) {
+    const e = Object.hasOwn(out.entities, id) ? out.entities[id] : undefined;
+    if (!e)
+      throw new Error(`starter ${doc.id}: no one is ${id}`);
+    Object.assign(e.fields, structuredClone(sheet));
+  }
+  return out;
+}
+
 // src/packs/starters/index.ts
 var starter = (doc) => (id, name) => ({ ...structuredClone(doc), id, name });
 var STARTER_WORLDS = {
-  fantasy_town: starter(fantasy_town_default),
-  mystery_manor: starter(mystery_manor_default),
-  modern_slice_of_life: starter(modern_slice_of_life_default)
+  fantasy_town: starter(withRules2(fantasy_town_default, FANTASY_TOWN_RULES)),
+  mystery_manor: starter(withRules2(mystery_manor_default, MYSTERY_MANOR_RULES)),
+  modern_slice_of_life: starter(withRules2(modern_slice_of_life_default, MODERN_SLICE_OF_LIFE_RULES))
 };
 // src/packs/starters/info.ts
 var STARTER_INFO = [
@@ -91177,7 +95580,7 @@ function clip(text6, max) {
 function jsonText(value, compact = false) {
   return (compact ? JSON.stringify(value) : JSON.stringify(value, null, 1)) ?? "null";
 }
-function kindOf(value) {
+function kindOf2(value) {
   if (Array.isArray(value))
     return `a list of ${value.length}`;
   if (isRecord(value))
@@ -91217,13 +95620,13 @@ function outline(value, pointer, from = 0) {
   const entries2 = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : isRecord(value) ? Object.entries(value) : [];
   for (let i = from;i < entries2.length; i++) {
     const [key, v] = entries2[i] ?? ["", null];
-    const line = Array.isArray(value) ? itemLine(i, v) : outlineLine(key, v);
-    if (used + line.length > BODY_LIMIT) {
+    const line2 = Array.isArray(value) ? itemLine(i, v) : outlineLine(key, v);
+    if (used + line2.length > BODY_LIMIT) {
       lines.push(`(${count(entries2.length - i, "more entry", "more entries")}: read on with from ${i}, or read one with pointer ${pointer}/<${Array.isArray(value) ? "index, id or name" : "key"}>)`);
       break;
     }
-    lines.push(line);
-    used += line.length + 1;
+    lines.push(line2);
+    used += line2.length + 1;
   }
   return lines.join(`
 `);
@@ -91282,7 +95685,7 @@ function readAt(root, options) {
   if (value === undefined) {
     const there = pointerOf(at) || "the top";
     const keys = Array.isArray(parent) ? [`indexes 0–${parent.length - 1}${parent.some((item) => itemKey(item) !== null) ? ", or an item's id or name" : ""}`] : isRecord(parent) ? Object.keys(parent) : [];
-    const holds4 = keys.length > 0 ? ` ${there} holds ${clip(keys.join(", "), 1500)}.` : ` ${there} is ${kindOf(parent)}.`;
+    const holds4 = keys.length > 0 ? ` ${there} holds ${clip(keys.join(", "), 1500)}.` : ` ${there} is ${kindOf2(parent)}.`;
     return { ok: false, text: `Nothing at ${pointer} in ${options.what}.${holds4}` };
   }
   if (options.from !== undefined || options.limit !== undefined)
@@ -91305,25 +95708,25 @@ function readAt(root, options) {
 ${text6.slice(offset, end)}${next}` };
   }
   if (text6.length <= BODY_LIMIT)
-    return { ok: true, text: `${where}, ${kindOf(value)}:
+    return { ok: true, text: `${where}, ${kindOf2(value)}:
 
 ${text6}` };
   if (!isRecord(value) && !Array.isArray(value)) {
     const end = cutAt(text6, BODY_LIMIT);
-    return { ok: true, text: `${where}, ${kindOf(value)}, characters 0–${end} of ${text6.length}:
+    return { ok: true, text: `${where}, ${kindOf2(value)}, characters 0–${end} of ${text6.length}:
 
 ${text6.slice(0, end)}
 
 (Continues: read on with offset ${end}.)` };
   }
   const deeper = Array.isArray(value) ? `${indexed}/0` : `${indexed}/<key>`;
-  return { ok: true, text: `${where} is ${kindOf(value)}, ${count(text6.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
+  return { ok: true, text: `${where} is ${kindOf2(value)}, ${count(text6.length, "character")} as JSON: too big for one answer, so here is its outline. Read a part with pointer "${deeper}", page through its entries with from, or through its JSON with offset 0.
 
 ${outline(value, indexed)}` };
 }
 function entriesOf(value, where, pointer, from, limit) {
   if (!Array.isArray(value) && !isRecord(value))
-    return { ok: false, text: `from and limit page a list or an object, and ${where} is ${kindOf(value)}: read it with offset instead.` };
+    return { ok: false, text: `from and limit page a list or an object, and ${where} is ${kindOf2(value)}: read it with offset instead.` };
   const entries2 = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value);
   const start = Math.floor(from);
   if (!(start >= 0) || start >= entries2.length && entries2.length > 0)
@@ -91598,7 +96001,7 @@ function narratorViewOf(raw) {
 }
 
 // src/engine/realism.ts
-function all(level) {
+function all2(level) {
   return Object.fromEntries(DOMAINS.map((d) => [d, level]));
 }
 var REALISM_PRESETS = {
@@ -91608,11 +96011,11 @@ var REALISM_PRESETS = {
   },
   grounded: {
     levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2, d20: 0 },
-    tierCaps: { principal: {}, supporting: {}, background: all(1) }
+    tierCaps: { principal: {}, supporting: {}, background: all2(1) }
   },
   simulation: {
     levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3, d20: 0 },
-    tierCaps: { principal: all(4), supporting: all(3), background: all(2) }
+    tierCaps: { principal: all2(4), supporting: all2(3), background: all2(2) }
   }
 };
 function predicates(world, reg) {
@@ -92035,6 +96438,21 @@ function lintStructure(world, reg) {
   return issues;
 }
 
+// src/engine/offered.ts
+function layerOff(ctx) {
+  return ctx.levelOf(ctx.world.pov, D20_PACK) < 1;
+}
+function offeredActions(reg, ctx) {
+  const off = layerOff(ctx);
+  const out = new Map;
+  for (const [id, a] of reg.actions)
+    if (!(off && a.pack === D20_PACK))
+      out.set(id, a);
+  for (const [id, a] of Object.entries(ctx.world.actions))
+    out.set(id, a);
+  return out;
+}
+
 // src/engine/typed-intent.ts
 var STOP = new Set(["the", "a", "an", "to", "of", "at", "my", "your", "and", "with", "about", "for", "in", "on", "some", "over", "up", "down"]);
 var FILLER3 = new Set(["down", "up", "over", "back", "out", "across", "along", "around", "right", "straight", "on", "off", "just"]);
@@ -92191,13 +96609,13 @@ function tokenize2(text6) {
   }
   return out;
 }
-function words5(s) {
+function words6(s) {
   return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w));
 }
 function byName(said3, pool) {
   let best = null;
   for (const c of pool) {
-    const n = words5(c.name).filter((w) => said3.has(w)).length;
+    const n = words6(c.name).filter((w) => said3.has(w)).length;
     if (n > 0 && (!best || n > best.n))
       best = { id: c.id, n };
   }
@@ -92258,20 +96676,16 @@ function phraseAt(tokens3, phrase, acts3) {
 function typedIntent(reg, world, state2, text6) {
   const said3 = tokenize2(text6);
   const tokens3 = said3.map((t) => t.word);
-  const actions = new Map;
-  for (const [id, a] of reg.actions)
-    actions.set(id, a);
-  for (const [id, a] of Object.entries(world.actions))
-    actions.set(id, a);
-  const named = new Set(words5(text6));
+  const ctx = reg.context(world, state2);
+  const actions = offeredActions(reg, ctx);
+  const named = new Set(words6(text6));
   const pov = world.pov;
   const people = new Set;
   for (const [id, e] of Object.entries(state2.entities))
     if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state2, id))
-      for (const w of words5(e.name))
+      for (const w of words6(e.name))
         people.add(w);
   const acts3 = (start) => playerActs(said3, start, people);
-  const ctx = reg.context(world, state2);
   const fits3 = optionalQuery(ctx, "combat.offers");
   const holders = optionalQuery(ctx, "economy.holders");
   const candidates = [];
@@ -92282,7 +96696,7 @@ function typedIntent(reg, world, state2, text6) {
     if (at < 0)
       return null;
     const end = tokens3.findIndex((w, i) => i > at && Object.values(LEADS2).some((l) => l.includes(w)));
-    return new Set(words5(tokens3.slice(at + 1, end < 0 ? undefined : end).join(" ")));
+    return new Set(words6(tokens3.slice(at + 1, end < 0 ? undefined : end).join(" ")));
   };
   const fill = (action2, rest2) => {
     const params = {};
@@ -92343,13 +96757,13 @@ function typedIntent(reg, world, state2, text6) {
       const at = phraseAt(tokens3, tokenize2(phrase).map((t) => t.word), acts3);
       if (!at)
         continue;
-      candidates.push({ action: action2, params: fill(action2, words5(tokens3.slice(at.end).join(" ")).join(" ")), skipped: at.skipped, length: phrase.length });
+      candidates.push({ action: action2, params: fill(action2, words6(tokens3.slice(at.end).join(" ")).join(" ")), skipped: at.skipped, length: phrase.length });
     }
   }
   const pay = actions.get(FINANCE_ACTIONS.pay);
   const verb = tokens3.findIndex((w, i) => hasOwn(MONEY_VERBS, w) && acts3(i));
   if (pay && amounts2.length > 0 && verb >= 0 && offered(pay))
-    candidates.push({ action: pay, params: fill(pay, words5(tokens3.slice(verb + 1).join(" ")).join(" ")), skipped: 0, length: tokens3[verb]?.length ?? 0 });
+    candidates.push({ action: pay, params: fill(pay, words6(tokens3.slice(verb + 1).join(" ")).join(" ")), skipped: 0, length: tokens3[verb]?.length ?? 0 });
   let best = null;
   for (const c of candidates) {
     const filled = Object.entries(c.action.params).every(([name, def]) => def.optional === true || c.params[name] !== undefined);
@@ -92465,13 +96879,13 @@ function billFlows(doc, owner2, taken) {
 }
 function jobOf2(doc, person2, taken) {
   const f = person2.fields;
-  const occupation = typeof f.occupation === "string" ? f.occupation : "";
+  const occupation2 = typeof f.occupation === "string" ? f.occupation : "";
   const hourly = typeof f.hourly_cents === "number" && f.hourly_cents > 0 ? f.hourly_cents : null;
   const salary = typeof f.salary_cents === "number" ? f.salary_cents : typeof f.annual_income_cents === "number" ? f.annual_income_cents : null;
-  if (occupation === "retired" || occupation === "" && hourly === null && salary === null)
+  if (occupation2 === "retired" || occupation2 === "" && hourly === null && salary === null)
     return null;
-  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation !== "" ? occupation.replace(/_/g, " ") : "Employer";
-  const job = { worker: person2.id, employer, ...occupation !== "" ? { occupation } : {}, status: "active" };
+  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation2 !== "" ? occupation2.replace(/_/g, " ") : "Employer";
+  const job = { worker: person2.id, employer, ...occupation2 !== "" ? { occupation: occupation2 } : {}, status: "active" };
   if (hourly !== null) {
     job.basis = "hourly";
     job.rate = hourly;
@@ -92626,7 +97040,7 @@ var RETIRED_PURPOSES = ["select", "contradiction"];
 function migrateWorld(stored) {
   const doc = migrateMoney(stored);
   const currency = doc.currency;
-  const lore = doc.lore;
+  const lore2 = doc.lore;
   const loreIndex = doc.loreIndex;
   const indexed = isRecord(loreIndex) && isRecord(loreIndex.terms) && isRecord(loreIndex.topics);
   const classifications = doc.classifications;
@@ -92637,7 +97051,7 @@ function migrateWorld(stored) {
   const retiredPurpose = (purpose) => typeof purpose === "string" && RETIRED_PURPOSES.includes(purpose);
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && retiredPurpose(t.purpose) ? [id] : []) : [];
   const resignaled = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && !retiredPurpose(t.purpose) && Array.isArray(t.signals) && hasRetiredSignal(t.signals.filter((s) => typeof s === "string")) ? [id] : []) : [];
-  const readers = isRecord(lore) ? Object.entries(lore).flatMap(([id, l]) => isRecord(l) && Array.isArray(l.audience) && l.audience.some(retiredPurpose) ? [id] : []) : [];
+  const readers = isRecord(lore2) ? Object.entries(lore2).flatMap(([id, l]) => isRecord(l) && Array.isArray(l.audience) && l.audience.some(retiredPurpose) ? [id] : []) : [];
   const lorePins = doc.lorePins;
   const pinned = isRecord(lorePins) && isRecord(lorePins.steps) && Object.keys(lorePins.steps).some(retiredPurpose);
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
@@ -92645,9 +97059,9 @@ function migrateWorld(stored) {
   const economy2 = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config3 = isRecord(economy2) && isRecord(economy2.config) ? economy2.config : null;
   const oldCap = config3 !== null && "unpricedCapCents" in config3;
-  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && readers.length === 0 && !pinned && !legacyPov && !oldCap)
+  if (isCurrency(currency) && isRecord(lore2) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && resignaled.length === 0 && readers.length === 0 && !pinned && !legacyPov && !oldCap)
     return compileMaps(doc);
-  const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
+  const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore2) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (!indexed)
     out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
   if (retired.length > 0 || resignaled.length > 0) {
@@ -92890,8 +97304,8 @@ function checkWorldDay(registry, pipeline, world, state2, runSeed, day2, intent2
     const ctx = registry.context(world, next);
     for (const r of registry.renderers) {
       try {
-        for (const line of r.render(ctx))
-          for (const leak of findLeaks(line, secrets))
+        for (const line2 of r.render(ctx))
+          for (const leak of findLeaks(line2, secrets))
             note2("leaks", `leak in ${r.slot}: "${leak}"`);
       } catch (error) {
         note2("failed", `section ${r.slot} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -92975,13 +97389,13 @@ function entityOf(reg, ctx, id) {
     life: { state: lifeOf(state2, id), label: life.label, acts: life.acts, everyone: awareness.everyone, aware: named(awareness.aware), unaware: named(awareness.unaware) }
   };
 }
-function picked(reg, ctx, pick2) {
-  const ids3 = pick2.ids ? [...new Set(pick2.ids)].filter((id) => own(ctx.state.entities, id)) : Object.keys(ctx.state.entities).sort();
-  const kind = pick2.kind;
+function picked(reg, ctx, pick3) {
+  const ids3 = pick3.ids ? [...new Set(pick3.ids)].filter((id) => own(ctx.state.entities, id)) : Object.keys(ctx.state.entities).sort();
+  const kind = pick3.kind;
   return kind === undefined ? ids3 : ids3.filter((id) => kindIs(reg, ctx.world, own(ctx.state.entities, id)?.kind ?? "", kind));
 }
 var WORLD_PARTS = {
-  entities: (reg, ctx, pick2) => picked(reg, ctx, pick2).flatMap((e) => entityOf(reg, ctx, e) ?? []),
+  entities: (reg, ctx, pick3) => picked(reg, ctx, pick3).flatMap((e) => entityOf(reg, ctx, e) ?? []),
   kinds: (reg, { world }) => {
     const kinds = new Map;
     for (const k of reg.kinds.values())
@@ -93017,26 +97431,26 @@ var WORLD_PARTS = {
         relationTypes.set(id, { id, label: id.replace(/_/g, " "), from: "*", to: "*", fields: [] });
     return [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label));
   },
-  money: (reg, ctx, pick2) => {
-    if (pick2.ids === undefined) {
-      const all2 = optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
-      const kind = pick2.kind;
-      return kind === undefined ? all2 : all2.filter((m) => kindIs(reg, ctx.world, own(ctx.state.entities, m.party)?.kind ?? "", kind));
+  money: (reg, ctx, pick3) => {
+    if (pick3.ids === undefined) {
+      const all3 = optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
+      const kind = pick3.kind;
+      return kind === undefined ? all3 : all3.filter((m) => kindIs(reg, ctx.world, own(ctx.state.entities, m.party)?.kind ?? "", kind));
     }
     const finance = optionalQuery(ctx, "economy.finance");
     if (!finance)
       return [];
-    return picked(reg, ctx, pick2).flatMap((id) => {
+    return picked(reg, ctx, pick3).flatMap((id) => {
       const e = own(ctx.state.entities, id);
       return e && PARTY_KINDS.some((k) => kindIs(reg, ctx.world, e.kind, k)) ? [finance(ctx, id, false)] : [];
     });
   },
-  orgs: (_reg, ctx, pick2) => optionalQuery(ctx, "orgs.gm")?.(ctx, pick2.ids) ?? [],
+  orgs: (_reg, ctx, pick3) => optionalQuery(ctx, "orgs.gm")?.(ctx, pick3.ids) ?? [],
   encounter: (_reg, ctx) => optionalQuery(ctx, "combat.gm")?.(ctx) ?? null,
   routineRoles: (_reg, ctx) => optionalQuery(ctx, "castlife.chat_roles")?.(ctx) ?? []
 };
-function buildGmWorldPart(reg, world, state2, part, pick2 = {}) {
-  return WORLD_PARTS[part](reg, reg.context(world, state2), pick2);
+function buildGmWorldPart(reg, world, state2, part, pick3 = {}) {
+  return WORLD_PARTS[part](reg, reg.context(world, state2), pick3);
 }
 function gmWorldPartCount(reg, world, state2, part) {
   const ctx = reg.context(world, state2);
@@ -93092,7 +97506,7 @@ function compactSpan(minutes2) {
 function pickReader(registry, world, state2, typed, heard) {
   const said3 = heard.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state2).filter((s) => !said3.includes(s.toLowerCase()));
-  const screened = (words6) => findLeaks(words6, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state2, words6, heard) ? null : words6;
+  const screened = (words7) => findLeaks(words7, secrets).length > 0 || namesHiddenOrSecretLore(registry, world, state2, words7, heard) ? null : words7;
   const nameOf9 = (value) => {
     if (typeof value !== "string" || value === "")
       return null;
@@ -93105,10 +97519,10 @@ function pickReader(registry, world, state2, typed, heard) {
     return null;
   };
   const asTyped = (value) => {
-    const words6 = value.replace(/[_~]/g, " ").trim();
-    if (typed === "" || words6 === "")
+    const words7 = value.replace(/[_~]/g, " ").trim();
+    if (typed === "" || words7 === "")
       return null;
-    const found = new RegExp(words6.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_~]+"), "iu").exec(typed);
+    const found = new RegExp(words7.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_~]+"), "iu").exec(typed);
     return found ? screened(found[0]) : null;
   };
   const labelOf2 = (table, value) => {
@@ -93129,12 +97543,12 @@ function pickReader(registry, world, state2, typed, heard) {
     const label2 = labelOf2(def.table, value);
     if (label2 !== null)
       return findLeaks(label2, secrets).length === 0 ? { words: label2, label: true } : null;
-    const words6 = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
-    return words6 === null ? null : { words: words6, label: false };
+    const words7 = (def.table === undefined && !(/^\S+$/.test(value) && /[_~]/.test(value)) ? screened(value) : null) ?? asTyped(value);
+    return words7 === null ? null : { words: words7, label: false };
   };
-  const payee = (def, value, words6) => {
-    if (words6 !== undefined)
-      return screened(words6);
+  const payee = (def, value, words7) => {
+    if (words7 !== undefined)
+      return screened(words7);
     if (typeof value !== "string" || value === "")
       return null;
     const entity = own(state2.entities, value);
@@ -93230,9 +97644,9 @@ function weightedOrder(items, rng) {
   const pool = [...items];
   const out = [];
   while (pool.length > 0) {
-    const pick2 = rng.weighted(pool.map((value, i) => ({ value: i, weight: value.weight })));
-    out.push(pool[pick2]);
-    pool.splice(pick2, 1);
+    const pick3 = rng.weighted(pool.map((value, i) => ({ value: i, weight: value.weight })));
+    out.push(pool[pick3]);
+    pool.splice(pick3, 1);
   }
   return out;
 }
@@ -93522,10 +97936,10 @@ function planTurn(input) {
           runRulesOnEvents(reg, w, met, { seed: hashParts(seed, "ended") });
       }
       stepTracks(reg, w, hashParts(seed, "tracks"));
-      const left = steps.length - 1 - i;
-      const cause = resolution && left > 0 ? queueStop(w, resolution, mark2, scene, speeding) : null;
+      const left2 = steps.length - 1 - i;
+      const cause = resolution && left2 > 0 ? queueStop(w, resolution, mark2, scene, speeding) : null;
       if (cause) {
-        stopped = { left, cause };
+        stopped = { left: left2, cause };
         break;
       }
     }
@@ -93636,8 +98050,8 @@ function sandboxSpan(world, state2, runSeed, index, at, leaks) {
     overrides[id] = "note";
   return checkWorldDay(registryOf(), pipeline, world, state2, runSeed, index, timelapseIntent({ type: "at", at }, overrides), { leaks, clock: () => performance.now() });
 }
-function sandboxGmPart(world, state2, part, pick2 = {}) {
-  return readPass(() => buildGmWorldPart(registryOf(), world, state2, part, pick2));
+function sandboxGmPart(world, state2, part, pick3 = {}) {
+  return readPass(() => buildGmWorldPart(registryOf(), world, state2, part, pick3));
 }
 function sandboxGmWorld(world, state2) {
   return readPass(() => buildGmWorld(registryOf(), world, state2));
@@ -93665,17 +98079,17 @@ function lintSummary(issues, shown4 = 12) {
 function ranked(issues, first) {
   return [...issues].sort((a, b) => Number(first?.has(b) === true) - Number(first?.has(a) === true) || RANK[a.severity] - RANK[b.severity]);
 }
-var issueKey = (i, words6) => `${i.severity}\x00${i.code}\x00${i.path}${words6 ? `\x00${i.message}` : ""}`;
+var issueKey = (i, words7) => `${i.severity}\x00${i.code}\x00${i.path}${words7 ? `\x00${i.message}` : ""}`;
 function lintDiff(before, after) {
   const open = new Set(after.keys());
-  const match = (issues, words6) => {
+  const match = (issues, words7) => {
     const waiting = new Map;
     for (const i of open) {
-      const key = issueKey(after[i], words6);
+      const key = issueKey(after[i], words7);
       waiting.set(key, [...waiting.get(key) ?? [], i]);
     }
     return issues.filter((issue) => {
-      const at = waiting.get(issueKey(issue, words6))?.shift();
+      const at = waiting.get(issueKey(issue, words7))?.shift();
       if (at === undefined)
         return true;
       open.delete(at);
@@ -96501,7 +100915,7 @@ var MCP_default = "# The lumirpengine command line and MCP server\n\n> **The com
 var RECIPES_default = "# LumiRPEngine recipes\n\n> The world format these recipes use is the engine's, which RPE keeps. Where a recipe names an `lre_*` tool, it is one of the command line and MCP server for outside harnesses, which this build does not serve and a later build brings back; in Build, enter each item in its editor ([Worlds in RPE](world.md)).\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `lre_world_create` with no template). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; an agent merges the JSON with `lre_edit`. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another, and the level follows the XP both ways. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix, a GM edit), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained; XP that falls below the level's threshold drops the level straight back, running nothing, and a pool left above its lower max comes down to it. Nothing else writes the level: to change one, change XP. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nThese values are Balanced's own, so the policy reads as Balanced. A policy's values are its own: change any of them and it plays as Custom with them (lint says so, and suggests naming it `\"custom\"`). The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1, `d20` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Tabletop rules pack](#tabletop-rules-pack-d20)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Organizations pack](#organizations-pack-orgs)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `acting(self, as)`\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `may(who, org, power)`\n- `member_of(entity, group)`\n- `staff_of(who, org)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.bump`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.put`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unlist`, `engine.unmaterialized`, `engine.world`, `engine.world_back`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.\n\n### Relation types\n\nBuilt in: `in`, `on`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`, `d20`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Events\n\nIts own: `calendar.holiday`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default`: `relationships.appraise`, `castlife.book_invitation` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default`: `castlife.satisfy`, `set` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default`: `set` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default`: `castlife.satisfy` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default`: `castlife.to_bed`, `castlife.satisfy` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?`, `fight?` |\n| `combat.end_turn` | `who?` |\n| `combat.join` | `fight`, `with?`, `foes?`, `order?`, `roll_initiative?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `with?`, `foes?`, `at?`, `order?`, `roll_initiative?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default`: `combat.end_turn` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default`: `combat.start` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.join`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `combat.bestiary` | Bestiary | `lre-table/combat.bestiary/v1` | name (text), kind (text), tier (text, optional), fields (json), carries (list, optional), description (text, optional) | 0 |\n\n## Tabletop rules pack (`d20`)\n\nVersion 1 · realism domain `d20` · requires `combat`, `gear`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `d20.advance` | `who`, `ruled?` |\n| `d20.attack` | `who`, `ruled?` |\n| `d20.award` | `who`, `ruled?` |\n| `d20.check` | `who`, `ruled?` |\n| `d20.condition` | `who`, `ruled?` |\n| `d20.effect` | `who`, `ruled?` |\n| `d20.harm` | `who`, `ruled?` |\n| `d20.heal` | `who`, `ruled?` |\n| `d20.ranks` | `who`, `ruled?` |\n| `d20.reload` | `who`, `ruled?` |\n| `d20.rest` | `who`, `ruled?` |\n| `d20.save` | `who`, `ruled?` |\n| `d20.stat_as` | `who`, `ruled?` |\n| `d20.trait` | `who`, `ruled?` |\n\n### Formula functions\n\n- `bonus(...args)`\n- `bonus_only(...args)`\n- `bonus_without(...args)`\n- `class_level(...args)`\n- `class_skill(...args)`\n- `class_sum(...args)`\n- `has_trait(...args)`\n- `hit_dice(...args)`\n- `levels(...args)`\n- `limit(...args)`\n- `mod(...args)`\n- `ranks(...args)`\n- `rest_minutes(...args)`\n- `score(...args)`\n- `size_mod(...args)`\n- `total(...args)`\n- `under(...args)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `advance` | Take a level | Take a level in a class: its hit points, and what the level gives by the tables, told as open. | `class: text`, `hp?: text` |  | `default`: `d20.advance` | `0` |  |\n| `attack` | Attack | Attack someone with a weapon in hand or one's own attack: the roll against their defence, a critical and the damage, all worked out from both sheets. | `target: ref → person`, `with?: text`, `full?: bool`, `touch?: bool`, `held?: text`, `shots?: text`, `nonlethal?: bool`, `concealment?: number`, `mods?: list` |  | `critical`: `d20.attack`; `default`: `d20.attack`; `hit`: `d20.attack`; `miss`: `d20.attack` | `0` | attack, strike at, shoot at, swing at |\n| `award` | Award experience | Give experience, as a number or for who was overcome, and say who has reached a new level. | `xp?: number`, `overcame?: list`, `also?: list`, `why?: text` |  | `default`: `d20.award` | `0` |  |\n| `check` | Check | Roll a skill or an ability against a difficulty or against someone, with the total worked out from the sheet. | `skill: text`, `difficulty?: text`, `vs?: ref → person`, `vs_skill?: text`, `take?: text`, `aid?: list`, `mods?: list` |  | `default`: `d20.check`; `failure`: `d20.check`; `success`: `d20.check` | `1` | roll for, make a check, use my skill |\n| `condition` | Condition | Put a condition of the ruleset on someone, or take it off, for a number of rounds, minutes or hours, or until a save. | `condition: text`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.condition` | `0` |  |\n| `d20_rest` | Rest the night | Rest for the ruleset's night: hit points and daily gauges come back as the ruleset gives them. | `hours?: number`, `also?: list` |  | `default`: `d20.rest` | `rest_minutes(params.hours)` | rest for the night, sleep it off |\n| `effect` | Effect | Put a passing effect with its own modifiers on someone, or take it off by its label. | `label: text`, `mods?: list`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.effect` | `0` |  |\n| `harm` | Harm | Take hit points off someone, several, or everyone in an area, with a save for half or none where one is given. | `amount: text`, `type?: text`, `nonlethal?: bool`, `targets?: list`, `centre?: ref → person`, `radius?: number`, `save?: text`, `difficulty?: text`, `half?: bool`, `why?: text` |  | `default`: `d20.harm` | `0` |  |\n| `heal` | Heal | Give back hit points, take off nonlethal harm, give temporary hit points, or stabilise someone dying. | `amount?: text`, `nonlethal?: bool`, `temporary?: bool`, `stabilize?: bool`, `why?: text` |  | `default`: `d20.heal` | `0` |  |\n| `ranks` | Skill ranks | Set someone's ranks in a skill; the most it takes and the points left are told. | `skill: text`, `ranks: number` |  | `default`: `d20.ranks` | `0` |  |\n| `reload` | Reload | Fill a weapon's magazine from the rounds carried. | `item?: text` |  | `default`: `d20.reload` | `0` | reload, change the magazine |\n| `save` | Save | Roll a save against a difficulty, with the total worked out from the sheet. | `save: text`, `difficulty: text`, `also?: list`, `mods?: list` |  | `default`: `d20.save`; `failure`: `d20.save`; `success`: `d20.save` | `0` | make a save, resist |\n| `stat_as` | Sheet from the bestiary | Give someone the sheet and the attacks of one of the ruleset's creatures. | `creature: text` |  | `default`: `d20.stat_as` | `0` |  |\n| `trait` | Trait | Give someone a feat, a race or a feature of the ruleset, or take it away; what it requires is told. | `trait: text`, `choice?: text`, `off?: bool`, `why?: text` |  | `default`: `d20.trait` | `0` |  |\n\n### Events\n\nIts own: `d20.advance`, `d20.attack`, `d20.award`, `d20.check`, `d20.condition`, `d20.effect`, `d20.harm`, `d20.heal`, `d20.ranks`, `d20.reload`, `d20.rest`, `d20.save`, `d20.stat_as`, `d20.state`, `d20.trait`, `d20.upkeep`.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement, note) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |\n| `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `opening_ep` | Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it) | money |  |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp, nonprofit |  |  |  |  | live from money 4 |\n| `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |\n| `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n| `winding_up` | Winding up since (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `revenue` | Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula) | list |  |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (anyone in the world, a place, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid (none: an unpaid title) | enum: weekly, biweekly, semimonthly, monthly, per_job, custom, none |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_from` | Pay starts | date |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `position` | Position (one its employer defines) | text |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `project`: Project\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Paid from (its party's operating account when left out) | ref → account |  |  |  |  | live from money 3 |\n| `org` | Whose project (the organization or person that runs and pays for it) | ref |  |  |  |  | live from money 3 |\n| `payee` | Paid to (Contractors when left out) | text |  |  |  |  | live from money 3 |\n| `start` | Starts (as the story begins when left out) | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: planned, active |  | `\"planned\"` |  |  | live from money 3 |\n| `steps` | Steps ({id, name, days or business_days, cost, paid: start, end or split, after, inputs, crew, capitalize, unlocks, done}) | list |  |  |  |  | live from money 3 |\n| `template` | Template | text (row of economy.projects) |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `built_by` | Built by the project | ref → project |  |  |  |  | live from money 3 |\n| `capital_cost` | Capital cost | money | ≥ 0 |  |  |  | live from money 3 |\n| `in_service` | In service from | date |  |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `life_months` | Useful life (months) | number | ≥ 1 |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `property_type` | What it is (mineral: a mineral or royalty interest) | enum: building, land, mineral |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `reserves` | Reserves (units) | number | ≥ 0 |  |  |  | live from money 3 |\n| `salvage` | Salvage value | money | ≥ 0 |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `valuation` | Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record) | list |  |  |  |  | live from money 4 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `purpose` | What it is for | text |  |  |  |  |  |\n| `revocable` | Revocable (its settlor may take it back) | bool |  |  |  |  |  |\n| `settlor` | Settlor (who made it: a person or an organization) | ref |  |  |  |  |  |\n| `trustees_decide` | Its trustees decide (each on their own unless set, or together) | enum: each, together |  |  |  |  |  |\n| `until` | Until (the day it ends) | date |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `new?`, `details?`, `finance?`, `down?`, `term_months?` |\n| `economy.card_replace` | `card`, `who?`, `by?` |\n| `economy.card_state` | `card`, `state`, `who?`, `by?` |\n| `economy.cash_rule` | `atm` |\n| `economy.close_account` | `account` |\n| `economy.consent_dividend` | `org`, `cents`, `year?`, `by?` |\n| `economy.consolidate` | `org`, `elect?`, `by?` |\n| `economy.delist` | `business`, `price?`, `party?`, `by?` |\n| `economy.deposit` | `account`, `cents`, `who?`, `by?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.donate` | `to`, `cents`, `from?`, `method?`, `memo?`, `by?` |\n| `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?`, `by?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `position?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_hours` | `job`, `hours_per_week`, `by?` |\n| `economy.job_leave` | `job`, `leave`, `by?` |\n| `economy.job_position` | `job`, `position?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.job_title` | `job`, `title?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |\n| `economy.lend` | `to`, `cents`, `from?`, `into?`, `apr?`, `months?`, `payment?`, `due_day?`, `who?`, `by?` |\n| `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |\n| `economy.open_account` | `party`, `product`, `name?`, `due_day?`, `statement_day?`, `autopay_from?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.project_drop` | `project`, `org?`, `text?`, `by?` |\n| `economy.project_note` | `project`, `org?`, `step?`, `days?`, `cents?`, `text`, `source?`, `by?` |\n| `economy.project_pause` | `project`, `org?`, `by?` |\n| `economy.project_resume` | `project`, `org?`, `by?` |\n| `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?`, `live?`, `story?`, `name?`, `owned?` |\n| `economy.property_list` | `property`, `price?`, `party?`, `by?` |\n| `economy.property_make` | `place`, `name?`, `value?`, `owner?`, `asking_price?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.share_out` | `org`, `cents`, `from?`, `by?` |\n| `economy.shares_buy_back` | `business`, `from`, `units`, `price?`, `to?`, `party?`, `by?` |\n| `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |\n| `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |\n| `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.tax_status` | `org`, `status?`, `by?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |\n| `economy.withdraw` | `account`, `cents`, `who?`, `by?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(employer, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default`: `economy.apply_credit` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.buy` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_replace` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | unfreeze my card, unlock my card |\n| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default`: `economy.consent_dividend` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.deposit` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default`: `economy.distribute` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |\n| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default`: `economy.donate` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.exercise` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default`: `economy.flow_create` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default`: `economy.flow_update` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default`: `economy.invoice_issue` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default`: `economy.invoice_pay` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default`: `economy.invoice_void` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default`: `economy.job_end` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default`: `economy.hire` | `15` | hire, take on, give a job to |\n| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default`: `economy.job_hours` | `5` | change their hours, cut their hours, more hours, full time, part time |\n| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | put on leave, give time off, send on leave |\n| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default`: `economy.job_position` | `5` | promote, appoint, make them, move them to |\n| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default`: `economy.job_raise` | `5` | give a raise, raise the pay, pay more |\n| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | back from leave, back to work, end their leave |\n| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default`: `economy.job_title` | `5` | change the job title, retitle |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default`: `economy.lease_end` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default`: `economy.lease_start` | `20` | rent out, sign a lease, let the apartment |\n| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default`: `economy.lend` | `10` | lend money to, make a loan to, loan the company |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.move` | `2` | transfer, move money, put into savings |\n| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default`: `economy.dues` | `2` | set dues, membership fee, everyone chips in |\n| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default`: `economy.pay_schedule` | `2` | pay schedule, change payday, pay every other week |\n| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default`: `economy.share_out` | `5` | share out, split the money, divide the purse, hand out |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default`: `economy.owner_draw` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default`: `economy.transfer` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.pay_card` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default`: `economy.project_drop` | `2` | drop the project, abandon the well, cancel the build |\n| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default`: `economy.project_pause` | `2` | pause the project, halt work, stop drilling |\n| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default`: `economy.project_resume` | `2` | resume the project, restart work |\n| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default`: `economy.project_start` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default`: `economy.property_buy` | `60` | buy the house, buy the property, make an offer on |\n| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default`: `economy.property_list` | `5` | put the house on the market, list the property, take it off the market |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.property_sell` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default`: `economy.route` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.set_autopay` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text, such as [{\"use\":\"debit\",\"max\":100},{\"use\":\"cash\"}]` |  | `default`: `economy.set_pay_prefs` | `2` | i'd rather pay with |\n| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_buy_back` | `30` | buy back shares, buy them out, buy back their stake |\n| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_classes` | `2` | add a share class, non-voting shares, change the votes |\n| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.delist` | `60` | take the company private, delist the company, go private, buy out the public |\n| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_issue` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |\n| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default`: `economy.list` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.stake_sell` | `60` | sell my share of the business, sell the shop, sell my shares |\n| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default`: `economy.consolidate` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default`: `economy.trade` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.withdraw` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_back`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unbook`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `project_note` | `money` |\n| `purchase` | `money` |\n| `revenue` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.projects` | `money` | 3 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n| `economy.year_close` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |\n| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), s_corp_holder (bool, optional), payout_pct (number, optional), excise_pct (number, optional), undistributed_tax_pct (number, optional), donor_limit_pct (number, optional), description (text) | 4 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |\n| `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.projects` | Production project templates | `lre-table/economy.projects/v1` | name (text), description (text), payee (text), days (band), cost_cents (band), steps (json) | 5 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.depreciation`, `economy.holdings`, `economy.listing`, `economy.notes`, `economy.projects`, `economy.property`, `economy.revenue`, `economy.scorp_holders`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `access` | Who may use it | enum: owner, members, staff, customers, public |  |  |  |  |  |\n| `aliases` | Also called | list of text |  |  |  |  |  |\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `description` | Description | text |  |  |  |  |  |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `got` | How its holder came to have it | list |  |  |  |  | locked |\n| `holds` | Takes things up to | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `home` | Kept at (a place, a holder, or owner) | text |  |  |  |  |  |\n| `made` | Made in play (by whom, where) | list |  |  |  |  | locked |\n| `maybe_same_as` | Maybe the same as | ref |  |  |  |  | locked |\n| `merged_into` | Merged into | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `part` | Built into what holds it | bool |  |  |  |  |  |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `size` | Size | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `sleep` | Can be slept in or on | bool |  |  |  |  |  |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `permits` | Lets use their things | `*` | `*` | many_many |  |  | `by`, `scope` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | `basis`, `by` |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.fetch` | `item`, `to` |\n| `gear.give` | `item`, `from`, `to`, `told?`, `basis?` |\n| `gear.hand` | `item`, `to`, `basis`, `until?`, `by?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.put_away` | `item`, `by?` |\n| `gear.put_in` | `item`, `into`, `by?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.set_apply` | `who`, `set` |\n| `gear.set_drop` | `who`, `set` |\n| `gear.set_save` | `who`, `name`, `kind` |\n| `gear.take` | `item`, `to` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.thing_change` | `change` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `ammo_of(who, what)`\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `fetch_minutes(who, thing)`\n- `fits_in(thing, holder)`\n- `fits_on(_who, thing)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `may_assign(who, thing)`\n- `may_use(who, thing)`\n- `movable(thing)`\n- `possessor(thing)`\n- `reach_of(who, thing)`\n- `readied(who, what)`\n- `rest_near(who, thing)`\n- `returns_to(who, thing)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default`: `gear.drop` | `1` | drop, put down, leave |\n| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default`: `gear.fetch` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |\n| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.give` | `1` | give, give away, let keep |\n| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default`: `gear.hand` | `1` | give back, return, hand back |\n| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.hand` | `1` | hand, hand over, pass, toss |\n| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default`: `gear.lend` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default`: `gear.lose` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default`: `gear.put_away` | `2` | put away, put back, tidy away |\n| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default`: `gear.put_in` | `1` | put in, put into, stash in, pack in, store in |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default`: `gear.retrieve` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default`: `gear.remove` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default`: `gear.search` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_apply` | `5` | change into, put on my, get dressed in, gear up |\n| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_drop` | `0` |  |\n| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default`: `gear.set_save` | `0` |  |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default`: `gear.take` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default`: `gear.take_piece` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default`: `gear.use` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default`: `gear.wear` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `has` | `ref` |\n| `item_condition` | `number` |\n| `item_hand` | `ref` |\n| `item_lose` | `ref` |\n| `item_make` | `ref` |\n| `item_move` | `ref` |\n| `item_own` | `ref` |\n| `item_use` | `number` |\n| `item_wear` | `ref` |\n| `lose` | `ref` |\n| `owner` | `ref` |\n| `put` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n| `gear.put_away` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 37 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), ammo (ref, optional), notes (text, optional) | 116 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 23 |\n\n### Lint codes\n\n`gear.carry`, `gear.contents`, `gear.holders`, `gear.kits`, `gear.things`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Organizations pack (`orgs`)\n\nVersion 1 · realism domain none · requires `economy`, `relationships`, `space`.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `acts_for` | Acts for | `*` | `*` | many_many |  |  | `accounts`, `by`, `month`, `payment`, `powers` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |\n| `orgs.answer` | `org`, `request`, `answer`, `why?`, `approver?`, `said?`, `by?` |\n| `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |\n| `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |\n| `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |\n| `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |\n| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `trustee?`, `beneficiary?`, `revocable?`, `purpose?`, `until?`, `founder?`, `by?` |\n| `orgs.leave` | `org`, `who`, `why?` |\n| `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |\n| `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |\n| `orgs.note` | `org`, `text`, `by?`, `names?` |\n| `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |\n| `orgs.party_name` | `name`, `by?` |\n| `orgs.party_purse` | `cents`, `from?`, `by?` |\n| `orgs.party_tier` | `who`, `tier`, `by?` |\n| `orgs.plan_goal` | `org`, `id?`, `text?`, `window?`, `where?`, `status?`, `source?`, `by?` |\n| `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |\n| `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |\n| `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |\n| `orgs.propose` | `change`, `by`, `party?` |\n| `orgs.remove` | `org`, `who`, `by?`, `why?` |\n| `orgs.rename` | `org`, `name`, `by?` |\n| `orgs.restructure` | `org`, `structure`, `party?`, `by?` |\n| `orgs.revoke` | `org`, `to`, `by?` |\n| `orgs.succession` | `on?` |\n| `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |\n| `orgs.vote` | `org`, `motion`, `vote`, `who?`, `said?`, `by?` |\n| `orgs.vote_rule` | `org`, `who?`, `vote?`, `with?`, `by?` |\n| `orgs.wind_up` | `org`, `stage?`, `property?`, `to?`, `why?`, `by?` |\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default`: `orgs.admit` | `10` | admit, take in as a member, welcome into |\n| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default`: `orgs.appoint` | `10` | appoint, make them foreman, promote |\n| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default`: `orgs.answer` | `5` | approve it, sign off on it, okay the spend |\n| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default`: `orgs.decisions` | `2` | set the quorum, change the voting rules |\n| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default`: `orgs.delegate` | `10` | let them act for, delegate, give them authority |\n| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default`: `orgs.answer` | `5` | deny the request, turn it down, withdraw my request |\n| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text, such as \"members\"`, `keys?: text` |  | `default`: `orgs.entry` | `0` |  |\n| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default`: `orgs.found` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |\n| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default`: `orgs.plan_goal` | `2` | set a goal, add to the plan |\n| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default`: `orgs.leave` | `5` | leave the group, quit the club, resign from |\n| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default`: `orgs.merge` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |\n| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default`: `orgs.motion_end` | `2` | withdraw the motion |\n| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default`: `orgs.plan_order` | `2` | give an order, put them on it |\n| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default`: `orgs.plan_status` | `2` | mark it done, drop the plan |\n| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default`: `orgs.position` | `2` | add a position, change the position |\n| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default`: `orgs.remove` | `10` | throw out, expel, remove from the group |\n| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default`: `orgs.rename` | `2` | rename, call it |\n| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default`: `orgs.restructure` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |\n| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default`: `orgs.revoke` | `5` | revoke, take back their authority |\n| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default`: `orgs.title` | `5` | call them, give them the title |\n| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default`: `orgs.vote` | `5` | vote for the motion, vote against, raise a hand for, abstain |\n| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default`: `orgs.vote_rule` | `2` | vote with, always vote for |\n| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default`: `orgs.wind_up` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |\n| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default`: `orgs.party_hire` | `15` | hire a hand, take on a hand, hire them for the party |\n| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default`: `orgs.party_name` | `1` | call our party, name our group |\n| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default`: `orgs.party_purse` | `1` | start a party purse, pool our money, a kitty for the party |\n| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default`: `orgs.party_tier` | `1` | join my party, travel with me from now on, leave the party |\n\n### Events\n\nIts own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.log_removed`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.plan_back`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `agenda` | `routine` |\n| `approval` | `routine` |\n| `employment` | `routine` |\n| `membership` | `routine` |\n| `vote` | `routine` |\n\n### Panels and slots\n\nPanels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `orgs.motions` | `relationships` | 0 | the world |\n| `orgs.orders` | `relationships` | 0 | the world |\n| `orgs.seats` | `relationships` | 0 | the world |\n\n### Lint codes\n\n`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`, `orgs.taxes`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `position`, `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?`, `asGiven?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default`: `relationships.appraise` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default`: `relationships.appraise` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`; `great`; `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `group`: Group\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |\n| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |\n| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |\n| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |\n| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |\n| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |\n| `places` | Its places | list of ref |  |  |  |  |  |\n| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |\n| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |\n| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |\n| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |\n| `vote_by` | Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set) | enum: shares, members, trustees |  |  |  |  |  |\n| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |\n\n#### `party`: Party\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `leader` | Leader | ref → person |  |  |  |  |  |\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `on` | On | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.entered` | `entity`, `to` |\n| `space.make_place` | `change` |\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance(a, b)`\n- `distance_km(from, to, mode)`\n- `entry_why(who, place)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `may_enter(who, place)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default`: `move` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default`: `space.step` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.door`, `space.place`, `space.pos`, `space.route`, `space.shape`, `space.squares`, `space.where`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n| `place_make` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default`: `story.answer` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `driver` | Driver | ref |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `specs` | Specs ({label, value}) | list |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n| `vehicles.take` | `vehicle`, `to`, `driver?`, `riders?`, `park?`, `fuel_pct?`, `miles?`, `hours?` |\n| `vehicles.upkeep` | `vehicle`, `fuel_pct?`, `status?`, `condition?`, `serviced?`, `payer?`, `cents?`, `memo?`, `category?` |\n\n### Formula functions\n\n- `burns_fuel(vehicle)`\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default`: `vehicles.drive` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default`: `vehicles.refuel` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), aliases (list, optional), make (text, optional), model (text, optional), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), fuel_cents_per_gal (band, optional), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 32 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 4 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1, `d20` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Tabletop rules pack](#tabletop-rules-pack-d20)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Organizations pack](#organizations-pack-orgs)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to`, `activity?`, `told?`, `with?` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `acting(self, as)`\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `may(who, org, power)`\n- `member_of(entity, group)`\n- `staff_of(who, org)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.bump`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.feed`, `engine.fired`, `engine.hint`, `engine.hint_closed`, `engine.life`, `engine.note`, `engine.observed`, `engine.out.lines`, `engine.out.scene`, `engine.pause`, `engine.put`, `engine.rename`, `engine.revealed`, `engine.rewind`, `engine.signal`, `engine.told`, `engine.unlist`, `engine.unmaterialized`, `engine.world`, `engine.world_back`, `engine.ws.delete`, `engine.ws.pin`, `engine.ws.readers`, `engine.ws.write`.\n\n### Relation types\n\nBuilt in: `in`, `on`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `knowledge` | `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `gear`, `knowledge`, `money`, `outcome`, `place`, `positions`, `pov`, `present`, `property`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget. A world words any built-in slot it has without listing it in its `sectionTemplates` part, by slot id: a template holding `{{lines}}`, stored only where it differs from the built-in text.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n| `place` | Place | 11 |\n| `property` | Property | 12 |\n| `knowledge` | Who knows what | 13 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`, `d20`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Lore pins\n\nThe world's `lorePins` part: `characters`, `places` and `steps`, each a map from an id (a step's purpose, for `steps`) to a list of pins, where a pin is `{\"lore\": id}` (one of the world's lore entries), `{\"book\": id, \"entry\": id}` (an entry of one of the user's World Info books) or `{\"book\": id}` (a whole book: its switched-on entries in the book's order, read whenever a call reads it, so entries added later are read too). A character's pins reach only their own mind's calls; a step's reach every call of that step whatever its lore policy (the mind step's, every mind, after the character's own); a place's reach every helper and mind call there or in a place inside it, nearest place first. Pinned text comes first within a helper call's lore tokens, or within the pinned lore a mind reads (Settings → Minds → What a mind reads), and a pin that doesn't fit is cut, with a note in the Context panel.\n\n| Lint | Means |\n|---|---|\n| `pin_duplicate` | the same entry or book pinned twice to one character, place or step |\n| `pin_missing` | a pin naming a lore entry the world doesn't have |\n| `pin_pending` | an AI-written entry still waiting for review: no call reads it until it is accepted |\n| `pin_shape` | a pin that is none of {\"lore\": id}, {\"book\": id, \"entry\": id} and {\"book\": id}: it is ignored |\n| `pin_target` | pins under a character, place or step the world doesn't have: no call reads them |\n| `pin_unread` | a secret entry pinned to someone whose own it isn't: their mind never reads it |\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Events\n\nIts own: `calendar.holiday`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.book_invitation` | `host` |\n| `castlife.company` | `with`, `to` |\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.routine` | `entity`, `blocks?`, `schedules?`, `turn?`, `by?` |\n| `castlife.satisfy` | `need`, `entity?`, `minutes?`, `activity?`, `after?` |\n| `castlife.to_bed` | `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | Say yes to an invitation someone made you. | `host: ref → person` |  | `default`: `relationships.appraise`, `castlife.book_invitation` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat | Have a meal or a snack. | `minutes?: duration` |  | `default`: `castlife.satisfy`, `set` | `minutes > 0 ? minutes : 30` | eat, have lunch, have dinner, grab a bite |\n| `get_up` | Get up | Get up from bed or from a rest and get on with the day. |  |  | `default`: `set` | `2` | get up, wake up, get out of bed |\n| `rest` | Rest | Rest or relax for a while. | `minutes?: duration` |  | `default`: `castlife.satisfy` | `minutes > 0 ? min(minutes, 30) : 30` | rest, relax, take a break |\n| `sleep` | Go to bed | Go to bed (your own, if you have one) and sleep until morning, or for as long as you say. | `minutes?: duration` |  | `default`: `castlife.to_bed`, `castlife.satisfy` | `minutes > 0 ? min(minutes, 5) : 5` | go to bed, sleep, turn in, hit the sack |\n\n### Rules\n\n- `castlife.conversation`: on `{\"event\":\"relationships.regard\"}`\n\n### Events\n\nIts own: `castlife.decision`, `castlife.follow`, `castlife.invitation`, `castlife.need`, `castlife.routine`, `castlife.schedule`, `castlife.skip_plan`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `routine` | `routine` |\n\n### Panels and slots\n\nPanels: `castlife.cast`, `castlife.needs`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.plans` | `castlife` | 0 | the world |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`, `castlife.needs`, `castlife.routines`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?`, `fight?` |\n| `combat.end_turn` | `who?` |\n| `combat.join` | `fight`, `with?`, `foes?`, `order?`, `roll_initiative?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `with?`, `foes?`, `at?`, `order?`, `roll_initiative?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_acted(e)`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `end_turn` | End turn | End your turn in a fight. |  |  | `default`: `combat.end_turn` | `0` | end my turn, end turn |\n| `fight` | Fight | Start a fight with someone. | `target: ref` |  | `default`: `combat.start` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.join`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `combat.bestiary` | Bestiary | `lre-table/combat.bestiary/v1` | name (text), kind (text), tier (text, optional), fields (json), carries (list, optional), description (text, optional) | 0 |\n\n## Tabletop rules pack (`d20`)\n\nVersion 1 · realism domain `d20` · requires `combat`, `gear`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `d20.advance` | `who`, `ruled?` |\n| `d20.attack` | `who`, `ruled?` |\n| `d20.award` | `who`, `ruled?` |\n| `d20.check` | `who`, `ruled?` |\n| `d20.condition` | `who`, `ruled?` |\n| `d20.effect` | `who`, `ruled?` |\n| `d20.harm` | `who`, `ruled?` |\n| `d20.heal` | `who`, `ruled?` |\n| `d20.ranks` | `who`, `ruled?` |\n| `d20.reload` | `who`, `ruled?` |\n| `d20.rest` | `who`, `ruled?` |\n| `d20.save` | `who`, `ruled?` |\n| `d20.stat_as` | `who`, `ruled?` |\n| `d20.trait` | `who`, `ruled?` |\n\n### Formula functions\n\n- `bonus(...args)`\n- `bonus_only(...args)`\n- `bonus_without(...args)`\n- `class_level(...args)`\n- `class_skill(...args)`\n- `class_sum(...args)`\n- `has_trait(...args)`\n- `hit_dice(...args)`\n- `levels(...args)`\n- `limit(...args)`\n- `mod(...args)`\n- `ranks(...args)`\n- `rest_minutes(...args)`\n- `score(...args)`\n- `size_mod(...args)`\n- `total(...args)`\n- `under(...args)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `advance` | Take a level | Take a level in a class. It takes who and the class by name, and reads the rest from the ruleset: the level's hit points (rolled, the average or the most, as the ruleset has it), the skill points, and whether the level gives a feat or an ability point, which it says are open to be placed; the class features the level gives are named. Recorded. | `class: text`, `hp?: text` |  | `default`: `d20.advance` | `0` |  |\n| `attack` | Attack | Attack someone with a weapon or one of one's own attacks. It takes who attacks, the target and, unless it is what is readied, what with. It reads the rest: the weapon's row, the attack total, the target's defence (flat-footed until it has acted in a fight), the range from the grid, the natural die's rule, a threat and its confirming roll, the damage with its multiplier, the target's reduction and resistances, and the round spent from the magazine. The hit points and the states they leave the target in are then set. It is recorded as one attack, and into the fight under way. To rule it without dice, give the outcome hit, miss or critical: the damage of a hit is rolled all the same. | `target: ref → person`, `with?: text`, `full?: bool`, `touch?: bool`, `held?: text`, `shots?: text`, `nonlethal?: bool`, `concealment?: number`, `distance?: number`, `mods?: list`, `boost?: bool` |  | `critical`: `d20.attack`; `default`: `d20.attack`; `hit`: `d20.attack`; `miss`: `d20.attack` | `0` | attack, strike at, shoot at, swing at |\n| `award` | Award experience | Give experience, and say who has reached a level they have not yet taken. It takes who (and others who share it) and either the experience the story gives or who was overcome, whom the ruleset's own table prices and shares out, so that no sum is worked out by hand. Recorded for each. | `xp?: number`, `overcame?: list`, `also?: list`, `why?: text` |  | `default`: `d20.award` | `0` |  |\n| `check` | Check | Roll a skill or an ability for someone, against a difficulty or against another's roll. It takes names, not numbers: who rolls, the skill or ability, and the difficulty (one of the ruleset's by name, or a number the story sets) or whom they roll against. The total is read from the sheet (ranks, ability, class skill, armour, size, traits, conditions and effects), and the roll is recorded with where each part came from. To rule it without dice, give the outcome success or failure. | `skill: text`, `difficulty?: text`, `vs?: ref → person`, `vs_skill?: text`, `take?: text`, `aid?: list`, `mods?: list`, `boost?: bool` |  | `default`: `d20.check`; `failure`: `d20.check`; `success`: `d20.check` | `1` | roll for, make a check, use my skill |\n| `condition` | Condition | Put a condition of the ruleset on someone, or take it off. It takes who, the condition by name, and how long: rounds (the one's own turns in a fight), minutes or hours, or until a save is made (which save, and its difficulty); with no length it lasts until it is taken off. What the condition changes comes from the ruleset's table, so no modifier is handed in. Recorded on the sheet. | `condition: text`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.condition` | `0` |  |\n| `d20_rest` | Rest the night | Rest for the night. It takes who (and others who rest with them) and the hours, left out: the ruleset's night; the hours are told in the answer, and the clock is moved by pass_time. What comes back is the ruleset's, read from each sheet: hit points by level, nonlethal harm by the hour, and each daily gauge filled. Recorded for each. | `hours?: number`, `also?: list` |  | `default`: `d20.rest` | `rest_minutes(params.hours)` | rest for the night, sleep it off |\n| `effect` | Effect | Put a passing effect on someone, or take it off by its label: what a spell, a thing or a ruling gives for a while, where the ruleset has no condition for it. It takes who, a label, how long (as a condition does), and the effect's modifiers, each a number, its type, what it changes and why. Those numbers are the effect's own, since no sheet has them; the sheet counts them with the rest by the ruleset's rule for stacking. Recorded on the sheet. | `label: text`, `mods?: list`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.effect` | `0` |  |\n| `harm` | Harm | Take hit points off someone, off several, or off everyone in an area, for harm no weapon gives: a fall, a fire, a trap, a ruling. It takes who is harmed (or a centre and a radius on the grid), the harm as dice or as a number the story gives, its type, and a save with its difficulty for half or none. It reads each one's saving total, reduction and resistance to the type, and the states the hit points leave them in. Each is recorded with its own harm. | `amount: text`, `type?: text`, `nonlethal?: bool`, `targets?: list`, `centre?: ref → person`, `radius?: number`, `save?: text`, `difficulty?: text`, `half?: bool`, `why?: text` |  | `default`: `d20.harm` | `0` |  |\n| `heal` | Heal | Give back hit points, take off nonlethal harm, give temporary hit points, or make someone who is dying stable. It takes who, the amount as dice or as a number the story gives, and which of these; hit points are held to the most the sheet gives, and the states that no longer hold are taken off. Recorded with what changed. | `amount?: text`, `nonlethal?: bool`, `temporary?: bool`, `stabilize?: bool`, `why?: text` |  | `default`: `d20.heal` | `0` |  |\n| `ranks` | Skill ranks | Set someone's ranks in a skill. It takes who, the skill and the ranks they have in all, and tells the most the skill takes at their level and the skill points left, both read from the sheet; ranks past the most are set all the same, and told. | `skill: text`, `ranks: number` |  | `default`: `d20.ranks` | `0` |  |\n| `reload` | Reload | Fill a weapon's magazine from the rounds carried. It takes who and the weapon (left out: what is readied), and moves as many rounds as the magazine holds and as are carried, reading both from the sheet and the gear. The rounds loaded are recorded. | `item?: text` |  | `default`: `d20.reload` | `0` | reload, change the magazine |\n| `save` | Save | Roll a save for someone, and for others who make the same one. It takes who saves, which save and the difficulty (one of the ruleset's by name, or a number the effect sets), and reads the total from the sheet, with the ruleset's rule for the natural die. Each roll is recorded with where its parts came from. To rule it without dice, give the outcome success or failure. | `save: text`, `difficulty: text`, `also?: list`, `mods?: list`, `boost?: bool` |  | `default`: `d20.save`; `failure`: `d20.save`; `success`: `d20.save` | `0` | make a save, resist |\n| `stat_as` | Sheet from the bestiary | Give someone the sheet of one of the ruleset's creatures or ordinary people: its values, its attacks and its challenge rating. It takes who and the row by name, and reads every value from the row, so none is handed in. Recorded; a level, a trait or ranks can be added to it after. | `creature: text` |  | `default`: `d20.stat_as` | `0` |  |\n| `trait` | Trait | Give someone a feat, a race or a feature of the ruleset, or take it away. It takes who, the trait by name, and what it is taken for where it is taken for something (a weapon, a skill). What it changes comes from its row, so no modifier is handed in; what it requires is read from the sheet and told, and a trait whose requirement does not hold is given all the same. | `trait: text`, `choice?: text`, `off?: bool`, `why?: text` |  | `default`: `d20.trait` | `0` |  |\n\n### Events\n\nIts own: `d20.advance`, `d20.attack`, `d20.award`, `d20.check`, `d20.condition`, `d20.effect`, `d20.harm`, `d20.heal`, `d20.ranks`, `d20.reload`, `d20.rest`, `d20.save`, `d20.stat_as`, `d20.state`, `d20.trait`, `d20.upkeep`.\n\n### Panels and slots\n\nPanels: `d20.sheet`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | enum: none, minimum, statement, full, fixed |  | `\"none\"` |  |  | live from money 3 |\n| `autopay_cents` | Autopay amount (fixed) | money | ≥ 0 |  |  |  | live from money 3 |\n| `autopay_from` | Autopay from | ref → account |  |  |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 3 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money | ≥ 0 |  |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number | 0 … 100 |  |  |  | live from money 4 |\n| `months_left` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 3 |\n| `opened` | Opened | date |  |  |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `overdraft` | Overdraft policy | enum: decline, fee, linked |  |  |  |  | live from money 2 |\n| `overdraft_limit` | Overdraft limit | money | ≥ 0 |  |  |  | live from money 2 |\n| `overdraft_link` | Overdraft from | ref → account |  |  |  |  | live from money 2 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `payment` | Monthly payment (loans) | money | ≥ 0 |  |  |  | live from money 3 |\n| `product` | Product (a world product, or a class: cash, checking, business_checking, savings, money_market, cd, trust, escrow, credit_card, charge_card, line_of_credit, loan, mortgage, brokerage, retirement, note) | text |  |  |  |  | live from money 2 |\n| `secured_by` | Secured by | ref |  |  |  |  | live from money 3 |\n| `statement_day` | Statement day | number | 1 … 28 |  |  |  | live from money 3 |\n| `status` | Status | enum: open, frozen, collections, charged_off, closed, paid_off, matured |  | `\"open\"` |  |  | live from money 2 |\n| `term_months` | Term in months | number | ≥ 0 |  |  |  | live from money 3 |\n\n#### `business`: Business\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `close_at` | Closes at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |\n| `consolidated_return` | Files one consolidated federal return with the corporations it holds 80% or more of (an election) | bool |  |  |  |  | live from money 3 |\n| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |\n| `decide_pct` | Ownership decisions need more than % of the votes | number | 0 … 100 | `50` |  |  | live from money 4 |\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `dissolved` | Dissolved on (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n| `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |\n| `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |\n| `industry` | Industry | text |  |  |  |  | live from money 3 |\n| `invoice_days` | Invoice terms (days) | number | ≥ 0 |  |  |  | live from money 3 |\n| `late_fee_pct` | Late fee % | number | ≥ 0 |  |  |  | live from money 4 |\n| `margin_pct` | Margin % | number | 0 … 100 |  |  |  | live from money 4 |\n| `merged_into` | Merged into | ref → business |  |  |  |  | live from money 3 |\n| `open_at` | Opens at (HH:MM) | text |  |  |  |  | live from money 3 |\n| `opening_ep` | Earnings and profits it had kept when the story begins (the accumulated earnings tax's credit reads it) | money |  |  |  |  | live from money 4 |\n| `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |\n| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |\n| `share_classes` | Share classes ({id, label, votes}) | list |  |  |  |  | live from money 4 |\n| `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp, nonprofit |  |  |  |  | live from money 4 |\n| `structure_before` | Taxed as, until the change of structure (sole_proprietorship, partnership, llc, s_corp or c_corp) | text |  |  |  |  | live from money 4 |\n| `structure_from` | Its structure is taxed from (YYYY-MM-DD) | text |  |  |  |  | live from money 4 |\n| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |\n| `valuation_multiple` | Valued at this many years of profit, over its books | number | ≥ 0 | `3` |  |  | live from money 4 |\n| `value` | Value (set: overrides the books) | money | ≥ 0 |  |  |  | live from money 3 |\n| `winding_up` | Winding up since (YYYY-MM-DD) | text |  |  |  |  | live from money 3 |\n\n#### `card`: Payment card\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 2 |\n| `daily_atm_limit` | Daily cash machine limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `daily_purchase_limit` | Daily purchase limit | money | ≥ 0 |  |  |  | live from money 4 |\n| `holder` | Holder | ref |  |  |  |  | live from money 2 |\n| `item` | The card in gear | ref |  |  |  |  | live from money 2 |\n| `last4` | Last four digits | text |  |  |  |  | live from money 3 |\n| `network` | Card type | enum: debit, credit, charge |  |  |  |  | live from money 2 |\n| `replaced_by` | Replaced by | ref → card |  |  |  |  | live from money 2 |\n| `replaces` | Replaces | ref → card |  |  |  |  | live from money 2 |\n| `state` | State | enum: active, frozen, lost, cancelled |  | `\"active\"` |  |  | live from money 2 |\n\n#### `flow`: Money flow\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `amount_cents` | Amount | money | ≥ 0 |  |  |  | live from money 2 |\n| `amount_due` | What's due on the credit account it pays | enum: minimum, statement, balance |  |  |  |  | live from money 3 |\n| `amount_formula` | Amount formula | text |  |  |  |  | live from money 3 |\n| `amount_max` | Amount at most | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_min` | Amount at least | money | ≥ 0 |  |  |  | live from money 3 |\n| `amount_of` | Percent of this account's balance | ref → account |  |  |  |  | live from money 3 |\n| `amount_pct` | Percent of a balance | number | 0 … 100 |  |  |  | live from money 3 |\n| `amount_table` | Amount from a table (table.row.column) | text |  |  |  |  | live from money 3 |\n| `at` | Time of day (HH:MM) | text |  |  |  |  | live from money 2 |\n| `category` | Category | text |  |  |  |  | live from money 2 |\n| `count` | Times at most | number | ≥ 1 |  |  |  | live from money 2 |\n| `days` | Days of the month (-1 = the last) | list of number |  |  |  |  | live from money 2 |\n| `end` | Ends | date |  |  |  |  | live from money 2 |\n| `every` | Every | enum: day, week, month, year |  |  |  |  | live from money 2 |\n| `except` | Except holidays | list of text |  |  |  |  | live from money 3 |\n| `fallback` | Fallback (an account or a party) | text |  |  |  |  | live from money 3 |\n| `flow_kind` | Kind | enum: transfer, bill, rent, utility, subscription, premium, loan_payment, card_payment, savings, income, payroll, allowance, living, tax, distribution, invoice, draw, other |  | `\"bill\"` |  |  | live from money 2 |\n| `from` | From (an account, a party, or an outside payer) | text |  |  |  |  | live from money 2 |\n| `interval` | Every Nth period | number | ≥ 1 |  |  |  | live from money 2 |\n| `link` | Belongs to | ref |  |  |  |  | live from money 2 |\n| `method` | Paid by (cash, card, checking, savings) | text |  |  |  |  | live from money 3 |\n| `months` | Months (yearly) | list of number |  |  |  |  | live from money 2 |\n| `once` | Once, at (YYYY-MM-DDTHH:MM) | text |  |  |  |  | live from money 2 |\n| `retries` | Retries | number | ≥ 0 |  |  |  | live from money 3 |\n| `retry_days` | Retry after days | number | ≥ 1 |  |  |  | live from money 3 |\n| `revenue` | Revenue model ({type, …}, one record: units × price × buyers, a catalog, a royalty, fees or a formula) | list |  |  |  |  | live from money 3 |\n| `roll` | Off a business day | enum: none, before, after |  | `\"none\"` |  |  | live from money 3 |\n| `shares` | Shares ({party, pct, from?}) | list |  |  |  |  | live from money 3 |\n| `shortfall` | When the money isn't there | enum: skip, partial, retry, fallback, overdraft, defer |  | `\"skip\"` |  |  | live from money 3 |\n| `splits` | Splits ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Starts | date |  |  |  |  | live from money 2 |\n| `status` | Status | enum: active, paused, ended |  | `\"active\"` |  |  | live from money 2 |\n| `to` | To (an account, a party, or an outside payee) | text |  |  |  |  | live from money 2 |\n| `weekdays` | Weekdays (0 = Sunday) | list of number |  |  |  |  | live from money 2 |\n\n#### `holding`: Holding\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Account | ref → account |  |  |  |  | live from money 4 |\n| `asset` | Asset | text |  |  |  |  | live from money 4 |\n| `lots` | Lots ({qty, cost, at}) | list |  |  |  |  | live from money 4 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `route` | Distributions go to (an account, or reinvest) | text |  |  |  |  | live from money 4 |\n\n#### `invoice`: Invoice\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `business` | Business | ref → business |  |  |  |  | live from money 3 |\n| `cents` | Amount | money | ≥ 0 |  |  |  | live from money 3 |\n| `customer` | Customer (a party, or an outside customer) | text |  |  |  |  | live from money 3 |\n| `days_late` | Days late | number | ≥ 0 |  |  |  | live from money 4 |\n| `due` | Due | date |  |  |  |  | live from money 3 |\n| `fees` | Late fees charged | number | ≥ 0 |  |  |  | live from money 4; locked |\n| `flow` | Paid by flow | text |  |  |  |  | live from money 3 |\n| `issued` | Issued | date |  |  |  |  | live from money 3 |\n| `late_fee` | Late fee charged | money | ≥ 0 |  |  |  | live from money 4 |\n| `memo` | For | text |  |  |  |  | live from money 3 |\n| `paid` | Paid | money | ≥ 0 |  |  |  | live from money 3 |\n| `state` | State | enum: open, paid, late, void |  | `\"open\"` |  |  | live from money 3 |\n\n#### `job`: Job\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `basis` | Paid by | enum: salary, hourly, per_shift, commission, tips, stipend |  | `\"hourly\"` |  |  | live from money 3 |\n| `commission_pct` | Commission % | number | ≥ 0 |  |  |  | live from money 3 |\n| `contractor` | Contractor (nothing withheld) | bool |  |  |  |  | live from money 4 |\n| `deductions` | Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?}) | list |  |  |  |  | live from money 4 |\n| `employer` | Employer (anyone in the world, a place, or an outside employer) | text |  |  |  |  | live from money 3 |\n| `end` | Ends | date |  |  |  |  | live from money 3 |\n| `hours` | Hours counted | enum: scheduled, attended, contract |  |  |  |  | live from money 3 |\n| `hours_per_week` | Hours a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_anchor` | First payday | date |  |  |  |  | live from money 3 |\n| `pay_days` | Paydays of the month | list of number |  |  |  |  | live from money 3 |\n| `pay_every` | Paid (none: an unpaid title) | enum: weekly, biweekly, semimonthly, monthly, per_job, custom, none |  | `\"monthly\"` |  |  | live from money 3 |\n| `pay_except` | Custom pay: except holidays | list of text |  |  |  |  | live from money 3 |\n| `pay_from` | Pay starts | date |  |  |  |  | live from money 3 |\n| `pay_interval` | Custom pay: every Nth | number | ≥ 1 |  |  |  | live from money 3 |\n| `pay_months` | Custom pay: months | list of number |  |  |  |  | live from money 3 |\n| `pay_roll` | Payday off a business day | enum: none, before, after |  | `\"before\"` |  |  | live from money 3 |\n| `pay_unit` | Custom pay: every | enum: day, week, month, year |  |  |  |  | live from money 3 |\n| `pay_weekday` | Payday weekday (0 = Sunday) | number | 0 … 6 |  |  |  | live from money 3 |\n| `pay_weekdays` | Custom pay: weekdays | list of number |  |  |  |  | live from money 3 |\n| `position` | Position (one its employer defines) | text |  |  |  |  | live from money 3 |\n| `rate` | Rate (a year, an hour or a shift) | money | ≥ 0 |  |  |  | live from money 3 |\n| `season_from` | Season from (MM-DD) | text |  |  |  |  | live from money 3 |\n| `season_to` | Season to (MM-DD) | text |  |  |  |  | live from money 3 |\n| `shift_pattern` | Shift pattern | text (row of calendar.shifts) |  |  |  |  | live from money 3 |\n| `shifts_per_week` | Shifts a week | number | ≥ 0 |  |  |  | live from money 3 |\n| `splits` | Pay goes to ({to, cents?, pct?}) | list |  |  |  |  | live from money 3 |\n| `start` | Started | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: active, leave, ended |  | `\"active\"` |  |  | live from money 3 |\n| `tips_per_hour` | Tips an hour | money | ≥ 0 |  |  |  | live from money 3 |\n| `title` | Title | text |  |  |  |  | live from money 3 |\n| `weeks_per_year` | Weeks a year | number | 0 … 53 |  |  |  | live from money 3 |\n| `worker` | Worker | ref → person |  |  |  |  | live from money 3 |\n| `workplace` | Workplace | ref |  |  |  |  | live from money 3 |\n\n#### `project`: Project\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `account` | Paid from (its party's operating account when left out) | ref → account |  |  |  |  | live from money 3 |\n| `org` | Whose project (the organization or person that runs and pays for it) | ref |  |  |  |  | live from money 3 |\n| `payee` | Paid to (Contractors when left out) | text |  |  |  |  | live from money 3 |\n| `start` | Starts (as the story begins when left out) | date |  |  |  |  | live from money 3 |\n| `status` | Status | enum: planned, active |  | `\"planned\"` |  |  | live from money 3 |\n| `steps` | Steps ({id, name, days or business_days, cost, paid: start, end or split, after, inputs, crew, capitalize, unlocks, done}) | list |  |  |  |  | live from money 3 |\n| `template` | Template | text (row of economy.projects) |  |  |  |  | live from money 3 |\n\n#### `property`: Property\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `appreciation_pct` | Appreciation % a year | number |  |  |  |  | live from money 4 |\n| `asking_price` | Asking price (for sale) | money | ≥ 0 |  |  |  | live from money 3 |\n| `built_by` | Built by the project | ref → project |  |  |  |  | live from money 3 |\n| `capital_cost` | Capital cost | money | ≥ 0 |  |  |  | live from money 3 |\n| `in_service` | In service from | date |  |  |  |  | live from money 3 |\n| `insurance` | Insurance a month | money | ≥ 0 |  |  |  | live from money 4 |\n| `lease_months` | Lease term, months | number | ≥ 1 | `12` |  |  | live from money 3 |\n| `let_from` | Let since | date |  |  |  |  | live from money 3 |\n| `life_months` | Useful life (months) | number | ≥ 1 |  |  |  | live from money 3 |\n| `managed` | Let to outside tenants | bool |  | `false` |  |  | live from money 3 |\n| `market_rent` | Market rent, a unit a month | money | ≥ 0 |  |  |  | live from money 3 |\n| `mortgage` | Mortgage | ref → account |  |  |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `place` | Place | ref |  |  |  |  | live from money 3 |\n| `property_type` | What it is (mineral: a mineral or royalty interest) | enum: building, land, mineral |  |  |  |  | live from money 3 |\n| `purchase_price` | Purchase price | money | ≥ 0 |  |  |  | live from money 4 |\n| `purchased` | Purchased | date |  |  |  |  | live from money 4 |\n| `region` | Region (for its property tax) | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `rent_to` | Rent paid into | ref → account |  |  |  |  | live from money 3 |\n| `reserves` | Reserves (units) | number | ≥ 0 |  |  |  | live from money 3 |\n| `salvage` | Salvage value | money | ≥ 0 |  |  |  | live from money 3 |\n| `tax_installments` | Property tax bills a year | number | 1 … 12 | `2` |  |  | live from money 3 |\n| `tax_pct` | Property tax % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `units` | Units to let | number | ≥ 1 | `1` |  |  | live from money 3 |\n| `upkeep_pct` | Upkeep % a year | number | ≥ 0 |  |  |  | live from money 4 |\n| `vacancy_months` | Months empty between tenants, on average | number | ≥ 0 | `1` |  |  | live from money 3 |\n| `valuation` | Valued from its streams' income ({method: pv, cap or multiple, discount_pct, cap_rate_pct, multiple, horizon_months}, one record) | list |  |  |  |  | live from money 4 |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `volatility_pct` | Value swings, % a year | number | ≥ 0 |  |  |  | live from money 4 |\n\n#### `trust`: Trust\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `depreciation` | Depreciation | enum: world, none, straight_line |  | `\"world\"` |  |  | live from money 3 |\n| `owners` | Owners ({party, role, share?, units?, class?}) | list |  |  |  |  | live from money 1 |\n| `purpose` | What it is for | text |  |  |  |  |  |\n| `revocable` | Revocable (its settlor may take it back) | bool |  |  |  |  |  |\n| `settlor` | Settlor (who made it: a person or an organization) | ref |  |  |  |  |  |\n| `trustees_decide` | Its trustees decide (each on their own unless set, or together) | enum: each, together |  |  |  |  |  |\n| `until` | Until (the day it ends) | date |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.apply_credit` | `product`, `cents?`, `term?`, `secured_by?`, `who?`, `by?` |\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?`, `cashback?`, `story?`, `seller?`, `size?`, `at?`, `by?`, `class?`, `new?`, `details?`, `finance?`, `down?`, `term_months?` |\n| `economy.card_replace` | `card`, `who?`, `by?` |\n| `economy.card_state` | `card`, `state`, `who?`, `by?` |\n| `economy.cash_rule` | `atm` |\n| `economy.close_account` | `account` |\n| `economy.consent_dividend` | `org`, `cents`, `year?`, `by?` |\n| `economy.consolidate` | `org`, `elect?`, `by?` |\n| `economy.delist` | `business`, `price?`, `party?`, `by?` |\n| `economy.deposit` | `account`, `cents`, `who?`, `by?` |\n| `economy.distribute` | `business`, `cents?`, `by?` |\n| `economy.donate` | `to`, `cents`, `from?`, `method?`, `memo?`, `by?` |\n| `economy.dues` | `org`, `cents`, `every?`, `day?`, `by?` |\n| `economy.exercise` | `holding`, `qty?`, `from?`, `to?`, `party?`, `by?` |\n| `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?` |\n| `economy.flow_edit` | `flow`, `name?`, `clear?` |\n| `economy.flow_status` | `flow`, `status`, `who?`, `by?` |\n| `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?`, `by?`, `clear?` |\n| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `position?`, `by?` |\n| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |\n| `economy.invoice_pay` | `invoice`, `by?` |\n| `economy.invoice_void` | `invoice`, `by?` |\n| `economy.job_end` | `job`, `end?`, `by?` |\n| `economy.job_hours` | `job`, `hours_per_week`, `by?` |\n| `economy.job_leave` | `job`, `leave`, `by?` |\n| `economy.job_position` | `job`, `position?`, `by?` |\n| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |\n| `economy.job_title` | `job`, `title?`, `by?` |\n| `economy.lease_end` | `lease`, `on?`, `party?`, `by?` |\n| `economy.lease_start` | `property`, `tenant`, `rent`, `months?`, `day?`, `unit?`, `from?`, `party?`, `by?` |\n| `economy.lend` | `to`, `cents`, `from?`, `into?`, `apr?`, `months?`, `payment?`, `due_day?`, `who?`, `by?` |\n| `economy.list` | `business`, `units`, `price?`, `symbol?`, `class?`, `party?`, `by?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?`, `by?`, `party?` |\n| `economy.open_account` | `party`, `product`, `name?`, `due_day?`, `statement_day?`, `autopay_from?` |\n| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |\n| `economy.pay_card` | `card`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.pay_schedule` | `org`, `every`, `weekday?`, `anchor?`, `days?`, `by?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.project_drop` | `project`, `org?`, `text?`, `by?` |\n| `economy.project_note` | `project`, `org?`, `step?`, `days?`, `cents?`, `text`, `source?`, `by?` |\n| `economy.project_pause` | `project`, `org?`, `by?` |\n| `economy.project_resume` | `project`, `org?`, `by?` |\n| `economy.project_start` | `org?`, `template?`, `project?`, `name?`, `account?`, `payee?`, `steps?`, `by?` |\n| `economy.property_buy` | `property`, `price?`, `from?`, `down?`, `term_months?`, `party?`, `by?`, `live?`, `story?`, `name?`, `owned?` |\n| `economy.property_list` | `property`, `price?`, `party?`, `by?` |\n| `economy.property_make` | `place`, `name?`, `value?`, `owner?`, `asking_price?` |\n| `economy.property_sell` | `property`, `price`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.release_hold` | `account`, `hold` |\n| `economy.revenue_adjust` | `stream`, `factor?`, `cents?`, `days?`, `reason`, `by?`, `story?` |\n| `economy.route` | `holding?`, `property?`, `business?`, `to?`, `party?`, `by?` |\n| `economy.set_autopay` | `account`, `mode`, `from?`, `cents?`, `who?`, `by?` |\n| `economy.set_pay_prefs` | `tiers`, `who?` |\n| `economy.set_price` | `asset`, `price` |\n| `economy.set_status` | `account`, `status` |\n| `economy.share_out` | `org`, `cents`, `from?`, `by?` |\n| `economy.shares_buy_back` | `business`, `from`, `units`, `price?`, `to?`, `party?`, `by?` |\n| `economy.shares_classes` | `business`, `class?`, `label?`, `votes?`, `holder?`, `remove?`, `party?`, `by?` |\n| `economy.shares_issue` | `business`, `to`, `units`, `price?`, `class?`, `from?`, `party?`, `by?` |\n| `economy.stake_sell` | `business`, `share?`, `units?`, `price?`, `buyer?`, `to?`, `party?`, `by?` |\n| `economy.tax_status` | `org`, `status?`, `by?` |\n| `economy.trade` | `side?`, `party?`, `holding?`, `asset?`, `account?`, `qty?`, `amount?`, `from?`, `to?`, `right?`, `strike?`, `expiry?`, `by?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?`, `story?`, `by?` |\n| `economy.withdraw` | `account`, `cents`, `who?`, `by?` |\n\n### Formula functions\n\n- `asset_price(id)`\n- `balance(account)`\n- `business_value(id)`\n- `can_afford(who, cents)`\n- `credit_score(who)`\n- `employs(employer, who)`\n- `holding_units(id)`\n- `holding_value(id)`\n- `holds(who, thing)`\n- `is_credit(account)`\n- `manages(who, thing)`\n- `may_draw(who, business)`\n- `money_feature(feature, who)`\n- `net_worth(who)`\n- `price(item)`\n- `property_value(id)`\n- `spends(who, account)`\n- `wealth(who)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `apply_credit` | Apply for credit | Apply for a credit card, a credit line or a loan. | `product: text`, `amount?: money`, `term?: number`, `as?: ref` |  | `default`: `economy.apply_credit` | `15` | apply for a credit card, apply for a loan, take out a loan |\n| `buy` | Buy | Buy something: food, drinks, goods or a service, here or delivered. | `item: text`, `qty?: number`, `price?: money`, `method?: text`, `cashback?: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.buy` | `5` | buy, purchase, order, pick up a |\n| `card_freeze` | Freeze card | Freeze a card so it can't be used. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | freeze my card, lock my card |\n| `card_replace` | Replace card | Order a replacement card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_replace` | `2` | replace my card, order a new card |\n| `card_report_lost` | Report card lost | Report a card lost or stolen. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | report my card lost, my card was stolen, cancel my card |\n| `card_unfreeze` | Unfreeze card | Unfreeze a frozen card. | `card: ref → card`, `as?: ref` |  | `default`: `economy.card_state` | `2` | unfreeze my card, unlock my card |\n| `consent_dividend` | Declare a consent dividend | For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them. | `org: ref → business`, `amount: money`, `year?: number` |  | `default`: `economy.consent_dividend` | `15` | declare a consent dividend, consent dividend, treat it as a dividend paid, clear the accumulated earnings tax |\n| `deposit_cash` | Deposit cash | Put cash into a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.deposit` | `3` | deposit, pay in cash, bank the cash |\n| `distribute_profit` | Distribute profit | Pay a business's profit out to its owners, or a stated amount of a trust's money to its beneficiaries, by their shares. | `business: ref`, `amount?: money` |  | `default`: `economy.distribute` | `10` | distribute profit, pay dividends, pay out the owners, pay the beneficiaries |\n| `donate` | Donate | Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person. | `to: ref`, `amount: money`, `method?: text`, `as?: ref` |  | `default`: `economy.donate` | `5` | donate, make a donation, give to charity, tithe, put money in the collection plate, sponsor |\n| `exercise_option` | Exercise an option | Exercise an option contract you hold. | `holding: ref → holding`, `qty?: number`, `from?: ref → account`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.exercise` | `2` | exercise the option, exercise my calls, exercise my puts |\n| `flow_create` | Set up a standing payment | Set up a standing payment: a bill, a regular transfer, an allowance. | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `as?: ref` |  | `default`: `economy.flow_create` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |\n| `flow_delete` | Cancel a standing payment | Cancel a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | cancel the standing order, stop the recurring payment |\n| `flow_pause` | Pause a standing payment | Pause a standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | pause the standing order |\n| `flow_resume` | Resume a standing payment | Resume a paused standing payment. | `flow: ref → flow`, `as?: ref` |  | `default`: `economy.flow_status` | `2` | resume the standing order |\n| `flow_update` | Change a standing payment | Change a standing payment: its amount, its schedule or its accounts. | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text`, `clear?: text`, `as?: ref` |  | `default`: `economy.flow_update` | `2` | change the standing order, change the recurring payment |\n| `invoice_issue` | Send an invoice | Bill a customer from a business you run. | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default`: `economy.invoice_issue` | `10` | send an invoice, invoice, bill them |\n| `invoice_pay` | Pay an invoice | Pay an invoice billed to you or to a business you run. | `invoice: ref → invoice` |  | `default`: `economy.invoice_pay` | `5` | pay the invoice, settle the bill |\n| `invoice_void` | Void an invoice | Cancel an invoice that a business you run sent. | `invoice: ref → invoice` |  | `default`: `economy.invoice_void` | `5` | void the invoice, cancel the invoice, write it off |\n| `job_end` | End a job | End a job: quit your own, or let someone go who works for you or an organization you let staff go for. | `job: ref → job` |  | `default`: `economy.job_end` | `10` | fire, let go, quit, resign, hand in my notice |\n| `job_hire` | Hire | Hire someone, for yourself or for an organization you hire for (a business, a household, the party), with a title, pay and a position. | `business: ref`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text`, `position?: text` |  | `default`: `economy.hire` | `15` | hire, take on, give a job to |\n| `job_hours` | Change hours | Change the hours a week someone works for you or an organization you set staff hours for. | `job: ref → job`, `hours_per_week: number` |  | `default`: `economy.job_hours` | `5` | change their hours, cut their hours, more hours, full time, part time |\n| `job_leave` | Put on leave | Put someone who works for you or an organization you set staff leave for on leave: they keep the job and are paid nothing while it lasts. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | put on leave, give time off, send on leave |\n| `job_position` | Appoint to a position | Promote or move someone who works for you or an organization you appoint for into one of its positions, or take them out of theirs. | `job: ref → job`, `position?: text` |  | `default`: `economy.job_position` | `5` | promote, appoint, make them, move them to |\n| `job_raise` | Give a raise | Change the pay of someone who works for you or an organization you set staff pay for. | `job: ref → job`, `rate: money` |  | `default`: `economy.job_raise` | `5` | give a raise, raise the pay, pay more |\n| `job_return` | Back from leave | Bring someone on leave back to work, paid again from their next payday. | `job: ref → job` |  | `default`: `economy.job_leave` | `5` | back from leave, back to work, end their leave |\n| `job_title` | Change title | Change the title a job goes by: your own, or that of someone who works for you or an organization you appoint for. | `job: ref → job`, `title?: text` |  | `default`: `economy.job_title` | `5` | change the job title, retitle |\n| `lease_end` | End a lease | End a tenant's lease. | `lease: ref → flow`, `on?: text`, `as?: ref` |  | `default`: `economy.lease_end` | `10` | end the lease, give notice, move out |\n| `lease_start` | Let a unit | Let a unit of a property you own to a tenant, for rent each month. | `property: ref → property`, `tenant: ref → person`, `rent: money`, `months?: number`, `day?: number`, `unit?: text`, `as?: ref` |  | `default`: `economy.lease_start` | `20` | rent out, sign a lease, let the apartment |\n| `lend_money` | Lend money | Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay. | `to: ref`, `amount: money`, `apr?: number`, `months?: number`, `from?: ref → account`, `as?: ref` |  | `default`: `economy.lend` | `10` | lend money to, make a loan to, loan the company |\n| `move_money` | Transfer between accounts | Move money between your own accounts: checking, savings, cash. | `from: ref → account`, `to: ref → account`, `amount: money`, `as?: ref`, `ask?: bool` |  | `default`: `economy.move` | `2` | transfer, move money, put into savings |\n| `org_dues` | Set dues | Set what each member pays into an organization's money, and how often; nothing ends them. | `org: ref`, `amount: money`, `every?: text`, `day?: number` |  | `default`: `economy.dues` | `2` | set dues, membership fee, everyone chips in |\n| `org_pay_schedule` | Change pay schedule | Set how often an organization you set staff pay for pays its staff, moving every job there to it. | `org: ref`, `every: text`, `weekday?: number`, `anchor?: text` |  | `default`: `economy.pay_schedule` | `2` | pay schedule, change payday, pay every other week |\n| `org_share_out` | Share out | Pay an amount from an organization's money to its members equally (the party's: its core members and companions). | `org: ref`, `amount: money`, `from?: ref → account`, `ask?: bool` |  | `default`: `economy.share_out` | `5` | share out, split the money, divide the purse, hand out |\n| `owner_draw` | Take an owner's draw | Take money out of a business you own, for yourself. | `business: ref → business`, `amount: money` |  | `default`: `economy.owner_draw` | `5` | take a draw, pay myself, take money out of the business |\n| `pay` | Pay | Give someone money: settle up, pay them back, tip them. | `to: ref, outside: economy.external:world`, `amount: money`, `method?: text`, `as?: ref`, `ask?: bool` |  | `default`: `economy.transfer` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card or loan | Pay off some or all of a card or loan balance. | `card: ref → account`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.pay_card` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |\n| `project_drop` | Drop a project | Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays. | `project: ref` |  | `default`: `economy.project_drop` | `2` | drop the project, abandon the well, cancel the build |\n| `project_pause` | Pause a project | Pause a project under way: its steps stop where they are and keep the work they have left. | `project: ref` |  | `default`: `economy.project_pause` | `2` | pause the project, halt work, stop drilling |\n| `project_resume` | Resume a project | Set a paused project going again: each step under way finishes the work it had left. | `project: ref` |  | `default`: `economy.project_resume` | `2` | resume the project, restart work |\n| `project_start` | Start a project | Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done. | `org: ref`, `template?: text`, `project?: ref`, `name?: text`, `account?: ref → account` |  | `default`: `economy.project_start` | `2` | start a project, drill a well, build a foundry, put up a building, plant the crop |\n| `property_buy` | Buy a property | Buy a property, outright or with a mortgage. | `property: ref → property`, `price?: money`, `from?: ref → account`, `down?: money`, `term_months?: number`, `live?: bool`, `as?: ref` |  | `default`: `economy.property_buy` | `60` | buy the house, buy the property, make an offer on |\n| `property_list` | List a property for sale | Put a property you own up for sale at an asking price, or take it off the market. | `property: ref → property`, `price?: money`, `as?: ref` |  | `default`: `economy.property_list` | `5` | put the house on the market, list the property, take it off the market |\n| `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.property_sell` | `60` | sell the house, sell the property |\n| `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default`: `economy.route` | `1` | reinvest dividends, send dividends to, send the rent to |\n| `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.set_autopay` | `2` | set up autopay, turn on autopay, turn off autopay |\n| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text, such as [{\"use\":\"debit\",\"max\":100},{\"use\":\"cash\"}]` |  | `default`: `economy.set_pay_prefs` | `2` | i'd rather pay with |\n| `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_buy_back` | `30` | buy back shares, buy them out, buy back their stake |\n| `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_classes` | `2` | add a share class, non-voting shares, change the votes |\n| `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.delist` | `60` | take the company private, delist the company, go private, buy out the public |\n| `shares_issue` | Issue shares | Issue new units of a company you control to a buyer, who pays for them into its account. | `business: ref → business`, `to: ref`, `units: number`, `price?: money`, `class?: text`, `from?: ref → account`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_issue` | `30` | issue shares, sell new shares in the company, bring in a partner, let them buy in |\n| `shares_list` | List on the market | List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account. | `business: ref → business`, `units: number`, `price?: money`, `symbol?: text`, `as?: ref`, `vote?: bool` |  | `default`: `economy.list` | `60` | list the company on the market, take the company public, go public, float the company, sell shares to the public |\n| `stake_sell` | Sell a share of a business | Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it. | `business: ref → business`, `share?: number`, `units?: number`, `price: money`, `buyer?: ref`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.stake_sell` | `60` | sell my share of the business, sell the shop, sell my shares |\n| `tax_consolidate` | File a consolidated return | Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax. | `org: ref → business`, `elect?: text` |  | `default`: `economy.consolidate` | `15` | file a consolidated return, file one return for the group, consolidate our taxes, stop filing a consolidated return |\n| `trade` | Buy or sell investments | Buy or sell investments: stocks, funds, bonds, crypto. | `side?: text`, `holding?: ref → holding`, `asset?: text`, `account?: ref → account`, `qty?: number`, `amount?: money`, `from?: ref → account`, `to?: ref → account`, `right?: text`, `strike?: money`, `expiry?: text`, `as?: ref` |  | `default`: `economy.trade` | `2` | invest, buy stocks, buy shares, sell stocks, sell shares, cash out, buy an option |\n| `withdraw_cash` | Withdraw cash | Take cash out of a bank account. | `account: ref → account`, `amount: money`, `as?: ref` |  | `default`: `economy.withdraw` | `3` | withdraw, take out cash, hit the atm, get cash |\n\n### Events\n\nIts own: `economy.accrue`, `economy.acquire`, `economy.anchor`, `economy.card_paid`, `economy.closes`, `economy.commission`, `economy.config`, `economy.consent_dividend`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.depreciate`, `economy.dispose`, `economy.dividend_received`, `economy.donation`, `economy.estimated_tax`, `economy.exercise`, `economy.flow_renamed`, `economy.flow_run`, `economy.foundation_mark`, `economy.foundation_tax`, `economy.hold`, `economy.income`, `economy.invoice_paid`, `economy.lots`, `economy.mint`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.penalty_tax`, `economy.price`, `economy.project_back`, `economy.project_begin`, `economy.project_drop`, `economy.project_note`, `economy.project_pause`, `economy.project_resume`, `economy.project_step`, `economy.quote`, `economy.remit`, `economy.revenue`, `economy.revenue_adjusted`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.stake_route`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.trust_distribution`, `economy.txn`, `economy.unbook`, `economy.unemployment_accrued`, `economy.unemployment_paid`, `economy.year_close`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `project_note` | `money` |\n| `purchase` | `money` |\n| `revenue` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`, `property`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.invoices` | `money` | 3 | the world |\n| `economy.markets` | `money` | 3 | the world |\n| `economy.money` | `money` | 2 | the world |\n| `economy.plans` | `money` | 0 | the world |\n| `economy.projects` | `money` | 3 | the world |\n| `economy.property_values` | `money` | 3 | the world |\n| `economy.settlements` | `money` | 3 | the world |\n| `economy.timesheet` | `money` | 3 | the world |\n| `economy.year_close` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), aliases (list, optional), category (ref), unit (text), size (enum, optional), holds (enum, optional), price_cents (band), notes (text, optional) | 358 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 20 |\n| `economy.exempt` | Tax-exempt organizations | `lre-table/economy.exempt/v1` | name (text), code (text), income_tax_exempt (bool), donations_deductible (bool), futa (bool), suta (bool), s_corp_holder (bool, optional), payout_pct (number, optional), excise_pct (number, optional), undistributed_tax_pct (number, optional), donor_limit_pct (number, optional), description (text) | 4 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 8 |\n| `economy.index_history` | Stock index history (total return, month-end closes) | `lre-table/economy.index_history/v1` | date (text), level (number) | 282 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.projects` | Production project templates | `lre-table/economy.projects/v1` | name (text), description (text), payee (text), days (band), cost_cents (band), steps (json) | 5 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), property_tax_effective_pct (number, optional), suta_wage_base_cents (int), suta_new_employer_pct (number), futa_credit_reduction_pct (number, optional), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), tipped_minimum_wage_cents_per_h (int, optional), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.depreciation`, `economy.holdings`, `economy.listing`, `economy.notes`, `economy.projects`, `economy.property`, `economy.revenue`, `economy.scorp_holders`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `access` | Who may use it | enum: owner, members, staff, customers, public |  |  |  |  |  |\n| `aliases` | Also called | list of text |  |  |  |  |  |\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `description` | Description | text |  |  |  |  |  |\n| `fixed` | Fixed in place (can't be picked up) | bool |  |  |  |  | locked |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `got` | How its holder came to have it | list |  |  |  |  | locked |\n| `holds` | Takes things up to | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `home` | Kept at (a place, a holder, or owner) | text |  |  |  |  |  |\n| `made` | Made in play (by whom, where) | list |  |  |  |  | locked |\n| `maybe_same_as` | Maybe the same as | ref |  |  |  |  | locked |\n| `merged_into` | Merged into | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `part` | Built into what holds it | bool |  |  |  |  |  |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2 |\n| `size` | Size | enum: pocket, hand, armful, heavy, furniture, builtin |  |  |  |  |  |\n| `sleep` | Can be slept in or on | bool |  |  |  |  |  |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `permits` | Lets use their things | `*` | `*` | many_many |  |  | `by`, `scope` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | `basis`, `by` |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.fetch` | `item`, `to` |\n| `gear.give` | `item`, `from`, `to`, `told?`, `basis?` |\n| `gear.hand` | `item`, `to`, `basis`, `until?`, `by?` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.put_away` | `item`, `by?` |\n| `gear.put_in` | `item`, `into`, `by?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.search` | `who`, `target?` |\n| `gear.set_apply` | `who`, `set` |\n| `gear.set_drop` | `who`, `set` |\n| `gear.set_save` | `who`, `name`, `kind` |\n| `gear.take` | `item`, `to` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.thing_change` | `change` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `ammo_of(who, what)`\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `fetch_minutes(who, thing)`\n- `fits_in(thing, holder)`\n- `fits_on(_who, thing)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n- `may_assign(who, thing)`\n- `may_use(who, thing)`\n- `movable(thing)`\n- `possessor(thing)`\n- `reach_of(who, thing)`\n- `readied(who, what)`\n- `rest_near(who, thing)`\n- `returns_to(who, thing)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default`: `gear.drop` | `1` | drop, put down, leave |\n| `fetch` | Fetch | Go and get something of yours, or something you may use, from close by. | `item: ref → item` |  | `default`: `gear.fetch` | `1 + fetch_minutes(self, item)` | fetch, go get, go and get |\n| `give` | Give | Give something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.give` | `1` | give, give away, let keep |\n| `give_back` | Give back | Give something back to whose it is, here. | `item: ref → item` |  | `default`: `gear.hand` | `1` | give back, return, hand back |\n| `hand_over` | Hand over | Hand something you carry to someone here to hold; it stays whose it is. | `item: ref → item, claim: held`, `to: ref → person` |  | `default`: `gear.hand` | `1` | hand, hand over, pass, toss |\n| `lend` | Lend | Lend something to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default`: `gear.lend` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default`: `gear.lose` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `put_away` | Put away | Put something back where it's kept. | `item: ref → item` |  | `default`: `gear.put_away` | `2` | put away, put back, tidy away |\n| `put_in` | Put in | Put something you carry, or that is here, into a bag, a box or a piece of furniture here. | `item: ref → item`, `into: ref → item` |  | `default`: `gear.put_in` | `1` | put in, put into, stash in, pack in, store in |\n| `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default`: `gear.retrieve` | `5` | take back, get back, reclaim |\n| `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default`: `gear.remove` | `2` | take off, remove, unequip |\n| `search` | Search | Search where you are, or look through a container, for what isn't in plain sight. | `target?: ref → item` |  | `default`: `gear.search` | `5` | search, look around, examine, look through, look inside, open, rummage |\n| `set_apply` | Change into | Change into one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_apply` | `5` | change into, put on my, get dressed in, gear up |\n| `set_drop` | Forget an outfit | Stop keeping one of your saved outfits or loadouts. | `set: text` |  | `default`: `gear.set_drop` | `0` |  |\n| `set_save` | Save what I'm wearing | Keep what you wear now as an outfit, or what you carry ready as a loadout. | `name: text`, `kind: text` |  | `default`: `gear.set_save` | `0` |  |\n| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default`: `gear.take` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default`: `gear.take_piece` | `1` | take the, grab a, get a |\n| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default`: `gear.use` | `5` | use, apply |\n| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default`: `gear.wear` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `drop` | `ref` |\n| `give` | `ref` |\n| `has` | `ref` |\n| `item_condition` | `number` |\n| `item_hand` | `ref` |\n| `item_lose` | `ref` |\n| `item_make` | `ref` |\n| `item_move` | `ref` |\n| `item_own` | `ref` |\n| `item_use` | `number` |\n| `item_wear` | `ref` |\n| `lose` | `ref` |\n| `owner` | `ref` |\n| `put` | `ref` |\n| `quantity` | `number` |\n| `take` | `ref` |\n| `use_up` | `number` |\n| `wear` | `ref` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`, `people`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n| `gear.put_away` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 2).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), size (enum, optional), holds (enum, optional), equip_slot (ref), price_cents (band), notes (text, optional) | 37 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), size (enum, optional), price_cents (band), ammo (ref, optional), notes (text, optional) | 116 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 23 |\n\n### Lint codes\n\n`gear.carry`, `gear.contents`, `gear.holders`, `gear.kits`, `gear.things`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `minds.know` | `facts`, `learn` |\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.fact`, `minds.forget`, `minds.intent`, `minds.keep`, `minds.knowledge`, `minds.learn`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.settle`, `minds.skip`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `learn` | `knowledge` |\n| `reveal` | `knowledge` |\n\n### Panels and slots\n\nPanels: `minds.known`. Slots it writes: `knowledge`, `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.holdings`, `minds.steps`.\n\n## Organizations pack (`orgs`)\n\nVersion 1 · realism domain none · requires `economy`, `relationships`, `space`.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `acts_for` | Acts for | `*` | `*` | many_many |  |  | `accounts`, `by`, `month`, `payment`, `powers` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `orgs.admit` | `org`, `who`, `title?`, `position?`, `by?`, `why?` |\n| `orgs.answer` | `org`, `request`, `answer`, `why?`, `approver?`, `said?`, `by?` |\n| `orgs.appoint` | `org`, `who`, `position?`, `by?`, `why?` |\n| `orgs.decisions` | `org`, `vote_by?`, `quorum?`, `pass?`, `days?`, `approval_days?`, `by?` |\n| `orgs.delegate` | `org`, `to`, `powers`, `payment?`, `month?`, `until?`, `by?` |\n| `orgs.entry` | `place`, `entry?`, `keys?`, `org?`, `by?` |\n| `orgs.found` | `type`, `name`, `kind?`, `cents?`, `from?`, `structure?`, `units?`, `classes?`, `trustee?`, `beneficiary?`, `revocable?`, `purpose?`, `until?`, `founder?`, `by?` |\n| `orgs.leave` | `org`, `who`, `why?` |\n| `orgs.merge` | `org`, `into`, `ratio?`, `cash?`, `from?`, `keep?`, `why?`, `by?` |\n| `orgs.motion_end` | `org`, `motion`, `how?`, `by?` |\n| `orgs.note` | `org`, `text`, `by?`, `names?` |\n| `orgs.party_hire` | `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours_per_week?`, `pay_every?`, `by?` |\n| `orgs.party_name` | `name`, `by?` |\n| `orgs.party_purse` | `cents`, `from?`, `by?` |\n| `orgs.party_tier` | `who`, `tier`, `by?` |\n| `orgs.plan_goal` | `org`, `id?`, `text?`, `window?`, `where?`, `status?`, `source?`, `by?` |\n| `orgs.plan_order` | `org`, `id?`, `to?`, `lead?`, `text?`, `where?`, `when?`, `goal?`, `status?`, `said?`, `source?`, `by?` |\n| `orgs.plan_status` | `org`, `id`, `status`, `note?`, `said?`, `source?`, `by?` |\n| `orgs.position` | `org`, `title?`, `id?`, `powers?`, `seats?`, `reports_to?`, `no_report?`, `scope?`, `payment?`, `month?`, `successor?`, `default?`, `remove?`, `by?` |\n| `orgs.propose` | `change`, `by`, `party?` |\n| `orgs.remove` | `org`, `who`, `by?`, `why?` |\n| `orgs.rename` | `org`, `name`, `by?` |\n| `orgs.restructure` | `org`, `structure`, `party?`, `by?` |\n| `orgs.revoke` | `org`, `to`, `by?` |\n| `orgs.succession` | `on?` |\n| `orgs.title` | `org`, `who`, `title?`, `by?`, `why?` |\n| `orgs.vote` | `org`, `motion`, `vote`, `who?`, `said?`, `by?` |\n| `orgs.vote_rule` | `org`, `who?`, `vote?`, `with?`, `by?` |\n| `orgs.wind_up` | `org`, `stage?`, `property?`, `to?`, `why?`, `by?` |\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `org_admit` | Admit a member | Admit someone to an organization, with a title or into a position. | `org: ref`, `who: ref`, `title?: text`, `position?: text` |  | `default`: `orgs.admit` | `10` | admit, take in as a member, welcome into |\n| `org_appoint` | Appoint | Appoint someone to a position in an organization, or take them out of theirs. | `org: ref`, `who: ref`, `position?: text` |  | `default`: `orgs.appoint` | `10` | appoint, make them foreman, promote |\n| `org_approve` | Approve | Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs. | `org: ref`, `request: text` |  | `default`: `orgs.answer` | `5` | approve it, sign off on it, okay the spend |\n| `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default`: `orgs.decisions` | `2` | set the quorum, change the voting rules |\n| `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default`: `orgs.delegate` | `10` | let them act for, delegate, give them authority |\n| `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default`: `orgs.answer` | `5` | deny the request, turn it down, withdraw my request |\n| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text, such as \"members\"`, `keys?: text` |  | `default`: `orgs.entry` | `0` |  |\n| `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default`: `orgs.found` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |\n| `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default`: `orgs.plan_goal` | `2` | set a goal, add to the plan |\n| `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default`: `orgs.leave` | `5` | leave the group, quit the club, resign from |\n| `org_merge` | Merge companies | Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern). | `org: ref → business`, `into: ref → business`, `ratio?: number`, `cash?: money`, `from?: ref → account`, `keep?: bool`, `vote?: bool` |  | `default`: `orgs.merge` | `60` | merge the companies, fold it into, take over the company, buy out the company, acquire the business |\n| `org_motion_end` | Withdraw a motion | Withdraw a motion you put to a vote, while it is open. | `org: ref`, `motion: text` |  | `default`: `orgs.motion_end` | `2` | withdraw the motion |\n| `org_order` | Give an order | Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when. | `org: text`, `id?: text`, `to?: text`, `lead?: text`, `text?: text`, `where?: text`, `when?: text`, `goal?: text` |  | `default`: `orgs.plan_order` | `2` | give an order, put them on it |\n| `org_plan_status` | Move a plan along | Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again. | `org: text`, `id: text`, `status: text`, `note?: text` |  | `default`: `orgs.plan_status` | `2` | mark it done, drop the plan |\n| `org_position` | Set a position | Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits. | `org: ref`, `title: text`, `id?: text`, `powers?: text`, `seats?: number`, `reports_to?: text`, `no_report?: bool`, `scope?: text`, `payment?: money`, `month?: money`, `successor?: text`, `default?: bool`, `remove?: bool` |  | `default`: `orgs.position` | `2` | add a position, change the position |\n| `org_remove` | Remove a member | Remove someone from an organization. | `org: ref`, `who: ref` |  | `default`: `orgs.remove` | `10` | throw out, expel, remove from the group |\n| `org_rename` | Rename | Give an organization a new name. | `org: ref`, `name: text` |  | `default`: `orgs.rename` | `2` | rename, call it |\n| `org_restructure` | Change structure | Change a company's legal structure (a sole proprietorship, a partnership, an LLC, an S or a C corporation): draws and payouts change at once, its taxes from the next estimated-tax period. | `org: ref → business`, `structure: text`, `as?: ref`, `vote?: bool` |  | `default`: `orgs.restructure` | `30` | incorporate, become an LLC, change the company's structure, turn it into a corporation |\n| `org_revoke` | Revoke | End someone's delegation to act for an organization. | `org: ref`, `to: ref` |  | `default`: `orgs.revoke` | `5` | revoke, take back their authority |\n| `org_title` | Change title | Give someone in an organization a title of their own, or take it away. | `org: ref`, `who: ref`, `title?: text` |  | `default`: `orgs.title` | `5` | call them, give them the title |\n| `org_vote` | Vote | Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`. | `org: ref`, `motion: text`, `vote: text`, `as?: ref` |  | `default`: `orgs.vote` | `5` | vote for the motion, vote against, raise a hand for, abstain |\n| `org_vote_rule` | Standing vote | Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none. | `org: ref`, `vote: text`, `with?: ref` |  | `default`: `orgs.vote_rule` | `2` | vote with, always vote for |\n| `org_wind_up` | Wind up a company | Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: all, begin, finish, resume. | `org: ref → business`, `stage?: text`, `property?: text`, `to?: ref`, `vote?: bool` |  | `default`: `orgs.wind_up` | `60` | wind up the company, close the business down, dissolve the company, shut the business for good, liquidate the company |\n| `party_hire` | Hire a hand | Hire someone for your party, paid from its purse; they join it as a hired hand. | `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default`: `orgs.party_hire` | `15` | hire a hand, take on a hand, hire them for the party |\n| `party_name` | Name the party | Give your party a name. | `name: text` |  | `default`: `orgs.party_name` | `1` | call our party, name our group |\n| `party_purse` | Start a purse | Open an account your party owns, with a deposit from an account of your own. | `amount: money`, `from?: ref → account` |  | `default`: `orgs.party_purse` | `1` | start a party purse, pool our money, a kitty for the party |\n| `party_tier` | Party tier | Add someone you know to your party in a tier (core, companion, hired, ally), change their tier, or take them out of the party (out). | `who: ref → person`, `tier: text` |  | `default`: `orgs.party_tier` | `1` | join my party, travel with me from now on, leave the party |\n\n### Events\n\nIts own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.log_removed`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.plan_back`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `agenda` | `routine` |\n| `approval` | `routine` |\n| `employment` | `routine` |\n| `membership` | `routine` |\n| `vote` | `routine` |\n\n### Panels and slots\n\nPanels: `orgs.list`, `orgs.org`. Slots it writes: `people`, `quest`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `orgs.motions` | `relationships` | 0 | the world |\n| `orgs.orders` | `relationships` | 0 | the world |\n| `orgs.seats` | `relationships` | 0 | the world |\n\n### Lint codes\n\n`orgs.delegations`, `orgs.entry`, `orgs.kinds`, `orgs.owners`, `orgs.positions`, `orgs.taxes`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `position`, `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?`, `asGiven?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | Spend a while talking with someone here. | `target: ref → person`, `minutes?: duration` |  | `default`: `relationships.appraise` | `minutes > 0 ? minutes : 15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | Give someone here a present. | `target: ref → person` |  | `default`: `relationships.appraise` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `attempt` | Attempt | Try something hard that one of your stats decides: climb, force, persuade, notice. | `stat: text`, `difficulty?: text` | `1d20` | `failure`; `great`; `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `group`: Group\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `approval_days` | A request for approval waits for days (7 unless set) | number | 1 … 365 |  |  |  | live from money 2 |\n| `dues` | Dues ({cents, every, day?}) | list |  |  |  |  | live from money 3 |\n| `motion_days` | A motion stays open for days (7 unless set) | number | 1 … 365 |  |  |  |  |\n| `pass_pct` | A motion passes with more than % of the votes cast for or against (50 unless set) | number | 0 … 99.9 |  |  |  |  |\n| `payroll` | Pay schedule ({every, anchor, weekday, days}) | list |  |  |  |  | live from money 3 |\n| `payroll_account` | Payroll account | ref → account |  |  |  |  | live from money 3 |\n| `places` | Its places | list of ref |  |  |  |  |  |\n| `positions` | Positions ({id, title, powers, seats?, reports_to?, scope?, limits?, successor?, default?, no_dues?}) | list |  |  |  |  |  |\n| `quorum_pct` | A motion needs at least % of the votes to take part (50 unless set) | number | 0 … 100 |  |  |  |  |\n| `suta_pct` | Its state unemployment tax rate (%), when it isn't its state's new-employer rate | number | 0 … 100 |  |  |  | live from money 3 |\n| `tax_exempt` | Tax-exempt status (a row of the exempt table: charity, church, club) | text (row of economy.exempt) |  |  |  |  | live from money 3 |\n| `vote_by` | Votes are counted by (shares, one each for members, or one each for its trustees; a company counts shares unless set) | enum: shares, members, trustees |  |  |  |  |  |\n| `vote_rules` | Standing votes ({who, vote: for, against, abstain or with, with?}) | list |  |  |  |  |  |\n\n#### `party`: Party\n\nExtends `group`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `leader` | Leader | ref → person |  |  |  |  |  |\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `bed` | Bed (a place or an item) | ref |  |  |  |  | live from castlife 1 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `filing_status` | Tax filing status | enum: single, married_filing_jointly, head_of_household |  |  |  |  | live from money 4 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `local_tax` | Pays local income tax | bool |  |  |  |  | live from money 4 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `pay_prefs` | Pays with, in order ({use, min?, max?, categories?, except?}) | list |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n| `on` | On | `*` | `*` | many_one |  |  | none |\n| `travels_with` | Travels with | `person` | `person` | many_one |  |  | `since`, `tier` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.entered` | `entity`, `to` |\n| `space.make_place` | `change` |\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `can_go(from, to)`\n- `distance(a, b)`\n- `distance_km(from, to, mode)`\n- `entry_why(who, place)`\n- `go_minutes(from, to)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `grid_unit(a)`\n- `may_enter(who, place)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `go` | Go to | Go to another place: a room, a building, a street, another part of town. | `to: ref → place`, `with?: list` |  | `default`: `move` | `go_minutes(here, to)` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | Walk to a square of the grid you stand on. | `x: number`, `y: number` |  | `default`: `space.step` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.door`, `space.place`, `space.pos`, `space.route`, `space.shape`, `space.squares`, `space.where`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n| `place_make` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `place`, `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track?`, `puzzle?`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `answer` | Answer | Give your answer to a puzzle: a riddle, a code, a combination. | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default`: `story.answer` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.answer_track`, `story.leaky_id`, `story.leaky_label`, `story.unset_flag`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `colour` | Colour | text |  |  |  |  |  |\n| `driver` | Driver | ref |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `make` | Make | text |  |  |  |  |  |\n| `model` | Model | text |  |  |  |  |  |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `plate` | Plate | text |  |  |  |  |  |\n| `specs` | Specs ({label, value}) | list |  |  |  |  |  |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |\n| `year` | Year | number |  |  |  |  |  |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n| `vehicles.take` | `vehicle`, `to`, `driver?`, `riders?`, `park?`, `fuel_pct?`, `miles?`, `hours?` |\n| `vehicles.upkeep` | `vehicle`, `fuel_pct?`, `status?`, `condition?`, `serviced?`, `payer?`, `cents?`, `memo?`, `category?` |\n\n### Formula functions\n\n- `burns_fuel(vehicle)`\n- `drive_minutes(vehicle, to, from)`\n- `fuel_ok(vehicle, to, from)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\nEach is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.\n\n| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |\n|---|---|---|---|---|---|---|---|\n| `drive` | Drive | Drive, ride, sail or fly a vehicle you own or may use to another place. | `vehicle: ref → vehicle`, `to: ref → place` |  | `default`: `vehicles.drive` | `drive_minutes(vehicle, to, here)` | drive to, drive over to, take the truck, take the car, sail to, ride to, fly to, fly the plane to |\n| `refuel` | Refuel | Fill up a vehicle's tank, or charge it. | `vehicle: ref → vehicle` |  | `default`: `vehicles.refuel` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | Have a damaged or broken-down vehicle repaired. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | Have a vehicle serviced: an oil change, a tune-up. | `vehicle: ref → vehicle` |  | `default`: `vehicles.service` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), aliases (list, optional), make (text, optional), model (text, optional), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), fuel_cents_per_gal (band, optional), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 32 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 4 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/USER-GUIDE.md
 var USER_GUIDE_default = `# RPE user guide
@@ -96654,7 +101068,7 @@ A bar of six places runs along the page: **Now**, **Me**, **People**, **Orgs**, 
 
 Everything here is shown as your character knows it. Someone your character cannot know of is never listed, and a place stays hidden until your character has been there or heard of it. A secret stays out of every place, sheet and Journal line until the story reveals it.
 
-On this page, **Act**, **Timelapse…** and **Combat actions** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
+On this page, **Act** and **Timelapse…** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
 
 ### What a press does
 
@@ -96675,7 +101089,7 @@ A press in the play views (here, in the HUD, in the actions sheet or on the map 
 
 ### Now
 
-**Now** is where Play opens. From the top: the banners above; the **scene card** (the time and the part of the day, **Clock paused** while it is, your place, the scene type with how long the last turn took, the weather and your cash, each with ✎ where it can be fixed); **Needs you**, the questions waiting under replies, each opening its reply in the chat; the **Encounter** while a fight is under way (the round and whose turn it is, the order with HP and conditions, and what you have left; see [Combat and encounters](#combat-and-encounters)); **Here**, the people with you, each opening their sheet; **glances**, short cards from the world's packs (what is coming up, the quest in hand, your vehicles, money alerts, things lent and overdue, your conditions, your organizations), each with **Open**; and **Act**, **Timelapse** and **Map**.
+**Now** is where Play opens. From the top: the banners above; the **scene card** (the time and the part of the day, **Clock paused** while it is, your place, the scene type with how long the last turn took, the weather and your cash, each with ✎ where it can be fixed); **Needs you**, the questions waiting under replies, each opening its reply in the chat; the **Encounter** while a fight is under way (the round and whose turn it is, the order with HP and conditions, what you have left, this round's acts, and **Combat actions** or **The whole fight**, which opens the fight's page; see [Combat and encounters](#combat-and-encounters)); **Here**, the people with you, each opening their sheet; **glances**, short cards from the world's packs (what is coming up, the quest in hand, your vehicles, money alerts, things lent and overdue, your conditions, your organizations), each with **Open**; and **Act**, **Timelapse** and **Map**.
 
 ### Me
 
@@ -96683,7 +101097,7 @@ A press in the play views (here, in the HUD, in the actions sheet or on the map 
 
 | Tab | What it shows |
 |---|---|
-| **You** | Your name, where you are and what you are doing, your tier and your conditions; then your character sheet: stats, skills and derived values, as numbers or in words by the level. A pool such as HP is a bar that turns red at a quarter or less; a level shows its XP. |
+| **You** | Your name, where you are and what you are doing, your tier and your conditions; then your character sheet: stats, skills and derived values, as numbers or in words by the level. A pool such as HP is a bar that turns red at a quarter or less; a level shows its XP. With the tabletop rules on in the chat, **You** is your sheet under them: your classes and levels; hit points, temporary hit points and nonlethal harm, with the state they put you in (disabled, dying); experience toward the next level; defence, touch and flat-footed, and initiative; each attack of what you have readied and of your own, with its damage, when it threatens a critical, its range and the rounds loaded; your saves, abilities and skills with their ranks; what you are under, with what is left of it; your daily gauges; and your traits, each with what it does. Press a total, or hover over it, for where its number comes from: each part, and each bonus with where it came from and whether a better one of its type counted instead. Your abilities, hit points, experience and daily gauges have ✎, each fix with its own Undo. |
 | **Needs** | From Cast life 4: hunger, fatigue, social and fun, each a gauge from 0 (met) to 100 (urgent), in words once it is pressing ("hungry"), with the point it is pressing from and what meets it ("Met by eating"). |
 | **Money** | Your own money: see [Your money](#your-money). |
 | **Garage** | A card for each vehicle: whose it is, its class, fuel, condition, where it is and its home base, its odometer or hours, cargo, specs, who has it on loan and who may use it, and service due. **Where is it?**, **Home base…**, **Owner & use…**, and **Specs…** (your own lines, "Seats: 5") are done at once; **Drive…** waits for your next message. **+ Add a vehicle** follows the world's claims policy. |
@@ -96723,7 +101137,7 @@ Each page opens over the page with a back button. A control's page has you fill 
 
 **People** lists **Here** and then **People you know**: each with their role, what they are doing or when and where you last saw them, how they feel about you, and any life state but alive. **Filter and group** groups and filters them by the classifications the world lets players see, by group and by tier. **Your groups** lists the organizations you belong to.
 
-A person's sheet shows where they are, or **Last seen** (from Cast life 2); their **Next** commitment; **Today**, a 24-hour timeline of where their routine and commitments put them, with **Why this plan?**; **Their usual day**, where each block comes from as far as you may know (a private block reads **Busy**); **How they see you**; **What they're after**, their public agendas; their **Organizations**; and **Known as**. Their day is what they would usually do. What the story establishes comes first, and nobody moves by their routine until an agent records it (see [Time, needs and routines](#time-needs-and-routines)).
+A person's sheet shows where they are, or **Last seen** (from Cast life 2); their **Next** commitment; **Today**, a 24-hour timeline of where their routine and commitments put them, with **Why this plan?**; **Their usual day**, where each block comes from as far as you may know (a private block reads **Busy**); **How they see you**; **What they're after**, their public agendas; their **Organizations**; and **Known as**. Their day is what they would usually do. What the story establishes comes first, and nobody moves by their routine until an agent records it (see [Time, needs and routines](#time-needs-and-routines)). With the tabletop rules on, someone standing where you are, or in the fight, has **Their sheet** too, laid out as yours, with no ✎; their hit points are told as the fight tells them, the numbers where the world's rules show them, else how hurt they look.
 
 **Where are they?** corrects where someone is, as ✎ on your own place does: search a place by any word of its name or browse from the top, among the places you may know. It is done at once, with Undo.
 
@@ -97180,11 +101594,15 @@ Each **block** says what it reads as, what they are doing, when (**At a set time
 
 In play the GM rules by them: it reads a sheet before it rules, says what each outcome will do, rolls once with \`roll\`, and applies the outcome (the skill \`ruleset-and-sheets\`). When the dice are rolled at all is [How checks are decided](#how-checks-are-decided).
 
+Under the tabletop rules, a feat, a race, a condition, a size, a weapon or a piece of armour is a row of its table in **Data tables**, and what it does to the numbers is its **modifiers**. A row's modifiers open as a form, a card for each: **What it changes**, offered from what this world's totals and the rules' procedures ask for (any other word is taken, and changes nothing until a total names it), its **Value** (a number, or a formula with \`self\`), its **Bonus type**, offered from the types the world's rules name, **When it counts** (a formula), and a **Note**. **Add a modifier** adds one; the bin takes one away. What cannot work is said under its field. A table's other cells are typed as they always are, and Build still makes no new table and adds no column.
+
 ### Combat and encounters
 
 Only a world whose ruleset has **Combat** has fights: initiative, the action economy, the hit-point pool, when someone is down, the sides and when a fight is over. Combat actions are actions with a cost; an attack's check reads the target's defence.
 
 In play the GM runs a fight with the skill \`combat\`: who is in it, where each stands on the map, what each has to hand, then a round at a time. Your character acts from your message; each principal's own agent chooses what they do; the GM chooses for everyone else, and records each round with \`fight_round\`, which moves the clock by the rounds it records. A fight ends when a side is down, has fled or has yielded, or when the story interrupts.
+
+On the Play page, the **Encounter** on Now opens **The fight**: the same card in full, with each combat action you can take now against each target, with its odds. Pressing one waits for your next message, as **End turn** does. **This round** lists each act; one taken by the tabletop rules says the roll, the total and where each number came from, the defence it met and the harm it did.
 
 ### Lore in Build
 
@@ -97287,11 +101705,11 @@ function sectionsOf(markdown) {
       out.push({ title: trail.filter((t) => t !== "").join(" › "), depth: depth2, body: text6 });
     body = [];
   };
-  for (const line of markdown.split(`
+  for (const line2 of markdown.split(`
 `)) {
-    if (/^\s*```/.test(line))
+    if (/^\s*```/.test(line2))
       fenced = !fenced;
-    const heading = fenced ? null : /^(#{1,4})\s+(.*)$/.exec(line);
+    const heading = fenced ? null : /^(#{1,4})\s+(.*)$/.exec(line2);
     if (heading) {
       flush();
       depth2 = (heading[1] ?? "#").length;
@@ -97300,7 +101718,7 @@ function sectionsOf(markdown) {
         trail[i] ??= "";
       trail[depth2 - 1] = (heading[2] ?? "").trim();
     } else
-      body.push(line);
+      body.push(line2);
   }
   flush();
   return out;
@@ -97320,14 +101738,14 @@ function partsOf(section) {
     lines = [];
     size = 0;
   };
-  for (const line of section.body.split(`
+  for (const line2 of section.body.split(`
 `)) {
-    if (/^\s*```/.test(line))
+    if (/^\s*```/.test(line2))
       fenced = !fenced;
-    if (!fenced && line.trim() === "" && size >= PART)
+    if (!fenced && line2.trim() === "" && size >= PART)
       flush();
-    lines.push(line);
-    size += line.length + 1;
+    lines.push(line2);
+    size += line2.length + 1;
   }
   flush();
   return parts;
@@ -97359,7 +101777,7 @@ function termsOf2(text6) {
 }
 var TITLE_WEIGHT = 3;
 var K1 = 1.2;
-var B = 0.75;
+var B3 = 0.75;
 var indexes = new WeakMap;
 function indexOf3(sections) {
   const known = indexes.get(sections);
@@ -97386,20 +101804,20 @@ function indexOf3(sections) {
   return index;
 }
 function lookup(sections, query, limit = 5, budget = BODY_LIMIT) {
-  const words6 = [...new Set(termsOf2(query))];
-  if (words6.length === 0)
+  const words7 = [...new Set(termsOf2(query))];
+  if (words7.length === 0)
     return 'Give a few words to look up (two letters or more each, not only words such as "the" or "how").';
   const { docs, df, average } = indexOf3(sections);
-  const idf = words6.map((w) => {
+  const idf = words7.map((w) => {
     const n = df.get(w) ?? 0;
     return Math.log(1 + (docs.length - n + 0.5) / (n + 0.5));
   });
   const scored = docs.map((d, i) => {
     let score = 0;
-    words6.forEach((w, k) => {
+    words7.forEach((w, k) => {
       const tf = d.tf.get(w) ?? 0;
       if (tf > 0)
-        score += (idf[k] ?? 0) * tf * (K1 + 1) / (tf + K1 * (1 - B + B * d.length / (average || 1)));
+        score += (idf[k] ?? 0) * tf * (K1 + 1) / (tf + K1 * (1 - B3 + B3 * d.length / (average || 1)));
     });
     return { i, score };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.i - b.i).slice(0, limit).flatMap(({ i }) => sections[i] ?? []);
@@ -97453,12 +101871,12 @@ function guide(topic) {
       out.add(i);
       size -= (guideBlocks[i]?.text.length ?? 0) + 2;
     }
-    const left = guideBlocks.filter((_, i) => out.has(i)).map((b) => `"${b.title}" (${count(b.text.length, "character")})`);
+    const left2 = guideBlocks.filter((_, i) => out.has(i)).map((b) => `"${b.title}" (${count(b.text.length, "character")})`);
     return `${guideBlocks.filter((_, i) => !out.has(i)).map((b) => b.text).join(`
 
 `)}
 
-(Left out so the rest fits one answer; read each with topic when the work needs it: ${left.join(", ")}.)`;
+(Left out so the rest fits one answer; read each with topic when the work needs it: ${left2.join(", ")}.)`;
   }
   const at = guideSections.findIndex((s) => (s.title.split(" › ").at(-1) ?? "").toLowerCase() === wanted);
   const head = guideSections[at];
@@ -97648,18 +102066,18 @@ function strings4(value, base, out) {
     for (const [key, v] of Object.entries(value))
       strings4(v, `${base}${pointerOf([key])}`, out);
 }
-function snippetOf(text6, words6) {
+function snippetOf(text6, words7) {
   const lower = text6.toLowerCase();
-  const found = words6.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
+  const found = words7.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
   const at = found.length > 0 ? Math.min(...found) : 0;
   const start = cutAt(text6, Math.max(0, at - 60));
   const end = cutAt(text6, start + 160);
   return `${start > 0 ? "…" : ""}${text6.slice(start, end).replace(/\s+/g, " ")}${end < text6.length ? "…" : ""}`;
 }
-function searchItems(items, words6, scope) {
-  if (words6.length === 0)
+function searchItems(items, words7, scope) {
+  if (words7.length === 0)
     return [];
-  const phrase = words6.join(" ");
+  const phrase = words7.join(" ");
   const hits = [];
   for (const entry of items) {
     const { collection, id, pointer, value } = entry;
@@ -97679,14 +102097,14 @@ function searchItems(items, words6, scope) {
     for (const leaf of leaves) {
       const lower = leaf.text.toLowerCase();
       let found = 0;
-      for (const w of words6) {
+      for (const w of words7) {
         if (!lower.includes(w))
           continue;
         found++;
         matched.add(w);
         occurrences2 += Math.min(5, lower.split(w).length - 1);
       }
-      if (words6.length > 1 && lower.includes(phrase))
+      if (words7.length > 1 && lower.includes(phrase))
         phraseFound = true;
       if (found > 0 && (best === null || found > best.found))
         best = { ...leaf, found };
@@ -97694,9 +102112,9 @@ function searchItems(items, words6, scope) {
     if (best === null)
       continue;
     const label2 = nameOf8(value) ?? (id || collection);
-    const inLabel = words6.some((w) => label2.toLowerCase().includes(w));
+    const inLabel = words7.some((w) => label2.toLowerCase().includes(w));
     const score = matched.size * 100 + Math.min(40, occurrences2) + (phraseFound ? 50 : 0) + (inLabel ? 20 : 0);
-    hits.push({ worldId: scope.worldId, source: scope.source, collection, id, pointer, ...kind !== undefined ? { kind } : {}, label: label2, field: best.path, snippet: snippetOf(best.text, words6), score });
+    hits.push({ worldId: scope.worldId, source: scope.source, collection, id, pointer, ...kind !== undefined ? { kind } : {}, label: label2, field: best.path, snippet: snippetOf(best.text, words7), score });
   }
   return hits;
 }
@@ -97822,7 +102240,7 @@ async function worldTool(live, args) {
 }
 async function searchTool(live, args) {
   const query = neededText(args, "query", "words to look for");
-  const words6 = searchWords(query);
+  const words7 = searchWords(query);
   const limit = intArg(args, "limit", 1, 100) ?? 20;
   const named = textsArg(args, "collections");
   const collections = named === undefined ? null : new Set(named);
@@ -97852,11 +102270,11 @@ async function searchTool(live, args) {
       const draft = await live.draft(w.id);
       const draftItems = note2(draft.draft);
       if (!draft.stored)
-        return { hits: searchItems(draftItems, words6, { worldId: w.id, source: "head", collections, kinds: kindsIn(draft.draft) }), draft: false };
+        return { hits: searchItems(draftItems, words7, { worldId: w.id, source: "head", collections, kinds: kindsIn(draft.draft) }), draft: false };
       const head = await live.revision(w.id, w.head);
       const drafted = new Map(draftItems.map((item) => [item.pointer, item.value]));
-      const inDraft = searchItems(draftItems, words6, { worldId: w.id, source: "draft", collections, kinds: kindsIn(draft.draft) });
-      const inHead = searchItems(note2(head), words6, { worldId: w.id, source: "head", collections, kinds: kindsIn(head), skip: (item) => drafted.has(item.pointer) && jsonEqual(item.value, drafted.get(item.pointer)) });
+      const inDraft = searchItems(draftItems, words7, { worldId: w.id, source: "draft", collections, kinds: kindsIn(draft.draft) });
+      const inHead = searchItems(note2(head), words7, { worldId: w.id, source: "head", collections, kinds: kindsIn(head), skip: (item) => drafted.has(item.pointer) && jsonEqual(item.value, drafted.get(item.pointer)) });
       return { hits: [...inDraft, ...inHead], draft: true };
     } catch (error) {
       return { skipped: error instanceof Error ? error.message : String(error) };
@@ -97875,8 +102293,8 @@ async function searchTool(live, args) {
   if (unknownKinds.length > 0)
     throw new ToolError(`There is no kind ${unknownKinds.join(", ")} in the engine's packs or in the worlds searched. Kinds: ${clip([...new Set([...reg.kinds.keys(), ...seenKinds])].sort().join(", "), 2000)}.`);
   const searched = found.flatMap((f) => ("hits" in f) ? [f] : []);
-  const all2 = searched.flatMap((f) => f.hits);
-  return { text: json2({ query, hits: rank(all2, limit), total: all2.length, searched: { worlds: searched.length, drafts: searched.filter((f) => f.draft).length }, ...skipped.length > 0 ? { skipped } : {} }) };
+  const all3 = searched.flatMap((f) => f.hits);
+  return { text: json2({ query, hits: rank(all3, limit), total: all3.length, searched: { worlds: searched.length, drafts: searched.filter((f) => f.draft).length }, ...skipped.length > 0 ? { skipped } : {} }) };
 }
 async function createTool(live, args) {
   const name = neededText(args, "name", "the new world's name");
@@ -98247,13 +102665,13 @@ function previewOf(preview, spoilers) {
       })
     };
   });
-  const tracks = (up?.tracks ?? []).map((t) => {
+  const tracks4 = (up?.tracks ?? []).map((t) => {
     if (t.secret !== true || spoilers)
       return t.text;
     hidden++;
     return "A hidden change";
   });
-  return { report: { lines: (preview?.lines ?? []).map((l) => l.text), entities, tracks }, hidden };
+  return { report: { lines: (preview?.lines ?? []).map((l) => l.text), entities, tracks: tracks4 }, hidden };
 }
 async function upgradeTool(live, args, serialize) {
   const chatId = neededText(args, "chatId", "the chat's id (lre_chats lists the chats that play a world)");
@@ -98407,8 +102825,8 @@ function chatGm(ctx, chatId) {
   return {
     what: `the GM view of chat ${chatId}`,
     parts: [GM_PARTS[0], GM_ROSTER, ...GM_PARTS.slice(1)],
-    part: async (part, pick2 = {}) => {
-      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part, ...pick2 });
+    part: async (part, pick3 = {}) => {
+      const read = await ask(ctx, chatId, "lre.gm.part", { chatId, part, ...pick3 });
       return read.same ? { id: read.id, value: null, key: read.key, same: true } : { id: read.id, value: read.value, key: read.key };
     },
     outline: async () => {
@@ -98434,30 +102852,30 @@ async function gmRead(args, source) {
     const said3 = textArg(args, arg);
     return said3 === undefined ? [] : [{ arg, part: part2, said: said3 }];
   });
-  const pick2 = picked2[0];
+  const pick3 = picked2[0];
   if (picked2.length + (asked !== undefined ? 1 : 0) > 1)
     throw new ToolError("Give at most one of part, entity, party and org.");
   const part = asked === undefined ? undefined : asked.trim() === GM_ALL ? GM_ALL : source.parts.find((p) => p === asked.trim());
   if (asked !== undefined && part === undefined)
     throw new ToolError(`part is one of ${source.parts.join(", ")} or ${GM_ALL}, not ${JSON.stringify(asked)}.`);
-  if (account2 !== undefined && pick2?.arg !== "party")
+  if (account2 !== undefined && pick3?.arg !== "party")
     throw new ToolError("account cuts one party's money to one account: give party with it.");
-  if (compact && (pick2 ? pick2.part !== "entities" : part !== undefined && part !== "entities"))
+  if (compact && (pick3 ? pick3.part !== "entities" : part !== undefined && part !== "entities"))
     throw new ToolError("compact reads the entities: give it with part entities, entity, or neither.");
-  if (kind !== undefined && (pick2 ? pick2.part !== "entities" : part !== undefined && part !== "entities" && part !== GM_ROSTER && part !== "money"))
+  if (kind !== undefined && (pick3 ? pick3.part !== "entities" : part !== undefined && part !== "entities" && part !== GM_ROSTER && part !== "money"))
     throw new ToolError("kind reads the entities, the roster or the money: give it with part entities, roster or money, entity, or alone.");
-  if (ids3 !== undefined && (pick2 !== undefined || part === undefined || part === GM_ALL || !GM_IDS_PARTS.includes(part)))
+  if (ids3 !== undefined && (pick3 !== undefined || part === undefined || part === GM_ALL || !GM_IDS_PARTS.includes(part)))
     throw new ToolError(`ids read some of ${GM_IDS_PARTS.join(", ")}: give them with one of those parts.`);
   if (since !== undefined && (part === undefined || part === GM_ALL))
     throw new ToolError("since rereads one part: give it with that part.");
   const { what } = source;
-  if (pick2) {
-    const { id, value } = await source.part(pick2.part, { id: pick2.said });
+  if (pick3) {
+    const { id, value } = await source.part(pick3.part, { id: pick3.said });
     const [one] = value;
     if (one === undefined)
-      throw new ToolError(source.noneNamed(pick2.part, pick2.said));
-    const root = pick2.part === "entities" && compact ? compacted([one]) : pick2.part === "money" && account2 !== undefined ? onlyAccount(one, account2, `${pick2.said}'s money`) : one;
-    return readOut(root, `${what}: ${pick2.part === "money" ? `the money of ${id}${account2 !== undefined ? `, account ${account2} alone` : ""}` : `${pick2.part === "orgs" ? "organization" : "entity"} ${id}`}`, args);
+      throw new ToolError(source.noneNamed(pick3.part, pick3.said));
+    const root = pick3.part === "entities" && compact ? compacted([one]) : pick3.part === "money" && account2 !== undefined ? onlyAccount(one, account2, `${pick3.said}'s money`) : one;
+    return readOut(root, `${what}: ${pick3.part === "money" ? `the money of ${id}${account2 !== undefined ? `, account ${account2} alone` : ""}` : `${pick3.part === "orgs" ? "organization" : "entity"} ${id}`}`, args);
   }
   if (part === GM_ALL)
     return readOut(await source.whole(), `${what}: everything as it stands, secrets included`, args);
@@ -98501,12 +102919,12 @@ function compacted(entities) {
     const own2 = {};
     for (const { id, value, ...def } of e.fields) {
       values[id] = value;
-      const plain4 = JSON.parse(JSON.stringify(def));
+      const plain5 = JSON.parse(JSON.stringify(def));
       const known = defs[id];
       if (known === undefined)
-        defs[id] = plain4;
-      else if (JSON.stringify(known) !== JSON.stringify(plain4))
-        own2[id] = plain4;
+        defs[id] = plain5;
+      else if (JSON.stringify(known) !== JSON.stringify(plain5))
+        own2[id] = plain5;
     }
     const { fields: _fields, ...rest2 } = e;
     return { ...JSON.parse(JSON.stringify(rest2)), fields: values, ...Object.keys(own2).length > 0 ? { fieldsOwn: own2 } : {} };
@@ -98558,14 +102976,14 @@ function foundThing(row) {
 async function itemsFind(args, ctx) {
   gate(args, "lre_items_find", "reads the chat's things as the GM does, hidden and secret ones included");
   const chatId = chatIdOf(args);
-  const words6 = neededText(args, "words", `the words that name the thing, as the story says them ("Danny's truck keys", "the wallet")`);
-  const [{ found = [] }, { list }] = await Promise.all([ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "find", words: words6 }), ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "list" })]);
+  const words7 = neededText(args, "words", `the words that name the thing, as the story says them ("Danny's truck keys", "the wallet")`);
+  const [{ found = [] }, { list }] = await Promise.all([ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "find", words: words7 }), ask(ctx, chatId, "lre.things", { scope: "gm", chatId, op: "list" })]);
   const rows2 = new Map((list?.rows ?? []).map((r) => [r.id, r]));
   const things = found.map((id) => {
     const row = rows2.get(id);
     return row ? foundThing(row) : { id };
   });
-  return { text: json2({ chatId, words: words6, things, ...things.length === 0 ? { note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." } : {} }) };
+  return { text: json2({ chatId, words: words7, things, ...things.length === 0 ? { note: "Nothing in the chat goes by those words: try fewer of them, or read lre_gm's /entities." } : {} }) };
 }
 var PARTY_WORDS = { party: true, "your party": true, "the party": true };
 function orgFound(pages, said3) {
@@ -98594,15 +103012,15 @@ async function orgsRead(args, ctx) {
     return paged || text6.length > BODY_LIMIT ? readOut(root, what, args) : { text: text6 };
   };
   const shown4 = (page2, more = {}) => {
-    const plain4 = JSON.parse(JSON.stringify(page2));
-    const sections2 = isRecord(plain4.sections) ? plain4.sections : {};
+    const plain5 = JSON.parse(JSON.stringify(page2));
+    const sections2 = isRecord(plain5.sections) ? plain5.sections : {};
     const money6 = account2 === undefined ? null : isRecord(sections2.money) ? onlyAccount(sections2.money, account2, `${page2.name}'s money`) : null;
     if (account2 !== undefined && money6 === null)
       throw new ToolError(`${page2.name}'s money isn't shown here: the player character may not see it, or it holds no accounts.`);
     const org = { id: page2.id, name: page2.name, type: page2.type, badge: page2.badge };
     if (money6 !== null)
       return answer({ chatId, org, part: "money", money: money6 }, `the money of ${page2.name} in chat ${chatId}, account ${account2 ?? ""} alone`);
-    return answer({ chatId, org, ...part !== undefined ? { part, ...JSON.parse(JSON.stringify(orgPart(page2, part))) } : { page: plain4, ...more } }, `the page of ${page2.name} in chat ${chatId}${part !== undefined ? `, its ${part}` : ""}`);
+    return answer({ chatId, org, ...part !== undefined ? { part, ...JSON.parse(JSON.stringify(orgPart(page2, part))) } : { page: plain5, ...more } }, `the page of ${page2.name} in chat ${chatId}${part !== undefined ? `, its ${part}` : ""}`);
   };
   if (boolArg(args, "spoilers")) {
     const byWords = said3 !== undefined && hasOwn(PARTY_WORDS, said3.trim().toLowerCase());
@@ -98799,8 +103217,8 @@ function action2(args, ctx) {
     throw new ToolError("params is an object: the picked option's params, as /palette/entries/<i>/options/<j>/params shows them.");
   const text6 = textArg(args, "text");
   return ctx.serialize(`chat:${chatId}`, async () => {
-    const words6 = text6 !== undefined && text6.trim() !== "" ? text6 : undefined;
-    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params, source: "palette", ...atOnceByDefault(id) && words6 === undefined ? {} : { now: true }, ...words6 !== undefined ? { text: words6 } : {} });
+    const words7 = text6 !== undefined && text6.trim() !== "" ? text6 : undefined;
+    const body = await ask(ctx, chatId, "lre.action", { chatId, action: id, params, source: "palette", ...atOnceByDefault(id) && words7 === undefined ? {} : { now: true }, ...words7 !== undefined ? { text: words7 } : {} });
     return { text: json2("messageId" in body ? { chatId, action: id, messageId: body.messageId, reply: REPLY } : ("pending" in body) ? { chatId, action: id, applied: true, pending: body.pending, ...queuedOf(body), ...body.undo ? { undo: body.undo } : {} } : { chatId, action: id, applied: true, pending: false }) };
   });
 }
@@ -99202,18 +103620,18 @@ class Tally {
     for (const e of events3) {
       if (e.type === "post") {
         const touched = new Set;
-        for (const line of e.lines) {
-          const account2 = state2.entities[line.account];
+        for (const line2 of e.lines) {
+          const account2 = state2.entities[line2.account];
           if (account2 === undefined)
             continue;
           const ids3 = [...new Set(ownersIn(account2.fields).map((o) => o.party))];
-          const whose = ids3.length > 0 ? ids3 : [line.account];
+          const whose = ids3.length > 0 ? ids3 : [line2.account];
           const key = whose.join("+");
           const row = this.holders.get(key) ?? { ids: whose, in: 0, out: 0, postings: 0 };
-          if (line.amount > 0)
-            row.in += line.amount;
+          if (line2.amount > 0)
+            row.in += line2.amount;
           else
-            row.out -= line.amount;
+            row.out -= line2.amount;
           if (!touched.has(key))
             row.postings++;
           touched.add(key);
@@ -99275,14 +103693,14 @@ function cutDigest(m, cap) {
 }
 var SANDBOX_PARTS = GM_PARTS.filter((p) => !["edits", "refused", "held", "minds"].includes(p));
 function sandboxGm(sb) {
-  const part = (asked, pick2 = {}) => {
+  const part = (asked, pick3 = {}) => {
     const world = SANDBOX_PARTS.find((p) => p === asked);
     if (world === undefined)
       throw new ToolError(`A sandbox has no ${asked}: its parts are ${SANDBOX_PARTS.join(", ")}. The chat's own (its edits, refused and held writes, and minds) are read with lre_gm.`);
     const keyed = GM_KEYED_PARTS.find((p) => p === world);
-    const id = pick2.id;
+    const id = pick3.id;
     if (keyed === undefined || id === undefined)
-      return { id: null, value: sandboxGmPart(sb.world, sb.state, world, { ...pick2.ids ? { ids: pick2.ids } : {}, ...pick2.kind !== undefined ? { kind: pick2.kind } : {} }) };
+      return { id: null, value: sandboxGmPart(sb.world, sb.state, world, { ...pick3.ids ? { ids: pick3.ids } : {}, ...pick3.kind !== undefined ? { kind: pick3.kind } : {} }) };
     const ambiguous = (ids3) => new ToolError(`${ids3.length} have the name ${JSON.stringify(id)}: ${ids3.join(", ")}; name one by its id.`);
     if (keyed === "orgs") {
       const orgs = sandboxGmPart(sb.world, sb.state, "orgs");
@@ -99299,7 +103717,7 @@ function sandboxGm(sb) {
   return {
     what: `sandbox ${sb.id} (a scratch copy of chat ${sb.chatId}, now ${clockLabel(sb, sb.state.clock)})`,
     parts: SANDBOX_PARTS,
-    part: async (asked, pick2) => part(asked, pick2),
+    part: async (asked, pick3) => part(asked, pick3),
     outline: async () => SANDBOX_PARTS.map((p) => ({ part: p, count: sandboxGmCount(sb.world, sb.state, p) })),
     whole: async () => sandboxGmWorld(sb.world, sb.state),
     noneNamed: (keyed, said3) => noneNamed(keyed, said3, `sandbox ${sb.id}`)
@@ -99350,7 +103768,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "3fc3cd5e";
+var BUILD = "443fe133";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;
@@ -99363,621 +103781,6 @@ function versionLine(bun) {
 }
 var VERSION_LINE = versionLine(process.versions.bun);
 var VERSIONS = { cli: CLI_VERSION, build: BUILD, engine: ENGINE_VERSION, worldFormat: WORLD_FORMAT, agentApi: AGENT_API };
-
-// src/shared/profiles/parts.ts
-var ABILITIES = [
-  { id: "str", label: "Strength" },
-  { id: "dex", label: "Dexterity" },
-  { id: "con", label: "Constitution" },
-  { id: "int", label: "Intelligence" },
-  { id: "wis", label: "Wisdom" },
-  { id: "cha", label: "Charisma" }
-];
-function abilityFields() {
-  const out = {};
-  for (const a of ABILITIES)
-    out[a.id] = { type: "number", label: a.label, default: 10, min: 1, max: 30 };
-  for (const a of ABILITIES)
-    out[`${a.id}_mod`] = { type: "number", label: `${a.label} modifier`, derived: `floor((self.${a.id} - 10) / 2)` };
-  return out;
-}
-function levelFields(maxLevel) {
-  return {
-    level: { type: "number", label: "Level", default: 1, min: 1, ...maxLevel !== null ? { max: maxLevel } : {}, locked: true },
-    xp: { type: "number", label: "XP", default: 0, min: 0 }
-  };
-}
-function signed2(expr) {
-  return `(${expr} >= 0 ? '+' : '') + (${expr})`;
-}
-function abilityRows() {
-  return ABILITIES.map((a) => ({ formula: `self.${a.id} + ' (' + ${signed2(`self.${a.id}_mod`)} + ')'`, label: a.label }));
-}
-function profileTable(id, label2, columns, rows2) {
-  const schema = `lre-table/${id}/v1`;
-  return { id, pack: "sheets", schema, revision: hashJson({ schema, columns, rows: rows2 }), label: label2, columns, rows: rows2 };
-}
-function levelRows(row) {
-  const out = {};
-  for (let level = 1;level <= 20; level++)
-    out[String(level)] = row(level);
-  return out;
-}
-function triangularXp(level) {
-  return 1000 * level * (level - 1) / 2;
-}
-function skillTable(id, label2, skills) {
-  const rows2 = {};
-  for (const s of skills)
-    rows2[s.id] = { label: s.label, ability: s.ability };
-  return profileTable(id, label2, { label: { type: "text" }, ability: { type: "text", doc: "The modifier field the roll adds" } }, rows2);
-}
-function rankFields(skills, max) {
-  const out = {};
-  for (const s of skills)
-    out[s.id] = { type: "number", label: s.label, default: 0, min: 0, max };
-  return out;
-}
-var DIFFICULTY = "difficulty_of(params.difficulty)";
-var DIFFICULTY_PARAM = { type: "text", optional: true, label: "Difficulty (easy, moderate, hard, very hard or a number)" };
-var DEGREES = [
-  { outcome: "failure", margin: { max: -1 } },
-  { outcome: "success", margin: { min: 0, max: 9 } },
-  { outcome: "great", margin: { min: 10 } }
-];
-var ATTACK_BANDS = [
-  { outcome: "miss", natural: { max: 1 } },
-  { outcome: "critical", natural: { min: 20 } },
-  { outcome: "miss", margin: { max: -1 } },
-  { outcome: "hit", margin: { min: 0 } }
-];
-function damage(expr) {
-  return [{ type: "add", args: { entity: "target", field: "hp", delta: `=-max(1, ${expr})` } }];
-}
-function attemptCheck(id, modifier) {
-  return { id, dice: "d20", modifier, dc: DIFFICULTY, bands: DEGREES };
-}
-var INITIATIVE_BANDS = [{ outcome: "rolled" }];
-function skillAction(table) {
-  return {
-    id: "skill_check",
-    label: "Use a skill",
-    params: { skill: { type: "text", label: "Skill", table }, difficulty: DIFFICULTY_PARAM },
-    requires: [],
-    check: "skill",
-    outcomes: { failure: [], success: [], great: [] },
-    duration: "10",
-    lexicon: ["roll for", "skill check", "use my skill"],
-    observable: "puts a skill to use"
-  };
-}
-function saveAction(table) {
-  return {
-    id: "save_check",
-    label: "Make a save",
-    params: { save: { type: "text", label: "Save", table }, difficulty: DIFFICULTY_PARAM },
-    requires: [],
-    check: "save",
-    outcomes: { failure: [], success: [] },
-    duration: "1",
-    lexicon: ["make a save", "saving throw", "try to resist"],
-    observable: "braces against it"
-  };
-}
-function attackAction(hit, critical) {
-  return {
-    id: "attack",
-    label: "Attack",
-    params: { target: { type: "ref", label: "Target" } },
-    requires: ["is_foe(self, target)", "not is_down(target)"],
-    check: "attack",
-    outcomes: { critical: damage(critical), hit: damage(hit), miss: [] },
-    duration: "0",
-    lexicon: ["attack", "strike at", "shoot at", "swing at"],
-    observable: "attacks",
-    combat: { cost: { action: 1 }, role: "attack" }
-  };
-}
-function stanceAction(id, label2, budget) {
-  return {
-    id,
-    label: label2,
-    params: {},
-    requires: [],
-    outcomes: { default: [] },
-    duration: "0",
-    lexicon: [label2.toLowerCase(), "defend myself", "take cover"],
-    observable: "goes on the defensive",
-    combat: { cost: { action: 1, [budget]: 1 }, role: "defend" }
-  };
-}
-function holdsStance(who, budget) {
-  return `in_encounter(${who}) and budget_left(${who}, '${budget}') == 0`;
-}
-function restAction(label2, more = []) {
-  return {
-    id: "long_rest",
-    label: label2,
-    params: {},
-    requires: ["not in_encounter(self)"],
-    outcomes: { default: [{ type: "recover", args: { entity: "self", field: "hp" } }, ...more] },
-    duration: "480",
-    lexicon: ["rest for the night", "take a long rest"],
-    observable: "settles down to rest"
-  };
-}
-
-// src/shared/profiles/classic.ts
-var SKILLS = [
-  { id: "athletics", label: "Athletics", ability: "str_mod" },
-  { id: "acrobatics", label: "Acrobatics", ability: "dex_mod" },
-  { id: "stealth", label: "Stealth", ability: "dex_mod" },
-  { id: "sleight_of_hand", label: "Deft Hands", ability: "dex_mod" },
-  { id: "search", label: "Search", ability: "int_mod" },
-  { id: "lore", label: "Lore", ability: "int_mod" },
-  { id: "heal", label: "First Aid", ability: "wis_mod" },
-  { id: "perception", label: "Perception", ability: "wis_mod" },
-  { id: "sense_motive", label: "Read People", ability: "wis_mod" },
-  { id: "survival", label: "Survival", ability: "wis_mod" },
-  { id: "diplomacy", label: "Persuade", ability: "cha_mod" },
-  { id: "bluff", label: "Deceive", ability: "cha_mod" },
-  { id: "intimidate", label: "Intimidate", ability: "cha_mod" }
-];
-var SAVES = [
-  { id: "fortitude", label: "Fortitude", ability: "con_mod", track: "good" },
-  { id: "reflex", label: "Reflex", ability: "dex_mod", track: "poor" },
-  { id: "will", label: "Will", ability: "wis_mod", track: "poor" }
-];
-var SKILL_MOD = "field(self, skill) + field(self, table('classic.skills', skill, 'ability'))";
-var saves = {};
-for (const s of SAVES) {
-  saves[`${s.id}_track`] = { type: "enum", label: `${s.label} progression`, values: ["good", "poor"], default: s.track };
-  saves[s.id] = { type: "number", label: s.label, derived: `table('classic.levels', self.level, 'save_' + self.${s.id}_track) + self.${s.ability}` };
-}
-var CLASSIC = {
-  id: "classic",
-  label: "Classic",
-  summary: "Classic fantasy on a d20: an attack bonus on a good, average or poor track and saves on good or poor ones, skills with ranks, an armor score, HP that grows by a die each level, and levels from XP.",
-  fields: {
-    ...abilityFields(),
-    ...levelFields(20),
-    attack_track: { type: "enum", label: "Base attack progression", values: ["good", "average", "poor"], default: "average" },
-    bab: { type: "number", label: "Base attack", derived: "table('classic.levels', self.level, 'attack_' + self.attack_track)" },
-    ...saves,
-    hit_die: { type: "number", label: "Hit die", default: 8, min: 4, max: 12 },
-    max_hp: { type: "number", label: "Max HP", derived: "max(1, self.hit_die + self.con_mod + (self.level - 1) * max(1, floor(self.hit_die / 2) + 1 + self.con_mod))" },
-    hp: { type: "number", label: "HP", pool: { max: "max_hp", recover: "max(1, self.level)" } },
-    armor: { type: "number", label: "Armor bonus", default: 0, min: 0 },
-    ac: { type: "number", label: "Armor Class", derived: `10 + self.armor + self.dex_mod + (${holdsStance("self", "defend")} ? 4 : 0)` },
-    damage: { type: "dice", label: "Damage", default: "1d8" },
-    ...rankFields(SKILLS, 23)
-  },
-  checks: {
-    skill: attemptCheck("skill", SKILL_MOD),
-    save: { id: "save", dice: "d20", modifier: "field(self, save)", dc: DIFFICULTY },
-    attack: { id: "attack", dice: "d20", modifier: "self.bab + self.str_mod", dc: "target.ac", bands: ATTACK_BANDS, pass: ["hit", "critical"] },
-    initiative: { id: "initiative", dice: "d20", modifier: "self.dex_mod", bands: INITIATIVE_BANDS }
-  },
-  actions: {
-    skill_check: skillAction("classic.skills"),
-    save_check: saveAction("classic.saves"),
-    attack: attackAction("roll(self.damage) + self.str_mod", "roll(self.damage) + roll(self.damage) + self.str_mod"),
-    total_defense: stanceAction("total_defense", "Total defense", "defend"),
-    long_rest: restAction("Rest for the night")
-  },
-  tables: {
-    "classic.levels": profileTable("classic.levels", "Classic levels", {
-      xp: { type: "int", doc: "XP the level needs" },
-      attack_good: { type: "int" },
-      attack_average: { type: "int" },
-      attack_poor: { type: "int" },
-      save_good: { type: "int" },
-      save_poor: { type: "int" }
-    }, levelRows((level) => ({
-      xp: triangularXp(level),
-      attack_good: level,
-      attack_average: Math.floor(level * 3 / 4),
-      attack_poor: Math.floor(level / 2),
-      save_good: 2 + Math.floor(level / 2),
-      save_poor: Math.floor(level / 3)
-    }))),
-    "classic.skills": skillTable("classic.skills", "Classic skills", SKILLS),
-    "classic.saves": skillTable("classic.saves", "Classic saves", SAVES)
-  },
-  ruleset: {
-    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: "classic.levels", column: "xp" }, maxLevel: 20 } },
-    sheet: {
-      sections: [
-        { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { progression: "level" }, { formula: "self.ac", label: "Armor Class" }, { formula: signed2("self.bab"), label: "Base attack" }, { formula: signed2("self.dex_mod"), label: "Initiative" }] },
-        { id: "abilities", label: "Abilities", rows: abilityRows() },
-        { id: "saves", label: "Saves", rows: SAVES.map((s) => ({ formula: signed2(`self.${s.id}`), label: s.label })) },
-        { id: "skills", label: "Skills", rows: SKILLS.map((s) => ({ formula: signed2(`self.${s.id} + self.${s.ability}`), label: s.label })) }
-      ]
-    },
-    minLevels: { sheets: 3 },
-    adjudication: presetAdjudication("balanced"),
-    combat: { initiative: "initiative", economy: { action: { label: "Standard action" }, defend: { label: "Total defense" } }, hp: "hp" }
-  }
-};
-
-// src/shared/profiles/custom.ts
-var CUSTOM = {
-  id: "custom",
-  label: "Custom",
-  summary: "A minimal start to build on: one stat, one check, an HP pool and a progression with no levels yet.",
-  fields: {
-    skill: { type: "number", label: "Skill", default: 0, min: 0, max: 10 },
-    hp: { type: "number", label: "HP", pool: { max: "10 + self.skill * 2" } },
-    ...levelFields(null)
-  },
-  checks: {
-    challenge: { id: "challenge", dice: "d20", modifier: "self.skill", dc: DIFFICULTY }
-  },
-  actions: {
-    try_something: { id: "try_something", label: "Try something", params: { difficulty: DIFFICULTY_PARAM }, requires: [], check: "challenge", outcomes: { failure: [], success: [] }, duration: "10", lexicon: ["try something", "give it a go"], observable: "gives it a go" },
-    attack: {
-      id: "attack",
-      label: "Attack",
-      params: { target: { type: "ref", label: "Target" } },
-      requires: ["is_foe(self, target)", "not is_down(target)"],
-      check: { id: "attack", dice: "d20", modifier: "self.skill", dc: "10 + target.skill" },
-      outcomes: { success: [{ type: "add", args: { entity: "target", field: "hp", delta: "=-roll('1d6')" } }], failure: [] },
-      duration: "0",
-      lexicon: ["attack", "strike at"],
-      observable: "attacks",
-      combat: { cost: { action: 1 }, role: "attack" }
-    }
-  },
-  tables: {},
-  ruleset: {
-    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: [0] } },
-    sheet: { sections: [{ id: "character", label: "Character", rows: [{ field: "skill" }, { pool: "hp" }, { progression: "level" }] }] },
-    minLevels: { sheets: 3 },
-    adjudication: presetAdjudication("balanced"),
-    combat: { initiative: { id: "initiative", dice: "d20", modifier: "self.skill", bands: INITIATIVE_BANDS }, economy: { action: { label: "Action" } }, hp: "hp" }
-  }
-};
-
-// src/shared/profiles/fifth.ts
-var SKILLS2 = [
-  { id: "athletics", label: "Athletics", ability: "str_mod" },
-  { id: "acrobatics", label: "Acrobatics", ability: "dex_mod" },
-  { id: "sleight_of_hand", label: "Deft Hands", ability: "dex_mod" },
-  { id: "stealth", label: "Stealth", ability: "dex_mod" },
-  { id: "investigation", label: "Investigation", ability: "int_mod" },
-  { id: "lore", label: "Lore", ability: "int_mod" },
-  { id: "insight", label: "Read People", ability: "wis_mod" },
-  { id: "medicine", label: "Medicine", ability: "wis_mod" },
-  { id: "perception", label: "Perception", ability: "wis_mod" },
-  { id: "survival", label: "Survival", ability: "wis_mod" },
-  { id: "deception", label: "Deception", ability: "cha_mod" },
-  { id: "intimidation", label: "Intimidation", ability: "cha_mod" },
-  { id: "performance", label: "Performance", ability: "cha_mod" },
-  { id: "persuasion", label: "Persuasion", ability: "cha_mod" }
-];
-var XP = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 1e5, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];
-var proficientIn = (ability) => `(self.save_prof_1 == ${ability} or self.save_prof_2 == ${ability}) ? self.proficiency : 0`;
-var proficiencies = {};
-for (const s of SKILLS2)
-  proficiencies[s.id] = { type: "number", label: s.label, default: 0, min: 0, max: 2 };
-var abilityIds = ABILITIES.map((a) => a.id);
-var FIFTH = {
-  id: "fifth",
-  label: "Fifth",
-  summary: "Heroic fantasy on a d20: one training bonus that grows with level for your trained skills and saves, advantage, an armor score, and short and long rests that spend and regain healing dice.",
-  fields: {
-    ...abilityFields(),
-    ...levelFields(20),
-    proficiency: { type: "number", label: "Proficiency bonus", derived: "table('fifth.levels', self.level, 'proficiency')" },
-    save_prof_1: { type: "enum", label: "Proficient save", values: abilityIds, default: "con" },
-    save_prof_2: { type: "enum", label: "Second proficient save", values: abilityIds, default: "wis" },
-    hit_die: { type: "number", label: "Hit die", default: 8, min: 6, max: 12 },
-    max_hp: { type: "number", label: "Max HP", derived: "max(1, self.hit_die + self.con_mod + (self.level - 1) * max(1, floor(self.hit_die / 2) + 1 + self.con_mod))" },
-    hp: { type: "number", label: "HP", pool: { max: "max_hp" } },
-    hit_dice: { type: "number", label: "Hit dice", pool: { max: "level", recover: "max(1, floor(self.level / 2))" } },
-    armor: { type: "number", label: "Armor (base AC)", default: 10, min: 0 },
-    ac: { type: "number", label: "Armor Class", derived: "self.armor + self.dex_mod" },
-    attack_bonus: { type: "number", label: "Attack bonus", derived: "self.proficiency + max(self.str_mod, self.dex_mod)" },
-    damage: { type: "dice", label: "Damage", default: "1d8" },
-    ...proficiencies
-  },
-  checks: {
-    skill: attemptCheck("skill", "field(self, table('fifth.skills', skill, 'ability')) + field(self, skill) * self.proficiency"),
-    save: { id: "save", dice: "d20", modifier: `field(self, save + '_mod') + (${proficientIn("save")})`, dc: DIFFICULTY },
-    attack: { id: "attack", dice: "d20", modifier: "self.attack_bonus", advantage: `${holdsStance("target", "dodge")} ? -1 : 0`, dc: "target.ac", bands: ATTACK_BANDS, pass: ["hit", "critical"] },
-    initiative: { id: "initiative", dice: "d20", modifier: "self.dex_mod", bands: INITIATIVE_BANDS }
-  },
-  actions: {
-    skill_check: skillAction("fifth.skills"),
-    save_check: saveAction("fifth.saves"),
-    attack: attackAction("roll(self.damage) + max(self.str_mod, self.dex_mod)", "roll(self.damage) + roll(self.damage) + max(self.str_mod, self.dex_mod)"),
-    dodge: stanceAction("dodge", "Dodge", "dodge"),
-    short_rest: {
-      id: "short_rest",
-      label: "Short rest (spend a hit die)",
-      params: {},
-      requires: ["not in_encounter(self)", "self.hit_dice >= 1"],
-      outcomes: {
-        default: [
-          { type: "add", args: { entity: "self", field: "hit_dice", delta: -1 } },
-          { type: "recover", args: { entity: "self", field: "hp", amount: "=max(1, roll('1d' + self.hit_die) + self.con_mod)" } }
-        ]
-      },
-      duration: "60",
-      lexicon: ["take a short rest", "catch my breath"],
-      observable: "takes a breather"
-    },
-    long_rest: restAction("Long rest", [{ type: "recover", args: { entity: "self", field: "hit_dice" } }])
-  },
-  tables: {
-    "fifth.levels": profileTable("fifth.levels", "Fifth levels", { xp: { type: "int", doc: "XP the level needs" }, proficiency: { type: "int", doc: "Proficiency bonus" } }, levelRows((level) => ({ xp: XP[level - 1] ?? 0, proficiency: 2 + Math.floor((level - 1) / 4) }))),
-    "fifth.skills": skillTable("fifth.skills", "Fifth skills", SKILLS2),
-    "fifth.saves": skillTable("fifth.saves", "Fifth saves", ABILITIES.map((a) => ({ id: a.id, label: a.label, ability: `${a.id}_mod` })))
-  },
-  ruleset: {
-    progression: { level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: "fifth.levels", column: "xp" }, maxLevel: 20, onLevel: [{ type: "add", args: { entity: "self", field: "hit_dice", delta: 1 } }] } },
-    sheet: {
-      sections: [
-        { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { pool: "hit_dice" }, { progression: "level" }, { formula: "self.ac", label: "Armor Class" }, { formula: signed2("self.proficiency"), label: "Proficiency" }, { formula: signed2("self.dex_mod"), label: "Initiative" }] },
-        { id: "abilities", label: "Abilities", rows: abilityRows() },
-        { id: "saves", label: "Saves", rows: ABILITIES.map((a) => ({ formula: signed2(`self.${a.id}_mod + (${proficientIn(`'${a.id}'`)})`), label: a.label })) },
-        { id: "skills", label: "Skills", rows: SKILLS2.map((s) => ({ formula: signed2(`self.${s.ability} + self.${s.id} * self.proficiency`), label: s.label })) }
-      ]
-    },
-    minLevels: { sheets: 3 },
-    adjudication: { ...presetAdjudication("balanced"), preset: "custom", description: { weight: "advantage", max: 2, advantageAt: 2 } },
-    combat: { initiative: "initiative", economy: { action: { label: "Action" }, dodge: { label: "Dodge" } }, hp: "hp" }
-  }
-};
-
-// src/shared/profiles/modern.ts
-var SKILLS3 = [
-  { id: "athletics", label: "Athletics", ability: "str_mod" },
-  { id: "drive", label: "Drive", ability: "dex_mod" },
-  { id: "stealth", label: "Stealth", ability: "dex_mod" },
-  { id: "computers", label: "Computers", ability: "int_mod" },
-  { id: "investigate", label: "Investigate", ability: "int_mod" },
-  { id: "repair", label: "Repair", ability: "int_mod" },
-  { id: "notice", label: "Notice", ability: "wis_mod" },
-  { id: "sense_motive", label: "Read People", ability: "wis_mod" },
-  { id: "treat_injury", label: "First Aid", ability: "wis_mod" },
-  { id: "persuade", label: "Persuade", ability: "cha_mod" },
-  { id: "bluff", label: "Deceive", ability: "cha_mod" },
-  { id: "intimidate", label: "Intimidate", ability: "cha_mod" }
-];
-var SAVES2 = [
-  { id: "fortitude", label: "Fortitude", ability: "con_mod" },
-  { id: "reflex", label: "Reflex", ability: "dex_mod" },
-  { id: "will", label: "Will", ability: "wis_mod" }
-];
-var SKILL_MOD2 = "field(self, skill) + field(self, table('modern.skills', skill, 'ability'))";
-var saves2 = {};
-for (const s of SAVES2)
-  saves2[s.id] = { type: "number", label: s.label, derived: `table('modern.levels', self.level, 'save') + self.${s.ability}` };
-var MODERN = {
-  id: "modern",
-  label: "Modern",
-  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill that a night's rest refills, HP, and levels from XP.",
-  fields: {
-    ...abilityFields(),
-    ...levelFields(20),
-    max_hp: { type: "number", label: "Max HP", derived: "max(1, 8 + self.con_mod + (self.level - 1) * max(1, 5 + self.con_mod))" },
-    hp: { type: "number", label: "HP", pool: { max: "max_hp", recover: "max(1, self.level)" } },
-    ap_max: { type: "number", label: "Action Points max", derived: "5 + floor(self.level / 2)" },
-    action_points: { type: "number", label: "Action Points", pool: { max: "ap_max" } },
-    attack_bonus: { type: "number", label: "Attack bonus", derived: "table('modern.levels', self.level, 'attack') + max(self.str_mod, self.dex_mod)" },
-    armor: { type: "number", label: "Equipment bonus", default: 0, min: 0 },
-    defense: { type: "number", label: "Defense", derived: `10 + self.dex_mod + table('modern.levels', self.level, 'defense') + self.armor + (${holdsStance("self", "defend")} ? 4 : 0)` },
-    damage: { type: "dice", label: "Damage", default: "1d6" },
-    reputation: { type: "number", label: "Reputation", default: 0, min: 0 },
-    ...saves2,
-    ...rankFields(SKILLS3, 23)
-  },
-  checks: {
-    skill: attemptCheck("skill", SKILL_MOD2),
-    save: { id: "save", dice: "d20", modifier: "field(self, save)", dc: DIFFICULTY },
-    attack: { id: "attack", dice: "d20", modifier: "self.attack_bonus", dc: "target.defense", bands: ATTACK_BANDS, pass: ["hit", "critical"] },
-    initiative: { id: "initiative", dice: "d20", modifier: "self.dex_mod", bands: INITIATIVE_BANDS }
-  },
-  actions: {
-    skill_check: skillAction("modern.skills"),
-    push_skill: {
-      id: "push_skill",
-      label: "Push a skill (Action Point)",
-      params: { skill: { type: "text", label: "Skill", table: "modern.skills" }, difficulty: DIFFICULTY_PARAM },
-      requires: ["self.action_points >= 1"],
-      check: { id: "push_skill", dice: "d20+1d6", modifier: SKILL_MOD2, dc: DIFFICULTY, bands: DEGREES },
-      outcomes: Object.fromEntries(["failure", "success", "great"].map((o) => [o, [{ type: "add", args: { entity: "self", field: "action_points", delta: "=roll.natural == null ? 0 : -1" } }]])),
-      duration: "10",
-      lexicon: ["spend an action point", "push myself", "dig deep"],
-      observable: "pushes hard"
-    },
-    save_check: saveAction("modern.saves"),
-    attack: attackAction("roll(self.damage) + self.str_mod", "roll(self.damage) + roll(self.damage) + self.str_mod"),
-    total_defense: stanceAction("total_defense", "Total defense", "defend"),
-    long_rest: restAction("Rest for the night", [{ type: "recover", args: { entity: "self", field: "action_points", full: true } }])
-  },
-  tables: {
-    "modern.levels": profileTable("modern.levels", "Modern levels", { xp: { type: "int", doc: "XP the level needs" }, attack: { type: "int", doc: "Base attack bonus" }, defense: { type: "int", doc: "Defense bonus" }, save: { type: "int", doc: "Base save bonus" } }, levelRows((level) => ({ xp: triangularXp(level), attack: Math.floor(level * 3 / 4), defense: 1 + Math.floor(level / 2), save: 1 + Math.floor(level / 3) }))),
-    "modern.skills": skillTable("modern.skills", "Modern skills", SKILLS3),
-    "modern.saves": skillTable("modern.saves", "Modern saves", SAVES2)
-  },
-  ruleset: {
-    progression: {
-      level: { label: "Level", xpField: "xp", levelField: "level", thresholds: { table: "modern.levels", column: "xp" }, maxLevel: 20, onLevel: [{ type: "recover", args: { entity: "self", field: "action_points", full: true } }] }
-    },
-    sheet: {
-      sections: [
-        {
-          id: "vitals",
-          label: "Vitals",
-          rows: [{ pool: "hp" }, { pool: "action_points", label: "Action Points (a night's rest or a new level refills them)" }, { progression: "level" }, { formula: "self.defense", label: "Defense" }, { formula: signed2("self.attack_bonus"), label: "Attack" }, { formula: signed2("self.dex_mod"), label: "Initiative" }, { field: "reputation" }]
-        },
-        { id: "abilities", label: "Abilities", rows: abilityRows() },
-        { id: "saves", label: "Saves", rows: SAVES2.map((s) => ({ formula: signed2(`self.${s.id}`), label: s.label })) },
-        { id: "skills", label: "Skills", rows: SKILLS3.map((s) => ({ formula: signed2(`self.${s.id} + self.${s.ability}`), label: s.label })) }
-      ]
-    },
-    minLevels: { sheets: 3 },
-    adjudication: presetAdjudication("balanced"),
-    combat: { initiative: "initiative", economy: { action: { label: "Action" }, defend: { label: "Total defense" } }, hp: "hp" }
-  }
-};
-
-// src/shared/profiles/index.ts
-var PROFILES = { modern: MODERN, classic: CLASSIC, fifth: FIFTH, custom: CUSTOM };
-var PROFILE_IDS = ["modern", "classic", "fifth", "custom"];
-function kindOf2(world, packKinds, id) {
-  return hasOwn(world.kinds, id) ? world.kinds[id] : hasOwn(packKinds, id) ? packKinds[id] : undefined;
-}
-function upChain(world, packKinds, kind, visit2) {
-  let id = kind;
-  for (let guard = 0;id !== undefined && guard < 32; guard++) {
-    const def = kindOf2(world, packKinds, id);
-    if (!def)
-      return;
-    const found = visit2(id, def);
-    if (found !== undefined)
-      return found;
-    id = def.extends;
-  }
-  return;
-}
-function words6(id) {
-  const text7 = id.replace(/[._]/g, " ");
-  return text7.charAt(0).toUpperCase() + text7.slice(1);
-}
-function rulesetIn(doc) {
-  const ruleset = isRecord(doc.ruleset) ? doc.ruleset : {};
-  doc.ruleset = ruleset;
-  return ruleset;
-}
-function rulesetPart(world, key) {
-  const part = isRecord(world.ruleset) ? world.ruleset[key] : undefined;
-  return isRecord(part) ? part : undefined;
-}
-function slotsOf(world, profile, packKinds) {
-  const pov = hasOwn(world.entities, world.pov) ? world.entities[world.pov] : undefined;
-  const kindId = pov?.kind ?? "person";
-  const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
-  const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
-  const label2 = ownKind?.label ?? packKind?.label ?? words6(kindId);
-  const kindIn = (doc) => {
-    const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
-    if (existing)
-      return existing;
-    const copy = { id: kindId, label: label2, ...packKind?.extends !== undefined ? { extends: packKind.extends } : {}, fields: structuredClone(packKind?.fields ?? {}) };
-    doc.kinds[kindId] = copy;
-    return copy;
-  };
-  const slots = [];
-  for (const [id, def] of Object.entries(profile.fields)) {
-    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words6(id), mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
-  }
-  for (const [id, def] of Object.entries(profile.checks)) {
-    slots.push({ path: `checks.${id}`, group: "checks", label: words6(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
-  }
-  for (const [id, def] of Object.entries(profile.actions)) {
-    slots.push({ path: `actions.${id}`, group: "actions", label: def.label, mine: hasOwn(world.actions, id) ? world.actions[id] : undefined, theirs: def, write: (doc) => void (doc.actions[id] = structuredClone(def)) });
-  }
-  for (const [id, def] of Object.entries(profile.tables)) {
-    slots.push({ path: `tables.${id}`, group: "tables", label: def.label, mine: hasOwn(world.tables, id) ? world.tables[id] : undefined, theirs: def, write: (doc) => void (doc.tables[id] = structuredClone(def)) });
-  }
-  const rs = profile.ruleset;
-  const progression = rulesetPart(world, "progression");
-  for (const [id, def] of Object.entries(rs.progression)) {
-    slots.push({
-      path: `ruleset.progression.${id}`,
-      group: "ruleset",
-      label: `Progression: ${def.label}`,
-      mine: progression && hasOwn(progression, id) ? progression[id] : undefined,
-      theirs: def,
-      write: (doc) => {
-        const r = rulesetIn(doc);
-        r.progression = { ...isRecord(r.progression) ? r.progression : {}, [id]: structuredClone(def) };
-      }
-    });
-  }
-  slots.push({ path: "ruleset.sheet", group: "ruleset", label: "Sheet layout", mine: rulesetPart(world, "sheet"), theirs: rs.sheet, write: (doc) => void (rulesetIn(doc).sheet = structuredClone(rs.sheet)) });
-  const floors = rulesetPart(world, "minLevels");
-  for (const [domain, level] of Object.entries(rs.minLevels)) {
-    slots.push({
-      path: `ruleset.minLevels.${domain}`,
-      group: "ruleset",
-      label: `Level floor: ${words6(domain)} ${String(level)}`,
-      mine: floors && hasOwn(floors, domain) ? floors[domain] : undefined,
-      theirs: level,
-      write: (doc) => {
-        const r = rulesetIn(doc);
-        r.minLevels = { ...isRecord(r.minLevels) ? r.minLevels : {}, [domain]: level };
-      }
-    });
-  }
-  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words6(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
-  slots.push({ path: "ruleset.combat", group: "ruleset", label: "Combat rules", mine: rulesetPart(world, "combat"), theirs: rs.combat, write: (doc) => void (rulesetIn(doc).combat = structuredClone(rs.combat)) });
-  return { kind: { id: kindId, label: label2, copied: !ownKind }, slots };
-}
-function statusOf2(slot) {
-  if (slot.mine === undefined)
-    return "add";
-  return hashJson(slot.mine) === hashJson(slot.theirs) ? "same" : "conflict";
-}
-function fitted(def, v) {
-  switch (def.type) {
-    case "number":
-    case "money":
-    case "duration": {
-      if (typeof v !== "number" || !Number.isFinite(v))
-        return null;
-      const lo = Math.max(def.min ?? -Infinity, def.pool ? typeof def.pool.min === "string" ? -Infinity : def.pool.min ?? 0 : -Infinity);
-      const n = Math.min(def.max ?? Infinity, Math.max(lo, v));
-      return n === v ? undefined : n;
-    }
-    case "bool":
-      return typeof v === "boolean" ? undefined : null;
-    case "enum":
-      return typeof v === "string" && (def.values ?? []).includes(v) ? undefined : null;
-    case "list":
-      return Array.isArray(v) ? undefined : null;
-    default:
-      return typeof v === "string" ? undefined : null;
-  }
-}
-function planOf4(world, profile, packKinds, choices) {
-  const { kind, slots } = slotsOf(world, profile, packKinds);
-  const items = slots.map((slot) => ({ path: slot.path, group: slot.group, label: slot.label, status: statusOf2(slot) }));
-  const write = slots.filter((slot, i) => {
-    const status = items[i]?.status;
-    return status === "add" || status === "conflict" && choices[slot.path] === "profile";
-  });
-  const taken = new Map;
-  for (const slot of write)
-    if (slot.field)
-      taken.set(slot.field.id, slot.field.def);
-  const values = [];
-  let people = 0;
-  for (const [id, e] of Object.entries(world.entities)) {
-    if (!upChain(world, packKinds, e.kind, (k) => k === kind.id ? true : undefined))
-      continue;
-    people++;
-    for (const [field, def] of taken) {
-      if (def.derived !== undefined || !hasOwn(e.fields, field))
-        continue;
-      if (upChain(world, packKinds, e.kind, (k, d) => k === kind.id ? false : hasOwn(d.fields, field) ? true : undefined) === true)
-        continue;
-      const from = e.fields[field];
-      if (from === undefined)
-        continue;
-      const to = fitted(def, from);
-      if (to !== undefined)
-        values.push({ entity: id, name: e.name, field, from, to });
-    }
-  }
-  return { plan: { profile: profile.id, kind, items, people, values }, write };
-}
-function planProfile(world, profile, packKinds, choices = {}) {
-  return planOf4(world, profile, packKinds, choices).plan;
-}
 
 // src/cli/tools-build.ts
 var WORLD_ID = { type: "string", description: "The world's id (w_…), from lre_worlds." };
@@ -101503,9 +105306,9 @@ var MIRRORS = {
 function moduleUsage() {
   const sections2 = new Map;
   for (const { cli } of MODULE_TOOLS) {
-    const line = cli.usage.length <= 42 ? `  ${cli.usage.padEnd(44)}${cli.summary}` : `  ${cli.usage}
+    const line2 = cli.usage.length <= 42 ? `  ${cli.usage.padEnd(44)}${cli.summary}` : `  ${cli.usage}
 ${" ".repeat(46)}${cli.summary}`;
-    sections2.set(cli.section, [...sections2.get(cli.section) ?? [], line]);
+    sections2.set(cli.section, [...sections2.get(cli.section) ?? [], line2]);
   }
   return [...sections2].map(([heading, lines]) => `${heading}
 ${lines.join(`
@@ -101543,11 +105346,11 @@ function moduleMirror(tool) {
             out[arg] = true;
           continue;
         }
-        const all2 = p.values[option];
-        const given = all2?.at(-1);
-        if (all2 === undefined || given === undefined)
+        const all3 = p.values[option];
+        const given = all3?.at(-1);
+        if (all3 === undefined || given === undefined)
           continue;
-        out[arg] = as === "many" ? all2 : as === "int" ? number(p, option) : as === "list" ? given.split(",").map((v) => v.trim()).filter((v) => v !== "") : as === "json" ? jsonFrom(option, given, io) : given;
+        out[arg] = as === "many" ? all3 : as === "int" ? number(p, option) : as === "list" ? given.split(",").map((v) => v.trim()).filter((v) => v !== "") : as === "json" ? jsonFrom(option, given, io) : given;
       }
       return out;
     }
