@@ -130,6 +130,8 @@ export interface OpenAppOptions {
   log?: Log;
   /** The app file this process was started from, and what a restart onto another build of it needs; absent or null where it runs from no single file. */
   appFile?: AppFile | null;
+  /** The first line of this run's log: that RPE started, on which build and why, in words to its owner, with the fields that say it plainly. */
+  started?: { message: string; fields: Record<string, JsonValue> };
 }
 
 /** A log of plain lines to `write` (standard error, in the server). Fields carry ids and counts, never a secret. */
@@ -235,8 +237,10 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const hooks = gatherHooks(areas);
   const liveKinds = gatherLiveKinds(areas);
   const now = options.now ?? Date.now;
-  const serviceLog = new ServiceLog(options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now), config.service.logLines, now);
+  const serviceLog = new ServiceLog(options.log ?? lineLog((text) => process.stderr.write(`${text}\n`), now), config.service.logLines, now, options.started === undefined ? 0 : 1);
   const log = serviceLog.log;
+  // The log's first line: that RPE started, on which build and why (`startedLine`), so a page that reads the log after a restart finds it at the oldest end.
+  if (options.started !== undefined) log.info(options.started.message, options.started.fields);
   // No row is written without its user (R-179): with none named, the data folder is left as it was.
   const user = config.lumiverse.user;
   if (user === null || user === "") throw new Error(NO_OWNER);

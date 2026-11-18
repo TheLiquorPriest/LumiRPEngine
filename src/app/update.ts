@@ -233,8 +233,8 @@ export interface AppFile {
   service(): Promise<boolean>;
   /** The name of the service's unit where this process runs as it, for a page to say; null where it runs by hand. */
   unit?(): Promise<string | null>;
-  /** Closes the app as on a stop and ends the process, for its service to start it again; `after` runs once the app has closed, before the process ends. */
-  restart(after?: () => Promise<void>): void;
+  /** Closes the app as on a stop and ends the process, for its service to start it again; `after` runs once the app has closed, before the process ends. `why` says what the restart is, for the next start to say. */
+  restart(after?: () => Promise<void>, why?: { why: "restart" } | { why: "update"; to: string }): void;
   sleep(ms: number): Promise<void>;
   /** Set where this process runs as RPE's installed copy and the install recorded where updates come from. */
   copy?: CopyUpdate;
@@ -511,16 +511,20 @@ export class Builds {
     else if (result.build !== version) log.info("RPE's app file on disk is another build.", { running: version, disk: result.build });
   }
 
-  /** Closes the app and ends the process for its service to start it again; an installed copy first swaps the build checked into the copy's place, once the app has closed. */
+  /** Closes the app and ends the process for its service to start it again; an installed copy first swaps the build checked into the copy's place, once the app has closed. The restart says it is an update, to the build asked for. */
   #swap(file: AppFile, copy: CopyUpdate | undefined): void {
     const ready = this.#ready;
-    this.deps.log.info("RPE restarts on the new build.", { running: this.deps.version, build: ready?.build ?? this.status().disk });
-    if (copy === undefined || ready === null) file.restart();
+    const to = ready?.build ?? this.status().disk ?? "";
+    this.deps.log.info("RPE restarts on the new build.", { running: this.deps.version, build: to });
+    if (copy === undefined || ready === null) file.restart(undefined, { why: "update", to });
     else
-      file.restart(async () => {
-        const settings = await file.settings();
-        await copy.swapIn(this.deps.version, ready.build, settings.keepCopies);
-      });
+      file.restart(
+        async () => {
+          const settings = await file.settings();
+          await copy.swapIn(this.deps.version, ready.build, settings.keepCopies);
+        },
+        { why: "update", to },
+      );
   }
 
   /** Waits until no turn or job runs (at once where `now`), then restarts; a file read again first, and given up where it is the running build again, or does not start. */
@@ -592,7 +596,7 @@ export class Builds {
       }
       this.#restart = "restarting";
       this.deps.log.info("RPE restarts, as it was asked from a page.", { running: this.deps.version });
-      file.restart();
+      file.restart(undefined, { why: "restart" });
     } finally {
       this.#waiting = false;
     }

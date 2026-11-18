@@ -1,12 +1,13 @@
 // `rpe serve`: RPE in the foreground.
 
-import { lineLog, openApp } from "../app";
+import { type App, lineLog, openApp } from "../app";
 import { copyUpdate, isInstalledCopy, recordedSource } from "../app-copy";
 import { currentKeys, NO_OWNER } from "../auth";
 import type { CliIO, CliOptions } from "../cli";
 import type { AppConfig, DataPaths } from "../config";
 import { accountSystemctl, rpeServiceOf } from "../up";
 import { type AppFile, startCheck, versionOf } from "../update";
+import { beginRun, endRun, type EndingAsk, readRun, startedLine } from "../run-record";
 import { runLine } from "./run-line";
 import { updateSettingsOf } from "./update-settings";
 import { takeLock } from "./writer";
@@ -40,6 +41,8 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
   // A restart onto a new build ends `serve` as a stop does, and RPE's service starts the new file; a swap into RPE's own copy is made once the app has closed.
   const restart = Promise.withResolvers<void>();
   const after: { run: (() => Promise<void>) | null } = { run: null };
+  /** How this run ends: a stop, unless it restarts (and says why) or fails. */
+  const ending: { is: EndingAsk } = { is: { why: "stop" } };
   const startsOn = (path: string, waitMs: number): Promise<string | null> => startCheck(process.execPath, path, paths.root, waitMs);
   // Run as RPE's own installed copy, it takes a new build from the one file the install recorded, on the extension's word alone.
   const source = options.appFile !== undefined && isInstalledCopy(options.appFile, paths.root) ? await recordedSource(paths.root) : null;
@@ -53,14 +56,26 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
           settings: () => updateSettingsOf(paths, log),
           service: () => runByService(paths, io),
           unit: async () => ((await runByService(paths, io)) ? ((await rpeServiceOf(paths.root, io.env, io.home))?.unit ?? null) : null),
-          restart: (then) => {
+          restart: (then, why) => {
             after.run = then ?? null;
+            ending.is = why ?? { why: "restart" };
             restart.resolve();
           },
           sleep: (ms) => Bun.sleep(ms),
           ...(source === null ? {} : { copy: copyUpdate(paths.root, source, startsOn) }),
         };
-  const app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log, appFile });
+  // How the run before this one ended, and what this run is: the log's first line says why RPE started, and this run's record is written for the next start to read.
+  const previous = await readRun(paths.root);
+  await beginRun(paths.root, options.version, io.now());
+  const started = startedLine(previous, options.version, await runByService(paths, io));
+  const failed = (error: unknown): EndingAsk => ({ why: "failed", error: error instanceof Error ? error.message : String(error) });
+  let app: App;
+  try {
+    app = await openApp({ paths, config, version: options.version, areas: options.areas ?? [], now: io.now, log, appFile, started });
+  } catch (error) {
+    await endRun(paths.root, failed(error), io.now());
+    throw error;
+  }
   try {
     const running = await app.start();
     // A swapped-in build that is up and listening has come up: the service's pre-start step counts its starts no more.
@@ -74,8 +89,13 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
     // The file as it is once RPE listens: a build put there while it started is noticed now.
     await Promise.race([app.builds.check(), stop]);
     await Promise.race([stop, restart.promise]);
+  } catch (error) {
+    ending.is = failed(error);
+    throw error;
   } finally {
     await app.close();
+    // How this run ended, written for the next start before the process goes.
+    await endRun(paths.root, ending.is, io.now());
   }
   await after.run?.();
   return 0;

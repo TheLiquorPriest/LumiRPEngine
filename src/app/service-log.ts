@@ -62,16 +62,19 @@ export class ServiceLog {
   readonly log: Log;
   readonly #kept: number;
   readonly #lines: LogLine[] = [];
+  /** How many of the oldest lines are never let go: the line that says why RPE started, which a page that reads the log after a restart looks for. */
+  readonly #pinned: number;
 
-  constructor(inner: Log, kept: number, now: () => number) {
+  constructor(inner: Log, kept: number, now: () => number, pinned = 0) {
     this.#kept = kept;
+    this.#pinned = Math.min(pinned, kept);
     const say =
       (level: LogLevel) =>
       (message: string, fields?: Record<string, JsonValue>): void => {
         inner[level](message, fields);
         const seen = fields === undefined ? {} : (hidden(fields, null) as Record<string, JsonValue>);
         this.#lines.push({ at: now(), level, message: message.replace(SECRET_TEXT, HIDDEN), area: idOf(seen, "area"), chat: idOf(seen, "chat"), turn: idOf(seen, "turn"), job: idOf(seen, "job"), fields: seen });
-        if (this.#lines.length > this.#kept) this.#lines.splice(0, this.#lines.length - this.#kept);
+        if (this.#lines.length > this.#kept) this.#lines.splice(this.#pinned, this.#lines.length - this.#kept);
       };
     this.log = { debug: say("debug"), info: say("info"), warn: say("warn"), error: say("error") };
   }
