@@ -28,7 +28,7 @@ lines:
   due_around: 'Due in the places beside it'
   due_beyond: 'Due elsewhere'
   horizon_none: 'Nothing is at hand: no place, person or thing is on the horizon.'
-  quest: '{{label}} [{{id}}] ({{kind}}): {{stage}}{{#owner}}, {{owner}}''s{{/owner}}{{#unchecked}} (invented without a gap check or consent){{/unchecked}}{{#turn}} — {{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}{{#unsourced}}unsourced, {{/unsourced}}turn {{turn}}{{/turn}}{{#way}}. {{#fails}}It fails here by its own condition, and its failing way leads to {{to}}{{/fails}}{{^fails}}Its way on to {{to}} holds now{{/fails}}: nothing moves it but a call, world_apply with {{call}} and your reason as why{{/way}}'
+  quest: '{{label}} [{{id}}] ({{kind}}): {{stage}}{{#owner}}, {{owner}}''s{{/owner}}{{#unchecked}} (invented without a gap check or consent){{/unchecked}}{{#turn}} — {{#precision}}{{precision}}, {{/precision}}{{#standing}}{{standing}}, {{/standing}}{{#unsourced}}unsourced, {{/unsourced}}turn {{turn}}{{/turn}}{{#way}}. {{#fails}}It fails here by its own condition, and its failing way leads to {{to}}{{/fails}}{{^fails}}What moves it on to {{to}} has happened{{/fails}}: nothing moves it but a call, world_apply with {{call}} and your reason as why{{/way}}'
   changed: '{{lane}}: {{n}} {{#one}}change{{/one}}{{^one}}changes{{/one}}{{#ops}} ({{list}}){{/ops}}{{#touched}}, to {{names}}{{/touched}}{{#by}}, by {{names}}{{/by}}{{#unapplied}}; {{unapplied}} did not apply{{/unapplied}}'
   changed_his: '{{lane}}: {{n}} {{#one}}change{{/one}}{{^one}}changes{{/one}} of the player''s own{{#ops}} ({{list}}){{/ops}}{{#touched}}, to {{names}}{{/touched}}{{#unapplied}}; {{unapplied}} did not apply{{/unapplied}}'
   changed_none: '{{lane}}: nothing changed'

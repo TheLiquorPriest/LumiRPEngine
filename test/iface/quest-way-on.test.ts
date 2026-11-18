@@ -41,5 +41,5 @@ test("an action's flag that opens a quest's way on is told to the Author, with t
   expect(flag === undefined ? undefined : changeSaid(await playAnswers(RPE_GUIDANCE), t.deps.env.registry, doc, state, flag)).toBe("The story flag “letter given” is set");
   await t.writes.run(() => t.s.tieTurn(t.turn.id, { message: "msg-1", hash: "hash-1" }), "tying the turn");
   const next = await t.writes.run(() => t.s.beginTurn({ chat: t.turn.chat, kind: "normal" }), "the next turn");
-  expect(worldState(t.s, { chat: t.turn.chat, turn: next.id, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).text).toContain(`The warden's errand [errand] (quest): Set out. Its way on to Handed over holds now: nothing moves it but a call, world_apply with {"op":"quest","quest":"errand","stage":"done","outcome":"met"} and your reason as why`);
+  expect(worldState(t.s, { chat: t.turn.chat, turn: next.id, layout: SHIPPED_LAYOUT, charsPerToken: 4 }).text).toContain(`The warden's errand [errand] (quest): Set out. What moves it on to Handed over has happened: nothing moves it but a call, world_apply with {"op":"quest","quest":"errand","stage":"done","outcome":"met"} and your reason as why`);
 });
