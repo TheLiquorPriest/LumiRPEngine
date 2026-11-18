@@ -125,7 +125,7 @@ action_flow_delete_label: Cancel a standing payment
 action_flow_delete_description: Cancel a standing payment.
 action_apply_credit_label: Apply for credit
 action_apply_credit_description: Apply for a credit card, a credit line or a loan.
-action_apply_credit_param_product: Product (credit_card, line_of_credit, loan, or one of the world's)
+action_apply_credit_param_product: Product
 action_set_pay_prefs_label: Set how I pay
 action_set_pay_prefs_description: Set the order in which you prefer to pay: cash, debit, credit.
 action_set_pay_prefs_param_tiers: Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}

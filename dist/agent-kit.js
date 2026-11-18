@@ -26114,6 +26114,10 @@ function creditAccounts(ctx, person) {
     return c !== null && isCredit(c);
   });
 }
+function creditProducts(ctx) {
+  const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
+  return Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class }));
+}
 function ageMonths(ctx, account) {
   const opened = strOf(own(ctx.state.entities, account)?.fields.opened);
   let at = 0;
@@ -26267,8 +26271,7 @@ function creditReport(ctx, person) {
   });
   const ages = accounts.map((id) => ageMonths(ctx, id));
   const when = (at) => formatClock(cal, at).split(",")[0] ?? "";
-  const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
-  const offers = Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
+  const offers = creditProducts(ctx).map((p) => ({ product: p.product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
   return {
     person,
     score,
@@ -38697,6 +38700,7 @@ function registerRest(r, hooks) {
     return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
+  r.query("economy.credit_products", (ctx) => creditProducts(ctx).map((p) => ({ value: p.product, label: p.label })));
   r.query("economy.offers_at", (ctx, place2) => offersAtPlace(ctx, place2));
   r.query("economy.item_choices", (ctx, text3, who) => {
     const place2 = placeOfEntity(ctx.state, who);
@@ -39234,7 +39238,7 @@ function registerActions(r) {
   r.action({ id: "flow_pause", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self", by: "actor" } }] }, lexicon: ["pause the standing order"], ...phone });
   r.action({ id: "flow_resume", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self", by: "actor" } }] }, lexicon: ["resume the standing order"], ...phone });
   r.action({ id: "flow_delete", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self", by: "actor" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
-  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text", choices: "economy.credit_products" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
   r.action({ id: "set_pay_prefs", pack: "economy", params: { tiers: { type: "text", example: [{ use: "debit", max: 100 }, { use: "cash" }] } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var economyPack = {
@@ -48461,6 +48465,35 @@ function tableRowKey(table, text4) {
   return hit ? hit.key : null;
 }
 
+// src/engine/param-words.ts
+var COUNT_PARAM = "qty";
+function paramLabel(action, name, world, registry) {
+  const def = action.params[name];
+  if (def?.label)
+    return def.label;
+  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
+  if (kind?.label)
+    return kind.label;
+  if (name === COUNT_PARAM)
+    return say("action_how_many");
+  const words3 = name.replace(/_/g, " ");
+  return words3.charAt(0).toUpperCase() + words3.slice(1);
+}
+function paramChoices(ctx, def, actor2) {
+  if (def?.type !== "text")
+    return [];
+  if (def.table !== undefined)
+    return tableChoices(own(ctx.world.tables, def.table)).map((row) => ({ value: row.key, label: row.label }));
+  if (def.choices === undefined)
+    return [];
+  const query = optionalQuery(ctx, def.choices);
+  return query === null ? [] : query(ctx, actor2);
+}
+function neededWords(registry, world, action, name, choices) {
+  const param = paramLabel(action, name, world, registry).toLowerCase();
+  return say("why_action_needs_param", { action: action.label, param, ...choices.length > 0 ? { choices: orOf(choices.map((c) => c.label)) } : {} });
+}
+
 // src/engine/resolve.ts
 function findAction(reg, world, id) {
   return own(world.actions, id) ?? reg.actions.get(id);
@@ -48485,7 +48518,7 @@ function prepare(reg, world, state2, req) {
     const raw = own(given, name);
     if (raw === undefined || raw === null || raw === "") {
       if (!def.optional)
-        return { code: "missing_param", reason: say("why_type_needs_k", { type: action.label, k: def.label ?? name }) };
+        return { code: "missing_param", reason: neededWords(reg, world, action, name, paramChoices(reg.context(world, state2), def, actor2)) };
       continue;
     }
     if (def.type === "ref") {
@@ -91263,19 +91296,6 @@ function compactSpan(minutes2) {
     return hours > 0 ? say("span_compact_d_h", { d: days, h: hours }) : say("span_compact_d", { d: days });
   return rest > 0 ? say("span_compact_h_min", { h: hours, min: rest }) : say("span_compact_h", { h: hours });
 }
-var COUNT_PARAM = "qty";
-function paramLabel(action, name, world, registry) {
-  const def = action.params[name];
-  if (def?.label)
-    return def.label;
-  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
-  if (kind?.label)
-    return kind.label;
-  if (name === COUNT_PARAM)
-    return say("action_how_many");
-  const words6 = name.replace(/_/g, " ");
-  return words6.charAt(0).toUpperCase() + words6.slice(1);
-}
 function pickReader(registry, world, state2, typed, heard) {
   const said3 = heard.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state2).filter((s) => !said3.includes(s.toLowerCase()));
@@ -97535,7 +97555,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "235340e5";
+var BUILD = "d46e770f";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

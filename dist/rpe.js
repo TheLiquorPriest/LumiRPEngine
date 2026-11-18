@@ -30206,6 +30206,10 @@ function creditAccounts(ctx, person) {
     return c !== null && isCredit(c);
   });
 }
+function creditProducts(ctx) {
+  const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id2, p]) => [id2, { label: p.label, class: p.class }])) };
+  return Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class }));
+}
 function ageMonths(ctx, account) {
   const opened = strOf(own2(ctx.state.entities, account)?.fields.opened);
   let at = 0;
@@ -30357,8 +30361,7 @@ function creditReport(ctx, person) {
   });
   const ages = accounts.map((id2) => ageMonths(ctx, id2));
   const when = (at) => formatClock(cal, at).split(",")[0] ?? "";
-  const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id2, p]) => [id2, { label: p.label, class: p.class }])) };
-  const offers = Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
+  const offers = creditProducts(ctx).map((p) => ({ product: p.product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score, CREDIT_SCORE_ASSUMED) }));
   return {
     person,
     score,
@@ -43141,6 +43144,7 @@ function registerRest(r, hooks) {
     return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
   });
   r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
+  r.query("economy.credit_products", (ctx) => creditProducts(ctx).map((p) => ({ value: p.product, label: p.label })));
   r.query("economy.offers_at", (ctx, place2) => offersAtPlace(ctx, place2));
   r.query("economy.item_choices", (ctx, text4, who) => {
     const place2 = placeOfEntity(ctx.state, who);
@@ -43678,7 +43682,7 @@ function registerActions(r) {
   r.action({ id: "flow_pause", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self", by: "actor" } }] }, lexicon: ["pause the standing order"], ...phone });
   r.action({ id: "flow_resume", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self", by: "actor" } }] }, lexicon: ["resume the standing order"], ...phone });
   r.action({ id: "flow_delete", pack: "economy", params: flowOnly, requires: flowsRun, outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self", by: "actor" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
-  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "apply_credit", pack: "economy", params: { product: { type: "text", choices: "economy.credit_products" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true }, as: asParam("money.borrow", "param_borrowing_as") }, requires: ["level.money >= 3", mayAs("money.borrow")], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self", by: "actor" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
   r.action({ id: "set_pay_prefs", pack: "economy", params: { tiers: { type: "text", example: [{ use: "debit", max: 100 }, { use: "cash" }] } }, requires: ["money_feature('payment_prefs', self)"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 var TABLES2, SHIPPED3, TAG_CATEGORIES, OFFER_CAP = 24, PHYSICAL, VEHICLE_CATEGORY = "vehicles", ID_SHAPED, economyPack, core_default3;
@@ -54371,6 +54375,39 @@ var init_tables = __esm(() => {
   init_json();
 });
 
+// src/engine/param-words.ts
+function paramLabel(action, name, world, registry) {
+  const def = action.params[name];
+  if (def?.label)
+    return def.label;
+  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
+  if (kind?.label)
+    return kind.label;
+  if (name === COUNT_PARAM)
+    return say("action_how_many");
+  const words4 = name.replace(/_/g, " ");
+  return words4.charAt(0).toUpperCase() + words4.slice(1);
+}
+function paramChoices(ctx, def, actor2) {
+  if (def?.type !== "text")
+    return [];
+  if (def.table !== undefined)
+    return tableChoices(own2(ctx.world.tables, def.table)).map((row) => ({ value: row.key, label: row.label }));
+  if (def.choices === undefined)
+    return [];
+  const query = optionalQuery(ctx, def.choices);
+  return query === null ? [] : query(ctx, actor2);
+}
+function neededWords(registry, world, action, name, choices) {
+  const param = paramLabel(action, name, world, registry).toLowerCase();
+  return say("why_action_needs_param", { action: action.label, param, ...choices.length > 0 ? { choices: orOf(choices.map((c) => c.label)) } : {} });
+}
+var COUNT_PARAM = "qty";
+var init_param_words = __esm(() => {
+  init_tables();
+  init_pack_kit();
+});
+
 // src/engine/resolve.ts
 function findAction(reg, world, id2) {
   return own2(world.actions, id2) ?? reg.actions.get(id2);
@@ -54395,7 +54432,7 @@ function prepare(reg, world, state2, req) {
     const raw = own2(given, name);
     if (raw === undefined || raw === null || raw === "") {
       if (!def.optional)
-        return { code: "missing_param", reason: say("why_type_needs_k", { type: action.label, k: def.label ?? name }) };
+        return { code: "missing_param", reason: neededWords(reg, world, action, name, paramChoices(reg.context(world, state2), def, actor2)) };
       continue;
     }
     if (def.type === "ref") {
@@ -54737,6 +54774,7 @@ var init_resolve = __esm(() => {
   init_life();
   init_presence();
   init_pack_kit();
+  init_param_words();
   EXPR_WORDS = new Set(["and", "or", "not", "true", "false", "null", "self"]);
 });
 
@@ -120203,18 +120241,6 @@ function compactSpan(minutes2) {
     return hours > 0 ? say("span_compact_d_h", { d: days, h: hours }) : say("span_compact_d", { d: days });
   return rest > 0 ? say("span_compact_h_min", { h: hours, min: rest }) : say("span_compact_h", { h: hours });
 }
-function paramLabel(action, name, world, registry) {
-  const def = action.params[name];
-  if (def?.label)
-    return def.label;
-  const kind = def?.ref ? world.kinds[def.ref] ?? registry.kinds.get(def.ref) : undefined;
-  if (kind?.label)
-    return kind.label;
-  if (name === COUNT_PARAM)
-    return say("action_how_many");
-  const words10 = name.replace(/_/g, " ");
-  return words10.charAt(0).toUpperCase() + words10.slice(1);
-}
 function pickReader(registry, world, state2, typed, heard) {
   const said3 = heard.toLowerCase();
   const secrets = unrevealedSecrets(registry, world, state2).filter((s) => !said3.includes(s.toLowerCase()));
@@ -120337,7 +120363,7 @@ function toldAction(registry, world, state2, res, before2) {
   const events3 = res.events.filter((e) => !(e.type === "set" && e.entity === res.actor && unchanged.has(e.field)));
   return { what: parts.length > 0 ? `${label2} (${parts.join(", ")})` : label2, changes: playerLines(registry, world, state2, world.pov, events3, TOLD_CHANGES), minutes: res.duration };
 }
-var COUNT_PARAM = "qty", TOLD_CHANGES = 6;
+var TOLD_CHANGES = 6;
 var init_action_words = __esm(() => {
   init_tables();
   init_world();
@@ -120347,6 +120373,7 @@ var init_action_words = __esm(() => {
   init_player_events();
   init_resolve();
   init_visibility();
+  init_param_words();
 });
 
 // src/engine/beats.ts
@@ -145913,7 +145940,7 @@ function exampleOf(reading, action, name, def, actor2) {
       return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
     }
     case "text":
-      return def.table === undefined ? undefined : Object.keys(own2(world.tables, def.table)?.rows ?? {})[0];
+      return paramChoices(reading.ctx, def, actor2)[0]?.value;
     default:
       return;
   }
@@ -145990,6 +146017,7 @@ var init_ops_act = __esm(() => {
   init_money();
   init_calendar();
   init_pack_kit();
+  init_param_words();
   init_resolve();
   init_rng();
   init_scope();
@@ -146101,7 +146129,8 @@ var init_ops_act = __esm(() => {
       const takes3 = [];
       const example = {};
       for (const [name, def] of Object.entries(action.params)) {
-        takes3.push(reading.lines.line("act_param", { name, optional: def.optional === true, says: def.label ?? "" }) ?? "");
+        const choices = paramChoices(reading.ctx, def, actor2).map((c) => `${c.value} (${c.label})`);
+        takes3.push(reading.lines.line("act_param", { name, optional: def.optional === true, says: def.label ?? "", ...choices.length > 0 ? { choices: choices.join(", ") } : {} }) ?? "");
         const value = exampleOf(reading, action, name, def, actor2);
         if (value !== undefined && (def.optional !== true || def.example !== undefined))
           example[name] = value;
@@ -148457,7 +148486,7 @@ function productLabel(ctx, product) {
   const cls = def?.class ?? (isAccountClass(product) ? product : null);
   return def?.label ?? (cls !== null ? CLASS_TRAITS[cls].label : product);
 }
-function creditProducts(ctx) {
+function creditProducts2(ctx) {
   const world = Object.entries(worldProducts(ctx.world)).filter(([, def]) => isCredit(def.class)).map(([id3]) => id3);
   const kinds = Object.keys(CLASS_TRAITS).filter((k) => isCredit(k));
   return [...new Set([...world, ...kinds])].sort();
@@ -148652,7 +148681,7 @@ var init_money2 = __esm(() => {
       });
       if ("code" in made) {
         if (made.code === "not_credit")
-          return outsideList(o, "product", product, creditProducts(ctx));
+          return outsideList(o, "product", product, creditProducts2(ctx));
         return notApplicable(o, o.draft.note(made).code);
       }
       const bad2 = o.draft.applyAll(made.events);
@@ -255657,10 +255686,10 @@ function palette(world, state3, registry3) {
         ...odds2.available ? {} : { disabled: unavailable(odds2.failed) }
       });
     }
-    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && p.table !== undefined) : undefined;
-    const rows2 = rowParam ? tableChoices(own2(world.tables, rowParam[1].table ?? "")).slice(0, 24) : [];
+    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && (p.table !== undefined || p.choices !== undefined)) : undefined;
+    const rows2 = rowParam ? paramChoices(ctx, rowParam[1], world.pov).slice(0, 24) : [];
     for (const row of rows2) {
-      const params = { [rowParam?.[0] ?? ""]: row.key };
+      const params = { [rowParam?.[0] ?? ""]: row.value };
       const odds2 = actionOdds(registry3, world, state3, { action, params });
       options.push({
         label: row.label,
@@ -255752,7 +255781,6 @@ function palette(world, state3, registry3) {
 }
 var TIMELAPSE_ACTION2 = "timelapse", GROUPS4;
 var init_palette = __esm(() => {
-  init_action_words();
   init_adjudication2();
   init_expr();
   init_org2();
@@ -255763,7 +255791,7 @@ var init_palette = __esm(() => {
   init_visibility();
   init_core11();
   init_routines();
-  init_tables();
+  init_param_words();
   init_offstage();
   init_world();
   GROUPS4 = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
@@ -271027,11 +271055,13 @@ async function endRun(root, ending, at3) {
   await writeWhole(join50(root, RUN_FILE), `${JSON.stringify({ ...run2, ending: { ...ending, at: at3 } })}
 `);
 }
-function startedLine(previous, build, service2) {
+function startedLine(previous, build, service2, fresh) {
   const head2 = `RPE started on build ${build}`;
   const by2 = service2 ? ", started by its service," : "";
+  if (previous === null && fresh)
+    return { message: `${head2}. This data folder was made in this start, so it is RPE's first start here.`, fields: { build, why: "first start" } };
   if (previous === null)
-    return { message: `${head2}. It holds no record of an earlier run on this data folder, so this is its first start here.`, fields: { build, why: "first start" } };
+    return { message: `${head2}. It holds no record of an earlier run, so it cannot say why it started.`, fields: { build, why: "no record of an earlier run", service: service2 } };
   const earlier = { build, previousBuild: previous.build, previousStarted: previous.started };
   const ending = previous.ending;
   if (ending === null) {
@@ -271067,6 +271097,7 @@ var init_update_settings = __esm(() => {
 });
 
 // src/app/commands/serve.ts
+import { existsSync as existsSync17 } from "fs";
 async function runByService(paths, io) {
   const service2 = await rpeServiceOf(paths.root, io.env, io.home);
   if (service2 === null)
@@ -271106,9 +271137,10 @@ async function serving(paths, config3, io, options) {
     sleep: (ms2) => Bun.sleep(ms2),
     ...source3 === null ? {} : { copy: copyUpdate(paths.root, source3, startsOn) }
   };
+  const fresh = !existsSync17(paths.database);
   const previous = await readRun2(paths.root);
   await beginRun(paths.root, options.version, io.now());
-  const started2 = startedLine(previous, options.version, await runByService(paths, io));
+  const started2 = startedLine(previous, options.version, await runByService(paths, io), fresh);
   const failed2 = (error4) => ({ why: "failed", error: error4 instanceof Error ? error4.message : String(error4) });
   let app;
   try {
@@ -271153,7 +271185,7 @@ var init_serve = __esm(() => {
 
 // src/app/commands/status.ts
 import { Database as Database14 } from "bun:sqlite";
-import { existsSync as existsSync17, statSync as statSync5 } from "fs";
+import { existsSync as existsSync18, statSync as statSync5 } from "fs";
 async function serviceLines(paths, io) {
   const service2 = await rpeServiceOf(paths.root, io.env, io.home);
   if (service2 === null)
@@ -271192,9 +271224,9 @@ async function statusCommand(paths, config3, io, version) {
     io.out(`Updates come from: ${source3}`);
   io.out(`Lumiverse: ${config3.lumiverse.url ?? "not set"}, for user ${config3.lumiverse.user ?? "not set"}`);
   const runtime = runtimeFoldersOf(io.env, io.home);
-  const there = (folder) => `${folder} (${existsSync17(folder) ? "there" : "not there"})`;
+  const there = (folder) => `${folder} (${existsSync18(folder) ? "there" : "not there"})`;
   io.out(`Previous build's runtime, read by rpe up and rpe migrate: config ${there(runtime.configDir)}, data ${there(runtime.dataDir)}; --runtime-config and --runtime-data name others.`);
-  if (!existsSync17(paths.database)) {
+  if (!existsSync18(paths.database)) {
     io.out("Database: not made yet");
     return 0;
   }
@@ -271286,7 +271318,7 @@ var init_switch = __esm(() => {
 });
 
 // src/app/commands/system-errors.ts
-import { existsSync as existsSync18 } from "fs";
+import { existsSync as existsSync19 } from "fs";
 import { dirname as dirname19 } from "path";
 function fieldOf4(error4, name) {
   return Reflect.get(error4, name);
@@ -271337,7 +271369,7 @@ function plainError(error4, paths) {
       if (syscall === "mkdtemp")
         return `RPE could not make a folder in ${at3}: that folder is not there. Make it first.`;
       const folder = dirname19(path7);
-      return existsSync18(folder) ? `${at3} is not there. Check its name.` : `${at3} is not there, and neither is the folder it belongs in (${folder}). Make that folder first.`;
+      return existsSync19(folder) ? `${at3} is not there. Check its name.` : `${at3} is not there, and neither is the folder it belongs in (${folder}). Make that folder first.`;
     }
     case "EEXIST":
       return `${at3} is there already, and RPE writes over nothing. Name a file that is not there yet.`;
@@ -271391,7 +271423,7 @@ var init_left = __esm(() => {
 });
 
 // src/app/commands/lumiverse-folder.ts
-import { existsSync as existsSync19, realpathSync, statSync as statSync6 } from "fs";
+import { existsSync as existsSync20, realpathSync, statSync as statSync6 } from "fs";
 import { basename as basename8, dirname as dirname20, join as join51 } from "path";
 function lumiverseFolderOf(appFile) {
   let real2;
@@ -271407,7 +271439,7 @@ function lumiverseFolderOf(appFile) {
     return null;
   const data = dirname20(extensions);
   const database = join51(data, LUMIVERSE_DATABASE);
-  return { data, identifier: basename8(identifierFolder), database: existsSync19(database) && statSync6(database).isFile() ? database : null };
+  return { data, identifier: basename8(identifierFolder), database: existsSync20(database) && statSync6(database).isFile() ? database : null };
 }
 var LUMIVERSE_DATABASE = "lumiverse.db";
 var init_lumiverse_folder = () => {};
@@ -271801,11 +271833,11 @@ var init_safety2 = __esm(() => {
 });
 
 // src/app/commands/up-service.ts
-import { existsSync as existsSync20 } from "fs";
+import { existsSync as existsSync21 } from "fs";
 import { dirname as dirname22, resolve as resolve10 } from "path";
 function nearestExisting(path7) {
   let at3 = path7;
-  while (!existsSync20(at3) && dirname22(at3) !== at3)
+  while (!existsSync21(at3) && dirname22(at3) !== at3)
     at3 = dirname22(at3);
   return at3;
 }
@@ -271814,7 +271846,7 @@ async function managerOf(io, host, appFile, bun, paths) {
     return { systemd: false, why: `this is ${host.platform === "darwin" ? "macOS" : host.platform === "win32" ? "Windows" : host.platform}` };
   if (host.uid === 0)
     throw new Error("--systemd installs a service of your own account, and root's account has none on most systems. Run RPE as the account Lumiverse runs as (sudo -u <account> \u2026): it needs no more rights than that. Nothing was changed.");
-  if (existsSync20("/.dockerenv") || existsSync20("/run/.containerenv"))
+  if (existsSync21("/.dockerenv") || existsSync21("/run/.containerenv"))
     return { systemd: false, why: "this is a container, where there is no systemd and 127.0.0.1 is the container's own" };
   if (Bun.which("systemctl", { PATH: io.env.PATH ?? "" }) === null)
     return { systemd: false, why: "there is no systemctl on this machine's PATH" };
@@ -271903,7 +271935,7 @@ var init_up_service = __esm(() => {
 });
 
 // src/app/commands/up.ts
-import { existsSync as existsSync21, realpathSync as realpathSync3, statSync as statSync8 } from "fs";
+import { existsSync as existsSync22, realpathSync as realpathSync3, statSync as statSync8 } from "fs";
 import { basename as basename9, dirname as dirname23, resolve as resolve11 } from "path";
 function inClear(base2) {
   const url2 = new URL(base2);
@@ -271988,14 +272020,14 @@ async function upCommand(argv, io, options, serveHere) {
   const data = resolve11(paths.root);
   const existing = await rpeServiceOf(data, io.env, io.home);
   const service2 = rpeService(flags.name ?? existing?.name ?? serviceNameOf(username), io.env, io.home);
-  const nameTaken = service2.unit !== existing?.unit && existsSync21(service2.file);
+  const nameTaken = service2.unit !== existing?.unit && existsSync22(service2.file);
   const nameWords2 = `${service2.file} is a unit for something other than this RPE (another data folder's): give this RPE's service a name of its own with --name. Nothing was stopped or changed.`;
   if (nameTaken && (manager?.systemd === true || flags.lumiverse !== undefined)) {
     io.err(nameWords2);
     return 1;
   }
   const database = flags.database === undefined ? undefined : resolve11(flags.database);
-  if (database !== undefined && !(existsSync21(database) && statSync8(database).isFile()))
+  if (database !== undefined && !(existsSync22(database) && statSync8(database).isFile()))
     throw new Error(`There is no file at ${database}: give --database the path of Lumiverse's database file. Nothing was changed.`);
   const guard = oneUser(paths, config3);
   const ctx = { paths, config: config3, io, version, what: "rpe up" };
@@ -272293,5 +272325,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "235340e5", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "d46e770f", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }

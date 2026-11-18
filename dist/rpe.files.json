@@ -1,5 +1,5 @@
 {
-  "build": "235340e5",
+  "build": "d46e770f",
   "files": {
     "guidance-harness/.hooks/examples/check-source.sh": "01d3b0b7afd186aaa7e50ae8d919df0b934253c7629fb16004de8638aded683f",
     "guidance-harness/.hooks/examples/hooks.yml": "1b1e09469e866c2e93498cb1262b4108bbd845c1a89492611cb66efef5e6791d",
@@ -100,8 +100,8 @@
     "guidance/.prompts/compaction.md": "2860d671006ee3cb61ec928546a85cd7da4ed0c9985555cb6d8e602cde94d930",
     "guidance/.prompts/continue-after-rule.md": "4af5b4ee7cfe7b2592ebccacd9b0056b1188ba53f1acde9fbdb8003ec71fc2e3",
     "guidance/.prompts/delegate-brief.md": "c5dc72845b737e9a5f47cf6e9dda33737132bdbc74477e072d68e1ee7a5e07f3",
-    "guidance/.prompts/engine-answers.md": "e17a9f3853b8cf69f34f57bc86e96bd11a690c497e5f0cb5c62a1b24d548522e",
-    "guidance/.prompts/history-actions.md": "a3d1b9e4b8e023a46ba473ee1267d2ee15b3f21d0d599c13690eb743168867b6",
+    "guidance/.prompts/engine-answers.md": "3614133a8b29778218048a3aa35cdbc3bd4b410dc5149295e8af490118b67f92",
+    "guidance/.prompts/history-actions.md": "773fc4daf1e8dfbfdb5b27cea0f0a8c3cb120ebf6788678527eb3c240e08f1cd",
     "guidance/.prompts/history-build.md": "930b742aba32b4c4f3d18ca158ee4dc251e1d3236928cd3d71eeb77f5d1963f2",
     "guidance/.prompts/history-calendar.md": "6145d0708a477d6f8799ced1afe4cddbe865e73216097409b6b11060309c81f7",
     "guidance/.prompts/history-engine.md": "621a0bc41f0ad06bfc4d0e0ad5cbc7a817cffd111d3fcd367560962d66092fc2",
@@ -114,7 +114,7 @@
     "guidance/.prompts/history-narrator.md": "83a1062b0a59ba4642bdd353ca7c553403669bb0601d6859001e5a0c89e5101c",
     "guidance/.prompts/history-orgs.md": "484ad3f9765b93fdda2540f3beab3710994be4a5e8028bfb67f7fc085a7a5aea",
     "guidance/.prompts/history-records.md": "a812f7caf2f5446b22ea6e8d407d27bcc6a0428f78128450b5bc697eeac78713",
-    "guidance/.prompts/history-refusals.md": "499af1205c6d695a463620755f37625ffd51347d6cdf6f9cd6215b7b1cab3b5c",
+    "guidance/.prompts/history-refusals.md": "cb471105de9f560cbddf2e7b1267280ab4004ba2c4f67953458bb0bb8fa3a796",
     "guidance/.prompts/history-routines.md": "7acf3801c1c70fe29d775cb3435c3066357731169f01f41ed1e15e368a84e4d5",
     "guidance/.prompts/history-vehicles.md": "5281eb579024e9dc30063d7339960ebb13d6f0cafd63fa9c4db0adadb3106869",
     "guidance/.prompts/history-words.md": "b1218f845d333f1ae72e5c724e8217c60cfb61aeeb3f5e41db5c54e170a84d89",
@@ -314,10 +314,10 @@
     "guidance/chat-defaults/TURN.md": "8187e042d82adb0f5cd78fec0c5fbfc5a5bcf3efaefe8ab3aa0eccad9a3b0e91",
     "guidance/chat-defaults/WORLD.md": "77aff17066410f92bfb51e9cdb35238aa0c06a9ec6a6a05bd730174870fa342a",
     "guidance/chat-defaults/WRITING.md": "c3ac2e9bd291ddd3f4cbdb46a2aa036da01d2f4428354d5d421ef3143ecbb85b",
-    "rpe.js": "550a3d34c0cc15dc7042cb9b4ca96c50b8c54eda3481a0555ce45e2d1a13860f",
+    "rpe.js": "7370ab9fdbf44b7b375bb209e29fd3db36934fe8caa51803a73c260239697200",
     "ui/chunk-5vkt1pr5.js": "e4f154898de45d4d53f3ecceccd6e6e0e8406ec9f6676224e6427f49f1eb1e09",
-    "ui/chunk-vxgceexm.js": "3a3ee0046e90873ceffc4d0263262a20a033a76bcb8b50dc18f29e2fd021374a",
-    "ui/chunk-z4ck7y0j.js": "4ca10b18ea258ca198407fe45969b6ad5370ab77267a9b005c694502277ab0f5",
-    "ui/index.html": "be67c3d6abc8cf4c81580190eb1f442a7a39fcd0887f3c0cbe0bd8f687b473fd"
+    "ui/chunk-8d7hg5m1.js": "d33550503e0f36df0815cad0ada9bdd137ae84a950c2b2a38997b38a74d68ea8",
+    "ui/chunk-pnmcdbvm.js": "804014cecc855ed936192b5ea22d4b184579359ce8a1f736a013851a5c5b83cc",
+    "ui/index.html": "c1bdfc6001c88b67a6faac4070301b46b5a004e493afa28d6e0ea7d604be0a51"
   }
 }
