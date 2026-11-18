@@ -1,5 +1,6 @@
 ---
 description: vehicle_service as the model is told it - what the tool does, and what each of its arguments is.
+doing: servicing a vehicle
 arguments:
   vehicle: "The vehicle, by name."
   work: "service or repair."
