@@ -32,7 +32,7 @@ export function guidanceFolder(level: LayerLevel, kind: "agents" | "rules" | "sk
 const INSTRUCTIONS = ["WORLD.md", "SIMULATION.md", "WRITING.md", "TURN.md", "PRESET.md", "SWIPE.md", "DELETE.md"] as const;
 
 export const KINDS: readonly FileKind[] = [
-  { id: "agents-md", words: "AGENTS.md, for every agent", named: false, at: () => "AGENTS.md", levels: (chat) => (chat === null ? [] : ["character", "chat"]) },
+  { id: "agents-md", words: "AGENTS.md, read by each agent whose definition lists it", named: false, at: () => "AGENTS.md", levels: (chat) => (chat === null ? [] : ["character", "chat"]) },
   { id: "instruction", words: "An instruction file (what the Author and the GM read)", named: true, names: INSTRUCTIONS, at: (name) => name, levels: ALL },
   { id: "own", words: "A file of your own, for an instructions: list", named: true, at: (name) => (name.endsWith(".md") ? name : `${name}.md`), levels: ALL },
   { id: "rule", words: "A rule", named: true, at: (name, level) => `${guidanceFolder(level, "rules")}/${name.replace(/\.md$/, "")}.md`, levels: ALL },
