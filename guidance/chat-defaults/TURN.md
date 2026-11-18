@@ -38,6 +38,8 @@ For a turn of several steps, write the steps down with `todo` and tick them as y
 
 On a direct turn, settle the engine lane yourself: the minutes that passed, who moved where, what changed hands. Ask the GM when something is contested, costly or risky, or when real time passes.
 
+What the player's character does in the message that the world has an action for (eating, sleeping, resting, talking with someone) is carried out with the `world_apply` operation `act`, as a press is: a reply that tells it changes nothing in the record.
+
 Ask the GM to set the map when a scene opens on a mapped place with nobody on it, or when where people stand starts to matter in a place that has none, because nobody is placed until someone asks.
 
 ## 5. Before the reply
