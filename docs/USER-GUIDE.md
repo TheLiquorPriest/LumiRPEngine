@@ -737,81 +737,15 @@ Nothing is pruned by a press alone: **Prune old turn folders**, **Prune closed s
 
 **Migration** moves you from the previous build: **A rehearsal** that reads its data and writes nothing, **The last real run** with its report, **The backup**, what is **Waiting on you**, **The switch** and **Going back**. Its steps are in [migration.md](migration.md).
 
-## Your agent's MCP server
+## What is not in this build
 
-Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the `lumirpengine` MCP server ([MCP.md](MCP.md)). It follows LumiRPEngine: when you update LumiRPEngine, a server on the same machine as Lumiverse loads the new build's tools and guide by itself, with no reinstall.
+Two things come with a later build:
 
-Your agent can also try a chat in a **sandbox**: a scratch copy of it on the agent's machine, fast-forwarded months at a time to see the bills, pay and standing payments month by month, or given typed turns such as "send $500 to Danny". Nothing done there reaches your chat, and no model runs. It needs your say-so to look behind the curtain, since the copy holds everything, secrets included. When you edit a world through your agent, it also sees what each edit brought into the world's checks and what's new in the draft since the last save.
+- **The `lumirpengine` command line and MCP server**, through which your own agent (Claude Code, Codex, Cursor…) or your shell manages your worlds. Until then a command that reads or changes worlds and chats says that it returns with a later build, and you edit worlds in **Build**. [MCP.md](MCP.md), [RECIPES.md](RECIPES.md) and [AGENT-GUIDE.md](AGENT-GUIDE.md) describe it and the world format it works on.
+- **Talk, the GM assistant chat.** The assistant's definition ships, and nothing starts it yet. The GM assistant threads you had in the previous build are kept in the migration's backup.
 
-**Settings → MCP server** (under *Your agent*) shows the setup that follows LumiRPEngine, with this extension's own path, under each runtime that runs it, each with **Copy**: first `bun <path>/dist/lumirpengine.js mcp`, for Bun 1.4 or newer, which Lumiverse itself runs on, so it is always on Lumiverse's machine; then `node <path>/dist/lumirpengine.js mcp`, for Node 22 or newer. Give one to your agent's harness as the command for its lumirpengine server. On a machine with only Bun, use the Bun one: installing with npm, or running with npx, needs Node. Below it is each server that has connected from your account, with the harness that runs it, its machine, its builds and whether it is connected now (Claude Code's and Codex's servers on one machine are two lines; a restarted one keeps its line): **Update now** asks one that hasn't reloaded yet to do it, and **Forget** drops one you no longer use. A server running as more than one process (two Claude Code windows on one machine) says how many, *2 processes*, and its line is the one furthest behind: it says *reloaded* only once all of them have.
+## When something is wrong
 
-**Lumiverse can run the server too.** In Lumiverse's Settings → MCP Servers, add a Stdio server with the command `bun` (or `node`) and the arguments `<path>/dist/lumirpengine.js, mcp` (the same path): Lumiverse runs only `node`, `bun`, `deno` and `python` there, not `lumirpengine`. Sign in once first, as the user Lumiverse runs as. It is listed like any other server, as *lumirpengine for lumiverse*, and follows each update. Lumiverse, though, keeps the tool list it read when it connected, so once the server has reloaded, its line offers **Reconnect in Lumiverse**. Pressing it asks the server to finish any tool call in progress and exit; Lumiverse starts it again about a second later, with the same command, and reads the new tools. The line waits for it to come back (Settings → Timeouts → **MCP server reconnect**, 1 min) and then reads updated; if it isn't back in time, the line says so, and you can **Disconnect** it and **Connect** it again in Lumiverse's Settings → MCP Servers. LumiRPEngine never adds or changes a Lumiverse MCP server. A server set up before this button existed doesn't know how to exit when asked, so its line asks you to reconnect it by hand that one time.
+[troubleshooting.md](troubleshooting.md) goes through what can go wrong and what to do: [chats on RPE's connection that are not played](troubleshooting.md#chats-on-rpes-connection-are-not-being-played), [a reply that fails before RPE plays it](troubleshooting.md#a-reply-fails-before-rpe-plays-it), [a turn that waits](troubleshooting.md#a-turn-waits-before-it-starts) or [ends without a reply](troubleshooting.md#a-turn-ends-without-a-reply), [a panel on the Play page that refuses](troubleshooting.md#a-panel-on-the-play-page-refuses), [a view that will not load](troubleshooting.md#a-view-will-not-load), and [what to look at after an update](troubleshooting.md#after-an-update).
 
-To have the line check Lumiverse's own tool list rather than take the server's word for it, switch on LumiRPEngine's **Mcp Servers** permission in Lumiverse's Extensions tab (only an owner or admin can). With it, LumiRPEngine reads which of your Lumiverse MCP servers hold LumiRPEngine's tools, and nothing more of them: only those servers' names show on the line. Without it, **Reconnect in Lumiverse** still works, and the line says Lumiverse's own list can't be checked.
-
-**After an update** a toast says so, once, and LumiRPEngine's tab in the drawer opens on **LumiRPEngine updated**, with a line for each server:
-- *reloaded this build's tools*: nothing to do;
-- a server Lumiverse runs that *reloaded this build's tools, but Lumiverse's MCP client keeps the list it got when it connected*: press **Reconnect in Lumiverse** (above);
-- *hasn't reloaded yet*: it does within a minute, or press **Update now**. Right after the update no server has checked in with the restarted LumiRPEngine yet, so the line says so: a running one takes the new tools at its next check, and a stopped one when it next starts;
-- *can't follow*: why, and what to do, such as installing again on another machine (**Copy the install**) or using the setup above (**Copy the setup for Bun 1.4 or newer**, or **for Node 22 or newer**). A server never loads tools other users of the machine could change: when Lumiverse's extensions folder, or the extension's files in it, can be written by anyone but their owner, the line names the path, and the fix is to make it writable by its owner only (on Linux and macOS; Windows isn't checked);
-- *from before MCP servers followed LumiRPEngine*: update it once (`npm i -g github:TheLiquorPriest/LumiRPEngine`), or switch it to the setup above.
-
-The notice stays until you press **Dismiss**, and comes back with the next update. If LumiRPEngine's tab was open when it updated, Lumiverse switches the drawer to another tab while it reloads the extension (on a phone, the RPEngine button can end up just past the edge of the tab strip): open RPEngine again to see the notice.
-
-## Troubleshooting
-
-**A reply came back empty, and the turn says "degraded" with a Retry chip.**
-The model returned nothing, which reasoning models do when their thinking uses up the token limit. The engine won't regenerate on its own. Raise **max tokens** to **1,500 or more** in your preset or connection settings, then tap **Retry**. The world checker warns you when a preset's max tokens are below 1,500 with a reasoning model, and **Settings → Caveats** shows the warning too.
-
-**The helper steps fail, or return nothing.**
-The same limit applies to the helper calls (reading typed text, reading replies, minds). A reasoning model needs several thousand tokens, because its thinking counts toward the limit; every step starts at 8,192. Set the step's **Max tokens** in **Settings → Steps and connections** if a step's replies still come back cut off; it warns you below 4,096.
-
-**Settings → Caveats says it's still checking.**
-Caveats checks your preset against the open chat with a test prompt build, which takes a while on a long chat. The page and its row on the Settings list say **Checking your preset…** until it answers; if the build is still running after the **Preset check** time (1 minute to start, in **Settings → Timeouts**), the page says so and the next visit picks up the answer, and if the build fails, the page says the preset's warnings aren't known. Settings itself never waits for it.
-
-**Settings → Caveats says a step's connection or model is gone.**
-Caveats checks the helper model's connection and every switched-on step's own connection and model before your preset: a connection you deleted in Lumiverse, or a model its connection no longer lists, would make that step's call fail and stop the turn. The warning's **Open Steps and connections** takes you there to pick another (or open **Helper model** from its top row). A connection that doesn't list its models within the **Preset check** time leaves its steps unchecked, and Caveats says so as information, not a warning; open it again in a moment. When Settings saves a value other than the one you gave (out of range, say), the page says what it kept.
-
-**The AI keeps writing a JSON block, or the replies look wrong.**
-Some presets contain a **JSON-ledger block**: a block that makes the narrator append a JSON object (gold, inventory) to its replies. It can confuse reasoning models, and it competes with the engine's own record of money and belongings. The world checker warns you if the active preset has one, and **Settings → Caveats** shows the warning too. Use a preset without that block for world chats.
-
-**A section turns up outside my preset's blocks.**
-Your preset places some of the world's sections with `{{outlet::lre_…}}` but not all of them, so the ones it leaves out go in where the world places them. **Settings → Caveats** names the missing outlets; add them to the block where the others are.
-
-**A section says "not delivered".**
-The test prompt build didn't find it in the prompt. Check where the world's book and your preset place it (a position your preset doesn't assemble never reaches the prompt), then open **GM → This chat → Context** ([The Context inspector](#the-context-inspector)) again, which runs the check again.
-
-**The chat is paused.**
-You edited an earlier message of yours. Choose **Keep** or **Discard** (see [Editing an earlier message of yours](#editing-an-earlier-message-of-yours)). Until you do, new turns are written without simulation.
-
-**The world doesn't match what the reply says.**
-You edited the reply, or continued it in a way the engine couldn't read. Tap **Re-read edit** on that reply (or **Retry read** for a stopped Continue).
-
-**A warning says a saved file was damaged.**
-A saved file the engine couldn't read, or couldn't make sense of, is kept next to the original as `<name>.corrupt-<time>` (a second damaged copy of the same file gets its own time), and the engine carries on: settings fall back to their defaults, and the chat's journal, extraction learning, chips, plans or inspector history, your jobs or the call meter start fresh. A damaged journal is also reported in the Context inspector's warnings, with where the file is kept. The records saved on your messages still apply; edits, pauses and discards that only the journal held may be gone. A single record on a message that has the wrong shape (from an imported or forked chat, or another extension writing to the same message) is skipped instead: the message reads as if the engine had not simulated it, and the inspector's warnings name the message and swipe. Nothing is deleted.
-
-**Something shows "pending".**
-You opened detail or made a change while a reply was streaming. It lands right after the reply finishes.
-
-**A Timelapse stopped early.**
-Something interrupted it, and the chip says what: **Timelapse stopped: an invitation** (or a bill, a declined payment, an incident, a quest event, a world rule, someone arriving, an overdue loan, a need, a weather alert), with a **Continue** button that carries on to the original target. The Montage and the Journal say the same. A **Continue timelapse** chip means it hit the safety cap, and a Timelapse that couldn't run at all says why in the turn's changes ("Timelapse not run: …").
-
-**My own lore entries are missing.**
-Your entries follow Lumiverse's own rules, and LumiRPEngine never switches one off in your book. For the prompt at hand, it leaves out a secret line, or an entry that is only one, when the narrator's knowledge leaves that secret out; and an entry an earlier version kept secret with its own fields, or one a secret entry of the world was indexed from, stays off until its gate holds. An entry an earlier version stored switched off for a secret stays off in its book until you move the book on [Secrecy in your World Info](#secrecy-in-your-world-info) and switch the entry back on. Otherwise, check that the book is attached to the chat, the entry is enabled and its keywords match, and Lumiverse's World Info budget leaves room for it.
-
-**I imported a world and I'm not sure what's in it.**
-A world file is someone else's content, and its lore and templates may contain Lumiverse macros (double braces such as `{{…}}`), which Lumiverse runs whenever it builds a prompt, in a World Info entry or here. LumiRPEngine keeps your own authored text exactly as written, macros included, and never lets a value it inserts (a name, a price, what a model said) form a macro. Besides double braces, Lumiverse's macro engine also acts on control characters and on the `<user>`, `<char>` and `<bot>` shorthands, so the import lists those too. After an import it lists what it found: a **Review before playing** card appears above the world list, with each item as "Review this macro before playing: …", the place it sits in (`lore.<id>.content`, `sections.<id>.template`, `steps.<id>.template`) and an **Open** button for it. Open each, delete or rewrite what you don't want, and tap **Done reviewing** before you attach the world to a chat. The card is shown only right after the import. The step templates' own placeholders (`{{pov}}`, `{{facts}}` and the like) appear in the list too; they belong to the engine and are harmless. Section templates may use only `{{lines}}`; the world checker reports any other macro, control character or shorthand in one as an error.
-
-**A step never seems to run, or the call meter shows fewer calls than I expected.**
-A step runs only when one of its signals fires and its phase's budget still has calls. Check the step's **Enabled** switch and its **Signals** (under **Advanced: signals and lore**) in **Settings → Steps and connections**, and the budgets under **Advanced: budgets and the engine budget** in **Settings → Model use** (**Calls** 0 means no model at all in that phase). Lean has NPC choices switched off, so it never asks a model about them.
-
-**The prompt is too long, or the chat history disappeared from it.**
-The engine's fixed overhead plus your context is over the connection's limit. Pick a smaller preset (Lean), lower the budgets in **Settings → Model use**, or use a connection with a larger context.
-
-**The map closed the drawer.**
-On a phone the map goes fullscreen, so opening it closes the drawer first. Reopen the drawer when you're done. If the drawer can't be closed, Play opens on **Places** instead, where the map is.
-
-**A step failed and the engine did something simpler.**
-That's the fallback: a failed decision call goes to the helper, then to the engine alone, and a step that passes its deadline uses its deterministic fallback. The turn still finishes. Check the call meter and your connections.
-
-For anything not covered here, see [Install and run](install.md#the-pages) and [How behaviour lives in files](behaviour.md).
+To see what happened in a turn, open it on [the Turns page](#the-turns-page); to watch one as it runs, **Live**. RPE's own log, narrowed to a chat, a turn or a job, is on [the Runtime page](#the-runtime-page).
