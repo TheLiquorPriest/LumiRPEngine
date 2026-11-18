@@ -128,7 +128,7 @@ function Line(props: { env: FrameEnv; message: string }) {
     // An empty reply Lumiverse kept when a generation failed or was stopped before its first word: what to do with it.
     return (
       <div class="lre rpe-chat-line" data-rpe-line="empty">
-        <span class="rpe-chat-line-unfinished">An empty reply: its turn ended before a word of it went out. Swipe it or delete it in Lumiverse.</span>
+        <span class="rpe-chat-line-unfinished">An empty reply: its turn ended before a word of it went out, and its thinking block says why. Swipe it or delete it in Lumiverse.</span>
         <button type="button" class="rpe-chat-line-btn" title="RPE takes such replies away itself where you switch this on: a write to your chat it otherwise never makes." onClick={() => props.env.open({ page: "settings", chat: null, at: ["lumiverse.reply.removeEmpty"] })}>
           Take away an empty reply a failed or stopped turn left
         </button>

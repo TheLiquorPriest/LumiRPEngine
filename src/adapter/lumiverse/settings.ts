@@ -171,7 +171,7 @@ export const REMOVE_EMPTY_REPLY = {
   perConnection: false,
   name: "Take away an empty reply a failed or stopped turn left",
   about:
-    "When a turn fails or is stopped before a word of its reply went out, Lumiverse keeps an empty reply for it, whose thinking holds RPE's progress lines and why it ended. On: RPE deletes that empty reply in Lumiverse (the message, or the swipe the turn added to a message), and only while its text is still empty. This is a write to your chat that RPE otherwise never makes. Off: the reply stays; swipe it or delete it in Lumiverse.",
+    "When a turn fails or is stopped before a word of its reply went out, Lumiverse keeps an empty reply for it, whose thinking block holds RPE's progress lines, the thinking its agents had shown (as Thinking in the chat lets it), and why it ended. On: RPE deletes that empty reply in Lumiverse with its thinking (the message, or the swipe the turn added to a message), and only while its text is still empty. This is a write to your chat that RPE otherwise never makes. Off: the reply stays; swipe it or delete it in Lumiverse.",
   effect: "use",
 } as const satisfies Setting;
 

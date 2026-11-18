@@ -51,12 +51,12 @@ A turn begins when the run of the turn before it has ended: nothing cuts that wa
 
 ## A turn ends without a reply
 
-RPE played the turn, and it ended with no reply. The chat shows one plain line, from `guidance/.prompts/reply-errors.md` (change the words there if you like), in Lumiverse's own notice of a failed generation; a turn you stopped shows none, as any stopped generation. Where nothing was shown yet, Lumiverse keeps no message. Where the turn had already shown progress lines in the message's thinking block (it usually has), Lumiverse keeps the message, empty but for its thinking, and the same line is written there too, so it says why.
+RPE played the turn, and it ended with no reply. The chat shows one plain line, from `guidance/.prompts/reply-errors.md` (change the words there if you like), in Lumiverse's own notice of a failed generation; a turn you stopped shows none, as any stopped generation. Where nothing was shown yet, Lumiverse keeps no message. Where the turn had already shown something in the message's thinking block (it usually has: its progress lines, and its agents' thinking as `progress.thinking` lets it go there), Lumiverse keeps the message, empty but for its thinking, and the same line is written there too, so it says why.
 
 What happens to that empty reply depends on the setting `lumiverse.reply.removeEmpty` ("Take away an empty reply a failed or stopped turn left"):
 
 - **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting, and so does the HUD's line where the chat plays a world, until the next run begins: it names the setting, and a press opens the turn's page. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
-- **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
+- **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. Its thinking block goes with it. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
 
 The **Turns** page and the turn's own page show what each agent did.
 
@@ -68,7 +68,11 @@ The **Turns** page and the turn's own page show what each agent did.
 | "The turn was stopped before a reply was written." | You, or Lumiverse, stopped the generation. | Send again. |
 | "The turn could not be played: …" | Anything else, in words after the colon: RPE is not set up for a Lumiverse, Lumiverse has no such chat for this RPE's user, no agent is named to lead the chat's turns (`turn.lead`), or an agent's `model:` names a connection RPE does not have, or there is none at all. | Add a connection with `rpe connection add`, or set the agent's `model:` to one you have, or name the lead in `turn.lead`. |
 
-Lumiverse ends a generation that has shown nothing for ten minutes. RPE shows a progress line in the thinking block to keep a turn alive (`progress.silenceSeconds`); a reply asked for whole holds at `lumiverse.reply.holdSeconds`, under that cut.
+Lumiverse ends a generation that has shown nothing for ten minutes. RPE shows a progress line in the thinking block to keep a turn alive (`progress.silenceSeconds`), and an agent's thinking shown there counts too; a reply asked for whole holds at `lumiverse.reply.holdSeconds`, under that cut.
+
+## The thinking block shows more than you want
+
+As shipped, the reply's thinking block holds every agent's thinking of the turn as it is written, each stretch under its agent's name, between the progress lines. It can say what the story has not shown you yet (RPE's own pages keep the same text behind the spoiler gate), and Lumiverse keeps it with the message. Set **Thinking in the chat** (`progress.thinking`) to `lead` for the Author's alone, or to `lines` for the progress lines alone. RPE never gives any of it to its agents again. Lumiverse itself may send it back with the earlier replies in later prompts (its Reasoning settings' **Keep in history**, or a connection's own reasoning settings); the **Prompt** page says when it did, since another connection you switch the chat to would be sent it. Set Keep in history to 0 in Lumiverse to send none.
 
 RPE's log (`journalctl --user -u rpe-<name>.service`) says why for every run that ends without a reply, or fails after one: a `warn` line, "A turn's run ended failed: …" (or "at a limit", "with no reply", "stopped where it stood"), with the turn, the run, the chat, the kind and the generation, in the line the chat showed. A job that fails or reaches a limit gets a `warn` line of its own, with its id, its chat and its agent. A run that ended well leaves no line above `debug`.
 
