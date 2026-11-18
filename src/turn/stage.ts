@@ -10,7 +10,9 @@ import type { HistoryRange } from "rp-harness/contract";
 import { isGone, kindIs } from "../engine/scope";
 import { findPlaces } from "../engine/places-in-play";
 import { entitiesAt } from "../engine/whereabouts";
+import { calendarOf, formatClock } from "../engine/calendar";
 import { openScenePlaceOf, ownerPlaceOf, type Store, type StoreState } from "../store";
+import { clockRecorded } from "../store/blank";
 import { namesOf } from "../story/kit";
 import { storyAt } from "../story/path";
 import { storySliceOf } from "../story/fold";
@@ -23,10 +25,23 @@ export type StageHow = (typeof STAGE_READINGS)[number];
 /** The stage at one reading: who is there by name, the place in words, the things there, and how it was read. */
 export interface Stage {
   who: string[];
+  /** Who the open scene's record names, the Author's own list (§7.3's "who was on stage"); none with no scene recorded. */
+  named: string[];
   place: string | null;
   /** The names of what the state places at the place and on those present; none the state does not hold. */
   things: string[];
   how: StageHow;
+  /** The story's date and time as the state left it there, as the world's calendar writes it; null where nobody set the clock. */
+  time: string | null;
+}
+
+/**
+ * Who a stage counts as on it for the cast's counts and the Turn page (plan §7.3): with a scene recorded, the Author's own list of who
+ * is in it, never everyone the state places in its place (a place holds those through a wall); with none, who the state places where
+ * the owner's character stands, for there is no list; with neither, nobody.
+ */
+export function countedOn(stage: Stage): { who: string[]; how: StageHow; place: string | null; time: string | null } {
+  return { who: stage.how === "scene" ? stage.named : stage.who, how: stage.how, place: stage.place, time: stage.time };
 }
 
 /** The open scene as the story record holds it: the people it names and its place in the Author's words. */
@@ -46,8 +61,9 @@ const keyOf = (name: string): string => name.trim().toLowerCase().replace(/\s+/g
 
 /** The stage from the open scene (if any) and the state the turn left: R-56. */
 function stageOf(store: Store, state: StoreState, scene: Scene | null): Stage {
-  const asRecorded: Stage = { who: scene?.who ?? [], place: scene?.place ?? null, things: [], how: scene === null ? "none" : "scene" };
   const doc = store.env.worlds(state.world.revision);
+  const time = doc !== undefined && clockRecorded(state) ? formatClock(calendarOf(doc), state.world.clock) : null;
+  const asRecorded: Stage = { who: scene?.who ?? [], named: scene?.who ?? [], place: scene?.place ?? null, things: [], how: scene === null ? "none" : "scene", time };
   if (doc === undefined) return asRecorded;
   const reg = store.env.registry;
   // The scene's place is the one the store finds for its record (an id the tree holds); the Author's words for a place the tree has no id for are found the way the
@@ -71,7 +87,7 @@ function stageOf(store: Store, state: StoreState, scene: Scene | null): Stage {
     }
   }
   const place = scene?.place ?? doc.places[at]?.name ?? null;
-  return { who, place, things, how: scene !== null ? "scene" : who.length > 0 ? "owner" : "none" };
+  return { who, named: asRecorded.named, place, things, how: scene !== null ? "scene" : who.length > 0 ? "owner" : "none", time };
 }
 
 /** The stage at one reading of the chat: at `turn`, or at its head when null; a chat the store does not hold has none. */

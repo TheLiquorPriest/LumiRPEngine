@@ -15,7 +15,7 @@ describe("stage.unperceived and path.unperceived", () => {
   test("count exactly the characters on stage with no perception of the turn, by casting with their names, this turn and earlier ones", async () => {
     const b = await openBench();
     const stage = new Map<string, string[]>();
-    const facts = castFacts({ ...UNSCENED, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : []))) });
+    const facts = castFacts({ ...UNSCENED, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const, place: null, time: null }] as const] : []))) });
     const read = async (turn: string) => {
       const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["stage.unperceived", "path.unperceived"]);
       expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
@@ -40,7 +40,15 @@ describe("stage.unperceived and path.unperceived", () => {
     const now = (await read(first.id))["stage.unperceived"];
     expect(now).toEqual({
       count: 3,
-      fields: { read: "scene" },
+      fields: {
+        read: "scene",
+        // The turn is still open: it has no reply yet.
+        missing: [
+          { name: "Odile", casting: "supporting", turns: [{ message: null, time: null, place: null }] },
+          { name: "Tam", casting: "extra", turns: [{ message: null, time: null, place: null }] },
+          { name: "Wren", casting: "uncast", turns: [{ message: null, time: null, place: null }] },
+        ],
+      },
       names: ["Odile", "Tam", "Wren"],
       by: { principal: 0, supporting: 1, extra: 1, uncast: 1 },
       namesBy: { principal: [], supporting: ["Odile"], extra: ["Tam"], uncast: ["Wren"] },
@@ -71,6 +79,27 @@ describe("stage.unperceived and path.unperceived", () => {
     expect(values["path.unperceived"]).toMatchObject({ count: 2, names: ["Tam", "Wren"], namesBy: { supporting: [] } });
   });
 
+  test("each missing turn is named by its message, story time and place; a perception of the same moment under another turn is one of it", async () => {
+    const b = await openBench();
+    const moments = new Map<string, { time: string | null; place: string | null }>();
+    const facts = castFacts({ ...UNSCENED, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.map((t) => [t, { who: ["Bram"], how: "scene" as const, ...(moments.get(t) ?? { time: null, place: null }) }])) });
+    const first = await b.t.begin();
+    await b.call("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, first.id);
+    await b.call("perceive", { perceptions: [{ who: "Bram", reach: "whole", content: "The lamp is lit." }] }, first.id);
+    moments.set(first.id, { time: "Tuesday, 19:40", place: "The Lamp" });
+    await b.t.tie(first);
+    // No time passed and nobody moved: the same moment as the first, which Bram has.
+    const same = await b.t.begin();
+    moments.set(same.id, { time: "Tuesday, 19:40", place: "The lamp" });
+    await b.t.tie(same);
+    const later = await b.t.begin();
+    moments.set(later.id, { time: "Tuesday, 20:10", place: "The Lamp" });
+    await b.t.tie(later);
+    const now = await b.t.begin();
+    const missing = (await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: now.id }, ["path.unperceived"]))["path.unperceived"];
+    expect(missing).toMatchObject({ count: 1, names: ["Bram"], fields: { missing: [{ name: "Bram", casting: "principal", turns: [{ message: castAt(b.t.s, CHAT, null).replyOf(later.id), time: "Tuesday, 20:10", place: "The Lamp" }] }] } });
+  });
+
   test("turns a migration carried owe no perception and their stage is not asked: the count names only the turn RPE played", async () => {
     const b = await openBench();
     const stage = new Map<string, string[]>();
@@ -82,7 +111,7 @@ describe("stage.unperceived and path.unperceived", () => {
       playerMind: async () => false,
       onStage: async (_scope, turns) => {
         asked.push(...turns);
-        return new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : [])));
+        return new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const, place: null, time: null }] as const] : [])));
       },
     });
     // Two turns the previous build played, carried with the castings it held: Bram and Odile on stage in both, no perception of RPE's.
@@ -173,7 +202,7 @@ describe("what waits for a character's own agent", () => {
       sources: b.t.shelf.reader,
       playerMind: async () => false,
       settings: async () => CAST_DEFAULTS,
-      onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const }] as const] : []))),
+      onStage: async (_scope, turns) => new Map(turns.flatMap((t) => (stage.has(t) ? [[t, { who: stage.get(t) ?? [], how: "scene" as const, place: null, time: null }] as const] : []))),
       scenes: async (_scope, turns) => ({ of: new Map(turns.map((t) => [t, scenes.get(t) ?? null])), closed }),
       jobs: async () => [],
     });
@@ -284,7 +313,7 @@ describe("what waits for a character's own agent", () => {
     const b = await openBench();
     // Every write of the bench is made at the moment 7: a job started at 7 or later has what was written before it in hand.
     const jobs: JobRead[] = [];
-    const facts = castFacts({ ...UNSCENED, jobs: async () => jobs, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.map((t) => [t, { who: ["Bram"], how: "scene" as const }])) });
+    const facts = castFacts({ ...UNSCENED, jobs: async () => jobs, store: b.t.store, sources: b.t.shelf.reader, playerMind: async () => false, onStage: async (_scope, turns) => new Map(turns.map((t) => [t, { who: ["Bram"], how: "scene" as const, place: null, time: null }])) });
     const read = async (turn: string) => {
       const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["stage.untaken", "path.untaken", "path.untaken.turns"]);
       expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);

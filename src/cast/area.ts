@@ -2,7 +2,7 @@
 
 import type { Area } from "../app";
 import { stateChanged } from "../play/live";
-import { stagesAt } from "../turn/stage";
+import { countedOn, stagesAt } from "../turn/stage";
 import type { OnStage } from "./facts";
 import { CAST_SETTINGS } from "./kit";
 import { castRoutes, type CastRoutesDeps } from "./routes";
@@ -19,8 +19,8 @@ export function castArea(takes: () => CastTakes): Area {
     settings: CAST_SETTINGS,
     mounted: (at) => {
       const taken = takes();
-      // Who was on stage, and how that was read, is the one reading of a stage the cast's facts count by (`src/turn/stage.ts`).
-      const onStage: OnStage = async ({ user, chat }, turns) => new Map([...stagesAt(taken.store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }]));
+      // Who was on stage, and how that was read, is the one reading of a stage the cast's facts count by (`src/turn/stage.ts`, `countedOn`).
+      const onStage: OnStage = async ({ user, chat }, turns) => new Map([...stagesAt(taken.store, user, chat, turns)].map(([turn, stage]) => [turn, countedOn(stage)]));
       at.routes.add("cast", castRoutes({ ...taken, onStage, writes: at.writes, changed: (chat) => stateChanged(at.live, chat) }));
     },
   };

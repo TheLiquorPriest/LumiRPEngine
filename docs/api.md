@@ -8899,7 +8899,7 @@ export interface StagePerson {
 
 ### `StageReading`
 
-How a turn's stage was read: from the open scene and who the state places in its place (scene), from where the owner's character stands when no scene was recorded (owner), or not recorded at all (none).
+How a turn's stage was read: from the open scene's own list of who is in it, as the Author recorded it (scene), from who the state places where the owner's character stands when no scene was recorded (owner), or not recorded at all (none).
 
 ```ts
 export type StageReading = "scene" | "owner" | "none";

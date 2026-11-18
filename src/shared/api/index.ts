@@ -3239,7 +3239,7 @@ export interface StagePerson {
   files: { name: string; filed: boolean }[];
 }
 
-/** How a turn's stage was read: from the open scene and who the state places in its place (scene), from where the owner's character stands when no scene was recorded (owner), or not recorded at all (none). */
+/** How a turn's stage was read: from the open scene's own list of who is in it, as the Author recorded it (scene), from who the state places where the owner's character stands when no scene was recorded (owner), or not recorded at all (none). */
 export type StageReading = "scene" | "owner" | "none";
 
 /** One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none; for a turn a migration carried, that the previous build played it, which owes no perception of RPE's, and the mind files carried with each. */

@@ -450,7 +450,7 @@ describe("the perception record and the player's own perception", () => {
       { character: wren, part: "perception", item: null, value: { of: first.id, reach: "whole", content: "She sees the seal." } },
     ]);
     await t.tie(first);
-    const page = pageOn(t, async (_scope, turns) => new Map(turns.map((turn) => [turn, { who: ["Wren", "Bram", "Tam"], how: "owner" as const }])));
+    const page = pageOn(t, async (_scope, turns) => new Map(turns.map((turn) => [turn, { who: ["Wren", "Bram", "Tam"], how: "owner" as const, place: null, time: null }])));
     const before = await page.record({ turn: first.id });
     expect(before.turns).toHaveLength(1);
     expect(before.turns[0]).toMatchObject({ turn: first.id, message: 1, read: "owner" });

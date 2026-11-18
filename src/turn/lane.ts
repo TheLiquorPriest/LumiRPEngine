@@ -66,7 +66,7 @@ import { STORE_AREAS } from "./store-areas";
 import { RunTimes } from "./spans";
 import { globalConfig, turnSettings } from "./settings";
 import { SinceKept } from "./since";
-import { closedScenesAt, scenesOf, stagesAt } from "./stage";
+import { closedScenesAt, countedOn, scenesOf, stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
 import { agentNaming, characterName, type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
@@ -539,13 +539,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     const known = castKnowledge(user, chat, turn);
     return holdersOf(known.items, (id) => known.nameOf(id), quest);
   };
-  // Who was on stage at each turn the cast counts, and how that was read (R-56): the open scene there and who the state places in its place; with none recorded, who the state places where the owner's character stands; with neither, nobody.
+  // Who was on stage at each turn the cast counts, and how that was read (R-56, `countedOn`): the open scene's own list of who is in it; with none recorded, who the state places where the owner's character stands; with neither, nobody. With the place and the story's time there.
   // The scene each turn was played in, and those closed at the reading, from the story record. Whether his own character has a mind is his setting for the chat (`cast.playerMind`), read at each use; the cast's settings are the chat's.
   facts.add(
     castFacts({
       store,
       sources,
-      onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, { who: stage.who, how: stage.how }])),
+      onStage: async ({ user, chat }, turns) => new Map([...stagesAt(store, user, chat, turns)].map(([turn, stage]) => [turn, countedOn(stage)])),
       scenes: async ({ user, chat }, turns, at) => ({ of: scenesOf(store, user, chat, turns), closed: closedScenesAt(store, user, chat, at) }),
       // The chat's jobs that may have a character's perceptions in hand: those not ended, every one; and those done, ended since `since`.
       jobs: async ({ user, chat }, since) => {

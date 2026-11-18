@@ -27,10 +27,13 @@ type Group = (typeof UNPERCEIVED_GROUPS)[number];
 /** How a stage was read: the open scene the Author recorded, where the owner's character stands (no scene recorded), or not recorded at all. */
 export type StageHow = "scene" | "owner" | "none";
 
-/** Who was on stage in one turn, by name or cast id, and how that was read. */
+/** Who was on stage in one turn, by name or cast id, how that was read, and the moment: the place in words and the story's date and time there. */
 export interface StageRead {
   who: readonly string[];
   how: StageHow;
+  place: string | null;
+  /** As the world's calendar writes it; null where nobody set the clock. */
+  time: string | null;
 }
 
 /**
@@ -73,15 +76,15 @@ const ASLEEP = "sleep";
 export const CAST_FACT_DEFS: readonly FactDef[] = [
   {
     name: "stage.unperceived",
-    counts: "Characters on stage this turn with no perception of it recorded, by casting; read: how the stage was read (scene: the open scene and who the state places in its place; owner: no scene recorded, who the state places where the owner's character is; none: not recorded). A turn a migration carried counts no one: the previous build played it, and what its characters took from it was carried with their minds.",
+    counts: "Characters on stage this turn with no perception of it recorded, by casting; read: how the stage was read (scene: the open scene's own list of who is in it, as the Author recorded it; owner: no scene recorded, who the state places where the owner's character is; none: not recorded); missing: each with its casting and the turn (message: its reply; time: the story's date and time as it left them, null where nobody set the clock; place). A perception of the same moment (the same story time and place) under another turn counts as one of it. A turn a migration carried counts no one: the previous build played it, and what its characters took from it was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["read"],
+    fields: ["read", "missing"],
   },
   {
     name: "path.unperceived",
-    counts: "Characters on stage in earlier turns RPE played on the chat's path with no perception of that turn recorded, each counted once, by casting; messages: those turns' replies; read: how many of those turns' stages were read each way (scene, owner, none). The turns a migration carried are not counted: the previous build played them, and what their characters took from them was carried with their minds.",
+    counts: "Characters on stage in earlier turns RPE played on the chat's path with no perception of that turn recorded, each counted once, by casting, the stage read as stage.unperceived reads it; messages: those turns' replies; read: how many of those turns' stages were read each way (scene, owner, none); missing: each with its casting and the turns it has none of (message: the turn's reply; time: the story's date and time as the turn left them, null where nobody set the clock; place). A perception of the same moment (the same story time and place) under another turn counts as one of it, and one with reach none (nothing reached them) settles the turn. The turns a migration carried are not counted: the previous build played them, and what their characters took from them was carried with their minds.",
     by: [...UNPERCEIVED_GROUPS],
-    fields: ["messages", "read"],
+    fields: ["messages", "read", "missing"],
   },
   {
     name: "stage.untaken",
@@ -154,11 +157,17 @@ export interface CastFacts {
   read(scope: Scope, names: readonly string[]): Promise<Record<string, FactValue>>;
 }
 
-/** Who on a stage has no perception of a turn, each once: their name, casting group, and the turns. */
+/** Who on a stage has no perception of a turn, each once: the cast's character (null: one the cast does not hold), their name, casting group, and the turns. */
 interface Gap {
+  character: string | null;
   name: string;
   group: Group;
   turns: string[];
+}
+
+/** A moment, as a stage reads it: the story's date and time and the place; none where either is not known. */
+function momentOf(stage: StageRead | undefined): string | null {
+  return stage?.time == null || stage.place == null ? null : `${stage.time}\n${nameKey(stage.place)}`;
 }
 
 function valueOf(gaps: readonly Pick<Gap, "name" | "group">[], fields?: FactValue["fields"]): FactValue {
@@ -201,8 +210,8 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
       // A chat RPE has not met yet has no one on stage and no character: every count is 0.
       if (user.chat(scope.chat) === null) {
         return {
-          ...(wanted.stage ? { "stage.unperceived": valueOf([], { read: "none" }) } : {}),
-          ...(wanted.path ? { "path.unperceived": valueOf([], { messages: [], read: readsOf([]) }) } : {}),
+          ...(wanted.stage ? { "stage.unperceived": valueOf([], { read: "none", missing: [] }) } : {}),
+          ...(wanted.path ? { "path.unperceived": valueOf([], { messages: [], read: readsOf([]), missing: [] }) } : {}),
           ...Object.fromEntries([...waits].map((n) => [n, n === "path.untaken.turns" ? valueOf([]) : valueOf([], { [n === "dream.due" ? "due" : "held"]: [] })])),
           ...(wanted.older ? { "cast.base.older": { count: 0, names: [], fields: { sources: [] } } } : {}),
           ...(wanted.proposed ? { "cast.growth.proposed": { count: 0, names: [] } } : {}),
@@ -238,34 +247,58 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
       const asked = [...(turn !== null && (wanted.stage || waits.has("stage.untaken")) ? [turn] : []), ...(wanted.path ? earlier : [])];
       const stage = asked.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user: scope.user, chat: scope.chat }, asked);
 
-      const perceived = new Set<string>();
-      for (const item of record.items.values()) if (item.part === "perception" && !item.dropped) perceived.add(`${perceivedTurn(item)}\n${item.character}`);
+      // The turns each character holds a perception of: a turn is theirs, and so is any turn of the same moment (the story's date and
+      // time as it left them, and the place), for a perception of that moment written under another turn is one of it.
+      const perceivedIn = new Map<string, Set<string>>();
+      for (const item of record.items.values()) {
+        if (item.part !== "perception" || item.dropped) continue;
+        const turns = perceivedIn.get(item.character) ?? new Set<string>();
+        turns.add(perceivedTurn(item));
+        perceivedIn.set(item.character, turns);
+      }
       const known = new Map<string, Character | null>();
       const characterNamed = (said: string): Character | null => {
         if (!known.has(said)) known.set(said, findCharacter(deps.store.db, scope.user, chats, said));
         return known.get(said) ?? null;
       };
-      const gapsIn = (turns: readonly string[]): Gap[] => {
+      const gapsIn = async (turns: readonly string[]): Promise<Gap[]> => {
         const out = new Map<string, Gap>();
         for (const t of turns) {
           for (const said of stage.get(t)?.who ?? []) {
             const character = characterNamed(said);
-            if (character !== null && perceived.has(`${t}\n${character.id}`)) continue;
+            if (character !== null && perceivedIn.get(character.id)?.has(t) === true) continue;
             const key = character?.id ?? `name:${nameKey(said)}`;
-            const gap = out.get(key) ?? { name: character?.name ?? said.trim(), group: character === null ? "uncast" : groupOf(character), turns: [] };
+            const gap = out.get(key) ?? { character: character?.id ?? null, name: character?.name ?? said.trim(), group: character === null ? "uncast" : groupOf(character), turns: [] };
             if (!gap.turns.includes(t)) gap.turns.push(t);
             out.set(key, gap);
           }
         }
-        return [...out.values()];
+        // The moments of the other turns on the path they hold perceptions of, read once.
+        const others = [...new Set([...out.values()].flatMap((g) => [...(g.character === null ? [] : (perceivedIn.get(g.character) ?? []))].filter((t) => !stage.has(t) && at.order.has(t))))];
+        const more = others.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user: scope.user, chat: scope.chat }, others);
+        const moment = (t: string): string | null => momentOf(stage.get(t) ?? more.get(t));
+        return [...out.values()].flatMap((g) => {
+          const theirs = [...(g.character === null ? [] : (perceivedIn.get(g.character) ?? []))].map(moment).filter((m): m is string => m !== null);
+          const turns = g.turns.filter((t) => {
+            const m = moment(t);
+            return m === null || !theirs.includes(m);
+          });
+          return turns.length === 0 ? [] : [{ ...g, turns }];
+        });
       };
+      /** Each one's turns with no perception: the reply's number, the story's date and time, the place. */
+      const missingOf = (gaps: readonly Gap[]): JsonObject[] =>
+        gaps.map((g) => ({ name: g.name, casting: g.group, turns: g.turns.map((t) => ({ message: at.replyOf(t), time: stage.get(t)?.time ?? null, place: stage.get(t)?.place ?? null })) }));
 
       const values: Record<string, FactValue> = {};
-      if (wanted.stage) values["stage.unperceived"] = valueOf(turn === null ? [] : gapsIn([turn]), { read: (turn === null ? null : stage.get(turn)?.how) ?? "none" });
+      if (wanted.stage) {
+        const gaps = turn === null ? [] : await gapsIn([turn]);
+        values["stage.unperceived"] = valueOf(gaps, { read: (turn === null ? null : stage.get(turn)?.how) ?? "none", missing: missingOf(gaps) });
+      }
       if (wanted.path) {
-        const gaps = gapsIn(earlier);
+        const gaps = await gapsIn(earlier);
         const messages = [...new Set(gaps.flatMap((g) => g.turns.map((t) => at.replyOf(t)).filter((m): m is number => m !== null)))].sort((a, b) => a - b);
-        values["path.unperceived"] = valueOf(gaps, { messages, read: readsOf(earlier.map((t) => stage.get(t)?.how ?? "none")) });
+        values["path.unperceived"] = valueOf(gaps, { messages, read: readsOf(earlier.map((t) => stage.get(t)?.how ?? "none")), missing: missingOf(gaps) });
       }
       if (waits.size > 0) Object.assign(values, await waitingValues({ deps, scope, at, played, record, waiting, groupOf, waits, busy: (character) => inHand(character).length > 0, onStage: turn === null ? [] : (stage.get(turn)?.who ?? []).flatMap((said) => characterNamed(said) ?? []) }));
       if (wanted.older) {

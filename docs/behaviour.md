@@ -57,7 +57,7 @@ Shipped rules in force:
 | `guidance/.rules/consent.md` | No agent improvises without the Author's consent, and only where no lore or continuity covers the gap. |
 | `guidance/.rules/perceptions.md` | Why perceptions matter, who gets one, what goes in it, what is kept from a character even when the line only says it does not know, and when it is written. |
 | `guidance/.rules/perceptions-owed.md` | Reminds the Author when someone on stage has no perception for this turn. |
-| `guidance/.rules/perceptions-missing.md` | Tells the Author at a turn's start when someone on stage in an earlier turn has no perception for it. |
+| `guidance/.rules/perceptions-missing.md` | Tells the Author at a turn's start when someone on stage in an earlier turn has no perception for it, naming each such turn by its message, its story time and its place. On stage is the open scene's own list of who is in it, as the Author recorded it; with no scene recorded, who the world places where your character stands. A perception of the same moment (the same story time and place) under another turn counts, and one that says nothing reached them settles the turn. |
 | `guidance/.rules/memory-owed.md` | Reminds the Author, as its run ends, when a principal on stage this turn holds perceptions its own agent has not taken in, and asks for what the perceptions rule asks. |
 | `guidance/.rules/memory-late.md` | Tells the Author at a turn's start when a principal has held such perceptions for as many turns as its header says (one, as shipped). |
 | `guidance/.rules/memory-scene-end.md` | Tells the Author at a turn's start when a scene has closed and a principal still holds perceptions of it its own agent has not taken in. |
