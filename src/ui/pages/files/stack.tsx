@@ -3,6 +3,7 @@
 // session's opening block afresh so a change holds now.
 
 import type { StackLeft } from "rp-harness/contract";
+import type { StackReply } from "../../../shared/api";
 import { Banner, Button, Disclosure, Pre, Section } from "../../../frontend/components";
 import { LEVEL_WORDS } from "../../words";
 import type { ApplyShown, FilesShown } from "./model";
@@ -24,6 +25,31 @@ function ApplyNote(props: { apply: ApplyShown }) {
     <Banner tone="info" icon="check" title="Applied">
       <span data-apply-note>{apply.note}</span>
     </Banner>
+  );
+}
+
+/** What the agent is handed whole at the start of each of its runs, after its stack, in the order it is handed, each with why it is there. */
+export function Handed(props: { agent: string; handed: StackReply["handed"] }) {
+  if (props.handed.length === 0) return null;
+  return (
+    <>
+      <p class="rpe-meta">Then, at the start of each run, {props.agent} is handed whole:</p>
+      <ol class="rpe-reports" data-handed={props.agent}>
+        {props.handed.map((h, i) => (
+          <li key={`${i}:${h.ref}`} data-handed-ref={h.ref}>
+            <span class="rpe-strong">{h.ref}</span>
+            {h.from === "definition" ? " · its definition gives it" : ` · pinned for ${props.agent}, in the config of ${LEVEL_WORDS[h.pinnedAt ?? "chat"].toLowerCase()}`}
+            {h.path === undefined || h.level === undefined ? null : ` · ${h.path} · ${LEVEL_WORDS[h.level]}`}
+            {h.problem === undefined ? null : ` · ${h.problem}`}
+            {h.text === undefined ? null : (
+              <Disclosure summary="Its text" class="rpe-open">
+                <Pre text={h.text} mono={false} />
+              </Disclosure>
+            )}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -68,21 +94,24 @@ export function StackSection(props: { chat: string | null; shown: FilesShown; on
       ) : stack.parts === null ? (
         <p class="lre-muted rpe-line">Reading the stack of {stack.agent}…</p>
       ) : (
-        <ol class="rpe-reports" data-stack={stack.agent}>
-          {stack.parts.map((p, i) => (
-            <li key={`${i}:${p.part}`} data-part={p.part}>
-              <span class="rpe-strong">{p.part}</span>
-              {` · ${p.path} · ${LEVEL_WORDS[p.level]} · ${p.where === "opening" ? "in the opening block" : "with the briefing"}`}
-              {p.left === undefined ? null : ` · left out: ${LEFT_WORDS[p.left]}`}
-              {p.situations === undefined || p.situations.length === 0 ? null : ` · added by: ${p.situations.join(", ")}`}
-              {p.text === undefined ? null : (
-                <Disclosure summary="Its text" class="rpe-open">
-                  <Pre text={p.text} mono={false} />
-                </Disclosure>
-              )}
-            </li>
-          ))}
-        </ol>
+        <>
+          <ol class="rpe-reports" data-stack={stack.agent}>
+            {stack.parts.map((p, i) => (
+              <li key={`${i}:${p.part}`} data-part={p.part}>
+                <span class="rpe-strong">{p.part}</span>
+                {` · ${p.path} · ${LEVEL_WORDS[p.level]} · ${p.where === "opening" ? "in the opening block" : "with the briefing"}`}
+                {p.left === undefined ? null : ` · left out: ${LEFT_WORDS[p.left]}`}
+                {p.situations === undefined || p.situations.length === 0 ? null : ` · added by: ${p.situations.join(", ")}`}
+                {p.text === undefined ? null : (
+                  <Disclosure summary="Its text" class="rpe-open">
+                    <Pre text={p.text} mono={false} />
+                  </Disclosure>
+                )}
+              </li>
+            ))}
+          </ol>
+          <Handed agent={stack.agent} handed={stack.handed ?? []} />
+        </>
       )}
     </Section>
   );

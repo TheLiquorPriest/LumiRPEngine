@@ -92,6 +92,7 @@ export const STACKS: Readonly<Record<string, StackReply>> = {
       { kind: "instruction", part: "TURN", path: "@global/TURN.md", level: "global", hash: "0e1f", where: "opening" },
       { kind: "instruction", part: "SWIPE", path: "@shipped/SWIPE.md", level: "shipped", hash: "2a3b", where: "briefing" },
     ],
+    handed: [{ from: "pin", ref: "persistent-workspace/notes.md", pinnedAt: "chat", path: "persistent-workspace/notes.md", level: "chat", text: "Toll: seven coppers.\n" }],
   },
   gm: {
     agent: "gm",
@@ -101,6 +102,7 @@ export const STACKS: Readonly<Record<string, StackReply>> = {
       { kind: "instruction", part: "SIMULATION", path: "SIMULATION.md", level: "chat", where: "opening", left: "missing" },
       { kind: "definition", part: "gm", path: "@shipped/.agents/gm.md", level: "shipped", hash: "4c5d", where: "opening" },
     ],
+    handed: [],
   },
 };
 

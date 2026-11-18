@@ -123,10 +123,11 @@ export interface SuggestionsShown {
   levels: Readonly<Record<number, WriteLevel>>;
 }
 
-/** An agent's stack, as asked for: the agent, and its parts once read, or why they could not be. */
+/** An agent's stack, as asked for: the agent, its parts and what it is handed at a run's start once read, or why they could not be. */
 export interface StackShown {
   agent: string;
   parts: StackReply["parts"] | null;
+  handed: StackReply["handed"] | null;
   problem: string | null;
 }
 
@@ -403,15 +404,15 @@ export function filesControl(calls: FilesCalls, limits: () => FilesLimits, onCha
       );
     },
     stack(agent) {
-      const asking: StackShown = { agent, parts: null, problem: null };
+      const asking: StackShown = { agent, parts: null, handed: null, problem: null };
       show({ ...shown, stack: asking });
       // Only the stack asked for last is shown.
       const answered = (stack: StackShown): void => {
         if (shown.stack === asking) show({ ...shown, stack });
       };
       calls.stack(agent).then(
-        (got) => answered({ agent, parts: got.parts, problem: null }),
-        (error: unknown) => answered({ agent, parts: null, problem: errorWords(error) }),
+        (got) => answered({ agent, parts: got.parts, handed: got.handed, problem: null }),
+        (error: unknown) => answered({ agent, parts: null, handed: null, problem: errorWords(error) }),
       );
     },
     applyNow() {

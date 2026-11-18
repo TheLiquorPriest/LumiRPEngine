@@ -1682,7 +1682,7 @@ Prunes a chat's old turn folders as the chat's retention setting says, never whi
 
 ### `GET /api/v1/files-stack`
 
-The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; with no chat, the stack the shipped and global levels give.
+The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; then what the agent is handed whole at the start of each run, in the order it is handed (what its definition lists in `given:`, then each file pinned for it), each with why it is there. With no chat, the stack the shipped and global levels give.
 
 | | |
 |---|---|
@@ -8340,6 +8340,29 @@ export interface Span {
 }
 ```
 
+### `StackHandedRow`
+
+One thing an agent is handed whole at the start of each of its runs, after its stack: a name its definition lists in `given:`, or a file pinned for it; for a pin, the file as the view holds it now, or why nothing is handed.
+
+```ts
+export interface StackHandedRow {
+  /** Why it is handed: its definition names it in `given:`, or a file is pinned for the agent in a level's config. */
+  from: "definition" | "pin";
+  /** What is handed: the name its definition lists, or the file as the pin writes its path. */
+  ref: string;
+  /** For a pin: the level whose config holds it. */
+  pinnedAt?: LayerLevel;
+  /** For a pin whose file is in the view: its path there. */
+  path?: string;
+  /** For a pin whose file is in the view: the level the file is at. */
+  level?: LayerLevel;
+  /** For a pin whose file is in the view: its whole text, as the agent is handed it. */
+  text?: string;
+  /** For a pin whose file is not a file in the view: why the agent is handed nothing for it. */
+  problem?: string;
+}
+```
+
 ### `StackPartRow`
 
 One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why.
@@ -8368,12 +8391,13 @@ export interface StackPartRow {
 
 ### `StackReply`
 
-The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why.
+The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why. After it, what the agent is handed whole at the start of each run, in the order it is handed: what its definition lists in `given:`, then each file pinned for it, each with why it is there.
 
 ```ts
 export interface StackReply {
   agent: string;
   parts: StackPartRow[];
+  handed: StackHandedRow[];
 }
 ```
 

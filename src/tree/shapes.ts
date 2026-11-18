@@ -334,7 +334,24 @@ const stackPartRow = shape.named(
     situations: opt(shape.list(T), "For a part the briefing is handed: the situations that add it."),
   }),
 );
-export const stackReply = shape.named("StackReply", "The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why.", shape.object({ agent: T, parts: shape.list(stackPartRow) }));
+const stackHandedRow = shape.named(
+  "StackHandedRow",
+  "One thing an agent is handed whole at the start of each of its runs, after its stack: a name its definition lists in `given:`, or a file pinned for it; for a pin, the file as the view holds it now, or why nothing is handed.",
+  shape.object({
+    from: field(shape.oneOf("definition", "pin"), "Why it is handed: its definition names it in `given:`, or a file is pinned for the agent in a level's config."),
+    ref: field(T, "What is handed: the name its definition lists, or the file as the pin writes its path."),
+    pinnedAt: opt(layerLevel, "For a pin: the level whose config holds it."),
+    path: opt(T, "For a pin whose file is in the view: its path there."),
+    level: opt(layerLevel, "For a pin whose file is in the view: the level the file is at."),
+    text: opt(T, "For a pin whose file is in the view: its whole text, as the agent is handed it."),
+    problem: opt(T, "For a pin whose file is not a file in the view: why the agent is handed nothing for it."),
+  }),
+);
+export const stackReply = shape.named(
+  "StackReply",
+  "The exact stack an agent gets in the chat, part by part in order, each with the file it comes from, its level, and whether it sits in the opening block or comes with the briefing; a part left out is listed with why. After it, what the agent is handed whole at the start of each run, in the order it is handed: what its definition lists in `given:`, then each file pinned for it, each with why it is there.",
+  shape.object({ agent: T, parts: shape.list(stackPartRow), handed: shape.list(stackHandedRow) }),
+);
 type StackMirrored = Holds<Exactly<Infer<typeof stackPartRow>, StackPart>>;
 
 export const partPreviewBody = shape.object({

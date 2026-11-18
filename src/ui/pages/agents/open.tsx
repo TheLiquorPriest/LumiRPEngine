@@ -16,6 +16,7 @@ import { useUiSetting } from "../../ui-settings";
 import { counted, errorWords, LEVEL_WORDS, num } from "../../words";
 import { guidanceFolder } from "../files/kinds";
 import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
+import { Handed } from "../files/stack";
 import type { SettingsShown } from "../settings";
 import type { RowActions } from "../settings/row";
 import { windowOfModel } from "../usage";
@@ -130,6 +131,7 @@ function StackSection(props: { chat: string | null; agent: string }) {
           </li>
         ))}
       </ul>
+      <Handed agent={props.agent} handed={(stack.value?.handed ?? []).filter((h) => h.from === "pin")} />
     </Section>
   );
 }

@@ -57,6 +57,23 @@ async function readFound(loc: ChatLocation, at: FoundFile, ask: { line?: number;
   return { ...file, bytes: part.bytes, text: part.text, lines: part.lines, from: part.from, to: part.to, more: part.to < part.lines };
 }
 
+/**
+ * What an agent is handed whole at the start of each run, in the order RPH hands it: what its definition lists in `given:`, then each file
+ * pinned for it, the farthest level's first. A pin shows the file as the view holds it now, or says there is none.
+ */
+async function handedOf(loc: ChatLocation, agent: string, given: readonly string[]) {
+  const pins = (await namesInForce(loc)).pins.filter((p) => p.agent === agent);
+  const pinned = await Promise.all(
+    pins.map(async (p) => {
+      const found = await locate(loc, p.file);
+      const text = found.ok && found.at.is === "file" && found.at.disk !== null ? await readText(found.at.disk) : null;
+      if (!found.ok || text === null) return { from: "pin" as const, ref: p.file, pinnedAt: p.level, problem: "No file of this name is in the files now, so nothing is handed for it (a file of this name in a turn's own folder is found when the turn runs)." };
+      return { from: "pin" as const, ref: p.file, pinnedAt: p.level, path: found.at.path, level: found.at.level, text };
+    }),
+  );
+  return [...given.map((ref) => ({ from: "definition" as const, ref })), ...pinned];
+}
+
 export function fileRoutes(kit: RouteKit) {
   const { deps, own } = kit;
   return [
@@ -65,10 +82,15 @@ export function fileRoutes(kit: RouteKit) {
       path: "/api/v1/files-stack",
       access: "page",
       group: "files",
-      does: "The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; with no chat, the stack the shipped and global levels give.",
+      does: "The exact stack an agent gets in a chat, part by part, each with the file it comes from and its text, and the briefing's parts with the situations that add them; then what the agent is handed whole at the start of each run, in the order it is handed (what its definition lists in `given:`, then each file pinned for it), each with why it is there. With no chat, the stack the shipped and global levels give.",
       query: { chat: shape.optional(shape.text({ blank: false }), "The chat the agent runs in; left out, the shipped and global levels alone."), agent: shape.field(shape.text({ blank: false }), "The agent's definition.") },
       reply: stackReply,
-      handle: async ({ user, query }) => ({ agent: query.agent, parts: await deps.stack(user, query.chat ?? null, query.agent) }),
+      handle: async ({ user, query }) => {
+        const chat = chatOf(query.chat);
+        const [parts, definitions] = await Promise.all([deps.stack(user, chat, query.agent), deps.guidance(user, chat).definitions()]);
+        const given = definitions.find((d) => d.name === query.agent)?.given ?? [];
+        return { agent: query.agent, parts, handed: await handedOf(own.locationOf(user, chat), query.agent, given) };
+      },
     }),
     route({
       method: "POST",

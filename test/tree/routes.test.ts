@@ -371,6 +371,22 @@ describe("the Files page's routes", () => {
     expect((await call<{ pins: unknown[] }>("GET", `/api/v1/files-pins?chat=${CHAT}`)).body.pins).toEqual([]);
   });
 
+  test("an agent's stack read ends with what it is handed at the start of a run: each file pinned for it, in the order the levels give them, with its text and the level that pins it, and a pin of a file that is gone says nothing is handed", async () => {
+    await writeFile(join(chatFolder, "WORLD.md"), "# World\nA drowned bell.\n");
+    await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
+    await call("PUT", "/api/v1/files-pin/@shipped/ALL-AGENTS.md", { level: "global", agent: "gm", pinned: true });
+    await call("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "author", pinned: true });
+    const stack = async (agent: string) => (await call<{ handed: { from: string; ref: string; pinnedAt?: string; path?: string; level?: string; text?: string; problem?: string }[] }>("GET", `/api/v1/files-stack?agent=${agent}&chat=${CHAT}`)).body.handed;
+    expect(await stack("gm")).toEqual([
+      { from: "pin", ref: "@shipped/ALL-AGENTS.md", pinnedAt: "global", path: "@shipped/ALL-AGENTS.md", level: "shipped", text: "Every agent reads this.\n" },
+      { from: "pin", ref: "WORLD.md", pinnedAt: "chat", path: "WORLD.md", level: "chat", text: "# World\nA drowned bell.\n" },
+    ]);
+    expect((await stack("author")).map((h) => h.ref)).toEqual(["WORLD.md"]);
+    expect(await stack("nobody")).toEqual([]);
+    await rm(join(chatFolder, "WORLD.md"));
+    expect((await stack("gm")).at(-1)).toMatchObject({ from: "pin", ref: "WORLD.md", problem: expect.stringContaining("nothing is handed") });
+  });
+
   test("a save, a delete, a move, a switch-off and a pin each call the written hook once with the chat, the path and the level, and a refused write calls nothing", async () => {
     told.length = 0;
     await call("PUT", "/api/v1/files/WORLD.md", { level: "chat", chat: CHAT, text: "# World\n" });
