@@ -28,7 +28,7 @@ describe("LORE-INDEX.md", () => {
       lore,
       db: db.db,
       writes: db.writes,
-      path: { turns: () => [] },
+      path: { overlays: () => [] },
       // Only the coast's chat has a folder yet.
       file: { folder: (user, chat) => (user === USER && chat === CHAT ? folder() : null), lines: async (at) => loreLines(files.guidance(at.chat)) },
     });

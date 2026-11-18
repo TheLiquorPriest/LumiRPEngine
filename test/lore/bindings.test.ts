@@ -24,7 +24,7 @@ describe("bindings", () => {
     const start = startingWorlds(coastWorld());
     // The Author's horizon: the net lofts, where Tobin is.
     const worlds = { registry: start.registry, at: (user: string, chat: string) => { const at = start.at(user, chat); return at === null ? null : { ...at, horizon: ["net_lofts"] }; } };
-    index = new LoreIndex({ lore: new Lore({ books: shelf, worlds, turns: new Tags(), numbers: db.numbers }), db: db.db, writes: db.writes, path: { turns: () => [] } });
+    index = new LoreIndex({ lore: new Lore({ books: shelf, worlds, turns: new Tags(), numbers: db.numbers }), db: db.db, writes: db.writes, path: { overlays: () => [] } });
   });
   afterAll(async () => {
     await db.close();
@@ -67,7 +67,7 @@ describe("bindings", () => {
     const start = startingWorlds(world);
     // The cast knows Sefa as c-1; the horizon names the net lofts (inside the coast the ferry is pinned to) and Sefa.
     const worlds = { registry: start.registry, castName: (_u: string, _c: string, said: string) => (said === "c-1" ? "Sefa Moor" : null), at: (user: string, chat: string) => { const at = start.at(user, chat); return at === null ? null : { ...at, horizon: ["net_lofts", "sefa"] }; } };
-    const idx = new LoreIndex({ lore: new Lore({ books: shelf, worlds, turns: new Tags(), numbers: db.numbers }), db: db.db, writes: db.writes, path: { turns: () => [] } });
+    const idx = new LoreIndex({ lore: new Lore({ books: shelf, worlds, turns: new Tags(), numbers: db.numbers }), db: db.db, writes: db.writes, path: { overlays: () => [] } });
     await idx.entries(AT);
     await db.writes.run((d) => {
       d.run("INSERT INTO lore_binding (user, entry, record, linked, aspect, by, created) VALUES (?, ?, 'cast:c-1', 1, 'background', 'casting', 1)", [USER, W.cove_route]);

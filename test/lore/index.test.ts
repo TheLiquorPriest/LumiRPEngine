@@ -47,7 +47,7 @@ describe("the lore index", () => {
     world.lore = { ...world.lore };
     const lore = new Lore({ books: shelf, worlds: startingWorlds(world), turns: new Tags(), numbers: opening.numbers });
     // No turns: these tests read no overlays.
-    index = new LoreIndex({ lore, db: opening.db, writes: opening.writes, path: { turns: () => [] }, settings: { batch }, now: () => 1_000 });
+    index = new LoreIndex({ lore, db: opening.db, writes: opening.writes, path: { overlays: () => [] }, settings: { batch }, now: () => 1_000 });
   };
   const shelfEntry = (id: string) => {
     const found = shelf.users.get(USER)?.entries.find((e) => e.id === id);
