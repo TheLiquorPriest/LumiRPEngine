@@ -18,7 +18,8 @@ afterEach(async () => {
 });
 
 async function bed(options: TurnBedOptions): Promise<TurnBed> {
-  const b = await openTurnBed(options);
+  // The reminder of writes that name no source would ask for calls these tests do not script.
+  const b = await openTurnBed({ off: ["rules/unsourced"], ...options });
   beds.push(b);
   return b;
 }
@@ -42,15 +43,16 @@ async function setForChat(b: TurnBed, key: string, value: number): Promise<void>
   expect(res.status).toBe(200);
 }
 
-/** What each tool answered the calls just before `request`, by the tool's name: its data, and the lines after it. */
+/** What each tool answered the calls just before `request`, by the tool's name: its data, and its other lines. */
 function answers(request: RecordedRequest | undefined): Record<string, { data: JsonObject; lines: string[] }> {
   const messages = request?.messages ?? [];
   const from = messages.findLastIndex((m) => m.role === "assistant");
   const out: Record<string, { data: JsonObject; lines: string[] }> = {};
   for (const m of messages.slice(from + 1)) {
     if (m.role !== "toolResult") continue;
-    const [data = "{}", ...lines] = m.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("\n").split("\n");
-    out[m.toolName] = { data: JSON.parse(data) as JsonObject, lines };
+    const parts = m.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("\n").split("\n");
+    const at = parts.findIndex((line) => line.startsWith("{"));
+    out[m.toolName] = { data: JSON.parse(parts[at] ?? "{}") as JsonObject, lines: parts.filter((_, i) => i !== at) };
   }
   return out;
 }
@@ -69,7 +71,7 @@ const READS: { call: string; args: JsonObject }[] = [
 
 test("what a chat's own RPE.yml sets holds at its next turn: the world state is measured by its budget, and the engine's, the cast's and the story's tools answer with as many as it allows", async () => {
   const b = await bed({
-    off: ["rules/turn-unrecorded", "rules/perceptions-missing", "rules/perceptions-owed"],
+    off: ["rules/unsourced", "rules/turn-unrecorded", "rules/perceptions-missing", "rules/perceptions-owed"],
     answers: [
       {
         pieces: [
@@ -120,7 +122,7 @@ const ENTRIES = [
 
 test("what the global file sets is read when RPE starts, by what is made once for every chat: the store's snapshots, the lore's searches and its index's batches, and the story's facts", async () => {
   const b = await bed({
-    global: ["store:", "  snapshotEvery: 1", "lore:", "  searchLimit: 1", "  index:", "    batch: 1", "story:", "  ahead: 0", "history:", "  window: 1", ""].join("\n"),
+    global: ["store:", "  snapshotEvery: 1", "lore:", "  search:", "    hits: 1", "  index:", "    entriesPerCall: 1", "story:", "  ahead: 0", "history:", "  window: 1", ""].join("\n"),
     answers: [replying("The lamp turns.")],
   });
   b.db.run("INSERT INTO world_books (id, name, user_id) VALUES (?, ?, ?)", BOOK.id, BOOK.name, USER);
