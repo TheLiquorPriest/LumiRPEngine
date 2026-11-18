@@ -292,8 +292,8 @@ const keptFor = shape.named(
 );
 const storageKindRow = shape.named(
   "StorageKindRow",
-  "One kind RPE keeps: how many, how big, the oldest of it, and how long it is kept.",
-  shape.object({ kind: T, count: field(N, "How many: files, rows, folders or backups, by what the kind is."), bytes: N, oldest: field(nullable(N), "When the oldest of it was made, epoch milliseconds; null where there is none."), kept: keptFor }),
+  "One kind RPE keeps: its id, the name the page calls it, how many, how big, the oldest of it, and how long it is kept.",
+  shape.object({ kind: field(T, "Its id: notes, note-versions, suggestions, turn-folders, turn-folders-pruned, sessions, yours, shipped, database, migration-backups, database-copies or archives."), name: field(T, "What the page calls it."), count: field(N, "How many: files, rows, folders or backups, by what the kind is."), bytes: N, oldest: field(nullable(N), "When the oldest of it was made, epoch milliseconds; null where there is none."), kept: keptFor }),
 );
 type KindMirrored2 = Holds<Exactly<Infer<typeof storageKindRow>, StorageKind>>;
 export const storageKindsReply = shape.named(

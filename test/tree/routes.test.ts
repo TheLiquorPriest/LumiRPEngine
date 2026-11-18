@@ -587,10 +587,11 @@ describe("the Files page's routes", () => {
   });
 
   test("the Storage page lists each kind with its count, size and how long it is kept, and a prune says first what goes, then takes exactly that: closed sessions' files, a deleted chat's other files, a backup he names", async () => {
-    const kinds = (await call<{ kinds: { kind: string; count: number; bytes: number; kept: { by: string; setting?: string; value?: number | null } }[]; lastPrune: number | null }>("GET", "/api/v1/storage/kinds")).body;
-    expect(kinds.kinds.map((k) => k.kind)).toEqual(["notes", "note versions", "suggestions", "turn folders kept whole", "turn folders pruned", "session files", "your files", "the shipped level", "the database", "the migration's backups", "database copies", "archives"]);
-    expect(kinds.kinds.find((k) => k.kind === "database copies")?.kept).toEqual({ by: "setting", setting: "database.copiesKept", value: 3 });
-    expect(kinds.kinds.find((k) => k.kind === "the shipped level")?.count).toBeGreaterThan(3);
+    const kinds = (await call<{ kinds: { kind: string; name: string; count: number; bytes: number; kept: { by: string; setting?: string; value?: number | null } }[]; lastPrune: number | null }>("GET", "/api/v1/storage/kinds")).body;
+    expect(kinds.kinds.map((k) => k.kind)).toEqual(["notes", "note-versions", "suggestions", "turn-folders", "turn-folders-pruned", "sessions", "yours", "shipped", "database", "migration-backups", "database-copies", "archives"]);
+    expect(kinds.kinds.map((k) => k.name)).toEqual(["Agents' notes", "Versions of notes", "Suggestions", "Turn folders kept whole", "Turn folders pruned to what stays", "Session files", "Your own files", "The shipped level", "The database", "The migration's backups", "Copies of the database taken before a migration", "Archives rpe backup made"]);
+    expect(kinds.kinds.find((k) => k.kind === "database-copies")?.kept).toEqual({ by: "setting", setting: "database.copiesKept", value: 3 });
+    expect(kinds.kinds.find((k) => k.kind === "shipped")?.count).toBeGreaterThan(3);
     expect(kinds.lastPrune).toBeNull();
 
     // Closed sessions: asked first; the open one's files stay; the plan taken exactly.

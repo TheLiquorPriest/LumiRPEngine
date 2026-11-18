@@ -20,8 +20,27 @@ import { type ChatLocation, kindOf } from "./view";
 /** How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which names its key and gives what it is now at his own level (null: none, all kept). */
 export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
 
+/** The kinds RPE keeps, each by its id and the name the Storage page calls it: the one place a kind's name is written. */
+export const KIND_NAMES = {
+  notes: "Agents' notes",
+  "note-versions": "Versions of notes",
+  suggestions: "Suggestions",
+  "turn-folders": "Turn folders kept whole",
+  "turn-folders-pruned": "Turn folders pruned to what stays",
+  sessions: "Session files",
+  yours: "Your own files",
+  shipped: "The shipped level",
+  database: "The database",
+  "migration-backups": "The migration's backups",
+  "database-copies": "Copies of the database taken before a migration",
+  archives: "Archives rpe backup made",
+} as const;
+type KindId = keyof typeof KIND_NAMES;
+
 export interface StorageKind {
   kind: string;
+  /** What the page calls it. */
+  name: string;
   /** How many: files, rows, folders or backups, by what the kind is. */
   count: number;
   bytes: number;
@@ -124,20 +143,20 @@ export async function storageKinds(deps: KindsDeps, user: string): Promise<Stora
     return t;
   };
   const lastPrune = deps.db.query<{ at: number }, [string]>("SELECT at FROM tree_prune WHERE user = ?").get(user)?.at ?? null;
-  const of = (kind: string, t: Tally, kept: KeptFor): StorageKind => ({ kind, ...t, kept });
+  const of = (kind: KindId, t: Tally, kept: KeptFor): StorageKind => ({ kind, name: KIND_NAMES[kind], ...t, kept });
   return {
     kinds: [
       of("notes", totals.notes, { by: "never" }),
-      of("note versions", { count: versions?.n ?? 0, bytes: versions?.bytes ?? 0, oldest: versions?.oldest ?? null }, { by: "setting", setting: "notes.versionsKept", value: versionsKept }),
+      of("note-versions", { count: versions?.n ?? 0, bytes: versions?.bytes ?? 0, oldest: versions?.oldest ?? null }, { by: "setting", setting: "notes.versionsKept", value: versionsKept }),
       of("suggestions", { count: suggestions?.n ?? 0, bytes: suggestions?.bytes ?? 0, oldest: suggestions?.oldest ?? null }, { by: "setting", setting: "suggestions.decidedKept", value: global.suggestionsDecidedKept }),
-      of("turn folders kept whole", whole, { by: "setting", setting: "retention.turnFolders", value: global.turnFolders }),
-      of("turn folders pruned", pruned, { by: "chat" }),
-      of("session files", totals.sessions, { by: "chat" }),
-      of("your files", totals.yours, { by: "never" }),
-      of("the shipped level", totals.shipped, { by: "never" }),
-      of("the database", { count: 1, bytes: database, oldest: null }, { by: "never" }),
-      of("the migration's backups", ofBackups("migration"), { by: "never" }),
-      of("database copies", ofBackups("copy"), { by: "setting", setting: "database.copiesKept", value: deps.copiesKept }),
+      of("turn-folders", whole, { by: "setting", setting: "retention.turnFolders", value: global.turnFolders }),
+      of("turn-folders-pruned", pruned, { by: "chat" }),
+      of("sessions", totals.sessions, { by: "chat" }),
+      of("yours", totals.yours, { by: "never" }),
+      of("shipped", totals.shipped, { by: "never" }),
+      of("database", { count: 1, bytes: database, oldest: null }, { by: "never" }),
+      of("migration-backups", ofBackups("migration"), { by: "never" }),
+      of("database-copies", ofBackups("copy"), { by: "setting", setting: "database.copiesKept", value: deps.copiesKept }),
       of("archives", ofBackups("archive"), { by: "never" }),
     ],
     lastPrune,

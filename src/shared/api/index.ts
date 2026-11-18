@@ -3127,9 +3127,12 @@ export interface StopReply {
   stopped: boolean;
 }
 
-/** One kind RPE keeps: how many, how big, the oldest of it, and how long it is kept. */
+/** One kind RPE keeps: its id, the name the page calls it, how many, how big, the oldest of it, and how long it is kept. */
 export interface StorageKindRow {
+  /** Its id: notes, note-versions, suggestions, turn-folders, turn-folders-pruned, sessions, yours, shipped, database, migration-backups, database-copies or archives. */
   kind: string;
+  /** What the page calls it. */
+  name: string;
   /** How many: files, rows, folders or backups, by what the kind is. */
   count: number;
   bytes: number;

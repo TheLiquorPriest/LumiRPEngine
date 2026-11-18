@@ -8,7 +8,7 @@ import { NO_STORAGE, StorageView, type StorageViewProps, storageCalls, storageCo
 import { askingClient, settle } from "../asking";
 import { expand, press, textOf } from "../vnodes";
 
-const KINDS: StorageKindsReply = { kinds: [{ kind: "turn-folders", count: 50, bytes: 4_000_000, oldest: Date.UTC(2026, 9, 1), kept: { by: "setting", setting: "retention.turnFolders", value: 50 } }, { kind: "notes", count: 3, bytes: 900, oldest: null, kept: { by: "chat" } }], lastPrune: null };
+const KINDS: StorageKindsReply = { kinds: [{ kind: "turn-folders", name: "Turn folders kept whole", count: 50, bytes: 4_000_000, oldest: Date.UTC(2026, 9, 1), kept: { by: "setting", setting: "retention.turnFolders", value: 50 } }, { kind: "notes", name: "Agents' notes", count: 3, bytes: 900, oldest: null, kept: { by: "chat" } }], lastPrune: null };
 const CHATS = (names: string[], next: string | null): StorageReply => ({ chats: names.map((n) => ({ chat: n, folder: `${n}-f`, bytes: 1000, areas: { notes: 1, turns: 2, sessions: 3, files: 4 }, rows: 500, measured: 1 })), next, global: 10, globalNotes: 1, shipped: 20, database: 30, rest: 5 });
 const PLAN: StoragePruneReply = { plan: "plan-1", removed: false, files: 12, bytes: 3_000_000, items: [{ kind: "turn-folder", path: "turns/0001", files: 12, bytes: 3_000_000 }] };
 
@@ -33,9 +33,9 @@ describe("the Storage page", () => {
     expect(page.text).toContain("kept as Turn folders kept whole says: 50");
     press(page.tree, "Turn folders kept whole");
     expect(page.calls).toEqual(["setting:retention.turnFolders"]);
-    const versions = view({ kinds: { kinds: [{ kind: "note-versions", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: null } }], lastPrune: null } });
+    const versions = view({ kinds: { kinds: [{ kind: "note-versions", name: "Versions of notes", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: null } }], lastPrune: null } });
     expect(versions.text).toContain("kept as Turns back note versions are kept says: all of them");
-    expect(view({ kinds: { kinds: [{ kind: "note-versions", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: 2 } }], lastPrune: null } }).text).toContain("says: 2");
+    expect(view({ kinds: { kinds: [{ kind: "note-versions", name: "Versions of notes", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: 2 } }], lastPrune: null } }).text).toContain("says: 2");
   });
 
   test("chats are read a page at a time, each with what it takes in the database", async () => {

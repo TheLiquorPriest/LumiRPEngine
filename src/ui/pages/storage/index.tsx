@@ -18,21 +18,6 @@ import { useSettingMap } from "../settings/names";
 export { NO_STORAGE, storageCalls, storageControl } from "./model";
 export type { StorageShown } from "./model";
 
-const KIND_WORDS: Readonly<Record<string, string>> = {
-  notes: "Agents' notes",
-  "note-versions": "Versions of notes",
-  suggestions: "Suggestions",
-  "turn-folders": "Turn folders kept whole",
-  "turn-folders-pruned": "Turn folders pruned to what stays",
-  sessions: "Session files",
-  yours: "Your own files",
-  shipped: "The shipped level",
-  database: "The database",
-  "migration-backups": "The migration's backups",
-  "database-copies": "Copies of the database taken before a migration",
-  archives: "Archives rpe backup made",
-};
-
 function KeptWords(props: { row: StorageKindRow; setting: SettingView | undefined; onSetting(key: string): void }) {
   const { kept } = props.row;
   const { setting } = props;
@@ -66,7 +51,7 @@ function KindsSection(props: { shown: StorageShown; settings: ReadonlyMap<string
         <div class="lre-stack" data-kinds>
           {kinds.kinds.map((row) => (
             <div key={row.kind} class="rpe-entry" data-kind={row.kind}>
-              <Row k={KIND_WORDS[row.kind] ?? row.kind} v={`${counted(row.count, "item")} · ${bytesWords(row.bytes)}`} sub={row.oldest === null ? undefined : `the oldest from ${when(row.oldest)}`} />
+              <Row k={row.name} v={`${counted(row.count, "item")} · ${bytesWords(row.bytes)}`} sub={row.oldest === null ? undefined : `the oldest from ${when(row.oldest)}`} />
               <p class="rpe-meta">
                 <KeptWords row={row} setting={row.kept.by === "setting" ? props.settings?.get(row.kept.setting) : undefined} onSetting={props.onSetting} />
               </p>
