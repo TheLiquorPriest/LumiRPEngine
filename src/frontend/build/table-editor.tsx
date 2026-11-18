@@ -2,9 +2,9 @@
 // table. Its page shows the rows as a paged grid whose first column, each row's name, stays put
 // while the other columns scroll sideways inside the grid, so it works at phone width. A row opens
 // as a sheet with one field per column, typed by the column contract: money in the world's
-// currency, bands as min, typical and max, refs picked by name from the referenced table. Saving
-// writes the table to the draft and the backend computes its revision. Styles: the data-table
-// block of styles/forms.ts.
+// currency, bands as min, typical and max, refs picked by name from the referenced table, and a
+// list of the tabletop rules' modifiers as a form of its own (`modifier-cell.tsx`). Saving writes the
+// table to the draft and the backend computes its revision. Styles: the data-table block of styles/forms.ts.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
@@ -13,6 +13,8 @@ import { hasOwn, isRecord, safeKey } from "../../shared/json";
 import { formatMoneyInput, parseMoneyInput } from "../../shared/money";
 import type { ColumnDef, DataTable, TableRow, TableUnit } from "../../shared/tables";
 import { tableChoices } from "../../shared/tables";
+import type { D20Def } from "../../shared/d20";
+import { isModifierColumn, modifierWords, roleOf } from "../../shared/d20";
 import { formatMoney } from "../../shared/world";
 import type { WorldCurrency, WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
@@ -27,6 +29,7 @@ import { revealInScroller } from "../scroll";
 import { go, ItemHeader } from "./chrome";
 import { CheckField, FormGroup, FormSheet, RefPicker } from "./form-kit";
 import { useHeld } from "./held";
+import { isModifierList, ModifiersField } from "./modifier-cell";
 import { deriveId } from "./schema";
 
 /** Rows per page of the grid. */
@@ -258,10 +261,11 @@ function numberText(unit: TableUnit | undefined, whole: boolean, currency: World
 
 // ---------------------------------------------------------------- the grid
 
-/** What cells are read against: the world's currency, and the tables refs name rows of (this one as edited). */
+/** What cells are read against: the world's currency, the tables refs name rows of (this one as edited), and its tabletop rules, if it has them. */
 interface GridCtx {
   currency: WorldCurrency;
   tables: Readonly<Record<string, DataTable>>;
+  rules: D20Def | null;
 }
 
 /** A value with no short form of its own: an object or a list as {…} or […], anything else as written. */
@@ -628,8 +632,12 @@ function ListField(props: CellFieldProps & { currency: WorldCurrency }) {
 }
 
 /** One column's field in the row sheet: its label over a control typed by the column contract, the column's doc as help, and the cell's problem under it. */
-function CellField(props: { name: string; column: ColumnDef; value: JsonValue | undefined; ctx: GridCtx; onChange(value: JsonValue | undefined): void }) {
+function CellField(props: { name: string; column: ColumnDef; value: JsonValue | undefined; ctx: GridCtx; table: DataTable; onChange(value: JsonValue | undefined): void }) {
   const { column } = props;
+  // A list of the tabletop rules' modifiers opens as its own form, with what the world's rules read offered (RULESET-DESIGN §4.3).
+  if (props.ctx.rules !== null && isModifierColumn(props.table, props.name) && isModifierList(props.value)) {
+    return <ModifiersField label={columnLabel(props.name, column)} help={column.doc} value={props.value} words={modifierWords(props.ctx.rules, props.ctx.tables, roleOf(props.table))} onChange={props.onChange} />;
+  }
   const plain = columnLabel(props.name, column);
   const field: CellFieldProps = {
     label: (
@@ -673,7 +681,7 @@ function RowSheet(props: { table: DataTable; rowId: string; row: TableRow; ctx: 
     <FormSheet title={rowName(props.table, props.rowId)} subtitle={showIds ? <IdText id={props.rowId} /> : undefined} backLabel={props.table.label} onClose={props.onClose}>
       <FormGroup>
         {Object.entries(props.table.columns).map(([key, column]) => (
-          <CellField key={key} name={key} column={column} value={cellOf(props.row, key)} ctx={props.ctx} onChange={(value) => props.onCell(key, value)} />
+          <CellField key={key} name={key} column={column} value={cellOf(props.row, key)} ctx={props.ctx} table={props.table} onChange={(value) => props.onCell(key, value)} />
         ))}
       </FormGroup>
       <div class="lre-form-table-actions spread">
@@ -812,7 +820,7 @@ function TablePage(props: { world: WorldDoc; send: Send; id: string; table: Data
   const columns = useMemo(() => Object.entries(table.columns), [table.columns]);
   const problems = useMemo(() => Object.values(table.rows).reduce((n, row) => n + rowProblems(columns, row), 0), [table.rows, columns]);
   const taken = useMemo(() => new Set(Object.keys(table.rows)), [table.rows]);
-  const ctx = useMemo<GridCtx>(() => ({ currency: props.world.currency, tables: { ...props.world.tables, [props.id]: table } }), [props.world.currency, props.world.tables, props.id, table]);
+  const ctx = useMemo<GridCtx>(() => ({ currency: props.world.currency, tables: { ...props.world.tables, [props.id]: table }, rules: props.world.ruleset?.d20 ?? null }), [props.world.currency, props.world.tables, props.world.ruleset, props.id, table]);
   const q = query.trim().toLowerCase();
   const rows = useMemo(() => Object.entries(table.rows).filter(([rid, row]) => !q || rid.toLowerCase().includes(q) || Object.values(row).some((v) => typeof v === "string" && v.toLowerCase().includes(q))), [table.rows, q]);
   // The naming column's cells are the grid's first column; the rest follow it.

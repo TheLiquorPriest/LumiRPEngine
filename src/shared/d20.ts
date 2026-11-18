@@ -6,7 +6,8 @@
 // Names the other parts of RPE use (the data sets, the chat's setup, the pages, the texts) are fixed here: the table roles and
 // their columns, the named totals, the fields a creature keeps, the formula functions, the actions and the records.
 
-import type { ColumnDef } from "./tables";
+import type { ColumnDef, DataTable, TableRow } from "./tables";
+import { hasOwn, isRecord } from "./json";
 import type { FieldId, KindId, ProgressionId, TableId } from "./ids";
 import type { CheckDef, Expr, LifeStateId } from "./world";
 
@@ -350,6 +351,77 @@ export const D20_COLUMNS: Readonly<Record<D20TableRole, Record<string, ColumnDef
 /** A table of a role's schema string (`DataTable.schema`). */
 export function d20Schema(role: D20TableRole): string {
   return `lre-table/d20.${role}/v1`;
+}
+
+/** A table's role by its schema (`d20Schema`), or null for a table that is none of the layer's. */
+export function roleOf(table: Pick<DataTable, "schema">): D20TableRole | null {
+  const m = /^lre-table\/d20\.([a-z_]+)\/v\d+$/.exec(table.schema);
+  const role = m?.[1];
+  return D20_TABLE_ROLES.find((r) => r === role) ?? null;
+}
+
+/** Whether a table's column is one of the layer's lists of modifiers (a trait's, a condition's, a size's, a weapon's, an armour's). */
+export function isModifierColumn(table: Pick<DataTable, "schema">, column: string): boolean {
+  const role = roleOf(table);
+  return role !== null && column === "modifiers" && hasOwn(D20_COLUMNS[role], "modifiers");
+}
+
+/**
+ * The names the procedures ask a modifier for besides those a ruleset's totals write (`bonus(self, 'ac')`): each `{…}` stands for
+ * every one of its kind the world has (an ability, a skill, a save, a weapons row, a damage type), and `{choice}` for the choice a
+ * trait is taken with.
+ */
+export const D20_MODIFIER_NAMES = ["ability.{ability}", "ability_check.{ability}", "skill.{skill}", "save.{save}", "attack.weapon.{weapon}", "threat.weapon.{weapon}", "resist.{type}", "reduction", "max_dex", "armor_check"] as const;
+
+/**
+ * What a modifier of a table of `role` may name, as a person writing one is offered it: what it changes (the names the totals ask
+ * for, and those the procedures ask for, each kind spelled out for the world's own rows, for a trait also with its choice, and each
+ * wider name that bears on them), and the bonus types the ruleset and its rows name. Both are open words: these are what this
+ * world's rules read now.
+ */
+export function modifierWords(rules: D20Def, tables: Readonly<Record<string, DataTable>>, role: D20TableRole | null): { names: string[]; types: string[] } {
+  const rows = (r: D20TableRole): Readonly<Record<string, TableRow>> => {
+    const id = rules.tables[r];
+    return id !== undefined && hasOwn(tables, id) ? (tables[id]?.rows ?? {}) : {};
+  };
+  const names = new Set<string>();
+  // What the totals' formulas ask for by name: a `bonus`, `bonus_without`, `bonus_only` or `limit` with its words written in.
+  for (const formula of Object.values(rules.totals)) {
+    for (const m of String(formula).matchAll(/\b(?:bonus|bonus_without|bonus_only|limit)\(\s*[^,()]+,\s*'([^']*)'/g)) {
+      for (const n of (m[1] ?? "").split(",")) if (n.trim() !== "" && !n.trim().endsWith(".")) names.add(n.trim());
+    }
+  }
+  const kinds: Record<string, string[]> = {
+    ability: rules.abilities,
+    skill: Object.keys(rows("skills")),
+    save: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)),
+    weapon: Object.keys(rows("weapons")),
+    type: [...new Set(Object.values(rows("weapons")).flatMap((w) => (Array.isArray(w.types) ? w.types.filter((t): t is string => typeof t === "string") : [])))],
+  };
+  for (const pattern of D20_MODIFIER_NAMES) {
+    const kind = /\{(\w+)\}/.exec(pattern)?.[1];
+    if (kind === undefined) {
+      names.add(pattern);
+      continue;
+    }
+    for (const id of kinds[kind] ?? []) names.add(pattern.replace(`{${kind}}`, id));
+    if (role === "traits" && kind !== "ability" && kind !== "save") names.add(pattern.replace(`{${kind}}`, "{choice}"));
+  }
+  // A wider name bears on every narrower one (`attack` on `attack.melee`, `save` on each save), so each is offered too.
+  for (const n of [...names]) {
+    const parts = n.split(".");
+    for (let i = 1; i < parts.length; i++) if (!parts.slice(0, i).join(".").includes("{")) names.add(parts.slice(0, i).join("."));
+  }
+  // The bonus types: those the ruleset stacks, the armour's own, and every one a row of the layer's tables already writes.
+  const types = new Set<string>(rules.bonuses.stack);
+  for (const a of Object.values(rows("armor"))) if (typeof a.type === "string" && a.type !== "") types.add(a.type);
+  for (const r of D20_TABLE_ROLES) {
+    for (const row of Object.values(rows(r))) {
+      const mods = row.modifiers;
+      if (Array.isArray(mods)) for (const m of mods) if (isRecord(m) && typeof m.type === "string" && m.type !== "") types.add(m.type);
+    }
+  }
+  return { names: [...names].sort(), types: [...types].sort() };
 }
 
 // ---------------------------------------------------------------- functions, actions, records

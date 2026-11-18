@@ -674,6 +674,8 @@ Each **block** says what it reads as, what they are doing, when (**At a set time
 
 In play the GM rules by them: it reads a sheet before it rules, says what each outcome will do, rolls once with `roll`, and applies the outcome (the skill `ruleset-and-sheets`). When the dice are rolled at all is [How checks are decided](#how-checks-are-decided).
 
+Under the tabletop rules, a feat, a race, a condition, a size, a weapon or a piece of armour is a row of its table in **Data tables**, and what it does to the numbers is its **modifiers**. A row's modifiers open as a form, a card for each: **What it changes**, offered from what this world's totals and the rules' procedures ask for (any other word is taken, and changes nothing until a total names it), its **Value** (a number, or a formula with `self`), its **Bonus type**, offered from the types the world's rules name, **When it counts** (a formula), and a **Note**. **Add a modifier** adds one; the bin takes one away. What cannot work is said under its field. A table's other cells are typed as they always are, and Build still makes no new table and adds no column.
+
 ### Combat and encounters
 
 Only a world whose ruleset has **Combat** has fights: initiative, the action economy, the hit-point pool, when someone is down, the sides and when a fight is over. Combat actions are actions with a cost; an attack's check reads the target's defence.
