@@ -1,5 +1,6 @@
 // `rpe serve`: RPE in the foreground.
 
+import { existsSync } from "node:fs";
 import { type App, lineLog, openApp } from "../app";
 import { copyUpdate, isInstalledCopy, recordedSource } from "../app-copy";
 import { currentKeys, NO_OWNER } from "../auth";
@@ -65,9 +66,11 @@ async function serving(paths: DataPaths, config: AppConfig, io: CliIO, options: 
           ...(source === null ? {} : { copy: copyUpdate(paths.root, source, startsOn) }),
         };
   // How the run before this one ended, and what this run is: the log's first line says why RPE started, and this run's record is written for the next start to read.
+  // The data folder is new in this start only where its database is not there yet: opening it is what makes it.
+  const fresh = !existsSync(paths.database);
   const previous = await readRun(paths.root);
   await beginRun(paths.root, options.version, io.now());
-  const started = startedLine(previous, options.version, await runByService(paths, io));
+  const started = startedLine(previous, options.version, await runByService(paths, io), fresh);
   const failed = (error: unknown): EndingAsk => ({ why: "failed", error: error instanceof Error ? error.message : String(error) });
   let app: App;
   try {

@@ -60,12 +60,15 @@ export async function endRun(root: string, ending: EndingAsk, at: number): Promi
 
 /**
  * The line that opens the log of a run: when it started is the line's own time; which build, and why it started, in words to the person who
- * reads the Runtime page, from how the run before it ended (`previous`), and whether RPE's service started it (`service`).
+ * reads the Runtime page, from how the run before it ended (`previous`), whether RPE's service started it (`service`), and whether the data folder
+ * was made in this start (`fresh`: the database it opens did not exist). With no record of an earlier run it says only that, and "first start" only
+ * for a data folder made in this start: a build that kept no record leaves none behind, so an update from one reads the same as a first start.
  */
-export function startedLine(previous: RunRecord | null, build: string, service: boolean): { message: string; fields: Record<string, JsonValue> } {
+export function startedLine(previous: RunRecord | null, build: string, service: boolean, fresh: boolean): { message: string; fields: Record<string, JsonValue> } {
   const head = `RPE started on build ${build}`;
   const by = service ? ", started by its service," : "";
-  if (previous === null) return { message: `${head}. It holds no record of an earlier run on this data folder, so this is its first start here.`, fields: { build, why: "first start" } };
+  if (previous === null && fresh) return { message: `${head}. This data folder was made in this start, so it is RPE's first start here.`, fields: { build, why: "first start" } };
+  if (previous === null) return { message: `${head}. It holds no record of an earlier run, so it cannot say why it started.`, fields: { build, why: "no record of an earlier run", service } };
   const earlier: Record<string, JsonValue> = { build, previousBuild: previous.build, previousStarted: previous.started };
   const ending = previous.ending;
   if (ending === null) {
