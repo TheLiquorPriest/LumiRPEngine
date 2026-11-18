@@ -130,7 +130,7 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
   const second = await play(b, "I order a drink.");
   await play(b, "I count my coins.");
   const told = JSON.stringify(b.model.requests.at(-2)?.messages);
-  expect(told).toContain(`A job finished: ${id(briefs.done)} (historian). Its brief: ${briefs.done} Its report: Bram's mood is recorded as sour. Of what it recorded, these took effect now: set.`);
+  expect(told).toContain(`A job finished: ${id(briefs.done)} (historian). Its brief: ${briefs.done} Its report: Bram's mood is recorded as sour. Took effect now: set on entity:bram,`);
   expect(told).toContain(`A job failed before it finished: ${id(briefs.failed)} (historian). Its brief: ${briefs.failed}`);
   expect(told).toContain(`A job was cancelled before it finished: ${id(briefs.cancelled)} (historian). Its brief: ${briefs.cancelled}`);
   expect(told.match(/A job finished/g)).toHaveLength(1);
@@ -196,6 +196,8 @@ function breakSetHandler(b: TurnBed): LiveEvent[] {
         };
   };
   b.turns.store.env.registry = { ...registry, get: broken };
+  // The fold of a user whose turns were read before keeps the registry it was first given.
+  b.turns.store.envOf(USER).registry = b.turns.store.env.registry;
   const published: LiveEvent[] = [];
   const publish = b.app.live.publish.bind(b.app.live);
   b.app.live.publish = (chat, event) => {
@@ -227,8 +229,9 @@ test("an engine handler that throws while world_apply works out a call is told t
   const published = breakSetHandler(b);
   const turn = await play(b, "I sit at the bar.");
 
-  const answered = JSON.stringify(b.model.requests[1]!.messages);
-  expect(answered).toContain("Operation 1 (set): the engine cannot apply this at all (failed).");
+  // What a tool result carries as `details` is for the trace and the pages; the model is sent its content alone.
+  const answered = JSON.stringify(b.model.requests[1]!.messages.map((m) => ("details" in m ? { ...m, details: undefined } : m)));
+  expect(answered).toContain("world_apply failed in the engine, not in your call: the fault is in RPE's log. Nothing was recorded.");
   expect(answered).not.toContain("the set handler broke");
   expect(b.turns.store.user(USER).stateAt(turn).state.world.entities.bram?.fields.mood).toBe("steady");
   expect(b.logged.some((l) => l.level === "error" && l.fields?.op === "set" && l.fields.error === "the set handler broke")).toBe(true);

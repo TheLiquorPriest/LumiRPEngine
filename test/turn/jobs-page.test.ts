@@ -36,9 +36,9 @@ test("a page lists the jobs of the user and of a chat, each with how it stands, 
   b.host.send(CHAT, "I open the keeper's log.");
   const turn = await settledTurn(b, (await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET })).generationId!);
 
-  const mine = await b.page<{ jobs: JobView[] }>("GET", "/api/v1/jobs");
+  const mine = await b.page<{ items: JobView[]; next: string | null }>("GET", "/api/v1/jobs");
   expect(mine.status).toBe(200);
-  expect(mine.body.jobs).toEqual([
+  expect(mine.body.items).toEqual([
     {
       id: expect.any(String),
       agent: "historian",
@@ -50,14 +50,14 @@ test("a page lists the jobs of the user and of a chat, each with how it stands, 
       usage: expect.objectContaining({ calls: expect.any(Number), input: expect.any(Number), output: expect.any(Number) }),
     },
   ]);
-  const [job] = mine.body.jobs;
-  expect((await b.page<{ jobs: JobView[] }>("GET", `/api/v1/chats/${CHAT}/jobs`)).body.jobs).toEqual(mine.body.jobs);
-  expect((await b.page<{ jobs: JobView[] }>("GET", "/api/v1/chats/chat-elsewhere/jobs")).body).toEqual({ jobs: [] });
+  const [job] = mine.body.items;
+  expect((await b.page<{ items: JobView[] }>("GET", `/api/v1/jobs?chat=${CHAT}`)).body.items).toEqual(mine.body.items);
+  expect((await b.page<{ items: JobView[]; next: string | null }>("GET", "/api/v1/jobs?chat=chat-elsewhere")).body).toEqual({ items: [], next: null });
 
   const cancelled = await b.page<{ job: JobView }>("POST", `/api/v1/jobs/${job!.id}/cancel`);
   expect(cancelled.status).toBe(200);
   expect(cancelled.body.job).toMatchObject({ id: job!.id, state: "cancelled", ended: expect.any(Number) });
-  expect((await b.page<{ jobs: JobView[] }>("GET", "/api/v1/jobs")).body.jobs.map((j) => [j.id, j.state])).toEqual([[job!.id, "cancelled"]]);
+  expect((await b.page<{ items: JobView[] }>("GET", "/api/v1/jobs")).body.items.map((j) => [j.id, j.state])).toEqual([[job!.id, "cancelled"]]);
   // Cancelled once, it is given again as it ended; a job nobody has is no job.
   expect((await b.page<{ job: JobView }>("POST", `/api/v1/jobs/${job!.id}/cancel`)).body.job.state).toBe("cancelled");
   expect((await b.page<{ error: string }>("POST", "/api/v1/jobs/job-nobody-has/cancel")).status).toBe(404);
