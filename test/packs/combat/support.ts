@@ -47,10 +47,10 @@ export function fightWorld(patch: (w: WorldDoc) => void = () => undefined): Worl
   return world;
 }
 
-/** The fight started with `foes` (ids or a selector) on a working copy of the world's start. */
-export function started(world: WorldDoc, foes: unknown = ["goblin", "bandit"], seed = "start", registry = reg): Working {
+/** The fight started with `foes` (ids or a selector) on a working copy of the world's start; `party` names the POV's side where it has others than the POV (the call's own sides: nobody joins by themselves). */
+export function started(world: WorldDoc, foes: unknown = ["goblin", "bandit"], seed = "start", registry = reg, party?: readonly string[]): Working {
   const w = new Working(registry, world, startState(world, registry));
-  const out = applyEffects(registry, w, [{ type: "combat.start", args: { foes: foes as never, roll_initiative: true } }], { bindings: { self: POV }, rng: createRng(seed) });
+  const out = applyEffects(registry, w, [{ type: "combat.start", args: { foes: foes as never, ...(party === undefined ? {} : { with: [...party] }), roll_initiative: true } }], { bindings: { self: POV }, rng: createRng(seed) });
   if (out.rejected.length > 0) throw new Error(out.rejected[0]?.rejection.reason);
   return w;
 }

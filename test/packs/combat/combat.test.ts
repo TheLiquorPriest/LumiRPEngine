@@ -71,16 +71,16 @@ describe("initiative", () => {
     expect(applyEffects(reg, w, [{ type: "combat.start", args: {} }], { bindings: { self: POV }, rng: createRng("x") }).rejected[0]?.rejection.code).toBe("no_foes");
   });
 
-  // hardening: allies and those hostile to the POV no longer join a fight by themselves; the sides are the call's.
-  test.skip("an ally joins the POV's side, and the ally of a foe joins the foes", () => {
+  // The sides are the call's: whoever it names with the POV is on his side, and no friend or foe of anyone is added (830f55171).
+  test("the people the call names on the POV's side are on it, and no one else joins either side", () => {
     const world = fightWorld((w) => {
       w.entities.dev!.fields = { ...w.entities.dev!.fields, place: "home" };
-      w.ruleset!.combat!.sides = { ally: "has_rel(self, 'friend', other)" };
       w.entities.dev!.relations.push({ type: "friend", to: POV });
     });
-    const enc = encounterOf(started(world, ["goblin"]).state);
+    const enc = encounterOf(started(world, ["goblin"], "start", reg, [POV, "dev"]).state);
     expect(enc?.order.find((f) => f.id === "dev")?.side).toBe("party");
     expect(enc?.order.some((f) => f.id === "bandit")).toBe(false);
+    expect(encounterOf(started(world, ["goblin"]).state)?.order.some((f) => f.id === "dev")).toBe(false);
   });
 });
 
@@ -228,8 +228,7 @@ describe("everyone else's turns", () => {
     expect(plan(manual, started(manual).state, "strike", { target: "goblin" }).events.filter((e) => e.type === "combat.act")).toHaveLength(1);
   });
 
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("tactics: attack the most threatening foe; a hurt fighter a foe is after guards instead", () => {
+  test("tactics: attack the most threatening foe; a hurt fighter a foe is after guards instead", () => {
     const world = fightWorld((w) => {
       initiative(w, "self.dex * 10");
       w.entities.dev!.fields = { ...w.entities.dev!.fields, place: "home" };
@@ -237,7 +236,7 @@ describe("everyone else's turns", () => {
       w.entities.dev!.relations.push({ type: "friend", to: POV });
       w.entities.dev!.fields.max_hp = 30;
     });
-    const w = started(world, ["goblin"]);
+    const w = started(world, ["goblin"], "start", reg, [POV, "dev"]);
     // The goblin goes first and picks Dev, who has the most HP.
     const p = plan(world, w.state, null);
     const first = p.events.find((e) => e.type === "combat.act");

@@ -52,6 +52,9 @@ function allyWorld(patch: (w: WorldDoc) => void = () => undefined): WorldDoc {
   });
 }
 
+/** The fight of `allyWorld` with Dev named on the POV's side: the sides are the call's, and nobody joins a fight by themselves (830f55171). */
+const withDev = (world: WorldDoc, foes?: unknown) => started(world, foes, "start", reg, [POV, "dev"]);
+
 /** The Modern profile on the modern starter with Danny as the only foe at the POV's home; the rest of his household is out. `seed` starts the fight. */
 function starterFight(seed = "start"): { registry: Registry; world: WorldDoc; state: WorldState } {
   const registry = createRegistry(ALL_PACKS);
@@ -66,10 +69,9 @@ function starterFight(seed = "start"): { registry: Registry; world: WorldDoc; st
 }
 
 describe("leaving a fight", () => {
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("walking out ends the fight for the POV: no one fights on unseen, and the walk takes its time", () => {
+  test("walking out ends the fight for the POV: no one fights on unseen, and the walk takes its time", () => {
     const world = allyWorld();
-    const w = started(world);
+    const w = withDev(world);
     expect(encounterOf(w.state)?.order.find((f) => f.id === "dev")?.side).toBe("party");
     const p = plan(world, w.state, "walk_out");
     expect(dataOf(p.events.find((e) => e.type === "combat.end"))).toMatchObject({ reason: "left", winner: null });
@@ -102,8 +104,7 @@ describe("leaving a fight", () => {
 });
 
 describe("the clock in a fight", () => {
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("a fight's turns take no clock time, whatever the POV does; a skip the player asks for ends the fight first, then runs", () => {
+  test("a fight's turns take no clock time, whatever the POV does; a skip the player asks for ends the fight first, then runs", () => {
     const world = fightWorld((w) => {
       povFirst(w);
       w.actions.persuade = { id: "persuade", label: "Persuade", params: {}, requires: [], outcomes: { default: [] }, duration: "10" };
@@ -120,7 +121,8 @@ describe("the clock in a fight", () => {
     const skip = withoutAmbient(() => planTurn({ registry: reg, world, state: fight, runSeed: "run", seed: "skip", kind: "normal", userTexts: ["wait an hour"], intent: timelapseIntent({ type: "duration", minutes: 60 }) }));
     expect(skip.events.filter((e) => e.type === "combat.end").map((e) => dataOf(e).reason)).toEqual(["skip"]);
     expect(encounterOf(fold(reg, world, fight, skip.events))).toBeNull();
-    expect(skip.combat).toHaveLength(1);
+    // Nothing words the end of a fight a skip breaks off (830f55171).
+    expect(skip.combat).toEqual([]);
     expect(skip.elapsedMinutes).toBe(60);
     expect(skip.timelapse).not.toBeNull();
   });
@@ -325,14 +327,13 @@ describe("no fight stalls", () => {
     for (const good of [0, 4]) expect(issues(good)).toEqual([]);
   });
 
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("two hurt fighters don't guard forever while the POV is down", () => {
+  test("two hurt fighters don't guard forever while the POV is down", () => {
     const world = allyWorld((w) => {
       w.entities.dev!.fields.hp = 2;
       w.entities.goblin!.fields.hp = 1;
       w.entities.bandit!.fields.place = "cafe";
     });
-    const w = started(world, ["goblin"]);
+    const w = withDev(world, ["goblin"]);
     w.apply({ type: "set", entity: POV, field: "hp", value: 0 });
     let state = w.state;
     const acts: string[] = [];
@@ -345,12 +346,11 @@ describe("no fight stalls", () => {
     expect(acts).toContain("strike");
   });
 
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("a POV who is down sees one round a turn", () => {
+  test("a POV who is down sees one round a turn", () => {
     const world = allyWorld((w) => {
       for (const id of ["goblin", "bandit"]) w.entities[id]!.fields.max_hp = 40;
     });
-    const w = started(world);
+    const w = withDev(world);
     w.apply({ type: "set", entity: POV, field: "hp", value: 0 });
     let state = w.state;
     const rounds: number[] = [encounterOf(state)?.round ?? 0];
@@ -405,14 +405,14 @@ describe("acts", () => {
     expect(encounterOf(view)).toEqual(encounterOf(other));
   });
 
-  // hardening: the fight's sides are the call's now, so nobody joins it by themselves and no order is rolled.
-  test.skip("the start line gives no total for someone the POV can't see", () => {
+  test("the start line gives no total for someone the POV can't see", () => {
     const world = fightWorld((w) => {
       povFirst(w);
       w.entities.bandit!.visibility = "secret";
-      w.entities.bandit!.relations.push({ type: "hostile", to: POV });
+      // A fight is the people the call names: this one names both foes (a player's own start names one target).
+      w.actions.ambush = { id: "ambush", label: "Ambush", params: {}, requires: [], outcomes: { default: [{ type: "combat.start", args: { foes: ["goblin", "bandit"], roll_initiative: true } }] }, duration: "0", combat: { cost: {}, start: true } };
     });
-    const p = plan(world, startState(world, reg), "fight", { target: "goblin" });
+    const p = plan(world, startState(world, reg), "ambush", {});
     const order = encounterOf(fold(reg, world, startState(world, reg), p.events))?.order ?? [];
     expect(order.map((f) => f.id).sort()).toEqual(["bandit", "goblin", POV]);
     const line = p.combat.find((l) => l.includes(String(order.find((f) => f.id === "goblin")?.init)));
