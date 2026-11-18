@@ -12,7 +12,7 @@
 // nothing, its fact is answered in words for the page, with a status by what kind of fact it is. A
 // job's change of state reaches every page that follows his jobs through `JOB_KIND` (`jobs.ts`).
 
-import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, StorePort, Usage, UserScope } from "rp-harness/contract";
+import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, Usage, UserScope } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, type Infer, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
 import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
 import { harnessSettings } from "../app/setting-list";
@@ -25,28 +25,6 @@ import { NO_SESSION } from "./turns";
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
-
-/**
- * The jobs started in the last 24 hours as the limit `jobs.perDay` counts them, so the page and the refusal give one number: RPH counts each job it
- * lets start (never one it refused, and one cancelled still stands) in the usage book it keeps through the store, one document for each UTC hour
- * (`usage/hours/2026-11-17T13`, a list `starts` of `{ at, all }`). The contract gives no call that reads the count, so it is read from those documents.
- */
-async function jobsStartedInDay(store: StorePort, user: string, now: number): Promise<number> {
-  const since = now - DAY_MS;
-  let started = 0;
-  for (let hour = Math.floor(since / HOUR_MS) * HOUR_MS; hour <= now; hour += HOUR_MS) {
-    const doc = await store.get({ user }, `usage/hours/${new Date(hour).toISOString().slice(0, 13)}`);
-    const starts = typeof doc === "object" && doc !== null && !Array.isArray(doc) ? doc["starts"] : undefined;
-    if (!Array.isArray(starts)) continue;
-    for (const item of starts) {
-      if (typeof item === "object" && item !== null && !Array.isArray(item) && typeof item["at"] === "number" && item["at"] > since && typeof item["all"] === "number") started += item["all"];
-    }
-  }
-  return started;
-}
 
 /** Why RPH started no job, or why a control of one did nothing, in RPE's words for the page: RPH gives the fact and its numbers. */
 export function refusalWords(refusal: JobRefusal): string {
@@ -132,8 +110,8 @@ const jobShownReply = shape.named(
 
 const jobLimitShown = shape.named(
   "JobLimitShown",
-  "A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against over the last 24 hours, or now for the jobs at once; null where it counts no day's use.",
-  shape.object({ key: T, value: shape.json(), used: shape.nullable(N) }),
+  "A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against: the jobs running now for the jobs at once, the jobs started over the window for the jobs in a day (with the window and the limit as the harness counts them), else the tokens used over the last 24 hours; null where it counts no use.",
+  shape.object({ key: T, value: shape.json(), used: shape.nullable(N), window: opt(N, "For the jobs in a day: the window the count is over, in milliseconds back from now.") }),
 );
 const jobSwitchesReply = shape.named(
   "JobSwitchesReply",
@@ -179,26 +157,26 @@ export function jobRoutes(deps: JobRoutesDeps) {
     return { job: await jobOf(user, id) };
   };
 
-  /** The switches, with each limit in force for jobs (for the chat's levels, or the shared ones) and its use over the last 24 hours, as the limit counts it. */
+  /** The switches, with each limit in force for jobs (for the chat's levels, or the shared ones) and its use: the jobs in a day as the harness counts them, with its window and its limit. */
   const switches = async (user: string, chat: string | undefined) => {
     // The settings that limit jobs, as RPH lists them: its `jobs.*` settings (none per connection) and the day's tokens of every agent.
     const listed = harnessSettings();
     const defs = listed.filter((s) => (s.key.startsWith("jobs.") && !s.key.includes("<")) || s.key === "limits.day.tokens");
     const weightDef = listed.find((d) => d.key === "limits.cachedWeight");
     const read = chat === undefined ? deps.shared() : readConfig(await portTexts(turns.files, { user, chat, session: NO_SESSION }), null, weightDef === undefined ? defs : [...defs, weightDef]);
-    const [held, running, day, jobsDay] = await Promise.all([jobs.switches(user), jobs.list({ user, states: ["running", "asking"] }), turns.harness.usage.day(user), turns.harness.usage.day(user, "jobs")]);
-    const started = await jobsStartedInDay(turns.env.store, user, turns.env.clock.now());
+    const [held, running, day, jobsDay, started] = await Promise.all([jobs.switches(user), jobs.list({ user, states: ["running", "asking"] }), turns.harness.usage.day(user), turns.harness.usage.day(user, "jobs"), jobs.dayCount(chat === undefined ? { user } : { user, chat, session: NO_SESSION })]);
     // Tokens as RPH counts them against a day's cap: sent, a token read again from a cache at `limits.cachedWeight`, and written.
     const weight = weightDef === undefined ? 1 : read.value(weightDef);
     const cached = typeof weight === "number" ? weight : 1;
     const tokens = (u: Usage): number => Math.round(u.input - u.cacheRead + u.cacheRead * cached) + u.output;
     const used: Record<string, number> = {
       "jobs.atOnce": running.jobs.length,
-      "jobs.perDay": started,
       "jobs.tokensPerDay": tokens(jobsDay),
       "limits.day.tokens": tokens(day),
     };
-    return { off: held.off, held: held.held, limits: defs.map((def) => ({ key: def.key, value: read.value(def), used: used[def.key] ?? null })) };
+    // The jobs in a day from the one place that holds jobs to it: the harness's count, its window and its limit.
+    const limits = defs.map((def) => (def.key === "jobs.perDay" ? { key: def.key, value: started.max, used: started.count, window: started.window } : { key: def.key, value: read.value(def), used: used[def.key] ?? null }));
+    return { off: held.off, held: held.held, limits };
   };
 
   return [

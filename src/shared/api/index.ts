@@ -1171,11 +1171,13 @@ export interface JobLimitsAsk {
   askAt?: number;
 }
 
-/** A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against over the last 24 hours, or now for the jobs at once; null where it counts no day's use. */
+/** A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against: the jobs running now for the jobs at once, the jobs started over the window for the jobs in a day (with the window and the limit as the harness counts them), else the tokens used over the last 24 hours; null where it counts no use. */
 export interface JobLimitShown {
   key: string;
   value: JsonValue;
   used: number | null;
+  /** For the jobs in a day: the window the count is over, in milliseconds back from now. */
+  window?: number;
 }
 
 /** Why a job was not started or a control did not apply: jobs switched off; the day's count or tokens reached; a limit that is no whole number above 0; no such agent or no model for it; no such job; a job not in a state the control applies to, or not stopped at one of its own limits; his job-start hook, with its reason; a tag check of none of his connections, or whose part is missing or not as it needs. */
@@ -2865,12 +2867,6 @@ export interface SessionClosed {
   change: number | null;
 }
 
-/** What closed a closed session and when: you (your own close), a turn (a scene changing at it), the end of an agent's or a talk's run, or the end of a job; and the time, in milliseconds since 1970, null where RPE holds none (a session its own record does not date). */
-export interface SessionClosing {
-  by: "you" | "turn" | "run" | "job";
-  at: number | null;
-}
-
 /** What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why. */
 export interface SessionCompactAnswer {
   session: SessionShown;
@@ -2911,7 +2907,7 @@ export interface SessionReply {
   webKey: { made: number; ends: number | null } | null;
 }
 
-/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), what closed it and when, a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
+/** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), when it was closed and what closed it (you, a turn's scene change, RPE's own close, the end of its run or of its job), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
 export interface SessionShown {
   id: string;
   user: string;
@@ -2924,13 +2920,14 @@ export interface SessionShown {
   opened: number;
   closedBy?: string;
   by?: "user";
+  closedAt?: number;
+  closedHow?: "user" | "turn" | "host" | "run" | "job";
   from?: { chat: string; session: string; turn: string };
   turns: number;
   compactAsked?: true;
   held?: { hook: string; reason: string };
   hooked?: string;
   scene?: string;
-  closing?: SessionClosing;
 }
 
 /** A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first. */

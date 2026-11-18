@@ -33,13 +33,14 @@ export function parentWords(session: SessionShown): string {
   return `started by ${parent.agent}${parent.turn === undefined ? "" : ` in turn ${parent.turn}`}`;
 }
 
-/** What closed a closed session, in words, with when where RPE holds the time: you, a turn's scene change, the end of its job, or the end of its run (an agent's or a talk's). */
+/** What closed a closed session and when, in words, as RPH says: you, a turn's scene change, RPE's own close, the end of its run (an agent's or a talk's), or the end of its job. */
 export function closingWords(session: SessionShown): string {
-  const { closing } = session;
-  if (closing === undefined) return session.by === "user" ? "closed by you" : "closed";
-  const by = closing.by === "you" ? "you" : closing.by === "turn" ? "a turn's scene change" : closing.by === "job" ? "the end of its job" : "the end of its run";
-  return `closed by ${by}${closing.at === null ? "" : ` on ${when(closing.at)}`}`;
+  const { closedHow, closedAt } = session;
+  if (closedHow === undefined) return session.by === "user" ? "closed by you" : "closed";
+  return `closed by ${CLOSED_BY[closedHow]}${closedAt === undefined ? "" : ` on ${when(closedAt)}`}`;
 }
+
+const CLOSED_BY: Readonly<Record<NonNullable<SessionShown["closedHow"]>, string>> = { user: "you", turn: "a turn's scene change", host: "RPE", run: "the end of its run", job: "the end of its job" };
 
 /** The compactions the page lists: every one the file holds, the newest first. */
 export function newestFirst(compactions: readonly CompactionShown[]): CompactionShown[] {

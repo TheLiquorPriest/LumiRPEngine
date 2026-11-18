@@ -4864,8 +4864,8 @@ export interface DefinitionRun {
   connection: { id: string; name: string } | null;
   model: string | null;
   effort: Effort | null;
-  limits?: DefinitionLimitsView;
   sent: Effort | null;
+  limits?: DefinitionLimitsView;
 }
 ```
 
@@ -5548,13 +5548,15 @@ export interface JobLimitsAsk {
 
 ### `JobLimitShown`
 
-A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against over the last 24 hours, or now for the jobs at once; null where it counts no day's use.
+A limit in force for jobs: its setting's key, its value (null: none), and the use it is held against: the jobs running now for the jobs at once, the jobs started over the window for the jobs in a day (with the window and the limit as the harness counts them), else the tokens used over the last 24 hours; null where it counts no use.
 
 ```ts
 export interface JobLimitShown {
   key: string;
   value: JsonValue;
   used: number | null;
+  /** For the jobs in a day: the window the count is over, in milliseconds back from now. */
+  window?: number;
 }
 ```
 
@@ -5612,7 +5614,6 @@ Where a job stands.
 export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
 ```
 
-### `JobSwitchesReply`
 ### `JobStopper`
 
 Who ended a job before its agent was done: an agent, by its job_cancel, with the run it worked in; the owner, by his own press; or RPH itself, and why: a limit reached, the turn that started it left the path, RPE stopping, or a restart that found it cut off.
@@ -5621,6 +5622,7 @@ Who ended a job before its agent was done: an agent, by its job_cancel, with the
 export type JobStopper = { by: "agent"; agent: AgentRef; run: string } | { by: "user" } | { by: "engine"; reason: "limit" | "off-path" | "stopping" | "restart" };
 ```
 
+### `JobSwitchesReply`
 
 His two switches over all his jobs (switched off: none starts; held: those running wait at their next call and none starts), and the limits in force for jobs with the day's use.
 
@@ -5660,9 +5662,9 @@ export interface JobView {
   usage: Usage;
   report?: string;
   limit?: LimitHit;
-  /** The attachments its start named, by name. */
   /** For a job ended before its agent was done (cancelled, at a limit, off the path, interrupted): who ended it. */
   stoppedBy?: JobStopper;
+  /** The attachments its start named, by name. */
   attach?: string[];
   /** The limits of its own its start gave. */
   limits?: JobLimits;
@@ -8120,17 +8122,6 @@ export interface SessionClosed {
 }
 ```
 
-### `SessionClosing`
-
-What closed a closed session and when: you (your own close), a turn (a scene changing at it), the end of an agent's or a talk's run, or the end of a job; and the time, in milliseconds since 1970, null where RPE holds none (a session its own record does not date).
-
-```ts
-export interface SessionClosing {
-  by: "you" | "turn" | "run" | "job";
-  at: number | null;
-}
-```
-
 ### `SessionCompactAnswer`
 
 What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why.
@@ -8203,7 +8194,7 @@ export interface SessionReply {
 
 ### `SessionShown`
 
-A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), what closed it and when, a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.
+A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), when it was closed and what closed it (you, a turn's scene change, RPE's own close, the end of its run or of its job), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for.
 
 ```ts
 export interface SessionShown {
@@ -8218,13 +8209,14 @@ export interface SessionShown {
   opened: number;
   closedBy?: string;
   by?: "user";
+  closedAt?: number;
+  closedHow?: "user" | "turn" | "host" | "run" | "job";
   from?: { chat: string; session: string; turn: string };
   turns: number;
   compactAsked?: true;
   held?: { hook: string; reason: string };
   hooked?: string;
   scene?: string;
-  closing?: SessionClosing;
 }
 ```
 

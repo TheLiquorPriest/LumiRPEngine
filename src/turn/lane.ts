@@ -119,6 +119,7 @@ function placingJobs(harness: Harness, place: (user: string, chat: string) => Pr
       list: (filter) => jobs.list(filter),
       get: (user, id) => jobs.get(user, id),
       switches: (user) => jobs.switches(user),
+      dayCount: (scope, connection) => jobs.dayCount(scope, connection),
       start: async (scope, start) => {
         if ("chat" in scope && scope.chat !== NO_CHAT) await place(scope.user, scope.chat);
         return await jobs.start(scope, start);

@@ -47,6 +47,7 @@ function keptJobs(): JobsApi & { all: JobView[] } {
     },
     start: unreached,
     switches: unreached,
+    dayCount: unreached,
     setSwitches: unreached,
     hold: unreached,
     letGo: unreached,
