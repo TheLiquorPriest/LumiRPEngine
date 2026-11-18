@@ -29,6 +29,8 @@ export interface SliceSlots {
 /** One slice: what it is, where and how it was found, and its text when the spoiler gate is open. */
 export function SliceCard(props: { slice: PromptSliceShown; all: readonly PromptSliceShown[]; gateOpen: boolean; slots: SliceSlots }) {
   const { slice } = props;
+  // A part is in the prompt where it has a place there, found by a finder or known only by its place in the chat application's layout (a preset with no map yet): the route gives no `found` for the latter.
+  const inPrompt = slice.found !== undefined || slice.at.length > 0;
   return (
     <li class="lre-section" data-slice={slice.marker}>
       <div class="lre-section-head">
@@ -42,10 +44,14 @@ export function SliceCard(props: { slice: PromptSliceShown; all: readonly Prompt
       <div class="lre-section-body">
         {slice.line === undefined ? null : <p class="rpe-line">{slice.line}</p>}
         <p class="rpe-meta">
-          {slice.found === undefined ? "Not found in this prompt." : `${counted(slice.length, "character")}, ${HOW_WORDS[slice.found]}${slice.breakdown === undefined ? "" : `; ${BREAKDOWN_WORDS[slice.breakdown]}`}.`}
+          {slice.found !== undefined
+            ? `${counted(slice.length, "character")}, ${HOW_WORDS[slice.found]}${slice.breakdown === undefined ? "" : `; ${BREAKDOWN_WORDS[slice.breakdown]}`}.`
+            : inPrompt
+              ? `${counted(slice.length, "character")}, known by its place in the chat application's layout.`
+              : "Not found in this prompt."}
           {slice.at.length === 0 ? "" : ` In ${slice.at.map((at) => `message ${at.message}, ${at.start} to ${at.end}`).join("; ")}.`}
         </p>
-        {slice.found === undefined ? null : props.gateOpen ? (
+        {!inPrompt ? null : props.gateOpen ? (
           <Disclosure summary="Its text" class="rpe-open">
             <Pre text={slice.text} mono={false} />
           </Disclosure>
