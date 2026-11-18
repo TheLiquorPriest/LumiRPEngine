@@ -1516,11 +1516,12 @@ export class UserStore {
     const head = showing.at(-1)?.node ?? null;
     const found = comparePaths(before, after);
     const branched = row.source_chat !== null && row.compared === null && after.length > 0 ? { from: row.source_chat, at: row.source_message } : null;
-    // Messages new to the path standing before a turn it had: inserted before a played turn, each with the first such turn after it.
+    // Messages new to the path standing before a turn it had: inserted before a played turn, each with the first such turn after it. A
+    // chat's first comparison has no path of the player's messages to insert into (a migration ties only the replies), so it finds none.
     const inserted: NonNullable<PathReport["inserted"]> = [];
     const hadTurn = new Set(oldTurns.map((e) => e.turn));
     let next: string | null = null;
-    for (let i = after.length - 1; i >= 0; i--) {
+    for (let i = after.length - 1; row.compared !== null && i >= 0; i--) {
       const e = after[i] as PathEntry;
       if (!was.has(e.message)) {
         if (next !== null) inserted.unshift({ message: e.message, before: next });
