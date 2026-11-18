@@ -11,11 +11,12 @@ import type { FoldDifference, MigrationChatShown, MigrationItemShown, MigrationR
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, PageHeader, Pre, Row, Section } from "../../frontend/components";
 import type { RpeClient } from "../client";
+import { jobEnded } from "../job-watch";
 import type { PageEntry } from "../page-entry";
 import { type PagedReading, usePaged, useRead } from "../reading";
 import { bytesWords, counted, errorWords } from "../words";
 import { CarriedOffer } from "./bootstrap";
-import { JobFollow, type JobRef } from "./jobs/follow";
+import { JobFollowLine, type JobRef, useJobFollow } from "./jobs/follow";
 import { GoingBack } from "./migration-going-back";
 import { ChatLabel, ChatName, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
 
@@ -205,6 +206,10 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   const { w } = props;
   const [open, setOpen] = useState(false);
   const [filing, setFiling] = useState<JobRef | null>(null);
+  const following = useJobFollow(filing, () => props.onDone());
+  // The press is made once while its job goes on: no second job is started beside the one under way.
+  const filingJob = following?.job ?? filing?.view ?? null;
+  const filingGoes = filingJob !== null && !jobEnded(filingJob.state);
   const split = waitingSplit(w);
   const words = (
     <span class="rpe-line">
@@ -217,7 +222,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   const switchOn = (path: string): Promise<string> =>
     app.client.call("POST /api/v1/migration/switch-on", {}, { body: { path } }).then((r) => {
       props.onDone();
-      return r.switched ? `On: written at ${r.to}.` : `Not written: ${r.to} is in force at the ${r.inForce.level} level already. Compare the two on the Files page and choose.`;
+      return r.switched ? `On: written at ${r.to}.` : r.inForce.text === r.attached ? `Already on: ${r.to} is in force at the ${r.inForce.level} level with this text.` : `Not written: ${r.to} is in force at the ${r.inForce.level} level already. Compare the two on the Files page and choose.`;
     });
   if (w.kind === "guidance" || w.kind === "agent" || w.kind === "skill") press = <Press label="Switch it on" kind="primary" run={() => switchOn(w.path)} />;
   else if (w.kind === "connection" && w.agent !== null) press = <PickConnection agent={w.agent} onDone={props.onDone} />;
@@ -273,8 +278,8 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   return (
     <li class="lre-stack" data-waiting={w.kind} data-done={w.done ? "true" : undefined}>
       {w.done ? <s>{words}</s> : words}
-      {w.done ? null : press}
-      {filing === null ? null : <JobFollow job={filing} what="The bootstrap job" onEnded={() => props.onDone()} />}
+      {w.done || filingGoes ? null : press}
+      {filing === null ? null : <JobFollowLine job={filing} what="The bootstrap job" watched={following} />}
     </li>
   );
 }
