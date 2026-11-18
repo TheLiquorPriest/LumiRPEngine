@@ -7,7 +7,9 @@
 import type { ComponentChildren } from "preact";
 import type { BuildsStatus, RestartState, ServiceHow, ServiceMemory } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section } from "../../../frontend/components";
-import { bytesWords, counted, when } from "../../words";
+import { bytesWords, counted, duration, when } from "../../words";
+import type { RpeClient } from "../../client";
+import type { Timers } from "../../roads";
 import { SettingName } from "../settings/names";
 
 export interface RestartShown {
@@ -15,9 +17,43 @@ export interface RestartShown {
   /** What the restart answered: where it stands, in RPE's words. */
   answer: BuildsStatus | null;
   problem: string | null;
+  /** Set once RPE has answered the restart and is not back yet: the page waits for it, and reads it again at each poll. */
+  waiting?: true;
+  /** Set once RPE answers again on a process that started after the restart: the build it runs, and how long it was from the press to that answer. */
+  back?: { build: string; tookMs: number };
 }
 
 export const NO_RESTART: RestartShown = { busy: false, answer: null, problem: null };
+
+/**
+ * Waits for RPE to come back after a restart: asks how RPE runs every `poll.every` (a read that fails while RPE is down is tried again), and when the
+ * process that answers started after `since` (the one the press was made against) says which build it runs and how long it took from the press.
+ * The returned function stops the waiting.
+ */
+export function watchRestart(client: Pick<RpeClient, "call">, since: number, pressed: number, poll: { every: number; timers: Timers }, onBack: (back: { build: string; tookMs: number }) => void): () => void {
+  let alive = true;
+  let timer: unknown = null;
+  const later = (): void => {
+    if (alive) timer = poll.timers.setTimeout(look, poll.every);
+  };
+  const look = (): void => {
+    timer = null;
+    client.call("GET /api/v1/service", {}).then(
+      (how) => {
+        if (!alive) return;
+        // The process pressed against answers for as long as it waits for the turns and jobs running: only one that started later is the restarted one.
+        if (how.since > since + 1000) onBack({ build: how.build, tookMs: poll.timers.now() - pressed });
+        else later();
+      },
+      later,
+    );
+  };
+  later();
+  return () => {
+    alive = false;
+    if (timer !== null) poll.timers.clearTimeout(timer);
+  };
+}
 
 /** Where a restart stands, in a line. */
 export const RESTART_WORDS: Readonly<Record<RestartState, ComponentChildren>> = {
@@ -65,9 +101,17 @@ export function ServiceView(props: ServiceViewProps) {
           <span>{restart.problem}</span>
         </Banner>
       )}
-      {restart.answer === null ? null : (
+      {restart.answer === null || restart.back !== undefined ? null : (
         <Banner tone="info" icon="refresh" title="Restart">
           <span data-restart>{restart.answer.words}</span>
+          {restart.waiting === true && restart.back === undefined ? <p class="lre-muted rpe-line" data-restart-waiting>Waiting for RPE to answer again…</p> : null}
+        </Banner>
+      )}
+      {restart.back === undefined ? null : (
+        <Banner tone="info" icon="check" title="RPE is back">
+          <span data-restart-back>
+            RPE is back on build {restart.back.build}; the restart took {duration(restart.back.tookMs)}.
+          </span>
         </Banner>
       )}
       {how === null ? (

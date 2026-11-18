@@ -3,10 +3,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
+import { askingClient, settle } from "../asking";
 import type { ServiceHow, ServiceLog, ServiceTimings } from "../../../src/shared/api";
 import { logAt, logFilterOf } from "../../../src/ui/pages/runtime";
 import { LogView, moreLines } from "../../../src/ui/pages/runtime/logs";
-import { canRestart, NO_RESTART, ServiceView } from "../../../src/ui/pages/runtime/service";
+import { canRestart, NO_RESTART, ServiceView, watchRestart } from "../../../src/ui/pages/runtime/service";
 import { TimingsView } from "../../../src/ui/pages/runtime/timings";
 import { banners, elements, expand, press, textOf } from "../vnodes";
 
@@ -49,6 +50,44 @@ describe("how RPE runs", () => {
     const byHand = textOf(expand(h(ServiceView, { how: { ...HOW, runs: "by hand", unit: null, restart: "by hand", memory: { ...HOW.memory, service: null } }, problem: null, restart: NO_RESTART, onRestart: () => undefined })));
     expect(byHand).toContain("300.0 MB");
     expect(byHand).not.toContain("Against its service's limit");
+  });
+
+  test("after a restart the page waits for a process that started later, then says it is back, on which build, and how long it took; a read that fails while RPE is down is tried again", async () => {
+    let clock = 10_000;
+    const timers: { fire: (() => void)[] } = { fire: [] };
+    const poll = {
+      every: 500,
+      timers: {
+        now: () => clock,
+        setTimeout: (fn: () => void) => {
+          timers.fire.push(fn);
+          return timers.fire.length;
+        },
+        clearTimeout: () => undefined,
+      } as unknown as Parameters<typeof watchRestart>[3]["timers"],
+    };
+    const { client, asked } = askingClient();
+    const back: { build: string; tookMs: number }[] = [];
+    watchRestart(client, HOW.since, 4_000, poll, (b) => back.push(b));
+    const next = async (answer: "down" | ServiceHow): Promise<void> => {
+      timers.fire.shift()?.();
+      const call = asked.at(-1);
+      if (answer === "down") call?.fail(new Error("RPE did not answer"));
+      else call?.answer(answer);
+      await settle();
+    };
+    await next("down");
+    await next({ ...HOW });
+    expect(back).toEqual([]);
+    clock = 16_500;
+    await next({ ...HOW, since: HOW.since + 12_000, build: "e5f6a7b8" });
+    expect(back).toEqual([{ build: "e5f6a7b8", tookMs: 12_500 }]);
+    expect(timers.fire).toEqual([]);
+    const tree = expand(h(ServiceView, { how: HOW, problem: null, restart: { busy: false, problem: null, waiting: true, back: back[0], answer: { running: "e5f6a7b8", disk: null, broken: null, extension: null, agree: true, restart: "restarting", update: null, words: "RPE is restarting now; this page is back in a few seconds." } }, onRestart: () => undefined }));
+    expect(textOf(tree)).toContain("RPE is back on build e5f6a7b8; the restart took 12.5 s.");
+    expect(textOf(tree)).not.toContain("this page is back in a few seconds");
+    const waiting = expand(h(ServiceView, { how: HOW, problem: null, restart: { busy: false, problem: null, waiting: true, answer: { running: "a1b2c3d4", disk: null, broken: null, extension: null, agree: true, restart: "waiting", update: null, words: "RPE is restarting." } }, onRestart: () => undefined }));
+    expect(textOf(waiting)).toContain("Waiting for RPE to answer again");
   });
 });
 

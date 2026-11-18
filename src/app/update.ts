@@ -599,13 +599,27 @@ export class Builds {
   }
 }
 
+/** What a restart onto the same files says of itself where it is asked for: that RPE is restarting and its page is back in a few seconds, or that nothing would start RPE again. */
+function restarting(state: BuildsStatus["restart"]): string {
+  switch (state) {
+    case "waiting":
+      return " RPE is restarting: it waits until no turn or job is running, and this page is back a few seconds after.";
+    case "restarting":
+      return " RPE is restarting now; this page is back in a few seconds.";
+    case "by hand":
+      return " RPE was started by hand, so nothing would start it again: it did not restart. Stop it, and start it again.";
+    default:
+      return "";
+  }
+}
+
 /** The builds in a sentence or two, as `rpe status` prints them and a page shows them; `extras` are what an installed copy adds. */
 function wordsOf(s: Omit<BuildsStatus, "words" | "update">, copy: boolean, extras: readonly string[] = []): string {
   const more = extras.length === 0 ? "" : ` ${extras.join(" ")}`;
   const extension = s.extension === null ? "the extension has not said its build yet" : `the extension is build ${s.extension}`;
   if (s.broken !== null) return `RPE runs build ${s.running}. ${copy ? `A new app file was not taken (${s.broken})` : `Its app file on disk was replaced by one that does not start (${s.broken})`}, so RPE goes on running build ${s.running}; ${extension}.${more}`;
-  if (s.disk === null) return `RPE runs build ${s.running}, from no single app file; ${extension}.${more}`;
-  if (s.disk === s.running) return `${s.agree ? `RPE runs build ${s.running}, the build of its app file on disk${s.extension === null ? `; ${extension}` : " and of the extension"}.` : `RPE runs build ${s.running}, the build of its app file on disk; ${extension}.`}${more}`;
+  if (s.disk === null) return `RPE runs build ${s.running}, from no single app file; ${extension}.${restarting(s.restart)}${more}`;
+  if (s.disk === s.running) return `${s.agree ? `RPE runs build ${s.running}, the build of its app file on disk${s.extension === null ? `; ${extension}` : " and of the extension"}.` : `RPE runs build ${s.running}, the build of its app file on disk; ${extension}.`}${restarting(s.restart)}${more}`;
   const head = `RPE runs build ${s.running}; its app file on disk is build ${s.disk}; ${extension}.`;
   switch (s.restart) {
     case "waiting":
