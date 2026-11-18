@@ -82,9 +82,6 @@
 // that runs them one after another, without the starting and loading a process of its own spends,
 // which is most of most files' time here. The two are kept apart, so neither run reads times in the
 // other's unit.
-//
-// The property suite (test/ledger/properties.test.ts) runs its everyday sample here, as everywhere
-// its count isn't set; `bun run test:properties` runs it whole.
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, loadavg, tmpdir } from "node:os";
