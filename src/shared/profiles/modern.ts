@@ -241,14 +241,14 @@ function occupation(label: string, count: number, skills: string[], feats: strin
 }
 
 const traitRows: Record<string, TableRow> = {
-  ...pick(SHARED_FEATS, ["simple_weapon_proficiency", "endurance", "great_fortitude", "improved_initiative", "iron_will", "lightning_reflexes", "mobility", "point_blank_shot", "precise_shot", "quick_draw", "run", "weapon_focus"]),
+  ...pick(SHARED_FEATS, ["simple_weapon_proficiency", "endurance", "great_fortitude", "improved_initiative", "iron_will", "lightning_reflexes", "mobility", "precise_shot", "quick_draw", "run", "weapon_focus"]),
   ...CLASSIC_MODERN_FEATS,
   ...pick(SHARED_FEATURES, ["evasion", "uncanny_dodge"]),
   ...pick(SHARED_CREATURE_TRAITS, ["animal", "natural_armor", "low_light_vision", "scent", "trip_bite"]),
 
   // Training with weapons and armour.
   personal_firearms_proficiency: trait("Personal Firearms", "feat", "No -4 to attack with a handgun or a longarm.", { grants: { proficiency: ["personal_firearms"] } }),
-  advanced_firearms_proficiency: trait("Automatic Fire", "feat", "No -4 on a weapon's automatic fire.", { requires: has("personal_firearms_proficiency") }),
+  advanced_firearms_proficiency: trait("Automatic Fire", "feat", "No -4 on automatic fire's roll against defence 10 for the square.", { requires: has("personal_firearms_proficiency") }),
   exotic_firearms_proficiency: trait("Heavy Weapon", "feat", "No -4 to attack with the heavy weapons taken as its choice: heavy_machine_guns, rocket_launchers or grenade_launchers.", { grants: { proficiency: [] }, requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
   archaic_weapons_proficiency: trait("Old Weapons", "feat", "No -4 to attack with a sword, a bow or another weapon of before guns.", { grants: { proficiency: ["archaic"] } }),
   exotic_melee_weapon_proficiency: trait("Exotic Melee Weapon", "feat", "No -4 to attack with the exotic melee weapon taken as its choice.", { grants: { proficiency: [] }, requires: `${BASE_ATTACK} >= 1` }),
@@ -257,7 +257,10 @@ const traitRows: Record<string, TableRow> = {
   armor_heavy: trait("Heavy Armour Training", "feat", "Heavy armour's whole bonus counts to defence; without the training only its lesser bonus does.", { requires: has("armor_medium") }),
 
   // Firearms.
-  double_tap: trait("Double Tap", "feat", "With a semi-automatic weapon, two rounds at one foe: -2 to attack, one more die of damage (the shot `double`).", { requires: `score(self, 'dex') >= 13 and ${has("point_blank_shot")}` }),
+  double_tap: trait("Double Tap", "feat", "With a semi-automatic weapon, two rounds at one foe: -2 to attack, one more die of damage (the shot `double`); without it the second round is wasted.", { requires: `score(self, 'dex') >= 13 and ${has("point_blank_shot")}` }),
+  point_blank_shot: trait("Close Shot", "feat", "+1 to attack and damage with a ranged weapon at 30 feet or nearer.", {
+    modifiers: [mod("attack.ranged", 1, { when: "distance <= 30", note: "30 feet or nearer" }), mod("damage.ranged", 1, { when: "distance <= 30", note: "30 feet or nearer" })],
+  }),
   burst_fire: trait("Burst Fire", "feat", "With an automatic weapon, five rounds at one foe: -4 to attack, two more dice of damage (the shot `burst`); without it the rounds add nothing.", { requires: `score(self, 'wis') >= 13 and ${all("personal_firearms_proficiency", "advanced_firearms_proficiency")}` }),
   strafe: trait("Strafe", "feat", "Automatic fire on a line of four squares in place of a square of two by two: name who stands in the line and give them the harm with a Reflex save against 15.", { requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
   quick_reload: trait("Quick Reload", "feat", "Puts in a box magazine or a speed loader as a free action, and loads a cylinder or an internal magazine as a move action.", { requires: `${BASE_ATTACK} >= 1` }),
@@ -409,10 +412,9 @@ const conditionRows: Record<string, TableRow> = {
 
 // ---------------------------------------------------------------- weapons
 
-/** The weapons table's extra columns: the magazine's kind, the weapon's size and hands, splash harm, and its rules in words. */
+/** The weapons table's extra columns: the weapon's size and hands, splash harm, and its rules in words. */
 const MODERN_WEAPON_COLUMNS: Record<string, ColumnDef> = {
   ...WEAPON_COLUMNS,
-  magazine_kind: { type: "text", optional: true, doc: "box, cylinder, internal or linked: what reloading it takes" },
   size: { type: "text", optional: true, doc: "The weapon's own size: tiny and small are light, large takes two hands, huge two hands and a rest" },
   hands: { type: "text", optional: true, doc: "How it is held: one, two, or two braced on a rest or a mount" },
   splash: { type: "int", optional: true, doc: "Harm to everyone within 5 feet of where it bursts" },
@@ -463,7 +465,7 @@ function gun(label: string, damage: string, range: number | null, fire: readonly
 const handgun = (label: string, damage: string, range: number, fire: readonly string[], magazine: number, kind: "box" | "cylinder" | "internal", size: string, more: GunMore = {}): TableRow => gun(label, damage, range, fire, magazine, kind, size, "one", more);
 const longarm = (label: string, damage: string, range: number, fire: readonly string[], magazine: number, kind: "box" | "internal" | "linked", size: string, more: GunMore = {}): TableRow => gun(label, damage, range, fire, magazine, kind, size, size === "huge" ? "two, braced" : "two", more);
 
-const SHOTGUN = "Its damage drops by 1 for each range increment past the first: name it with the harm.";
+const SHOTGUN = "Its damage drops by 1 for each range increment past the first.";
 const LONGARM = "-4 to attack a foe in the next square.";
 
 /** A weapon of the hand: damage, threat, training, how it is held, its damage types and size. */
@@ -623,6 +625,16 @@ const weaponRows: Record<string, TableRow> = {
   acid_flask: blast("Acid, a flask", "1d6", ["acid"], null, null, 10, "tiny", "A touch attack (say touch) at one foe: the harm to it, 1 to all within 5 feet; thrown at a square, only the splash.", { splash: 1, threat: 20 }),
   fire_bottle: blast("Fire bottle", "1d6", ["fire"], null, null, 10, "small", "Lighting the rag is a move action; it bursts in two rounds or when it strikes. A touch attack (say touch) at one foe: the harm to it, 1 to all within 5 feet, and 1d6 fire more the next round to the one struck.", { splash: 1, threat: 20 }),
 };
+
+// What distance does to a gun, as its row's own modifiers (counted while it is readied): a longarm at a foe 5 feet off takes -4, and
+// a shotgun's damage drops by 1 for each range increment past the first.
+const SHOTGUNS = ["shotgun_12ga", "shotgun_12ga_semi", "shotgun_12ga_box", "shotgun_10ga", "shotgun_sawed_off"];
+for (const [id, row] of Object.entries(weaponRows)) {
+  const more = [];
+  if (row.proficiency === "personal_firearms" && String(row.hands).startsWith("two")) more.push(mod(`attack.weapon.${id}`, -4, { when: "distance <= 5", note: "a longarm at the next square" }));
+  if (SHOTGUNS.includes(id)) more.push(mod(`damage.weapon.${id}`, `-max(0, ceil(distance / ${Number(row.range)}) - 1)`, { note: "shot spreading with range" }));
+  if (more.length > 0) row.modifiers = [...(Array.isArray(row.modifiers) ? row.modifiers : []), ...more];
+}
 
 // ---------------------------------------------------------------- armour
 
@@ -798,12 +810,16 @@ const NEGATIVE: Expr = "self.hp < 0 and self.hp > -10";
 /** Class defence, lost while helpless. */
 const CLASS_DEFENCE: Expr = "min(class_sum(self, 'defence'), limit(self, 'defended', 99))";
 
-/** The shots a firearm can make: what each needs of the weapon, the rounds it spends, what it adds, and the trait it wants. */
+/**
+ * The shots a firearm can make: what each needs of the weapon, the rounds it spends, what it adds, and the trait it wants. Without
+ * the trait a double tap or a burst is a plain shot, its other rounds wasted; automatic fire rolls against defence 10 for the square
+ * first, -4 without its training, and only then does each one in it save.
+ */
 const SHOTS: Record<string, ShotDef> = {
   single: { needs: "single", rounds: 1 },
-  double: { needs: "semi", rounds: 2, attack: -2, dice: 1, trait: "double_tap" },
-  burst: { needs: "auto", rounds: 5, attack: -4, dice: 2, trait: "burst_fire" },
-  auto: { needs: "auto", rounds: 10, area: 10, save: "ref", dc: 15, trait: "advanced_firearms_proficiency" },
+  double: { needs: "semi", rounds: 2, attack: -2, dice: 1, trait: "double_tap", without: { attack: 0 } },
+  burst: { needs: "auto", rounds: 5, attack: -4, dice: 2, trait: "burst_fire", without: { attack: 0 } },
+  auto: { needs: "auto", rounds: 10, area: 10, save: "ref", dc: 15, defence: 10, trait: "advanced_firearms_proficiency", without: { attack: -4 } },
 };
 
 /** The full round, as the budgets spend it. */
@@ -872,6 +888,8 @@ const D20: D20Def = {
     massive: { when: "amount >= total(self, 'damage_threshold') and self.hp >= 0", save: "fort", dc: 15, hp: "-1" },
     rest: { hours: 8, hp: PER_LEVEL, nonlethal: PER_LEVEL, daily: Object.keys(DAILY) },
   },
+  // An action point spent on a check, a save or an attack: 1d6 to the 7th level, 2d6 to the 14th, then 3d6, the highest kept.
+  boost: { gauge: "action_points", dice: "total(self, 'action_dice') + 'd6kh1'", rolls: ["check", "save", "attack"] },
   costs: {
     ...D20_COSTS,
     "reload.box": { move: 1 },
@@ -887,6 +905,8 @@ const D20: D20Def = {
     rankLimit: "(levels(self) + self.racial_hd + 3) / (class_skill(self, skill) ? 1 : 2)",
     skillPoints: { plus: "mod(self, 'int') + bonus(self, 'skill_points')", min: 1, first: 4 },
     featEvery: 3,
+    // Two feats at the first level, then one each third level.
+    featAt: [1, 1, 3, 6, 9, 12, 15, 18],
     abilityEvery: 4,
     experienceBy: "challenge",
   },
