@@ -66,7 +66,18 @@ The same folder also holds `rpe-before-<build>-<time>.db`: a copy of RPE's datab
 The rehearsal and the real run print the same report. It holds counts and checksums, never your content.
 
 - **One line for each kind of thing the previous build kept:** found = carried + attached + archived + kept in the backup only. *Carried* went into RPE. *Attached* is kept beside the turn it belongs to. *Archived* is kept in the backup for good, because nothing in RPE uses it.
-- **Found must equal the sum, and nothing may be "found, not classified".** If either fails, the real run refuses before it changes anything, and the report says which files it could not place. A file you know and the table has no row for, you give a row to in `RPE-global.yml`: `migration.rows` lists each as its path (as the report names it; a path ending in `/` is every file under that folder), `archived` or `attached`, and your line saying what it is. The next rehearsal counts it under a row of its own with your line, the backup keeps it, and the report lists it as yours. Nothing is carried that nothing reads, so these two are the only fates you can give.
+- **Found must equal the sum, and nothing may be "found, not classified".** If either fails, the real run refuses before it changes anything, and the report says which files it could not place. A file you know and the table has no row for, you give a row to in `RPE-global.yml`: `migration.rows` lists each as its path (as the report names it; a path ending in `/` is every file under that folder), `archived` or `attached`, and your line saying what it is. The next rehearsal counts it under a row of its own with your line, the backup keeps it, and the report lists it as yours. Nothing is carried that nothing reads, so these two are the only fates you can give. In `files/RPE-global.yml` (the Migration page's press on a file writes the same):
+
+  ```yaml
+  migration:
+    rows:
+      - path: stray-notes.txt        # the file as the report names it
+        fate: archived               # or: attached
+        line: My notes on the old harbour map
+      - path: old-exports/           # a path ending in / is every file under that folder
+        fate: archived
+        line: Exports from before the move
+  ```
 - **Where the previous build keeps two copies of one thing** (the acceptance connections, in the runs' own file and in the settings; a world's lore entry that copies a book entry's text), the migration reads the copy the previous build treats as the authority and counts the other as attached.
 - **What the previous build put in Lumiverse** is listed whole: its books, entries and regex scripts, its preset blocks and outlet references, the messages the panels put in your chats, the chats pinned to its connection and model, and its address among your scheduler's exclusions. None of it is changed.
 - **For every chat:** the turns found and imported, whether its state matched at the latest reply and at every swipe, the replies edited since the previous build read them (RPE's agents are told of each, as a reply edited after its turn, at the first turn that finds it showing), and anything waiting on you, such as a chat paused on a question. Each chat is opened first as the previous build opens one: a reply you edited that it never saw pauses the chat on a keep-or-discard question, as it would have, and a GM edit or ✎ fix it was holding for a reply that was under way lands on its turn, as it does when the previous build starts again. The report counts those that landed and those it refused, and lists any that still wait for a reply that is under way; no fold applies those.
@@ -79,13 +90,7 @@ The rehearsal and the real run print the same report. It holds counts and checks
 
 ### "Kept in the backup only"
 
-Some kinds of thing have no place in RPE yet. The run counts them, keeps them in the backup, and does not carry them. They are not lost: they stay in the backup, and in the previous build's own storage, which nothing changes. A later run carries them once a build has a place for them. The report lists them last, by name, so that nobody reads a run as complete. In this build they are:
-
-- Build jobs and their proposals;
-- approvals and jobs;
-- what you asked for through a panel;
-- GM assistant threads;
-- review cards, stored chips and staged changes;
+A kind of thing this build has no place for is counted, kept in the backup, and not carried. It is not lost: it stays in the backup, and in the previous build's own storage, which nothing changes. The report lists it last, by name, so that nobody reads a run as complete. In this build there is one: the GM assistant threads, which belong to Talk, the assistant chat that was dropped. Build's jobs, lore ids and secrecy undo copies, what you asked for through a panel, review cards, stored chips, staged changes, approvals and jobs are all carried.
 
 ## Running it again
 

@@ -290,7 +290,7 @@ export function refusalsOf(report: Pick<MigrationReport, "rows" | "notClassified
       if (i.count !== e.carried + e.attached + e.archived) out.push(`Row "${r.what}": ${i.count} found inside other rows' things, but ${e.carried} carried, ${e.attached} attached and ${e.archived} archived${i.stranded ? `; ${i.stranded.count} have no place in this run: ${i.stranded.why.join("; ")}` : ""}.`);
     }
   }
-  if (report.notClassified.length > 0) out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}.`);
+  if (report.notClassified.length > 0) out.push(`${report.notClassified.length} found, not classified: ${report.notClassified.map((i) => `${i.where}: ${i.path}`).join("; ")}. To give a file a row, add it to files/RPE-global.yml under migration.rows as a path (as named here), a fate (archived or attached) and your line saying what it is; docs/migration.md, "The report", has an example.`);
   if (report.disk.free !== null && report.disk.free < report.disk.total) out.push(`The real run needs ${report.disk.total} bytes where it writes, and ${report.disk.free} are free.`);
   return out;
 }
