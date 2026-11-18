@@ -91,8 +91,8 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "Kept in the file, not used by this build", icon: "sparkle" },
-  lorePins: { label: "Pinned lore", hint: "Lore every call for a character, at a place, or of a step always reads", icon: "pin" },
-  routineSettings: { label: "Routines and the story", hint: "What routines are at each level, how firmly they hold against the story, and who invites whom", icon: "route" },
+  lorePins: { label: "Pinned lore", hint: "Kept in the file, not used by this build", icon: "pin" },
+  routineSettings: { label: "Routines and the story", hint: "What a routine is to people, how firmly it holds against the story, and who invites whom", icon: "route" },
   needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when the narrator is told and when it alerts`, icon: "sliders" },
 };
 

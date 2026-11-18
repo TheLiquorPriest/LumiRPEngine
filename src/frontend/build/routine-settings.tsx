@@ -1,23 +1,23 @@
-// Build → World → Routines and the story (DESIGN §8): what someone's routine is to the engine at each
-// level of closeness (Informative, Enforced or Off), whether the narrator hears the present characters'
-// usual routines, whether a Timelapse from the Actions sheet follows the player's routine unless asked
-// otherwise, how aware of the story and its lore enforced routines are (Story first, Balanced,
-// Routine first), whom routine blocks may invite, how social people are, and which story plans may
-// move their work or school. Saved whole as `lre.editor set part routineSettings`; the defaults remove
-// it, so a world left as it was keeps no settings. Whatever is picked, the story leads for anyone on
-// screen: no setting lets a routine move someone out of a scene with the player's character,
-// contradict the narration or interrupt play. Routines' own list links here. Styles: the choice cards
-// of styles/minds.ts, styles/forms.ts.
+// Build → World → Routines and the story (DESIGN §8): what everyone's routine is to the engine
+// (Informative, Enforced or Off), whether a Timelapse from the Actions sheet follows the player's
+// routine unless asked otherwise, how aware of the story and its lore enforced routines are (Story
+// first, Balanced, Routine first), whom routine blocks may invite, how social people are, and which
+// story plans may move their work or school. RPE has no ladder of how closely a character is
+// followed, so every character counts as Background: only that level's role and skip life are
+// drawn, and the other levels, the plan-a-skip choice and the narrator's routine context of the
+// previous build are kept in the file and named once at the foot (`KeptUnused`). Saved whole as `lre.editor set part
+// routineSettings`; the defaults remove it, so a world left as it was keeps no settings. Whatever is
+// picked, the story leads for anyone on screen: no setting lets a routine move someone out of a
+// scene with the player's character, contradict the narration or interrupt play. Routines' own list
+// links here. Styles: the choice cards of styles/minds.ts, styles/forms.ts.
 
 import { useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
+import { isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/lint";
 import { NEED_WORDS } from "../../shared/needs";
-import type { Fidelity } from "../../shared/minds";
-import { FIDELITIES } from "../../shared/minds";
-import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife, SkipPlanCalls } from "../../shared/routines";
-import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, SKIP_PLAN_CALLS, SKIP_PLAN_CALLS_LABEL, SOCIABILITY_LABEL } from "../../shared/routines";
-import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
+import type { RoutineAwareness, RoutineInvitations, RoutinePlanBend, RoutineRole, RoutineSettings, RoutineSociability, SkipLife } from "../../shared/routines";
+import { AWARENESS_LABEL, DEFAULT_ROUTINE_SETTINGS, INVITATIONS_LABEL, PLAN_BEND_LABEL, ROUTINE_AWARENESS, ROUTINE_INVITATIONS, ROUTINE_PLAN_BEND, ROUTINE_ROLE_LABEL, ROUTINE_ROLES, ROUTINE_SOCIABILITY, routineSettingsOf, SKIP_LIFE_LABEL, SKIP_LIVES, SOCIABILITY_LABEL } from "../../shared/routines";
 import { SKIP_NOTE } from "../../packs/castlife/ui/routines-ops";
 import { useApp } from "../app";
 import { Button, Field, HostSwitch, PageHeader, SaveBar, Seg, useBusy } from "../components";
@@ -26,23 +26,15 @@ import type { Req } from "../requests";
 import { useSelect } from "../../ui/store";
 import { PART_INFO } from "./chrome";
 import { draftSend } from "./draft";
-import { FormGroup, Issues } from "./form-kit";
+import { FormGroup, Issues, KeptUnused } from "./form-kit";
 import { useHeld } from "./held";
 import { lintAt } from "./schema-form";
 
 /** Each role in one plain line: what someone's routine and their own schedules are to the engine. */
 export const ROLE_EXPLAINED: Record<RoutineRole, string> = {
-  informative: "The story and planning decide what they do; their routine is only context their mind and the narrator may weigh.",
+  informative: "Their routine is only a hint of their usual day: the story and what has been planned decide what they do.",
   enforced: "Their routine and schedules run their day when the story doesn't, and never pull them out of a scene with you.",
-  off: "Their routine isn't used at all, not even as context.",
-};
-
-/** Each level of closeness as this page names it: who the level is, in a few words. */
-const LEVEL_NAME: Record<Fidelity, string> = {
-  live: `${FIDELITY_LABEL.live}: in the scene with you`,
-  near: `${FIDELITY_LABEL.near}: close to the story`,
-  far: `${FIDELITY_LABEL.far}: off screen, still followed`,
-  background: `${FIDELITY_LABEL.background}: everyone else`,
+  off: "Their routine isn't used at all, not even as a hint.",
 };
 
 /** Each awareness in one plain line; it shapes only the days of those whose routine is enforced. */
@@ -96,39 +88,27 @@ function Choices<T extends string>(props: { label: string; value: T; options: re
   );
 }
 
-/** The settings this page saves with the rest that say what a routine is to the engine: each level's role, the narrator's context and the Timelapse default. */
+/** What a routine is to everyone and how they spend a stretch of time that is run through; the previous build's other levels are left as the file has them. */
 export function RoutineRoleSettings(props: { value: RoutineSettings; lint: readonly LintIssue[]; disabled: boolean; onChange(next: RoutineSettings): void }) {
   const { value, lint, disabled } = props;
+  const role = value.roles.background;
+  const skip = value.skips.background;
   return (
     <>
-      <FormGroup title="What a routine is, by closeness">
-        <p class="lre-minds-note">For each level of closeness on the minds ladder. Informative is the default for everyone but Background: routines and schedules tell, they don't dictate.</p>
-        {FIDELITIES.map((level) => (
-          <Field key={level} label={LEVEL_NAME[level]} help={ROLE_EXPLAINED[value.roles[level]]}>
-            <Seg<RoutineRole> label={`${FIDELITY_LABEL[level]} characters' routine`} value={value.roles[level]} options={ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r] }))} disabled={disabled} onChange={(role) => props.onChange({ ...value, roles: { ...value.roles, [level]: role } })} />
-          </Field>
-        ))}
-        <p class="lre-minds-note">The GM can set it apart for one character in a chat. A world's schedules (weather, prices, bills, paydays, opening hours) and pay run whatever you pick.</p>
+      <FormGroup title="What a routine is">
+        <p class="lre-minds-note">Enforced is the default: routines and schedules run people's days. The GM can set it apart for one character in a chat.</p>
+        <Field label="Everyone's routine" help={ROLE_EXPLAINED[role]}>
+          <Seg<RoutineRole> label="Everyone's routine" value={role} options={ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r] }))} disabled={disabled} onChange={(next) => props.onChange({ ...value, roles: { ...value.roles, background: next } })} />
+        </Field>
+        <p class="lre-minds-note">A world's schedules (weather, prices, bills, paydays, opening hours) and pay run whatever you pick.</p>
         <Issues issues={lintAt(lint, "routineSettings.roles")} />
       </FormGroup>
-      <FormGroup title="In a time skip">
-        <p class="lre-minds-note">How each level spends a time skip while their routine is informative. An enforced routine is always lived through a skip, and an off one never.</p>
-        {FIDELITIES.map((level) => (
-          <Field key={level} label={LEVEL_NAME[level]} help={value.roles[level] === "informative" ? SKIP_NOTE[value.skips[level]] : `Their routine is ${ROUTINE_ROLE_LABEL[value.roles[level]].toLowerCase()} here, so this applies only to characters the GM makes informative.`}>
-            <Seg<SkipLife> label={`${FIDELITY_LABEL[level]} characters in a time skip`} value={value.skips[level]} options={SKIP_LIVES.map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] }))} disabled={disabled} onChange={(skip) => props.onChange({ ...value, skips: { ...value.skips, [level]: skip } })} />
-          </Field>
-        ))}
-        <p class="lre-minds-note">The GM can set it apart for one character in a chat.</p>
-        <Issues issues={lintAt(lint, "routineSettings.skips")} />
-        <Field label="Plan a skip" help="One call is cheaper; one call per person keeps each answer small, which suits a large cast or a long skip.">
-          <Seg<SkipPlanCalls> label="How the model plans a time skip" value={value.skipPlanCalls} options={SKIP_PLAN_CALLS.map((c) => ({ value: c, label: SKIP_PLAN_CALLS_LABEL[c] }))} disabled={disabled} onChange={(skipPlanCalls) => props.onChange({ ...value, skipPlanCalls })} />
+      <FormGroup title="When a stretch of time is run through">
+        <p class="lre-minds-note">How people spend it while their routine is informative. An enforced routine is always lived through it, and an off one never. The GM can set it apart for one character in a chat.</p>
+        <Field label="Everyone" help={role === "informative" ? (skip === "model" ? "The file says a model plans their time. None does now, so they stay where the story has them." : SKIP_NOTE[skip]) : `Their routine is ${ROUTINE_ROLE_LABEL[role].toLowerCase()} here, so this applies only to characters the GM makes informative.`}>
+          <Seg<SkipLife> label="Everyone, when a stretch of time is run through" value={skip} options={SKIP_LIVES.filter((s) => s !== "model" || skip === "model").map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] }))} disabled={disabled} onChange={(next) => props.onChange({ ...value, skips: { ...value.skips, background: next } })} />
         </Field>
-        <Issues issues={lintAt(lint, "routineSettings.skipPlanCalls")} />
-      </FormGroup>
-      <FormGroup title="The narrator">
-        <HostSwitch label="Tell the narrator people's usual routines" checked={value.narrator} disabled={disabled} onChange={(narrator) => props.onChange({ ...value, narrator })} />
-        <p class="lre-minds-note">For the characters in the scene whose routine isn't off: what they usually do, as context the narrator may use, never what they must do.</p>
-        <Issues issues={lintAt(lint, "routineSettings.narrator")} />
+        <Issues issues={lintAt(lint, "routineSettings.skips")} />
       </FormGroup>
       <FormGroup title="Timelapse from the Actions sheet">
         <HostSwitch label="Follow my routine by default" checked={value.paletteFollowsRoutine} disabled={disabled} onChange={(paletteFollowsRoutine) => props.onChange({ ...value, paletteFollowsRoutine })} />
@@ -138,6 +118,27 @@ export function RoutineRoleSettings(props: { value: RoutineSettings; lint: reado
     </>
   );
 }
+
+/** What the file holds of the previous build's settings that nothing RPE runs reads, by the key `KeptUnused` names; unset where the file holds the default. */
+function keptRoutineSettings(raw: unknown): Record<string, unknown> {
+  const file = isRecord(raw) ? raw : {};
+  const away = DEFAULT_ROUTINE_SETTINGS;
+  const levels = (key: "roles" | "skips"): boolean => {
+    const set = isRecord(file[key]) ? file[key] : {};
+    return (["live", "near", "far"] as const).some((level) => set[level] !== undefined && set[level] !== away[key][level]);
+  };
+  return {
+    levels: levels("roles") || levels("skips") ? true : undefined,
+    skipPlanCalls: file.skipPlanCalls !== away.skipPlanCalls ? file.skipPlanCalls : undefined,
+    narrator: file.narrator !== away.narrator ? file.narrator : undefined,
+  };
+}
+
+const KEPT_ROUTINE_SETTINGS = [
+  { key: "levels", label: "What a routine is, and how a stretch of time is spent, for the levels of the previous build's closeness ladder above Background (Live, Near and Far)" },
+  { key: "skipPlanCalls", label: "How a model plans a time skip: all in one call, or one call per person" },
+  { key: "narrator", label: "Telling the narrator people's usual routines" },
+] as const;
 
 /** Build → World → Routines and the story: every setting, saved together from the sticky bar. */
 export function RoutineSettingsEditor() {
@@ -184,6 +185,7 @@ export function RoutineSettingsEditor() {
         <Choices label="How plans bend routine" value={value.planBend} options={ROUTINE_PLAN_BEND} names={PLAN_BEND_LABEL} disabled={busy} onChange={(planBend: RoutinePlanBend) => setValue({ ...value, planBend })} />
         <Issues issues={lintAt(lint, "routineSettings.planBend")} />
       </FormGroup>
+      <KeptUnused fields={KEPT_ROUTINE_SETTINGS} held={keptRoutineSettings(draft.doc.routineSettings)} />
       <SaveBar>
         <Button variant="primary" disabled={!changed} busy={busy} onClick={() => save(value)}>
           Save to draft
