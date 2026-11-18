@@ -148,7 +148,7 @@ A bar of six places runs along the page: **Now**, **Me**, **People**, **Orgs**, 
 
 Everything here is shown as your character knows it. Someone your character cannot know of is never listed, and a place stays hidden until your character has been there or heard of it. A secret stays out of every place, sheet and Journal line until the story reveals it.
 
-On this page, **Act**, **Timelapse…** and **Combat actions** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
+On this page, **Act** and **Timelapse…** say "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE", and the map's **Full screen** says Places shows it here. In the chat, the actions sheet and the map open over the chat (see [The HUD](#the-hud)).
 
 ### What a press does
 
@@ -169,7 +169,7 @@ A press in the play views (here, in the HUD, in the actions sheet or on the map 
 
 ### Now
 
-**Now** is where Play opens. From the top: the banners above; the **scene card** (the time and the part of the day, **Clock paused** while it is, your place, the scene type with how long the last turn took, the weather and your cash, each with ✎ where it can be fixed); **Needs you**, the questions waiting under replies, each opening its reply in the chat; the **Encounter** while a fight is under way (the round and whose turn it is, the order with HP and conditions, and what you have left; see [Combat and encounters](#combat-and-encounters)); **Here**, the people with you, each opening their sheet; **glances**, short cards from the world's packs (what is coming up, the quest in hand, your vehicles, money alerts, things lent and overdue, your conditions, your organizations), each with **Open**; and **Act**, **Timelapse** and **Map**.
+**Now** is where Play opens. From the top: the banners above; the **scene card** (the time and the part of the day, **Clock paused** while it is, your place, the scene type with how long the last turn took, the weather and your cash, each with ✎ where it can be fixed); **Needs you**, the questions waiting under replies, each opening its reply in the chat; the **Encounter** while a fight is under way (the round and whose turn it is, the order with HP and conditions, what you have left, this round's acts, and **Combat actions** or **The whole fight**, which opens the fight's page; see [Combat and encounters](#combat-and-encounters)); **Here**, the people with you, each opening their sheet; **glances**, short cards from the world's packs (what is coming up, the quest in hand, your vehicles, money alerts, things lent and overdue, your conditions, your organizations), each with **Open**; and **Act**, **Timelapse** and **Map**.
 
 ### Me
 
@@ -177,7 +177,7 @@ A press in the play views (here, in the HUD, in the actions sheet or on the map 
 
 | Tab | What it shows |
 |---|---|
-| **You** | Your name, where you are and what you are doing, your tier and your conditions; then your character sheet: stats, skills and derived values, as numbers or in words by the level. A pool such as HP is a bar that turns red at a quarter or less; a level shows its XP. |
+| **You** | Your name, where you are and what you are doing, your tier and your conditions; then your character sheet: stats, skills and derived values, as numbers or in words by the level. A pool such as HP is a bar that turns red at a quarter or less; a level shows its XP. With the tabletop rules on in the chat, **You** is your sheet under them: your classes and levels; hit points, temporary hit points and nonlethal harm, with the state they put you in (disabled, dying); experience toward the next level; defence, touch and flat-footed, and initiative; each attack of what you have readied and of your own, with its damage, when it threatens a critical, its range and the rounds loaded; your saves, abilities and skills with their ranks; what you are under, with what is left of it; your daily gauges; and your traits, each with what it does. Press a total, or hover over it, for where its number comes from: each part, and each bonus with where it came from and whether a better one of its type counted instead. Your abilities, hit points, experience and daily gauges have ✎, each fix with its own Undo. |
 | **Needs** | From Cast life 4: hunger, fatigue, social and fun, each a gauge from 0 (met) to 100 (urgent), in words once it is pressing ("hungry"), with the point it is pressing from and what meets it ("Met by eating"). |
 | **Money** | Your own money: see [Your money](#your-money). |
 | **Garage** | A card for each vehicle: whose it is, its class, fuel, condition, where it is and its home base, its odometer or hours, cargo, specs, who has it on loan and who may use it, and service due. **Where is it?**, **Home base…**, **Owner & use…**, and **Specs…** (your own lines, "Seats: 5") are done at once; **Drive…** waits for your next message. **+ Add a vehicle** follows the world's claims policy. |
@@ -217,7 +217,7 @@ Each page opens over the page with a back button. A control's page has you fill 
 
 **People** lists **Here** and then **People you know**: each with their role, what they are doing or when and where you last saw them, how they feel about you, and any life state but alive. **Filter and group** groups and filters them by the classifications the world lets players see, by group and by tier. **Your groups** lists the organizations you belong to.
 
-A person's sheet shows where they are, or **Last seen** (from Cast life 2); their **Next** commitment; **Today**, a 24-hour timeline of where their routine and commitments put them, with **Why this plan?**; **Their usual day**, where each block comes from as far as you may know (a private block reads **Busy**); **How they see you**; **What they're after**, their public agendas; their **Organizations**; and **Known as**. Their day is what they would usually do. What the story establishes comes first, and nobody moves by their routine until an agent records it (see [Time, needs and routines](#time-needs-and-routines)).
+A person's sheet shows where they are, or **Last seen** (from Cast life 2); their **Next** commitment; **Today**, a 24-hour timeline of where their routine and commitments put them, with **Why this plan?**; **Their usual day**, where each block comes from as far as you may know (a private block reads **Busy**); **How they see you**; **What they're after**, their public agendas; their **Organizations**; and **Known as**. Their day is what they would usually do. What the story establishes comes first, and nobody moves by their routine until an agent records it (see [Time, needs and routines](#time-needs-and-routines)). With the tabletop rules on, someone standing where you are, or in the fight, has **Their sheet** too, laid out as yours, with no ✎; their hit points are told as the fight tells them, the numbers where the world's rules show them, else how hurt they look.
 
 **Where are they?** corrects where someone is, as ✎ on your own place does: search a place by any word of its name or browse from the top, among the places you may know. It is done at once, with Undo.
 
@@ -679,6 +679,8 @@ In play the GM rules by them: it reads a sheet before it rules, says what each o
 Only a world whose ruleset has **Combat** has fights: initiative, the action economy, the hit-point pool, when someone is down, the sides and when a fight is over. Combat actions are actions with a cost; an attack's check reads the target's defence.
 
 In play the GM runs a fight with the skill `combat`: who is in it, where each stands on the map, what each has to hand, then a round at a time. Your character acts from your message; each principal's own agent chooses what they do; the GM chooses for everyone else, and records each round with `fight_round`, which moves the clock by the rounds it records. A fight ends when a side is down, has fled or has yielded, or when the story interrupts.
+
+On the Play page, the **Encounter** on Now opens **The fight**: the same card in full, with each combat action you can take now against each target, with its odds. Pressing one waits for your next message, as **End turn** does. **This round** lists each act; one taken by the tabletop rules says the roll, the total and where each number came from, the defence it met and the harm it did.
 
 ### Lore in Build
 

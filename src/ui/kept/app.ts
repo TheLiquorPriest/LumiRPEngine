@@ -38,7 +38,7 @@ export interface ToastSettings {
 
 /** What the page says of an overlay this build has nowhere to open, when one of today's buttons asks for it. */
 export const NOT_HERE = {
-  /** Act, Actions, Timelapse and a fight's turn open today's actions sheet. */
+  /** Act, Actions and Timelapse open today's actions sheet; a fight's moves are on the fight's page. */
   palette: "The actions sheet (Act, Actions, Timelapse) does not open in this build of RPE.",
   /** The map's Full screen, asked on Places, where the map already shows. */
   map: "The map does not open full screen in this build of RPE; Places shows it here.",
