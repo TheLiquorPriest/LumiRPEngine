@@ -203,10 +203,16 @@ describe("act: the actions a play view's press did not reach", () => {
     expect(stateOf(t).entities.odile?.relations.some((x) => x.type === "member_of" && x.to === "lamplighters")).toBe(false);
   });
 
-  test("org_entry: the cellar is for members, said by its owner's guild", async () => {
+  test("org_entry: the cellar is for members with its keys, said by its owner's guild; a list of keys is read as the keys", async () => {
     const { t } = await rigOf(dealings);
-    await apply(t, { op: "act", action: "org_entry", who: "Bram", params: { org: "The Lamplighters", place: "The Cellar", entry: "members" } });
-    expect(entryInPlay(stateOf(t), "cellar").entry).toBe("members");
+    await apply(t, { op: "act", action: "org_entry", who: "Bram", params: { org: "The Lamplighters", place: "The Cellar", entry: "members", keys: ["knife", "bell"] } });
+    expect(entryInPlay(stateOf(t), "cellar")).toEqual({ entry: "members", keys: ["knife", "bell"] });
+  });
+
+  test("set_pay_prefs: the ways to pay, given as a list, are Wren's order of paying", async () => {
+    const { t } = await rigOf(dealings);
+    await apply(t, { op: "act", action: "set_pay_prefs", params: { tiers: [{ use: "debit", max: 100 }, { use: "cash" }] } });
+    expect(stateOf(t).entities[POV]?.fields.pay_prefs).toEqual([{ use: "debit", max: 100 }, { use: "cash" }]);
   });
 
   test("org_approve and org_deny: a waiting request approved is carried out, and one denied is closed", async () => {

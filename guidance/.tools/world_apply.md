@@ -37,7 +37,7 @@ arguments:
   operations.stage: "quest: the stage it moves to."
   operations.outcome: "quest: met or failed. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules."
   operations.action: "act: the action, by its id."
-  operations.params: "act: the action's own arguments, as name: value; a person, thing or place by name, an amount in the world's main coin."
+  operations.params: "act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is."
   operations.reveal: "quest: true to show the player."
   operations.axis: "relate: the regard that changes (trust, liking); leave it out for all."
   operations.change: "relate: how much, up or down."

@@ -22,8 +22,17 @@ import { nearestOf, type Want } from "./reading";
 import { textOf } from "./texts";
 
 /**
+ * A list or an object given for an argument that is one value: a list of words or numbers as the words joined by commas (ids, powers,
+ * keys: as an action's text arguments list them), any other as its JSON text (a payment preference's tiers).
+ */
+function asText(said: JsonObject | JsonValue[]): string {
+  return Array.isArray(said) && said.every((x) => typeof x === "string" || typeof x === "number") ? said.join(", ") : JSON.stringify(said);
+}
+
+/**
  * One of the action's arguments as the call gives it, as the action takes it: a person, thing or place by name, found as its id; a list
  * of them, each found; a number; an amount in the world's main coin (or as the world writes money), in its smallest unit; a yes or no;
+ * a list or an object given for any other argument, as text (`asText`), the one way an action's argument, a single value, carries one;
  * anything else as given. Undefined for an argument left empty; what could not be read, when it could not.
  */
 function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue): JsonValue | Unread | undefined {
@@ -41,7 +50,7 @@ function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue):
       return isUnread(place) ? found : place.id;
     }
     case "list": {
-      if (def.ref === undefined) return said;
+      if (def.ref === undefined) return typeof said === "object" ? asText(said) : said;
       const names = Array.isArray(said) ? said : typeof said === "string" ? said.split(",") : null;
       if (names === null) return notAs(o, field, said, "list");
       const ids: string[] = [];
@@ -66,7 +75,7 @@ function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue):
     case "bool":
       return said === true || said === "true" ? true : said === false || said === "false" ? false : notAs(o, field, said, "yes_no");
     default:
-      return said;
+      return typeof said === "object" ? asText(said) : said;
   }
 }
 
