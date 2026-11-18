@@ -564,7 +564,7 @@ function biggest(rows: readonly ThingRow[]): SizeClass | null {
  * The bar under GM → Things while it chooses: how many are picked, Select all and Clear, and what to
  * do to every thing picked: Move to…, Put in…, Put away (each to where it rests), Wear or Take off
  * (on whoever has it), Hand to…, Make it theirs…, Let use…, Rename… (one thing), Size… and
- * Remove…, one op a thing, sent as edits of at most the setting `engine.editOps` operations each
+ * Remove…, one op a thing, sent as edits of at most the setting `engine.maxEditOps` operations each
  * (`BulkEditor.editAll`), with one Undo for all of it. Put away and Wear send at once; the rest open
  * their sheets.
  */
@@ -824,7 +824,7 @@ export function ThingsSection(props: { editor: BulkEditor; chatId: string }) {
   const chosenIds = new Set(chosen.map((r) => r.id));
   const loans = bulkLoans(clock);
   const closeBulk = () => setBulk(null);
-  /** One bulk change as edits of at most `engine.editOps` operations each, with one Undo; its sheet closes once any applied. */
+  /** One bulk change as edits of at most `engine.maxEditOps` operations each, with one Undo; its sheet closes once any applied. */
   const change = (next: BulkChange): void => {
     const edit = bulkEdit(next, chosen);
     if (!edit) {

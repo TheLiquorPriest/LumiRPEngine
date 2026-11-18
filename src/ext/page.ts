@@ -22,8 +22,8 @@ export interface PageRoadSettings {
 }
 
 /**
- * The road's values until RPE's start facts give its own (`StartFacts.road`, RPE's settings `lumiverse.extension.requestWait` and
- * `followRenewal`): past the proxy's 30 s (`worker-host.ts:771`); a third of RPE's 60 s lease (`relay.ts`).
+ * The road's values until RPE's start facts give its own (`StartFacts.road`, RPE's settings `lumiverse.extension.requestWaitSeconds` and
+ * `followRenewalSeconds`): past the proxy's 30 s (`worker-host.ts:771`); a third of RPE's 60 s lease (`relay.ts`).
  */
 export const PAGE_ROAD_DEFAULTS: PageRoadSettings = { requestMs: 35_000, renewMs: 20_000 };
 

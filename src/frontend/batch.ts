@@ -1,8 +1,8 @@
 // Bulk changes to a list's selection (DESIGN §7, §4.1): what a multi-select's bar applies to everyone
 // picked. In GM mode a change is the existing GM edit ops, one per entity, sent in chunks of the
-// setting `engine.editOps`: each chunk is one `lre.edit`, all or none, with its own Undo. In Build it is a JSON
+// setting `engine.maxEditOps`: each chunk is one `lre.edit`, all or none, with its own Undo. In Build it is a JSON
 // Patch on the draft, worked out from the draft as it stands, so it writes only what changes, sent in chunks of
-// `engine.editOps` and never more than `worlds.patchOps`. Each op goes through the same checks a single edit or write does.
+// `engine.maxEditOps` and never more than `worlds.maxPatchOps`. Each op goes through the same checks a single edit or write does.
 
 import type { DomainId, EntityId, Level, PlaceId, TierId } from "../shared/ids";
 import { pointerOf } from "../shared/json-patch";

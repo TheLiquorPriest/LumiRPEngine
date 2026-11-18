@@ -1,6 +1,6 @@
 // The Migration page's routes (plan §14, §15.5, §15.6; R-4, R-80, R-180, R-327, R-328): the summary of the last real run
 // and of the page's own rehearsal, before any run as after; a report's rows, chats (by name, searchable), a chat's
-// differences and the things found, a page at a time (`migration.page`, at most `migration.pageMost`); a chat's own
+// differences and the things found, a page at a time (`migration.page`, at most `migration.maxPage`); a chat's own
 // summary; the printed text; the report whole, to be saved as a file; the rehearsal started from the page, a long route
 // whose report the running RPE holds in memory, writing nothing; and, for a migrated chat, its carried turns with what each
 // old engine recorded of the reply. Every route but the rehearsal's start is a read of RPE's database or of what RPE holds.
@@ -336,10 +336,10 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       path: "/api/v1/chats/:chat/carried",
       access: "page",
       group: "migration",
-      does: "A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.pageMost`).",
+      does: "A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.maxPage`).",
       query: {
         from: shape.optional(shape.whole({ least: 0 }), "How many carried turns to pass over; none when left out."),
-        limit: shape.optional(shape.whole({ least: 1 }), "How many carried turns to give: the setting `migration.page` when left out, and at most `migration.pageMost`."),
+        limit: shape.optional(shape.whole({ least: 1 }), "How many carried turns to give: the setting `migration.page` when left out, and at most `migration.maxPage`."),
       },
       reply: carriedTurnsReply,
       handle: async ({ user, params, query }) => {

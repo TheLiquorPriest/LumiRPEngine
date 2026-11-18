@@ -85,7 +85,7 @@ test("a section that is not a mapping, and a whole file that is not one, are log
   const log: Log = { debug: () => undefined, info: () => undefined, warn: (message, fields) => void warned.push({ message, fields }), error: () => undefined };
   const read = readConfig(
     [
-      { level: "shipped", file: "@shipped/RPE-global.yml", text: "lead: author\n" },
+      { level: "shipped", file: "@shipped/RPE-global.yml", text: "turn:\n  lead: author\n" },
       { level: "global", file: "@global/RPE-global.yml", text: "history: 5\n" },
       { level: "chat", file: "RPE.yml", text: "- one\n- two\n" },
     ],
@@ -102,7 +102,7 @@ test("a section that is not a mapping, and a whole file that is not one, are log
 });
 
 test("the same files give every area the same values", async () => {
-  const global = ["history:", "  window: 12", "files:", "  findLimit: 7", "bootstrap:", "  tokenLimit: 1234", "lumiverse:", "  search:", "    hits: 7", "cast:", "  topOfMind: 4", ""].join("\n");
+  const global = ["history:", "  window: 12", "files:", "  findHits: 7", "bootstrap:", "  askAtTokens: 1234", "lumiverse:", "  search:", "    hits: 7", "cast:", "  topOfMind: 4", ""].join("\n");
   const b = await playedBed(global);
   const loc = located(b);
   await writeFile(join(loc.files, CHATS_FOLDER, loc.character!, loc.chat!, CHAT_CONFIG), ["history:", "  window: 9", "files:", "  grepMs: 300", ""].join("\n"));

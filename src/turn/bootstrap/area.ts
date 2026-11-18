@@ -37,7 +37,7 @@ export function bootstrapArea(takes: BootstrapTakes): Area {
               const v = def === undefined ? fallback : read.value(def);
               return typeof v === "number" ? v : fallback;
             };
-            return { default: value("turns.page", TURN_DEFAULTS.turnsPage.size), most: value("turns.pageMost", TURN_DEFAULTS.turnsPage.most) };
+            return { default: value("turns.page", TURN_DEFAULTS.turnsPage.size), most: value("turns.maxPage", TURN_DEFAULTS.turnsPage.most) };
           },
         }),
       ),

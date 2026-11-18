@@ -20,7 +20,7 @@ export interface IndexFileOptions {
   path: string;
   /** The app's pool, which runs the searches. */
   workers: Workers;
-  /** Rows the writer writes in one transaction (`index.batch`). */
+  /** Rows the writer writes in one transaction (`database.indexBatch`). */
   batch: number;
   log: Log;
 }

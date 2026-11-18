@@ -297,7 +297,7 @@ describe("the live socket's bounds", () => {
     expect(later.slice(-3)).toEqual([newest + 1, newest + 2, newest + 3]);
   });
 
-  test("a page follows at most liveSocket.follows chats at once: one more is refused in words that name the setting, and after an unfollow it may follow another", async () => {
+  test("a page follows at most liveSocket.maxFollows chats at once: one more is refused in words that name the setting, and after an unfollow it may follow another", async () => {
     const app = await bed.open({ config: { live: { follows: 2 } } });
     const server = await app.start();
     const p = await page(server, await makeKey(app, "web"));
@@ -308,7 +308,7 @@ describe("the live socket's bounds", () => {
     }
     const refused = p.next("refused");
     p.socket.send(JSON.stringify({ op: "follow", chat: "chat-c" }));
-    expect(String((await refused).message)).toContain("the setting liveSocket.follows");
+    expect(String((await refused).message)).toContain("the setting liveSocket.maxFollows");
     p.socket.send(JSON.stringify({ op: "unfollow", chat: "chat-a" }));
     const following = p.next("following");
     p.socket.send(JSON.stringify({ op: "follow", chat: "chat-c" }));

@@ -71,14 +71,14 @@ async function world(request: Of<"lre.world">, ctx: CallContext): Promise<Result
       return { revision: done.revision, ...(done.waiting ? { pending: true } : {}), ...(done.edit === null ? {} : { undo: done.edit }) };
     }
     case "limits": {
-      // The sizes Build's "Change the selected" writes its patch in: `engine.editOps` operations at a time, never more than one patch of a draft may carry.
+      // The sizes Build's "Change the selected" writes its patch in: `engine.maxEditOps` operations at a time, never more than one patch of a draft may carry.
       const read = await call("GET /api/v1/settings", {});
       const whole = (key: string): number => {
         const value = read.settings.find((s) => s.key === key)?.value;
         if (typeof value !== "number") throw new Refusal("internal", `RPE gave no value for ${key}.`);
         return value;
       };
-      return { limits: { editOps: whole("engine.editOps"), patchOps: whole("worlds.patchOps") } };
+      return { limits: { editOps: whole("engine.maxEditOps"), patchOps: whole("worlds.maxPatchOps") } };
     }
     case "undo_upgrade": {
       const done = await call("POST /api/v1/chats/:chat/upgrade/undo", { chat: request.chatId }, { body: { edit: request.edit } });

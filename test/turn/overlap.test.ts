@@ -52,7 +52,7 @@ async function firstTurnAtWork(b: TurnBed): Promise<string> {
 describe("requests that meet at intake", () => {
   test("a second request for the chat stops the first in Lumiverse while RPE holds it: the first ends there with no turn begun, and the second's turn begins once the turn before's run is over", async () => {
     const after = gate();
-    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks away.")], global: "limits:\n  previousRun: 5\n" });
+    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks away.")], global: "limits:\n  previousRunSeconds: 5\n" });
     const before = await firstTurnAtWork(b);
 
     // The first request waits for the turn before's run, and the player is shown the wait. A second request for the chat comes, and Lumiverse stops the first before it takes the chat.
@@ -77,7 +77,7 @@ describe("requests that meet at intake", () => {
 
   test("a request Lumiverse stops while it waits for the previous turn's run ends there: no turn is begun, and the previous run goes on", async () => {
     const after = gate();
-    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRun: 0.5\n" });
+    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRunSeconds: 0.5\n" });
     const first = await firstTurnAtWork(b);
 
     b.host.send(CHAT, "I ask about the boat.");

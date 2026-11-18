@@ -1,7 +1,7 @@
 // The routes of what the player asks for beside his words (`requests.ts`; plan §10.10, §14): what waits
 // in a chat, listed; a composer control's ask held for the next message; one that waits, withdrawn; and
 // what a turn was told and keeps. A panel's tap is held by the panel's own route. An ask longer than
-// `requests.textMost` is not kept, and each refusal is said in the words of `.prompts/request-answers.md`.
+// `turn.maxRequestChars` is not kept, and each refusal is said in the words of `.prompts/request-answers.md`.
 
 import { loadGuidance } from "../app/guidance";
 import { route, RouteError } from "../app";
@@ -44,7 +44,7 @@ export function requestRoutes(turns: Turns) {
       path: "/api/v1/chats/:chat/requests",
       access: "page",
       group: "chats",
-      does: "Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than requests.textMost is not kept, and the answer says so.",
+      does: "Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than turn.maxRequestChars is not kept, and the answer says so.",
       body: requestAsk,
       reply: requestHeldReply,
       handle: async ({ user, params, body }) => {

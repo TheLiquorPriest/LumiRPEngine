@@ -1,6 +1,6 @@
 // What a turn's time brought due, for the World page (plan §6.4, scenario 1): the span the turn's clock
 // moved over, from its start to its end, and each thing the host lists as falling due in it (`timeDue`,
-// the list the engine's tools give), soonest first, at the chat's `engine.dueItems`, with the changes of
+// the list the engine's tools give), soonest first, at the chat's `engine.maxDueItems`, with the changes of
 // the turn that concern it as what was recorded for it. A list only, read from the store: nothing here
 // decides what the time did.
 

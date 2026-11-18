@@ -17,7 +17,7 @@ export const REQUESTS_KIND = liveKind("requests", {
   does: "What waits in the chat, asked for beside the player's words, changed: how many requests wait now; a page reads them again.",
 });
 
-/** A request's words as the bound `requests.textMost` counts them: what was pressed and on what, or the choice and the words typed with it. */
+/** A request's words as the bound `turn.maxRequestChars` counts them: what was pressed and on what, or the choice and the words typed with it. */
 export function requestText(asked: PanelAsk | ComposerAsk): string {
   return "what" in asked ? `${asked.what}${asked.on ?? ""}` : `${asked.choice}${asked.words ?? ""}`;
 }

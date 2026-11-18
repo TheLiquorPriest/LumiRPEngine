@@ -186,7 +186,7 @@ export interface FloorRun {
   arms: { plain: Arm; rpe: Arm };
   /** The owner's connections the floor played on, by option: Lumiverse's for plain, RPE's (by the name the trace gives) for the Author; null: the floor's own (N-15). */
   option: { plain: string; rpe: string } | null;
-  /** `limits.previousRun` as the run gave it: how long a next message waits for the run before it, in seconds. */
+  /** `limits.previousRunSeconds` as the run gave it: how long a next message waits for the run before it, in seconds. */
   previousRun: number | null;
   /** The floor's book as the fixture made it, so the lore row says which designed entries were not played; null when no book was found. */
   book: BookDesign | null;
@@ -629,7 +629,7 @@ function stackRow(run: FloorRun): Row {
   };
 }
 
-/** The run after the reply in numbers: each RPE run's release to its end, a run still going at the floor's limit as longer than it; how long a next message sent at the release would have waited, up to `limits.previousRun`. */
+/** The run after the reply in numbers: each RPE run's release to its end, a run still going at the floor's limit as longer than it; how long a next message sent at the release would have waited, up to `limits.previousRunSeconds`. */
 export function afterReply(run: FloorRun): { spans: number[]; median: number | null; longest: number | null; waited: { median: number | null; longest: number | null }; running: string[]; unknown: string[] } {
   const spans: number[] = [];
   const running: string[] = [];
@@ -657,7 +657,7 @@ function afterRow(run: FloorRun): Row {
     id: "after-reply",
     measure: "The run after the reply",
     pass: "its time reported on its own, with how long a next message would have waited",
-    measured: `median ${s(a.median)}, longest ${s(a.longest)}; a next message sent at the release would have waited ${s(a.waited.median)} (median), ${s(a.waited.longest)} (longest)${limit === null ? "" : `, ${limit} s at most (limits.previousRun), after which that run is stopped`}${a.running.length > 0 ? `; still going at the floor's limit of ${LIMITS.runEnd / 60_000} min: ${a.running.join(", ")}` : ""}`,
+    measured: `median ${s(a.median)}, longest ${s(a.longest)}; a next message sent at the release would have waited ${s(a.waited.median)} (median), ${s(a.waited.longest)} (longest)${limit === null ? "" : `, ${limit} s at most (limits.previousRunSeconds), after which that run is stopped`}${a.running.length > 0 ? `; still going at the floor's limit of ${LIMITS.runEnd / 60_000} min: ${a.running.join(", ")}` : ""}`,
     verdict: why.length > 0 ? "not judged" : "reported",
     stands: `${a.spans.length} RPE run(s)`,
     why,

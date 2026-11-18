@@ -24,7 +24,7 @@ describe("the tags, thirty turns", () => {
     const played = await playLoop(TAGS_GATE, turns());
     expect(partOf(played, "tags")).toHaveLength(30);
     expect(partOf(played, "tags").every((i) => i.outcome === "met")).toBe(true);
-    expect(played.log.writes).toEqual([{ chat: "chat-floor", key: "reply.forms.rpe-floor", value: "tags" }]);
+    expect(played.log.writes).toEqual([{ chat: "chat-floor", key: "connections.rpe-floor.reply.form", value: "tags" }]);
     expect(played.log.sent.map((s) => s.line)).toEqual([...LINES_30]);
     expect(played.log.sent.every((s) => s.connection === "rpe-floor")).toBe(true);
     const count = JSON.parse(played.internal["count.json"] ?? "null");
@@ -67,7 +67,7 @@ describe("the tags, thirty turns", () => {
   test("a connection that could not be set to the form, or a contract that names no tags, leaves nothing played and the part not judged, with why", async () => {
     const failed = await playLoop(TAGS_GATE, turns([], { writeFails: "RPE PUT /api/v1/settings: 400 not a setting" }));
     expect(failed.log.sent).toEqual([]);
-    expect(partOf(failed, "tags")).toEqual([{ outcome: "not judged", why: "the connection was not set to the tags form for the run: reply.forms.rpe-floor could not be set to \"tags\": RPE PUT /api/v1/settings: 400 not a setting" }]);
+    expect(partOf(failed, "tags")).toEqual([{ outcome: "not judged", why: "the connection was not set to the tags form for the run: connections.rpe-floor.reply.form could not be set to \"tags\": RPE PUT /api/v1/settings: 400 not a setting" }]);
     const other = await playLoop(TAGS_GATE, turns([], { reads: "two-step" }));
     expect(other.log.sent).toEqual([]);
     expect(partOf(other, "tags")[0]?.why).toContain("reads \"two-step\" after it was set to \"tags\"");

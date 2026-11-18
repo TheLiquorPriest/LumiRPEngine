@@ -46,7 +46,7 @@ bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --ur
 
 Its other options are the previous build's install line's:
 
-- `--port <port>`: the port RPE's connection in Lumiverse points at, on loopback; 7871 until you give another. Where the port is taken, a first install takes the first free one after it, up to the setting `service.portLast` (7899).
+- `--port <port>`: the port RPE's connection in Lumiverse points at, on loopback; 7871 until you give another. Where the port is taken, a first install takes the first free one after it, up to the setting `service.lastPort` (7899).
 - `--listen <address>`: also listen on that address, so that other machines reach RPE. RPE says what that means (plain http off loopback) and still answers on loopback, where Lumiverse's extension reaches it.
 - `--allow-http`: accept a Lumiverse address that is plain http to another machine, where your password and the session token cross the network in clear.
 - `--bun <path>`: the Bun the service runs, by its real path (an absolute path).
@@ -87,10 +87,10 @@ By default RPE listens on `127.0.0.1`, port `7871`.
 `rpe up --systemd` installs RPE as a service of your account, on Linux with systemd. It does not run the file in the extension's folder, which an update of the extension replaces under a running service. It copies RPE (the app file and the folders it reads beside it: `guidance/`, `guidance-harness/` and `ui/`) into `app/current/` in RPE's data folder, records the file it ran from as the one source of updates, and writes a unit that runs the copy:
 
 - `rpe-<name>.service` in `~/.config/systemd/user/`, written whole in one step, enabled and started. Its name follows systemd's own rule for a unit's name; RPE sets no length of its own.
-- Its `MemoryMax` is the setting `service.memory` (1G, at least 256M; `--memory` sets it), its `RestartSec` the setting `service.restartWait` (2 seconds), and it is started no more than `update.startTries` times within `update.startWindow` seconds, besides one start that puts back the known-good copy (see [Updating](#updating)).
+- Its `MemoryMax` is the setting `service.memory` (1G, at least 256M; `--memory` sets it), its `RestartSec` the setting `service.restartWaitSeconds` (2 seconds), and it is started no more than `update.startTries` times within `update.startWindowSeconds` seconds, besides one start that puts back the known-good copy (see [Updating](#updating)).
 - Lingering is turned on for your account, so the service starts at boot and keeps running when you log out. Where it cannot be turned on from here, `rpe up` says so and gives the line (`sudo loginctl enable-linger <account>`).
 - It is refused, with nothing changed, as root; for an RPE run from its sources (build first); and where the app file, the Bun, or a folder above them or above RPE's data folder is one another account could change: each is named, with the `chmod` that takes the write away.
-- A later `rpe up --systemd`, with the service running, waits for the turns and jobs under way to end, at most `service.drainWait` seconds (5 minutes), looking every `update.lookEvery` seconds, before it makes the copy again and restarts the service.
+- A later `rpe up --systemd`, with the service running, waits for the turns and jobs under way to end, at most `service.drainWaitSeconds` seconds (5 minutes), looking every `update.lookEverySeconds` seconds, before it makes the copy again and restarts the service.
 
 `rpe status` names the file updates come from. Run from a copy that is not the extension's own folder in Lumiverse's data folder, `rpe up` says that updates will come only from that copy.
 
@@ -225,12 +225,12 @@ Update the extension in Lumiverse, as with any extension. Lumiverse replaces the
 The service does not run the file in the extension's folder: it runs RPE's own copy (see [The service](#the-service)), so an update of the extension never changes the running server under it. `bun run build` writes `dist/rpe.files.json`, the hash of the app file and of every file of the folders it reads beside it, and stamps the hash of that statement into the extension's backend. When the extension has been updated it tells RPE that a new app file has arrived, stating that hash. RPE then:
 
 1. reads the one file it was set up from (`rpe status` names it), copies the build beside its own copy, and takes it only when every file matches the statement and the statement matches the hash the extension stated;
-2. starts it for real on a scratch copy of its data (`rpe check`): a copy of the database, a fresh file tree, no Lumiverse; it passes only once it has mounted every area, laid its shipped files and answered its status with its build, within `update.checkWait` seconds;
+2. starts it for real on a scratch copy of its data (`rpe check`): a copy of the database, a fresh file tree, no Lumiverse; it passes only once it has mounted every area, laid its shipped files and answered its status with its build, within `update.checkWaitSeconds` seconds;
 3. waits until no turn and no job runs (`update.restart`, on by default), swaps the checked copy into its own copy's place, keeps the copy it replaces as known-good (`update.keepCopies`), and restarts onto it; its service starts it again.
 
 - `rpe status` has a `Builds:` line: the build RPE runs, the build waiting, the extension's build, and what RPE will do about a difference, with why a build was not taken. The **Runtime** page shows the same line, and the newest update stage by stage (arrived, its files checked, started on a scratch copy, the restart onto it), each under way, passed, or refused with why, read again while it goes on; a refused one shows that the running build stays as it was.
 - A word with no stated hash (today's registration carries only the extension's build) is not taken, and `rpe status` says why. A new build whose files do not match what was stated for it, or that does not start, is never swapped in; RPE goes on with the build it runs.
-- A build that is swapped in and does not come up within `update.startTries` starts is put back to the known-good copy by a step the service runs before each start, which an update does not replace (`rpe up --systemd` wrote it); `rpe status` says what happened. One that still cannot start is left stopped: the service stops starting RPE after `update.startTries` starts within `update.startWindow` seconds.
+- A build that is swapped in and does not come up within `update.startTries` starts is put back to the known-good copy by a step the service runs before each start, which an update does not replace (`rpe up --systemd` wrote it); `rpe status` says what happened. One that still cannot start is left stopped: the service stops starting RPE after `update.startTries` starts within `update.startWindowSeconds` seconds.
 - RPE run by hand (`rpe serve`) never restarts by itself: stop it and start it again.
 - With `update.restart` off, RPE waits for you: **Update now** on the Runtime page restarts it at once onto the build that passed, or restart RPE's service yourself. Pressed with no build waiting, it says there is none, or why the last one was refused.
 

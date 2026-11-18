@@ -37,7 +37,7 @@ export const BOOT: BootstrapChatReply = {
     cachedWeight: 0.1,
     caps: [
       { key: "bootstrap.run.calls", value: 200 },
-      { key: "bootstrap.run.time", value: 3_600 },
+      { key: "bootstrap.run.seconds", value: 3_600 },
       { key: "jobs.run.tokensIn", value: 600_000 },
       { key: "jobs.run.tokensOut", value: 60_000 },
     ],

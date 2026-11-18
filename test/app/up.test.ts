@@ -193,7 +193,7 @@ describe("rpe up", () => {
 
   test("with something else on RPE's port, up says so and names how to move RPE; with a free one after it, a first install takes that", async () => {
     await mkdir(bed.paths.files, { recursive: true });
-    await writeFile(bed.paths.globalConfig, "service:\n  portLast: 65535\n");
+    await writeFile(bed.paths.globalConfig, "service:\n  lastPort: 65535\n");
     const squatter = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("not rpe", { status: 200 }) });
     try {
       const first = await up(ACCOUNT.password);
@@ -377,12 +377,12 @@ describe("rpe up", () => {
     }
   });
 
-  test("a later up waits for the turn under way to end before it restarts RPE's service, and restarts it at the end of service.drainWait all the same", async () => {
+  test("a later up waits for the turn under way to end before it restarts RPE's service, and restarts it at the end of service.drainWaitSeconds all the same", async () => {
     const m = await machine();
     try {
       const line = ["--url", lumiverse.url, "--user", ACCOUNT.username, "--systemd"];
       expect((await up(ACCOUNT.password, line, [], { env: m.env, options: m.options })).code).toBe(0);
-      await writeFile(bed.paths.globalConfig, "service:\n  drainWait: 3\nupdate:\n  lookEvery: 1\n");
+      await writeFile(bed.paths.globalConfig, "service:\n  drainWaitSeconds: 3\nupdate:\n  lookEverySeconds: 1\n");
       let running = 1;
       const app = await bed.open({ config: { port, lumiverse: { url: lumiverse.url, user: ACCOUNT.id } }, areas: [{ name: "service", mount: (a) => a.routes.add("service", serviceRoutes(a)) }] });
       app.builds.counts(() => running);
@@ -397,7 +397,7 @@ describe("rpe up", () => {
       expect(performance.now() - began).toBeLessThan(2900);
       // One that does not end is waited for as long as the setting says, and the service is restarted at its end all the same.
       running = 1;
-      await writeFile(bed.paths.globalConfig, "service:\n  drainWait: 1\nupdate:\n  lookEvery: 1\n");
+      await writeFile(bed.paths.globalConfig, "service:\n  drainWaitSeconds: 1\nupdate:\n  lookEverySeconds: 1\n");
       const held = await up(null, line, [], { env: m.env, options: m.options });
       expect(held.out).toContain("1 still under way after 1 s: restarting RPE's service all the same.");
       expect((await m.calls()).match(/systemctl --user restart rpe-reader.service/g)?.length).toBe(3);

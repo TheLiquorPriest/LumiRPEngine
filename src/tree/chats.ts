@@ -252,7 +252,7 @@ export class TreeChats {
     return row === null ? null : { character: row.character, chat: row.folder };
   }
 
-  /** The chat's levels' limits on its suggestions (`suggestions.openMost`, `suggestions.decidedKept`), as its config files set them; the defaults for a chat not placed. */
+  /** The chat's levels' limits on its suggestions (`suggestions.maxOpen`, `suggestions.decidedKept`), as its config files set them; the defaults for a chat not placed. */
   async suggestionLimits(user: string, chat: string): Promise<{ openMost: number; decidedKept: number }> {
     const at = this.folders(user, chat);
     const s = await treeSettingsOf({ files: this.files, character: at?.character ?? null, chat: at?.chat ?? null });

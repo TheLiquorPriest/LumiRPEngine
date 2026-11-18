@@ -1,6 +1,6 @@
 // The floor's own trials, found before the first pair (PlanGates-4-fix1 item 4; findings 3, 10): the
 // runner's standing governs, and the floor adds its own reasons, guidance in a user layer, a shipped file
-// switched off by an `off:` list, a shipped tree not the build's, a lead that is not the Author. With any
+// switched off by a `stack.off` list, a shipped tree not the build's, a lead that is not the Author. With any
 // of them every measured part, the conditions of the whole test with them, goes to the runner as not
 // judged, "trial: " and the reason, never met or failed, and the table prints the trial first and no
 // verdict; the two parts seen on screen claim only what their screens show (PlanGates-4-fix2 item 5).

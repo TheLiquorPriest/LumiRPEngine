@@ -18,7 +18,7 @@ function isChats(request: RequestBody): request is Things & { scope: "gm" | "pla
   return request.type === "lre.things" && (request.scope === "gm" || request.scope === "play");
 }
 
-/** Tidy up's own control of how many findings a run shows: today's user setting `tidy.findings`, now RPE's global `things.tidyRunMost`. */
+/** Tidy up's own control of how many findings a run shows: today's user setting `tidy.findings`, now RPE's global `things.maxTidyFindings`. */
 function runMostOf(request: RequestBody): number | null {
   if (request.type !== "lre.settings.set") return null;
   const { patch } = request;
@@ -41,7 +41,7 @@ export const calls: CallFile = {
   async serve(request, ctx): Promise<ServedBody> {
     const runMost = runMostOf(request);
     if (runMost !== null) {
-      await ctx.client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "things.tidyRunMost", value: runMost } });
+      await ctx.client.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "things.maxTidyFindings", value: runMost } });
       return {} as ServedBody;
     }
     if (!isChats(request)) throw new Refusal("internal", "The things calls do not take that request.");

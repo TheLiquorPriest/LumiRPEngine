@@ -205,7 +205,7 @@ export class BootstrapJobs {
       cachedWeight: number("limits.cachedWeight") ?? 0,
       caps: [
         { key: "bootstrap.run.calls", value: settings.runCalls },
-        { key: "bootstrap.run.time", value: settings.runTime },
+        { key: "bootstrap.run.seconds", value: settings.runTime },
         ...RPH_CAPS.map((key) => ({ key, value: number(key) })),
       ],
     };

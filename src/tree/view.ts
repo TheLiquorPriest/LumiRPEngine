@@ -28,7 +28,7 @@ export function treeLayers(): Layer[] {
   ];
 }
 
-/** An id that names a folder (a session's, a turn's): letters, digits, `_` and `-`, so it can reach nowhere else. How long one may be is a setting (`files.idChars`). */
+/** An id that names a folder (a session's, a turn's): letters, digits, `_` and `-`, so it can reach nowhere else. How long one may be is a setting (`files.maxIdChars`). */
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 export function safeId(what: string, id: string): string {

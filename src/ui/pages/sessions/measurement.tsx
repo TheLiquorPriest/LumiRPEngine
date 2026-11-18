@@ -156,7 +156,7 @@ export function MeasurementSection(props: { chat: string | null }) {
   const shownId = picked ?? list.items[0]?.id ?? null;
   const report = useRead(shownId === null ? null : () => app.client.call("GET /api/v1/sessions/measurements/:id", { id: shownId }), [shownId]);
   const settings = useRead(() => app.client.call("GET /api/v1/settings", {}, { query: chat === null ? {} : { chat } }), [chat]);
-  const carry = settings.value?.settings.find((s) => s.key === "carry");
+  const carry = settings.value?.settings.find((s) => s.key === "sessions.carry");
   const inForce: CarryMode = carry?.value === "records" || carry?.value === "nothing" ? carry.value : "continuing";
   const [level, setLevel] = useState<Level>("global");
   const [busy, setBusy] = useState<CarryMode | null>(null);
@@ -167,7 +167,7 @@ export function MeasurementSection(props: { chat: string | null }) {
     if (busy !== null) return;
     setBusy(mode);
     setProblem(null);
-    app.client.call("PUT /api/v1/settings", {}, { body: { level: atLevel, ...(atLevel === "chat" ? { chat } : {}), key: "carry", value: mode } }).then(
+    app.client.call("PUT /api/v1/settings", {}, { body: { level: atLevel, ...(atLevel === "chat" ? { chat } : {}), key: "sessions.carry", value: mode } }).then(
       () => {
         setBusy(null);
         setSaid(`${CARRY_WORDS[mode].name} is now the default ${atLevel === "chat" ? "for this chat" : "for every chat"}.`);

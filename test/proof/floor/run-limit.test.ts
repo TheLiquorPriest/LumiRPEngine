@@ -41,7 +41,7 @@ describe("no pair sent over a running run", () => {
     expect(after.spans).toEqual([600, 600, 600, 600, Number.POSITIVE_INFINITY]);
     expect(after.longest).toBe(Number.POSITIVE_INFINITY);
     expect(after.running).toEqual(["pair 5"]);
-    // A next message would have waited for it no longer than limits.previousRun (20 s), and then that run is stopped.
+    // A next message would have waited for it no longer than limits.previousRunSeconds (20 s), and then that run is stopped.
     expect(after.waited.longest).toBe(20_000);
   });
 });

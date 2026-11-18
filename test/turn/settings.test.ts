@@ -88,7 +88,7 @@ test("what a chat's own RPE.yml sets holds at its next turn: the world state is 
   await play(b, "I climb the stairs.");
   const before = answers(b.model.requests[2]);
 
-  await setForChat(b, "worldState.budget", 40);
+  await setForChat(b, "worldState.tokens", 40);
   await setForChat(b, "engine.searchHits", 1);
   await setForChat(b, "cast.queryItems", 1);
   await setForChat(b, "story.queryItems", 1);

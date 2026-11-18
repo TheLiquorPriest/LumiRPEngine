@@ -56,7 +56,7 @@ export interface LoreSettings {
   wordCap: number;
   /** Entries the lore search index gives a search for each word it asks of a book's names and of its texts, before the search ranks them (`lore.search.candidates`). */
   searchCandidates: number;
-  /** Tokens the secrets a character holds may take in what it is given as its own (`lore.held.budget`). */
+  /** Tokens the secrets a character holds may take in what it is given as its own (`lore.held.tokens`). */
   heldBudget: number;
   /** Entries past which the catalogue's deterministic step (title, text, keys, size, activation, revision) runs on a worker thread (`lore.workerCatalogueAt`). */
   workerCatalogueAt: number;
@@ -734,7 +734,7 @@ export class Lore {
 
   /**
    * The secrets the character a reader plays holds (plan §9.6), with how it came by each and the tokens they may take together
-   * (`lore.held.budget`): those the world or a mark names it a holder of, and those the story made it one of, as they hold at the point
+   * (`lore.held.tokens`): those the world or a mark names it a holder of, and those the story made it one of, as they hold at the point
    * `at` stands at. Null when it plays no one in the chat's world.
    */
   async held(at: LoreAt, plays: string): Promise<{ secrets: HeldSecret[]; budget: number } | null> {

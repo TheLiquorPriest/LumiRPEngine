@@ -97,7 +97,7 @@ export interface SentInput {
   keep?: number | null;
   /** RPE's `history.step`: the window holds `keep` to `keep` plus this, both ends (R-95). Null or absent: off. */
   step?: number | null;
-  /** RPE's `history.hold.cap` when `history.hold.on` is set: the window may reach back this many messages more. Null or absent: the hold is off. */
+  /** RPE's `history.hold.maxMessages` when `history.hold.on` is set: the window may reach back this many messages more. Null or absent: the hold is off. */
   hold?: number | null;
   /** With the hold on: how many of the chat's visible rows, from its first, the story record covers for the turn. Null or absent: not given, and the turn is not judged. */
   reach?: number | null;

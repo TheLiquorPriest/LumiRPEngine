@@ -3,7 +3,7 @@
 // given for, so an address set anew takes no key but one given with it). Off until he sets one: RPH's `web_search` then answers that it
 // is off, and nothing leaves the machine. A search asks `<address>?q=<words>&limit=<n>` and reads a JSON list of `{ url, title,
 // snippet }` (or one under `results`), as RPH's folder host does; no redirect is followed, and the provider's answer is waited for as
-// long as `web.timeout` says.
+// long as `web.timeoutSeconds` says.
 
 import type { SearchHit, WebSearchPort } from "rp-harness/contract";
 import { type App, route, RouteError, shape } from "../app";
@@ -17,7 +17,7 @@ const GLOBAL = ["shipped", "global"] as const;
 
 export const WEB_SETTING_DEFS = {
   hits: { key: "web.hits", default: 10, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "Web search hits", about: "The hits a web search gives when the agent names no number.", effect: "use" },
-  timeout: { key: "web.timeout", default: 30, takes: { type: "number", least: 1 }, levels: GLOBAL, perConnection: false, name: "Web search wait", about: "Seconds a web search waits for the provider's answer before it says the search failed.", effect: "use" },
+  timeout: { key: "web.timeoutSeconds", default: 30, takes: { type: "number", least: 1 }, levels: GLOBAL, perConnection: false, name: "Web search wait", about: "Seconds a web search waits for the provider's answer before it says the search failed.", effect: "use" },
 } as const;
 
 /** The provider as the secrets file keeps it: its address, and the key given for that address, if any. */

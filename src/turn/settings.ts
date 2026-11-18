@@ -8,28 +8,29 @@
 //   turn:
 //     lead: null                 the agent definition that leads a turn, RPH's setting; the shipped RPE-global.yml names it
 //                                (author), and nothing in code does: with no level naming one, no turn is played
-//   carry: continuing            what a session carries between turns: continuing, records or nothing
+//     passConnection: <name>     the connection a request with no tag is passed on to (global level only;
+//                                absent: the default connection)
+//     maxRequestChars: 2000      the most characters a request beside his words may hold
+//   sessions:
+//     carry: continuing          what a session carries between turns: continuing, records or nothing
 //   limits:
-//     previousRun: ~             seconds a turn waits for the run of the turn before it, then stops it; none: until it ends
-//   chat:
-//     hiddenReadable: false      agents may read the messages the player hid from the prompt
+//     previousRunSeconds: ~      seconds a turn waits for the run of the turn before it, then stops it; none: until it ends
 //   history:
+//     hiddenReadable: false      agents may read the messages the player hid from the prompt
 //     window: 40                 the latest this many of the chat's messages stay in the prompt; null keeps them all
 //     step: null                 lets the window grow by this many before it is cut back to its size; null is off
 //     hold: false                keeps a message the story record does not cover in the prompt: true or false,
-//                                or { on: true, cap: 40 }, cap being the most messages it holds past the window
-//   since:
-//     editedBudget: null         tokens the briefing's "Since the last turn" spends on replies edited after their
+//                                or { on: true, maxMessages: 40 }, maxMessages being the most it holds past the window
+//   briefing:
+//     editedTokens: null         tokens the briefing's "Since the last turn" spends on replies edited after their
 //                                turns, told in full, the newest first; the rest named in one line; null tells all
-//     deletedBudget: 1000        tokens it spends quoting the first words of the replies of turns a delete took; the rest
+//     deletedTokens: 1000        tokens it spends quoting the first words of the replies of turns a delete took; the rest
 //                                by message numbers in one line
 //     deletedWords: 24           words of each such reply it quotes
-//     notAppliedBudget: 1500     tokens it spends listing what no longer applies after a flip; past it, a count
-//     jobBudget: 1500            tokens it spends listing, thing by thing, what each finished job changed; past it, a count
+//     notAppliedTokens: 1500     tokens it spends listing what no longer applies after a flip; past it, a count
+//     jobTokens: 1500            tokens it spends listing, thing by thing, what each finished job changed; past it, a count
 //   reply:
 //     lastText: false            a turn that ends with no reply sends the Author's last plain text in place of the error line
-//   passConnection: <name>       the connection a request with no tag is passed on to (global level only;
-//                                absent: the default connection)
 //
 // With them, the settings of the areas the turn lane hands a chat's work to, each group declared by its
 // area (`cast:`, `story:`, `worldState:`, `engine:`): read here for the chat, at every level. The areas
@@ -115,16 +116,16 @@ export interface TurnSettings {
   reserve: number;
   /** RPH's characters to a token for the chat (`tokens.charsPerToken`), the model layer's count: every budget the turn fills is counted at it. */
   charsPerToken: number;
-  /** The turns a chat's list gives when the page names no limit (`turns.page`), and the most one page may ask (`turns.pageMost`). */
+  /** The turns a chat's list gives when the page names no limit (`turns.page`), and the most one page may ask (`turns.maxPage`). */
   turnsPage: { size: number; most: number };
-  /** The most characters a request's words may hold (`requests.textMost`); one past it is not kept. */
+  /** The most characters a request's words may hold (`turn.maxRequestChars`); one past it is not kept. */
   requestsTextMost: number;
   /** The taps' bounds, for the chat (`src/play/settings.ts`). */
   taps: TapSettings;
   /** Whose messages are the chat's story (`story.from`), and, read with `replies`, whether his newest message is the turn's direction (`story.newest`): briefing facts (R-176). */
   storyFrom: StoryFrom;
   storyNewest: StoryNewest;
-  /** The most characters of a gap check's hit in the state or the story record (`gap.snippet`). */
+  /** The most characters of a gap check's hit in the state or the story record (`tools.gap.snippetChars`). */
   gapSnippet: number;
   /** What a write to each lane does (`permissions.<lane>`), and a call of a tool outside RPE (`external`): the user's, per chat, read at every level. */
   permissions: Readonly<Record<"story" | "engine" | "external", LanePermission>>;
@@ -191,7 +192,7 @@ const CARRIES: readonly Carry[] = ["continuing", "records", "nothing"];
 /** Each setting as the files write it, by the name this file reads it under. Each is in force from the next turn, but the connection for requests with no tag, read at each. */
 const DEFS = {
   carry: {
-    key: "carry",
+    key: "sessions.carry",
     default: TURN_DEFAULTS.carry,
     takes: { type: "oneOf", values: CARRIES },
     perConnection: false,
@@ -201,7 +202,7 @@ const DEFS = {
     row: "How context is carried in a session",
   },
   previousRun: {
-    key: "limits.previousRun",
+    key: "limits.previousRunSeconds",
     default: null,
     takes: { type: "number", least: 0 },
     orNone: true,
@@ -213,7 +214,7 @@ const DEFS = {
     row: "Wait for the previous turn's run",
   },
   hiddenReadable: {
-    key: "chat.hiddenReadable",
+    key: "history.hiddenReadable",
     default: TURN_DEFAULTS.hiddenReadable,
     takes: { type: "yesNo" },
     perConnection: false,
@@ -233,7 +234,7 @@ const DEFS = {
     row: "When the Author ends with no reply",
   },
   editedBudget: {
-    key: "since.editedBudget",
+    key: "briefing.editedTokens",
     default: TURN_DEFAULTS.editedBudget,
     takes: { type: "whole", least: 0 },
     orNone: true,
@@ -244,7 +245,7 @@ const DEFS = {
     effect: "turn",
   },
   deletedBudget: {
-    key: "since.deletedBudget",
+    key: "briefing.deletedTokens",
     default: TURN_DEFAULTS.deletedBudget,
     takes: { type: "whole", least: 0 },
     perConnection: false,
@@ -253,7 +254,7 @@ const DEFS = {
     effect: "turn",
   },
   deletedWords: {
-    key: "since.deletedWords",
+    key: "briefing.deletedWords",
     default: TURN_DEFAULTS.deletedWords,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -262,7 +263,7 @@ const DEFS = {
     effect: "turn",
   },
   notAppliedBudget: {
-    key: "since.notAppliedBudget",
+    key: "briefing.notAppliedTokens",
     default: TURN_DEFAULTS.notAppliedBudget,
     takes: { type: "whole", least: 0 },
     perConnection: false,
@@ -271,7 +272,7 @@ const DEFS = {
     effect: "turn",
   },
   jobBudget: {
-    key: "since.jobBudget",
+    key: "briefing.jobTokens",
     default: TURN_DEFAULTS.jobBudget,
     takes: { type: "whole", least: 0 },
     perConnection: false,
@@ -316,7 +317,7 @@ const DEFS = {
     row: "Hold a message in the prompt until the record covers it",
   },
   holdCap: {
-    key: "history.hold.cap",
+    key: "history.hold.maxMessages",
     default: TURN_DEFAULTS.window.hold.cap,
     takes: { type: "whole", least: 0 },
     perConnection: false,
@@ -327,7 +328,7 @@ const DEFS = {
   },
   // Read with no chat (`passConnection` below), so from the global level alone.
   passConnection: {
-    key: "passConnection",
+    key: "turn.passConnection",
     default: null,
     takes: { type: "text" },
     orNone: true,
@@ -349,7 +350,7 @@ const DEFS = {
     effect: "use",
   },
   turnsPageMost: {
-    key: "turns.pageMost",
+    key: "turns.maxPage",
     default: 500,
     takes: { type: "whole", least: 1 },
     levels: ["shipped", "global"],
@@ -359,7 +360,7 @@ const DEFS = {
     effect: "use",
   },
   requestsTextMost: {
-    key: "requests.textMost",
+    key: "turn.maxRequestChars",
     default: TURN_DEFAULTS.requestsTextMost,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -386,7 +387,7 @@ const DEFS = {
     effect: "turn",
   },
   gapSnippet: {
-    key: "gap.snippet",
+    key: "tools.gap.snippetChars",
     default: TURN_DEFAULTS.gapSnippet,
     takes: { type: "whole", least: 1 },
     perConnection: false,

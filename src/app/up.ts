@@ -136,11 +136,11 @@ export interface UnitFacts {
   bun: string;
   /** RPE's data folder: its installed copy is what the unit runs. */
   data: string;
-  /** No more than `tries` starts within `windowMs` (`update.startTries`, `update.startWindow`): the one start after the last allowed to a swapped-in build is the known-good copy's. */
+  /** No more than `tries` starts within `windowMs` (`update.startTries`, `update.startWindowSeconds`): the one start after the last allowed to a swapped-in build is the known-good copy's. */
   startLimit: { tries: number; windowMs: number };
   /** The unit's `MemoryMax` (`service.memory`). */
   memory: string;
-  /** Seconds before the service is started again (`service.restartWait`). */
+  /** Seconds before the service is started again (`service.restartWaitSeconds`). */
   restartWait: number;
 }
 
@@ -148,7 +148,7 @@ export interface UnitFacts {
  * RPE's unit: `rpe serve` on its data folder, run from RPE's installed copy and never from the
  * extension's file (R-13), by the Bun `rpe up` ran with, always restarted, as today's runtime's unit is,
  * held to its memory cap, and started no more than `tries` times within the window (the settings
- * `update.startTries` and `update.startWindow`) besides the one start that puts back the known-good
+ * `update.startTries` and `update.startWindowSeconds`) besides the one start that puts back the known-good
  * copy: a build that cannot serve, such as one an update put in place, is first put back, and one that
  * still cannot is left stopped, and `systemctl --user status` says it failed, rather than started
  * every two seconds for good. Its pre-start step is the copy's own, written at install, which an

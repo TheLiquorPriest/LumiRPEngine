@@ -45,7 +45,7 @@ export function twoStepTrace(options: { extra?: number; writesIntent?: boolean; 
   const write: ToolCallView = { id: "w", name: "file_write", args: { path: "scratch/intent.md" } };
   const look: ToolCallView = { id: "l", name: "lore_search", args: { query: "reef" } };
   const first = options.writesIntent === false ? look : write;
-  const events: [number, TraceEvent][] = [...start("author"), callStarted(1, 3), [5, { kind: "tool_started", callId: first.id, tool: first.name, args: first.args, closing: false }], callEnded(1, 8, options.workingText ?? "", [first])];
+  const events: [number, TraceEvent][] = [...start("author"), callStarted(1, 3), [5, { kind: "tool_started", callId: first.id, tool: first.name, args: first.args }], callEnded(1, 8, options.workingText ?? "", [first])];
   let call = 1;
   for (let n = 0; n < (options.extra ?? 0); n++) events.push(callStarted(++call, 10 + n), callEnded(call, 11 + n, ""));
   events.push(callStarted(++call, 20), callEnded(call, 30, "Marta nods and sets down the cup."), [30, { kind: "released", release: { by: { ...AUTHOR }, form: "message", length: 40 } }]);
@@ -111,7 +111,7 @@ function sourceOf(spec: LoopSpec, log: Log, seen?: Partial<Ground>): (sent: Sent
       messages: async () => [],
       close: () => undefined,
       contract: async () => spec.contract ?? CONTRACT,
-      setting: async (_chat, key) => (key.startsWith("reply.forms.") && written !== null ? { value: spec.reads ?? written, from: "chat" } : null),
+      setting: async (_chat, key) => (key.startsWith("connections.") && key.endsWith(".reply.form") && written !== null ? { value: spec.reads ?? written, from: "chat" } : null),
       put: async (chat, key, value) => {
         if (spec.writeFails !== undefined) throw new Error(spec.writeFails);
         written = String(value);

@@ -79,9 +79,9 @@ const SENTENCES = " ";
 
 /** The settings a chat's taps read, as the chat's levels set them. */
 export interface PlaySettings {
-  /** The most things falling due a list gives (`engine.dueItems`). */
+  /** The most things falling due a list gives (`engine.maxDueItems`). */
   dueItems: number;
-  /** The most operations one edit of operations carries (`engine.editOps`). */
+  /** The most operations one edit of operations carries (`engine.maxEditOps`). */
   editOps: number;
   taps: TapSettings;
   /** The chat's map settings (`map:` in its config), which the map panel is drawn at. */
@@ -519,7 +519,7 @@ export class PlayService {
       return played(edited([{ op: "fix_item", change }]));
     }
     if ("things" in r) {
-      // Belongings' changes to his things: all or none, one unit with one Undo, as many as the setting `taps.thingsMost` allows.
+      // Belongings' changes to his things: all or none, one unit with one Undo, as many as the setting `taps.maxThingsPerFix` allows.
       const most = settings.taps.thingsMost;
       const changes = Array.isArray(r.things) ? r.things.map(parseItemFix) : [];
       if (changes.length === 0 || changes.length > most || changes.some((c) => c === null) || typeof r.label !== "string") throw new Refused("bad_request", { line: "things_count", fields: { most } });
@@ -581,7 +581,7 @@ export class PlayService {
     return { opened, events: w.events.filter((e) => !opened.includes(e)), store };
   }
 
-  /** An edit of operations, as the economy's "Make this a property" sends it: all or none, locked fields writable, as many as `engine.editOps` allows. */
+  /** An edit of operations, as the economy's "Make this a property" sends it: all or none, locked fields writable, as many as `engine.maxEditOps` allows. */
   private ops({ registry, world, state, seed }: Head, ops: readonly JsonValue[], settings: PlaySettings): Resolved {
     if (ops.length === 0 || ops.length > settings.editOps) throw new Refused("bad_request", { line: "edit_ops_count", fields: { most: settings.editOps } });
     // Each holder whose cash an op sets has what the world gave them opened first, as the world's own, so the sum starts from it.

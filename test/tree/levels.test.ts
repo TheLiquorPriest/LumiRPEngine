@@ -1,7 +1,7 @@
 // The levels of RPE's tree as RPH reads its guidance through the port (plan §5.2): the shipped level
 // laid out at every start from RPH's shipped files and then RPE's, RPE's winning a name both have;
 // a user's file replacing the shipped one of its name, a chat's replacing the user's; and a name
-// switched off in a config's `off:` list not found at all.
+// switched off in a config's `stack.off` list not found at all.
 
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -100,7 +100,7 @@ describe("RPE's tree, level by level", () => {
   test("a part switched off in the user's config is not found", async () => {
     tree = await layTree(KIT_SEED, place, { rpe: [{ level: "shipped", path: ".prompts/kit-words.md", text: part("Shipped words.") }] });
     expect(await loadGuidance(tree.port, scope).part("kit-words")).toBeDefined();
-    await Bun.write(join(tree.levelDir("global"), "RPE-global.yml"), "off: [.prompts/kit-words.md]\n");
+    await Bun.write(join(tree.levelDir("global"), "RPE-global.yml"), "stack:\n  off: [.prompts/kit-words.md]\n");
     expect(await loadGuidance(tree.port, scope).part("kit-words")).toBeUndefined();
   });
 });

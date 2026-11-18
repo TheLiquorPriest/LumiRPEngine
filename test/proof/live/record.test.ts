@@ -146,13 +146,13 @@ test("each agent's connection, model, reply form, effort and streaming come from
     providers: [],
   };
   const definitions = { author: "---\nname: author\nmodel: default\neffort: high\n---\nBody.", gm: "---\nname: gm\nmodel: Other\n---\nBody." };
-  const views = [view("reply.form", "tags"), view("reply.forms.Other", "two-step", { id: "c2", name: "Other" }), view("reply.streamAnyway", []), view("effort.connections.Other", "medium", { id: "c2", name: "Other" })];
+  const views = [view("reply.form", "tags"), view("connections.Other.reply.form", "two-step", { id: "c2", name: "Other" }), view("reply.streamAnyway", []), view("connections.Other.effort", "medium", { id: "c2", name: "Other" })];
   expect(await agentFacts(new Agents(shown, views, definitions))).toEqual([
     { agent: "author", connection: "Lamp", model: "model-a", replyForm: "tags", effort: "high", streams: true },
     { agent: "gm", connection: "Other", model: "model-b", replyForm: "two-step", effort: "medium", streams: false },
   ]);
   // A two-step connection named in `reply.streamAnyway` streams.
-  const streaming = [view("reply.form", "tags"), view("reply.forms.Other", "two-step", { id: "c2", name: "Other" }), view("reply.streamAnyway", ["Other"])];
+  const streaming = [view("reply.form", "tags"), view("connections.Other.reply.form", "two-step", { id: "c2", name: "Other" }), view("reply.streamAnyway", ["Other"])];
   expect((await agentFacts(new Agents(shown, streaming, definitions))).find((a) => a.agent === "gm")?.streams).toBe(true);
   expect(headerOf("no header")).toEqual({});
 });

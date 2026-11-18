@@ -56,11 +56,11 @@ describe("the Settings page", () => {
     expect(said(tree, "limits.turn.calls")).toContain(
       "Calls in a turnchanged60Model calls all the agents of one turn may make between them.limits.turn.calls · set in @global/RPE-global.yml (Yours) · default: 40 · takes a whole number, 1 or more · a change holds from the next turn · Appendix D.1: Calls in a turn across all agents",
     );
-    expect(said(tree, "limits.turn.time")).toContain("limits.turn.timeno limitWhat limits.turn.time does.limits.turn.time · no file sets it · default: no limit");
+    expect(said(tree, "limits.turn.seconds")).toContain("limits.turn.secondsno limitWhat limits.turn.seconds does.limits.turn.seconds · no file sets it · default: no limit");
     expect(said(tree, "reply.form")).toContain("A file sets it to markdown, which is not taken: reply.form takes one of tags, tools, text.");
     expect(said(tree, "reply.streamAnyway")).toContain("reply.streamAnyway · set in RPE.yml (This chat's) · default: none listed");
     expect(said(tree, "update.restart")).toContain("update.restart · set in @global/RPE-global.yml (Yours) · default: yes · takes yes or no · a change holds at its next use · beyond Appendix D.1, for the owner's approval");
-    expect(said(tree, "reply.forms.c-flash")).toContain("reply.forms.c-flashchangedtoolsWhat reply.forms.c-flash does.reply.forms.c-flash · set in RPE.yml (This chat's) · default: the reply's form");
+    expect(said(tree, "connections.c-flash.reply.form")).toContain("connections.c-flash.reply.formchangedtoolsWhat connections.c-flash.reply.form does.connections.c-flash.reply.form · set in RPE.yml (This chat's) · default: the reply's form");
     // A file that cannot be read is said, in RPE's words.
     const broken: SettingsReply = { ...SETTINGS, files: SETTINGS.files.map((f) => (f.level === "chat" ? { ...f, problem: "RPE.yml: a mapping was expected at line 3." } : f)) };
     expect(banners(view({ reply: broken }).tree)).toEqual([{ title: "RPE.yml could not be read", text: "RPE.yml could not be readRPE.yml: a mapping was expected at line 3." }]);
@@ -70,7 +70,7 @@ describe("the Settings page", () => {
     const listed = view();
     expect(buttonsOf(rowOf(listed.tree, "limits.turn.calls"))).toEqual(["Change", "Remove it from @global/RPE-global.yml"]);
     // No file sets it: there is nothing to remove.
-    expect(buttonsOf(rowOf(listed.tree, "limits.turn.time"))).toEqual(["Change"]);
+    expect(buttonsOf(rowOf(listed.tree, "limits.turn.seconds"))).toEqual(["Change"]);
     press(rowOf(listed.tree, "limits.turn.calls"), "Change");
     press(rowOf(listed.tree, "limits.turn.calls"), "Remove it from @global/RPE-global.yml");
     expect(listed.asked).toEqual([{ edit: "limits.turn.calls" }, { takeAway: "limits.turn.calls", level: "global" }]);
@@ -141,8 +141,8 @@ describe("the Settings page", () => {
     control.save();
     expect(asked[6]?.body).toMatchObject({ key: "update.restart", value: true });
     // A setting no file sets is changed at the user's own level.
-    control.edit("limits.turn.time");
-    expect(states.at(-1)?.editing).toEqual({ key: "limits.turn.time", level: "global", text: "" });
+    control.edit("limits.turn.seconds");
+    expect(states.at(-1)?.editing).toEqual({ key: "limits.turn.seconds", level: "global", text: "" });
   });
 
   test("the page keeps its chat in the address, and with no chat it reads the levels every chat shares", () => {

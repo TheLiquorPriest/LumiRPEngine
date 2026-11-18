@@ -47,7 +47,7 @@ export const SETTINGS: SettingsReply = {
   ],
   settings: [
     setting("limits.turn.calls", { name: "Calls in a turn", about: "Model calls all the agents of one turn may make between them.", row: "Calls in a turn across all agents", value: 60, default: 40, from: "global", file: GLOBAL_FILE, set: [{ level: "global", file: GLOBAL_FILE, value: 60 }], takes: { type: "whole", least: 1 }, takesWords: "a whole number, 1 or more", none: "no limit", orNone: true }),
-    setting("limits.turn.time", { takes: { type: "whole", least: 1 }, takesWords: "a whole number, 1 or more", none: "no limit", orNone: true }),
+    setting("limits.turn.seconds", { takes: { type: "whole", least: 1 }, takesWords: "a whole number, 1 or more", none: "no limit", orNone: true }),
     setting("reply.form", { value: "tags", default: "tags", takes: { type: "oneOf", values: ["tags", "tools", "text"] }, takesWords: "one of tags, tools, text", passed: { value: "markdown", why: "reply.form takes one of tags, tools, text." } }),
     setting("reply.streamAnyway", { value: ["moira", "ash"], default: [], from: "chat", file: CHAT_FILE, takes: { type: "texts" }, takesWords: "a list of names" }),
     setting("update.restart", { value: false, default: true, from: "global", file: GLOBAL_FILE, takes: { type: "yesNo" }, takesWords: "yes or no", levels: ["global"], effect: "use", effectWords: "at its next use" }),
@@ -77,9 +77,9 @@ export const SETTINGS: SettingsReply = {
       takes: { type: "records", fields: PIN_FIELDS },
       takesWords: "a list of records, each with file (a line of text) and agent (a line of text)",
     }),
-    setting("reply.forms.c-flash", { value: "tools", from: "chat", file: CHAT_FILE, takes: { type: "oneOf", values: ["tags", "tools", "text"] }, takesWords: "one of tags, tools, text", none: "the reply's form", connection: { id: "c-flash", name: "Flash" } }),
-    setting("effort.connections.c-flash", { takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: { id: "c-flash", name: "Flash" } }),
-    setting("effort.connections.Studio", { value: "high", from: "global", file: GLOBAL_FILE, takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: null }),
+    setting("connections.c-flash.reply.form", { value: "tools", from: "chat", file: CHAT_FILE, takes: { type: "oneOf", values: ["tags", "tools", "text"] }, takesWords: "one of tags, tools, text", none: "the reply's form", connection: { id: "c-flash", name: "Flash" } }),
+    setting("connections.c-flash.effort", { takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: { id: "c-flash", name: "Flash" } }),
+    setting("connections.Studio.effort", { value: "high", from: "global", file: GLOBAL_FILE, takes: { type: "oneOf", values: ["low", "medium", "high"] }, takesWords: "one of low, medium, high", none: "the connection's own", connection: null }),
   ],
   facts: [
     { key: "lumiverse.url", name: "Lumiverse's address", value: "http://lumiverse.test:7860", from: "config.json" },

@@ -130,7 +130,7 @@ export interface StoreOptions {
    * written to standard error.
    */
   handlerFailed?: (failure: StoreFailure) => void;
-  /** How far the engine's own walks go (`engine.kindChain`, `engine.holderDepth`, `space.visitDepth`); each 32 by default. */
+  /** How far the engine's own walks go (`engine.maxKindChain`, `engine.maxHolderDepth`, `places.maxVisitDepth`); each 32 by default. */
   kindChain?: number;
   holderDepth?: number;
   visitDepth?: number;
@@ -1302,7 +1302,7 @@ export class UserStore {
 
   /**
    * The (chat, message) pairs a chat's message is: its own, and through branch links its sources', as many links back as
-   * `store.branchHops` says. Where a link goes on past that, it stops: each place it stopped is put in `stopped` and told to the log.
+   * `store.maxBranchHops` says. Where a link goes on past that, it stops: each place it stopped is put in `stopped` and told to the log.
    */
   private sources(chat: string, messages: readonly string[], stopped?: { chat: string; message: string; hops: number }[]): Map<string, { chat: string; message: string }[]> {
     const out = new Map<string, { chat: string; message: string }[]>(messages.map((m) => [m, [{ chat, message: m }]]));
@@ -1327,7 +1327,7 @@ export class UserStore {
       if (!beyond.has(shown) || seen.has(`${at}\u0000${message}`)) continue;
       seen.add(`${at}\u0000${message}`);
       stopped?.push({ chat: at, message, hops });
-      this.store.log?.("A chat's branch links were followed as far as store.branchHops says; the turns beyond are not found.", { user: this.id, chat, stoppedAtChat: at, stoppedAtMessage: message, hops });
+      this.store.log?.("A chat's branch links were followed as far as store.maxBranchHops says; the turns beyond are not found.", { user: this.id, chat, stoppedAtChat: at, stoppedAtMessage: message, hops });
     }
     return out;
   }

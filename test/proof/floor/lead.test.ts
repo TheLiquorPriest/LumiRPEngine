@@ -1,5 +1,5 @@
 // The floor is "where the Author writes" (STANDALONE-PLAN §17.1 l.1757; PlanGates-4-fix2 item 2): the lead
-// the floor expects is the shipped default of RPE's `lead` setting, read from RPE and written nowhere in
+// the floor expects is the shipped default of RPE's `turn.lead` setting, read from RPE and written nowhere in
 // the script. Before the first pair the floor reads who leads at every level of settings, and a lead that
 // is not that default is one of the floor's own trials, "the turn's lead is <name>, not the Author"; each
 // turn's trace is checked too, and a turn led by another definition makes the run a trial. A trial gives
@@ -12,9 +12,9 @@ import { floorConditions, ledByOthers, noVerdict, type FloorRun } from "../../..
 import { recordedRun } from "./recorded";
 import { factsOf, LEADS, partOf, playReplay, recordOf, SERVED } from "./replay";
 
-/** RPE's `lead` setting as its settings route shows it. */
+/** RPE's `turn.lead` setting as its settings route shows it. */
 function leadSetting(value: string, from: SettingView["from"], fallback = "author"): SettingView {
-  return { key: "lead", name: "lead", about: "Who leads each turn.", effect: "turn", effectWords: "from the next turn", row: null, set: [], joined: false, value, default: fallback, from, file: from === null ? null : `@${from}/RPE.yml`, takes: { type: "text" }, takesWords: "a line of text that is not blank", none: null, orNone: false, levels: ["global", "character", "chat"], passed: null };
+  return { key: "turn.lead", name: "turn.lead", about: "Who leads each turn.", effect: "turn", effectWords: "from the next turn", row: null, set: [], joined: false, value, default: fallback, from, file: from === null ? null : `@${from}/RPE.yml`, takes: { type: "text" }, takesWords: "a line of text that is not blank", none: null, orNone: false, levels: ["global", "character", "chat"], passed: null };
 }
 
 /** The recorded run with every record of every RPE turn's trace made by another definition: the check's case. */
@@ -36,28 +36,28 @@ describe("who leads, read from RPE's own settings", () => {
   test("a lead the chat's settings change is one of the floor's own trials, naming the lead and the level that sets it", () => {
     const leads = leadsOf({ settings: [leadSetting("gm", "chat")] }, [
       { level: "global", file: "@global/RPE-global.yml", text: "history:\n  window: 40\n", problem: null },
-      { level: "chat", file: "@chat/RPE.yml", text: "lead: gm\n", problem: null },
+      { level: "chat", file: "@chat/RPE.yml", text: "turn:\n  lead: gm\n", problem: null },
     ]);
     expect(leads.levels).toEqual([
       { level: "global", file: "@global/RPE-global.yml", lead: null, problem: null },
       { level: "chat", file: "@chat/RPE.yml", lead: "gm", problem: null },
     ]);
-    expect(leadTrials(leads)).toEqual(["the turn's lead is gm, not the Author (the shipped default of the lead setting is author; the chat level's file sets it)"]);
+    expect(leadTrials(leads)).toEqual(["the turn's lead is gm, not the Author (the shipped default of the turn.lead setting is author; the chat level's file sets it)"]);
     // Through the floor's trials, beside the others, and with a lead that is the default none.
     const run = recordOf(factsOf(recordedRun({ form: "tag" })));
     expect(floorTrials(run, { shipped: SERVED, layers: [], off: [], leads }, null)).toEqual(leadTrials(leads));
   });
 
   test("a lead RPE's settings do not give is a trial too, never taken to be the Author", () => {
-    expect(leadTrials(leadsOf({ settings: [] }, []))).toEqual(["RPE's settings give no `lead` setting with a default, so who leads the turn is not known"]);
+    expect(leadTrials(leadsOf({ settings: [] }, []))).toEqual(["RPE's settings give no `turn.lead` setting with a default, so who leads the turn is not known"]);
     const noValue: Leads = { expected: "author", inForce: null, from: null, levels: [] };
-    expect(leadTrials(noValue)).toEqual(["RPE's settings give no value in force for `lead`, so who leads the turn is not known"]);
+    expect(leadTrials(noValue)).toEqual(["RPE's settings give no value in force for `turn.lead`, so who leads the turn is not known"]);
   });
 
   test("a level's own file is read for the lead it sets; one that does not parse or could not be read is named, and the value in force still decides", () => {
-    expect(leadInFile("lead: gm\n")).toEqual({ lead: "gm", problem: null });
+    expect(leadInFile("turn:\n  lead: gm\n")).toEqual({ lead: "gm", problem: null });
     expect(leadInFile("history:\n  window: 40\n")).toEqual({ lead: null, problem: null });
-    expect(leadInFile("lead: [unclosed\n").problem).toContain("does not parse");
+    expect(leadInFile("turn: { lead: [unclosed\n").problem).toContain("does not parse");
     const leads = leadsOf({ settings: [leadSetting("author", null)] }, [{ level: "chat", file: "@chat/RPE.yml", text: null, problem: "it could not be read: 500" }]);
     expect(leads.levels).toEqual([{ level: "chat", file: "@chat/RPE.yml", lead: null, problem: "it could not be read: 500" }]);
     expect(leadTrials(leads)).toEqual([]);

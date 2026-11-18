@@ -120,7 +120,7 @@ test("a run whose served tree is not the build's, empty, with guidance in a chat
     [SERVED_OTHER, "the shipped tree the server ran is not the build's: 1 path differs (author/turn.md)"],
     [CHAT_LAYER, "the chat layer holds guidance of its own, so its agents did not run under the shipped guidance: author/turn.md"],
     [fakeFacts({ none: true }), "the host gave no account of the guidance the run stood on (the shipped tree it served, the build's own, the layers of the user's own, the names its configs switch), so nothing shows its agents ran under the shipped guidance"],
-    // A config's `off:` switches shipped guidance off and holds no guidance: the tree's hashes cannot show it.
+    // A config's `stack.off` switches shipped guidance off and holds no guidance: the tree's hashes cannot show it.
     [names({ off: [{ name: "TURN", levels: ["global"] }] }), "a config switches shipped guidance: off: TURN (global), so its agents did not run under the shipped guidance as shipped"],
     [names({ layered: ["AGENTS"] }), "a config switches shipped guidance: layered: AGENTS, so its agents did not run under the shipped guidance as shipped"],
     [names({ added: ["notes.md"] }), "a config switches shipped guidance: added: notes.md, so its agents did not run under the shipped guidance as shipped"],
@@ -196,7 +196,7 @@ test("in the rig an as-shipped part is its code path, judged as code whatever th
 });
 
 test("a setting written during a play is no change of guidance: a layer is hashed over its guidance files, not its settings file", async () => {
-  // The play's chat has an RPE.yml when the footing is ready, and a different one when the form has ended (a gate writing `reply.forms.<connection>`).
+  // The play's chat has an RPE.yml when the footing is ready, and a different one when the form has ended (a gate writing `connections.<connection>.reply.form`).
   const settings = (text: string) => fakeGuidance({ layers: [{ level: "chat", files: [{ path: "RPE.yml", sha256: sha256(text) }] }] });
   const written: SessionGuidance = (_, when) => settings(when === "before" ? "reply:\n  streamAnyway: false\n" : "reply:\n  streamAnyway: true\n");
   const kept = await runOn(root, CLEAN, { guidance: written });

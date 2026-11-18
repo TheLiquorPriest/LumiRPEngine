@@ -40,7 +40,7 @@ test("a whole request ends at the hold: what the Author has written of the reply
 
 test("the chat's lower limit ends it first: a turn's time of one second under a longer hold, with nothing of the reply written, ends with the limit's line", async () => {
   const never = gate();
-  const b = await wholeBed(30_000, { answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { hold: never }] }], global: "limits:\n  turn:\n    time: 1\n" });
+  const b = await wholeBed(30_000, { answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { hold: never }] }], global: "limits:\n  turn:\n    seconds: 1\n" });
   b.host.send(CHAT, "I climb the stairs.");
   const asked = Date.now();
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });

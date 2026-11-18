@@ -188,7 +188,7 @@ describe("a long silent turn", () => {
   /**
    * A turn that works twelve minutes and then replies, played as Lumiverse plays any generation: through the stand-in's `generate()` on a clock the test moves,
    * RPE's endpoint the connection's server, the tag the extension would add given as a parameter; with `progressEvery`, it writes a progress line after each such
-   * stretch of silence, as RPH does after `progress.silence` seconds. Each moment the stand-in counted text as it came (`touchActiveGeneration`) is kept.
+   * stretch of silence, as RPH does after `progress.silenceSeconds` seconds. Each moment the stand-in counted text as it came (`touchActiveGeneration`) is kept.
    */
   async function silentTurn(progressEvery?: number): Promise<{ out: Outcome; touches: number[]; started: number; ended: number }> {
     const clock = new FakeClock();

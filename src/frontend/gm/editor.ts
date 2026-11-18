@@ -34,7 +34,7 @@ export interface BulkEditor extends Editor {
    * for all of it.
    */
   editAll(ops: readonly EditOp[], done: (count: number) => string): Promise<{ applied: number; of: number }>;
-  /** The bounds the page's controls hold to, as RPE's settings give them: the operations in one edit (`engine.editOps`), the things one move takes (`taps.thingsMost`), and the fewest findings a Tidy up run may show (`things.tidyRunMost`'s least; it has no most). */
+  /** The bounds the page's controls hold to, as RPE's settings give them: the operations in one edit (`engine.maxEditOps`), the things one move takes (`taps.maxThingsPerFix`), and the fewest findings a Tidy up run may show (`things.maxTidyFindings`'s least; it has no most). */
   limits: { editOps: number; thingsMost: number; tidyRunLeast: number };
   /** The chat's GM key as the view was last loaded at (`GmSectionProps.reloadKey`): what a page reads besides `gm` (a thing, a character) it reads again on this, not on `gm`. */
   reloadKey: string;

@@ -349,12 +349,12 @@ interface Found {
   replaced: string | null;
   /** Whether the chat lets agents read its hidden messages. */
   hiddenReadable: boolean;
-  /** Tokens the replies edited after their turns may take in full (`since.editedBudget`); null for no bound. */
+  /** Tokens the replies edited after their turns may take in full (`briefing.editedTokens`); null for no bound. */
   editedBudget: number | null;
-  /** The turns a delete took, quoted while they fit (`since.deletedBudget`, `since.deletedWords`), and what a flip stopped, listed while it fits (`since.notAppliedBudget`). */
+  /** The turns a delete took, quoted while they fit (`briefing.deletedTokens`, `briefing.deletedWords`), and what a flip stopped, listed while it fits (`briefing.notAppliedTokens`). */
   deleted: { budget: number; words: number };
   notAppliedBudget: number;
-  /** What each finished job changed, listed while it fits (`since.jobBudget`); the rest counted. */
+  /** What each finished job changed, listed while it fits (`briefing.jobTokens`); the rest counted. */
   jobBudget: number;
   /** A text's tokens as the model layer counts them (`tokenCount`). */
   tokens: (text: string) => number;
@@ -1674,7 +1674,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     const kept = this.#keptFor(user, turn, again, attempts);
     const of = <K extends FoundItem["kind"]>(kind: K): Extract<FoundItem, { kind: K }>[] => kept.flatMap((k) => (k.item.kind === kind ? [k.item as Extract<FoundItem, { kind: K }>] : []));
     // Turns gone, counted once each, whichever comparison found them; each named by its message's number as the chat stood before the
-    // deletion (the numbers chat_read used) and the first words of its reply, the newest first, while they fit `since.deletedBudget`;
+    // deletion (the numbers chat_read used) and the first words of its reply, the newest first, while they fit `briefing.deletedTokens`;
     // the rest by their numbers in one line.
     const gone = new Map<string, GoneTurn | null>();
     for (const d of of("deleted")) {
@@ -1701,7 +1701,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // Another swipe showing on an earlier reply: the turns after it stand with their changes applied again on it, the stretch named by
     // message numbers as an unplayed stretch is. What that flip stopped from applying, change by change: what it was about (the things it
     // names, by their names at the chat's head), its operation, its value, the message of the turn it came from, and why, each report code
-    // in the notices part's words (its `keys`), while they fit `since.notAppliedBudget`; the rest counted (the world state lists them all).
+    // in the notices part's words (its `keys`), while they fit `briefing.notAppliedTokens`; the rest counted (the world state lists them all).
     const keys = isRecord(notices?.header.keys) ? notices.header.keys : {};
     let headView: TreeView | undefined;
     const namesOf = (refs: readonly string[]): string => {
@@ -1752,7 +1752,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     };
     // Each reply edited after its turn, with what its turn was played on: a carried turn's text as the store keeps it, else what
     // Lumiverse saved, where that is not what was released, by the turn's latest run that wrote into the chat (a Settle now run writes
-    // nothing there). The newest are told in full while they fit the chat's bound (`since.editedBudget`); the rest, which a carried chat
+    // nothing there). The newest are told in full while they fit the chat's bound (`briefing.editedTokens`); the rest, which a carried chat
     // can hold by the hundred, in one line by their messages' numbers, which tells them as surely.
     const editLines = edited.map((e) => {
       const run = hidden.has(e.message) ? null : this.#d.runs.reply(user, e.turn);
@@ -1838,7 +1838,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * notice's data: the job, the definition it ran as, its brief, its report, and what it recorded, change by change: what the change
    * is about, its operation and value, and for one that did not take effect why, each report code in the notices part's words (its
    * `keys`), with the later turn whose value stands (by its message's number) where one does. Each job's changes are listed while
-   * they fit `since.jobBudget`; the rest are counted, and the Jobs page lists them all.
+   * they fit `briefing.jobTokens`; the rest are counted, and the Jobs page lists them all.
    */
   #jobsEnded(
     user: string,

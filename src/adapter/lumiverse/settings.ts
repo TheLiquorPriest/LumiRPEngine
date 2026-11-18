@@ -6,32 +6,32 @@
 // (plan §2.1 point 5): a value past it is taken, and the line says what Lumiverse then does.
 //
 //   lumiverse:
-//     session: { check: 43200 }          seconds between asking after RPE's session, which renews it (Lumiverse: seven days)
+//     session: { checkSeconds: 43200 }   seconds between asking after RPE's session, which renews it (Lumiverse: seven days)
 //     sockets:                           the event and relay sockets
-//       ping: 30                         seconds between pings; Lumiverse closes a socket silent for 120
-//       pong: 15                         seconds a ping waits for its pong before the socket is opened again
-//       open: 20                         seconds an opening socket waits for Lumiverse's answer
-//       retry: 1                         seconds before opening again, doubled after each failure
-//       retryMax: 30                     the longest of those waits
-//     database: { tries: 4, wait: 0.025 }  tries of a statement while Lumiverse holds its file locked; seconds before the second, doubled
-//     reads: { rereads: 3, breakdownReplies: 10, keep: 15, kept: 32 }  a changing chat's rereads; newest replies asked for a stored breakdown; seconds a read over HTTP is held; chats, books and presets held at once
-//     dryRun: { wait: 10 }               seconds a dry run is waited for before the reply goes on without its names
-//     stream: { comment: 5 }             seconds a reply's stream may send nothing before a comment line keeps its connection
-//     reply: { hold: 540 }               seconds after a reply asked for whole arrives at which its turn stops with what it has
+//       pingSeconds: 30                  seconds between pings; Lumiverse closes a socket silent for 120
+//       pongWaitSeconds: 15              seconds a ping waits for its pong before the socket is opened again
+//       openWaitSeconds: 20              seconds an opening socket waits for Lumiverse's answer
+//       retrySeconds: 1                  seconds before opening again, doubled after each failure
+//       maxRetrySeconds: 30              the longest of those waits
+//     database: { tries: 4, waitSeconds: 0.025 }  tries of a statement while Lumiverse holds its file locked; seconds before the second, doubled
+//     reads: { rereads: 3, breakdownReplies: 10, keepSeconds: 15, kept: 32 }  a changing chat's rereads; newest replies asked for a stored breakdown; seconds a read over HTTP is held; chats, books and presets held at once
+//     dryRun: { waitSeconds: 10 }        seconds a dry run is waited for before the reply goes on without its names
+//     stream: { commentSeconds: 5 }      seconds a reply's stream may send nothing before a comment line keeps its connection
+//     reply: { holdSeconds: 540 }        seconds after a reply asked for whole arrives at which its turn stops with what it has
 //     relay:
-//       flush: 0.25                      seconds between a page's frames
-//       frame: 256                       KiB of characters in one frame; a longer list goes in parts
-//       lease: 60                        seconds a page's follow lasts unless the page asks again
-//       hold: 1024                       KiB of characters a page may have waiting before its chats' events are held
-//       retry: 30                        seconds before registering again with an extension that did not take it
-//     question: { body: 8192 }           KiB the extension's question may carry
+//       flushSeconds: 0.25               seconds between a page's frames
+//       frameKiB: 256                    KiB of characters in one frame; a longer list goes in parts
+//       leaseSeconds: 60                 seconds a page's follow lasts unless the page asks again
+//       holdKiB: 1024                    KiB of characters a page may have waiting before its chats' events are held
+//       retrySeconds: 30                 seconds before registering again with an extension that did not take it
+//     question: { maxKiB: 8192 }         KiB the extension's question may carry
 //     extension:                         the light extension's values, sent with RPE's registration and the page's start facts
-//       questionWait: 3                  seconds the extension waits for RPE's answer, and RPE works it out in
-//       whoseWait: 2                     seconds the extension waits for each read of whether a reply's chat is RPE's
+//       questionWaitSeconds: 3           seconds the extension waits for RPE's answer, and RPE works it out in
+//       whoseWaitSeconds: 2              seconds the extension waits for each read of whether a reply's chat is RPE's
 //       logChars: 200                    characters of RPE's words the extension writes in its log
-//       requestWait: 35                  seconds a page's request through the extension waits for its answer
-//       followRenewal: 20                seconds between a page's renewals of a chat's follow
-//     search: { hits: 20, snippet: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
+//       requestWaitSeconds: 35           seconds a page's request through the extension waits for its answer
+//       followRenewalSeconds: 20         seconds between a page's renewals of a chat's follow
+//     search: { hits: 20, snippetChars: 80 }  a chat search's hits when the query names none; a hit's snippet in characters
 //     stores: { hits: 20 }               a search of Lumiverse's databanks and memory: its hits when the query names none
 //     untagged: { whileAwaited: pass }   pass, or fail: a request with no tag while a reply RPE heard start awaits its tag
 
@@ -105,37 +105,37 @@ const setting = (key: string, value: number, takes: SettingTakes & { type: "whol
 
 /** Each of the door's settings, by the name its reader takes it under. The question's wait has a row of Appendix D.1; each other is listed for the owner's approval (N-10). */
 export const LUMIVERSE_SETTING_DEFS = {
-  sessionCheck: setting("session.check", KEEP_EVERY_MS / S, { type: "whole", least: 1 }, "Session check", "Seconds between RPE asking Lumiverse after its sign-in, which renews it; Lumiverse ends a session seven days after its last renewal.", "use", [
+  sessionCheck: setting("session.checkSeconds", KEEP_EVERY_MS / S, { type: "whole", least: 1 }, "Session check", "Seconds between RPE asking Lumiverse after its sign-in, which renews it; Lumiverse ends a session seven days after its last renewal.", "use", [
     { below: 60, says: "RPE asks Lumiverse after its session more than once a minute." },
     { above: SESSION_DAYS_S - 1, says: "Lumiverse ends a session seven days after its last renewal: RPE's sign-in lapses before it is asked after." },
   ]),
-  ping: setting("sockets.ping", SOCKET_DEFAULTS.pingMs / S, { type: "number", least: 1 }, "Socket ping", "Seconds between pings on the event and relay sockets; Lumiverse closes a socket silent for 120.", "use", [{ above: SILENT_CLOSE_S - 1, says: "Lumiverse closes a socket that has sent nothing for 120 seconds, so the sockets close between pings." }]),
-  pong: setting("sockets.pong", SOCKET_DEFAULTS.pongMs / S, { type: "number", least: 1 }, "Socket pong wait", "Seconds a ping waits for its answer before the socket is opened again."),
-  open: setting("sockets.open", SOCKET_DEFAULTS.openMs / S, { type: "number", least: 1 }, "Socket open wait", "Seconds an opening socket waits for Lumiverse to let it in."),
-  retry: setting("sockets.retry", SOCKET_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Socket first retry", "Seconds before a closed socket is opened again, doubled after each failure."),
-  retryMax: setting("sockets.retryMax", SOCKET_DEFAULTS.retryMaxMs / S, { type: "number", least: 1 }, "Socket longest retry", "The longest wait in seconds between tries to open a socket."),
+  ping: setting("sockets.pingSeconds", SOCKET_DEFAULTS.pingMs / S, { type: "number", least: 1 }, "Socket ping", "Seconds between pings on the event and relay sockets; Lumiverse closes a socket silent for 120.", "use", [{ above: SILENT_CLOSE_S - 1, says: "Lumiverse closes a socket that has sent nothing for 120 seconds, so the sockets close between pings." }]),
+  pong: setting("sockets.pongWaitSeconds", SOCKET_DEFAULTS.pongMs / S, { type: "number", least: 1 }, "Socket pong wait", "Seconds a ping waits for its answer before the socket is opened again."),
+  open: setting("sockets.openWaitSeconds", SOCKET_DEFAULTS.openMs / S, { type: "number", least: 1 }, "Socket open wait", "Seconds an opening socket waits for Lumiverse to let it in."),
+  retry: setting("sockets.retrySeconds", SOCKET_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Socket first retry", "Seconds before a closed socket is opened again, doubled after each failure."),
+  retryMax: setting("sockets.maxRetrySeconds", SOCKET_DEFAULTS.retryMaxMs / S, { type: "number", least: 1 }, "Socket longest retry", "The longest wait in seconds between tries to open a socket."),
   dbTries: setting("database.tries", TRIES, { type: "whole", least: 1 }, "Database tries", "Tries of a read while Lumiverse holds its database file locked."),
-  dbWait: setting("database.wait", RETRY_MS / S, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
+  dbWait: setting("database.waitSeconds", RETRY_MS / S, { type: "number", least: 0.001 }, "Database first wait", "Seconds before the second try of a locked read, doubled after each try."),
   rereads: setting("reads.rereads", REREADS, { type: "whole", least: 1 }, "Rereads of a changing chat", "Times a chat read over HTTP is read again when it changed while it was read."),
   breakdownReplies: setting("reads.breakdownReplies", BREAKDOWN_TRIES, { type: "whole", least: 1 }, "Replies asked for a breakdown", "The newest replies asked when looking for the prompt breakdown Lumiverse stored.", "use", [{ above: PAGE_ROWS, says: "Lumiverse gives at most 1000 rows a page: no more replies than that are asked." }]),
-  readKeep: setting("reads.keep", HTTP_KEEP_MS / S, { type: "number", least: 0 }, "Seconds a read over HTTP is held", "Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged."),
+  readKeep: setting("reads.keepSeconds", HTTP_KEEP_MS / S, { type: "number", least: 0 }, "Seconds a read over HTTP is held", "Seconds what RPE read of Lumiverse's rows over HTTP is held before it is read again; an event Lumiverse sends for a change lets it go at once. Read from the database file, a read is held exactly as long as the rows are unchanged."),
   readKept: setting("reads.kept", KEPT, { type: "whole", least: 1 }, "Chats, books and presets held", "How many chats, books and presets have what RPE read of them held at once; the one left alone longest goes first."),
-  dryRun: setting("dryRun.wait", DRY_RUN_MS / S, { type: "number", least: 0.1 }, "Dry run wait", "Seconds a dry run is waited for before the reply goes on without its blocks' names."),
-  comment: setting("stream.comment", COMMENT_MS / S, { type: "number", least: 0.1 }, "Stream comment", "Seconds a reply's stream may send nothing before a comment line keeps its connection open.", "use", [{ above: IDLE_S - 1, says: "The server lets a connection sit idle ten seconds: a reply's stream that sends nothing that long is closed before its comment line." }]),
-  flush: setting("relay.flush", RELAY_DEFAULTS.flushMs / S, { type: "number", least: 0.001 }, "Relay flush", "Seconds between the relay's frames to a page; a frame for every event floods Lumiverse's socket."),
-  frame: setting("relay.frame", RELAY_DEFAULTS.frameChars / KIB, { type: "whole", least: 1 }, "Relay frame", "KiB of characters in one relay frame; a longer list goes in parts.", "use", [{ above: FRAME_MOST_KIB, says: "Lumiverse drops a frame over 1 MiB, and a frame this long can pass it: the page then misses those events." }]),
-  lease: setting("relay.lease", RELAY_DEFAULTS.leaseMs / S, { type: "number", least: 1 }, "Relay lease", "Seconds a page's follow lasts unless the page asks again."),
-  hold: setting("relay.hold", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1 }, "Relay hold", "KiB of characters a page may have waiting before its chats' events are held.", "use", [{ above: HOLD_MOST_KIB, says: "Lumiverse holds at most 8 MiB waiting for a socket: past it, it drops what waits." }]),
-  relayRetry: setting("relay.retry", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
-  wholeHold: setting("reply.hold", WHOLE_HOLD_MS / S, { type: "number", least: 1 }, "Whole reply hold", "Seconds after a reply asked for whole arrives at which its turn stops with what it has; Lumiverse ends a generation that has had no text for ten minutes, and nothing reaches it while a whole reply is written.", "use", [{ above: SILENT_GENERATION_S - 1, says: "Lumiverse ends a generation with no text for ten minutes: a turn still writing then loses its reply whole." }]),
-  questionBody: setting("question.body", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
-  questionWait: { ...setting("extension.questionWait", QUESTION_WAIT_MS / S, { type: "number", least: 0.1 }, "Question wait", "Seconds the extension waits for RPE's answer to its question before a generation, and RPE works it out in; a half not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives.", "use", [{ above: INTERCEPTOR_S - 1, says: "Lumiverse gives the extension ten seconds before it goes on without its answer: the generation starts with every marked secret kept out." }]), row: "How long the extension waits for RPE's answer before a generation" },
-  whoseWait: setting("extension.whoseWait", WHOSE_WAIT_MS / S, { type: "number", least: 0.001 }, "Whose-chat read wait", "Seconds the extension waits for each read that tells whether a reply's chat is RPE's (its stored registration, the connection's own record); a read that does not answer in them has failed, and where both fail that generation is stopped with a line and the failure recorded.", "use", [{ above: INTERCEPTOR_S / 2, says: "Lumiverse gives the extension ten seconds before it goes on without it, and two reads of this wait and the question's come before a generation." }]),
+  dryRun: setting("dryRun.waitSeconds", DRY_RUN_MS / S, { type: "number", least: 0.1 }, "Dry run wait", "Seconds a dry run is waited for before the reply goes on without its blocks' names."),
+  comment: setting("stream.commentSeconds", COMMENT_MS / S, { type: "number", least: 0.1 }, "Stream comment", "Seconds a reply's stream may send nothing before a comment line keeps its connection open.", "use", [{ above: IDLE_S - 1, says: "The server lets a connection sit idle ten seconds: a reply's stream that sends nothing that long is closed before its comment line." }]),
+  flush: setting("relay.flushSeconds", RELAY_DEFAULTS.flushMs / S, { type: "number", least: 0.001 }, "Relay flush", "Seconds between the relay's frames to a page; a frame for every event floods Lumiverse's socket."),
+  frame: setting("relay.frameKiB", RELAY_DEFAULTS.frameChars / KIB, { type: "whole", least: 1 }, "Relay frame", "KiB of characters in one relay frame; a longer list goes in parts.", "use", [{ above: FRAME_MOST_KIB, says: "Lumiverse drops a frame over 1 MiB, and a frame this long can pass it: the page then misses those events." }]),
+  lease: setting("relay.leaseSeconds", RELAY_DEFAULTS.leaseMs / S, { type: "number", least: 1 }, "Relay lease", "Seconds a page's follow lasts unless the page asks again."),
+  hold: setting("relay.holdKiB", RELAY_DEFAULTS.holdChars / KIB, { type: "whole", least: 1 }, "Relay hold", "KiB of characters a page may have waiting before its chats' events are held.", "use", [{ above: HOLD_MOST_KIB, says: "Lumiverse holds at most 8 MiB waiting for a socket: past it, it drops what waits." }]),
+  relayRetry: setting("relay.retrySeconds", RELAY_DEFAULTS.retryMs / S, { type: "number", least: 0.1 }, "Registration retry", "Seconds before RPE registers again with an extension that did not take its registration."),
+  wholeHold: setting("reply.holdSeconds", WHOLE_HOLD_MS / S, { type: "number", least: 1 }, "Whole reply hold", "Seconds after a reply asked for whole arrives at which its turn stops with what it has; Lumiverse ends a generation that has had no text for ten minutes, and nothing reaches it while a whole reply is written.", "use", [{ above: SILENT_GENERATION_S - 1, says: "Lumiverse ends a generation with no text for ten minutes: a turn still writing then loses its reply whole." }]),
+  questionBody: setting("question.maxKiB", QUESTION_BODY_BYTES / KIB, { type: "whole", least: 1 }, "Question size", "KiB the extension's question before a generation may carry.", "start"),
+  questionWait: { ...setting("extension.questionWaitSeconds", QUESTION_WAIT_MS / S, { type: "number", least: 0.1 }, "Question wait", "Seconds the extension waits for RPE's answer to its question before a generation, and RPE works it out in; a half not worked out in them is answered not known: the extension then keeps every marked secret out, and RPE makes the cut when the reply's request arrives.", "use", [{ above: INTERCEPTOR_S - 1, says: "Lumiverse gives the extension ten seconds before it goes on without its answer: the generation starts with every marked secret kept out." }]), row: "How long the extension waits for RPE's answer before a generation" },
+  whoseWait: setting("extension.whoseWaitSeconds", WHOSE_WAIT_MS / S, { type: "number", least: 0.001 }, "Whose-chat read wait", "Seconds the extension waits for each read that tells whether a reply's chat is RPE's (its stored registration, the connection's own record); a read that does not answer in them has failed, and where both fail that generation is stopped with a line and the failure recorded.", "use", [{ above: INTERCEPTOR_S / 2, says: "Lumiverse gives the extension ten seconds before it goes on without it, and two reads of this wait and the question's come before a generation." }]),
   logChars: setting("extension.logChars", EXTENSION_LOG_CHARS, { type: "whole", least: 0 }, "Extension log words", "Characters of RPE's words the extension writes in Lumiverse's log when RPE refuses its question."),
-  requestWait: setting("extension.requestWait", PAGE_ROAD_DEFAULTS.requestMs / S, { type: "number", least: 1 }, "Page request wait", "Seconds a page's request through the extension waits for its answer; Lumiverse's proxy gives up after its own 30."),
-  followRenewal: setting("extension.followRenewal", PAGE_ROAD_DEFAULTS.renewMs / S, { type: "number", least: 1 }, "Page follow renewal", "Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease."),
+  requestWait: setting("extension.requestWaitSeconds", PAGE_ROAD_DEFAULTS.requestMs / S, { type: "number", least: 1 }, "Page request wait", "Seconds a page's request through the extension waits for its answer; Lumiverse's proxy gives up after its own 30."),
+  followRenewal: setting("extension.followRenewalSeconds", PAGE_ROAD_DEFAULTS.renewMs / S, { type: "number", least: 1 }, "Page follow renewal", "Seconds between a page's renewals of its follow of a chat; keep it well inside the relay lease."),
   searchHits: setting("search.hits", CHAT_SEARCH_DEFAULTS.limit, { type: "whole", least: 1 }, "Chat search hits", "Hits a chat search gives when the query names no number."),
-  searchSnippet: setting("search.snippet", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
+  searchSnippet: setting("search.snippetChars", CHAT_SEARCH_DEFAULTS.snippetChars, { type: "whole", least: 0 }, "Chat search snippet", "Characters of a chat search hit's snippet."),
   storeHits: setting("stores.hits", STORE_HITS, { type: "whole", least: 1 }, "Store search hits", "Hits a search of Lumiverse's databanks and memory gives when the query names no number."),
 } as const satisfies NumberSettings<string>;
 

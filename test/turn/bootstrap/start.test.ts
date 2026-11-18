@@ -45,7 +45,7 @@ test("the routes take their places in RPE's route table", () => {
 test.skip("the Author is given the skill's text, the player's choice and the setting's limit; a second start while it runs is refused in words; an edited skill is the next brief", async () => {
   const held = gate();
   const boot = await openBootBed({
-    global: "bootstrap:\n  tokenLimit: 150000\n",
+    global: "bootstrap:\n  askAtTokens: 150000\n",
     answers: [
       // The Author hands a historian the facts and its own job's choice, by their names.
       { pieces: [{ hold: held }, { call: "delegate", args: { agent: "historian", brief: "Say which stretches are covered.", attach: ["bootstrap:facts", "bootstrap:job"] } }] },
@@ -125,7 +125,7 @@ test.skip("the bootstrap reads its jobs as its user's", async () => {
 // hardening: the token limit is now the point where the job asks (TurnKinds-13 item 1).
 test.skip("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
   const boot = await openBootBed({
-    global: "bootstrap:\n  tokenLimit: 1000\n",
+    global: "bootstrap:\n  askAtTokens: 1000\n",
     answers: [
       // One call that sends and writes past the player's limit between them, though neither alone does.
       { pieces: [{ text: "Recorded the premise." }, { call: "chat_read", args: { from: 0, to: 1 } }], usage: { input: 800, output: 300 } },

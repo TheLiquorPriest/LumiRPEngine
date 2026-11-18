@@ -37,7 +37,7 @@ RPE writes its database and its secrets file from one place at a time. While RPE
 
 While RPE is stopped, a command that writes takes the data folder's lock (lock.db, named by lock.holder) and is then the only writer, the changes to the database it applies included. `rpe serve` takes the same lock for as long as it runs: started while a command writes, it waits and says what it waits for; two commands at once write one after the other, each waiting up to `commandLine.waitMs` and saying which process it waits for.
 
-A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `liveSocket.follows` chats.
+A page's live socket holds its key or token for as long as it is open: it is checked when the socket opens and at every message, and the socket is closed once the page token or the web key runs out, or the web key is replaced. One socket follows at most `liveSocket.maxFollows` chats.
 
 The extension takes RPE's registration only at a bare address on this machine (a scheme, a loopback host and a port, nothing more); any other is refused before a call goes out.
 
@@ -73,6 +73,6 @@ rpe deny <name>
 
 What is switched on is each user's own: a thing on for one user is not on for another, even of the same kind, name and target (`--user <id>` names the user; without it, the user this RPE belongs to). A thing that changes, in its command or its address, waits again: the switch holds what you were shown.
 
-No page session can switch anything, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. A page can only read the list: the Rules and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls. A thing is listed as waiting the moment it is written in a file, added on a page, or put in the tools folder or an MCP server's file, before any agent loads it. `rpe allow` with no name lists each user's own things the same way, and `rpe status` lists what is waiting. The longest name a thing may have is the setting `switches.nameLength`.
+No page session can switch anything, however it was opened, so a page that reaches RPE cannot plant code or point a tool at an address of its choosing. A page can only read the list: the Rules and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls. A thing is listed as waiting the moment it is written in a file, added on a page, or put in the tools folder or an MCP server's file, before any agent loads it. `rpe allow` with no name lists each user's own things the same way, and `rpe status` lists what is waiting. The longest name a thing may have is the setting `switches.maxNameChars`.
 
 Rules that only add text to what an agent reads need no such step. They can say anything to an agent, and can run nothing.

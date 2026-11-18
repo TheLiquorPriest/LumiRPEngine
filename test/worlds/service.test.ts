@@ -57,7 +57,7 @@ describe("the world service", () => {
     const made = await service.create(USER, "Fernwick", "fantasy_town");
     const patch = [1, 2, 3].map((n) => ({ op: "add" as const, path: `/kinds/k${n}`, value: { id: `k${n}`, label: `K${n}`, extends: "person", fields: {} } }));
     const refused = await service.draft(USER, made.world.id, { op: "patch", ops: patch }).catch((e: unknown) => e);
-    expect((refused as Error).message).toContain("worlds.patchOps");
+    expect((refused as Error).message).toContain("worlds.maxPatchOps");
     ops = 5;
     expect((await service.draft(USER, made.world.id, { op: "patch", ops: patch })).stored).toBe(true);
   });

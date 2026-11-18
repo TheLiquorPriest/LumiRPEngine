@@ -47,7 +47,7 @@ const WAITING = "Finishing the last turn's work first.";
 describe("the turn before", () => {
   test("a new message waits for the previous turn's run as long as the setting gives it, then stops it and goes on", async () => {
     const after = gate();
-    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRun: 0.3\n" });
+    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRunSeconds: 0.3\n" });
     const first = await firstTurnAtWork(b);
 
     b.host.send(CHAT, "I ask about the boat.");
@@ -65,7 +65,7 @@ describe("the turn before", () => {
 
   test("a previous run that ends within its time is waited for and not stopped", async () => {
     const after = gate();
-    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRun: 5\n" });
+    const b = await bed({ answers: [...replyThenWork(after), replying("Wren looks up.")], global: "limits:\n  previousRunSeconds: 5\n" });
     const first = await firstTurnAtWork(b);
 
     b.host.send(CHAT, "I ask about the boat.");

@@ -66,7 +66,7 @@ describe("Build's job home and the kept worker", () => {
     const { home, made, told } = await rig({ running: 1 });
     const jobs = home();
     const id = await jobs.start(USER, "check_world", made.world.id, { days: 14 });
-    await expect(jobs.start(USER, "check_world", made.world.id, { days: 1 })).rejects.toThrow("build.jobs.running");
+    await expect(jobs.start(USER, "check_world", made.world.id, { days: 1 })).rejects.toThrow("build.jobs.atOnce");
     await expect(jobs.cancel(OTHER, id)).rejects.toBeInstanceOf(JobError);
     await jobs.cancel(USER, id);
     await jobs.idle();

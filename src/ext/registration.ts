@@ -14,7 +14,7 @@
 // in memory names is RPE's; else the connection's own record in Lumiverse tells, by RPE's mark in its
 // `metadata`, which RPE writes on every connection it takes (at install and at the swap). Only where
 // neither can be read is it not known. Each of those reads is waited for up to RPE's setting
-// `lumiverse.extension.whoseWait`, given with the registration (`WHOSE_WAIT_MS` until one is held): a read
+// `lumiverse.extension.whoseWaitSeconds`, given with the registration (`WHOSE_WAIT_MS` until one is held): a read
 // that does not answer in it has failed, and says so.
 
 import { CONFIRM_PATH, onLoopback, readConfirmed, readRegistration, REGISTRATION_FILE, rpeMarked, USER_HEADER, type ConfirmAsk, type Registration } from "../adapter/lumiverse/pipe-wire";
@@ -36,7 +36,7 @@ export interface RegistrationDeps {
 
 const words = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** How long each read of whose chat a reply is waits, until RPE's registration gives its own (`lumiverse.extension.whoseWait`). */
+/** How long each read of whose chat a reply is waits, until RPE's registration gives its own (`lumiverse.extension.whoseWaitSeconds`). */
 export const WHOSE_WAIT_MS = 2_000;
 
 /** `read`, or a rejection saying it did not answer within `ms`. */

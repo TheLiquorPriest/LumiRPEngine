@@ -181,7 +181,7 @@ export function openAppStore(app: Pick<App, "db" | "version" | "log" | "live" | 
   };
   const global = globalConfig(app.paths.files, app.log);
   const worlds = storedWorlds(app.db, global.numbers(WORLD_DOCS_SETTING_DEFS));
-  // A walk the store's settings cut short (`engine.kindChain`, `holderDepth`, `space.visitDepth`) is logged, once for each chain.
+  // A walk the store's settings cut short (`engine.maxKindChain`, `maxHolderDepth`, `places.maxVisitDepth`) is logged, once for each chain.
   // A fold over more changes than `store.workerFoldAt` runs on a worker thread, which reads the same file and folds with the same areas (`workers/tasks.ts`).
   const away = { path: app.paths.database, run: (brief: StoreBrief, job: FoldJob) => app.workers.run("fold", { brief, job }) };
   return openStore({ db: app.db, registry: createRegistry(ALL_PACKS), worlds, fingerprint: app.version, handlerFailed, log: (message, data) => app.log.warn(message, data as Record<string, JsonValue>), areas: STORE_AREAS, away, ...global.numbers(STORE_SETTING_DEFS) });

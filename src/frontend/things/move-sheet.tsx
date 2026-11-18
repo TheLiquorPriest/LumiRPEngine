@@ -78,7 +78,7 @@ export function moveChoices(choices: readonly WhereChoice[], things: readonly Mo
  * Move to…'s sheet. `kept` offers Where it's kept (in words, for one thing); `blocked` holds back a
  * holder already full; `atOnce` sends the request, its notice and Undo the caller's; `store` keeps
  * the chat's recent targets (the page's storage, by default). `most`, where given, is how many things
- * one move takes (`taps.thingsMost`); without it RPE answers a move past its setting in words.
+ * one move takes (`taps.maxThingsPerFix`); without it RPE answers a move past its setting in words.
  */
 export function MoveSheet(props: { chatId: ChatId; things: readonly MoveThing[]; choices: readonly WhereChoice[]; at: MoveAt; kept?: string | null; blocked?(choice: WhereChoice): string | null; atOnce: AtOnce; title?: string; store?: RecentStore; most?: number; onClose(): void; onMoved?(): void }) {
   const store = props.store ?? pageStore;

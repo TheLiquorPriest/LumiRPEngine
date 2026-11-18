@@ -159,11 +159,11 @@ describe("the switches", () => {
     expect(app.switches.list().map((s) => s.state)).toEqual(["waiting"]);
   });
 
-  test("a name longer than switches.nameLength is refused and the setting named; raising the setting lets it in", async () => {
+  test("a name longer than switches.maxNameChars is refused and the setting named; raising the setting lets it in", async () => {
     const name = "n".repeat(11);
     const thing = { kind: "hook", name, target: "echo" } as const;
     const short = new Switches(app.db, app.writes, app.now, OWNER, 10);
-    await expect(short.state(OWNER, thing)).rejects.toThrow("switches.nameLength");
+    await expect(short.state(OWNER, thing)).rejects.toThrow("switches.maxNameChars");
     const longer = new Switches(app.db, app.writes, app.now, OWNER, 11);
     expect(await longer.state(OWNER, thing)).toBe("waiting");
   });

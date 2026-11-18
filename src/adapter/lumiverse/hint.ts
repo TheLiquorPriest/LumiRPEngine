@@ -16,7 +16,7 @@ import type { LumiverseReads } from "./reads";
 import type { LumiverseSession } from "./session";
 import type { ReplyKind, Tag } from "./wire";
 
-/** The default of `lumiverse.dryRun.wait`: how long a dry run is given before it is let go. */
+/** The default of `lumiverse.dryRun.waitSeconds`: how long a dry run is given before it is let go. */
 export const DRY_RUN_MS = 10_000;
 
 export interface HintDeps {

@@ -47,7 +47,7 @@ import type { DueSource, DueUnder } from "./world-state";
 /** What a reading of the tree passes in beyond the state: what time brings due, and how far ahead a reflection counts it. */
 export interface ViewReading {
   due: DueSource;
-  /** Minutes of story time ahead (`worldState.dueAhead`). */
+  /** Minutes of story time ahead (`worldState.dueAheadMinutes`). */
   ahead: number;
 }
 
@@ -56,7 +56,7 @@ export interface ViewOptions {
   ownOnly: readonly string[];
   /** How many names of note a reflection gives. */
   notable: number;
-  /** How many places up the tree a place's values are inherited from (`store.placeDepth`). */
+  /** How many places up the tree a place's values are inherited from (`store.maxPlaceDepth`). */
   placeDepth: number;
 }
 
@@ -248,7 +248,7 @@ function valueFields(v: ValueLine, facts: number): JsonObject {
   return out;
 }
 
-/** A place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
+/** A place whose chain up stopped at `store.maxPlaceDepth`, and the place it stopped at. */
 type Stop = { place: string; at: string };
 
 /**
@@ -390,7 +390,7 @@ export class TreeView {
   /** Agents' own lines by the level each names now. */
   private readonly notes = new Map<string, string>();
   private readonly ctx: ReadContext;
-  /** While a query or a level's lines are made: each place whose chain up stopped at `store.placeDepth`, and the place it stopped at. */
+  /** While a query or a level's lines are made: each place whose chain up stopped at `store.maxPlaceDepth`, and the place it stopped at. */
   private stopsSeen: Map<string, Stop> | null = null;
   /** While a reading that passed one runs: what time brings due, for the reflections. */
   private reading: ViewReading | null = null;
@@ -858,7 +858,7 @@ export class TreeView {
     for (let id = place ?? undefined, depth = 0; id !== undefined; depth++) {
       const p = own(this.doc.places, id);
       if (!p || out.some((x) => x.id === id)) break;
-      // As many places up as `store.placeDepth` says; a query that met the end says where the chain above stopped.
+      // As many places up as `store.maxPlaceDepth` says; a query that met the end says where the chain above stopped.
       if (depth >= this.options.placeDepth) {
         if (place !== null) this.stopsSeen?.set(place, { place, at: id });
         break;
@@ -1400,7 +1400,7 @@ export class TreeView {
     );
     for (const b of blocks) for (const s of b.stops) if (!stops.has(s.place)) stops.set(s.place, s);
     const tail: ViewLine[] = [];
-    for (const s of stops.values()) tail.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.placeDepth" } });
+    for (const s of stops.values()) tail.push({ kind: "place_chain_stopped", depth: 0, fields: { place: s.place, at: s.at, limit: this.options.placeDepth, setting: "store.maxPlaceDepth" } });
     for (const cut of walkCuts(this.state.world, this.doc)) tail.push({ kind: "walk_stopped", depth: 0, fields: { walk: cut.walk, setting: WALK_SETTINGS[cut.walk], from: cut.from, at: cut.at, limit: cut.limit } });
     return { own: mine, blocks, tail };
   }

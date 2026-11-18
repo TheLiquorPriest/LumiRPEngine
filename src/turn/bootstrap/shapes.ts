@@ -13,7 +13,7 @@ const opt = shape.optional;
 export const MIGRATED = "migrated";
 
 const relive = opt(shape.nullable(shape.text({ blank: false })), "His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes.");
-const tokenLimit = opt(shape.whole({ least: 1 }), "His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat.");
+const tokenLimit = opt(shape.whole({ least: 1 }), "His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.askAtTokens` in force for the chat.");
 
 export const bootstrapStartBody = shape.named("BootstrapStartAsk", "What starts a chat's bootstrap job: his choice of what to relive, and his own token limit for it, where he made them.", shape.object({ relive, tokenLimit }));
 export const bootstrapBatchBody = shape.named(

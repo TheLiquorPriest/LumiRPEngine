@@ -36,7 +36,7 @@ export interface SuggestionsDeps {
   db: Database;
   writes: TreeWrites;
   now(): number;
-  /** The chat's limits (`suggestions.openMost`, `suggestions.decidedKept`), as its levels' config files set them; the defaults where absent. */
+  /** The chat's limits (`suggestions.maxOpen`, `suggestions.decidedKept`), as its levels' config files set them; the defaults where absent. */
   limits?(user: string, chat: string): Promise<{ openMost: number; decidedKept: number }>;
 }
 
@@ -80,7 +80,7 @@ export class TreeSuggestions {
   }
 
   /**
-   * Keeps a suggestion an agent filed, unless the chat's open ones are at their limit (`suggestions.openMost`), in which case it is not
+   * Keeps a suggestion an agent filed, unless the chat's open ones are at their limit (`suggestions.maxOpen`), in which case it is not
    * kept and the limit is said, whatever the suggestion says; null for one of lore, which is not the tree's.
    */
   async file(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<SuggestionFiled | null> {

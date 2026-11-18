@@ -164,7 +164,7 @@ export function testModelLayer(port: ModelsPort): ConnectionsApi {
     },
     // It calls no provider and knows no model: the routes' tests of a test and of limits run on RPH's own layer.
     test: async () => ({ ok: false, ms: 0, error: "This stand-in calls no provider." }),
-    limits: async () => ({ contextWindow: null, maxTokens: null, pictures: null, asked: ["contextWindow", "maxTokens", "pictures"] }),
+    limits: async () => ({ contextWindow: null, maxTokens: null, pictures: null, audio: null, video: null, asked: ["contextWindow", "maxTokens", "pictures"] }),
     signIn: () => {
       throw new Error("This stand-in signs in to no provider: the sign-in routes' tests run on RPH's own layer.");
     },

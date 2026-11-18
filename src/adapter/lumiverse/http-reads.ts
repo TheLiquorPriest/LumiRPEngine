@@ -7,7 +7,7 @@
 // disagree (a message came or went between two) is read again from its start.
 //
 // Nothing can be asked of whether a row changed, so what is read is held a short while (`memo.ts`,
-// `lumiverse.reads.keep`, 15 seconds) and let go the moment an event Lumiverse sent says it changed.
+// `lumiverse.reads.keepSeconds`, 15 seconds) and let go the moment an event Lumiverse sent says it changed.
 
 import { isRecord, type JsonValue } from "../../shared/json";
 import { HTTP_KEEP_MS, KEEP, KEPT, Memo } from "./memo";

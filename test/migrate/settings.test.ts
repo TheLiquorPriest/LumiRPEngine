@@ -87,9 +87,9 @@ describe("today's settings into RPE's config", () => {
       const report = await run(fixture, data, 9);
 
       // In RPE-global.yml: each value as RPE's setting takes it; milliseconds as seconds; every message kept as ~; today's update choice as RPE's.
-      const carriedKeys = { "chat.hiddenReadable": true, "limits.turn.tokensIn": 300_000, "limits.turn.tokensOut": 20_000, "limits.turn.toolRounds": 30, "limits.turn.time": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "limits.turn.agentsAtOnce": 2, "limits.cachedWeight": 0.2, "results.clip": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.tokensPerDay": 5_000_000, "jobs.run.tokensIn": 400_000, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true, "service.memory": "1G", "secrets.tracked": true, "secrets.threshold": 0.5, "secrets.narrator.knowledge": "pov", "secrets.narrator.secrets": "omit", "lore.books": ["book-a"], "update.versionWait": 90, "lumiverse.stream.comment": 8, "progress.silence": 45 };
+      const carriedKeys = { "history.hiddenReadable": true, "limits.turn.tokensIn": 300_000, "limits.turn.tokensOut": 20_000, "limits.turn.toolRounds": 30, "limits.turn.seconds": 180, "limits.turn.depth": 1, "limits.turn.agents": null, "limits.turn.agentsAtOnce": 2, "limits.cachedWeight": 0.2, "results.clipChars": 9_000, "compaction.keepTurns": 5, "jobs.atOnce": 3, "jobs.perRun": 4, "jobs.tokensPerDay": 5_000_000, "jobs.run.tokensIn": 400_000, "jobs.run.tokensOut": 40_000, "history.window": null, "update.restart": true, "service.memory": "1G", "secrets.tracked": true, "secrets.threshold": 0.5, "secrets.narrator.knowledge": "pov", "secrets.narrator.secrets": "omit", "lore.books": ["book-a"], "update.versionWaitSeconds": 90, "lumiverse.stream.commentSeconds": 8, "progress.silenceSeconds": 45 };
       for (const [key, value] of Object.entries(carriedKeys)) expect({ key, value: await setIn(data, key) }).toEqual({ key, value });
-      for (const key of ["limits.turn.calls", "jobs.run.calls", "jobs.run.time", "progress.show"]) expect({ key, value: await setIn(data, key) }).toEqual({ key, value: undefined });
+      for (const key of ["limits.turn.calls", "jobs.run.calls", "jobs.run.seconds", "progress.show"]) expect({ key, value: await setIn(data, key) }).toEqual({ key, value: undefined });
 
       const settings = report.carried?.settings;
       if (settings === undefined) throw new Error("a real run carries the settings");
@@ -102,22 +102,22 @@ describe("today's settings into RPE's config", () => {
         { from: lumiah("core.jobs.budget.tokensOut"), to: global("jobs.run.tokensOut") },
         { from: lumiah("core.jobs.perRun"), to: global("jobs.perRun") },
         { from: lumiah("core.jobs.tokensPerDay"), to: global("jobs.tokensPerDay") },
-        { from: lumiah("core.loop.clipChars"), to: global("results.clip") },
+        { from: lumiah("core.loop.clipChars"), to: global("results.clipChars") },
         { from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") },
         { from: lumiah("core.spend.cachedWeight"), to: global("limits.cachedWeight") },
-        { from: lumiah("core.story.hidden"), to: global("chat.hiddenReadable") },
+        { from: lumiah("core.story.hidden"), to: global("history.hiddenReadable") },
         { from: lumiah("core.turn.tokensIn"), to: global("limits.turn.tokensIn") },
         { from: lumiah("core.turn.tokensOut"), to: global("limits.turn.tokensOut") },
         { from: lumiah("core.turn.toolTurns"), to: global("limits.turn.toolRounds") },
-        { from: lumiah("core.turn.wallMs"), to: global("limits.turn.time") },
+        { from: lumiah("core.turn.wallMs"), to: global("limits.turn.seconds") },
         { from: lumiah("transport.connections.oneToolAtATime"), to: global("models, serialTools on each connection named") },
         { from: lumiah("transport.history.count"), to: global("history.window") },
         { from: lumiah("transport.history.keep"), to: global("history.window") },
         { from: "runtime home: autoUpdate", to: global("update.restart") },
         { from: "runtime home: memory", to: global("service.memory") },
-        { from: "runtime home: tuning.buildStartMs", to: global("update.versionWait") },
-        { from: "runtime home: tuning.commentMs", to: global("lumiverse.stream.comment") },
-        { from: "runtime home: tuning.progressMs", to: global("progress.silence") },
+        { from: "runtime home: tuning.buildStartMs", to: global("update.versionWaitSeconds") },
+        { from: "runtime home: tuning.commentMs", to: global("lumiverse.stream.commentSeconds") },
+        { from: "runtime home: tuning.progressMs", to: global("progress.silenceSeconds") },
         { from: "settings.json: loreBooks", to: global("lore.books") },
         { from: "settings.json: minds.knowledge.enabled", to: global("secrets.tracked") },
         { from: "settings.json: minds.knowledge.threshold", to: global("secrets.threshold") },
@@ -127,7 +127,7 @@ describe("today's settings into RPE's config", () => {
       // Not carried: today's counts the answers that called tools where RPE's jobs count every model call, and a time of 90.5 seconds is no whole number.
       expect([...(settings.notCarried ?? [])].sort((a, b) => a.from.localeCompare(b.from))).toEqual([
         { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: "today's counted the answers that called tools; RPE's counts every model call" },
-        { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.time", why: "jobs.run.time takes a whole number, at least 1, or ~ for no limit, not 90.5." },
+        { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.seconds", why: "jobs.run.seconds takes a whole number, at least 1, or ~ for no limit, not 90.5." },
         { from: lumiah("core.reply.progress"), to: "progress.show", why: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
       ]);
       // Archived: what steered only an old engine, named with why; the runtime's stop wait is named as having no counterpart.
@@ -150,7 +150,7 @@ describe("today's settings into RPE's config", () => {
       expect(settings.noHome).toContain("settings.json: time");
 
       const text = reportText(report);
-      expect(text).toContain("  harness/settings.json: core.turn.wallMs → RPE-global.yml: limits.turn.time");
+      expect(text).toContain("  harness/settings.json: core.turn.wallMs → RPE-global.yml: limits.turn.seconds");
       expect(text).toContain("\nSettings RPE has a like setting for that means something else or takes no such value, not carried (kept in the backup):\n");
       expect(text).toContain(`\n  harness/settings.json: core.jobs.budget.toolTurns (RPE's jobs.run.calls: today's counted the answers that called tools; RPE's counts every model call)\n`);
       expect(text).toContain("Your settings: RPE-global.yml: 29 setting(s) carried; 3 not carried, as RPE's like setting means something else or takes no such value; 6 archived in the backup, as they steered only an old engine, each named with why; ");
@@ -178,12 +178,12 @@ describe("today's settings into RPE's config", () => {
       ]);
       const second = await run(fixture, data, 10);
 
-      // RPH's limits.turn.time takes `~`, so the turn's time lifted today is written as `~`.
-      expect({ clip: await setIn(data, "results.clip"), keepTurns: await setIn(data, "compaction.keepTurns"), time: await setIn(data, "limits.turn.time") }).toEqual({ clip: 5_000, keepTurns: 4, time: null });
+      // RPH's limits.turn.seconds takes `~`, so the turn's time lifted today is written as `~`.
+      expect({ clip: await setIn(data, "results.clipChars"), keepTurns: await setIn(data, "compaction.keepTurns"), time: await setIn(data, "limits.turn.seconds") }).toEqual({ clip: 5_000, keepTurns: 4, time: null });
       const settings = second.carried?.settings;
-      expect(settings?.keptInRpe).toEqual([{ from: lumiah("core.loop.clipChars"), to: global("results.clip") }]);
-      expect(settings?.carried).toEqual(expect.arrayContaining([{ from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") }, { from: lumiah("core.turn.wallMs"), to: global("limits.turn.time") }]));
-      expect(reportText(second)).toContain("  RPE-global.yml: results.clip (today's harness/settings.json: core.loop.clipChars)");
+      expect(settings?.keptInRpe).toEqual([{ from: lumiah("core.loop.clipChars"), to: global("results.clipChars") }]);
+      expect(settings?.carried).toEqual(expect.arrayContaining([{ from: lumiah("core.session.keepTurns"), to: global("compaction.keepTurns") }, { from: lumiah("core.turn.wallMs"), to: global("limits.turn.seconds") }]));
+      expect(reportText(second)).toContain("  RPE-global.yml: results.clipChars (today's harness/settings.json: core.loop.clipChars)");
     } finally {
       await fixture.remove();
     }

@@ -257,7 +257,7 @@ function JobLine(props: { job: BootstrapJobShown }) {
 /** A cap's setting, in the page's words. */
 const CAP_WORDS: Readonly<Record<string, string>> = {
   "bootstrap.run.calls": "Calls in its run",
-  "bootstrap.run.time": "Seconds of its run",
+  "bootstrap.run.seconds": "Seconds of its run",
   "jobs.run.tokensIn": "Tokens sent in its run",
   "jobs.run.tokensOut": "Tokens written in its run",
 };

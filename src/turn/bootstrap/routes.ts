@@ -17,7 +17,7 @@ export interface BootstrapRoutesDeps {
   jobs: BootstrapJobs;
   /** The chats the last migration carried for the user (imported, or imported again), by id. */
   carried(user: string): Promise<readonly string[]>;
-  /** A list's page when the caller names none and the most one may ask: the turn area's page settings (`turns.page`, `turns.pageMost`). */
+  /** A list's page when the caller names none and the most one may ask: the turn area's page settings (`turns.page`, `turns.maxPage`). */
   sizes(): PageSizes;
 }
 

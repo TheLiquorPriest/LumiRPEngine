@@ -120,8 +120,8 @@ export async function upCommand(argv: readonly string[], io: CliIO, options: Cli
     if (installed && givenPort === undefined) blocked = `Something other than RPE answers at ${loopbackUrl(first)}, RPE's port: give RPE a free one with ${runLine(io, paths, "up", "--port", "<port>")} (the port is "port" in its config, and RPE_PORT), or stop what holds it.`;
     else {
       const next = firstFreePort(first + 1, config.service.portLast);
-      if (next === null) throw new Error(`Port ${first} is taken and no port from ${first + 1} to ${config.service.portLast} is free on loopback: give a port with --port, or raise service.portLast. Nothing was changed.`);
-      portNote = `Port ${first} is taken, so RPE uses ${next}, the first free one after it (up to service.portLast, ${config.service.portLast}).`;
+      if (next === null) throw new Error(`Port ${first} is taken and no port from ${first + 1} to ${config.service.portLast} is free on loopback: give a port with --port, or raise service.lastPort. Nothing was changed.`);
+      portNote = `Port ${first} is taken, so RPE uses ${next}, the first free one after it (up to service.lastPort, ${config.service.portLast}).`;
       port = next;
     }
   }

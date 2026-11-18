@@ -8,7 +8,7 @@
 
 /** The default of `lumiverse.reads.kept`: how many chats, books and presets have what was read of them held at once. */
 export const KEPT = 32;
-/** The default of `lumiverse.reads.keep`: how many milliseconds a read over HTTP is held, where nothing can be asked of whether it changed. */
+/** The default of `lumiverse.reads.keepSeconds`: how many milliseconds a read over HTTP is held, where nothing can be asked of whether it changed. */
 export const HTTP_KEEP_MS = 15_000;
 
 interface Kept {

@@ -63,7 +63,7 @@ function storyChoices(doc: unknown, chat: string): Wanted[] {
   const story = isRecord(doc) && isRecord(doc.story) ? doc.story[chat] : undefined;
   if (!isRecord(story)) return [];
   const out: Wanted[] = [];
-  if (story.hidden === "include" || story.hidden === "leave_out") out.push({ from: "its own choice of hidden messages", key: "chat.hiddenReadable", value: story.hidden === "include" });
+  if (story.hidden === "include" || story.hidden === "leave_out") out.push({ from: "its own choice of hidden messages", key: "history.hiddenReadable", value: story.hidden === "include" });
   if (typeof story.from === "string") out.push({ from: "its own choice of whose messages are the story", key: "story.from", value: story.from });
   if (typeof story.newest === "string") out.push({ from: "its own choice of the newest message", key: "story.newest", value: story.newest });
   return out;
@@ -80,7 +80,7 @@ function json(text: string | null): unknown {
 
 /**
  * Carries the own choices of `chats` (the chats this run imported) into their `RPE.yml`. `globalConfig` is where the user's own cap of the
- * leave-alone list (`things.tidyLeftMost`) is read; `registry` the app's settings; `earlier` what earlier runs put.
+ * leave-alone list (`things.maxTidyLeft`) is read; `registry` the app's settings; `earlier` what earlier runs put.
  */
 export async function carryChatSettings(input: { today: Today; chats: readonly string[]; places: TreePlaces; globalConfig: string; earlier: PutPrints; registry?: readonly Setting[] }): Promise<{ carried: ChatSettingsCarried; put: Map<string, string>; drop: Set<string> }> {
   const { today, places, earlier, registry } = input;
@@ -89,10 +89,10 @@ export async function carryChatSettings(input: { today: Today; chats: readonly s
   const drop = new Set<string>();
   const lumiah = json(await today.userView.read("harness/chats.json"));
   const globalText = (await readText(input.globalConfig)) ?? "";
-  const mostDeclared = registry?.find((d) => d.key === "things.tidyLeftMost");
+  const mostDeclared = registry?.find((d) => d.key === "things.maxTidyLeft");
   const globalMost = ((): unknown => {
     const things = yamlMapping(globalText, input.globalConfig).things;
-    return isRecord(things) ? things.tidyLeftMost : undefined;
+    return isRecord(things) ? things.maxTidyLeft : undefined;
   })();
   const cap = typeof globalMost === "number" ? globalMost : typeof mostDeclared?.default === "number" ? mostDeclared.default : null;
 

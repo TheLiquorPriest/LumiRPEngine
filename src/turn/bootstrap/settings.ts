@@ -27,7 +27,7 @@ const OWN = { default: null, orNone: true, none: "none of its own: every job's l
 /** Read at every level, since a job is started for one chat, and at the start of each job. */
 export const BOOTSTRAP_SETTING_DEFS = {
   tokenLimit: {
-    key: "bootstrap.tokenLimit",
+    key: "bootstrap.askAtTokens",
     default: BOOTSTRAP_DEFAULTS.tokenLimit,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -46,7 +46,7 @@ export const BOOTSTRAP_SETTING_DEFS = {
     effect: "use",
   },
   runTime: {
-    key: "bootstrap.run.time",
+    key: "bootstrap.run.seconds",
     ...OWN,
     takes: { type: "whole", least: 1 },
     perConnection: false,

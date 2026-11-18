@@ -89,7 +89,7 @@ const dueShown = shape.named(
 );
 const dueReply = shape.named(
   "DueReply",
-  "What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted).",
+  "What a turn's time brought due, soonest first, as many as the chat's engine.maxDueItems lists, and how many more fell due (null: more did, uncounted).",
   shape.object({
     turn: shape.turnId(),
     span: shape.field(shape.nullable(shape.object({ from: shape.text(), to: shape.text() })), "The turn's span as the world prints its two ends; null where no time passed."),

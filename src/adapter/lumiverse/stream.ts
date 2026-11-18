@@ -59,7 +59,7 @@ export interface StreamLife {
   commentMs?: number;
 }
 
-/** The default of `lumiverse.stream.comment`: under the ten seconds Bun's server lets a connection idle by default. */
+/** The default of `lumiverse.stream.commentSeconds`: under the ten seconds Bun's server lets a connection idle by default. */
 export const COMMENT_MS = 5_000;
 
 /** Writes a reply: `run` is given the stream and a signal that aborts when Lumiverse stops listening; when it returns without ending the reply, the reply ends there. */

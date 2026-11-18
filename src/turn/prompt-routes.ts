@@ -92,7 +92,7 @@ export function promptRoutes(turns: Turns) {
       path: "/api/v1/chats/:chat/prompt/history",
       access: "page",
       group: "turns",
-      does: "Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.pageMost` give a page's length.",
+      does: "Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.maxPage` give a page's length.",
       reply: shape.page(promptTurnShown),
       paged: { sizes: historySizes },
       handle: ({ user, params, query }) => {

@@ -33,7 +33,7 @@ Send the message again.
 The extension and RPE are different builds. `rpe status` shows both on its `Builds:` line. Update the extension in Lumiverse; RPE restarts onto the new build by itself (see [Updating](install.md#updating)).
 
 **"RPE has no connection to pass this request on to. Add one on RPE's Connections page."**
-A request on RPE's connection that is not a chat reply (Lumiverse's own small tasks) goes to RPE's default connection, or to the one `passConnection` names. Add a model connection (`rpe connection add`), or name one in `passConnection`.
+A request on RPE's connection that is not a chat reply (Lumiverse's own small tasks) goes to RPE's default connection, or to the one `turn.passConnection` names. Add a model connection (`rpe connection add`), or name one in `turn.passConnection`.
 
 ## A turn ends without a reply
 
@@ -75,9 +75,9 @@ Its words come from `guidance/.prompts/play-answers.md`.
 
 `rpe status`'s `Builds:` line says what RPE does about a new build: it is waiting for a turn or job to end, it is restarting, `update.restart` is off, it was started by hand, or the new file does not start. The same line is on the **Settings** page.
 
-Before RPE restarts onto a new build, the new build checks that it starts on RPE's data (`rpe check`: its config read, its changes to the database tried on a copy). A build that fails the check, or does not finish it within `update.checkWait` seconds, is never restarted onto: RPE goes on with the build it runs, and the `Builds:` line says why. Update the extension again, or report it.
+Before RPE restarts onto a new build, the new build checks that it starts on RPE's data (`rpe check`: its config read, its changes to the database tried on a copy). A build that fails the check, or does not finish it within `update.checkWaitSeconds` seconds, is never restarted onto: RPE goes on with the build it runs, and the `Builds:` line says why. Update the extension again, or report it.
 
-Should a build start and then keep failing all the same, RPE's service stops starting it after `update.startTries` starts within `update.startWindow` seconds, and `systemctl --user status rpe-<name>.service` says it failed. Its log says why (`journalctl --user -u rpe-<name>.service`).
+Should a build start and then keep failing all the same, RPE's service stops starting it after `update.startTries` starts within `update.startWindowSeconds` seconds, and `systemctl --user status rpe-<name>.service` says it failed. Its log says why (`journalctl --user -u rpe-<name>.service`).
 
 ## After the switch from the previous build
 

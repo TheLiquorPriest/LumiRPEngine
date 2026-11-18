@@ -173,7 +173,7 @@ function draftOf(raw: JsonValue): Pick<WorldDoc, "entities" | "places"> {
 export function gmRoutes(deps: GmReadDeps) {
   const { store } = deps;
   const read = <T>(user: string, chat: string, run: (ctx: ReadContext) => T): JsonValue => readPass(() => run(chatContext(store, user, chat))) as unknown as JsonValue;
-  /** Tidy up's run at the chat's head: every finding of the kept finder, less those he left, at most `things.tidyRunMost`. */
+  /** Tidy up's run at the chat's head: every finding of the kept finder, less those he left, at most `things.maxTidyFindings`. */
   const tidy = async (user: string, chat: string): Promise<JsonValue> => {
     const { taps } = await deps.settings(user, chat);
     const path = pathEventsAtHead(store.user(user), chat);
@@ -244,7 +244,7 @@ export function gmRoutes(deps: GmReadDeps) {
       path: "/api/v1/chats/:chat/tidy",
       access: "page",
       group: "state",
-      does: "Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.tidyRunMost`; with the switch on or off. Nothing is changed.",
+      does: "Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.maxTidyFindings`; with the switch on or off. Nothing is changed.",
       reply: answer,
       handle: ({ user, params }) => tidy(user, params.chat),
     }),
@@ -253,7 +253,7 @@ export function gmRoutes(deps: GmReadDeps) {
       path: "/api/v1/chats/:chat/tidy/left",
       access: "page",
       group: "state",
-      does: "Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.tidyLeftMost`), or taken out; then Tidy up's run as it stands.",
+      does: "Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.maxTidyLeft`), or taken out; then Tidy up's run as it stands.",
       body: shape.object({ key: shape.text({ blank: false }), left: shape.yesNo() }),
       reply: answer,
       handle: async ({ user, params, body }) => {

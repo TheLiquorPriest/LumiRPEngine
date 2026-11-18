@@ -519,7 +519,7 @@ describe("the swap, and going back", () => {
     // The defaults, from the first swap's unit; then the user's own RPE-global.yml, which a later `rpe up` writes into the unit.
     expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=60", "StartLimitBurst=6", "Restart=always"]));
     const global = dataPaths(data).globalConfig;
-    await writeFile(global, `${(await readFile(global, "utf8").catch(() => "")).trimEnd()}\nupdate:\n  startTries: 3\n  startWindow: 30\n`);
+    await writeFile(global, `${(await readFile(global, "utf8").catch(() => "")).trimEnd()}\nupdate:\n  startTries: 3\n  startWindowSeconds: 30\n`);
     await rm(log, { force: true });
     expect((await rpe(["up", "--url", lumiverse.url, "--user", USERNAME, "--data", data])).code).toBe(0);
     expect((await readFile(join(unitFolder, UNIT), "utf8")).split("\n")).toEqual(expect.arrayContaining(["StartLimitIntervalSec=30", "StartLimitBurst=4"]));

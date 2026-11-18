@@ -60,7 +60,7 @@ async function windowAtNextTurn(b: TurnBed): Promise<number | null> {
 }
 
 test("every setting RPH and RPE read is listed for a chat: the value in force, its default, and the level and file it comes from", async () => {
-  const b = await playedBed("history:\n  window: 30\nreply:\n  forms:\n    Floor model: two-step\n");
+  const b = await playedBed("history:\n  window: 30\nconnections:\n  Floor model:\n    reply:\n      form: two-step\n");
   const made = await b.page<{ id: string; error?: string }>("POST", "/api/v1/connections", { connection: { name: "Floor model", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, key: "sk-invented-0000-1111" });
   expect(made.body.error).toBeUndefined();
   await writeFile(chatFile(b), "# This chat's own.\nhistory:\n  window: 12\nlimits:\n  turn:\n    calls: 0\n");
@@ -74,16 +74,16 @@ test("every setting RPH and RPE read is listed for a chat: the value in force, i
   ]);
   // The chat's level over the global one; the shipped file's value where neither sets it; the default where no file does.
   expect(setting(body, "history.window")).toMatchObject({ value: 12, default: 40, from: "chat", file: "RPE.yml", orNone: true, levels: ["global", "chat"] });
-  expect(setting(body, "lead")).toMatchObject({ value: "author", from: "shipped", file: "@shipped/RPE-global.yml" });
+  expect(setting(body, "turn.lead")).toMatchObject({ value: "author", from: "shipped", file: "@shipped/RPE-global.yml" });
   expect(setting(body, "history.step")).toMatchObject({ value: null, default: null, from: null, file: null });
-  expect(setting(body, "compaction.reserve")).toMatchObject({ value: 16_384, default: 16_384, from: null });
-  expect(setting(body, "passConnection").levels).toEqual(["global"]);
+  expect(setting(body, "compaction.reserveTokens")).toMatchObject({ value: 16_384, default: 16_384, from: null });
+  expect(setting(body, "turn.passConnection").levels).toEqual(["global"]);
   // A value the setting does not take leaves its default in force, and says why.
   expect(setting(body, "limits.turn.calls")).toMatchObject({ value: 40, from: "chat", passed: { value: 0 } });
   expect(setting(body, "limits.turn.calls").passed?.why).toContain("a whole number, at least 1");
   // Per connection: the one the global file names by its name, and by its id where no file names it.
-  expect(setting(body, "reply.forms.Floor model")).toMatchObject({ value: "two-step", from: "global", connection: { id: made.body.id, name: "Floor model" } });
-  expect(setting(body, `jobs.connections.${made.body.id}.perDay`)).toMatchObject({ value: null, from: null, connection: { id: made.body.id, name: "Floor model" } });
+  expect(setting(body, "connections.Floor model.reply.form")).toMatchObject({ value: "two-step", from: "global", connection: { id: made.body.id, name: "Floor model" } });
+  expect(setting(body, `connections.${made.body.id}.jobs.perDay`)).toMatchObject({ value: null, from: null, connection: { id: made.body.id, name: "Floor model" } });
 
   // With no chat, the levels every chat shares.
   const shared = await settings(b, "GET", "");
@@ -130,19 +130,19 @@ test("a value set at a chat's level is in force at the chat's next turn, over th
 });
 
 test("a write keeps the user's comments and every other line of the file, and a key written short keeps its value", async () => {
-  const mine = ["# My own settings.", "off: [rules/turn-unrecorded]", "", "history:", "  # The prompt keeps the latest thirty.", "  window: 30", "  hold: true", "", "# Limits, mine.", "limits:", "  turn:", "    depth: 1", ""].join("\n");
+  const mine = ["# My own settings.", "stack:", "  off: [rules/turn-unrecorded]", "", "history:", "  # The prompt keeps the latest thirty.", "  window: 30", "  hold: true", "", "# Limits, mine.", "limits:", "  turn:", "    depth: 1", ""].join("\n");
   const b = await playedBed("");
   await writeFile(b.app.paths.globalConfig, mine);
 
   expect((await settings(b, "PUT", "", { level: "global", key: "limits.turn.calls", value: 12 })).status).toBe(200);
-  const capped = await settings(b, "PUT", "", { level: "global", key: "history.hold.cap", value: 3 });
+  const capped = await settings(b, "PUT", "", { level: "global", key: "history.hold.maxMessages", value: 3 });
   expect(capped.status).toBe(200);
   expect(setting(capped.body, "history.hold.on")).toMatchObject({ value: true, from: "global" });
-  expect(setting(capped.body, "history.hold.cap")).toMatchObject({ value: 3, from: "global" });
+  expect(setting(capped.body, "history.hold.maxMessages")).toMatchObject({ value: 3, from: "global" });
 
   const text = await readFile(b.app.paths.globalConfig, "utf8");
-  for (const line of ["# My own settings.", "off: [rules/turn-unrecorded]", "  # The prompt keeps the latest thirty.", "  window: 30", "# Limits, mine.", "    depth: 1"]) expect(text.split("\n")).toContain(line);
-  expect(Bun.YAML.parse(text)).toEqual({ off: ["rules/turn-unrecorded"], history: { window: 30, hold: { on: true, cap: 3 } }, limits: { turn: { depth: 1, calls: 12 } } });
+  for (const line of ["# My own settings.", "  off: [rules/turn-unrecorded]", "  # The prompt keeps the latest thirty.", "  window: 30", "# Limits, mine.", "    depth: 1"]) expect(text.split("\n")).toContain(line);
+  expect(Bun.YAML.parse(text)).toEqual({ stack: { off: ["rules/turn-unrecorded"] }, history: { window: 30, hold: { on: true, maxMessages: 3 } }, limits: { turn: { depth: 1, calls: 12 } } });
   const turn = await turnSettings(b.turns.files, { user: USER, chat: CHAT, session: NO_SESSION }, b.turns.env.log);
   expect(turn.window).toEqual({ size: 30, step: null, hold: { on: true, cap: 3 } });
 });
@@ -156,21 +156,21 @@ test("a value of the wrong kind, a key RPE does not read, ~ where it is not take
     return answer.body.error;
   };
   expect(await refused({ level: "global", key: "history.window", value: 0 })).toBe("history.window takes a whole number, at least 1, or ~ for every message kept, not 0.");
-  expect(await refused({ level: "global", key: "reply.forms.Floor model", value: "three-step" })).toContain("one of tags, two-step");
+  expect(await refused({ level: "global", key: "connections.Floor model.reply.form", value: "three-step" })).toContain("one of tags, two-step");
   expect(await refused({ level: "global", key: "reply.streamAnyway", value: ["Floor model", 3] })).toContain("a list of names");
   expect(await refused({ level: "global", key: "history.windows", value: 3 })).toBe('RPE reads no setting "history.windows".');
   expect(await refused({ level: "global", key: "reply.form", none: true })).toContain("takes no ~");
-  expect(await refused({ level: "chat", chat: CHAT, key: "passConnection", value: "Floor model" })).toBe("passConnection is read from the global level alone.");
+  expect(await refused({ level: "chat", chat: CHAT, key: "turn.passConnection", value: "Floor model" })).toBe("turn.passConnection is read from the global level alone.");
   expect(await refused({ level: "chat", key: "history.window", value: 3 })).toContain("Name the chat");
   expect(await readFile(b.app.paths.globalConfig, "utf8")).toBe(before);
 });
 
 test("the files switched off at a level are listed under it, and a write switches one on again", async () => {
   const b = await playedBed("");
-  // His own file, with one `off:` list (the bed's own line replaced).
-  await writeFile(b.app.paths.globalConfig, "off:\n  - rules/turn-unrecorded\n  - WORLD\n");
-  await writeFile(chatFile(b), "off: [SIMULATION]\n");
-  const listed = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "off");
+  // His own file, with one `stack.off` list (the bed's own line replaced).
+  await writeFile(b.app.paths.globalConfig, "stack:\n  off:\n    - rules/turn-unrecorded\n    - WORLD\n");
+  await writeFile(chatFile(b), "stack:\n  off: [SIMULATION]\n");
+  const listed = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "stack.off");
   // Every level's list, each under its level; together, what is off.
   expect(listed).toMatchObject({ joined: true, value: ["rules/turn-unrecorded", "WORLD", "SIMULATION"], takes: { type: "texts" } });
   expect(listed.set).toEqual([
@@ -179,29 +179,29 @@ test("the files switched off at a level are listed under it, and a write switche
     { level: "chat", file: "RPE.yml", value: ["SIMULATION"] },
   ]);
 
-  // WORLD switched on again at the level that switched it off: written as the Files page writes it, a list under `off:`.
-  const on = await settings(b, "PUT", "", { level: "global", key: "off", value: ["rules/turn-unrecorded"] });
+  // WORLD switched on again at the level that switched it off: written as the Files page writes it, a list under `stack.off`.
+  const on = await settings(b, "PUT", "", { level: "global", key: "stack.off", value: ["rules/turn-unrecorded"] });
   expect(on.status).toBe(200);
-  expect(setting(on.body, "off").value).toEqual(["rules/turn-unrecorded"]);
-  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toEqual({ off: ["rules/turn-unrecorded"] });
-  const chatOn = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "off", value: [] });
-  expect(setting(chatOn.body, "off").value).toEqual(["rules/turn-unrecorded"]);
+  expect(setting(on.body, "stack.off").value).toEqual(["rules/turn-unrecorded"]);
+  expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toEqual({ stack: { off: ["rules/turn-unrecorded"] } });
+  const chatOn = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "stack.off", value: [] });
+  expect(setting(chatOn.body, "stack.off").value).toEqual(["rules/turn-unrecorded"]);
 });
 
-test("`added:` is shown and written as a table of situations, each with its files", async () => {
+test("`stack.added` is shown and written as a table of situations, each with its files", async () => {
   const b = await playedBed("");
-  const shipped = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "added");
+  const shipped = setting((await settings(b, "GET", `?chat=${CHAT}`)).body, "stack.added");
   expect(shipped).toMatchObject({ value: { swipe: ["SWIPE"], regenerate: ["SWIPE"], delete: ["DELETE"] }, from: "shipped", takes: { type: "table", of: { type: "texts" } } });
   expect(shipped.takesWords).toBe("a table of names, each to a list of names");
 
   // A situation's entry at the chat's level replaces the shipped one for that situation alone.
-  const set = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "added", value: { swipe: ["SWIPE", "RECAP"] } });
+  const set = await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "stack.added", value: { swipe: ["SWIPE", "RECAP"] } });
   expect(set.status).toBe(200);
-  expect(setting(set.body, "added").value).toEqual({ swipe: ["SWIPE", "RECAP"], regenerate: ["SWIPE"], delete: ["DELETE"] });
-  expect(Bun.YAML.parse(await readFile(chatFile(b), "utf8"))).toEqual({ added: { swipe: ["SWIPE", "RECAP"] } });
+  expect(setting(set.body, "stack.added").value).toEqual({ swipe: ["SWIPE", "RECAP"], regenerate: ["SWIPE"], delete: ["DELETE"] });
+  expect(Bun.YAML.parse(await readFile(chatFile(b), "utf8"))).toEqual({ stack: { added: { swipe: ["SWIPE", "RECAP"] } } });
 
-  const refused = await settings<{ error: string }>(b, "PUT", "", { level: "chat", chat: CHAT, key: "added", value: { swipe: "SWIPE" } });
-  expect(refused).toEqual({ status: 400, body: { error: 'added.swipe takes a list of names, not "SWIPE".' } });
+  const refused = await settings<{ error: string }>(b, "PUT", "", { level: "chat", chat: CHAT, key: "stack.added", value: { swipe: "SWIPE" } });
+  expect(refused).toEqual({ status: 400, body: { error: 'stack.added.swipe takes a list of names, not "SWIPE".' } });
 });
 
 test("a list of records a test area declares is shown as a table and written back with one record added and one taken out, his comments kept", async () => {
@@ -234,8 +234,8 @@ test("a list of records a test area declares is shown as a table and written bac
   expect(setting(put.body, "keeper.marks").value).toEqual(written);
   const text = await readFile(b.app.paths.globalConfig, "utf8");
   for (const line of ["# The keeper's marks.", "# The end."]) expect(text.split("\n")).toContain(line);
-  // The bed's own `off:` line stays as it was.
-  expect(Bun.YAML.parse(text)).toEqual({ off: [], keeper: { marks: written } });
+  // The bed's own `stack.off` line stays as it was.
+  expect(Bun.YAML.parse(text)).toEqual({ stack: { off: [] }, keeper: { marks: written } });
 
   // A record short of a field is refused, and nothing is written.
   const refused = await settings<{ error: string }>(b, "PUT", "", { level: "global", key: "keeper.marks", value: [{ file: "persistent-workspace/tides.md" }] });
@@ -255,12 +255,12 @@ test("the server's limits are listed under RPE-global.yml with their defaults, a
   // The one of Appendix D.1: RPE listens on loopback unless an address is set.
   expect(setting(listed, "server.address")).toMatchObject({ value: "127.0.0.1", row: "RPE listens on", effectWords: "from RPE's next start" });
 
-  const put = await settings(b, "PUT", "", { level: "global", key: "server.bodyBytes", value: 2_097_152 });
+  const put = await settings(b, "PUT", "", { level: "global", key: "server.maxBodyBytes", value: 2_097_152 });
   expect(put.status).toBe(200);
-  expect(setting(put.body, "server.bodyBytes")).toMatchObject({ value: 2_097_152, from: "global", file: "@global/RPE-global.yml" });
+  expect(setting(put.body, "server.maxBodyBytes")).toMatchObject({ value: 2_097_152, from: "global", file: "@global/RPE-global.yml" });
   expect(Bun.YAML.parse(await readFile(b.app.paths.globalConfig, "utf8"))).toMatchObject({ server: { bodyBytes: 2_097_152 } });
   // Read from the global level alone; config.json is not written.
-  expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "server.bodyBytes", value: 4096 })).status).toBe(400);
+  expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "server.maxBodyBytes", value: 4096 })).status).toBe(400);
   expect(await readFile(b.app.paths.config, "utf8")).toBe(configBefore);
   // What RPE's next start reads.
   expect((await loadConfig(b.app.paths, {})).server.bodyBytes).toBe(2_097_152);

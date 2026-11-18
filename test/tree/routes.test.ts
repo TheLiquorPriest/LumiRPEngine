@@ -2,7 +2,7 @@
 // says which file of a name is taken and which replaces it; a file written as the user at a level becomes
 // the file taken there; a replaced default shows its difference and resets; an update that changes a
 // default under the user's own file leaves their file as it is and is reported; switching a name off
-// writes the level's `off:` list, and RPH's own loader then finds it off; a page reaches nothing outside
+// writes the level's `stack.off` list, and RPH's own loader then finds it off; a page reaches nothing outside
 // the tree, no shipped file is written or removed, and a call without a page's token is refused. Every
 // name and text is invented.
 
@@ -20,7 +20,7 @@ const NAMES = { character: { id: "char-wren", name: "Wren Alder" }, chat: { name
 const GHOST = { character: { id: "char-heron", name: "Ghost Heron" }, chat: { name: "The Quiet Lamp" } };
 
 const SHIPPED_RPH: Record<string, string> = {
-  "RPE-global.yml": "layered: [AGENTS]\noff: []\n",
+  "RPE-global.yml": "stack:\n  layered: [AGENTS]\n  off: []\n",
   "ALL-AGENTS.md": "Every agent reads this.\n",
   ".agents/gm.md": "---\nname: gm\ndescription: Rules the scene.\n---\nThe shipped GM.\n",
   ".rules/consent.md": "---\ndescription: Asks before a hard turn.\nagents: all\n---\nAsk first.\n",
@@ -35,10 +35,11 @@ async function put(folder: string, files: Record<string, string>): Promise<void>
   }
 }
 
-/** A config's `off:` list as it reads back. */
+/** A config's `stack.off` list as it reads back. */
 function offOf(text: string): unknown {
   const doc: unknown = YAML.parse(text);
-  return typeof doc === "object" && doc !== null && "off" in doc ? doc.off : undefined;
+  const stack = typeof doc === "object" && doc !== null && "stack" in doc ? doc.stack : undefined;
+  return typeof stack === "object" && stack !== null && "off" in stack ? stack.off : undefined;
 }
 
 describe("the Files page's routes", () => {
@@ -273,8 +274,8 @@ describe("the Files page's routes", () => {
     expect((await call<{ suggestions: TreeSuggestionView[] }>("GET", `/api/v1/suggestions?chat=${CHAT}&state=open`)).body.suggestions).toEqual([]);
   });
 
-  test("switching a shipped file off writes its name in the level's off: list, RPH's loader finds it off, and switching it on again takes the name out", async () => {
-    await writeFile(app.paths.globalConfig, "# My own settings.\noff: [WORLD]\n");
+  test("switching a shipped file off writes its name in the level's stack.off list, RPH's loader finds it off, and switching it on again takes the name out", async () => {
+    await writeFile(app.paths.globalConfig, "# My own settings.\nstack:\n  off: [WORLD]\n");
     const switched = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-off/@shipped/.rules/consent.md", { level: "global", off: true });
     expect(switched.status).toBe(200);
     expect(switched.body.file).toMatchObject({ path: "@shipped/.rules/consent.md", off: true, applies: false });
@@ -293,9 +294,9 @@ describe("the Files page's routes", () => {
     expect((await call("PUT", "/api/v1/files-off/@shipped/RPE-global.yml", { level: "global", off: true })).status).toBe(400);
   });
 
-  test("the listing says which levels' off: lists name a file: switched on at a level whose list does not name it, it stays off; at the one that does, it is on", async () => {
-    await writeFile(app.paths.globalConfig, "off: [agents/gm]\n");
-    await writeFile(join(chatFolder, "RPE.yml"), "off:\n  - .agents/gm.md\n");
+  test("the listing says which levels' stack.off lists name a file: switched on at a level whose list does not name it, it stays off; at the one that does, it is on", async () => {
+    await writeFile(app.paths.globalConfig, "stack:\n  off: [agents/gm]\n");
+    await writeFile(join(chatFolder, "RPE.yml"), "stack:\n  off:\n    - .agents/gm.md\n");
     const gm = async () => (await listing()).get("@shipped/.agents/gm.md");
     expect(await gm()).toMatchObject({ off: true, offIn: ["global", "chat"] });
     expect((await listing()).get("@shipped/.rules/consent.md")).toMatchObject({ off: false, offIn: [] });
@@ -310,9 +311,9 @@ describe("the Files page's routes", () => {
     expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
   });
 
-  test.skip("hardening: pinning a file for an agent writes it in the level's pins: with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {
+  test.skip("hardening: pinning a file for an agent writes it in the level's stack.pins with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {
     await writeFile(join(chatFolder, "WORLD.md"), "# World\n");
-    await writeFile(join(chatFolder, "RPE.yml"), "# his own words\noff: []\n");
+    await writeFile(join(chatFolder, "RPE.yml"), "# his own words\nstack:\n  off: []\n");
     const pinned = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files-pin/WORLD.md", { level: "chat", chat: CHAT, agent: "gm", pinned: true });
     expect(pinned.body.file).toMatchObject({ path: "WORLD.md", pinnedFor: [{ agent: "gm", level: "chat" }] });
     expect(await readFile(join(chatFolder, "RPE.yml"), "utf8")).toContain("# his own words");

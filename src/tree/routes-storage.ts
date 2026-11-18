@@ -22,7 +22,7 @@ export function storageRoutes(kit: RouteKit) {
       access: "page",
       group: "files",
       does: "What the tree takes, a page of chats at a time from the sizes RPE keeps (a chat not measured yet is measured meanwhile and shows its sizes at the next read): each chat's folder by area and its rows of the database, the user's own level, the shipped level, and RPE's database file with what no chat's rows take of it.",
-      query: { limit: shape.optional(shape.whole({ least: 1 }), "How many chats a page holds; the `storage.chatsListed` setting's when left out, and at most `files.listMost`."), after: shape.optional(shape.text(), "The chat after which the page starts: the `next` of the page before.") },
+      query: { limit: shape.optional(shape.whole({ least: 1 }), "How many chats a page holds; the `storage.page` setting's when left out, and at most `files.list.maxPage`."), after: shape.optional(shape.text(), "The chat after which the page starts: the `next` of the page before.") },
       reply: storageReply,
       handle: async ({ user, query }) => {
         const s = await treeSettingsOf(own.locationOf(user, null));

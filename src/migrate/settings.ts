@@ -155,7 +155,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
       if (key === "v") continue;
       // His tidy-up's most findings a run puts, as today's reader takes it, into the setting of the same meaning.
       if (key === "tidy") {
-        puts.push({ from: ["settings.json: tidy.findings"], to: "things.tidyRunMost", value: tidySettingsOf(value).findings });
+        puts.push({ from: ["settings.json: tidy.findings"], to: "things.maxTidyFindings", value: tidySettingsOf(value).findings });
         continue;
       }
       // A group some of whose leaves have a setting of the same meaning: those leaves are settled one by one, and the group's own fate names the rest.
@@ -178,8 +178,8 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     const from = `harness/settings.json: ${path}`;
     // Today's "messages you hid": whether agents may read them.
     if (path === "core.story.hidden") {
-      if (value === "include" || value === "leave_out") puts.push({ from: [from], to: "chat.hiddenReadable", value: value === "include" });
-      else notCarried.push({ from, to: "chat.hiddenReadable", why: "today's is neither include nor leave_out" });
+      if (value === "include" || value === "leave_out") puts.push({ from: [from], to: "history.hiddenReadable", value: value === "include" });
+      else notCarried.push({ from, to: "history.hiddenReadable", why: "today's is neither include nor leave_out" });
     }
     // Today's history cutoff becomes the history window, with the number it keeps now (§15.2); every message kept is `~`.
     else if (path === "transport.history.keep" || path === "transport.history.count") {

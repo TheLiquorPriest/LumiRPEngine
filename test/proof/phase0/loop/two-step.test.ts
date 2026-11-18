@@ -17,7 +17,7 @@ describe("the two-step form, thirty turns", () => {
     expect(partOf(played, "two-step")).toHaveLength(30);
     expect(partOf(played, "two-step").every((i) => i.outcome === "met")).toBe(true);
     expect(partOf(played, "calls").every((i) => i.outcome === "met" && i.why.endsWith("2 call(s) before the reply's release"))).toBe(true);
-    expect(played.log.writes).toEqual([{ chat: "chat-floor", key: "reply.forms.rpe-floor", value: "two-step" }]);
+    expect(played.log.writes).toEqual([{ chat: "chat-floor", key: "connections.rpe-floor.reply.form", value: "two-step" }]);
     const count = JSON.parse(played.internal["count.json"] ?? "null");
     expect(count).toMatchObject({ form: "two-step", count: { kept: 30, played: 30, unread: 0 }, calls: { exact: 30, of: 30 } });
     expect(played.printed).toEqual([]);

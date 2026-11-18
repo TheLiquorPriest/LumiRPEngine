@@ -30,7 +30,7 @@ const MODEL = { none: "the model and effort an agent of today's runs on are carr
 const LUMIAH: Readonly<Record<string, Fate>> = {
   "core.reply.progress": { unlike: "today's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive", to: "progress.show" },
   "core.reply.progressChars": { none: "RPE's progress line is not cut at a length of its own" },
-  "core.story.hidden": { to: "chat.hiddenReadable" },
+  "core.story.hidden": { to: "history.hiddenReadable" },
   "core.story.from": { to: "story.from" },
   "core.story.newest": { to: "story.newest" },
   "story.minds.playerMind": { to: "cast.playerMind" },
@@ -139,7 +139,7 @@ const ENGINE: Readonly<Record<string, Fate>> = {
   minds: { none: "RPE has no setting of that meaning besides those named of it; each chat's own choices are carried with the chat" },
   loreIndex: { none: "RPE has no setting of that meaning besides the entry that heads the index" },
   prompts: { none: "his edited texts are attached under imported/, switched off" },
-  tidy: { to: "things.tidyRunMost" },
+  tidy: { to: "things.maxTidyFindings" },
 };
 
 /** What becomes of a key of the engine's `settings.json`. */
@@ -165,20 +165,20 @@ export function engineLeaves(key: string): [string, Fate][] {
 /** A runtime's `tuning` fields (`RuntimeTuning`, `H/link/settings.ts`), each by its name. */
 const LINK = gone("LumiAH's link between its runtime and Lumiverse, a retired part");
 const TUNING: Readonly<Record<string, Fate>> = {
-  buildStartMs: { to: "update.versionWait", seconds: true },
-  drainPollMs: { to: "update.lookEvery", seconds: true },
-  drainMs: { to: "service.drainWait", seconds: true },
-  maxBodyBytes: { to: "server.providerBodyBytes" },
+  buildStartMs: { to: "update.versionWaitSeconds", seconds: true },
+  drainPollMs: { to: "update.lookEverySeconds", seconds: true },
+  drainMs: { to: "service.drainWaitSeconds", seconds: true },
+  maxBodyBytes: { to: "server.maxProviderBodyBytes" },
   stopGraceMs: { none: "RPE's stop does not wait for work in flight: a turn cut short is marked interrupted" },
   progressMs: { to: "progress.silenceSeconds", seconds: true },
-  commentMs: { to: "lumiverse.stream.comment", seconds: true },
-  reconnectMs: { to: "lumiverse.sockets.retry", seconds: true },
-  reconnectMaxMs: { to: "lumiverse.sockets.retryMax", seconds: true },
-  socketPingMs: { to: "lumiverse.sockets.ping", seconds: true },
-  sessionCheckMs: { to: "lumiverse.session.check", seconds: true },
+  commentMs: { to: "lumiverse.stream.commentSeconds", seconds: true },
+  reconnectMs: { to: "lumiverse.sockets.retrySeconds", seconds: true },
+  reconnectMaxMs: { to: "lumiverse.sockets.maxRetrySeconds", seconds: true },
+  socketPingMs: { to: "lumiverse.sockets.pingSeconds", seconds: true },
+  sessionCheckMs: { to: "lumiverse.session.checkSeconds", seconds: true },
   lumiverseMs: { none: "RPE reads Lumiverse's database file where it can, and its waits for Lumiverse are the lumiverse.* settings" },
   stopAskMs: { none: "RPE ends a reply by its own route, with no wait for Lumiverse to stop it" },
-  turnWaitMs: { to: "limits.previousRun", seconds: true },
+  turnWaitMs: { to: "limits.previousRunSeconds", seconds: true },
   providerMs: { to: "calls.providerWaitSeconds", seconds: true },
   answerSilentMs: { to: "calls.silentAfterSeconds", seconds: true },
   signInMs: { to: "calls.signInOpenSeconds", seconds: true },

@@ -1,5 +1,5 @@
 // What one find may cost RPE's one thread, and that a find stopped by one of its bounds says so: a find
-// that names no limit gives at most `files.findLimit` (RPH holds a limit an agent names to
+// that names no limit gives at most `files.findHits` (RPH holds a limit an agent names to
 // `tools.perCall`), a grep passes over files larger than `files.grepBytes`, tests at most
 // `files.grepLineChars` of each line and stops once it has run `files.grepMs`, so a pattern that
 // backtracks on the turn folder's very long lines cannot hold every chat and every Stop. Each of
@@ -36,8 +36,8 @@ async function find(query: FileQuery): Promise<Found> {
   return found;
 }
 
-test("a find that names no limit gives at most files.findLimit, and one that names a limit gets it: RPE's own listing of a folder of more entries than that is whole", async () => {
-  await settings("files:\n  findLimit: 3\n");
+test("a find that names no limit gives at most files.findHits, and one that names a limit gets it: RPE's own listing of a folder of more entries than that is whole", async () => {
+  await settings("files:\n  findHits: 3\n");
   for (let n = 0; n < 6; n++) await note(`n${n}.md`, "the tide\n");
   expect((await find({ by: "list", path: "persistent-workspace/bounds" })).hits).toHaveLength(3);
   expect((await find({ by: "glob", pattern: "*.md", path: "persistent-workspace/bounds" })).hits).toHaveLength(3);
@@ -63,7 +63,7 @@ test("a grep tests only files.grepLineChars of a long line, and stops with what 
 });
 
 test("each bound says it stopped: the limit when more hits were there, the files too large, the lines cut, the time", async () => {
-  await settings("files:\n  findLimit: 2\n  grepBytes: 100\n  grepLineChars: 20\n");
+  await settings("files:\n  findHits: 2\n  grepBytes: 100\n  grepLineChars: 20\n");
   await note("a.md", "tide one\ntide two\ntide three\n");
   // Exactly the limit is no stop: one past it is looked for.
   expect(await find({ by: "grep", pattern: "tide", path: "persistent-workspace/bounds/a.md", limit: 3 })).toEqual({ status: "found", hits: expect.any(Array) });

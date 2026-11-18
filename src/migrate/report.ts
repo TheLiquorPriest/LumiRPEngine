@@ -246,7 +246,7 @@ export interface MigrationReport {
    * Where the tidy-up's settings were found, level by level (R-201), nothing assumed of a level from its type: the chats whose own
    * choices hold its switch or leave-alone list (carried into each chat's RPE.yml), the worlds whose head revision holds its switch
    * (kept in the world document, carried with the world), and a user-level `tidy` in settings.json, as today's own reader reads
-   * it (carried into `things.tidyRunMost`); null where none is stored. Absent from a report kept before runs looked.
+   * it (carried into `things.maxTidyFindings`); null where none is stored. Absent from a report kept before runs looked.
    */
   tidy?: { chats: string[]; worlds: string[]; user: number | null };
   /** Why the real run won't start on this report; none: it may. After a real run, what of it did not balance once counted from what the run did, which the swap reads. */
@@ -604,7 +604,7 @@ export function reportText(report: MigrationReport): string {
     if (own !== null) {
       lines.push("", `Each chat's own choices (its knowledge switch, narrator view, story and tidy-up) in its RPE.yml: ${own.carried.length} carried${own.keptInRpe.length > 0 ? `, ${own.keptInRpe.length} changed in RPE since a run put them and left as RPE has them` : ""}${own.notCarried.length > 0 ? `, ${own.notCarried.length} not carried (kept in the backup)` : ""}.`);
       for (const n of own.notCarried) lines.push(`  ${n.chat}: ${n.from} (${n.to}: ${n.why})`);
-      for (const t of own.tidyCut) lines.push(`  ${t.chat}: ${t.left} older key(s) of what it told the tidy-up to leave alone are left out, as the list holds at most the number things.tidyLeftMost says`);
+      for (const t of own.tidyCut) lines.push(`  ${t.chat}: ${t.left} older key(s) of what it told the tidy-up to leave alone are left out, as the list holds at most the number things.maxTidyLeft says`);
     }
     lines.push("", "Settings carried into RPE's config:");
     for (const s of settings.carried) lines.push(`  ${s.from} → ${s.to}`);
@@ -630,7 +630,7 @@ export function reportText(report: MigrationReport): string {
     const found = [
       t.chats.length > 0 ? `at the chat's level, in ${t.chats.length} chat(s): ${t.chats.join(", ")} (each carried into its RPE.yml)` : "",
       t.worlds.length > 0 ? `at the world's level, in ${t.worlds.length} world(s): ${t.worlds.join(", ")} (packs.gear.config.tidy.auto, kept in the world document)` : "",
-      t.user !== null ? `at the user's level: ${t.user} finding(s) a Tidy up run shows (carried into things.tidyRunMost)` : "",
+      t.user !== null ? `at the user's level: ${t.user} finding(s) a Tidy up run shows (carried into things.maxTidyFindings)` : "",
     ].filter((s) => s !== "");
     lines.push("", found.length === 0 ? "The tidy-up's settings: found at no level." : `The tidy-up's settings were found ${found.join("; ")}.`);
   }

@@ -103,7 +103,7 @@ export function setSwitch(db: Database, user: string, name: string, state: "on" 
 
 /**
  * The server's side: RPH's `switches` port, backed by the registry, and what is listed for the user this
- * RPE belongs to. `nameLength` is the longest name it takes (`switches.nameLength`).
+ * RPE belongs to. `nameLength` is the longest name it takes (`switches.maxNameChars`).
  */
 export class Switches implements SwitchesPort {
   constructor(
@@ -125,7 +125,7 @@ export class Switches implements SwitchesPort {
    */
   async state(user: string, thing: Switchable): Promise<SwitchState> {
     const { name, kind, target: what } = thing;
-    if (name.trim() === "" || name.length > this.nameLength || /[\u0000-\u001f]/.test(name)) throw new Error(`A switch's name is one line of text of at most ${this.nameLength} characters (the setting switches.nameLength).`);
+    if (name.trim() === "" || name.length > this.nameLength || /[\u0000-\u001f]/.test(name)) throw new Error(`A switch's name is one line of text of at most ${this.nameLength} characters (the setting switches.maxNameChars).`);
     if (kind.trim() === "") throw new Error(`Say what sort of thing ${name} is.`);
     const digest = switchDigest(kind, what);
     const row = this.db.query<{ state: SwitchState }, [string, string, string]>("SELECT state FROM switch WHERE user = ? AND name = ? AND digest = ?").get(user, name, digest);

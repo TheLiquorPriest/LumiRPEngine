@@ -117,7 +117,7 @@ export function fileRoutes(kit: RouteKit) {
         chat: chatQuery,
         folder: shape.optional(shape.text(), "The folder to list, by its path in the view; the chat's own top when left out."),
         search: shape.optional(shape.text(), "Search every level for files whose path or text holds this, instead of listing a folder."),
-        limit: shape.optional(shape.whole({ least: 1 }), "How many entries a page holds; the `files.listPage` setting's when left out, and at most `files.listMost`."),
+        limit: shape.optional(shape.whole({ least: 1 }), "How many entries a page holds; the `files.list.page` setting's when left out, and at most `files.list.maxPage`."),
         after: shape.optional(shape.text(), "Where the page starts after: the `next` of the page before."),
       },
       reply: treeListedReply,

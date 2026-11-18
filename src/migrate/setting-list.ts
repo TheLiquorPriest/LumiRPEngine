@@ -50,7 +50,7 @@ export const MIGRATE_SETTINGS: readonly Setting[] = [
     effect: "use",
   },
   {
-    key: "migration.pageMost",
+    key: "migration.maxPage",
     default: 200,
     takes: { type: "whole", least: 1 },
     advice: [{ above: 5000, says: "One request may ask for over 5000 carried turns, each read whole from the old records." }],
@@ -70,7 +70,7 @@ export async function carriedPage(globalConfig: string): Promise<{ size: number;
     const value = def === undefined ? undefined : read.read(def).value;
     return typeof value === "number" ? value : 0;
   };
-  return { size: number("migration.page"), most: number("migration.pageMost") };
+  return { size: number("migration.page"), most: number("migration.maxPage") };
 }
 
 /** The rows a config holds, from the records the reader gives for the setting (`ConfigRead.read`): each entry that is a whole row. */

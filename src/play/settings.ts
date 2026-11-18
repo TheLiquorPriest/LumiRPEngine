@@ -65,7 +65,7 @@ export const TAP_DEFAULTS: Readonly<TapSettings> = Object.freeze({
 /** The numbers among them, by the name `TapSettings` reads each under. */
 export const TAP_SETTING_DEFS = {
   nameMost: {
-    key: "taps.nameMost",
+    key: "taps.maxNameChars",
     default: TAP_DEFAULTS.nameMost,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -74,7 +74,7 @@ export const TAP_SETTING_DEFS = {
     effect: "use",
   },
   thingsMost: {
-    key: "taps.thingsMost",
+    key: "taps.maxThingsPerFix",
     default: TAP_DEFAULTS.thingsMost,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -83,7 +83,7 @@ export const TAP_SETTING_DEFS = {
     effect: "use",
   },
   journalMost: {
-    key: "taps.journalMost",
+    key: "taps.journalPage",
     default: TAP_DEFAULTS.journalMost,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -102,7 +102,7 @@ export const TAP_SETTING_DEFS = {
     effect: "use",
   },
   clocksMost: {
-    key: "taps.clocksMost",
+    key: "taps.maxClocks",
     default: TAP_DEFAULTS.clocksMost,
     takes: { type: "whole", least: 1 },
     levels: ["shipped", "global"],
@@ -112,7 +112,7 @@ export const TAP_SETTING_DEFS = {
     effect: "use",
   },
   tidyRunMost: {
-    key: "things.tidyRunMost",
+    key: "things.maxTidyFindings",
     default: TAP_DEFAULTS.tidyRunMost,
     takes: { type: "whole", least: 1 },
     advice: [{ above: 500, says: "Over 500 findings in one run are listed and drawn at once." }],
@@ -175,7 +175,7 @@ const TIDY_DEFS = {
     effect: "turn",
   },
   leftMost: {
-    key: "things.tidyLeftMost",
+    key: "things.maxTidyLeft",
     default: TAP_DEFAULTS.tidy.leftMost,
     takes: { type: "whole", least: 1 },
     perConnection: false,
@@ -217,7 +217,7 @@ function choicesRead(read: ConfigRead): TapSettings["choices"] {
   };
 }
 
-/** The panels' settings as a chat's levels set them; the list of findings left alone cut to its newest `things.tidyLeftMost`. */
+/** The panels' settings as a chat's levels set them; the list of findings left alone cut to its newest `things.maxTidyLeft`. */
 export function tapSettingsRead(read: ConfigRead): TapSettings {
   const tell = Object.fromEntries(OFFSTAGE_GROUPS.map((group) => [group, read.value(TELL_GROUP_DEFS[group]) as boolean])) as Record<OffstageGroup, boolean>;
   const leftMost = read.value(TIDY_DEFS.leftMost) as number;

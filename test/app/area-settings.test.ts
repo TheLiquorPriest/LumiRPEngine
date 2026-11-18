@@ -98,7 +98,7 @@ test("a limit the tree reads, written through the route at a chat's level, holds
   const prune = () => pruneChat({ files: b.app.paths.files, chats: b.turns.chats }, USER, CHAT);
 
   expect(await listing()).toBeGreaterThan(1);
-  expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "files.findLimit", value: 1 })).status).toBe(200);
+  expect((await settings(b, "PUT", "", { level: "chat", chat: CHAT, key: "files.findHits", value: 1 })).status).toBe(200);
   expect(await listing()).toBe(1);
 
   // As shipped, 50 are kept whole: the chat's one turn folder stays as it is.
@@ -131,8 +131,8 @@ test("for each area, a value changed through PUT /api/v1/settings is what that a
   // At the next turn: the cast's, the story lane's, the world state's and the engine's tools', each read through the one reader as a turn begins.
   const nextTurn: readonly [string, number, (t: TurnSettings) => number][] = [
     ["cast.topOfMind", 4, (t) => t.cast.topOfMind],
-    ["story.soFar.floor", 3000, (t) => t.storySoFar.floor],
-    ["worldState.budget", 2500, (t) => t.worldState.budget],
+    ["story.soFar.minTokens", 3000, (t) => t.storySoFar.floor],
+    ["worldState.tokens", 2500, (t) => t.worldState.budget],
     ["engine.searchHits", 7, (t) => t.engine.searchHits],
   ];
   for (const [key, value, read] of nextTurn) {
@@ -142,8 +142,8 @@ test("for each area, a value changed through PUT /api/v1/settings is what that a
   }
 
   // At its next use: the bootstrap's limit, read as a bootstrap job starts.
-  expect(await effectOf("bootstrap.tokenLimit")).toBe("use");
-  await put({ level: "chat", chat: CHAT, key: "bootstrap.tokenLimit", value: 150_000 });
+  expect(await effectOf("bootstrap.askAtTokens")).toBe("use");
+  await put({ level: "chat", chat: CHAT, key: "bootstrap.askAtTokens", value: 150_000 });
   expect((await bootstrapSettings(b.turns.files, scope, b.turns.env.log)).tokenLimit).toBe(150_000);
 
   // From the next start: the store's own, read once as RPE opens the store; this RPE keeps what it opened with until it starts again.

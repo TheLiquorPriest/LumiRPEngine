@@ -213,11 +213,11 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return found;
   }
 
-  /** The scope's places: its session's and its turn's ids name folders, each no longer than the setting `files.idChars` at the chat's levels. */
+  /** The scope's places: its session's and its turn's ids name folders, each no longer than the setting `files.maxIdChars` at the chat's levels. */
   async function places(scope: RunScope): Promise<Places> {
     const { idChars } = await treeSettingsOf(location(scope));
     for (const [what, id] of [["session", scope.session], ["turn", scope.turn]] as const) {
-      if (id !== undefined && id.length > idChars) throw new Error(`A ${what} id names a folder, so it is at most ${idChars} characters (the setting files.idChars), and this one is ${id.length}.`);
+      if (id !== undefined && id.length > idChars) throw new Error(`A ${what} id names a folder, so it is at most ${idChars} characters (the setting files.maxIdChars), and this one is ${id.length}.`);
     }
     return placesOf(scope, namesChat(scope) && scope.turn !== undefined ? await deps.turnFolder(scope) : null);
   }

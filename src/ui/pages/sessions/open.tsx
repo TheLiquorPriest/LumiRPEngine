@@ -138,7 +138,7 @@ export function SessionOpen(props: SessionOpenProps) {
   const [mode, setMode] = useState<CarryMode | null>(null);
   const settings = useRead(() => app.client.call("GET /api/v1/settings", {}, { query: { chat } }), [chat]);
   const inForce = ((): CarryMode => {
-    const value = settings.value?.settings.find((s) => s.key === "carry")?.value;
+    const value = settings.value?.settings.find((s) => s.key === "sessions.carry")?.value;
     return value === "records" || value === "nothing" ? value : "continuing";
   })();
   const shownMode = mode ?? inForce;
@@ -204,7 +204,7 @@ export function SessionOpen(props: SessionOpenProps) {
     });
   const makeDefault = (): void =>
     press("default", async () => {
-      await call.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "carry", value: shownMode } });
+      await call.call("PUT /api/v1/settings", {}, { body: { level: "global", key: "sessions.carry", value: shownMode } });
       setMade(shownMode);
       settings.again();
     });

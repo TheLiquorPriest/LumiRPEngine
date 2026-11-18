@@ -24,7 +24,7 @@ export interface SearchersDeps {
   store: Store;
   /** The world's person `plays` names in the chat at the turn; null for none, or several. */
   personPlayed(at: { user: string; chat: string; turn?: string }, plays: string): { id: string; name: string } | null;
-  /** The most characters of a hit's snippet (`gap.snippet`), for the chat. */
+  /** The most characters of a hit's snippet (`tools.gap.snippetChars`), for the chat. */
   snippet(scope: Scope): Promise<number>;
   /** The index of vectors; absent, every hit is by words. */
   meaning?: Pick<MeaningIndex, "nearest">;

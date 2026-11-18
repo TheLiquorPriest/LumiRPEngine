@@ -75,7 +75,7 @@ export interface TurnBedOptions {
   answers: Answer[];
   /** The user's own `RPE-global.yml`, over the shipped one. */
   global?: string;
-  /** What the user switched off in their own `RPE-global.yml` (`off:`): nothing, unless a test names it. */
+  /** What the user switched off in their own `RPE-global.yml` (`stack.off`): nothing, unless a test names it. */
   off?: readonly string[];
   /** The chat's messages before the test plays: the character's greeting when not given. */
   messages?: ChatMessage[];
@@ -139,7 +139,7 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     const signIn = await new LumiverseSession({ base: server.base, fetch: server.fetch, signIn: null, save: async () => undefined, owner: () => USER, clock: REAL_CLOCK, log: () => undefined }).signIn("marlow", PASSWORD);
     await new SecretsFile(paths.secrets).write("lumiverse", { ...signIn });
     const off = options.off ?? [];
-    await writeFile(paths.globalConfig, `off: [${off.join(", ")}]\n${options.global ?? ""}`, "utf8");
+    await writeFile(paths.globalConfig, `stack: { off: [${off.join(", ")}] }\n${options.global ?? ""}`, "utf8");
 
     const model = scriptedModel(options.answers, { contextWindow: 64_000, maxTokens: 4_000 });
     const logged: Logged[] = [];

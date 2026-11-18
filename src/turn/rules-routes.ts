@@ -127,7 +127,7 @@ export function rulesRoutes(turns: Turns) {
       does: "The rules that fired in a chat, newest first, a page at a time (a job's of his among them), each with what the agent did next; `cursor` is the last id read. The setting `turns.page` gives a page's length.",
       query: {
         rule: opt(T, "Only this rule's firings."),
-        limit: opt(shape.whole({ least: 1 }), "How many to give: the setting `turns.page` when left out, and at most `turns.pageMost`."),
+        limit: opt(shape.whole({ least: 1 }), "How many to give: the setting `turns.page` when left out, and at most `turns.maxPage`."),
         cursor: opt(T, "The id of the last firing read: older ones follow it."),
       },
       reply: shape.named("FiringsReply", "A page of a chat's firings, newest first, and the cursor of the next page (null: none).", shape.object({ items: shape.list(firingShown), next: shape.nullable(T) })),

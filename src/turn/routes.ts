@@ -373,9 +373,9 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/turns",
       access: "page",
       group: "turns",
-      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length.",
+      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.",
       query: {
-        limit: shape.optional(shape.whole({ least: 1 }), "How many turns to give: the setting `turns.page` when left out, and at most `turns.pageMost`."),
+        limit: shape.optional(shape.whole({ least: 1 }), "How many turns to give: the setting `turns.page` when left out, and at most `turns.maxPage`."),
         before: shape.optional(shape.turnId(), "A turn's id: the turns older than it are given."),
       },
       reply: turnsReply,

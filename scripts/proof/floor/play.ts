@@ -149,7 +149,7 @@ export interface Ground {
   /** The plain arm's connection, as Lumiverse holds it. */
   plain: Arm;
   history: RpeSide["history"];
-  /** `limits.previousRun` as RPE's settings give it for the chat, in seconds. */
+  /** `limits.previousRunSeconds` as RPE's settings give it for the chat, in seconds. */
   previousRun: number | null;
   /** RPE's own connections, which say what provider the Author's connection is of. */
   rpeConnections: RpeConnections;
@@ -461,8 +461,8 @@ export function liveReader(acts: FloorActs): FloorReader {
       return {
         observed: { plain, shipped: trees.shipped, layers: trees.layers, off: trees.off, leads },
         plain: { connection: plainConnection, provider: arm.provider, providerWhy: arm.provider === null ? "Lumiverse's connection names no provider" : null, model: arm.model },
-        history: { keep: whole(setting("history.window")), step: whole(setting("history.step")), hold: setting("history.hold.on") === true ? whole(setting("history.hold.cap")) : null, framing, framingNote, framingWhy },
-        previousRun: whole(setting("limits.previousRun")),
+        history: { keep: whole(setting("history.window")), step: whole(setting("history.step")), hold: setting("history.hold.on") === true ? whole(setting("history.hold.maxMessages")) : null, framing, framingNote, framingWhy },
+        previousRun: whole(setting("limits.previousRunSeconds")),
         rpeConnections,
       };
     },

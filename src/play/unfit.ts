@@ -6,7 +6,7 @@
 // payment, not someone to pay. A payment that pays no one for a reason of its own: that reason.
 // Anyone or anything else, unknown, made up or hidden alike: that it names no one, no place or nothing
 // he knows, in his own words for it where he typed them. A hidden thing reads exactly as a made-up one,
-// and a name that would give a secret away, or is longer than `taps.nameMost`, reads as naming no one.
+// and a name that would give a secret away, or is longer than `taps.maxNameChars`, reads as naming no one.
 
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";

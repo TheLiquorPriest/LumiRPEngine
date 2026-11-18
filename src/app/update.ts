@@ -13,7 +13,7 @@
 // file that does not start, nor where nothing would start it again (run by hand), nor, unless the
 // user asks ("Update now"), with the setting `update.restart` off. Should a build start and then fail
 // all the same, the service's unit stops starting it after `update.startTries` starts within
-// `update.startWindow` seconds (`rpe up` writes them into it).
+// `update.startWindowSeconds` seconds (`rpe up` writes them into it).
 //
 // Each update is kept stage by stage (`UpdateProgress`): its arrival, its check, its start and the restart onto
 // it, each under way, passed or where it stopped and why, so the Runtime page shows it from its arrival to the
@@ -33,12 +33,12 @@ export type BuildOf = { build: string } | { failed: string };
 /** The update's settings, read from the global level alone: they are RPE's, not a chat's. */
 const DEFS = {
   restart: { key: "update.restart", name: "Restart onto a new build", about: "RPE restarts by itself onto a new app file the extension brings, once no turn or job runs.", effect: "use", default: true, takes: { type: "yesNo" }, levels: ["shipped", "global"], perConnection: false },
-  versionWait: { key: "update.versionWait", name: "Wait for a new build to say its version", about: "Seconds a new app file is given to say its build.", effect: "use", default: 10, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  lookEvery: { key: "update.lookEvery", name: "Look again for running work", about: "Seconds a waiting restart waits before it looks again whether turns or jobs still run.", effect: "use", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  versionWait: { key: "update.versionWaitSeconds", name: "Wait for a new build to say its version", about: "Seconds a new app file is given to say its build.", effect: "use", default: 10, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  lookEvery: { key: "update.lookEverySeconds", name: "Look again for running work", about: "Seconds a waiting restart waits before it looks again whether turns or jobs still run.", effect: "use", default: 2, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   startTries: { key: "update.startTries", name: "Starts allowed in the start window", about: "Starts of RPE's service its unit allows within the start window before the service manager stops starting it; rpe up writes it into the unit.", effect: "use", default: 5, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  startWindow: { key: "update.startWindow", name: "Start window", about: "Seconds within which the starts of RPE's service are counted.", effect: "use", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  startWindow: { key: "update.startWindowSeconds", name: "Start window", about: "Seconds within which the starts of RPE's service are counted.", effect: "use", default: 60, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
   keepCopies: { key: "update.keepCopies", name: "Known-good copies kept", about: "Copies of RPE's own build kept beside the one that runs, the newest first, for the service's pre-start step to put back when a swapped-in build does not come up.", effect: "use", default: 1, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
-  checkWait: { key: "update.checkWait", name: "Wait for a new build's check", about: "Seconds a new app file is given to check that it starts on this RPE's data.", effect: "use", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
+  checkWait: { key: "update.checkWaitSeconds", name: "Wait for a new build's check", about: "Seconds a new app file is given to check that it starts on this RPE's data.", effect: "use", default: 120, takes: { type: "whole", least: 1 }, levels: ["shipped", "global"], perConnection: false },
 } as const satisfies Record<string, Setting>;
 
 /** Every setting the update reads, as the global config file writes it. */

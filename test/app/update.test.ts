@@ -225,7 +225,7 @@ test('a check that failed for a passing reason is asked again by "Update now", t
   const running = await rpe();
   const slow = join(bed.root, "slow-check");
   await writeFile(slow, "");
-  // While the marker is there its check takes longer than update.checkWait allows, as a check on a machine under load may; the file itself does not change. The spawn's own time limit is what fails it, so the check really hangs.
+  // While the marker is there its check takes longer than update.checkWaitSeconds allows, as a check on a machine under load may; the file itself does not change. The spawn's own time limit is what fails it, so the check really hangs.
   await writeFile(file, [`if (process.argv[2] === "--version") console.log("rpe ${NEW}");`, `if (process.argv[2] === "check" && require("node:fs").existsSync(${JSON.stringify(slow)})) setTimeout(() => {}, 60_000);`, ""].join("\n"));
   expect(await running.builds.check()).toMatchObject({ disk: null, broken: "it did not finish checking that it starts on this RPE's data within 0.3 s", restart: "none" });
   await rm(slow);

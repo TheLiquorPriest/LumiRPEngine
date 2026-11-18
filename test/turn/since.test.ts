@@ -94,7 +94,7 @@ describe("the turn before, told and kept", () => {
         replying("Wren looks up."),
         replying("Wren looks away."),
       ],
-      global: "limits:\n  previousRun: 0.2\n",
+      global: "limits:\n  previousRunSeconds: 0.2\n",
     });
     const first = await play(b, "normal", "I climb the stairs.");
     await b.until("the first turn to be tied while its run goes on", () => {
@@ -250,7 +250,7 @@ describe("what has happened in the chat since the last turn", () => {
     expect(shut.sent).not.toContain("aside I keep");
     expect(shut.kept).toBe(0);
 
-    const open = await played("chat:\n  hiddenReadable: true\n");
+    const open = await played("history:\n  hiddenReadable: true\n");
     expect(open.told).toContain(`The player's message m-aside was edited since your last turn. Before: ${aside} Now: ${changed}`);
   });
 
@@ -371,7 +371,7 @@ describe("what has happened in the chat since the last turn", () => {
     // each carried turn is tied to the old one, as the migration ties it.
     const reply = (i: number, how: string): string => `Reply ${i}, ${how}: ${"the lamp turns and the sea runs high under the rock, ".repeat(6)}`;
     const messages: ChatMessage[] = Array.from({ length: 13 }, (_, i) => (i % 2 === 0 ? { id: `m${i}`, role: "assistant", content: reply(i, "touched up") } : { id: `m${i}`, role: "user", content: `Line ${i}.` }));
-    const b = await bed({ answers: [replying("Wren looks up."), replying("Wren nods.")], messages, global: "since:\n  editedBudget: 250\n" });
+    const b = await bed({ answers: [replying("Wren looks up."), replying("Wren nods.")], messages, global: "briefing:\n  editedTokens: 250\n" });
     await carriedOver(b);
     const store = b.turns.store.user(USER);
     await b.app.writes.run(() => {
@@ -405,7 +405,7 @@ describe("what a comparison of the path found, kept with the chat", () => {
         { pieces: [{ hold: after }, { text: "Noted." }] },
         replying("Wren looks up."),
       ],
-      global: "limits:\n  previousRun: 30\n",
+      global: "limits:\n  previousRunSeconds: 30\n",
     });
     const asked = b.host.send(CHAT, "I climb the stairs.");
     const first = await play(b, "normal");

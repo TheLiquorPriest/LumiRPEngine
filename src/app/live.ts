@@ -15,7 +15,7 @@
 // jobs in every chat and in none (`LIVE_JOBS`), what concerns the user and no one chat (`LIVE_USER`: the
 // extension's status), and an address an area gave a caller (`LIVE_ADDRESS_PREFIX` and the address: an
 // outside client's check-in), which a socket follows only when the area that gave it says its caller holds it.
-// Each counts toward `liveSocket.follows`; an event published to one reaches the sockets that follow it alone.
+// Each counts toward `liveSocket.maxFollows`; an event published to one reaches the sockets that follow it alone.
 //
 // The socket itself is declared once too (`liveSocketDeclaration`): where it is, the protocol a page offers,
 // how a page that cannot set a header gives its token (as a second protocol, `rpe.token.<token>`), what a
@@ -23,8 +23,8 @@
 // refusal), and the code and reason RPE closes it with once the token it opened with has run out or been
 // replaced. The server reads what a page sends by that declaration, and the generated types and the
 // reference are written from it. A socket keeps what auth answered for it, its credential's hash and end,
-// never the credential's text; RPE keeps at most `liveSocket.sockets` open, and a chat id longer than
-// `liveSocket.chatIdChars` is refused.
+// never the credential's text; RPE keeps at most `liveSocket.atOnce` open, and a chat id longer than
+// `liveSocket.maxChatIdChars` is refused.
 
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import type { JobRefusal, TraceDelta, TraceRecord } from "rp-harness/contract";
@@ -633,17 +633,17 @@ export interface LiveSocketData {
 
 /** Fixed: the longest delay a timer takes; a later end is looked at again then. */
 const LONGEST_TIMER_MS = 2_147_483_647;
-/** The close code a socket past `liveSocket.sockets` is given: try again later (RFC 6455). */
+/** The close code a socket past `liveSocket.atOnce` is given: try again later (RFC 6455). */
 const TOO_MANY_SOCKETS = 1013;
 
 export interface LiveSocketOptions {
-  /** The largest message a page may send, in bytes (`liveSocket.messageBytes`). */
+  /** The largest message a page may send, in bytes (`liveSocket.maxMessageBytes`). */
   messageBytes: number;
-  /** The most chats (and names) one socket may follow at once (`liveSocket.follows`). */
+  /** The most chats (and names) one socket may follow at once (`liveSocket.maxFollows`). */
   follows: number;
-  /** The most characters of a chat id a socket may follow (`liveSocket.chatIdChars`). */
+  /** The most characters of a chat id a socket may follow (`liveSocket.maxChatIdChars`). */
   chatIdChars: number;
-  /** The most sockets open at once (`liveSocket.sockets`). */
+  /** The most sockets open at once (`liveSocket.atOnce`). */
   sockets: number;
   /** Seconds a socket may send and be sent nothing (`server.idleSeconds`; 0: no bound): RPE pings it inside them, and a page that answers stays open. */
   idleSeconds: number;
@@ -663,7 +663,7 @@ function refuse(ws: ServerWebSocket<LiveSocketData>, message: string): void {
 
 /**
  * The server's socket handlers for the live hub. A socket is held to the credential it opened with: once that no longer holds, it is
- * closed, and sent nothing more. Past `liveSocket.sockets` open, a new one is closed at once with the reason.
+ * closed, and sent nothing more. Past `liveSocket.atOnce` open, a new one is closed at once with the reason.
  */
 export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocketHandler<LiveSocketData> {
   let open = 0;
@@ -689,7 +689,7 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
   };
   /** Why a socket may not follow `name`, or null when it may: a chat id within its bound, one of the user's own names, or an address its caller holds. */
   const refusalOf = (ws: ServerWebSocket<LiveSocketData>, name: string): string | null => {
-    if (name.length > options.chatIdChars) return `A chat id is at most ${options.chatIdChars} characters (the setting liveSocket.chatIdChars), and this one is ${name.length}.`;
+    if (name.length > options.chatIdChars) return `A chat id is at most ${options.chatIdChars} characters (the setting liveSocket.maxChatIdChars), and this one is ${name.length}.`;
     if (!name.startsWith("~") || name === LIVE_JOBS || name === LIVE_USER) return null;
     if (name.startsWith(LIVE_ADDRESS_PREFIX) && hub.holdsAddress(name.slice(LIVE_ADDRESS_PREFIX.length), ws.data.auth)) return null;
     return `${name} is no chat id, and not ${LIVE_JOBS}, ${LIVE_USER} or an address RPE gave this socket's caller.`;
@@ -703,7 +703,7 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
     sendPings: true,
     open(ws) {
       if (open >= options.sockets) {
-        ws.close(TOO_MANY_SOCKETS, `RPE has ${open} live sockets open, the most it keeps (the setting liveSocket.sockets): close another page's first.`);
+        ws.close(TOO_MANY_SOCKETS, `RPE has ${open} live sockets open, the most it keeps (the setting liveSocket.atOnce): close another page's first.`);
         return;
       }
       open++;
@@ -739,7 +739,7 @@ export function liveSockets(hub: LiveHub, options: LiveSocketOptions): WebSocket
         return;
       }
       if (follows.size >= options.follows) {
-        refuse(ws, `This socket follows ${follows.size} chats and names, the most one socket may (the setting liveSocket.follows): unfollow one first.`);
+        refuse(ws, `This socket follows ${follows.size} chats and names, the most one socket may (the setting liveSocket.maxFollows): unfollow one first.`);
         return;
       }
       sendTo(ws, { type: "following", chat, seq: hub.seq(chat) });

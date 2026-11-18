@@ -20,7 +20,7 @@ export interface LoreScope {
 export interface LoreChatSettings {
   /** His own lore index entry, by its id in Lumiverse; null for none (`lore.index.entry`). */
   indexEntry: string | null;
-  /** The lore's numbers (`lore.searchLimit`, `lore.snippetChars`, `lore.titleWords`, `lore.search.minTerm`, `lore.search.wordCap`). */
+  /** The lore's numbers (`lore.search.hits`, `lore.search.snippetChars`, `lore.titleWords`, `lore.search.minWordChars`, `lore.search.maxWordRepeats`). */
   lore: LoreSettings;
   /** What a search holds back: the shortest term, a repeated word's count and the stop words (`lore.search.*`). */
   search: SearchLimits;

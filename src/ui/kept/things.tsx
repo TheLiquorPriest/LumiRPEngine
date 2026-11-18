@@ -2,7 +2,7 @@
 // GM → Things (Here, By place, By owner, Find, a thing's page, a person's things, Select and the bulk bar, + Add, Tidy up and Keep
 // in the world), over a kept App of its own for the chat (`app.ts`) whose call files read RPE's typed routes. The GM view's parts it
 // reads load as GM mode loaded them (`useGmParts`), again when the chat moves on. Every change is his own edit through the taps
-// route, sent in edits of at most `engine.editOps` operations each, with one Undo for all of them; after one applies, a notice says
+// route, sent in edits of at most `engine.maxEditOps` operations each, with one Undo for all of them; after one applies, a notice says
 // what it did with that Undo. The bounds its controls hold to are RPE's settings, read when it mounts. The World page shows it only
 // with its gate open (`things-page.tsx`), which loads the kept chunk (`chunk.ts`) that mounts it here.
 
@@ -38,9 +38,9 @@ async function limitsOf(client: Pick<RpeClient, "call">, chat: string): Promise<
     if (typeof value !== "number") throw new Error(`RPE gave no value for ${key}.`);
     return value;
   };
-  const takes = of("things.tidyRunMost")?.takes;
+  const takes = of("things.maxTidyFindings")?.takes;
   const least = (takes !== undefined && "least" in takes ? takes.least : undefined) ?? 1;
-  return { editOps: whole("engine.editOps"), thingsMost: whole("taps.thingsMost"), tidyRunLeast: least };
+  return { editOps: whole("engine.maxEditOps"), thingsMost: whole("taps.maxThingsPerFix"), tidyRunLeast: least };
 }
 
 /** The browser over the kept App: the GM view's things parts, the editor every control sends through, and the notice with its Undo. */

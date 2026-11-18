@@ -313,7 +313,7 @@ function bodyLimit(info: RouteInfo, table: Table): string {
   const declared = info.declared;
   if (info.method === "GET" || (info.method === "DELETE" && !info.raw) || (declared !== null && "reply" in declared && declared.body === null)) return "takes no body";
   if (info.maxBody !== null) return `at most ${sizeWords(info.maxBody)}`;
-  return info.access === "provider" ? `the server's \`server.providerBodyBytes\` (${sizeWords(table.providerBodyBytes)} as shipped)` : `the server's \`server.bodyBytes\` (${sizeWords(table.bodyBytes)} as shipped)`;
+  return info.access === "provider" ? `the server's \`server.maxProviderBodyBytes\` (${sizeWords(table.providerBodyBytes)} as shipped)` : `the server's \`server.maxBodyBytes\` (${sizeWords(table.bodyBytes)} as shipped)`;
 }
 
 function paramsCell(info: RouteInfo): string {

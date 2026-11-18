@@ -135,7 +135,7 @@ describe("what the real run carries besides the chats", () => {
   test("a setting with one of the same meaning in RPE is in RPE-global.yml; the rest are listed by name, and those naming a Lumiverse connection are listed for the user", async () => {
     const config = Bun.YAML.parse(await readFile(dataPaths(data).globalConfig, "utf8")) as Record<string, unknown>;
     // Today's history cutoff becomes the history window, with the number it keeps now; the runtime's update choice is RPE's own.
-    expect({ chat: config.chat, history: config.history, update: config.update, service: config.service }).toEqual({ chat: { hiddenReadable: true }, history: { window: 30 }, update: { restart: true }, service: { memory: "1G" } });
+    expect({ history: config.history, update: config.update, service: config.service }).toEqual({ history: { hiddenReadable: true, window: 30 }, update: { restart: true }, service: { memory: "1G" } });
     const settings = report.carried?.settings;
     expect(settings?.carried.map((s) => s.from).sort()).toEqual(["harness/settings.json: core.story.hidden", "harness/settings.json: transport.connections.oneToolAtATime", "harness/settings.json: transport.history.count", "harness/settings.json: transport.history.keep", "runtime home: autoUpdate", "runtime home: memory"]);
     expect(settings?.lumiverseConnections).toEqual([

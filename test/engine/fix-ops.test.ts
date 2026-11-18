@@ -182,7 +182,7 @@ describe("reading what a fix entry asks for", () => {
     ]) expect(parseFixOps([bad])).toBeNull();
     expect(parseFixOps([])).toBeNull();
     expect(parseFixOps("ops")).toBeNull();
-    // The most one edit carries is the caller's (the setting `engine.editOps`): more are told apart from a malformed one, and an edit recorded is read with no most at all.
+    // The most one edit carries is the caller's (the setting `engine.maxEditOps`): more are told apart from a malformed one, and an edit recorded is read with no most at all.
     const many = (n: number): unknown[] => Array.from({ length: n }, () => NEW_OPS[1]);
     expect(parseFixOps(many(65), 64)).toEqual({ tooMany: { count: 65, most: 64 } });
     expect(parseFixOps(many(64), 64)).toHaveLength(64);

@@ -107,7 +107,7 @@ export const COVERAGE: Coverage = {
     templates: { tools: ["lre_world_create"] },
     chats: { tools: ["lre_chats", "lre_upgrade", "lre_world_delete"] },
     updates: { excluded: "What Build → World → Data updates and GM → Pins and upgrade list for the owner to take: which of a world's data tables this build ships newer than its copies. Nothing an outside agent reads or writes depends on it; lre_draft reads the draft's tables as they are." },
-    limits: { excluded: "The sizes Build's Change the selected writes its patch in, read from the settings: lre_settings reads engine.editOps and worlds.patchOps themselves." },
+    limits: { excluded: "The sizes Build's Change the selected writes its patch in, read from the settings: lre_settings reads engine.maxEditOps and worlds.maxPatchOps themselves." },
     undo_upgrade: { excluded: "Build's Undo of an Upgrade it just made, the owner's own press on the world home; an outside agent moves the chat to another revision with lre_upgrade." },
   },
   "lre.ui": { close_drawer: { excluded: "Closes the drawer on the user's screen: the page's own presentation, which nothing an agent does needs." } },
