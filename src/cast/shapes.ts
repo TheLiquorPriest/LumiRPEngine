@@ -52,9 +52,16 @@ const castingRow = shape.named(
 );
 export type CastingShown = Infer<typeof castingRow>;
 
+const waitsRow = shape.named(
+  "CastWaits",
+  "What waits for a character's own agent at the reading: how many of its perceptions of turns RPE played it has not taken in, the reply of the oldest one's turn (null: none waits, or that turn's reply is not on the path), the turns RPE played since that turn (the one read included), and its last dream (null: it never dreamt), with that turn's reply and its date in story time where the chat's clock shows one.",
+  shape.object({ perceptions: N, since: nullable(N), turns: N, dreamt: nullable(shape.object({ message: nullable(N), date: nullable(T) })) }),
+);
+export type CastWaitsShown = Infer<typeof waitsRow>;
+
 const memberRow = shape.named(
   "CastMemberRow",
-  "A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), and its counts.",
+  "A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), its counts, and what waits for its own agent.",
   shape.object({
     id: T,
     name: T,
@@ -63,6 +70,7 @@ const memberRow = shape.named(
     from: field(shape.object({ carried: shape.yesNo(), played: shape.yesNo() }), "Where its record on the path came from: writes on turns a migration's import wrote (carried), and writes on turns RPE played."),
     person: field(nullable(T), "The world's person it is, by the entity's id; null where none is known."),
     counts,
+    waits: waitsRow,
   }),
 );
 export type CastMemberShown = Infer<typeof memberRow>;

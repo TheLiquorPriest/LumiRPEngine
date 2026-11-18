@@ -5,7 +5,8 @@
 // agents' windows is; what a job he started was told (its gap checks, consents and rules fired); the
 // switches over all his jobs with the limits in force for jobs and the day's use against each that
 // counts one; and every control. He starts any job, as his own and tied to no turn (R-27): of a chat, or
-// of no chat (C-23). He starts again a job that was interrupted, failed or cancelled, with the same
+// of no chat (C-23); and, from the Cast page, the job in which a character's own agent takes in what it
+// has perceived and not yet taken in. He starts again a job that was interrupted, failed or cancelled, with the same
 // task; carries on one stopped at one of its limits with more; resumes an interrupted one from its own
 // session; holds one that waits and lets it go; pauses one that runs and lets it go; says a word to
 // one that runs; answers one that asks; cancels one. Where RPH starts nothing or a control does
@@ -13,6 +14,7 @@
 // job's change of state reaches every page that follows his jobs through `JOB_KIND` (`jobs.ts`).
 
 import type { JobLimits, JobRefusal, JobState, JobView, RunScope, Scope, Usage, UserScope } from "rp-harness/contract";
+import { loadGuidance } from "../app/guidance";
 import { agentRef, type Exactly, type Holds, type Infer, jobView, route, RouteError, shape, traceRecord, usage } from "../app";
 import { type ConfigRead, portTexts, readConfig } from "../app/config-read";
 import { harnessSettings } from "../app/setting-list";
@@ -97,6 +99,12 @@ const jobStartAsk = shape.named(
   }),
 );
 
+/** The part whose line `take_in` briefs the job he starts for a character's own agent (`.prompts/cast-jobs.md`). */
+const CAST_JOBS_PART = "cast-jobs";
+/** The definition a character's own agent runs as (`.agents/character.md`). */
+const CHARACTER_DEFINITION = "character";
+
+const takeInAsk = shape.named("TakeInAsk", "The character whose own agent is to take in what it has perceived and not yet taken in, by its name as the cast holds it.", shape.object({ character: shape.text({ blank: false }) }));
 export const jobReply = shape.named("JobReply", "A job as it stands after the call.", shape.object({ job: jobView }));
 
 const runUsage = shape.named("RunUsage", "What a run spent, in all and by agent.", shape.object({ run: T, total: usage, agents: shape.list(shape.object({ agent: agentRef, usage })) }));
@@ -222,6 +230,22 @@ export function jobRoutes(deps: JobRoutesDeps) {
       body: jobStartAsk,
       reply: jobReply,
       handle: ({ user, params, body }) => start({ user, chat: params.chat, session: NO_SESSION }, body),
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/chats/:chat/jobs/take-in",
+      access: "page",
+      group: "jobs",
+      does: "He starts a job of the chat, as his own and tied to no turn, in which a character's own agent (the character definition, playing the character he names) takes in what it has perceived and not yet taken in, briefed by the line take_in of `.prompts/cast-jobs.md`.",
+      body: takeInAsk,
+      reply: jobReply,
+      handle: async ({ user, params, body }) => {
+        const scope: Scope = { user, chat: params.chat, session: NO_SESSION };
+        const part = await loadGuidance(turns.files, scope).part(CAST_JOBS_PART);
+        const brief = part?.format === "lines" ? part.line("take_in", { name: body.character }) : undefined;
+        if (brief === undefined || brief.trim() === "") throw new RouteError(409, `No job was started: the part ${CAST_JOBS_PART} is switched off or has no line take_in, which briefs the job.`);
+        return { job: viewOrThrow(await jobs.start(scope, { agent: CHARACTER_DEFINITION, brief, plays: body.character }), "No job was started") };
+      },
     }),
     route({
       method: "GET",

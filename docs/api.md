@@ -2180,6 +2180,20 @@ He starts a job of the chat, as his own and tied to no turn, with any agent defi
 | Reply | [`JobReply`](#jobreply) |
 | The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
+### `POST /api/v1/chats/:chat/jobs/take-in`
+
+He starts a job of the chat, as his own and tied to no turn, in which a character's own agent (the character definition, playing the character he names) takes in what it has perceived and not yet taken in, briefed by the line take_in of `.prompts/cast-jobs.md`.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`TakeInAsk`](#takeinask) |
+| Reply | [`JobReply`](#jobreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
+
 ### `GET /api/v1/jobs`
 
 His jobs a page at a time, of every chat or of one, in one state or in any, the newest started first, each as RPH keeps it: where it stands, its agent, who started it and the turn that did.
@@ -4521,7 +4535,7 @@ export interface CastingRow {
 
 ### `CastMemberRow`
 
-A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), and its counts.
+A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), its counts, and what waits for its own agent.
 
 ```ts
 export interface CastMemberRow {
@@ -4536,6 +4550,7 @@ export interface CastMemberRow {
   /** The world's person it is, by the entity's id; null where none is known. */
   person: string | null;
   counts: EntryCounts;
+  waits: CastWaits;
 }
 ```
 
@@ -4593,6 +4608,19 @@ export interface CastStrikeReply {
   heldAgain: string[];
   /** What it could not do, and what it left as it was (knowledge struck apart, and the secret it gave), in the cast's words. */
   notes: string[];
+}
+```
+
+### `CastWaits`
+
+What waits for a character's own agent at the reading: how many of its perceptions of turns RPE played it has not taken in, the reply of the oldest one's turn (null: none waits, or that turn's reply is not on the path), the turns RPE played since that turn (the one read included), and its last dream (null: it never dreamt), with that turn's reply and its date in story time where the chat's clock shows one.
+
+```ts
+export interface CastWaits {
+  perceptions: number;
+  since: number | null;
+  turns: number;
+  dreamt: { message: number | null; date: string | null } | null;
 }
 ```
 
@@ -9335,6 +9363,16 @@ A tag check asked for: the job it runs as, at once; or why none was started (job
 
 ```ts
 export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
+```
+
+### `TakeInAsk`
+
+The character whose own agent is to take in what it has perceived and not yet taken in, by its name as the cast holds it.
+
+```ts
+export interface TakeInAsk {
+  character: string;
+}
 ```
 
 ### `TakenKeyAsk`

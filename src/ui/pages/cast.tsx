@@ -13,12 +13,14 @@
 // said again or taken away, and the person it is named; and the page says what the cast did with each. A
 // character can be read as it stood at a turn (the turn a perception was missed in); a turn that was joined to
 // another is shown at the turn it joined, and said so. It reads when it opens, after each edit, and when the
-// chat's live view says its record changed or a run began or ended.
+// chat's live view says its record changed or a run began or ended. For each principal it says what waits for its own agent (the
+// perceptions it has not taken in, since when, and when it last dreamt), and has a press that starts, as his own job and once he has
+// read what it will run and on which connection, the job in which that agent takes them in.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useSelect } from "../store";
-import type { CharacterReply, CharacterListName, EntryRow, EntryCounts, EntryItems, CastReply, CastMemberRow, CastStrikeReply, CastRole, MemoryBand, PerceptionRecordReply } from "../../shared/api";
+import type { CharacterReply, CharacterListName, DefinitionRun, EntryRow, EntryCounts, EntryItems, CastReply, CastMemberRow, CastStrikeReply, CastRole, JobView, MemoryBand, PerceptionRecordReply } from "../../shared/api";
 import { isRecord } from "../../shared/json";
 import { useApp } from "../app";
 import { Badge, Banner, Button, Disclosure, Empty, Gated, PageHeader, Pre, Row, Section } from "../../frontend/components";
@@ -61,9 +63,22 @@ export interface CastShown {
   editProblem: string | null;
   /** What is typed in the forms and not sent, by the name of the field. */
   drafts: Drafts;
+  /** The press that starts the job in which the open character's own agent takes in what waits; null while it is not pressed. */
+  takeIn: TakeInShown | null;
 }
 
-export const NO_CAST: CastShown = { list: null, open: null, character: null, loading: true, problem: null, striking: null, struck: null, strikeProblem: null, at: null, joined: null, skips: {}, stage: null, editing: null, edited: null, editProblem: null, drafts: {} };
+/** A step of that press: asked (the confirm shown), go (started), cancel (not now). */
+export type TakeInStep = "ask" | "go" | "cancel";
+
+/** Where that press stands: asked, with what the character definition runs on in this chat (null while it is read); the start out; the job it started; or why none was. */
+export interface TakeInShown {
+  stage: "asked" | "out" | "started" | "refused";
+  runsOn: DefinitionRun | null;
+  job: JobView | null;
+  problem: string | null;
+}
+
+export const NO_CAST: CastShown = { list: null, open: null, character: null, loading: true, problem: null, striking: null, struck: null, strikeProblem: null, at: null, joined: null, skips: {}, stage: null, editing: null, edited: null, editProblem: null, drafts: {}, takeIn: null };
 
 export interface CastReader {
   /** Opens a character, as it stands at the chat's newest turn or, with `at`, at that turn. */
@@ -78,6 +93,8 @@ export interface CastReader {
   newest(): void;
   /** Keeps what is typed in a form. */
   draft(name: string, value: string | boolean): void;
+  /** A step of the press that starts the job in which the open character's own agent takes in what waits. */
+  takeIn(step: TakeInStep): void;
   /** Reads the cast again, and the character open. */
   refresh(): void;
   stop(): void;
@@ -135,12 +152,12 @@ export function readCast(client: Pick<RpeClient, "call">, chat: string, onChange
   readList();
   return {
     open(character, at) {
-      show({ open: character, at: at ?? null, joined: null, character: null, struck: null, strikeProblem: null, skips: {}, stage: null, edited: null, editProblem: null, drafts: {} });
+      show({ open: character, at: at ?? null, joined: null, character: null, struck: null, strikeProblem: null, skips: {}, stage: null, edited: null, editProblem: null, drafts: {}, takeIn: null });
       readOne(character);
       readStage();
     },
     close() {
-      show({ open: null, at: null, joined: null, character: null, struck: null, strikeProblem: null, skips: {}, stage: null, edited: null, editProblem: null, drafts: {} });
+      show({ open: null, at: null, joined: null, character: null, struck: null, strikeProblem: null, skips: {}, stage: null, edited: null, editProblem: null, drafts: {}, takeIn: null });
     },
     strike(ask) {
       const character = shown.open;
@@ -205,6 +222,31 @@ export function readCast(client: Pick<RpeClient, "call">, chat: string, onChange
     draft(name, value) {
       show({ drafts: { ...shown.drafts, [name]: value } });
     },
+    takeIn(step) {
+      const name = shown.character?.character.name;
+      if (step === "cancel" || name === undefined) {
+        show({ takeIn: null });
+        return;
+      }
+      if (step === "ask") {
+        show({ takeIn: { stage: "asked", runsOn: null, job: null, problem: null } });
+        // What the character definition runs on in this chat, for the confirm: the Agents page's own reading.
+        client.call("GET /api/v1/agents", {}, { query: { chat } }).then(replyOf).then(
+          (agents) => {
+            const run = agents.agents.find((a) => a.name === "character")?.runsOn ?? { connection: null, model: null, effort: null, sent: null };
+            if (shown.takeIn?.stage === "asked") show({ takeIn: { ...shown.takeIn, runsOn: run } });
+          },
+          (error: unknown) => show({ takeIn: { stage: "refused", runsOn: null, job: null, problem: errorWords(error) } }),
+        );
+        return;
+      }
+      if (shown.takeIn?.stage !== "asked") return;
+      show({ takeIn: { ...shown.takeIn, stage: "out" } });
+      client.call("POST /api/v1/chats/:chat/jobs/take-in", { chat }, { body: { character: name } }).then(replyOf).then(
+        (answer) => show({ takeIn: { stage: "started", runsOn: null, job: answer.job, problem: null } }),
+        (error: unknown) => show({ takeIn: { stage: "refused", runsOn: null, job: null, problem: errorWords(error) } }),
+      );
+    },
     newest() {
       const character = shown.open;
       if (character === null) return;
@@ -263,6 +305,75 @@ function originWords(member: CastMemberRow): string {
   return carried && played ? "carried by the migration, and played on RPE" : carried ? "carried by the migration" : played ? "played on RPE" : "nothing written yet";
 }
 
+/** What waits for a character's own agent, in one line: the perceptions it has not taken in and when it last dreamt. Empty for one that is no principal and has nothing waiting. */
+export function waitsWords(member: CastMemberRow): string {
+  const { waits } = member;
+  if (member.casting?.as !== "principal" && waits.perceptions === 0) return "";
+  const held =
+    waits.perceptions === 0
+      ? "nothing waits for its own agent"
+      : `${counted(waits.perceptions, "perception")} its own agent has not taken in${waits.since === null ? "" : `, the oldest of message ${waits.since}`}${waits.turns === 0 ? "" : ` (${counted(waits.turns, "turn")} ago)`}`;
+  const dream = waits.dreamt === null ? "never dreamt" : `last dreamt${waits.dreamt.message === null ? "" : ` at message ${waits.dreamt.message}`}${waits.dreamt.date === null ? "" : `, ${waits.dreamt.date}`}`;
+  return `${held} · ${dream}`;
+}
+
+/** What a definition runs on in this chat, in words for the confirm. */
+function runsOnWords(run: DefinitionRun | null): string {
+  if (run === null) return "the connection its definition names (being read)";
+  if (run.connection === null) return "no connection: none resolves for it in this chat, so it will not start";
+  return `connection ${run.connection.name}${run.model === null ? "" : `, model ${run.model}`}`;
+}
+
+/**
+ * What waits for the open character's own agent, and the press that starts the job in which its agent takes it in: the press asks him
+ * first, saying what it will run and on which connection. Read at the chat's newest turn only: at an earlier turn there is no press.
+ */
+function WaitsSection(props: { member: CastMemberRow; at: string | null; takeIn: TakeInShown | null; onTakeIn(step: TakeInStep): void }) {
+  const { member, takeIn } = props;
+  const words = waitsWords(member);
+  const n = member.waits.perceptions;
+  return (
+    <Section id="waits" title="What waits for its own agent">
+      <p class="rpe-line" data-waits>
+        {words === "" ? "Nothing waits: it is no principal, and holds no perception it has not taken in." : words}
+      </p>
+      {props.at !== null || words === "" ? null : takeIn?.stage === "asked" || takeIn?.stage === "out" ? (
+        <div class="lre-stack" data-confirm="true">
+          <span class="rpe-meta">
+            This starts a job of yours: the character definition, playing {member.name}, on {runsOnWords(takeIn.runsOn)}. Its agent is given the {counted(n, "perception")} it has not taken in and writes from them; what it writes counts from the next turn.
+          </span>
+          <div class="lre-inline rpe-wrap">
+            <Button size="sm" busy={takeIn.stage === "out"} disabled={takeIn.stage === "out" || takeIn.runsOn?.connection === null} onClick={() => props.onTakeIn("go")}>
+              Start it
+            </Button>
+            <Button size="sm" variant="ghost" disabled={takeIn.stage === "out"} onClick={() => props.onTakeIn("cancel")}>
+              Not now
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div class="lre-stack">
+          {takeIn?.stage === "started" && takeIn.job !== null ? (
+            <Banner tone="info" icon="check" title={`Job ${takeIn.job.id} started`}>
+              <span>Its agent takes in what waits; the Jobs page follows it. What it writes counts from the next turn.</span>
+            </Banner>
+          ) : null}
+          {takeIn?.stage === "refused" ? (
+            <Banner tone="neg" icon="alert" title="No job was started">
+              <span data-problem>{takeIn.problem}</span>
+            </Banner>
+          ) : null}
+          <div class="lre-inline rpe-wrap">
+            <Button size="sm" disabled={n === 0} onClick={() => props.onTakeIn("ask")}>
+              Have its agent take them in now
+            </Button>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function MemberLine(props: { member: CastMemberRow; gateOpen: boolean; onOpen(): void }) {
   const { member } = props;
   return (
@@ -275,6 +386,7 @@ function MemberLine(props: { member: CastMemberRow; gateOpen: boolean; onOpen():
             <span class="lre-listrow-sub">
               {originWords(member)}
               {countWords(member) === "" ? "" : ` · ${countWords(member)}`}
+              {waitsWords(member) === "" ? "" : ` · ${waitsWords(member)}`}
             </span>
           </span>
           <CastingBadge member={member} />
@@ -358,6 +470,8 @@ export interface CastViewProps {
   onNewest(): void;
   /** Keeps what is typed in a form, by the name of its field. */
   onDraft(name: string, value: string | boolean): void;
+  /** A step of the press that starts the job in which the open character's own agent takes in what waits. */
+  onTakeIn(step: TakeInStep): void;
 }
 
 /** Why the record sits behind the gate. */
@@ -506,6 +620,7 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
           <span data-problem>{shown.editProblem}</span>
         </Banner>
       )}
+      <WaitsSection member={c.character} at={shown.at} takeIn={shown.takeIn} onTakeIn={props.onTakeIn} />
       <Section id="who" title="Who it is">
         <PersonEditor {...form} member={c.character} />
         <CastingEditor key={`${c.character.casting?.as}-${c.character.casting?.pinned}`} {...form} member={c.character} />
@@ -774,6 +889,7 @@ export function CastPage(props: { chat: string }) {
       onMore={(list, skip) => reader.current?.more(list, skip)}
       onNewest={() => reader.current?.newest()}
       onDraft={(name, value) => reader.current?.draft(name, value)}
+      onTakeIn={(step) => reader.current?.takeIn(step)}
     />
   );
 }

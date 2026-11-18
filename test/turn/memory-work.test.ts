@@ -253,3 +253,24 @@ test("dream-due: a principal who goes to sleep is reminded of once, as the run e
   const third = await play(b, "I wait.");
   expect(fired(b, third)).toEqual([]);
 });
+
+test("the Cast page's press: the cast list says what waits, the press starts the job as his own with her agent playing her, briefed by the shipped part, and the first turn begun after it ended reads it taken in", async () => {
+  const author: Answer[] = [...VOICED, { pieces: [{ text: "Nothing more." }] }, { pieces: [{ text: "She was only present; it waits." }] }, replying("The lamp turns.")];
+  const b = await openTurnBed({ off: ["rules/unsourced", "rules/perceptions-owed"], answers: routed(author, [TAKING_IN, { pieces: [{ text: "Taken in." }] }]) });
+  beds.push(b);
+  await play(b, "I ask whether the boat came.");
+
+  const list = await b.page<{ characters: { name: string; waits: { perceptions: number; dreamt: unknown } }[] }>("GET", `/api/v1/chats/${CHAT}/cast`);
+  expect(list.body.characters.find((c) => c.name === WREN)?.waits).toMatchObject({ perceptions: 1, dreamt: null });
+  const started = await b.page<{ job: { agent: string; plays?: string; startedBy: unknown } }>("POST", `/api/v1/chats/${CHAT}/jobs/take-in`, { character: WREN });
+  expect(started.status).toBe(200);
+  expect(started.body.job).toMatchObject({ agent: "character", plays: WREN, startedBy: "user" });
+  await b.until("the job to end", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.ended !== undefined && j.state === "done"));
+  expect(told(b, "Take in what you have perceived and not yet taken in.")).toBeGreaterThan(0);
+
+  const next = await play(b, "I wait.");
+  expect(wrenAt(b, next)).toMatchObject({ memories: ["A stranger asked after the boat."], untaken: [] });
+  expect(fired(b, next)).toEqual([]);
+  const after = await b.page<{ characters: { name: string; waits: { perceptions: number } }[] }>("GET", `/api/v1/chats/${CHAT}/cast`);
+  expect(after.body.characters.find((c) => c.name === WREN)?.waits.perceptions).toBe(0);
+});

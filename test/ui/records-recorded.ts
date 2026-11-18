@@ -16,9 +16,10 @@ export const ODILE: CastMemberRow = {
   casting: { as: "principal", pinned: true, line: "Runs the ferry, owes nobody." },
   from: { carried: true, played: true },
   counts: counts({ mind: { held: 1, struck: 1 }, memories: { held: 2, struck: 0 }, knowledge: { held: 1, struck: 0 }, perceptions: { held: 1, struck: 0 }, files: { held: 2, struck: 0, filed: 1 } }),
+  waits: { perceptions: 1, since: 4, turns: 2, dreamt: null },
 };
 
-export const TOBIN: CastMemberRow = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: counts({}) };
+export const TOBIN: CastMemberRow = { id: "char-tobin", name: "Tobin Reede", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: counts({}), waits: { perceptions: 0, since: null, turns: 0, dreamt: null } };
 
 export const CAST: CastReply = { chat: CHAT, turn: null, characters: [ODILE, TOBIN] };
 

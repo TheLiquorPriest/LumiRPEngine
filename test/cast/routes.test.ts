@@ -154,8 +154,10 @@ async function played(): Promise<Story> {
 const none = { held: 0, struck: 0 };
 
 describe("the cast of a chat", () => {
-  test("lists every character the chat knows, with its casting, where its record came from and what it holds by kind", async () => {
+  test("lists every character the chat knows, with its casting, where its record came from, what it holds by kind and what waits for its own agent", async () => {
     const { page, bram, wren, odile } = await played();
+    // Wren's one perception came into a memory of hers: nothing waits for anyone, and nobody has dreamt.
+    const idle = { perceptions: 0, since: null, turns: 0, dreamt: null };
     expect(await page.list()).toEqual({
       chat: CHAT,
       turn: null,
@@ -169,6 +171,7 @@ describe("the cast of a chat", () => {
           // The migration carried his casting and files; marking a file filed was played on RPE.
           from: { carried: true, played: true },
           counts: { growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { held: 2, struck: 0, filed: 1 } },
+          waits: idle,
         },
         {
           id: wren,
@@ -178,8 +181,9 @@ describe("the cast of a chat", () => {
           casting: { as: "principal", pinned: false, line: "A courier with a sealed letter." },
           from: { carried: false, played: true },
           counts: { growth: { held: 1, struck: 0 }, mind: { held: 1, struck: 0 }, memories: { held: 1, struck: 0 }, relationships: { held: 1, struck: 0 }, knowledge: { held: 1, struck: 1 }, history: none, perceptions: { held: 1, struck: 0 }, files: { ...none, filed: 0 } },
+          waits: idle,
         },
-        { id: odile, name: "Odile", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: { growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 } } },
+        { id: odile, name: "Odile", chat: CHAT, person: null, casting: null, from: { carried: false, played: false }, counts: { growth: none, mind: none, memories: none, relationships: none, knowledge: none, history: none, perceptions: none, files: { ...none, filed: 0 } }, waits: idle },
       ],
     });
   });

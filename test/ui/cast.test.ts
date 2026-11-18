@@ -30,6 +30,7 @@ function view(shown: Partial<CastShown>, gateOpen = false) {
       onMore: (list, skip) => pressed.push(["more", list, skip]),
       onNewest: () => pressed.push("newest"),
       onDraft: (name, value) => pressed.push(["draft", name, value]),
+      onTakeIn: (step) => pressed.push(["take in", step]),
     }),
   );
   return { tree, text: textOf(tree), pressed };
@@ -66,13 +67,35 @@ describe("the Cast page", () => {
     expect(text).toContain("Odile Holt");
     expect(text).toContain("principal, pinned by you");
     expect(text).toContain("Runs the ferry, owes nobody.");
-    expect(text).toContain("carried by the migration, and played on RPE · mind 1 (1 struck) · memories 2 · knowledge 1 · perceptions 1 · carried mind files 2 (1 filed)");
+    expect(text).toContain("carried by the migration, and played on RPE · mind 1 (1 struck) · memories 2 · knowledge 1 · perceptions 1 · carried mind files 2 (1 filed) · 1 perception its own agent has not taken in, the oldest of message 4 (2 turns ago) · never dreamt");
     expect(text).toContain("Tobin Reede");
     expect(text).toContain("not cast");
     expect(text).toContain("nothing written yet");
     const hit = elements(tree).find((e) => e.props["data-character"] === ODILE.id);
     (hit?.props.onClick as () => void)();
     expect(pressed).toEqual([["open", ODILE.id]]);
+  });
+
+  test("a principal opened shows what waits for its own agent, and a press that asks first, saying what it runs and on which connection, then starts it", () => {
+    const opened = { list: CAST, open: ODILE.id, character: ODILE_RECORD };
+    const first = view(opened, true);
+    expect(section(first.tree, "waits")).toContain("1 perception its own agent has not taken in, the oldest of message 4 (2 turns ago) · never dreamt");
+    press(first.tree, "Have its agent take them in now");
+    expect(first.pressed).toEqual([["take in", "ask"]]);
+
+    const asked = view({ ...opened, takeIn: { stage: "asked", runsOn: { connection: { id: "conn-1", name: "Ferry deep" }, model: "model-a", effort: null, sent: null }, job: null, problem: null } }, true);
+    expect(section(asked.tree, "waits")).toContain("This starts a job of yours: the character definition, playing Odile Holt, on connection Ferry deep, model model-a. Its agent is given the 1 perception it has not taken in and writes from them; what it writes counts from the next turn.");
+    press(asked.tree, "Start it");
+    press(asked.tree, "Not now");
+    expect(asked.pressed).toEqual([["take in", "go"], ["take in", "cancel"]]);
+
+    // No connection resolves for the definition: it is said, and Start it is not live.
+    const none = view({ ...opened, takeIn: { stage: "asked", runsOn: { connection: null, model: null, effort: null, sent: null }, job: null, problem: null } }, true);
+    expect(section(none.tree, "waits")).toContain("on no connection: none resolves for it in this chat, so it will not start.");
+    expect(elements(none.tree).find((e) => e.type === "button" && textOf(e.props.children) === "Start it")?.props.disabled).toBe(true);
+
+    // Read at an earlier turn, there is no press.
+    expect(elements(view({ ...opened, at: "turn-3" }, true).tree).some((e) => e.type === "button" && textOf(e.props.children) === "Have its agent take them in now")).toBe(false);
   });
 
   test("one character opened shows its whole record: the base in force and its earlier versions, memories with tier, strength and fading, struck entries as struck, and every carried mind file word for word with its filed mark", () => {

@@ -396,7 +396,7 @@ export interface CastingRow {
   line: string | null;
 }
 
-/** A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), and its counts. */
+/** A character as the cast lists it: its casting (null: none yet), where its record came from (carried by a migration, played on RPE), its counts, and what waits for its own agent. */
 export interface CastMemberRow {
   id: string;
   name: string;
@@ -409,6 +409,7 @@ export interface CastMemberRow {
   /** The world's person it is, by the entity's id; null where none is known. */
   person: string | null;
   counts: EntryCounts;
+  waits: CastWaits;
 }
 
 /** Every character the chat knows, with what each holds on the path read; `turn` null: at the chat's newest. */
@@ -446,6 +447,14 @@ export interface CastStrikeReply {
   heldAgain: string[];
   /** What it could not do, and what it left as it was (knowledge struck apart, and the secret it gave), in the cast's words. */
   notes: string[];
+}
+
+/** What waits for a character's own agent at the reading: how many of its perceptions of turns RPE played it has not taken in, the reply of the oldest one's turn (null: none waits, or that turn's reply is not on the path), the turns RPE played since that turn (the one read included), and its last dream (null: it never dreamt), with that turn's reply and its date in story time where the chat's clock shows one. */
+export interface CastWaits {
+  perceptions: number;
+  since: number | null;
+  turns: number;
+  dreamt: { message: number | null; date: string | null } | null;
 }
 
 /** The lists of a character's record the answer bounds. */
@@ -3559,6 +3568,11 @@ export interface TagCheck {
 /** A tag check asked for: the job it runs as, at once; or why none was started (jobs off, the day's count or tokens reached, no such connection, the check's part missing or not as it needs, his job-start hook). */
 export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
 
+/** The character whose own agent is to take in what it has perceived and not yet taken in, by its name as the cast holds it. */
+export interface TakeInAsk {
+  character: string;
+}
+
 /** The hash of the provider key today's connections hold, which RPE takes over at the swap, with the model names those connections name, which the key opens. */
 export interface TakenKeyAsk {
   /** The key's SHA-256, in hex. */
@@ -4674,6 +4688,16 @@ export interface ApiRoutes {
     params: { chat: string };
     query: Record<string, never>;
     body: JobStartAsk;
+    reply: JobReply;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** He starts a job of the chat, as his own and tied to no turn, in which a character's own agent (the character definition, playing the character he names) takes in what it has perceived and not yet taken in, briefed by the line take_in of `.prompts/cast-jobs.md`. */
+  "POST /api/v1/chats/:chat/jobs/take-in": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: TakeInAsk;
     reply: JobReply;
     paged: false;
     long: false;

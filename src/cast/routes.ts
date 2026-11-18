@@ -38,7 +38,7 @@ import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { IMPORTED_KIND } from "./carried";
 import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import type { OnStage, StageRead } from "./facts";
-import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings } from "./kit";
+import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings, datedAt } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
 import { castAt } from "./path";
 import { perceivedTurn, perceiveAsPlayer, struckWith } from "./perceive";
@@ -107,6 +107,7 @@ import {
 } from "./shapes";
 import { freshnessOf, type SourceNow, type SourceReader, sourcesNow } from "./sources";
 import { CAST_LANE, type Unread } from "./update";
+import { turnsSince, waitingOf } from "./waiting";
 
 export const CAST_PATH = "/api/v1/chats/:chat/cast";
 export const CHARACTER_PATH = "/api/v1/chats/:chat/cast/:character";
@@ -339,7 +340,7 @@ function emptyCounts(): CastCounts {
   return { growth: held(), mind: held(), memories: held(), relationships: held(), knowledge: held(), history: held(), perceptions: held(), files: { ...held(), filed: 0 } };
 }
 
-/** Each character on the reading as the cast lists it, in the order given. */
+/** Each character on the reading as the cast lists it, in the order given, with what waits for its own agent (`waiting.ts`). */
 function membersOf(r: Reading, characters: readonly Character[]): CastMemberShown[] {
   const counts = new Map<string, CastCounts>();
   const from = new Map<string, { carried: boolean; played: boolean }>();
@@ -358,8 +359,14 @@ function membersOf(r: Reading, characters: readonly Character[]): CastMemberShow
     else mine[kind].held++;
     if (kind === "files" && !item.dropped && isFiled(item)) mine.files.filed++;
   }
+  const { at } = r.record;
+  const played = r.s.playedOf(at.turns);
+  const waiting = new Map(waitingOf(r.record, characters, played).map((w) => [w.character.id, w]));
   return characters.map((c) => {
     const casting = castingInForce(r.record, c);
+    const w = waiting.get(c.id);
+    const oldest = w?.untaken[0];
+    const dreamt = w?.dreamt ?? null;
     return {
       id: c.id,
       name: c.name,
@@ -368,6 +375,12 @@ function membersOf(r: Reading, characters: readonly Character[]): CastMemberShow
       casting: casting === null ? null : { as: casting.as, pinned: casting.pinned, line: casting.line },
       from: from.get(c.id) ?? { carried: false, played: false },
       counts: counts.get(c.id) ?? emptyCounts(),
+      waits: {
+        perceptions: w?.untaken.length ?? 0,
+        since: oldest === undefined || !at.order.has(oldest.turn) ? null : at.replyOf(oldest.turn),
+        turns: oldest === undefined ? 0 : turnsSince(at, played, oldest.index),
+        dreamt: dreamt === null ? null : { message: at.order.has(dreamt.turn) ? at.replyOf(dreamt.turn) : null, date: datedAt(r.clock, dreamt.at).date ?? null },
+      },
     };
   });
 }
