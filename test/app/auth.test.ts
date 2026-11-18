@@ -107,14 +107,14 @@ describe("auth", () => {
   test("the web UI's key has no end as shipped; with auth.webKeyDays it opens page routes until that many days after it was made; the session route tells the page when its credential ends", async () => {
     const session = async (token: string) => (await fetch(`${server.url}/api/v1/status/session`, { headers: bearer(token) })).json();
     const forever = await makeKey(app, "web");
-    expect(await session(forever)).toEqual({ user: OWNER, ends: null });
+    expect(await session(forever)).toMatchObject({ user: OWNER, holds: "web key", ends: null, webKey: { ends: null } });
     const page = await app.auth.mintPageToken(OWNER, "extension");
-    expect(await session(page.token)).toEqual({ user: OWNER, ends: page.expires });
+    expect(await session(page.token)).toMatchObject({ user: OWNER, holds: "session", ends: page.expires, webKey: { ends: null } });
     const days = await bed.open({ areas: [probe], config: { port: 0, auth: { webKeyDays: 2 } } });
     const other = await days.start();
     const made = bed.clock.now;
     const web = await makeKey(days, "web");
-    expect(await (await fetch(`${other.url}/api/v1/status/session`, { headers: bearer(web) })).json()).toEqual({ user: OWNER, ends: made + 2 * 86_400_000 });
+    expect(await (await fetch(`${other.url}/api/v1/status/session`, { headers: bearer(web) })).json()).toMatchObject({ user: OWNER, holds: "web key", ends: made + 2 * 86_400_000, webKey: { ends: made + 2 * 86_400_000 } });
     bed.clock.now = made + 2 * 86_400_000 - 1;
     expect((await fetch(`${other.url}/api/v1/probe/me`, { headers: bearer(web) })).status).toBe(200);
     bed.clock.now = made + 2 * 86_400_000;

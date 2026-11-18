@@ -2859,10 +2859,12 @@ export interface SessionReopenAsk {
   change?: number;
 }
 
-/** Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end). */
+/** Whose the page's credential is; what it is, a session (renewed while a page is open) or the web key; when it runs out (epoch milliseconds; null: it has no end); and the web key in force, made when and ending when (null: no end), none where none is made. */
 export interface SessionReply {
   user: string;
+  holds: "session" | "web key";
   ends: number | null;
+  webKey: { made: number; ends: number | null } | null;
 }
 
 /** A session as the Sessions page shows it: a scene's, a sub-agent's run, a job's run or a talk thread; open or closed, the turn that closed it (for his own close, the chat's newest turn when he closed it), a compaction asked for that waits for its next turn, and, for a scene's, the id of the story record's scene it was opened for. */
@@ -6352,7 +6354,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Whose the page's credential is, and when it ends. */
+  /** Whose the page's credential is, what it is (a session, which is renewed while a page is open, or the web key itself) and when it ends, and the web key in force with when it was made and when it ends. */
   "GET /api/v1/status/session": {
     params: Record<string, never>;
     query: Record<string, never>;

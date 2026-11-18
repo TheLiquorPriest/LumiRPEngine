@@ -1,7 +1,7 @@
 // The builds line on Runtime: which build RPE runs, which is on disk, which the extension is, in the
 // status's own words; "Update now" always there, its answer shown (the restart, none to take, or why the
-// last one was refused); refusals in RPE's words. And the line that says when the web
-// key ends, read from the session route: nothing for a key with no end.
+// last one was refused); refusals in RPE's words. And the lines that say what this browser signs in with, read from the session
+// route: the session it holds and when it ends, and the web key, which has no end unless a setting gives it one.
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
@@ -66,29 +66,35 @@ describe("the builds line", () => {
     expect(banners(view(shown.at(-1) ?? {}).tree)[0]).toEqual({ title: "Not updated", text: "Not updatedThis needs a page token or the web UI's token." });
   });
 
-  test("the web key's end is said on Runtime with its date and how to make a new key; a key with no end, or one not read, says nothing; the route is read once, and its answer let go once the page left", async () => {
+  test("Runtime says the session this browser holds and the web key each as what it is: the session ends and is renewed while the page is open, the web key has no end unless a setting gives it one; nothing before the route has answered; the route is read once, and its answer let go once the page left", async () => {
     const ENDS = 1_800_000_000_000;
-    const runtimeWith = (sessionEnds: number | null) => {
-      const tree = expand(h(RuntimeView, { builds: { ...NO_BUILDS, loading: false }, onUpdate: () => undefined, sessionEnds }));
+    const KEY_ENDS = 1_900_000_000_000;
+    const reply = (holds: "session" | "web key", ends: number | null, key: number | null | "none") => ({ user: "user-1", holds, ends, webKey: key === "none" ? null : { made: 1, ends: key } });
+    const runtimeWith = (session: ReturnType<typeof reply> | null) => {
+      const tree = expand(h(RuntimeView, { builds: { ...NO_BUILDS, loading: false }, onUpdate: () => undefined, session, names: { session: "A web session holds", webKey: "The web app's key holds" } }));
       return elements(tree).filter((e) => e.props["data-session"] !== undefined).map((e) => textOf(e.props.children));
     };
-    expect(runtimeWith(ENDS)).toEqual([`This browser's web key ends on ${when(ENDS)}. Make a new one with rpe key web on the machine RPE runs on before then.`]);
+    const [held, key] = runtimeWith(reply("session", ENDS, null));
+    expect(held).toContain(`This browser holds a session, which ends on ${when(ENDS)}. It is renewed while this page is open; once it has ended you sign in again with the web key or your Lumiverse account.`);
+    expect(key).toContain("The web key has no end");
+    expect(runtimeWith(reply("session", ENDS, KEY_ENDS))[1]).toBe(`The web key ends on ${when(KEY_ENDS)}. Make a new one with rpe key web on the machine RPE runs on before then.`);
+    expect(runtimeWith(reply("web key", null, "none"))).toEqual(["This browser holds the web key itself."]);
     expect(runtimeWith(null)).toEqual([]);
 
     const { client, asked } = askingClient();
     const heard: (number | null)[] = [];
-    readSession(client, (ends) => heard.push(ends));
+    readSession(client, (s) => heard.push(s.ends));
     expect(asked.map((a) => a.key)).toEqual(["GET /api/v1/status/session"]);
-    asked[0]?.answer({ user: "user-1", ends: ENDS });
-    const forget = readSession(client, (ends) => heard.push(ends));
-    asked[1]?.answer({ user: "user-1", ends: null });
+    asked[0]?.answer(reply("session", ENDS, null));
+    const forget = readSession(client, (s) => heard.push(s.ends));
+    asked[1]?.answer(reply("web key", null, null));
     await settle();
     expect(heard).toEqual([ENDS, null]);
     forget();
-    readSession(client, (ends) => heard.push(ends));
-    const late = readSession(client, (ends) => heard.push(ends));
+    readSession(client, (s) => heard.push(s.ends));
+    const late = readSession(client, (s) => heard.push(s.ends));
     late();
-    asked[3]?.answer({ user: "user-1", ends: ENDS });
+    asked[3]?.answer(reply("session", ENDS, null));
     asked[2]?.fail(new Error("This needs a page token or the web UI's token."));
     await settle();
     expect(heard).toEqual([ENDS, null]);

@@ -3635,7 +3635,7 @@ Proves to a page that this is the RPE that holds its page token, before the page
 
 ### `GET /api/v1/status/session`
 
-Whose the page's credential is, and when it ends.
+Whose the page's credential is, what it is (a session, which is renewed while a page is open, or the web key itself) and when it ends, and the web key in force with when it was made and when it ends.
 
 | | |
 |---|---|
@@ -8094,12 +8094,14 @@ export interface SessionReopenAsk {
 
 ### `SessionReply`
 
-Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).
+Whose the page's credential is; what it is, a session (renewed while a page is open) or the web key; when it runs out (epoch milliseconds; null: it has no end); and the web key in force, made when and ending when (null: no end), none where none is made.
 
 ```ts
 export interface SessionReply {
   user: string;
+  holds: "session" | "web key";
   ends: number | null;
+  webKey: { made: number; ends: number | null } | null;
 }
 ```
 

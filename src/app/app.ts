@@ -6,7 +6,7 @@
 import type { Database } from "bun:sqlite";
 import type { JsonValue, Log, ModelsPort } from "rp-harness/contract";
 import { Answers, answersRoute } from "./answers";
-import { Auth, NO_OWNER } from "./auth";
+import { Auth, currentKeys, NO_OWNER } from "./auth";
 import type { AppConfig, DataPaths } from "./config";
 import { moveLimits, prepareDataFolder } from "./config";
 import { commandRoutes } from "./command-routes";
@@ -187,7 +187,7 @@ const statusReply = shape.named(
  * page, which reads the app file again each time it is asked; "Update now", which answers what RPE
  * will do; when the page's own credential ends; the live socket; and the web app.
  */
-export function appRoutes(version: string, started: number, ui: string | null, builds: Builds, answers: Answers, lumiverse: string | null = null) {
+export function appRoutes(version: string, started: number, ui: string | null, builds: Builds, answers: Answers, lumiverse: string | null = null, webKey: () => { made: number; ends: number | null } | null = () => null) {
   return [
     route({ method: "GET", path: STATUS_PATH, access: "public", group: "service", does: "Says that RPE answers here, its build, and the address of the Lumiverse it belongs to; nothing more, and no work to say it.", reply: statusReply, handle: () => ({ name: "rpe" as const, version, lumiverse }) }),
     route({ method: "POST", path: UPDATE_PATH, access: "page", group: "service", does: '"Update now": RPE restarts onto its new app file once no turn or job runs, whatever update.restart says, and answers where that stands.', reply: buildsStatus, handle: () => builds.now() }),
@@ -205,11 +205,20 @@ export function appRoutes(version: string, started: number, ui: string | null, b
       path: SESSION_PATH,
       access: "page",
       group: "service",
-      does: "Whose the page's credential is, and when it ends.",
-      reply: shape.named("SessionReply", "Whose the page's credential is, and when it runs out (epoch milliseconds; null: it has no end).", shape.object({ user: T, ends: shape.nullable(shape.number()) })),
+      does: "Whose the page's credential is, what it is (a session, which is renewed while a page is open, or the web key itself) and when it ends, and the web key in force with when it was made and when it ends.",
+      reply: shape.named(
+        "SessionReply",
+        "Whose the page's credential is; what it is, a session (renewed while a page is open) or the web key; when it runs out (epoch milliseconds; null: it has no end); and the web key in force, made when and ending when (null: no end), none where none is made.",
+        shape.object({
+          user: T,
+          holds: shape.oneOf("session", "web key"),
+          ends: shape.nullable(shape.number()),
+          webKey: shape.nullable(shape.object({ made: shape.number(), ends: shape.nullable(shape.number()) })),
+        }),
+      ),
       handle: ({ auth }) => {
         if (auth.credential === null) throw new RouteError(401, "This needs a page token or the web UI's token.");
-        return { user: auth.user, ends: auth.credential.until };
+        return { user: auth.user, holds: auth.credential.kind === "web" ? ("web key" as const) : ("session" as const), ends: auth.credential.until, webKey: webKey() };
       },
     }),
     answersRoute(answers),
@@ -268,7 +277,13 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   await ownModels(paths, secrets, user, log);
   const builds = new Builds({ version, file: options.appFile ?? null, log, now });
   await builds.start();
-  routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers, config.lumiverse.url));
+  routes.add(
+    "app",
+    appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers, config.lumiverse.url, () => {
+      const key = currentKeys(db, user).find((k) => k.kind === "web");
+      return key === undefined ? null : { made: key.made, ends: key.ends };
+    }),
+  );
   // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them. The files that name what runs a command or calls out are looked at before the list of it is read.
   routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words, () => hooks.listFiles()));
   let running: RunningServer | null = null;

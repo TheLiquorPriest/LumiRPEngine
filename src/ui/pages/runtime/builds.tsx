@@ -4,12 +4,12 @@
 // refused one shown with the build that goes on running; and "Update now", always there: it takes a new
 // build that has passed its checks, or says there is none, or why the last one was refused.
 //
-// And, in the web shell, when the web key this browser holds ends (the session route): nothing for a
-// key with no end. The drawer's page token is renewed by the extension as it runs out, so its end is
-// nothing the player acts on, and the drawer does not show it.
+// And, in the web shell, what this browser signs in with (the session route): the session it holds and when it ends, which the page renews
+// while it is open, and the web key, which has no end unless a setting gives it one. The drawer's page token is renewed by the extension as it
+// runs out, so its end is nothing the player acts on, and the drawer does not show it.
 
 import type { ComponentChildren } from "preact";
-import type { BuildsReply, BuildsStatus, RestartState, UpdateStage } from "../../../shared/api";
+import type { BuildsReply, BuildsStatus, RestartState, SessionReply, UpdateStage } from "../../../shared/api";
 import { Badge, Banner, Button, Row, Section, type Tone } from "../../../frontend/components";
 import type { RpeClient } from "../../client";
 import type { Timers } from "../../roads";
@@ -203,12 +203,12 @@ export function BuildsView(props: { shown: BuildsShown; onUpdate(): void }) {
   );
 }
 
-/** Reads when the credential the page holds ends, once: `onEnds` hears it (null: it has no end). A refused read leaves the line out: a key RPE no longer takes signs the web shell out on its own. The returned function lets the answer go. */
-export function readSession(client: Pick<RpeClient, "call">, onEnds: (ends: number | null) => void): () => void {
+/** Reads what the page holds to sign in with, once: `onSession` hears it. A refused read leaves the lines out: a key RPE no longer takes signs the web shell out on its own. The returned function lets the answer go. */
+export function readSession(client: Pick<RpeClient, "call">, onSession: (session: SessionReply) => void): () => void {
   let alive = true;
   client.call("GET /api/v1/status/session", {}).then(
     (session) => {
-      if (alive) onEnds(session.ends);
+      if (alive) onSession(session);
     },
     () => undefined,
   );
@@ -217,12 +217,33 @@ export function readSession(client: Pick<RpeClient, "call">, onEnds: (ends: numb
   };
 }
 
-/** When the web key ends, or nothing where it has no end (or it is not known yet). */
-export function SessionLine(props: { ends: number | null }) {
-  if (props.ends === null) return null;
+/**
+ * What this browser signs in with, each said as what it is: the session it holds (it ends, and is renewed while the page is open; when it has
+ * ended you sign in again), and the web key (which has no end unless a setting gives it one). Nothing before the route has answered.
+ */
+export function SessionLine(props: { session: SessionReply | null; names: { session: string; webKey: string } }) {
+  const { session, names } = props;
+  if (session === null) return null;
   return (
-    <p class="rpe-line" data-session="ends">
-      This browser's web key ends on {when(props.ends)}. Make a new one with <code>rpe key web</code> on the machine RPE runs on before then.
-    </p>
+    <>
+      <p class="rpe-line" data-session="session">
+        {session.holds === "web key" ? "This browser holds the web key itself." : null}
+        {session.holds === "session" && session.ends !== null ? <>This browser holds a session, which ends on {when(session.ends)}. It is renewed while this page is open; once it has ended you sign in again with the web key or your Lumiverse account. </> : null}
+        {session.holds === "session" ? (
+          <>
+            How long a session holds is "{names.session}" on the Settings page.
+          </>
+        ) : null}
+      </p>
+      {session.webKey === null ? null : session.webKey.ends === null ? (
+        <p class="rpe-line" data-session="key">
+          The web key has no end: it holds until you make a new one with <code>rpe key web</code> on the machine RPE runs on. How long it holds is "{names.webKey}" on the Settings page.
+        </p>
+      ) : (
+        <p class="rpe-line" data-session="key">
+          The web key ends on {when(session.webKey.ends)}. Make a new one with <code>rpe key web</code> on the machine RPE runs on before then.
+        </p>
+      )}
+    </>
   );
 }

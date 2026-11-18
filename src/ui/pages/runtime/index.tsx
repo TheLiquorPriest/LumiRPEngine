@@ -1,16 +1,17 @@
 // Runtime (plan §4.4, §4.6, §14): how RPE runs. How it runs and a Restart that waits for what is running; its builds,
-// the newest update stage by stage (read again while one goes on) and "Update now", and, in the web shell, when the web
-// key this browser holds ends; RPE's own log, a page at a time, narrowed by level, area, chat, turn and job (the
+// the newest update stage by stage (read again while one goes on) and "Update now", and, in the web shell, what this browser
+// signs in with (the session it holds and when it ends, and the web key); RPE's own log, a page at a time, narrowed by level, area, chat, turn and job (the
 // narrowing is in the address: `runtime/log/job/<id>`); and where the time goes across the latest turns.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import type { BuildsStatus } from "../../../shared/api";
+import type { BuildsStatus, SessionReply } from "../../../shared/api";
 import { type Route, useApp } from "../../app";
 import { PageHeader } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useRead } from "../../reading";
 import { useUiSetting } from "../../ui-settings";
+import { useSettingView } from "../settings/names";
 import { errorWords } from "../../words";
 import { type BuildsReader, type BuildsShown, BuildsView, NO_BUILDS, readBuilds, readSession, SessionLine } from "./builds";
 import { type LogFilter, logAt, logFilterOf, LogView } from "./logs";
@@ -23,8 +24,10 @@ export { logAt, logFilterOf } from "./logs";
 export interface RuntimeViewProps {
   builds: BuildsShown;
   onUpdate(): void;
-  /** When the web key this browser holds ends; null for none, or not known. */
-  sessionEnds: number | null;
+  /** What this browser signs in with, as the session route says it; null where it is not known (or the page is not the web shell's). */
+  session: SessionReply | null;
+  /** The Settings page's names for how long a session holds and how long the web key holds, which the lines on what the browser signs in with point to. */
+  names: { session: string; webKey: string };
   /** How RPE runs, drawn above the builds. */
   service?: ComponentChildren;
   /** The sections the service's routes give after the builds: the log and the timings. */
@@ -36,7 +39,7 @@ export function RuntimeView(props: RuntimeViewProps) {
     <div class="lre-stack rpe-page" data-page="runtime">
       <PageHeader title="Runtime" subtitle="How RPE runs, and which build." />
       {props.service}
-      <SessionLine ends={props.sessionEnds} />
+      <SessionLine session={props.session} names={props.names} />
       <BuildsView shown={props.builds} onUpdate={props.onUpdate} />
       {props.children}
     </div>
@@ -98,19 +101,20 @@ export function RuntimePage(props: { route?: Route }) {
   const route = props.route ?? { page: "runtime" };
   const [builds, setBuilds] = useState<BuildsShown>(NO_BUILDS);
   const [reader, setReader] = useState<BuildsReader | null>(null);
-  const [sessionEnds, setSessionEnds] = useState<number | null>(null);
+  const [session, setSession] = useState<SessionReply | null>(null);
+  const names = { session: useSettingView("auth.webSessionMinutes")?.name ?? "the setting", webKey: useSettingView("auth.webKeyDays")?.name ?? "the setting" };
   const pollMs = useUiSetting("jobPollMs");
   useEffect(() => {
     const reading = readBuilds(app.client, setBuilds, { every: pollMs, timers: app.timers });
     setReader(reading);
-    const forget = app.shell === "web" ? readSession(app.client, setSessionEnds) : () => undefined;
+    const forget = app.shell === "web" ? readSession(app.client, setSession) : () => undefined;
     return () => {
       reading.stop();
       forget();
     };
   }, []);
   return (
-    <RuntimeView builds={builds} onUpdate={() => reader?.update()} sessionEnds={sessionEnds} service={<ServicePart />}>
+    <RuntimeView builds={builds} onUpdate={() => reader?.update()} session={session} names={names} service={<ServicePart />}>
       <LogPart route={route} />
       <TimingsPart chat={route.chat ?? null} />
     </RuntimeView>

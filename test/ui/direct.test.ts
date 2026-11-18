@@ -159,11 +159,11 @@ describe("the direct road, against RPE's own server", () => {
   test("the page's session says whose its credential is and when it ends, and the pages' copies of the live socket's close code and the session's path are the app's", async () => {
     const client = webClient(token);
     const session = await client.call("GET /api/v1/status/session", {});
-    expect(session).toEqual({ user: USER, ends: expect.any(Number) });
-    // Settings' line reads the end the route gives.
-    const heard = Promise.withResolvers<number | null>();
+    expect(session).toEqual({ user: USER, holds: expect.stringMatching(/^(session|web key)$/), ends: expect.any(Number), webKey: null });
+    // Runtime's lines read what the route gives.
+    const heard = Promise.withResolvers<{ ends: number | null }>();
     readSession(client, heard.resolve);
-    expect(await heard.promise).toBe(session.ends);
+    expect((await heard.promise).ends).toBe(session.ends);
     expect([LIVE_TOKEN_ENDED, SESSION_PATH]).toEqual([SENT_TOKEN_ENDED, SENT_SESSION_PATH]);
   });
 
