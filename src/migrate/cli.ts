@@ -47,9 +47,11 @@ export interface CliIo {
 
 /**
  * Runs the migration from the command line's words; the exit code: 0 done, 1 refused or failed, 2
- * misused. `tree` is the file tree's layout, which says where the user's own files go; `settings` the
- * app's one registry of settings, which takes each value the run carries as its own reader takes it;
- * `runs` the turn lane's writer of a carried turn's run record, with its tables.
+ * misused. A rehearsal is done when it has printed its report, and it exits 0 where the report says the
+ * real run may start and 1 where it says the real run won't. `tree` is the file tree's layout, which says
+ * where the user's own files go; `settings` the app's one registry of settings, which takes each value the
+ * run carries as its own reader takes it; `runs` the turn lane's writer of a carried turn's run record,
+ * with its tables.
  */
 export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[], runs?: CarriedRuns): Promise<number> {
   const values: Record<string, string> = {};
@@ -89,7 +91,7 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
   try {
     const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
     io.out(switches.has("json") ? `${JSON.stringify(report, null, 2)}\n` : reportText(report));
-    return switches.has("rehearse") || ran ? 0 : 1;
+    return (switches.has("rehearse") ? report.refusals.length === 0 : ran) ? 0 : 1;
   } catch (error) {
     io.err(`The migration stopped: ${error instanceof Error ? error.message : String(error)}`);
     return 1;

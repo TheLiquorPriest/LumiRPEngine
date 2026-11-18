@@ -58,7 +58,7 @@ Migration rehearsal, read at <time>.
 The real run may start.
 ```
 
-If it says `The real run won't start:` instead, the lines under it say why. Nothing was changed. What to do for each:
+If it says `The real run won't start:` instead, the lines under it say why. Nothing was changed. The command's exit code tells you the same, so a script can check it: 0 where the real run may start, 1 where it won't. What to do for each:
 
 | It says | What to do |
 |---|---|
