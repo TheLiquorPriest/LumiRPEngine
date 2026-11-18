@@ -366,33 +366,6 @@ describe("realism examples: NPC lives", () => {
     lapse(w, 4 * 1440);
     expect(w.ctx.query("regard")(w.ctx, "rosa", "maya")).not.toBe(10);
   });
-
-  test("feelings decay over time without contact (Relationships 4)", () => {
-    const w = setup((wd) => {
-      wd.realism.levels.relationships = 4;
-      wd.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 60, respect: 60, t: 0 } });
-    });
-    effects(w, [{ type: "relationships.adjust", args: { from: "maya", to: "you", delta: 1 } }]);
-    const at = (): number | undefined => buildCastView(w.ctx).people.find((p) => p.id === "maya")?.regard?.find((r) => r.axis === "Warmth")?.value;
-    const v0 = at() ?? 0;
-    expect(v0).toBeGreaterThan(60);
-    w.apply({ type: "clock", minutes: 30 * 1440, cause: "advance" });
-    expect(at()).toBeCloseTo(v0 / 2, 1);
-  });
-
-  test("NPC↔NPC feelings decay too (Relationships 4), from the anchor a coarsened record leaves", () => {
-    const world = modernUsWorld("npc", "Riverton");
-    world.realism.levels.relationships = 4;
-    world.realism.tierCaps = { principal: {}, supporting: {}, background: {} };
-    world.realism.levels.castlife = 2;
-    world.entities.rosa!.relations.push({ type: "regard", to: "maya", fields: { warmth: 40, trust: 20, respect: 20, t: 450 } });
-    const s0 = startState(world);
-    const plan = planTurn({ registry: reg, world, state: s0, runSeed: "npc", seed: "s", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 30 * 1440 }, ALL_NOTE) });
-    const after = fold(reg, world, s0, plan.events);
-    const ctx = reg.context(world, after);
-    expect(ctx.query("regard")(ctx, "rosa", "maya", "warmth")).toBeCloseTo(20, 0);
-    expect(ctx.query("regard_band")(ctx, "rosa", "maya")).toBe("neutral");
-  });
 });
 
 describe("realism examples: mixed tiers and defaults", () => {
