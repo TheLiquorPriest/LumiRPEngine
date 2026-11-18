@@ -6,7 +6,7 @@
 // Today's settings registry, carried for the migration (PlanSwap-13 item 3), which reads today's
 // settings file with it (`settings-store.ts`); nothing kept reads it.
 
-import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "../../shared/ids";
+import type { Band, BoundMode, DomainId, DomainLevels, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "../../shared/ids";
 import type { ClaimsPolicy } from "../../shared/claims";
 import type { AdjudicationDef, StepPurpose } from "../../shared/world";
 import type { Limit, MindsSettings } from "../../shared/minds";
@@ -204,7 +204,7 @@ export interface ModelUseSettings {
 
 export interface RealismSettings {
   preset: RealismPresetId;
-  levels: Record<DomainId, Level>;
+  levels: DomainLevels;
   /** Caps per detail band, keyed by band id. */
   tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
   /** What a typed action's thing the world doesn't have becomes (DESIGN §9.4); each named preset carries its own. */

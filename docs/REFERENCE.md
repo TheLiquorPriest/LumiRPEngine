@@ -4,7 +4,7 @@
 
 What the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.
 
-Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1.
+Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1, `orgs` 1, `d20` 1.
 
 ## Contents
 
@@ -12,6 +12,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 - [Calendar & time pack](#calendar--time-pack-calendar)
 - [Cast life pack](#cast-life-pack-castlife)
 - [Combat pack](#combat-pack-combat)
+- [Tabletop rules pack](#tabletop-rules-pack-d20)
 - [Economy pack](#economy-pack-economy)
 - [Gear & containers pack](#gear--containers-pack-gear)
 - [Minds pack](#minds-pack-minds)
@@ -152,7 +153,7 @@ The slots a world gets when it defines none, kept in rank order on the section b
 
 ### Realism
 
-Domains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.
+Domains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`, `d20`; each at a level from 0 to 4.
 
 Detail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).
 
@@ -344,6 +345,74 @@ Panels: `combat.encounter`. Slots it writes: none.
 | Table | Label | Schema | Columns | Default rows |
 |---|---|---|---|---|
 | `combat.bestiary` | Bestiary | `lre-table/combat.bestiary/v1` | name (text), kind (text), tier (text, optional), fields (json), carries (list, optional), description (text, optional) | 0 |
+
+## Tabletop rules pack (`d20`)
+
+Version 1 · realism domain `d20` · requires `combat`, `gear`, `space`.
+
+### Effects
+
+| Effect | Arguments |
+|---|---|
+| `d20.advance` | `who`, `ruled?` |
+| `d20.attack` | `who`, `ruled?` |
+| `d20.award` | `who`, `ruled?` |
+| `d20.check` | `who`, `ruled?` |
+| `d20.condition` | `who`, `ruled?` |
+| `d20.effect` | `who`, `ruled?` |
+| `d20.harm` | `who`, `ruled?` |
+| `d20.heal` | `who`, `ruled?` |
+| `d20.ranks` | `who`, `ruled?` |
+| `d20.reload` | `who`, `ruled?` |
+| `d20.rest` | `who`, `ruled?` |
+| `d20.save` | `who`, `ruled?` |
+| `d20.stat_as` | `who`, `ruled?` |
+| `d20.trait` | `who`, `ruled?` |
+
+### Formula functions
+
+- `bonus()`
+- `bonus_only()`
+- `bonus_without()`
+- `class_level()`
+- `class_skill()`
+- `class_sum()`
+- `has_trait()`
+- `hit_dice()`
+- `levels()`
+- `limit()`
+- `mod()`
+- `ranks()`
+- `rest_minutes()`
+- `score()`
+- `size_mod()`
+- `total()`
+- `under()`
+
+### Actions
+
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
+
+| Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
+|---|---|---|---|---|---|---|---|
+| `advance` | Take a level | Take a level in a class: its hit points, and what the level gives by the tables, told as open. | `class: text`, `hp?: text` |  | `default`: `d20.advance` | `0` |  |
+| `attack` | Attack | Attack someone with a weapon in hand or one's own attack: the roll against their defence, a critical and the damage, all worked out from both sheets. | `target: ref → person`, `with?: text`, `full?: bool`, `touch?: bool`, `held?: text`, `shots?: text`, `nonlethal?: bool`, `concealment?: number`, `mods?: list` |  | `critical`: `d20.attack`; `default`: `d20.attack`; `hit`: `d20.attack`; `miss`: `d20.attack` | `0` | attack, strike at, shoot at, swing at |
+| `award` | Award experience | Give experience, as a number or for who was overcome, and say who has reached a new level. | `xp?: number`, `overcame?: list`, `also?: list`, `why?: text` |  | `default`: `d20.award` | `0` |  |
+| `check` | Check | Roll a skill or an ability against a difficulty or against someone, with the total worked out from the sheet. | `skill: text`, `difficulty?: text`, `vs?: ref → person`, `vs_skill?: text`, `take?: text`, `aid?: list`, `mods?: list` |  | `default`: `d20.check`; `failure`: `d20.check`; `success`: `d20.check` | `1` | roll for, make a check, use my skill |
+| `condition` | Condition | Put a condition of the ruleset on someone, or take it off, for a number of rounds, minutes or hours, or until a save. | `condition: text`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.condition` | `0` |  |
+| `d20_rest` | Rest the night | Rest for the ruleset's night: hit points and daily gauges come back as the ruleset gives them. | `hours?: number`, `also?: list` |  | `default`: `d20.rest` | `rest_minutes(params.hours)` | rest for the night, sleep it off |
+| `effect` | Effect | Put a passing effect with its own modifiers on someone, or take it off by its label. | `label: text`, `mods?: list`, `off?: bool`, `rounds?: number`, `minutes?: number`, `hours?: number`, `save?: text`, `difficulty?: text`, `why?: text` |  | `default`: `d20.effect` | `0` |  |
+| `harm` | Harm | Take hit points off someone, several, or everyone in an area, with a save for half or none where one is given. | `amount: text`, `type?: text`, `nonlethal?: bool`, `targets?: list`, `centre?: ref → person`, `radius?: number`, `save?: text`, `difficulty?: text`, `half?: bool`, `why?: text` |  | `default`: `d20.harm` | `0` |  |
+| `heal` | Heal | Give back hit points, take off nonlethal harm, give temporary hit points, or stabilise someone dying. | `amount?: text`, `nonlethal?: bool`, `temporary?: bool`, `stabilize?: bool`, `why?: text` |  | `default`: `d20.heal` | `0` |  |
+| `ranks` | Skill ranks | Set someone's ranks in a skill; the most it takes and the points left are told. | `skill: text`, `ranks: number` |  | `default`: `d20.ranks` | `0` |  |
+| `reload` | Reload | Fill a weapon's magazine from the rounds carried. | `item?: text` |  | `default`: `d20.reload` | `0` | reload, change the magazine |
+| `save` | Save | Roll a save against a difficulty, with the total worked out from the sheet. | `save: text`, `difficulty: text`, `also?: list`, `mods?: list` |  | `default`: `d20.save`; `failure`: `d20.save`; `success`: `d20.save` | `0` | make a save, resist |
+| `stat_as` | Sheet from the bestiary | Give someone the sheet and the attacks of one of the ruleset's creatures. | `creature: text` |  | `default`: `d20.stat_as` | `0` |  |
+| `trait` | Trait | Give someone a feat, a race or a feature of the ruleset, or take it away; what it requires is told. | `trait: text`, `choice?: text`, `off?: bool`, `why?: text` |  | `default`: `d20.trait` | `0` |  |
+
+### Events
+
+Its own: `d20.advance`, `d20.attack`, `d20.award`, `d20.check`, `d20.condition`, `d20.effect`, `d20.harm`, `d20.heal`, `d20.ranks`, `d20.reload`, `d20.rest`, `d20.save`, `d20.stat_as`, `d20.state`, `d20.trait`, `d20.upkeep`.
 
 ## Economy pack (`economy`)
 

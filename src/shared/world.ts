@@ -23,6 +23,7 @@ import type {
   ChatId,
   CheckId,
   DomainId,
+  DomainLevels,
   EntityId,
   EventType,
   FieldId,
@@ -62,6 +63,7 @@ import type { WorldMindsConfig } from "./minds";
 import type { RoutineDef, RoutineId, RoutineSettings, WorldRoutineSource } from "./routines";
 import type { NeedsSettings } from "./needs";
 import type { LedgerEvent } from "./ledger";
+import type { D20Def } from "./d20";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
@@ -119,8 +121,8 @@ export interface Span {
 export interface PoolDef {
   /** The most it holds: the id of a field of the same entity (often a derived one), or a formula with the entity as `self`. */
   max: Expr | FieldId;
-  /** The least it holds; default 0. */
-  min?: number;
+  /** The least it holds: a number, or a formula with the entity as `self` (minus the Constitution score); default 0. */
+  min?: number | Expr;
   /** What a `recover` effect restores when it names no amount (a night's rest): a formula with the entity as `self`. Absent: back to the max. */
   recover?: Expr;
 }
@@ -863,7 +865,7 @@ export interface WorldPins {
 
 export interface RealismDefaults {
   preset: RealismPresetId;
-  levels: Record<DomainId, Level>;
+  levels: DomainLevels;
   /** Caps per detail band, keyed by band id; the POV is never capped. */
   tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
   /** What a typed action's thing the world doesn't have becomes in new chats (DESIGN §9.4); absent, the user's setting fills in. */
@@ -1225,6 +1227,8 @@ export interface RulesetDef {
   cover?: { half?: number; threeQuarters?: number; total?: number; creatures?: boolean };
   /** The profile the ruleset last started from (Build → Ruleset → Start from a profile), by id; nothing reads it as rules. */
   profile?: string;
+  /** The tabletop rules layer (the `d20` pack, RULESET-DESIGN §4.1): abilities, totals, how bonuses stack, an attack's and hit points' procedure, and the tables it names. Absent: the world has no such rules. */
+  d20?: D20Def;
 }
 
 /** A named adjudication preset expands to concrete values; `custom` keeps them as edited. */

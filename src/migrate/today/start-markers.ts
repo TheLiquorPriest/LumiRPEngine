@@ -53,6 +53,9 @@ function worldFirstTime(user: TimeSettings, world: WorldDoc): TimeSettings {
   return { ...user, sceneTicks, interrupts, speedThrough, montage: montage === "key" || montage === "day" || montage === "week" ? montage : user.montage, unitCap };
 }
 
+/** The domains today's build had: the tabletop rules (`d20`) came after it, so a carried chat starts with none of its markers. */
+const TODAYS_DOMAINS = DOMAINS.filter((d) => d !== "d20");
+
 /**
  * Starting markers for a chat on `revision` of `world`: `migrate`, a `resolve` for every domain's
  * level and for the band caps, a `time` marker for every time control, `claims` and `adjudicate`.
@@ -60,13 +63,13 @@ function worldFirstTime(user: TimeSettings, world: WorldDoc): TimeSettings {
 export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revision: string): MarkerBody[] {
   const mine = settings.overrideWorldDefaults;
   const out: MarkerBody[] = [{ kind: "migrate", to: revision }];
-  for (const domain of DOMAINS) out.push({ kind: "resolve", domain, scope: { all: true }, to: (mine ? undefined : levelAt(world.realism.levels, domain)) ?? settings.realism.levels[domain] });
+  for (const domain of TODAYS_DOMAINS) out.push({ kind: "resolve", domain, scope: { all: true }, to: (mine ? undefined : levelAt(world.realism.levels, domain)) ?? settings.realism.levels[domain] ?? 0 });
   for (const band of BANDS) {
     // A band the world caps at all is the world's whole say for it (an absent cap is the domain
     // level); the chat starts from those caps, so one the seed doesn't keep is lifted to 4.
     const authored = at(world.realism.tierCaps, band);
     const caps: unknown = mine || !isRecord(authored) ? settings.realism.tierCaps[band] : authored;
-    for (const domain of DOMAINS) {
+    for (const domain of TODAYS_DOMAINS) {
       const to = levelAt(caps, domain) ?? (at(authored, domain) !== undefined ? 4 : undefined);
       if (to !== undefined) out.push({ kind: "resolve", domain, scope: { tier: band }, to });
     }

@@ -597,7 +597,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const re = isRecord(v.realism) ? v.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
   const levels = { ...d.realism.levels };
-  for (const dom of DOMAINS) if (hasOwn(rawLevels, dom)) levels[dom] = level(rawLevels[dom]) ?? d.realism.levels[dom];
+  for (const dom of DOMAINS) if (hasOwn(rawLevels, dom)) levels[dom] = level(rawLevels[dom]) ?? d.realism.levels[dom] ?? 0;
   const rawCaps = isRecord(re.tierCaps) ? re.tierCaps : {};
   const tierCaps = structuredClone(d.realism.tierCaps);
   for (const band of BANDS) {

@@ -11,7 +11,7 @@ import type { FieldDef, ProgressionDef, SheetRowDef, WorldDoc } from "../shared/
 import { formatMoney } from "../shared/world";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
-import { bandOf, evalExpr, fieldDef, kindIs, poolMax, scopeEnv } from "./scope";
+import { bandOf, evalExpr, fieldDef, kindIs, poolMax, poolMin, scopeEnv } from "./scope";
 import { own } from "./pack-kit";
 import { say } from "../shared/lines";
 
@@ -139,7 +139,7 @@ function rowOf(reg: Registry, ctx: ReadContext, entity: EntityId, row: SheetRowD
     const read = env.lookup(["self", row.pool]);
     const current = typeof read === "number" ? read : 0;
     const max = poolMax(reg, ctx, entity, def.pool);
-    const min = def.pool.min ?? 0;
+    const min = poolMin(reg, ctx, entity, def.pool);
     const fix = fixes ? fixOf(entity, row.pool, def, own(e.fields, row.pool) ?? current, { min, ...(max !== null ? { max } : {}) }) : undefined;
     return { label: row.label ?? def.label ?? words(row.pool), value: `${shown(current)} / ${max === null ? "—" : shown(max)}`, pool: { current, min, max }, ...(fix ? { fix } : {}) };
   }

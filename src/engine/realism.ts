@@ -26,18 +26,18 @@ function all(level: Level): Record<DomainId, Level> {
   return Object.fromEntries(DOMAINS.map((d) => [d, level])) as Record<DomainId, Level>;
 }
 
-/** The three named presets (DESIGN §9.1). An absent band cap means "the domain level". */
+/** The three named presets (DESIGN §9.1). An absent band cap means "the domain level". None switches the tabletop rules on (`d20`). */
 export const REALISM_PRESETS: Record<Preset, RealismState> = {
   story: {
-    levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
+    levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1, d20: 0 },
     tierCaps: { principal: {}, supporting: {}, background: {} },
   },
   grounded: {
-    levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2 },
+    levels: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2, d20: 0 },
     tierCaps: { principal: {}, supporting: {}, background: all(1) },
   },
   simulation: {
-    levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
+    levels: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3, d20: 0 },
     tierCaps: { principal: all(4), supporting: all(3), background: all(2) },
   },
 };
@@ -46,10 +46,10 @@ function capOf(caps: Caps, band: Band, domain: DomainId): Level {
   return caps[band][domain] ?? 4;
 }
 
-/** The preset a realism state matches, or `custom`. */
+/** The preset a realism state matches, or `custom`. Whether the tabletop rules are on (`d20`) is a switch of its own, which no preset reads. */
 export function presetOf(realism: RealismState): RealismPresetId {
   for (const [id, p] of Object.entries(REALISM_PRESETS) as [Preset, RealismState][]) {
-    const same = DOMAINS.every((d) => p.levels[d] === realism.levels[d] && BANDS.every((b) => capOf(p.tierCaps, b, d) === capOf(realism.tierCaps, b, d)));
+    const same = DOMAINS.every((d) => d === "d20" || (p.levels[d] === realism.levels[d] && BANDS.every((b) => capOf(p.tierCaps, b, d) === capOf(realism.tierCaps, b, d))));
     if (same) return id;
   }
   return "custom";

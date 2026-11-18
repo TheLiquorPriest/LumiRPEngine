@@ -48,7 +48,7 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
 import { levelProgression, progressionApplies, progressOf } from "./ruleset";
-import { evalArg, evalArgs, evalExpr, fieldDef, isGone, kindFields, objects, placeOfEntity, poolMax, scopeEnv } from "./scope";
+import { evalArg, evalArgs, evalExpr, fieldDef, isGone, kindFields, objects, placeOfEntity, poolMax, poolMin, scopeEnv } from "./scope";
 import { acts } from "./life";
 import { together } from "./presence";
 import { classOf, classProblems } from "./selector";
@@ -161,7 +161,7 @@ function clampNumber(value: number, min: number | undefined, max: number | undef
 export function fieldBounds(reg: Registry, ctx: ReadContext, entity: EntityId, def: FieldDef | undefined): { min?: number; max?: number } {
   if (!def?.pool) return { ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}) };
   const top = poolMax(reg, ctx, entity, def.pool);
-  const min = Math.max(def.min ?? -Infinity, def.pool.min ?? 0);
+  const min = Math.max(def.min ?? -Infinity, poolMin(reg, ctx, entity, def.pool));
   const max = Math.min(def.max ?? Infinity, top ?? Infinity);
   return { ...(Number.isFinite(min) ? { min } : {}), ...(Number.isFinite(max) ? { max } : {}) };
 }

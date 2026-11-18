@@ -350,7 +350,7 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
         const known = DOMAINS.find((d) => d === domain);
         if (!known) err(`ruleset.minLevels.${domain}`, "ruleset", say("lint_domain_isnt_a_realism_domain", { domain: domain }));
         else if (typeof level !== "number" || !Number.isInteger(level) || level < 0 || level > 4) err(`ruleset.minLevels.${domain}`, "ruleset", say("lint_a_level_floor_is_a_whole_number"));
-        else if (world.realism.levels[known] < level) info(`ruleset.minLevels.${domain}`, "level_floor", say("lint_the_realism_defaults_put_domain_at_known", { domain: domain, known: world.realism.levels[known], level: level }));
+        else if ((world.realism.levels[known] ?? 0) < level) info(`ruleset.minLevels.${domain}`, "level_floor", say("lint_the_realism_defaults_put_domain_at_known", { domain: domain, known: world.realism.levels[known] ?? 0, level: level }));
       }
     }
   }

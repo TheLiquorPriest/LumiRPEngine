@@ -51,12 +51,15 @@ export function runDir(chatId: ChatId): string {
   return `runs/${chatId}/`;
 }
 
-/** Realism domains (DESIGN §9.1). */
-export const DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"] as const;
+/** Realism domains (DESIGN §9.1). `d20` is the tabletop rules layer's (RULESET-DESIGN §3): on at any level of 1 or more, off at 0, the level a world without it reads. */
+export const DOMAINS = ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets", "d20"] as const;
 export type DomainId = (typeof DOMAINS)[number];
 
 /** Realism level per domain: 0 off … 4 simulation. */
 export type Level = 0 | 1 | 2 | 3 | 4;
+
+/** A document's level for each domain: every one stated, but the tabletop rules' (`d20`), which a document written before them lacks and reads as off. */
+export type DomainLevels = Record<Exclude<DomainId, "d20">, Level> & { d20?: Level };
 
 /** Each domain and each level by its name (DESIGN §9.1), as the World page, the GM view and the engine's lines say them. */
 export const DOMAIN_LABEL: Record<DomainId, string> = {
@@ -69,6 +72,7 @@ export const DOMAIN_LABEL: Record<DomainId, string> = {
   calendar: "Calendar & time",
   weather: "Weather",
   sheets: "Sheets & checks",
+  d20: "Tabletop rules",
 };
 export const LEVEL_LABEL: Record<Level, string> = { 0: "Off", 1: "Narrative", 2: "Simple", 3: "Detailed", 4: "Simulation" };
 

@@ -348,7 +348,7 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   // Predicates on fields the world's current realism freezes (after a demotion, or authored above
   // it); a ruleset's floor raises the level they play at.
   for (const domain of DOMAINS) {
-    const level = rulesetFloor(world, domain, world.realism.levels[domain]);
+    const level = rulesetFloor(world, domain, world.realism.levels[domain] ?? 0);
     for (const p of frozenPredicates(reg, world, domain, level)) {
       warn(`${p.where}s.${p.id}`, "frozen_predicate", say("lint_a_condition_of_where_id_reads_field", { where: p.where, id: p.id, field: p.field, domain: domain, level: level }));
     }

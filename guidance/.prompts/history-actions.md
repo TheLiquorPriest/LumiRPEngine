@@ -477,3 +477,99 @@ param_flow_every: Every (day, week, month, year or once)
 action_how_many: How many
 action_with_names: with {{names}}
 action_from_place: from {{place}}
+action_check_label: Check
+action_check_description: Roll a skill or an ability against a difficulty or against someone, with the total worked out from the sheet.
+action_check_param_skill: Skill or ability
+action_check_param_difficulty: Difficulty (a number, or one of the ruleset's difficulties)
+action_check_param_vs: Against (someone who rolls against it)
+action_check_param_vs_skill: Their skill (left out: the same)
+action_check_param_take: Take 10 or 20 in place of the roll
+action_check_param_aid: Helped by
+action_check_param_mods: Other modifiers (a number, its type and why)
+action_save_label: Save
+action_save_description: Roll a save against a difficulty, with the total worked out from the sheet.
+action_save_param_save: Save
+action_save_param_difficulty: Difficulty
+action_save_param_also: Others who make the same save
+action_save_param_mods: Other modifiers (a number, its type and why)
+action_attack_label: Attack
+action_attack_description: Attack someone with a weapon in hand or one's own attack: the roll against their defence, a critical and the damage, all worked out from both sheets.
+action_attack_param_target: Target
+action_attack_param_with: With (a weapon in hand or one's own attack; left out: what is readied)
+action_attack_param_full: Every attack the base attack gives
+action_attack_param_touch: Against touch defence
+action_attack_param_held: Held (one hand, two hands or the off hand)
+action_attack_param_shots: Shots (single, double, burst or automatic)
+action_attack_param_nonlethal: Nonlethal
+action_attack_param_concealment: Concealment (the miss chance in percent)
+action_attack_param_mods: Other modifiers (a number, its type and why)
+action_harm_label: Harm
+action_harm_description: Take hit points off someone, several, or everyone in an area, with a save for half or none where one is given.
+action_harm_param_amount: Amount (a number or dice)
+action_harm_param_type: Damage type
+action_harm_param_nonlethal: Nonlethal
+action_harm_param_targets: Who is harmed (left out: the one named)
+action_harm_param_centre: Centre of an area
+action_harm_param_radius: Radius of the area
+action_harm_param_save: Save
+action_harm_param_difficulty: Difficulty of the save
+action_harm_param_half: A save halves it (left out: a save takes none)
+action_harm_param_why: Why
+action_heal_label: Heal
+action_heal_description: Give back hit points, take off nonlethal harm, give temporary hit points, or stabilise someone dying.
+action_heal_param_amount: Amount (a number or dice)
+action_heal_param_nonlethal: Only nonlethal harm
+action_heal_param_temporary: As temporary hit points
+action_heal_param_stabilize: Stabilise
+action_heal_param_why: Why
+action_condition_label: Condition
+action_condition_description: Put a condition of the ruleset on someone, or take it off, for a number of rounds, minutes or hours, or until a save.
+action_condition_param_condition: Condition
+action_condition_param_off: Take it off
+action_condition_param_rounds: Rounds
+action_condition_param_minutes: Minutes
+action_condition_param_hours: Hours
+action_condition_param_save: Save that ends it
+action_condition_param_difficulty: Difficulty of that save
+action_condition_param_why: Why
+action_effect_label: Effect
+action_effect_description: Put a passing effect with its own modifiers on someone, or take it off by its label.
+action_effect_param_label: Label
+action_effect_param_mods: Modifiers (a number, its type, what it changes and why)
+action_effect_param_off: Take it off
+action_effect_param_rounds: Rounds
+action_effect_param_minutes: Minutes
+action_effect_param_hours: Hours
+action_effect_param_save: Save that ends it
+action_effect_param_difficulty: Difficulty of that save
+action_effect_param_why: Why
+action_d20_rest_label: Rest the night
+action_d20_rest_description: Rest for the ruleset's night: hit points and daily gauges come back as the ruleset gives them.
+action_d20_rest_param_hours: Hours
+action_d20_rest_param_also: Others who rest
+action_reload_label: Reload
+action_reload_description: Fill a weapon's magazine from the rounds carried.
+action_reload_param_item: Weapon (left out: what is readied)
+action_award_label: Award experience
+action_award_description: Give experience, as a number or for who was overcome, and say who has reached a new level.
+action_award_param_xp: Experience
+action_award_param_overcame: Who was overcome
+action_award_param_also: Others who share it
+action_award_param_why: Why
+action_advance_label: Take a level
+action_advance_description: Take a level in a class: its hit points, and what the level gives by the tables, told as open.
+action_advance_param_class: Class
+action_advance_param_hp: Hit points (roll, average, most, or a number)
+action_trait_label: Trait
+action_trait_description: Give someone a feat, a race or a feature of the ruleset, or take it away; what it requires is told.
+action_trait_param_trait: Trait
+action_trait_param_choice: Taken for (a weapon, a skill)
+action_trait_param_off: Take it away
+action_trait_param_why: Why
+action_ranks_label: Skill ranks
+action_ranks_description: Set someone's ranks in a skill; the most it takes and the points left are told.
+action_ranks_param_skill: Skill
+action_ranks_param_ranks: Ranks
+action_stat_as_label: Sheet from the bestiary
+action_stat_as_description: Give someone the sheet and the attacks of one of the ruleset's creatures.
+action_stat_as_param_creature: Creature

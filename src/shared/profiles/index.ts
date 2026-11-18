@@ -199,7 +199,8 @@ function fitted(def: FieldDef, v: JsonValue): JsonValue | null | undefined {
     case "money":
     case "duration": {
       if (typeof v !== "number" || !Number.isFinite(v)) return null;
-      const lo = Math.max(def.min ?? -Infinity, def.pool ? (def.pool.min ?? 0) : -Infinity);
+      // A floor that is a formula is read on the sheet, not here: only a number holds a stored value up.
+      const lo = Math.max(def.min ?? -Infinity, def.pool ? (typeof def.pool.min === "string" ? -Infinity : (def.pool.min ?? 0)) : -Infinity);
       const n = Math.min(def.max ?? Infinity, Math.max(lo, v));
       return n === v ? undefined : n;
     }

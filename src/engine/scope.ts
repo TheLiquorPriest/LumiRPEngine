@@ -598,6 +598,20 @@ export function poolMax(reg: Registry, ctx: ReadContext, entity: EntityId, pool:
   }
 }
 
+/** A pool's floor for an entity: its `min` as a number, or as a formula with the entity as `self` (0 where it doesn't read as one); 0 when unset. */
+export function poolMin(reg: Registry, ctx: ReadContext, entity: EntityId, pool: PoolDef): number {
+  if (pool.min === undefined) return 0;
+  if (typeof pool.min === "number") return pool.min;
+  if (!own(ctx.state.entities, entity) || poolReads > 8) return 0;
+  poolReads++;
+  try {
+    const v = Number(evalExpr(pool.min, scopeEnv({ reg, ctx, bindings: { self: entity } }), 0));
+    return Number.isFinite(v) ? v : 0;
+  } finally {
+    poolReads--;
+  }
+}
+
 /** Evaluates a formula; parse errors and unknown names yield `fallback`. */
 export function evalExpr(src: string | number | boolean | undefined, env: ExprEnv, fallback: Value = 0): Value {
   if (src === undefined) return fallback;
