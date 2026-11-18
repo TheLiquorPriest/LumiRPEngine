@@ -9,7 +9,7 @@
 //   combat.start     {encounter, place, order: [{id, side, init, left}]}   initiative rolled at the effect
 //   combat.turn      {encounter, round, turn, actor, reset}                 the next turn and its refills (a new round extends or restarts the calm)
 //   combat.spend     {encounter, who, cost}                                 a combat action's cost
-//   combat.act       {encounter, actor, action, label, target?, outcome?}  who did what (Journal, the card's log); an attack breaks the round's calm
+//   combat.act       {encounter, actor, action, label, target?, outcome?, told?}  who did what (Journal, the card's log), with its records' words; an attack breaks the round's calm
 //   combat.down      {encounter, entity, down}                              re-checked against the down rule
 //   combat.end       {encounter, reason, winner, rounds}                    `over` re-checks the end rule, `left` that the POV
 //                                                                           isn't where the fight is, `stalemate` the calm
@@ -335,7 +335,8 @@ const events: EventTypeDef<PackEvent>[] = [
       const enc = fightById(state, strOf(e.data.encounter));
       if (!enc) return;
       const target = typeof e.data.target === "string" ? e.data.target : null;
-      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
+      const told = Array.isArray(e.data.told) ? e.data.told.filter((t): t is string => typeof t === "string" && t !== "") : [];
+      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null, ...(told.length > 0 ? { told } : {}) };
       // An attack, hit or miss, keeps the round under way from counting toward a stalemate.
       const struck = enc.calm.struck || attacks(ctx, enc, entry.actor, strOf(e.data.action), target);
       writeEncounter(state, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });

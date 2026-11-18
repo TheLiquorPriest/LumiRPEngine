@@ -159,9 +159,10 @@ function actionNamed(o: OpContext): ActionDef | Unread {
  * An action of the tabletop rules (the `d20` pack's) carried out while its doer is in a fight under way (RULESET-DESIGN §5.3): what
  * it costs of the fight's budgets (`ruleset.d20.costs`, by the action's id, `attack.full` for every attack a high base attack gives)
  * is spent, and said where its doer has it not left this turn and carried out all the same; the act is recorded into the fight, as
- * `fight_round` records one; and who that leaves down or back up is settled by the fight's rules. Nothing for any other action.
+ * `fight_round` records one, with `told`, its records' words, for the fight's round to show its numbers; and who that leaves down or
+ * back up is settled by the fight's rules. Nothing for any other action.
  */
-function intoFight(o: OpContext, action: ActionDef, actor: EntityId, params: JsonObject, outcome: string | null): void {
+function intoFight(o: OpContext, action: ActionDef, actor: EntityId, params: JsonObject, outcome: string | null, told: readonly string[]): void {
   const w = o.draft.w;
   const d20 = w.world.ruleset?.d20;
   const rules = fightRulesOf(w.world);
@@ -175,7 +176,7 @@ function intoFight(o: OpContext, action: ActionDef, actor: EntityId, params: Jso
     if (refused) o.reply.report("fight_cost_not_left", { n: o.n, op: o.op, who: named(o.reading, actor), cost: Object.entries(cost).map(([b, n]) => `${n} ${rules.economy[b]?.label ?? b}`).join(", "), why: refused.reason });
   }
   const target = typeof params.target === "string" ? params.target : null;
-  o.draft.applyAll([{ type: "combat.act", data: { encounter: enc.id, actor, action: action.id, label: action.label, ...(target !== null ? { target } : {}), ...(outcome !== null && outcome !== "default" ? { outcome } : {}) } }]);
+  o.draft.applyAll([{ type: "combat.act", data: { encounter: enc.id, actor, action: action.id, label: action.label, ...(target !== null ? { target } : {}), ...(outcome !== null && outcome !== "default" ? { outcome } : {}), ...(told.length > 0 ? { told: [...told] } : {}) } }]);
   const now = fightById(w.state, enc.id);
   if (now !== null) downsOf(w, rules, now, createRng(o.draft.seed(o.n)).fork("down"));
 }
@@ -246,15 +247,17 @@ const act: OpDef = {
         }
       }
     }
-    // An action of the tabletop rules taken in a fight under way is recorded into the fight, spends its cost, and settles who is down (RULESET-DESIGN §5.3).
-    intoFight(o, action, res.actor, params, res.outcome);
+    // What the action worked out and where its numbers came from, as its records say it (an event type that is `told`).
+    const toldSince = (start: number): string[] =>
+      w.events.slice(start).flatMap((e) => {
+        const def = reg.get(e.type);
+        return def?.told === true ? [def.describe(e, w.ctx)] : [];
+      });
+    // An action of the tabletop rules taken in a fight under way is recorded into the fight with those words, spends its cost, and settles who is down (RULESET-DESIGN §5.3).
+    intoFight(o, action, res.actor, params, res.outcome, toldSince(from));
     if (w.events.length === from) o.reply.line("already_so", { n: o.n, op: o.op, what: `${action.label} [${action.id}]` });
     for (const unmet of res.advised ?? []) o.draft.adviseOp(o.n, { code: "unmet_requirement", values: { requirement: typeof unmet.requirement === "string" ? unmet.requirement : unmet.reason, ...(unmet.words !== undefined ? { words: unmet.words } : {}) } });
-    // What the action worked out and where its numbers came from, as its records say it (an event type that is `told`).
-    const told = w.events.slice(from).flatMap((e) => {
-      const def = reg.get(e.type);
-      return def?.told === true ? [def.describe(e, w.ctx)] : [];
-    });
+    const told = toldSince(from);
     o.draft.record(o.n, o.op, o.lane, o.prov, from);
     const check = res.check;
     o.after((state): JsonObject => ({

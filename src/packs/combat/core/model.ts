@@ -36,6 +36,8 @@ export interface LogEntry {
   action: string;
   target: EntityId | null;
   outcome: string | null;
+  /** What the act's records said of it as it was made, with their numbers and where those came from (the tabletop rules' attack, save, harm); none for an act ruled in words. */
+  told?: string[];
 }
 
 /**
@@ -105,7 +107,8 @@ function readEncounter(raw: JsonValue | undefined): Encounter | null {
   const log: LogEntry[] = [];
   for (const e of Array.isArray(raw.log) ? raw.log : []) {
     if (!isRecord(e) || typeof e.actor !== "string") continue;
-    log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null });
+    const told = Array.isArray(e.told) ? e.told.filter((t): t is string => typeof t === "string" && t !== "") : [];
+    log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null, ...(told.length > 0 ? { told } : {}) });
   }
   const calm = objOf(raw.calm);
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };

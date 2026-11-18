@@ -85,8 +85,8 @@ export type Dest = "now" | "me" | "people" | "orgs" | "places" | "story";
 /** Where a panel lives: a Play destination, or the World page. */
 export type PanelHome = Dest | "gm";
 
-/** `org_edit`: an organization's editors in Play (ORG-SPEC §4.4): a member's sheet, Hire someone, Admit a member, a position, a delegation, its dues. */
-export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money" | "org" | "org_edit";
+/** `org_edit`: an organization's editors in Play (ORG-SPEC §4.4): a member's sheet, Hire someone, Admit a member, a position, a delegation, its dues. `fight`: the fight's page. */
+export type SheetKind = "person" | "place" | "item" | "account" | "quest" | "money" | "org" | "org_edit" | "fight";
 
 /** A detail sheet opened over a Play destination. */
 export interface SheetRoute {

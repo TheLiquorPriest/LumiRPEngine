@@ -125,11 +125,19 @@ export function paletteEncounter(ctx: ReadContext): PaletteEncounter | null {
   };
 }
 
+/**
+ * Each act of the round in a line: who did what to whom, and how it came out; an act of the tabletop rules by the words of its records
+ * (the roll, the total and its parts, the defence, the damage, the hit points it left), where everyone they name is someone the POV
+ * can see, since they name each by name.
+ */
 function logLines(ctx: ReadContext, enc: Encounter, gm: boolean): string[] {
   return enc.log.map((e) => {
-    const who = nameOf(ctx, e.actor, gm) ?? "someone";
-    const target = e.target ? ` → ${nameOf(ctx, e.target, gm) ?? "someone"}` : "";
-    return `${who.charAt(0).toUpperCase()}${who.slice(1)}: ${e.action}${target}${e.outcome ? ` (${e.outcome.replace(/_/g, " ")})` : ""}`;
+    const who = nameOf(ctx, e.actor, gm);
+    const whom = e.target ? nameOf(ctx, e.target, gm) : null;
+    if (e.told !== undefined && who !== null && (e.target === null || whom !== null)) return e.told.join(" ");
+    const target = e.target ? ` → ${whom ?? "someone"}` : "";
+    const name = who ?? "someone";
+    return `${name.charAt(0).toUpperCase()}${name.slice(1)}: ${e.action}${target}${e.outcome ? ` (${e.outcome.replace(/_/g, " ")})` : ""}`;
   });
 }
 

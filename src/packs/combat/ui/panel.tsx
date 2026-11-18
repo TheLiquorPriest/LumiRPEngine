@@ -1,17 +1,20 @@
 // The Encounter (DESIGN §11, §12), on Play → Now while a fight is under way: one card with the
 // initiative order and whose turn it is, HP as a meter (the POV's exact; anyone else's as the rules
 // and visibility allow, a wound band otherwise), conditions, what the POV has left of each budget,
-// End turn, the way to the combat actions (the palette's Combat tab, with their targets and exact
-// odds), and this round's acts. The GM view draws the same card with everything shown and no
-// actions. The view is the combat pack's, already POV-filtered: an unseen foe reads "someone".
+// End turn, the press that opens the fight's page, and this round's acts (an act of the tabletop
+// rules with its record's numbers). The fight's page is the same card in full, with each combat
+// action the POV can take now against each target, with its exact odds, to press. The GM view draws
+// the same card with everything shown and no actions. The view is the combat pack's, already
+// POV-filtered: an unseen foe reads "someone".
 
 import { isRecord } from "../../../shared/json";
 import type { PaletteEntry, PaletteOption } from "../../../shared/state-view";
-import { useApp } from "../../../frontend/app";
-import { Badge, Button, Empty, JsonView, Meter, Section, useBusy } from "../../../frontend/components";
+import { pushSheet, useApp } from "../../../frontend/app";
+import { Badge, Button, Empty, JsonView, List, ListRow, Meter, PageHeader, Section, useBusy } from "../../../frontend/components";
 import { bool, list, num, obj, oneOf, optStr, str, strings } from "../../../frontend/decode";
+import { formatOdds } from "../../../frontend/format";
 import { Icon } from "../../../ui/icons";
-import type { PanelProps, Send } from "../../../frontend/registry";
+import type { PanelProps, Send, SheetProps } from "../../../frontend/registry";
 import { paletteRequest } from "../../../frontend/requests";
 import type { EncounterRow, EncounterView } from "../core/view";
 
@@ -120,13 +123,56 @@ function EndTurn(props: { entry: PaletteEntry; option: PaletteOption; chatId: st
   );
 }
 
-/** One fight as one card: the order, the POV's budgets and actions (unless it's the GM's), and this round's acts. */
-export function EncounterCard(props: { view: EncounterView; chatId?: string; send?: Send }) {
+/** One combat action against one target, with its odds: pressed, it is sent as the player's press, as End turn is. */
+function Move(props: { entry: PaletteEntry; option: PaletteOption; chatId: string; send: Send }) {
+  const [busy, run] = useBusy();
+  const { entry, option } = props;
+  const odds = option.odds?.map((o) => `${formatOdds(o.p)} ${o.outcome}`).join(" · ");
+  return (
+    <ListRow
+      icon="sword"
+      title={option.label}
+      subtitle={option.disabled ?? option.detail}
+      value={odds}
+      valueTone="muted"
+      disabled={option.disabled !== undefined || busy}
+      onClick={() =>
+        run(async () => {
+          await props.send(paletteRequest(entry, [option], props.chatId));
+        })
+      }
+    />
+  );
+}
+
+/** The POV's combat actions now, each with its targets and their odds. */
+function Moves(props: { entries: readonly PaletteEntry[]; chatId: string; send: Send }) {
+  return (
+    <>
+      {props.entries.map((entry) => (
+        <div key={entry.action} class="lre-stack" data-lre-encounter-action={entry.action}>
+          <span class="lre-world-sublabel">{entry.label}</span>
+          <List>
+            {entry.options.map((option, i) => (
+              <Move key={`${i}:${option.label}`} entry={entry} option={option} chatId={props.chatId} send={props.send} />
+            ))}
+          </List>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * One fight as one card: the order, the POV's budgets and End turn (unless it's the GM's), and this round's acts. On Now it has the
+ * press that opens the fight's page; on the fight's page (`whole`), the combat actions to press instead.
+ */
+export function EncounterCard(props: { view: EncounterView; chatId?: string; send?: Send; whole?: boolean }) {
   const app = useApp();
   const { view, chatId, send } = props;
   const turn = view.yours ? "Your turn" : `${view.turn.charAt(0).toUpperCase()}${view.turn.slice(1)}'s turn`;
   // The GM's card shows the fight; acting stays the player's.
-  const act = chatId !== undefined && send !== undefined && !view.gm && view.actions.length > 0 ? { chatId, send } : null;
+  const player = chatId !== undefined && send !== undefined && !view.gm ? { chatId, send } : null;
   const end = view.actions.find((entry) => entry.action === "end_turn");
   const endOption = end?.options[0];
   const others = view.actions.filter((entry) => entry.action !== "end_turn");
@@ -152,22 +198,23 @@ export function EncounterCard(props: { view: EncounterView; chatId?: string; sen
               </span>
             </div>
           ) : null}
-          {act ? (
+          {player ? (
             <div class="lre-world-moves">
               <span class="lre-world-sublabel">{view.yours ? "Your move" : "Waiting for your turn"}</span>
               <div class="lre-inline">
-                {others.length > 0 ? (
+                {props.whole !== true ? (
                   <span data-lre-encounter-action="combat">
-                    <Button variant={view.yours ? "primary" : "secondary"} icon="sword" onClick={() => void app.overlays.openPalette("combat")}>
-                      {ready > 0 ? `Combat actions (${ready})` : "Combat actions"}
+                    <Button variant={view.yours && ready > 0 ? "primary" : "secondary"} icon="sword" onClick={() => app.ui.update((ui) => pushSheet(ui, { kind: "fight", id: view.id }))}>
+                      {ready > 0 ? `Combat actions (${ready})` : "The whole fight"}
                     </Button>
                   </span>
                 ) : null}
-                {end && endOption ? <EndTurn entry={end} option={endOption} chatId={act.chatId} send={act.send} /> : null}
+                {end && endOption ? <EndTurn entry={end} option={endOption} chatId={player.chatId} send={player.send} /> : null}
               </div>
               {endOption?.disabled ? <span class="lre-world-sublabel">{endOption.disabled}</span> : null}
             </div>
           ) : null}
+          {player && props.whole === true && others.length > 0 ? <Moves entries={others} chatId={player.chatId} send={player.send} /> : null}
           {view.log.length > 0 ? (
             <div class="lre-world-log">
               <span class="lre-world-sublabel">This round</span>
@@ -178,6 +225,18 @@ export function EncounterCard(props: { view: EncounterView; chatId?: string; sen
           ) : null}
         </div>
       </Section>
+    </div>
+  );
+}
+
+/** The fight's page, opened from the card on Now: the card in full, with the combat actions to press; a note once the fight is over for you. */
+export function FightSheet(props: SheetProps) {
+  const view = decodeEncounterView(props.state.panels["combat.encounter"]);
+  const fight = view !== null && view.id === props.id ? view : null;
+  return (
+    <div class="lre-stack lre-world" data-lre-sheet-fight={props.id}>
+      <PageHeader title="The fight" onBack={props.close} />
+      {fight ? <EncounterCard view={fight} chatId={props.chatId} send={props.send} whole /> : <Empty icon="sword">This fight is over, or you are no longer in it.</Empty>}
     </div>
   );
 }
