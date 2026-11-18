@@ -1,6 +1,6 @@
 # The lumirpengine command line and MCP server
 
-> This page describes the build before the standalone one. For RPE, start at the [README](../README.md).
+> **The command line and MCP server this page describes are not in this build; they come with a later one.** Until then, a `lumirpengine` command that reads or changes worlds and chats on Lumiverse answers that the command returns with a later build, and worlds are edited in Build ([Worlds in RPE](world.md)). The page describes the previous build's, and is kept for the build that brings them back. For RPE, start at the [README](../README.md).
 
 `lumirpengine` lets your own agent (Claude Code, Codex, Cursor, omp…) or your shell manage your LumiRPEngine worlds on your Lumiverse: read, search, create, import, edit, check, playtest, commit, restore, delete and export them, and attach and upgrade the chats that play them. It is an MCP server (`lumirpengine mcp`) and a command line with the same tools. It runs on Bun 1.4 or newer, or on Node 22 or newer, and needs nothing else; the engine is bundled in, so the offline tools work without a Lumiverse. How it reaches LumiRPEngine is DESIGN §23. Agents should read [AGENT-GUIDE.md](AGENT-GUIDE.md) first (the `lre_guide` tool serves it).
 
