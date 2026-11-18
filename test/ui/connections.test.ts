@@ -10,8 +10,12 @@ import { type ConnectionsAction, ConnectionsView, type ConnectionsViewProps, dra
 import { NO_SIGNIN, SignInPanel, signInCalls, signInSteps, signInWords } from "../../src/ui/pages/connections/signin";
 import type { ConnectionShown, ConnectionsShown, SaveConnection } from "../../src/shared/api";
 import { duration } from "../../src/ui/words";
+import { SettingName } from "../../src/ui/pages/settings/names";
 import { askingClient, settle } from "./asking";
-import { banners, elements, expand, press, textOf } from "./vnodes";
+import { banners, elements, expand, press, type Stand, textOf } from "./vnodes";
+
+/** The setting's name is read through the app's settings route, which the view's expansion has no app for: it is drawn as its key here. */
+const STAND: Stand = new Map([[SettingName, (props) => props.settingKey]]);
 
 const KEYED: ConnectionShown = { id: "c-flash", name: "Flash", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", effort: "high", retries: 4, limits: { "deepseek-v4-flash": { contextWindow: 64_000 } }, default: true, key: { set: true }, limitsInForce: { contextWindow: { tokens: 64_000, from: "user" }, maxTokens: { tokens: 8_192, from: "pi" }, pictures: null, asked: ["pictures"] } };
 const SIGNED: ConnectionShown = { id: "c-studio", name: "Studio", provider: "anthropic", auth: "signin", default: false, key: null, signedIn: false, limitsInForce: null };
@@ -42,7 +46,7 @@ function view(over: Partial<ConnectionsViewProps> = {}) {
     signIn: () => ({ shown: undefined, start: (id) => asked.push({ signInStart: id }), code: () => undefined, finish: (id, code) => asked.push({ signInFinish: id, code }), cancel: (id) => asked.push({ signInCancel: id }), out: (id) => asked.push({ signInOut: id }) }),
     ...over,
   };
-  const tree = expand(h(ConnectionsView, props));
+  const tree = expand(h(ConnectionsView, props), STAND);
   return { tree, text: textOf(tree), asked };
 }
 
@@ -103,13 +107,13 @@ describe("the Connections page", () => {
 
   test("each connection shows its model's limits and where each comes from; a test says how long it took and which model answered, or the provider's words", async () => {
     const listed = view();
-    expect(textOf(elements(listed.tree).find((e) => e.props["data-limits"] === "c-flash")?.props.children)).toBe("Context window: 64,000 tokens, yours · Longest reply: 8,192 tokens, as pi lists it.");
-    expect(textOf(elements(listed.tree).find((e) => e.props["data-limits"] === "c-studio")?.props.children)).toBe("Context window: not known · Longest reply: not known.");
+    expect(textOf(elements(listed.tree).find((e) => e.props["data-limits"] === "c-flash")?.props.children)).toBe("Context window: 64,000 tokens, yours · Longest reply: 8,192 tokens, as pi lists it · Audio: not said, so it is sent · Video: not said, so it is sent.");
+    expect(textOf(elements(listed.tree).find((e) => e.props["data-limits"] === "c-studio")?.props.children)).toBe("Context window: not known · Longest reply: not known · Audio: not said, so it is sent · Video: not said, so it is sent.");
     const flash = elements(listed.tree).find((e) => e.props["data-connection"] === "c-flash");
     press(flash, "Test it");
     expect(listed.asked).toEqual([{ test: "c-flash" }]);
     const answered = view({ tests: { "c-flash": { busy: false, tested: { ok: true, ms: 840, model: "deepseek-v4-flash", limits: { contextWindow: { tokens: 128_000, from: "pi" }, maxTokens: null, pictures: null, asked: ["maxTokens", "pictures"] } }, problem: null } } });
-    expect(answered.text).toContain(`It answered in ${duration(840)}, as deepseek-v4-flash. Context window: 128,000 tokens, as pi lists it · Longest reply: not known.`);
+    expect(answered.text).toContain(`It answered in ${duration(840)}, as deepseek-v4-flash. Context window: 128,000 tokens, as pi lists it · Longest reply: not known · Audio: not said, so it is sent · Video: not said, so it is sent.`);
     const refused = view({ tests: { "c-studio": { busy: false, tested: { ok: false, ms: 120, error: "401: the key (the key) is not valid.", limits: null }, problem: null } } });
     expect(banners(refused.tree)).toEqual([{ title: "It did not answer", text: `It did not answer401: the key (the key) is not valid. (${duration(120)})` }]);
     // The test calls its route for the connection; RPE's own refusal is said in its words.
@@ -158,7 +162,7 @@ describe("the Connections page", () => {
   test("limits that could not be read say why, apart from limits nobody knows", () => {
     const unread = view({ list: { ...LIST, connections: [{ ...KEYED, limitsInForce: null, limitsProblem: "The model catalogue could not be read: its file is not JSON." }] } });
     expect(textOf(elements(unread.tree).find((e) => e.props["data-limits"] === "c-flash")?.props.children)).toBe("Its limits could not be read: The model catalogue could not be read: its file is not JSON.");
-    expect(limitsWords(null)).toBe("Context window: not known · Longest reply: not known");
+    expect(limitsWords(null)).toBe("Context window: not known · Longest reply: not known · Audio: not said, so it is sent · Video: not said, so it is sent");
   });
 
   test("the form shows and saves retries, message threads and serial tools, and the model's figures he enters", () => {

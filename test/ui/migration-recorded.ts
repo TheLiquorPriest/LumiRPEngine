@@ -20,6 +20,7 @@ export const MIGRATED: MigrationReply = {
     mode: "real run",
     at: "2026-11-13T21:04:00.000Z",
     refusals: [],
+    disowned: [],
     counts: { rows: 46, chats: 3, items: 214, notClassified: 0, unreadable: 1, differences: 2, offRpe: 1 },
     disk: { backup: 48_340_992, import: 31_000_000, total: 79_340_992, free: null },
     backup: { path: "/srv/rpe/backups/before-migration.tar", bytes: 48_340_992, sha256: "4f1d2c9a8b7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c" },

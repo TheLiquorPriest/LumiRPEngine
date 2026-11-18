@@ -157,7 +157,7 @@ describe("the World page as it reads the chat's turns", () => {
         };
         const root = page.document.createElement("div") as PageElement;
         await act(() => {
-          render(h(AppContext.Provider, { value: { client, gate: openGate() } as unknown as UiApp }, h(WorldPage, { chat: CHAT })), root as unknown as HTMLElement);
+          render(h(AppContext.Provider, { value: { client, gate: openGate(), kept: () => new Promise(() => undefined) } as unknown as UiApp }, h(WorldPage, { chat: CHAT })), root as unknown as HTMLElement);
         });
         // The reads begin once the page is drawn; their answers are drawn once they are in.
         await act(() => settle());

@@ -56,6 +56,8 @@ function heldClient(): RpeClient & { asked: Asked[]; listener(): LiveListener; c
     state: createStore<ClientState>({ phase: "relay", why: "the test" }),
     missing: createStore<readonly MissingPermissionShown[] | null>(null),
     call(key, params, options) {
+      // The jobs the Live page reads beside the turns are none here: answered at once, so the calls the test counts are the chat's.
+      if (key === "GET /api/v1/jobs") return Promise.resolve({ items: [], next: null } as never);
       const { promise, resolve } = Promise.withResolvers<never>();
       asked.push({ key, params: params as Record<string, string>, query: (options?.query ?? {}) as Record<string, unknown>, answer: (value) => resolve(value as never) });
       for (const w of waiting.filter((x) => x.n < asked.length)) w.resolve(asked[w.n] as Asked);

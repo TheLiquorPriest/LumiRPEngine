@@ -29,7 +29,7 @@ function recorded(): { env: FrameEnv; posted: unknown[]; deleted: string[]; publ
   let waiting: RequestShown[] = [];
   const listeners = new Set<LiveListener>();
   const call = async (key: string, params: Record<string, string>, options?: { body?: unknown }): Promise<unknown> => {
-    if (key === "GET /api/v1/files/*") return { text: params["*"] === "TURN.md" ? TURN : SWIPE };
+    if (key === "GET /api/v1/files-in-force/*") return { text: params["*"] === "@shipped/TURN.md" ? TURN : SWIPE };
     if (key === "GET /api/v1/chats/:chat/requests") return { requests: waiting };
     if (key === "POST /api/v1/chats/:chat/requests") {
       posted.push(options?.body);
@@ -52,7 +52,7 @@ function recorded(): { env: FrameEnv; posted: unknown[]; deleted: string[]; publ
       return () => listeners.delete(listener);
     },
   } as unknown as RpeClient;
-  const env: FrameEnv = { client, chat: createStore<string | null>("c1"), open: () => undefined, settings: createUiSettings(null), timers: { now: () => 0, setTimeout: () => 0, clearTimeout: () => undefined }, host: {} as FrameEnv["host"] };
+  const env: FrameEnv = { client, chat: createStore<string | null>("c1"), open: () => undefined, settings: createUiSettings(null), timers: { now: () => 0, setTimeout: () => 0, clearTimeout: () => undefined }, host: {} as FrameEnv["host"], kept: (() => new Promise(() => undefined)) as FrameEnv["kept"] };
   return {
     env,
     posted,

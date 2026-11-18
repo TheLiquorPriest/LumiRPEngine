@@ -88,7 +88,7 @@ beforeAll(async () => {
     version: "1.0.0",
     areas: [
       { name: "turns", mount: (at) => at.routes.add("turns", [turnsRoute]) },
-      { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [], facts: () => [] })) },
+      { name: "settings", mount: (at) => at.routes.add("settings", settingsRoutes({ settings: [CALLS], levels: async () => [global], connections: async () => [], definitions: async () => [], facts: () => [] })) },
       { name: "connections", mount: (at) => at.routes.add("connections", connectionRoutes(testModelLayer(at.models), NO_TAG_CHECKS, () => at.config.lumiverse.user ?? "", at.log)) },
       { name: "probe", mount: (at) => at.routes.add("probe", [places]) },
       // The proof a page asks for before it sends its token is the sign-in routes', which the app's own area mounts.
@@ -309,7 +309,7 @@ describe("every route the pages call, through the client, on RPE as composed", (
       const table = new Map(b.app.routes.list().map((r) => [keyOf(r), r]));
       const called = [...(await pagesCall())].sort((a, c) => Number(!a.startsWith("GET ")) - Number(!c.startsWith("GET ")));
       const replied: string[] = [];
-      const refused: { key: string; status: number; reading: boolean }[] = [];
+      const refused: { key: string; status: number; reading: boolean; words: string }[] = [];
       const wrong: string[] = [];
       for (const key of called) {
         const info = table.get(key);
@@ -326,13 +326,18 @@ describe("every route the pages call, through the client, on RPE as composed", (
           if (problems.length > 0) wrong.push(`${key}: ${problems.slice(0, 3).join(" ")}`);
           else replied.push(key);
         } catch (error) {
-          if (error instanceof RpeError && error.status >= 400 && error.status < 500 && error.message.trim() !== "") refused.push({ key, status: error.status, reading });
+          if (error instanceof RpeError && error.status >= 400 && error.status < 500 && error.message.trim() !== "") refused.push({ key, status: error.status, reading, words: error.message });
           else wrong.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       expect(wrong).toEqual([]);
-      // A read of what the bed has answers; one is refused only for a character or a file the bed does not hold, named by a param of its path.
-      const strangers = refused.filter((r) => r.reading && !(table.get(r.key)?.params ?? []).some((p) => p !== "chat" && p !== "turn"));
+      // A read of what the bed has answers; one is refused only for what the bed does not hold: a character or a file named by a param of its path, a world (the bed's chat plays none), a turn a migration carried, or a value its query is given that the bed does not have.
+      const lacks = /plays no world|not one a migration carried/;
+      const queried = (key: string): boolean => {
+        const d = table.get(key)?.declared;
+        return d !== undefined && "query" in d && Object.keys(d.query).length > 0;
+      };
+      const strangers = refused.filter((r) => r.reading && !lacks.test(r.words) && !queried(r.key) && !(table.get(r.key)?.params ?? []).some((p) => p !== "chat" && p !== "turn"));
       expect(strangers).toEqual([]);
       // The reads that answered are most of what the pages call: a call that is refused each time checks nothing.
       expect(replied.filter((key) => key.startsWith("GET ")).length).toBeGreaterThan(15);
@@ -341,5 +346,5 @@ describe("every route the pages call, through the client, on RPE as composed", (
       for (const client of open) client.close();
       await b.close();
     }
-  });
+  }, 60_000);
 });

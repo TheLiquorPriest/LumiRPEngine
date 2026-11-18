@@ -6,13 +6,16 @@ import type { VNode } from "preact";
 
 type Props = Record<string, unknown> & { children?: unknown };
 
+/** A component of the page that reads the app through a hook, which a call made with no page to render in cannot, drawn by a stand-in of the test's own. */
+export type Stand = ReadonlyMap<unknown, (props: Props) => unknown>;
+
 /** The tree with every component called, down to plain elements. */
-export function expand(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(expand);
+export function expand(node: unknown, stand?: Stand): unknown {
+  if (Array.isArray(node)) return node.map((each) => expand(each, stand));
   if (node === null || typeof node !== "object" || !("type" in node)) return node;
   const vnode = node as VNode<Props>;
-  if (typeof vnode.type === "function") return expand((vnode.type as (props: Props) => unknown)(vnode.props));
-  return { ...vnode, props: { ...vnode.props, children: expand(vnode.props.children) } };
+  if (typeof vnode.type === "function") return expand((stand?.get(vnode.type) ?? (vnode.type as (props: Props) => unknown))(vnode.props), stand);
+  return { ...vnode, props: { ...vnode.props, children: expand(vnode.props.children, stand) } };
 }
 
 /** Every word an expanded tree shows, in order. */

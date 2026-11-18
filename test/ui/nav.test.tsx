@@ -143,11 +143,11 @@ describe("the bars of pages", () => {
 
   test("with no chat to show, the web shell's chat pages are there and cannot be pressed, and so are the chat's pages behind More while the rest can be; signed out, More cannot be pressed either", async () => {
     const bar = await drawn("foot", "chats", (item) => item.needsChat);
-    expect(bar.entries().filter((el) => el.disabled).map(words)).toEqual(["Live", "Turns", "World", "Play"]);
+    expect(bar.entries().filter((el) => el.disabled).map(words)).toEqual(["Turns", "World", "Play"]);
     await act(() => bar.more().click());
-    expect(bar.list()?.children.filter((el) => el.disabled).map(words)).toEqual(["Sessions", "Cast", "Prompt", "Story", "Places", "Quests", "Lore"]);
+    expect(bar.list()?.children.filter((el) => el.disabled).map(words)).toEqual(["Cast", "Prompt", "Story", "Places", "Quests", "Lore"]);
     await act(() => bar.more().click());
-    for (const title of ["Live", "Settings"]) await bar.tap(title);
+    for (const title of ["Turns", "Settings"]) await bar.tap(title);
     expect(bar.gone).toEqual(["settings"]);
     await bar.close();
 

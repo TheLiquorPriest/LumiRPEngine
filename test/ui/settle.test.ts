@@ -115,7 +115,7 @@ describe("Settle now", () => {
     const row = EARLIER[0] as TurnsViewProps["turns"][number];
     const swipe = { ...(row.runs[0] as TurnsViewProps["turns"][number]["runs"][number]), kind: "swipe" as const, status: "failed" as const, error: { code: "provider" as const, detail: "The connection closed." } };
     const settle = { ...swipe, nth: 2, kind: "settle" as const, status: "no-reply" as const, error: null, usage: { ...swipe.usage, calls: 22 } };
-    const list = turns({ turns: [{ ...row, kind: "settle", status: "no-reply", runs: [swipe, settle] }] });
+    const list = turns({ turns: [{ ...row, kind: "swipe", status: "no-reply", runs: [swipe, settle] }] });
     expect(list.text).toContain("Swipe");
     expect(list.text).toContain("Reply released, then its run failed");
     expect(list.text).toContain("Then a settle run (it ran because you pressed Settle now, and it writes nothing to the chat)");

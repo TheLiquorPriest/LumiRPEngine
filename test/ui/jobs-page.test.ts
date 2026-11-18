@@ -33,6 +33,6 @@ describe("what he may do with a job where it stands", () => {
 describe("the limits he types", () => {
   test("an empty field sets none, a whole number of at least one is kept, anything else is named", () => {
     expect(limitsOf({ calls: "3", tokens: "", time: "90" })).toEqual({ limits: { calls: 3, time: 90 }, bad: [] });
-    expect(limitsOf({ calls: "0", tokensIn: "2.5", tokensOut: "x" }).bad).toEqual(["calls", "tokensIn", "tokensOut"]);
+    expect(limitsOf({ calls: "0", tokensIn: "2.5", tokensOut: "x" }).bad).toEqual(["Calls at most", "Tokens in at most", "Tokens out at most"]);
   });
 });

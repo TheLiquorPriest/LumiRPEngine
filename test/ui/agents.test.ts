@@ -24,11 +24,11 @@ describe("a definition's file made again", () => {
 });
 
 describe("what a definition runs on", () => {
-  const agent = (over: Partial<ListedDefinition> = {}): ListedDefinition => ({ name: "gm", description: "", path: "p", level: "shipped", replaces: [], off: false, tools: [], reads: [], given: [], runsOn: { connection: { id: "c1", name: "Flash" }, model: "deepseek-v4-flash", effort: "medium" }, ...over });
+  const agent = (over: Partial<ListedDefinition> = {}): ListedDefinition => ({ name: "gm", description: "", path: "p", level: "shipped", replaces: [], off: false, tools: [], reads: [], given: [], runsOn: { connection: { id: "c1", name: "Flash" }, model: "deepseek-v4-flash", effort: "medium", sent: "medium" }, ...over });
 
   test("the connection, model and effort are said, and a definition with no connection says so; those in force come first", () => {
     expect(runsWords(agent())).toBe("Flash · deepseek-v4-flash · medium");
-    expect(runsWords(agent({ runsOn: { connection: null, model: null, effort: null } }))).toBe("no connection resolves");
+    expect(runsWords(agent({ runsOn: { connection: null, model: null, effort: null, sent: null } }))).toBe("no connection resolves");
     expect(sortedAgents([agent({ name: "b", off: true }), agent({ name: "c" }), agent({ name: "a" })]).map((a) => a.name)).toEqual(["a", "c", "b"]);
   });
 
