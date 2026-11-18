@@ -165,7 +165,7 @@ rules_unknown: There is no rule set {{rules}}. The rule sets: {{choices}}.
 rules_no_world: This chat plays no world, so there is nothing to put rules on or add a row to.
 rules_behind: This chat plays an older revision of its world than the newest, which has changes this chat does not have yet. Move the chat to the newest first (world_upgrade), then try again. Nothing was changed.
 rules_draft_open: The world has changes in Build that are not kept yet, and a revision made for the rules would keep them too. Nothing was changed: whoever owns the world keeps them or discards them in Build first.
-rules_not_conflict: {{paths}}: {{rules}} has no conflict with this world there. Its conflicts: {{conflicts}}. Nothing was changed.
+rules_not_conflict: At {{paths}} the world has nothing of its own that {{rules}} would change, so there is nothing to take there. What {{rules}} would change: {{conflicts}}. Nothing was changed.
 rules_plan: Nothing was changed. {{rules}} would add {{added}} to this world, finds {{same}} there already, and meets {{kept}} of the world's own that it would change{{#taken}}, {{taken}} of them as you named{{/taken}}.
 rules_done: {{rules}} is on this world as revision {{revision}}: {{added}} added{{#taken}}, {{taken}} of the world's own replaced as you named{{/taken}}. This chat moves to it from its next turn; the world's other chats stay on the revision they play. One Undo of the Upgrade takes it back.
 rules_already: This world has all of {{rules}} already, so no revision was made.
@@ -260,7 +260,7 @@ acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} alre
 out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
 out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
 fight_cost_not_left: Operation {{n}} ({{op}}): the action costs {{cost}} of the fight's budgets, which {{who}} has not left ({{why}}); it was carried out and recorded into the fight all the same.
-no_d20_rules: This world has no tabletop rules (its ruleset has no d20 part), so there is no sheet of them to read; world_query at the person reads what it holds.
+no_d20_rules: This world has no tabletop rules, so there is no sheet of them to read; world_query at the person reads what it holds.
 rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
 harm_kept: Operation {{n}} ({{op}}): this world's ruleset names no gauge a fight's harm comes off (its combat hp), so the {{harm}} harm to {{who}} was kept with the act and no value changed.
 harm_no_gauge: Operation {{n}} ({{op}}): {{who}} has no {{gauge}}, the gauge this world's ruleset takes a fight's harm off, so the {{harm}} harm was kept with the act and no value changed.
