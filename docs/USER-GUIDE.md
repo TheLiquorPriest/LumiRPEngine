@@ -65,6 +65,7 @@ Under each reply RPE played, a line says:
 
 - the world's date and time when the turn ended, and where your character was, where the chat plays a world;
 - **Story** and **Engine**, each with how many changes the turn made in that lane; tap one for the short list;
+- the turn's **marks**, where it has any: **edited** (its reply was edited in the chat after it was saved; the Author is told the text before and after at the next turn), **interrupted** (RPE restarted while a run of the turn went on), **saved otherwise** (what Lumiverse saved is not what was released), **an earlier message edited** and **a message inserted before it**. Each is a short word: point at it or press it for what it means, with **See it on the turn's page**;
 - **Turn**, which opens the turn's page (see [The Turns page](#the-turns-page)).
 
 A reply RPE did not play says **Made without RPE.** A reply carried over from the previous build says which engine played it.
@@ -85,8 +86,12 @@ RPE's notices show in the chat's toolbar, so you see them with the drawer shut.
 
 While the chat plays a world, RPE shows the world's status over the chat.
 
-- **On a wider screen**, a small pill floats over the chat. Drag it where you like; it remembers its place, the phone's and the desktop's apart. It shows the time (with a pause sign while the clock is paused, and the time scale when it is not 1×), your place, the weather and your cash, each when the world has it, and ✎ where a value can be fixed. On a screen narrower than 760 px it shows the time and **Show place, weather and cash**. A pulse shows while a turn runs, and **Paused** while a turn is held on the Live page.
-- **On a phone**, a status line sits above the message box instead: the time, your place and your cash, the same pulse and **Paused**, and **Act**, which opens the actions sheet.
+- **On a wider screen**, a small pill floats over the chat. Drag it where you like; it remembers its place, the phone's and the desktop's apart. It shows the time (with a pause sign while the clock is paused, and the time scale when it is not 1×), your place, the weather and your cash, each when the world has it, and ✎ where a value can be fixed. On a screen narrower than 760 px it shows the time and **Show place, weather and cash**. **Paused** shows while a turn is held on the Live page.
+- **On a phone**, a status line sits above the message box instead: the time, your place and your cash, **Paused**, and **Act**, which opens the actions sheet.
+
+**While a turn runs**, the HUD says who is at work and the newest progress line it gave, with how long the turn has run (where there is little room, only the time). A turn that failed says so, with why where there is room; press it to open the turn's page. Where a turn ended before a word of its reply went out, it says that the empty reply stays in your chat and what to do with it. This holds when you open the chat while a turn runs, or after one ended.
+
+**While a press waits for your next message**, the HUD shows **With your next message:** and what you pressed and on what, with **Send now** and ✕ (**Take it back**); see [What a press does](#what-a-press-does).
 
 Tap either for the **World** details: the time and the part of the day, your place, the scene type and how long the last turn took, the weather and your cash, each with its ✎ where it can be fixed; **This turn**, with its calls, seconds, tokens and lore lookups; **Pause clock** or **Resume clock**; **Map**, where the world has a map; and **Actions**.
 
@@ -108,7 +113,7 @@ A fix is your own change, made at once and kept on the chat's newest turn, with 
 
 **World actions…**, **Act**, and **Actions** in the World details open the actions sheet over the chat. It lists what your character can do here and now, by tab: **Actions**, **Buy**, **Pay**, **Transfer**, **Lend**, **Drive**, **Timelapse** and, in a world with combat, **Combat**, each where it has something. An action shows its targets, its minutes and its price, and an action with a check shows its odds. One that is not possible here and now stays listed, with why. **Go to** asks who comes along. **Timelapse** offers lengths of time, times to go until, and what may stop it.
 
-What you pick does not play by itself. It waits for your next message, and the Author is told what you pressed and on what, and plays it as what you want, with your words for how. Pick the same thing again to take it back. See [What a press does](#what-a-press-does).
+What you pick does not play by itself. It waits for your next message, and the Author is told what you pressed and on what, and plays it as what you want, with your words for how. While it waits, the sheet shows it chosen, marked **With your next message**, and its button reads **Take back** …; pick it again to take it back. **Send now**, beside a choice, puts it in the chat as your message at once and starts the reply. See [What a press does](#what-a-press-does).
 
 **World map** opens the map over the chat (see [The map](#the-map)).
 
@@ -145,10 +150,11 @@ On this page, **Act**, **Timelapse…** and **Combat actions** say "The actions 
 
 ### What a press does
 
-A press in the play views (here, in the HUD, in the actions sheet or on the map in the chat) does one of three things.
+A press in the play views (here, in the HUD, in the actions sheet or on the map in the chat) does one of these things.
 
-- **It is done at once.** Every money and organization control (paying, moving money, cards, standing payments, credit, investing, property, invoices, staff, members, structure, votes, the plan), your Belongings' controls, and each ✎ fix. It is your own change, kept on the chat's newest turn. A notice says what was done, with **Undo**. No message is sent, no reply is written and no time passes.
-- **It waits for your next message.** Everything else: going somewhere, taking or giving a thing, buying, driving, a Timelapse, an action of the world's own. RPE keeps it with your next message, and the Author is told what you pressed and on what, and plays it as what you want, with your words for how. Press the same thing again to take it back. Nothing on the page shows it while it waits; once the turn has run, its page lists it under **What you asked for**.
+- **It is done at once.** Every money and organization control (paying, moving money, cards, standing payments, credit, investing, property, invoices, staff, members, structure, votes, the plan), your Belongings' controls, **Show a hint** on a quest, and each ✎ fix. It is your own change, kept on the chat's newest turn. A notice where you pressed says what was done ("Done: …"), with **Undo** in it. No message is sent, no reply is written and no time passes.
+- **It waits for your next message.** Everything else: going somewhere, taking or giving a thing, buying, driving, a Timelapse, **Walk here**, an action of the world's own. RPE keeps it with your next message, and the Author is told what you pressed and on what, and plays it as what you want, with your words for how. While it waits, the HUD (and the actions sheet or the map, where you pressed it) shows **With your next message:** and what you pressed, with **Send now** and ✕; the actions sheet shows the action chosen, and the map the square. Press the same thing again, or ✕, to take it back. Once the turn has run, its page lists it under **What you asked for**.
+- **It plays now.** **Send now**, on what waits or beside a choice in the actions sheet and the Timelapse, puts that line in the chat as your message and starts the reply, as if you had sent it: "Sent as your message: the reply is on its way in the chat." It cannot be pressed while a turn of the chat runs ("A turn is running: send it once the reply is in."), and it needs RPE connected to your Lumiverse. Where it cannot send, it says why, nothing is put in the chat and what waits still waits ([each answer](troubleshooting.md#a-panel-on-the-play-page-refuses)).
 - **It reads.** Opening a sheet, a tab or a place changes nothing.
 
 **Telling the Author.** A control that is done at once has **Tell** and **Don't tell**: whether the next turn's Author is told you did it. When you choose neither, its group's setting decides: **Tell the Author: Payments to others**, **Credit**, **Property**, **Business**, **Staff**, **Members**, **Structure** and **Hand-overs and outfits** are on as shipped; **Your own accounts**, **Investing**, **Governance** and **Things** are off (`taps.tell.<group>`). **Payments told from** (`taps.tell.paymentsFrom`) sets the amount from which a payment to someone else is told.
@@ -258,7 +264,7 @@ Tap a place for its sheet: whether you are here, have been or have only heard of
 
 **Known** and **Fog** choose how the map shows what your character knows, for this chat: **Known** draws a place you have only heard of as a dashed ring; **Fog** dims what you have not been to and covers what you have not seen. Your choice is the chat's setting **How the map panel shows the map** (`map.display`).
 
-Where the world uses the grid system, you stand on a square: tap a square of your grid and its card offers **Walk here** with the time it takes, around the walls and through the doors, or says "No way there from here."; the walk waits for your next message. Walls and doors are drawn as thin lines; a place you know may carry a mark (**Home**, **Yours**, **For sale**), named in the legend under **The map shows**.
+Where the world uses the grid system, you stand on a square: tap a square of your grid and its card offers **Walk here** with the time it takes, around the walls and through the doors, or says "No way there from here."; the walk waits for your next message, its square marked on the map, and the card then offers **Take back Walk here**. Walls and doors are drawn as thin lines; a place you know may carry a mark (**Home**, **Yours**, **For sale**), named in the legend under **The map shows**.
 
 In the chat, **World map** and **Map** open the same map over the chat.
 
@@ -280,7 +286,7 @@ A chat has one clock. With a world, it runs on the world's calendar, and the HUD
 
 From Cast life 4, people get hungry, tired, lonely and bored: hunger, fatigue, social and fun, each from 0 (met) to 100 (urgent). They rise with the clock. They come down only when the engine records what met them, one of the world's actions: **eat** for hunger, **sleep** for fatigue, **chat_with** for social, **rest** for fun. Passing the minutes of a meal does not meet hunger. As shipped, the `time` skill tells the agents to record a meal, a night's sleep or a rest with its action, so that the need comes down.
 
-**Me → Needs** shows your own. A need that crosses its point is listed among what falls due. A world sets each need in **Build → Needs**: how fast it grows (**Grows by … points an hour, out of 100**), the point it is pressing from (the field reads **Told to the narrator from …**), and its alert point (**An alert from …**), with an **On** or **Off** for each and **Use the defaults**. Anyone can have a **bed** (the person's **Bed** field in Build): **sleep** takes them to it.
+**Me → Needs** shows your own, each from 0 (met) to 100 (urgent), with the point from which it presses ("From 60 you're hungry.", or "You're hungry." once it does) and what meets it. The Author is not shown these numbers: the world state it is given each turn says when one of your needs will reach its alert point, if that falls within the time ahead it lists (**Time ahead listed as due**, `worldState.dueAheadMinutes`, 360 minutes), and which reached it as the last turn moved the clock; and a need that reaches it is listed among what falls due when time passes. A world sets each need in **Build → Needs**: how fast it grows (**Grows by … points an hour, out of 100**), the point from which the Needs panel marks it as pressing (**Marked as pressing from …**) and the point from which it is listed as due (**Listed as due from …**), with an **On** or **Off** for each and **Use the defaults**. Anyone can have a **bed** (the person's **Bed** field in Build): **sleep** takes them to it.
 
 ### Routines and schedules
 
@@ -696,6 +702,8 @@ Neither is a turn of RPE: no agent plays in them.
 **Settings** holds every setting RPE and its harness read, found by what it does: in sections of plain words, chosen from a row of them (a column beside the settings on a wide page), with **Find a setting** over every name and what it does, and **Changed** to show only the ones you changed. Each setting shows what it does, the control that fits it, its unit, the advice its value passes, what was shipped with the way back to it, and where it is set. A switch or a choice is written at once; a typed value waits for **Save** (or Enter). RPE takes or refuses a value in its own words.
 
 With a chat open, **Where a change goes** chooses **For every chat** or **For this chat only**. Your changes for every chat are kept in `files/RPE-global.yml`; a chat's own in its `RPE.yml`. The settings set for one connection or one agent at a time are a table, a row for each: press a cell to change it. **Server and service** lists what the server's own command line sets (`rpe up`, `rpe lumiverse`) and [anything that runs a command or calls out](#what-runs-a-command-or-calls-out): no page can change those. Every setting, its default and what it does is in [settings.md](settings.md).
+
+**On this device** holds what this browser keeps for itself, not in RPE's settings and not on your other devices: **Show ids**, which shows each id beside its name in Build (people, places, things, kinds, tables and the rest), for when a rule, a formula or a line of lore names one by its id. Play shows names only.
 
 ### The Storage page
 
