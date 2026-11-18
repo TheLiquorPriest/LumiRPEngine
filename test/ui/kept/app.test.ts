@@ -5,7 +5,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { type RpeClient, RpeError } from "../../../src/ui/client";
-import { keptApp, type ToastSettings } from "../../../src/ui/kept/app";
+import { chooseShowIds, type Kept, keptApp, showIdsChosen, type ToastSettings } from "../../../src/ui/kept/app";
 import type { CallFile } from "../../../src/ui/kept/client";
 import { webHost } from "../../../src/ui/kept/host";
 import { createStore } from "../../../src/ui/store";
@@ -111,6 +111,30 @@ describe("the App kept for Build and Play", () => {
     chat.set(null);
     expect(kept.app.sync.get()).toMatchObject({ chatId: null, view: null });
     kept.stop();
+  });
+
+  test("Show ids chosen on this device reaches every kept App at once, and stays chosen for the next one", () => {
+    const kept = new Map<string, string>();
+    const had = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) } });
+    try {
+      const open = (): Kept => keptApp({ client: { call: (() => Promise.reject(new Error("no"))) as RpeClient["call"], ...quiet }, chat: createStore<string | null>(null), mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });
+      const first = open();
+      expect(first.app.ui.get().showIds).toBe(false);
+      expect(chooseShowIds(true)).toBe(true);
+      expect(first.app.ui.get().showIds).toBe(true);
+      expect(showIdsChosen()).toBe(true);
+      const second = open();
+      expect(second.app.ui.get().showIds).toBe(true);
+      first.stop();
+      chooseShowIds(false);
+      expect(second.app.ui.get().showIds).toBe(false);
+      expect(first.app.ui.get().showIds).toBe(true);
+      second.stop();
+    } finally {
+      if (had === undefined) Reflect.deleteProperty(globalThis, "localStorage");
+      else Object.defineProperty(globalThis, "localStorage", had);
+    }
   });
 });
 

@@ -94,13 +94,44 @@ export interface Kept {
   stop(): void;
 }
 
-/** Show ids, as this device last chose it in today's Settings → Display; hidden where storage is refused. */
+/** Show ids, as this device last chose it (Settings, On this device); hidden where storage is refused. */
 export function showIdsChosen(): boolean {
   try {
     return localStorage.getItem(SHOW_IDS_KEY) === "true";
   } catch {
     return false;
   }
+}
+
+/** The page's word that Show ids changed on this device, which every kept App of the page hears, in whichever of RPE's files it was made. */
+export const SHOW_IDS_CHANGED = "rpe:show-ids";
+
+/** Show ids chosen on this device and told to every kept App of the page; false where the browser refuses to keep it. */
+export function chooseShowIds(on: boolean): boolean {
+  try {
+    localStorage.setItem(SHOW_IDS_KEY, on ? "true" : "false");
+  } catch {
+    return false;
+  }
+  globalThis.dispatchEvent?.(new Event(SHOW_IDS_CHANGED));
+  return true;
+}
+
+/** Follows Show ids as this device keeps it: chosen on this page, or in another tab of the same browser; the returned function stops. */
+function followShowIds(ui: Store<UiState>): () => void {
+  const take = (): void => {
+    const on = showIdsChosen();
+    if (ui.get().showIds !== on) ui.update((held) => ({ ...held, showIds: on }));
+  };
+  const fromTab = (event: Event): void => {
+    if ((event as StorageEvent).key === SHOW_IDS_KEY) take();
+  };
+  globalThis.addEventListener?.(SHOW_IDS_CHANGED, take);
+  globalThis.addEventListener?.("storage", fromTab);
+  return () => {
+    globalThis.removeEventListener?.(SHOW_IDS_CHANGED, take);
+    globalThis.removeEventListener?.("storage", fromTab);
+  };
 }
 
 /** Today's client, but the chat's view comes from RPE's state route: asking for it afresh reads it again (chat-state.ts). */
@@ -197,6 +228,7 @@ export function keptApp(deps: KeptDeps): Kept {
   stops.push(client.onError((error) => toast(error.message, "error")));
 
   const ui = createStore<UiState>({ ...initialUi(showIdsChosen()), mode: deps.mode });
+  stops.push(followShowIds(ui));
   if (deps.mode === "build") {
     // A place Build opens at, then said once for the place it is on: what a refusal said stays only while the same page shows.
     let place = JSON.stringify(ui.get().build);

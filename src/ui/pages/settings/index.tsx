@@ -20,6 +20,7 @@ import { type ChangeLevel, isChanged, type SectionShown, sectionsOf, settingMatc
 import { type RowActions, SettingRow } from "./row";
 import { SettingsTable } from "./table";
 import { WaitingSection } from "./waiting";
+import { chooseShowIds, showIdsChosen } from "../../kept/app";
 
 // ---------------------------------------------------------------- the calls and the state over them
 
@@ -208,6 +209,39 @@ function ServerExtras(props: SettingsViewProps) {
   );
 }
 
+/** What this browser keeps for itself and RPE's settings do not hold: Show ids, written here and nowhere else. */
+export function DeviceChoices() {
+  const [ids, setIds] = useState(showIdsChosen);
+  const [refused, setRefused] = useState(false);
+  return (
+    <section class="rpe-set-section" data-section="device">
+      <div class="rpe-set-sectionhead">
+        <h3 class="lre-section-title">On this device</h3>
+        <p class="rpe-meta">Kept by this browser alone: not in RPE's settings, and not on your other devices.</p>
+      </div>
+      <div class="rpe-set-group" data-device="show-ids">
+        <label class="rpe-switch">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="Show ids"
+            checked={ids}
+            onChange={() => {
+              const kept = chooseShowIds(!ids);
+              setRefused(!kept);
+              if (kept) setIds(!ids);
+            }}
+          />
+          <span class="rpe-switch-track" aria-hidden="true" />
+          <span>Show ids</span>
+        </label>
+        <p class="rpe-meta">Shows each id beside its name in Build (people, places, things, kinds, tables and the rest), for when a rule, a formula or a line of lore names one by its id. Play shows names only, as your character knows them.</p>
+        {refused ? <p class="rpe-meta">This browser does not let pages keep anything, so Show ids cannot be kept here.</p> : null}
+      </div>
+    </section>
+  );
+}
+
 export function SettingsView(props: SettingsViewProps) {
   const { shown } = props;
   const reply = shown.reply;
@@ -270,6 +304,7 @@ export function SettingsView(props: SettingsViewProps) {
           <p class="rpe-meta">Read from {reply.files.map((f) => `${f.file} (${LEVEL_WORDS[f.level]})`).join(", ")}.</p>
         </>
       )}
+      <DeviceChoices />
     </div>
   );
 }
