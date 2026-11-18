@@ -24,6 +24,8 @@ Every roll, every harm and every change to a sheet has an action of the rules, c
 
 **You name who, what and against whom. The action reads every number.** Do not hand in a modifier, a defence, a total, a damage figure or a count of hit points that a sheet or the rules have: the action takes them from the sheets and the tables, says them in its answer and keeps them on the sheet, so that what was rolled can be seen and followed. What you do give is what the story gives and no sheet has: a circumstance (`mods`: a number, its type and why, as in "+2 circumstance: high ground"), a difficulty the table has not, how long an effect lasts, the harm of a fall or a fire.
 
+**A check, a save or an attack for someone who has a sheet is always the action** (`act` with `check`, `save` or `attack`), never `roll` with dice and a bonus you added up. A circumstance you judge (a first-aid kit, high ground, darkness) goes in as a named modifier of the action (`mods`), never as a number added to bare dice. `roll` with bare dice is for what no sheet covers.
+
 ### Choosing a difficulty
 
 The rules have a table of usual difficulties, each with a name and a number: read it with `world_query` at `ruleset`. Choose the one that fits what is attempted and the circumstances, by its name (`difficulty` "hard"). Choose by the task, never by who attempts it: the sheet already counts who. Give a number only where the story has set one. Against another person's skill, name them (`vs`) and the action rolls theirs.
