@@ -16,6 +16,7 @@ import { neededWords, paramChoices } from "../../src/engine/param-words";
 import { creditProducts } from "../../src/packs/economy/core/credit";
 import { headOf } from "../../src/play/owner-edits";
 import { orOf } from "../../src/shared/lines";
+import type { PanelAsk } from "../../src/turn/requests";
 
 /** A press of the starter world's palette that waits for the next message, as the taps route takes it. */
 async function pressThatWaits(bed: Bed): Promise<{ kind: "action"; action: string; params: JsonObject; source: string }> {
