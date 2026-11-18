@@ -268643,4 +268643,4 @@ if (Bun.isMainThread)
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs(process.execPath, Bun.main)
-  }, { version: "dcf1d93b", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "3948aa28", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
