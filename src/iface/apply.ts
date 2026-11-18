@@ -15,6 +15,7 @@ import { prepareBases } from "../places/prepare";
 import { type Lane, PRECISIONS, STANDINGS, type StoreState } from "../store/types";
 import { type Call, NUMBER, OBJECT, oneOf, Reply, TEXT, TEXTS, type ToolSpec, WHOLE, YES_NO } from "./kit";
 import { type OpContext, type OpDef, tellUnread, type Unread } from "./ops";
+import { ACT_OPS } from "./ops-act";
 import { THING_OPS } from "./ops-things";
 import { TIME_OPS } from "./ops-time";
 import { VALUE_OPS } from "./ops-values";
@@ -24,10 +25,10 @@ import { MARKS, PROVENANCE_PROPERTIES, type Provenance, provenanceOf, SOURCE_KIN
 import { type Fields, textOf } from "./texts";
 import { answerDraft, commit, Draft } from "./writing";
 
-/** The everyday operations, in the order the plan names them. */
-export const OPERATION_NAMES = ["move", "place", "give", "wear", "store", "pay", "pass_time", "set", "fact", "quest", "relate", "spawn", "horizon"] as const;
+/** The everyday operations, in the order the plan names them, and `act`, which carries out one of the world's own actions (plan §6.5). */
+export const OPERATION_NAMES = ["move", "place", "give", "wear", "store", "pay", "pass_time", "set", "fact", "quest", "relate", "spawn", "horizon", "act"] as const;
 
-const BY_NAME: ReadonlyMap<string, OpDef> = new Map([...THING_OPS, ...TIME_OPS, ...VALUE_OPS].map((d) => [d.name, d]));
+const BY_NAME: ReadonlyMap<string, OpDef> = new Map([...THING_OPS, ...TIME_OPS, ...VALUE_OPS, ...ACT_OPS].map((d) => [d.name, d]));
 
 /** Every operation, in the plan's order. */
 export const OPERATIONS: readonly OpDef[] = OPERATION_NAMES.map((name) => {
@@ -93,6 +94,8 @@ export const OPERATION_PROPERTIES: Record<string, JsonObject> = {
   near: TEXT,
   zone: TEXT,
   why: TEXT,
+  action: TEXT,
+  params: OBJECT,
   lane: oneOf([...new Set(OPERATIONS.flatMap((d) => d.lanes ?? []))]),
   ...PROVENANCE_PROPERTIES,
   source: { anyOf: [...SOURCE_KINDS.map((from) => ({ const: from })), { type: "object", required: ["from"], properties: { from: oneOf(SOURCE_KINDS), lore: TEXT, message: TEXT, roll: TEXT, gap_check: TEXT, consent: TEXT } }] },
@@ -108,7 +111,7 @@ function needed(): JsonObject[] {
 }
 
 /**
- * One operation of a call as the schema holds it: its name is one of the thirteen and, once it has one, what its kind needs is there, so
+ * One operation of a call as the schema holds it: its name is one of the operations and, once it has one, what its kind needs is there, so
  * the check that runs before the tool does names the field and what it takes. An argument the operation does not read is not refused: the
  * answer says it.
  */

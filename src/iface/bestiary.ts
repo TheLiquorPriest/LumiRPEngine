@@ -45,13 +45,13 @@ export function bestiaryRow(world: Pick<WorldDoc, "tables">, said: string): Best
   return rows.find((r) => r.id === said.trim()) ?? rows.find((r) => r.id.toLowerCase() === lower || r.name.toLowerCase() === lower);
 }
 
-/** The world's ruleset part as data, its bestiary with it: what the GM reads to rule by. */
-export function rulesetData(world: Pick<WorldDoc, "ruleset" | "tables" | "checks" | "actions">): JsonObject {
+/** The world's ruleset part as data, its bestiary with it: what the GM reads to rule by. `actions`: the ids of the actions listed, the world's own when not given. */
+export function rulesetData(world: Pick<WorldDoc, "ruleset" | "tables" | "checks" | "actions">, actions: readonly string[] = Object.keys(world.actions)): JsonObject {
   const ruleset: RulesetDef = world.ruleset ?? {};
   return {
     ...(JSON.parse(JSON.stringify(ruleset)) as JsonObject),
     checks: Object.keys(world.checks) as JsonValue,
-    actions: Object.keys(world.actions) as JsonValue,
+    actions: [...actions] as JsonValue,
     bestiary: bestiaryOf(world).map((r) => ({ ...r }) as unknown as JsonValue),
   };
 }

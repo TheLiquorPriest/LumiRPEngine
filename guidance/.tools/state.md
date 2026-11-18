@@ -9,6 +9,10 @@ world_apply takes `operations`, applied in order, each on the state the ones bef
 
     world_apply {"operations": [{"op": "move", "who": "Ada", "to": "Keeper's kitchen", "source": {"from": "prose", "message": "m-12"}}, {"op": "pay", "who": "Ada", "to": "Tobin", "amount": 3, "reason": "purchase", "source": {"from": "prose", "message": "m-12"}}]}
 
+An `act` operation carries out one of the world's actions by its id (`action`; `world_query` at `ruleset` lists them all): `who` takes it (left out, the player's character), `params` are the action's own arguments by name, and `outcome` is the one you ruled (left out, an action with a check rolls it). The answer says any requirement that does not hold, the action's own minutes and the activity it started; the time passes only by a `pass_time` after it.
+
+    world_apply {"operations": [{"op": "act", "action": "eat", "who": "Ada", "params": {"minutes": 30}, "source": {"from": "prose", "message": "m-14"}}, {"op": "pass_time", "minutes": 30, "source": {"from": "prose", "message": "m-14"}}]}
+
 roll rolls once for `who`, by `dice` (such as 1d20+3) or by one of the world's checks (`check`), with an optional `against` difficulty and `for`, what it decides. The answer gives the roll's id, which a later write cites as its source.
 
     roll {"who": "Ada", "check": "athletics", "against": 15, "for": "swimming the channel"}

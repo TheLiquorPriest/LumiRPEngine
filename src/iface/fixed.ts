@@ -65,7 +65,8 @@ export const WORLD_QUERY: ToolSpec = {
     const reply = call.reply();
     const reading = readingOr(call, reply);
     if (reading === null) return reply;
-    if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc) });
+    // Every action the world plays, the packs' and its own, by id: what `act` carries out and `checks_odds` reads.
+    if (args.at === RULESET_POINT) return reply.data({ ruleset: rulesetData(reading.doc, [...new Set([...reading.registry.actions.keys(), ...Object.keys(reading.doc.actions)])].sort()) });
     // (S17Story, quests) The quests' level, or a quest by name, id or ref: its record whole.
     const quest = queryQuests(call, reading, reply, args.at);
     if (quest !== null) return quest;

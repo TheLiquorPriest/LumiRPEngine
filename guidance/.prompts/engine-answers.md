@@ -129,6 +129,7 @@ off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, o
 not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, so nothing was added to it and it stays as it was; the change is recorded as given.
 capped: Operation {{n}} ({{op}}): {{field}} of {{entity}} was {{was}} and is held to {{now}}, the cap given; the change is recorded as given.
 advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).
+unmet_requirement: Operation {{n}} ({{op}}) was carried out, though one of the action's requirements does not hold: {{requirement}}{{#words}} ({{words}}){{/words}}.
 on_map: Operation {{n}} ({{op}}): {{said}}
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.
@@ -245,6 +246,7 @@ driver_gone: Operation {{n}} ({{op}}): the driver recorded for {{what}} ({{who}}
 not_recorded: Operation {{n}} ({{op}}): {{what}} has no {{field}} recorded, so the amount given was not added.
 not_a_vehicle: Operation {{n}} ({{op}}): {{name}} is not a vehicle. The vehicles nearest that name: {{vehicles}}. To put a thing somewhere, use the move operation.
 wants_number: a number
+wants_yes_no: true or false
 unknown_holiday: {{#n}}Operation {{n}} ({{op}}): {{/n}}no holiday {{holiday}} is on this calendar; the holidays are: {{holidays}}.
 wants_date_md: a day of the year as MM-DD, such as 12-25
 wants_date_rule: an object: {"type": "fixed", "month", "day"}, {"type": "nth_weekday", "month", "weekday" (0 is Sunday), "n"}, {"type": "easter", "days" from Easter} or {"type": "relative", "to" (a holiday's id), "days"}

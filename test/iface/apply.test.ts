@@ -205,7 +205,7 @@ describe("answers that say what would work", () => {
     const r = await t.call("world_apply", { operations: [{ op: "fact", subject: "bram", value: "Keeps a ledger of every debt.", source: src }] });
     expect(texts(r)).toEqual(["Operation 1 (fact) needs about, key.", "fact needs about, key, value, and also takes replaces, part, beat. It does not read subject.", "Nothing was recorded. Send the call again with that put right."]);
     const empty = await t.call("world_apply", {});
-    expect(texts(empty)).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon."]);
+    expect(texts(empty)).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon, act."]);
     for (const x of [r, empty]) wordsFromFiles(x);
   });
 
