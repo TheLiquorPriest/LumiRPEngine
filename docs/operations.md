@@ -424,7 +424,7 @@ Lane: engine. Needs: `quest`. Takes its provenance.
 | `quest` | text | quest: the quest, secret, puzzle or agenda. |
 | `open` | any value |  |
 | `stage` | text | quest: the stage a quest the world built moves to (the one it stands on, to call that one); the stage called, for a quest opened in play. |
-| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
+| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it, one with a check has its check rolled by the world's rules, and one of the tabletop rules' works its outcome out itself. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 | `reveal` | true or false | quest: true to show the player. |
 | `show` | any value |  |
@@ -587,7 +587,7 @@ Lane: engine. Needs: `action`. Takes its provenance.
 | `action` | text | act: the action, by its id. |
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. act: who takes the action; left out, the player's character. |
 | `params` | object | act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is. |
-| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
+| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it, one with a check has its check rolled by the world's rules, and one of the tabletop rules' works its outcome out itself. |
 
 Reports its code (`src/iface/ops-act.ts`) can give: `fight_cost_not_left`.
 
@@ -1771,7 +1771,7 @@ Worked example:
 
 #### fight_round
 
-Records what each fighter did, as the story decided it, and goes on to the next turn after each; once everyone has had theirs the fight is in its next round. Nothing is chosen or rolled here: who acts, what they do and how it comes out are the call's. Harm comes off the gauge the world's ruleset names for a fight, held to its bounds, and anyone it leaves down by the ruleset's rule is marked down; in a world whose ruleset names no gauge, or for someone who has none, the harm is kept with the act and the answer says that no value changed. A fighter who acts twice in a round, who acts out of the order, or who strikes someone beyond reach on the map is recorded all the same and reported. Where the fight is on a grid that counts rounds, the rounds that pass move the clock by the grid's seconds. The answer gives the fight as it now stands.
+Records what each fighter did, as the story decided it, and goes on to the next turn after each; once everyone has had theirs the fight is in its next round. Nothing is chosen or rolled here: who acts, what they do and how it comes out are the call's. Harm comes off the gauge the world's ruleset names for a fight, held to its bounds, and anyone it leaves down by the ruleset's rule is marked down; in a world whose ruleset names no gauge, or for someone who has none, the harm is kept with the act and the answer says that no value changed. A fighter who acts twice in a round, who acts out of the order, or who strikes someone beyond reach on the map is recorded all the same and reported. Where the fight is on a grid that counts rounds, the rounds that pass move the clock by the grid's seconds. In a world with the tabletop rules, an attack and harm are the rules' own actions, carried out with the `world_apply` operation `act`, which record themselves into the fight; this tool is for a turn ruled in words, and a turn is recorded one way or the other. The answer gives the fight as it now stands.
 
 Writes the engine lane.
 
@@ -3115,17 +3115,17 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### ruleset-and-sheets
 
-- Names: `world_query`, `checks_odds`, `roll`, `world_apply`, `act`, `set`, `fact`.
-- Actions it names, carried out by `act`: `attempt`.
-- Names with no engine tool, operation or action of that name: `tool_search`.
+- Names: `world_query`, `sheet`, `rules_apply`, `world_apply`, `act`, `set`, `pass_time`, `rules_add`, `fact`, `checks_odds`, `roll`.
+- Actions it names, carried out by `act`: `check`, `take`, `save`, `attack`, `reload`, `harm`, `heal`, `rest`, `condition`, `effect`, `award`, `advance`, `ranks`, `trait`, `stat_as`, `attempt`.
+- Names with no engine tool, operation or action of that name: `vs_skill`, `tool_search`.
 - Its families' tools it does not name: `gm_set_life`, `gm_despawn`, `gm_restore`, `gm_classify`, `gm_set_entity`, `gm_link`, `gm_unlink`, `fill_in_detail`, `people_regard`.
 
 ### combat
 
-- Names: `world_apply`, `act`, `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `give`.
-- Actions it names, carried out by `act`: `fight`, `end_turn`.
-- Names with no engine tool, operation or action of that name: `tool_search`.
-- Its families' tools it does not name: `fight_start`, `fight_read`, `fight_end`.
+- Names: `world_apply`, `act`, `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `world_query`, `fight_start`, `fight_read`, `pass_time`, `give`.
+- Actions it names, carried out by `act`: `fight`, `harm`, `end_turn`, `attack`, `reload`, `condition`, `effect`, `heal`, `award`, `advance`.
+- Names with no engine tool, operation or action of that name: `tool_search`, `roll_initiative`.
+- Its families' tools it does not name: `fight_end`.
 
 ### places-and-maps
 
