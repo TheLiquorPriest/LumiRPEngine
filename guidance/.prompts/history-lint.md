@@ -51,6 +51,7 @@ lint_the_pov_entity_pov_does_not_exist: the POV entity "{{pov}}" does not exist
 lint_the_start_place_place_does_not_exist: the start place "{{place}}" does not exist
 lint_decimals_must_be_a_whole_number_from: decimals must be a whole number from 0 to 6
 lint_the_currency_needs_a_display_format: the currency needs a display format
+lint_the_time_zone_zone_is_not_a_time_zone: {{#zone}}The time zone "{{zone}}" is not a time zone{{/zone}}{{^zone}}There is no time zone{{/zone}}: write its IANA name, such as America/New_York or Europe/Paris.
 lint_unknown_kind_kind: unknown kind "{{kind}}"
 lint_unknown_parent_place_parent: unknown parent place "{{parent}}"
 lint_unknown_place_from: unknown place "{{from}}"

@@ -17,6 +17,7 @@ import type { DataTable } from "../shared/tables";
 import { builtInSectionsOf, DEFAULT_SECTIONS, sectionTemplateProblem } from "../shared/sections";
 import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, isHardLock, readSectionFeed, requirementExpr, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
+import { timeZoneExists } from "./calendar";
 import { applyEvent, validateEvent } from "./events";
 import { identifiers } from "./expr";
 import type { Registry } from "./registry-impl";
@@ -297,12 +298,15 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   const c = world.currency;
   if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6) err("currency.decimals", "currency", say("lint_decimals_must_be_a_whole_number_from"));
   if (c.format.trim() === "") err("currency.format", "currency", say("lint_the_currency_needs_a_display_format"));
+  // A name that is no time zone is one the clock cannot tell the time in, wherever the calendar or a place gives it.
+  if (typeof world.calendar.timeZone === "string" && !timeZoneExists(world.calendar.timeZone)) err("calendar.timeZone", "time_zone", say("lint_the_time_zone_zone_is_not_a_time_zone", { zone: world.calendar.timeZone }));
   for (const [id, e] of Object.entries(world.entities)) {
     if (e.id !== id) err(`entities.${id}.id`, "id_mismatch", say("lint_the_id_must_match_its_key"));
     if (!world.kinds[e.kind] && !registry.kinds.has(e.kind)) err(`entities.${id}.kind`, "unknown_kind", say("lint_unknown_kind_kind", { kind: e.kind }));
   }
   for (const [id, p] of Object.entries(world.places)) {
     if (p.parent && !world.places[p.parent]) err(`places.${id}.parent`, "missing_place", say("lint_unknown_parent_place_parent", { parent: p.parent }));
+    if (typeof p.timeZone === "string" && p.timeZone !== "" && !timeZoneExists(p.timeZone)) err(`places.${id}.timeZone`, "time_zone", say("lint_the_time_zone_zone_is_not_a_time_zone", { zone: p.timeZone }));
   }
   for (const [id, r] of Object.entries(world.routes)) {
     if (!world.places[r.from]) err(`routes.${id}.from`, "missing_place", say("lint_unknown_place_from", { from: r.from }));

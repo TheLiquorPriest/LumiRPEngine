@@ -577,6 +577,16 @@ export function knownZone(zone: string): boolean {
   return Object.prototype.hasOwnProperty.call(ZONES, zone);
 }
 
+/** Whether the runtime knows `zone` as an IANA time zone name ("America/New_York"), which "Mars/Olympus" and the empty text are not. */
+export function timeZoneExists(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** UTC offset of a zone on a gregorian date at a local minute (unknown zones: 0). */
 export function zoneOffset(zone: string, year: number, month: number, day: number, minuteOfDay: number): number {
   const rule = own(ZONES, zone);

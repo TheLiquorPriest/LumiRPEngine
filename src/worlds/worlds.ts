@@ -33,6 +33,7 @@ import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, r
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
 import { sectionTemplatesProblem } from "../shared/sections";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
+import { timeZoneExists } from "../engine/calendar";
 import { compileMaps } from "../shared/maps";
 import { storedMapSettings } from "../shared/map-settings";
 import type { Registry } from "../engine/registry-impl";
@@ -525,6 +526,10 @@ export class WorldStore {
           const problem = routineProblem(request.id, request.value);
           if (problem !== null) throw new WorldError("bad_request", problem);
         }
+        if (request.op === "put" && request.collection === "places" && isRecord(request.value)) {
+          const problem = zoneProblem(`places ${request.id}`, request.value.timeZone, isRecord(current) ? current.timeZone : undefined, true);
+          if (problem !== null) throw new WorldError("bad_request", problem);
+        }
         what = `${request.collection} ${request.id}`;
         const tables = request.collection === "tables" ? { ...doc.tables } : null;
         // A new item written without its id takes its key, so the id isn't typed twice.
@@ -620,6 +625,10 @@ export class WorldStore {
           const problem = routineProblem(id, to);
           if (problem !== null) throw refusal([name, id], problem);
         }
+        if (name === "places" && isRecord(to)) {
+          const problem = zoneProblem(`places ${id}`, to.timeZone, isRecord(from) ? from.timeZone : undefined, true);
+          if (problem !== null) throw refusal([name, id], problem);
+        }
         // Build's editors and the engine's lookups take only these ids, so an item under any other couldn't be edited or found.
         const length = id.length;
         if (to !== undefined && !safeKey(id)) throw refusal([name, id], say("lint_name_ids_are_1_to_200_characters", { name: name, length: length }));
@@ -633,6 +642,10 @@ export class WorldStore {
     if (!jsonEqual(was.needs, after.needs) && after.needs !== undefined) {
       const problem = needsProblem(after.needs);
       if (problem !== null) throw refusal(["needs"], problem);
+    }
+    if (!jsonEqual(was.calendar, after.calendar) && isRecord(after.calendar)) {
+      const problem = zoneProblem("calendar", after.calendar.timeZone, isRecord(was.calendar) ? was.calendar.timeZone : undefined);
+      if (problem !== null) throw refusal(["calendar"], problem);
     }
     if (!jsonEqual(was.sectionTemplates, after.sectionTemplates) && after.sectionTemplates !== undefined) {
       const problem = sectionTemplatesProblem(after.sectionTemplates);
@@ -725,6 +738,16 @@ function settingsProblem(value: unknown): string | null {
 function needsProblem(value: unknown): string | null {
   const problems = needsSettingsProblems(value);
   return problems.length === 0 ? null : `needs settings: ${problems.join("; ")}`;
+}
+
+/**
+ * A time zone as a write sends it, refused when the runtime has no such zone: a made-up name would read as no zone at all. One the item holds
+ * already (`was`) is left to the lint, so an edit of something else in it is not refused. A place may give none (`optional`: it takes its
+ * parent's); the calendar's is always one. A value that is no text is the lint's to report.
+ */
+function zoneProblem(where: string, zone: unknown, was: unknown, optional = false): string | null {
+  if (typeof zone !== "string" || zone === was || (optional && zone === "") || timeZoneExists(zone)) return null;
+  return `${where}: ${say("lint_the_time_zone_zone_is_not_a_time_zone", { zone })}`;
 }
 
 /** The collections whose items carry no `id` of their own: a world's maps and its packs' settings. */
@@ -904,6 +927,10 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (Object.keys(stored).length === 0) delete doc.needs;
     else doc.needs = stored;
     return;
+  }
+  if (part === "calendar") {
+    const problem = zoneProblem("calendar", value.timeZone, doc.calendar.timeZone);
+    if (problem !== null) throw new WorldError("bad_request", problem);
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.
   Object.assign(doc, { [part]: value });
