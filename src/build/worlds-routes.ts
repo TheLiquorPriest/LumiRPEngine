@@ -75,6 +75,41 @@ const committed = shape.named(
   "The draft as the world's next revision. Where the world's errors block it, `revision` is null and `message` and `lint` say what blocks.",
   shape.object({ revision: field(shape.nullable(T), "The new revision; null where it was not made."), lint: field(lintList, "The lint of the committed world, or what blocks."), message: field(shape.nullable(T), "Why it was not made; null where it was.") }),
 );
+const revisionRow = shape.named(
+  "WorldRevisionRow",
+  "One revision of a world as its history lists it: when it became head and what made it, its note, how many things it changed against the revision before it, whether it is the head now, and the chats that play it.",
+  shape.object({
+    revision: field(T, "The revision."),
+    at: opt(shape.number(), "When it became head, in ms since 1970; left out for a revision that became head before the world kept a history."),
+    source: opt(shape.oneOf("create", "build", "agent", "import"), "What made it head."),
+    note: opt(T, "The note given with the commit."),
+    head: field(shape.yesNo(), "It is the world's head now."),
+    changed: field(shape.nullable(N), "How many things it changed against the revision before it; null for the world's first revision, and for one whose file is gone."),
+    chats: field(shape.list(shape.object({ chat: field(T, "The chat's id."), name: field(T, "Its name in Lumiverse; its id where Lumiverse gives none.") })), "The chats that play it now."),
+  }),
+);
+const worldChanges = shape.named(
+  "WorldChanges",
+  "What changed from one version of a world to another, part by part.",
+  shape.object({
+    from: field(T, "The revision it is compared against."),
+    to: field(shape.nullable(T), "The revision it is compared to; null for the draft."),
+    total: field(N, "How many things changed in all."),
+    parts: field(
+      shape.list(
+        shape.object({
+          part: field(T, "The collection (`entities`, `places`…) or the part (`calendar`, `ruleset`…) of the world's document."),
+          added: field(N, "Things added."),
+          changed: field(N, "Things changed."),
+          removed: field(N, "Things removed."),
+          things: field(shape.list(shape.object({ id: field(T, "Its id."), name: field(shape.nullable(T), "Its name; null where it has none."), kind: field(shape.oneOf("added", "changed", "removed"), "How it changed.") })), "The first things the part changed, named; none for a part that holds no things of its own (the calendar)."),
+          more: field(N, "How many more changed than are named."),
+        }),
+      ),
+      "Each part that changed, in the order of the document.",
+    ),
+  }),
+);
 const draftReply = shape.named(
   "WorldDraft",
   "A world's draft as it stands after the call, with its lint, the revision it began from, whether one is stored and its version. `moved` is true where the write named a version the draft was no longer at: nothing was written, and this is the draft as it now stands.",
@@ -248,6 +283,32 @@ export function worldsRoutes(service: WorldService, bodyBytes: number) {
           return refusalOf(error);
         }
       },
+    }),
+    // ---------------------------------------------------------------- the history
+    route({
+      method: "GET",
+      path: `${WORLD_PATH}/revisions`,
+      access: "page",
+      group: "worlds",
+      does: "A page of the world's revisions, newest first: when each became head and what made it, the note given with it, how many things it changed against the revision before it, and the chats that play it now. The settings `worlds.revisionsPage` and `worlds.maxRevisionsPage` give a page's length.",
+      reply: shape.page(revisionRow),
+      paged: {
+        sizes: async () => {
+          const limits = await service.limits();
+          return { default: limits.revisionsPage, most: limits.revisionsPageMost };
+        },
+      },
+      handle: ({ params, query, user }) => guarded(async () => (await service.revisions(user, params.world, { limit: query.limit, ...(query.after === undefined ? {} : { after: query.after }) })) as never),
+    }),
+    route({
+      method: "GET",
+      path: `${WORLD_PATH}/changes`,
+      access: "page",
+      group: "worlds",
+      does: "What changed from one version of a world to another, part by part: for each part how many things were added, changed and removed, and the first of them named (the setting `worlds.maxChangesListed` says how many). From the world's head to its draft by default.",
+      query: { from: opt(T, "A revision of the world to compare against; its head by default."), to: opt(T, "A revision of the world to compare; its draft by default.") },
+      reply: worldChanges,
+      handle: ({ params, query, user }) => guarded(async () => (await service.changes(user, params.world, query.from, query.to)) as never),
     }),
     // ---------------------------------------------------------------- the draft
     route({ method: "GET", path: DRAFT_PATH, access: "page", group: "worlds", does: "A world's draft as it stands (the head while none is stored), with its lint, base and version.", reply: draftReply, handle: ({ params, user }) => drafted(() => service.draft(user, params.world, { op: "get" })) as never }),

@@ -15,6 +15,12 @@ export interface WorldLimits {
   noteChars: number;
   /** Loaded revisions kept across chats, least recently used first. */
   revisionsHeld: number;
+  /** How many of a world's revisions one page of its list gives when the caller names no number. */
+  revisionsPage: number;
+  /** The most revisions one page of a world's list may ask for. */
+  revisionsPageMost: number;
+  /** The most things a part of a changes list names; the rest are counted. */
+  changesListed: number;
   /** The largest body a worlds route takes. */
   bodyBytes: number;
 }
@@ -26,6 +32,9 @@ export const WORLD_LIMIT_DEFAULTS: Readonly<WorldLimits> = Object.freeze({
   depth: 64,
   noteChars: 200,
   revisionsHeld: 8,
+  revisionsPage: 10,
+  revisionsPageMost: 50,
+  changesListed: 25,
   bodyBytes: 4 * 1024 * 1024,
 });
 
@@ -37,6 +46,9 @@ export const WORLD_SETTING_DEFS = {
   depth: { key: "worlds.maxDepth", default: WORLD_LIMIT_DEFAULTS.depth, takes: { type: "whole", least: 1 }, advice: [{ below: 4, says: "A world document nests at least four deep: below it every write to a world is refused." }], levels: GLOBAL, perConnection: false, name: "Depth of a world document", about: "How deep a world document may nest; a write that would nest it deeper is refused.", effect: "use" },
   noteChars: { key: "worlds.noteChars", default: WORLD_LIMIT_DEFAULTS.noteChars, takes: { type: "whole", least: 0 }, levels: GLOBAL, perConnection: false, name: "Characters of a commit note", about: "The longest note a commit keeps in a world's history, cut to it.", effect: "use" },
   revisionsHeld: { key: "worlds.revisionsHeld", default: WORLD_LIMIT_DEFAULTS.revisionsHeld, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "World revisions the editor holds in memory", about: "Revisions of worlds the editor keeps loaded across requests, the least recently used going first; a revision is several MB once read.", effect: "use" },
+  revisionsPage: { key: "worlds.revisionsPage", default: WORLD_LIMIT_DEFAULTS.revisionsPage, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "Revisions on a page of a world's history", about: "How many of a world's revisions one page of its history gives when you ask for no number; each one is read beside the one before it to say how much it changed, so a longer page takes longer.", effect: "use" },
+  revisionsPageMost: { key: "worlds.maxRevisionsPage", default: WORLD_LIMIT_DEFAULTS.revisionsPageMost, takes: { type: "whole", least: 1 }, levels: GLOBAL, perConnection: false, name: "Most revisions on a page of a world's history", about: "The most revisions one page of a world's history may ask for.", effect: "use" },
+  changesListed: { key: "worlds.maxChangesListed", default: WORLD_LIMIT_DEFAULTS.changesListed, takes: { type: "whole", least: 0 }, levels: GLOBAL, perConnection: false, name: "Things named for each part of a change", about: "The most things the list of what changed between two versions of a world names under each part (the people, the places, the rules…); the rest are counted, not named. 0 names none.", effect: "use" },
   bodyBytes: { key: "worlds.maxBodyBytes", default: WORLD_LIMIT_DEFAULTS.bodyBytes, takes: { type: "whole", least: 1 }, advice: [{ below: 1024, says: "Under 1 KiB almost every world file and draft written whole is refused." }], levels: GLOBAL, perConnection: false, name: "Largest body a worlds route takes", about: "The most bytes a request of Build's worlds routes may carry (a world file imported, a draft written whole); a larger one is refused naming this setting.", effect: "start" },
 } as const satisfies NumberSettings<keyof WorldLimits>;
 

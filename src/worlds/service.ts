@@ -26,11 +26,13 @@ import type { LintIssue } from "../shared/lint";
 import type { TableUpdate } from "../shared/tables";
 import type { TemplateInfo } from "../packs/starters/info";
 import type { ThingsRead } from "../shared/thing-view";
+import { changesBetween } from "../shared/world-diff";
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import type { Store } from "../store";
 import { storeBacking } from "./backing";
 import { WORLD_LIMIT_DEFAULTS, type WorldLimits } from "./limits";
 import { WorldChats, type WorldChatsDeps } from "./chats";
+import { type Changes, changesOf } from "./changes";
 import { type DraftNotice, type EditorResult, WorldError, WorldStore } from "./worlds";
 
 /** What the world service stands on. */
@@ -48,6 +50,23 @@ export interface WorldServiceDeps {
 
 /** The draft's editor writes without the envelope today's messages carried: what a caller names of a write. */
 export type DraftWrite = EditorRequest extends infer R ? (R extends unknown ? Omit<R, "lre" | "type" | "reqId" | "worldId" | "base" | "version"> : never) : never;
+
+/** One revision of a world as its list gives it. */
+export interface RevisionRow {
+  revision: RevisionId;
+  /** When it became head, in ms since 1970; none for a revision that became head before the world kept a history. */
+  at?: number;
+  /** What made it head. */
+  source?: RevisionNote["source"];
+  /** The note given with the commit. */
+  note?: string;
+  /** It is the world's head now. */
+  head: boolean;
+  /** How many things it changed against the revision before it; null for the world's first, and for one whose file is gone. */
+  changed: number | null;
+  /** The chats that play it now, by name. */
+  chats: { chat: string; name: string }[];
+}
 
 /** A world opened at a revision: the document, which revision it is, how each became head, and what the packs give the editors. */
 export interface WorldRead {
@@ -159,6 +178,71 @@ export class WorldService {
   async updates(user: UserId, world: WorldId, revision?: RevisionId): Promise<TableUpdate[]> {
     const doc = revision !== undefined ? (await this.worlds.get(world, user, revision)).world : await this.worlds.working(world, user);
     return tableUpdates(doc, this.registry.tables, STARTER_TABLES);
+  }
+
+  // ---------------------------------------------------------------- a world's history
+
+  /** The limits `worlds.*` give now. */
+  async limits(): Promise<WorldLimits> {
+    return (this.deps.limits ?? (() => WORLD_LIMIT_DEFAULTS))();
+  }
+
+  /**
+   * A page of the world's revisions, newest first: each with when it became head and what made it, its note, how many things it
+   * changed against the revision before it, and the chats that play it now. Each time a revision became head is a row of its own (a
+   * revision put back as head comes again); the revisions that became head before a history was kept come last, with no time. A page
+   * starts after `after`, the place of the last row of the page before it (a time and a revision, never a count), and gives `limit` rows.
+   */
+  async revisions(user: UserId, world: WorldId, page: { limit: number; after?: string }): Promise<{ items: RevisionRow[]; next: string | null }> {
+    const [index, history] = await Promise.all([this.worlds.index(world, user), this.worlds.history(world, user)]);
+    if (index === null) throw new WorldError("not_found", `world ${world} not found`);
+    const noted = new Set(history.map((n) => n.revision));
+    // Oldest first: what became head before a history was kept, then each time a revision became head.
+    const entries: { revision: RevisionId; note?: RevisionNote }[] = [...index.revisions.filter((r) => !noted.has(r)).map((revision) => ({ revision })), ...history.map((note) => ({ revision: note.revision, note }))];
+    const place = (e: { revision: RevisionId; note?: RevisionNote }): string => `${e.note?.at ?? 0}~${e.revision}`;
+    const end = page.after === undefined ? entries.length : entries.findIndex((e) => place(e) === page.after);
+    if (end < 0) throw new WorldError("bad_request", `${page.after ?? ""} is no place in the history of world ${world}`);
+    const start = Math.max(0, end - page.limit);
+    const read = async (at: number): Promise<WorldDoc | null> => {
+      try {
+        return (await this.worlds.get(world, user, entries[at]?.revision)).world;
+      } catch (error) {
+        // A revision whose file is gone is listed all the same, with nothing said of how much it changed.
+        if (error instanceof WorldError && error.code === "not_found") return null;
+        throw error;
+      }
+    };
+    const chats = this.chatDeps === undefined ? [] : await this.chats.chatsOf(user, { world });
+    const rows: RevisionRow[] = [];
+    let before = start > 0 ? await read(start - 1) : null;
+    for (let at = start; at < end; at++) {
+      const entry = entries[at];
+      if (entry === undefined) continue;
+      const doc = await read(at);
+      const same = at > 0 && entries[at - 1]?.revision === entry.revision;
+      rows.push({
+        revision: entry.revision,
+        ...(entry.note === undefined ? {} : { at: entry.note.at, source: entry.note.source, ...(entry.note.note === undefined ? {} : { note: entry.note.note }) }),
+        head: entry.revision === index.head,
+        changed: at === 0 || doc === null || before === null ? null : same ? 0 : changesBetween(before, doc).length,
+        chats: chats.filter((c) => c.revision === entry.revision).map((c) => ({ chat: c.chat, name: c.name })),
+      });
+      before = doc;
+    }
+    const first = entries[start];
+    return { items: rows.reverse(), next: start > 0 && first !== undefined ? place(first) : null };
+  }
+
+  /**
+   * What changed from one version of the world to another, part by part: from `from` (the world's head by default) to `to` (the draft
+   * by default; a draft none is stored for is the head, so nothing changed).
+   */
+  async changes(user: UserId, world: WorldId, from?: RevisionId, to?: RevisionId): Promise<{ from: RevisionId; to: RevisionId | null } & Changes> {
+    const index = await this.worlds.index(world, user);
+    if (index === null) throw new WorldError("not_found", `world ${world} not found`);
+    const before = from ?? index.head;
+    const [was, now, limits] = await Promise.all([this.worlds.get(world, user, before), to === undefined ? this.worlds.working(world, user) : this.worlds.get(world, user, to).then((got) => got.world), this.limits()]);
+    return { from: before, to: to ?? null, ...changesOf(was.world, now, limits.changesListed) };
   }
 
   // ---------------------------------------------------------------- the draft

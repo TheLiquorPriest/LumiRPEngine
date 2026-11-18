@@ -1,13 +1,14 @@
 // The world service: his worlds kept once, in the store's table, behind one service every writer of a draft goes through.
 
 import { describe, expect, test } from "bun:test";
+import { WORLD_LIMIT_DEFAULTS } from "../../src/worlds/limits";
 import { DraftMoved } from "../../src/worlds/worlds";
 import { WorldService } from "../../src/worlds/service";
 import { makeBed, OTHER, starter, USER } from "../build-mode/bed";
 
 function serviceOn(limits?: () => Partial<import("../../src/worlds/limits").WorldLimits>) {
   const bed = makeBed();
-  const base = { patchOps: 500, patchBytes: 4 * 1024 * 1024, depth: 64, noteChars: 200, revisionsHeld: 8, bodyBytes: 4 * 1024 * 1024 };
+  const base = WORLD_LIMIT_DEFAULTS;
   return { bed, service: new WorldService({ store: bed.store, writes: bed.writes, log: bed.log, ...(limits ? { limits: () => ({ ...base, ...limits() }) } : {}) }) };
 }
 
@@ -60,5 +61,27 @@ describe("the world service", () => {
     expect((refused as Error).message).toContain("worlds.maxPatchOps");
     ops = 5;
     expect((await service.draft(USER, made.world.id, { op: "patch", ops: patch })).stored).toBe(true);
+  });
+
+  test("a world's history is read newest first a page at a time, each revision with its note and how much it changed, and the draft is set against the head part by part", async () => {
+    const { service } = serviceOn();
+    const made = await service.create(USER, "Fernwick", "fantasy_town");
+    const id = made.world.id;
+    const kind = (name: string) => ({ id: name, label: name, extends: "person", fields: {} });
+    await service.draft(USER, id, { op: "put", collection: "kinds", id: "lamplighter", value: kind("lamplighter") });
+    const first = await service.commit(USER, id, { base: made.revision, source: "build", note: "a lamplighter" });
+    await service.draft(USER, id, { op: "put", collection: "kinds", id: "ropewalker", value: kind("ropewalker") }, { base: first.revision });
+    await service.draft(USER, id, { op: "remove", collection: "kinds", id: "lamplighter" }, { base: first.revision });
+    const drafted = await service.changes(USER, id);
+    expect(drafted).toMatchObject({ from: first.revision, to: null, total: 2 });
+    expect(drafted.parts).toMatchObject([{ part: "kinds", added: 1, changed: 0, removed: 1 }]);
+    const second = await service.commit(USER, id, { base: first.revision, source: "build", note: "swapped" });
+    const page = await service.revisions(USER, id, { limit: 2 });
+    expect(page.items.map((r) => [r.note, r.changed])).toEqual([["swapped", 2], ["a lamplighter", 1]]);
+    expect(page.items[0]).toMatchObject({ revision: second.revision, head: true, source: "build", chats: [] });
+    const rest = await service.revisions(USER, id, { limit: 2, after: page.next ?? "" });
+    expect(rest.items.map((r) => [r.revision, r.changed])).toEqual([[made.revision, null]]);
+    expect(rest.next).toBeNull();
+    expect((await service.changes(USER, id, made.revision, second.revision)).parts).toMatchObject([{ part: "kinds", added: 1, removed: 0 }]);
   });
 });

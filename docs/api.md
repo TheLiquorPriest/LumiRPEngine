@@ -2763,6 +2763,19 @@ Attaches the world to a chat. A chat that plays no world takes the world's head 
 | Body | `{ chat: string }` |
 | Reply | [`WorldAttached`](#worldattached) |
 
+### `GET /api/v1/worlds/:world/changes`
+
+What changed from one version of a world to another, part by part: for each part how many things were added, changed and removed, and the first of them named (the setting `worlds.maxChangesListed` says how many). From the world's head to its draft by default.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `from` (may be left out): `string`, A revision of the world to compare against; its head by default<br>`to` (may be left out): `string`, A revision of the world to compare; its draft by default |
+| Body | none |
+| Reply | [`WorldChanges`](#worldchanges) |
+
 ### `GET /api/v1/worlds/:world/characters/:entity`
 
 A character as its own model, from the world's draft.
@@ -2945,6 +2958,19 @@ A person's things, in the Character page's groups.
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+
+### `GET /api/v1/worlds/:world/revisions`
+
+A page of the world's revisions, newest first: when each became head and what made it, the note given with it, how many things it changed against the revision before it, and the chats that play it now. The settings `worlds.revisionsPage` and `worlds.maxRevisionsPage` give a page's length.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `world` |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: WorldRevisionRow[]; next: string | null }`, a page at a time |
 
 ### `POST /api/v1/worlds/:world/sheet`
 
@@ -9693,6 +9719,23 @@ export interface WorldChanged {
 }
 ```
 
+### `WorldChanges`
+
+What changed from one version of a world to another, part by part.
+
+```ts
+export interface WorldChanges {
+  /** The revision it is compared against. */
+  from: string;
+  /** The revision it is compared to; null for the draft. */
+  to: string | null;
+  /** How many things changed in all. */
+  total: number;
+  /** Each part that changed, in the order of the document. */
+  parts: ({ part: string; added: number; changed: number; removed: number; things: ({ id: string; name: string | null; kind: "added" | "changed" | "removed" })[]; more: number })[];
+}
+```
+
 ### `WorldChat`
 
 A chat that plays one of his worlds: its name, the world and the revision it plays now (a move that waits for its next turn counted), the world's head, and whether it is behind.
@@ -9868,6 +9911,29 @@ export interface WorldRevisionNote {
   source: "create" | "build" | "agent" | "import";
   /** The commit's note. */
   note?: string;
+}
+```
+
+### `WorldRevisionRow`
+
+One revision of a world as its history lists it: when it became head and what made it, its note, how many things it changed against the revision before it, whether it is the head now, and the chats that play it.
+
+```ts
+export interface WorldRevisionRow {
+  /** The revision. */
+  revision: string;
+  /** When it became head, in ms since 1970; left out for a revision that became head before the world kept a history. */
+  at?: number;
+  /** What made it head. */
+  source?: "create" | "build" | "agent" | "import";
+  /** The note given with the commit. */
+  note?: string;
+  /** It is the world's head now. */
+  head: boolean;
+  /** How many things it changed against the revision before it; null for the world's first revision, and for one whose file is gone. */
+  changed: number | null;
+  /** The chats that play it now. */
+  chats: { chat: string; name: string }[];
 }
 ```
 
