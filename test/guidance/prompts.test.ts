@@ -455,6 +455,7 @@ describe("the two parts D.2 makes a home are tested by edit", () => {
   test("continue-after-rule.md is the one home of the line an agent goes on under: changing it changes the line, and it is there only when some of the reply was shown", async () => {
     const shipped = await template("continue-after-rule");
     expect(shipped.render({ shown: "Wren waved." }).text.trim()).toBe("The player has already been shown the text below. Go on from where it ends, without repeating any of it.\n\nWren waved.");
+    expect(shipped.render({ shown: "Wren waved.", form: { tags: true }, tags: { reply: "reply", intent: "intent" } }).text).toContain("Write what follows between `<reply>` and `</reply>`");
     expect(shipped.render({}).text.trim()).toBe("");
     expect(await afterEdit("continue-after-rule", "{{#shown}}Carry on after: {{shown}}{{/shown}}\n", { shown: "Wren waved." })).toBe("Carry on after: Wren waved.");
   });
