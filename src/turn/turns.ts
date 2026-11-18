@@ -165,6 +165,15 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
   }
 }
 
+/**
+ * How a turn's run ended, in the words of the reply-errors part: why it ended with no reply; or, `after` its reply began to go out, why
+ * the turn's record of that reply was not finished (the part's line of the same name ending `-after`). "" where the part has no such line.
+ */
+export function replyErrorWords(e: ReplyError, errors: LinesPart | undefined, after = false): string {
+  const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}) };
+  return errors?.line(after ? `${e.code}-after` : e.code, fields) ?? "";
+}
+
 /** The connection the harness runs a lead's definition on for the scope (`definitions.list`'s `runsOn`), by its id: null for his default, or where none resolves. */
 export async function leadConnection(definitions: Pick<DefinitionsApi, "list">, scope: Scope, lead: string | null): Promise<string | null> {
   if (lead === null) return null;
@@ -1965,7 +1974,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         // The message Lumiverse keeps shows the same line in its thinking, filled with no detail: a thrown error's or a provider's own
         // words go out as the error alone, since what is kept in the thinking can reach a later prompt.
         const { detail: _detail, ...plain } = e;
-        out.error(this.#errorWords(e, ending.errors), this.#errorWords(plain, ending.errors));
+        out.error(replyErrorWords(e, ending.errors), replyErrorWords(plain, ending.errors));
         replied.resolve();
       },
     };
@@ -2041,21 +2050,16 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     await replied.promise;
   }
 
-  /** The line the player is shown when a turn ends with no reply, in the words of the reply-errors part. */
-  #errorWords(e: ReplyError, errors: LinesPart | undefined): string {
-    const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}) };
-    return errors?.line(e.code, fields) ?? "";
-  }
-
   /**
    * A run that ended is told once in RPE's log, so the log answers why a reply failed: at warn where it failed, reached a limit or
    * released no reply, with the turn, the run, the chat, its kind and the reason in the words the player is shown (or the error's own, where
-   * that part has none); at info where it was stopped; a run that released its reply and ended well is told in no line above debug.
+   * that part has none), said as the end of a run whose reply had begun to go out where it had; at info where it was stopped; a run that
+   * released its reply and ended well is told in no line above debug.
    */
   #runEnded(run: Run, errors: LinesPart | undefined): void {
     if (run.status === "released" && run.stoppedBy === null) return;
     const e = run.error;
-    const why = e === null ? `no reason was given (the run's status is ${run.status})` : this.#errorWords(e, errors) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+    const why = e === null ? `no reason was given (the run's status is ${run.status})` : replyErrorWords(e, errors, run.released !== null) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
     const how = run.stoppedBy !== null ? "stopped where it stood" : run.status === "limit" ? "at a limit" : run.status === "no-reply" ? "with no reply" : run.status === "stopped" ? "stopped" : "failed";
     const fields = { turn: run.turn, run: run.id, chat: run.chat, kind: run.kind, generation: run.generation, status: run.status };
     if (run.status === "stopped" && run.stoppedBy === null) this.#d.log.info(`A turn's run ended ${how}: ${why}`, fields);
