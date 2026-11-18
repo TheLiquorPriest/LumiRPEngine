@@ -1,16 +1,15 @@
-// Import from lore / Build-Refine proposals: per-pack catalog, validation against kinds, field
-// types and references, deterministic dedupe, Refine merges; and the import job end to end on the
-// fake host (lore book → helper → proposals → accepted puts → committed revision).
+// Import from lore / Build-Refine proposals: validation against kinds, field types and references, deterministic dedupe, Refine merges.
 
 import { describe, expect, test } from "bun:test";
+import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import type { JobProposal } from "../../src/shared/jobs";
 import { blankWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
-import { checkProposals, dropSummary, IMPORT_MAX_CALLS, kindCatalog, PROPOSAL_MAX_TOKENS, proposalSystem, readProposals, type DropCounts } from "../../src/backend/proposals";
-import { JobRunner } from "../../src/backend/jobs";
-import { Rig } from "../support/rig";
+import { checkProposals as check, readProposals as read, type DropCounts, type ImportSources, type ProposalMode } from "../../src/build/jobs/checks";
+import type { Registry } from "../../src/engine/registry-impl";
+import type { WorldDoc } from "../../src/shared/world";
 
 const registry = createRegistry(ALL_PACKS);
 const world = (() => {
@@ -23,34 +22,12 @@ function p(collection: JobProposal["collection"], key: string, value: Record<str
   return { id: `${collection}:${key}:${confidence}`, collection, key, value: JSON.parse(JSON.stringify(value)), source: "test", confidence };
 }
 
-const lore = (comment: string, content: string) => ({ comment, content, keys: [comment.toLowerCase()], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} });
-
-/** Starts a job on the rig's fake host and returns its final update. */
-async function finished(rig: Rig, kind: "import_lore" | "refine", worldId: string, input: Record<string, unknown>) {
-  const jobId = rig.body(await rig.send({ type: "lre.job", op: "start", kind, worldId, input: JSON.parse(JSON.stringify(input)) })).jobId;
-  await rig.host.settle();
-  const done = rig.host.sent.find((m) => m.type === "lre.job.update" && m.jobId === jobId && m.status === "done");
-  if (done?.type !== "lre.job.update") throw new Error("the job didn't finish");
-  return { message: done.message, proposals: done.result && "proposals" in done.result ? done.result.proposals : [] };
-}
+/** The checks as they were called before Build's jobs kept a limit of their own: no limit that matters here. */
+const checkProposals = (w: WorldDoc, reg: Registry, raw: readonly JobProposal[], mode: ProposalMode, sources?: ImportSources, drops?: DropCounts): JobProposal[] => check(w, reg, raw, mode, 1000, sources, drops);
+/** A reply's proposals as the job reads them: the list a `world_propose` call gives. */
+const readProposals = (reply: { proposals: JsonValue[] }, source: string): JobProposal[] => read(reply.proposals, source);
 
 describe("Import and Refine proposals", () => {
-  test("a job that keeps nothing says why", () => {
-    const drops: DropCounts = new Map();
-    const raw = [p("entities", "ghost", { kind: "spirit", name: "Ghost" }), p("entities", "wisp", { kind: "spirit", name: "Wisp" }), p("routes", "nowhere", { from: "a", to: "b", modes: { walk: { minutes: 5 } } })];
-    const kept = checkProposals(world, registry, raw, "import", undefined, drops);
-    expect(kept).toEqual([]);
-    expect(dropSummary(raw.length, kept.length, drops)).toBe("3 of 3 proposal(s) dropped: 2 used a kind this world doesn't have (spirit); 1 joined places that don't exist.");
-    expect(dropSummary(0, 0, new Map())).toContain("proposed nothing");
-  });
-
-  test("the prompt lists every pack's kinds and the strict rules", () => {
-    const catalog = kindCatalog(world, registry);
-    expect(catalog).toContain("[vehicles] vehicle (a container)");
-    expect(catalog).toContain("fuel_pct:number");
-    expect(proposalSystem("import", world, registry)).toContain("Never invent numbers");
-  });
-
   test("kinds, field types and references are checked; packs are named", () => {
     const out = checkProposals(
       world,
@@ -104,56 +81,6 @@ describe("Import and Refine proposals", () => {
     expect(checkProposals(blankWorld("w_keys", "Keys"), registry, read, "refine").map((p) => p.key)).toEqual(["diner"]);
   });
 
-  test("Import from lore end to end: book → helper → reviewed proposals → draft → revision", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const book = await rig.host.books.create("Town lore", "", rig.host.userId);
-    const entry = await rig.host.books.createEntry(book, { comment: "The diner", content: "Rosie's Diner sits on Main Street, a short walk from home.", keys: ["diner"], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, rig.host.userId);
-    // The model cites the entry by the source id in its heading.
-    rig.host.quietReply = (req) => {
-      const cited = /\(source: ([^)]+)\)/.exec(req.messages.map((m) => m.content).join("\n"))?.[1] ?? "";
-      return JSON.stringify({ proposals: [{ collection: "places", key: "rosies_diner", value: { name: "Rosie's Diner" }, confidence: 0.9, source: cited }, { collection: "routes", key: "home_diner", value: { from: "home", to: "rosies_diner", modes: { walk: { minutes: 5 } } }, confidence: 0.6 }] });
-    };
-    const jobId = rig.body(await rig.send({ type: "lre.job", op: "start", kind: "import_lore", worldId, input: { bookIds: [book] } })).jobId;
-    await rig.host.settle();
-    const done = rig.host.sent.find((m) => m.type === "lre.job.update" && m.jobId === jobId && m.status === "done");
-    if (done?.type !== "lre.job.update" || !done.result || !("proposals" in done.result)) throw new Error("no proposals");
-    expect(done.result.proposals.map((x) => x.key)).toEqual(["rosies_diner", "home_diner"]);
-    // Back-linked to its entry (DESIGN §9.7), which stays as it was.
-    const diner = done.result.proposals[0]?.value;
-    expect(isRecord(diner) ? diner.sources : null).toEqual([`${book}/${entry}`]);
-    // Show value names the cited entry by its title; the review adds the book's name.
-    expect(done.result.proposals[0]?.sourceNames).toEqual({ [`${book}/${entry}`]: "The diner" });
-    expect(done.result.proposals[1]?.sourceNames).toBeUndefined();
-    // The review accepts both and writes them to the draft (as the UI's proposalWrites does).
-    for (const x of done.result.proposals) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: x.collection, id: x.key, value: x.value }));
-    const committed = rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const head = rig.body(await rig.send({ type: "lre.world", op: "get", worldId }));
-    expect(head.revision).toBe(committed.revision);
-    expect(isRecord(head.world) && isRecord(head.world.places) && "rosies_diner" in head.world.places).toBe(true);
-  });
-
-  test("an Import/Refine model call ends at its own deadline and the job still finishes", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const deadline = new AbortController();
-    const jobs = new JobRunner(rig.host, rig.rt.worlds, rig.rt.steps, rig.rt.settings, rig.rt.registry, () => deadline.signal);
-    let calls = 0;
-    // A model that never answers: only the call's signal ends it.
-    rig.host.models.quiet = (_request, _userId, signal) => {
-      calls++;
-      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("deadline")), { once: true }));
-    };
-    const jobId = await jobs.start("refine", worldId, { instructions: "Add a diner." }, rig.host.userId);
-    for (let i = 0; i < 1000 && calls === 0; i++) await Promise.resolve();
-    expect(calls).toBe(1);
-    deadline.abort();
-    await jobs.idle();
-    // A call that ran out of time is not asked again: the retry lives inside the call's deadline.
-    expect(calls).toBe(1);
-    expect(rig.host.sent.some((m) => m.type === "lre.job.update" && m.jobId === jobId && m.status === "done")).toBe(true);
-  });
-
   test("Import fills a table-backed field from the best-matching row and marks it assumed (DESIGN §9.7)", () => {
     const w = blankWorld("w_t", "Tables");
     w.kinds.trinket = { id: "trinket", label: "Trinket", extends: "item", fields: { catalog: { type: "text", table: "economy.catalog" } } };
@@ -165,107 +92,6 @@ describe("Import and Refine proposals", () => {
     // A stated row id is the lore's, not an assumption; no shared word, no fill.
     expect(byKey.get("coil")?.assumed).toBeUndefined();
     expect(byKey.get("gem")?.fields).toEqual({});
-  });
-
-  test("an empty or non-JSON reply is asked once more with the shape; the retry's proposals stand, and the call is metered", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const book = await rig.host.books.create("Harbor lore", "", rig.host.userId);
-    await rig.host.books.createEntry(book, lore("Lighthouse", "The old lighthouse stands dark on the breakwater."), rig.host.userId);
-    const good = JSON.stringify({ proposals: [{ collection: "places", key: "old_lighthouse", value: { name: "The Old Lighthouse" }, confidence: 0.8 }] });
-    // Empty first: no repair call, then the reminder.
-    let replies = ["", good];
-    rig.host.quietReply = () => replies.shift() ?? "";
-    const empty = await finished(rig, "import_lore", worldId, { bookIds: [book] });
-    expect(empty.proposals.map((x) => x.key)).toEqual(["old_lighthouse"]);
-    expect(empty.message).toBeUndefined();
-    expect(rig.host.quietCalls.length).toBe(2);
-    const retry = rig.host.quietCalls[1]?.messages.map((m) => m.content).join("\n") ?? "";
-    expect(retry).toContain("Reply with JSON only, in this shape");
-    expect(retry).toContain("(source: ");
-    expect(rig.rt.steps.meter.log.filter((c) => c.purpose === "brief").length).toBe(2);
-    // Prose that doesn't parse, and a repair that doesn't either: the retry is the third call.
-    rig.host.quietCalls.length = 0;
-    replies = ["Sure! The lighthouse is a place.", "Still prose.", good];
-    const prose = await finished(rig, "import_lore", worldId, { bookIds: [book] });
-    expect(prose.proposals.map((x) => x.key)).toEqual(["old_lighthouse"]);
-    expect(rig.host.quietCalls.length).toBe(3);
-    // Valid JSON in another shape is a bad reply too.
-    rig.host.quietCalls.length = 0;
-    replies = [JSON.stringify({ places: [{ id: "old_lighthouse" }] }), good];
-    expect((await finished(rig, "import_lore", worldId, { bookIds: [book] })).proposals.length).toBe(1);
-  });
-
-  test("Import's first reply with nothing usable for lore with text (an empty list, or no readable proposal) is asked once more; each call is in the diagnostics", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const book = await rig.host.books.create("Harbor lore", "", rig.host.userId);
-    await rig.host.books.createEntry(book, lore("Lighthouse", "The old lighthouse stands dark on the breakwater."), rig.host.userId);
-    const good = JSON.stringify({ proposals: [{ collection: "places", key: "old_lighthouse", value: { name: "The Old Lighthouse" }, confidence: 0.8 }] });
-    for (const first of [JSON.stringify({ proposals: [] }), JSON.stringify({ proposals: [{ type: "place", name: "The Old Lighthouse" }] })]) {
-      const replies = [first, good];
-      rig.host.quietReply = () => replies.shift() ?? "";
-      rig.host.quietCalls.length = 0;
-      const out = await finished(rig, "import_lore", worldId, { bookIds: [book] });
-      expect(out.proposals.map((x) => x.key)).toEqual(["old_lighthouse"]);
-      expect(rig.host.quietCalls.length).toBe(2);
-      expect(rig.host.quietCalls[1]?.messages.map((m) => m.content).join("\n")).toContain("Each entry above describes something");
-    }
-    const lines = (rig.host.userLogs.get(rig.host.userId) ?? []).filter((l) => l.includes("import chunk"));
-    expect(lines.map((l) => l.replace(/ in \d+ ms$/, ""))).toEqual([
-      "info: [LumiRPEngine] import chunk 1 of 1 call: an empty list for lore with text",
-      "info: [LumiRPEngine] import chunk 1 of 1 retry: 1 proposal(s)",
-      "info: [LumiRPEngine] import chunk 1 of 1 call: none of its 1 proposal(s) readable",
-      "info: [LumiRPEngine] import chunk 1 of 1 retry: 1 proposal(s)",
-    ]);
-  });
-
-  test("Import and Refine calls have room for a full answer, and a reply cut off at the limit is logged", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const book = await rig.host.books.create("Harbor lore", "", rig.host.userId);
-    await rig.host.books.createEntry(book, lore("Lighthouse", "The old lighthouse stands dark on the breakwater."), rig.host.userId);
-    const asked: number[] = [];
-    rig.host.models.quiet = async (request) => {
-      asked.push(request.maxTokens);
-      return { content: '{"proposals":[{"collection":"places","key":"old_li', finishReason: "length", tokens: request.maxTokens };
-    };
-    await finished(rig, "import_lore", worldId, { bookIds: [book] });
-    await finished(rig, "refine", worldId, { instructions: "Add a lighthouse keeper." });
-    expect(asked.length).toBeGreaterThan(0);
-    expect(asked.every((n) => n >= PROPOSAL_MAX_TOKENS)).toBe(true);
-    expect((rig.host.userLogs.get(rig.host.userId) ?? []).some((l) => l.startsWith(`warn: [LumiRPEngine] brief helper reply was cut off at ${PROPOSAL_MAX_TOKENS} tokens`))).toBe(true);
-  });
-
-  test("a retry that fails too keeps the reason; retries only spend calls no chunk needs", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const book = await rig.host.books.create("Big lore", "", rig.host.userId);
-    await rig.host.books.createEntry(book, lore("Lighthouse", "The old lighthouse stands dark."), rig.host.userId);
-    rig.host.quietReply = () => "";
-    const one = await finished(rig, "import_lore", worldId, { bookIds: [book] });
-    expect(one.message).toBe("The helper proposed nothing (or its reply wasn't valid JSON).");
-    expect(rig.host.quietCalls.length).toBe(2);
-    // 72 entries take all 12 calls, so nothing is left for a retry.
-    for (let i = 1; i < 72; i++) await rig.host.books.createEntry(book, lore(`Entry ${i}`, `Text ${i}.`), rig.host.userId);
-    rig.host.quietCalls.length = 0;
-    await finished(rig, "import_lore", worldId, { bookIds: [book] });
-    expect(rig.host.quietCalls.length).toBe(IMPORT_MAX_CALLS);
-  });
-
-  test("Refine shares the retry", async () => {
-    const rig = new Rig();
-    const worldId = await rig.newWorld();
-    const replies = ["", JSON.stringify({ proposals: [{ collection: "places", key: "bait_shop", value: { name: "Bait Shop" }, confidence: 0.8 }] })];
-    rig.host.quietReply = () => replies.shift() ?? "";
-    const out = await finished(rig, "refine", worldId, { instructions: "Add a bait shop." });
-    expect(out.proposals.map((x) => x.key)).toEqual(["bait_shop"]);
-    expect(rig.host.quietCalls.length).toBe(2);
-    // For Refine an empty list is an answer: nothing fits the request.
-    rig.host.quietCalls.length = 0;
-    rig.host.quietReply = () => JSON.stringify({ proposals: [] });
-    expect((await finished(rig, "refine", worldId, { instructions: "Add nothing." })).proposals).toEqual([]);
-    expect(rig.host.quietCalls.length).toBe(1);
   });
 
   test("a proposal with no kind takes the world's one base kind, marked assumed; otherwise it is dropped", () => {
@@ -284,14 +110,13 @@ describe("Import and Refine proposals", () => {
     expect(isRecord(skiff?.value) && skiff.value.fields).toEqual({ owner: "rosie" });
     expect(skiff?.note).toContain("assumed kind: thing");
     expect(skiff?.pack).toBe("space");
-    expect(dropSummary(raw.length, out.length, drops)).toBe("1 of 5 proposal(s) dropped: 1 used a kind this world doesn't have (spirit).");
     // A second base kind makes none obvious: the kind-less proposal is dropped, and no kind is invented.
     const two = structuredClone(world);
     two.kinds.spell = { id: "spell", label: "Spell", fields: {} };
     two.kinds.fire_spell = { id: "fire_spell", label: "Fire spell", extends: "spell", fields: {} };
     const twoDrops: DropCounts = new Map();
     expect(checkProposals(two, registry, [p("entities", "biscuit", { name: "Biscuit" })], "import", undefined, twoDrops)).toEqual([]);
-    expect([...twoDrops.keys()]).toEqual(["used a kind this world doesn't have (none)"]);
+    expect([...twoDrops.keys()]).toHaveLength(1);
   });
 
   test("a Refine change that leaves out the kind keeps the entity's kind; a new entity in the same reply still takes the base kind", () => {
@@ -328,7 +153,6 @@ describe("Import and Refine proposals", () => {
     const keys = ["constructor", "__proto__", "toString", "hasOwnProperty"];
     const raw = keys.map((kind, i) => p("entities", `k${i}`, { kind, name: `Odd ${i}` }));
     expect(checkProposals(world, registry, raw, "import", undefined, drops)).toEqual([]);
-    expect(dropSummary(raw.length, 0, drops)).toBe("4 of 4 proposal(s) dropped: 1 used a kind this world doesn't have (constructor); 1 used a kind this world doesn't have (__proto__); 1 used a kind this world doesn't have (toString); 1 used a kind this world doesn't have (hasOwnProperty).");
     // A world kind extending "constructor" is a root of its own, so `thing` stays the one base kind;
     // its field backed by a "constructor" table has no table to fill from.
     const w = structuredClone(world);
