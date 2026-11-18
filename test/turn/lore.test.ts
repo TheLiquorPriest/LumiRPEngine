@@ -50,6 +50,7 @@ async function play(b: TurnBed, said: string): Promise<string> {
 test("an indexing run is given the next batch by name and answered with the batch after; the next briefing holds the lore map in full", async () => {
   const ids: Record<string, string> = {};
   const b = (bed = await openTurnBed({
+    off: ["rules/unsourced"],
     answers: [
       { pieces: [{ text: "<intent>Have the keeper's book indexed first.</intent>" }, { call: "delegate", args: { agent: "indexer", brief: "Index the batch you are given." } }] },
       // The indexer keeps the lines of two of the three entries it was given, each for the revision its batch showed.
@@ -81,7 +82,7 @@ test("an indexing run is given the next batch by name and answered with the batc
   await play(b, "I ask where the oil is kept.");
   const [author, indexer, answered] = b.model.requests;
   // Nothing was indexed yet: the Author's map shows the oil store by its keys, and counts what no run has indexed.
-  expect(textsOf(author)).toContain(`- [${ids.oil}] The oil store (not indexed yet; keys: oil)`);
+  expect(textsOf(author)).toContain(`- [${ids.oil}] The oil store (by a key) (not indexed yet; keys: oil)`);
   expect(textsOf(author)).toContain("3 attached entries are not indexed yet.");
   // The indexer is given every entry with its revision, Lumiverse's own (a new entry's is 1), and its text; the tool answers with what it kept, then the one entry left, with its text.
   expect(textsOf(indexer)).toContain(`### [${ids.oil}] The oil store (from Keeper's Book; revision 1; keys: oil)\n${OIL.content}`);

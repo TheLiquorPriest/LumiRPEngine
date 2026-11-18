@@ -148,8 +148,8 @@ describe("the turn's folder", () => {
 
     const { scope, folder } = await folderOf(b, turn.id);
     const lore = await text(b, scope, `${folder}${TURN_FILES.lore}`);
-    const id = /^- \[(e-\d+)\] The oil store \(not indexed yet; keys: oil\)$/m.exec(lore)?.[1];
+    const id = /^- \[(e-\d+)\] The oil store \(by a key\) \(not indexed yet; keys: oil\)$/m.exec(lore)?.[1];
     expect(id).toBeDefined();
-    inOrder(lore, ["# Lore map", "### In the prompt", `- [${id}] The oil store (not indexed yet; keys: oil)`, `## [${id}] The oil store, from Keeper's Book, activated by keyword\n\n${content}\n`]);
+    inOrder(lore, ["# Lore map", "### In the prompt", `- [${id}] The oil store (by a key) (not indexed yet; keys: oil)`, `## [${id}] The oil store, from Keeper's Book, activated by keyword\n\n${content}\n`]);
   });
 });
