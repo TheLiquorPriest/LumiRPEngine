@@ -34,7 +34,6 @@
     "check": "\"$npm_execpath\" scripts/test/run.ts --check",
     "test:all": "\"$npm_execpath\" scripts/test-all.ts",
     "test:release": "\"$npm_execpath\" scripts/test/run.ts --release",
-    "test:properties": "\"$npm_execpath\" scripts/test/run.ts --properties",
     "test:timings": "\"$npm_execpath\" scripts/test-all.ts --record"
   },
   "type": "module"
