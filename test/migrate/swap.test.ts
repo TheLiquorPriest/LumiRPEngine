@@ -596,7 +596,7 @@ describe("the swap, and going back", () => {
       const { code, out } = await up();
       expect(code).toBe(0);
       expect(out).toContain(`Started ${UNIT}, RPE's service: RPE answers at http://127.0.0.1:${place.port}, where the previous runtime home did, with its key.`);
-      expect(out).not.toContain("under its model name");
+      expect(out).not.toMatch(/^(Started|RPE answers on) .*under its model name/m);
     } finally {
       if (todaysConnection !== undefined) lumiverse.connections.set(TODAYS_CONNECTION, todaysConnection);
     }

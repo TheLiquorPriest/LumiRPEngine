@@ -105,6 +105,7 @@ describe("a turn's area as LumiAH reads it", () => {
             "Mind files from the earlier build, on each character's record word for word, not yet filed:",
             `- ${PEOPLE.ada.name}: core.md, memory.md`,
             `- ${PEOPLE.bo.name}: profile.md`,
+            "Where the earlier build's minds pack kept notes of a character (its summary, notes, commitments, what it witnessed, its last mind), they are on the character's record too, as `minds`, not yet filed.",
             "From the earlier build's story record: 1 beat(s) and 0 strike(s) on the timeline, 1 draft(s) as proposed futures, 1 casting(s) in the cast.",
             "The Author's notes from the earlier build are in `persistent-workspace`, as the reply now shown left them; each earlier version is in the notes' own history, on the turn that wrote it, so showing an earlier reply puts its notes back; what it had learned is in `persistent-workspace/learned`.",
           ]);

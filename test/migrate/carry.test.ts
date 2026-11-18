@@ -213,7 +213,7 @@ describe("what the real run carries besides the chats", () => {
       db.close();
     }
     const config = Bun.YAML.parse(await readFile(dataPaths(data).globalConfig, "utf8")) as Record<string, unknown>;
-    expect(config.chat).toEqual({ hiddenReadable: false });
+    expect(config.history).toEqual({ hiddenReadable: false, window: 30 });
   });
 
   test("a chat played on RPE keeps the notes it has: a later run leaves them as they are, and says so", async () => {

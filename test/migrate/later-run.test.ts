@@ -118,7 +118,7 @@ describe("a later run over today's data changed since", () => {
       // In RPE: the model's limits and the retries entered on the connection, a connection of the user's own made the default, and hidden messages kept from agents.
       const ours: StoredConnection = { ...((await conn()) as StoredConnection), limits: { "deepseek-reasoner": { contextWindow: 128000, maxTokens: 8192 } }, retries: 5 };
       await port.saveConnections({ user: USER }, { v: 1, default: "conn-own", connections: [{ id: "conn-own", name: "Mine", provider: "anthropic", auth: "signin" }, ours] });
-      await writeFile(paths.globalConfig, withTopLevelKey(await readFile(paths.globalConfig, "utf8"), "chat", { hiddenReadable: false }, paths.globalConfig));
+      await writeFile(paths.globalConfig, withTopLevelKey(await readFile(paths.globalConfig, "utf8"), "history", { hiddenReadable: false, window: 30 }, paths.globalConfig));
       // On today's side since: the connection renamed.
       await changeToday((c) => (c.name = "Main, renamed today"));
       const third = await migrated(fixture, data, 11);
@@ -142,7 +142,7 @@ describe("a later run over today's data changed since", () => {
       const paths = dataPaths(data);
       const port = modelsPort(paths, new SecretsFile(paths.secrets), () => USER);
       const book = join(fixture.sources.runtime?.dataDir ?? "", "runtimes", RUNTIME);
-      const hidden = async (): Promise<unknown> => (Bun.YAML.parse(await readFile(paths.globalConfig, "utf8")) as { chat?: { hiddenReadable?: boolean } }).chat?.hiddenReadable;
+      const hidden = async (): Promise<unknown> => (Bun.YAML.parse(await readFile(paths.globalConfig, "utf8")) as { history?: { hiddenReadable?: boolean } }).history?.hiddenReadable;
       await migrated(fixture, data, 9);
       expect(await hidden()).toBe(true);
 

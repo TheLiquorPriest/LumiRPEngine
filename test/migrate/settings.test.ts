@@ -127,7 +127,7 @@ describe("today's settings into RPE's config", () => {
       // Not carried: today's counts the answers that called tools where RPE's jobs count every model call, and a time of 90.5 seconds is no whole number.
       expect([...(settings.notCarried ?? [])].sort((a, b) => a.from.localeCompare(b.from))).toEqual([
         { from: lumiah("core.jobs.budget.toolTurns"), to: "jobs.run.calls", why: "the previous build's counted the answers that called tools; RPE's counts every model call" },
-        { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.seconds", why: "jobs.run.seconds takes a whole number, at least 1, or ~ for no limit, not 90.5." },
+        { from: lumiah("core.jobs.budget.wallMs"), to: "jobs.run.seconds", why: "jobs.run.seconds takes a whole number, at least 0, or ~ for no limit, not 90.5." },
         { from: lumiah("core.reply.progress"), to: "progress.show", why: "the previous build's, off, showed no progress line; RPE's least still shows the one that keeps a silent turn alive" },
       ]);
       // Archived: what steered only an old engine, named with why; the runtime's stop wait is named as having no counterpart.
@@ -168,7 +168,7 @@ describe("today's settings into RPE's config", () => {
       await run(fixture, data, 9);
       // In RPE since: the tool answers clipped shorter.
       const config = dataPaths(data).globalConfig;
-      await writeFile(config, withKeyAt(await readFile(config, "utf8"), ["results", "clip"], 5_000, config));
+      await writeFile(config, withKeyAt(await readFile(config, "utf8"), ["results", "clipChars"], 5_000, config));
       // On today's side since: the clip, the summaries' kept turns and the turn's time, each changed; the turn's time lifted.
       await changeToday(fixture, [
         ...LUMIAH_OWN.filter((p) => !["core.loop.clipChars", "core.session.keepTurns", "core.turn"].includes(p.path.join("."))),
