@@ -10,4 +10,4 @@ Since they last dreamt, these characters have slept or lived a long stretch: {{d
 {{#dream.due.due}}
 - {{name}} ({{casting}}): {{#slept}}a sleep has begun{{/slept}}{{^slept}}{{hours}} story hours have passed{{/slept}} since {{#dreamt}}its last dream, at message {{dreamt}}{{/dreamt}}{{^dreamt}}it first perceived anything; it has never dreamt{{/dreamt}}.
 {{/dream.due.due}}
-Ask its agent to dream: `delegate` to the `character` definition with `plays` naming it and a brief that says it sleeps, or how much time has passed, or the same as a job. See the perceptions rule, "When".
+Ask its agent to dream: `delegate` to the `character` definition with `plays` naming it and a brief that says it sleeps, or how much time has passed; `job_start` with the same `agent`, `plays` and `brief` does the same. A dream settles the memories its agent already has, so if it also holds perceptions it has not taken in, the brief asks for those first. See the perceptions rule, "When".
