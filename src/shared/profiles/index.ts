@@ -3,8 +3,9 @@
 // frontend) and the backend applies it to the stored draft in one editor write
 // (`applyProfile`, `lre.editor profile`), so both read the same plan.
 //
-//   the people kind  the point of view's kind gets the fields: the world's own kind, or, when the
-//                    POV is of a pack's kind, a world copy of that kind with the fields added
+//   the kinds        the fields go on every kind the profile's tabletop rules name (`ruleset.d20.kinds`),
+//                    else on the point of view's kind: the world's own kind, or, when it is a pack's
+//                    kind, a world copy of that kind with the fields added
 //   items            every field, check, action, table and ruleset part is new (`add`), the same as
 //                    the world's (`same`), or different (`conflict`, kept unless the author takes
 //                    the profile's); applying twice therefore changes nothing
@@ -59,10 +60,12 @@ export interface ProfileValue {
 
 export interface ProfilePlan {
   profile: ProfileId;
-  /** The kind the fields go on, and whether the world gets its own copy of a pack's kind for them. */
+  /** The first kind the fields go on, and whether the world gets its own copy of a pack's kind for them. */
   kind: { id: KindId; label: string; copied: boolean };
+  /** Every kind the fields go on, `kind` first: the kinds the profile's tabletop rules name, else the point of view's alone. */
+  kinds: { id: KindId; label: string; copied: boolean }[];
   items: ProfileItem[];
-  /** How many people (of that kind or one inheriting it) read the new fields' defaults. */
+  /** How many people (of those kinds or one inheriting one) read the new fields' defaults. */
   people: number;
   values: ProfileValue[];
 }
@@ -102,8 +105,8 @@ interface Slot {
   label: string;
   mine: unknown;
   theirs: unknown;
-  /** A field of the people kind: its id and the profile's definition. */
-  field?: { id: string; def: FieldDef };
+  /** A field of a kind the fields go on: that kind, the field's id and the profile's definition. */
+  field?: { kind: KindId; id: string; def: FieldDef };
   write(doc: WorldDoc): void;
 }
 
@@ -125,23 +128,35 @@ function rulesetPart(world: WorldDoc, key: keyof RulesetDef): Record<string, unk
   return isRecord(part) ? part : undefined;
 }
 
-function slotsOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds): { kind: ProfilePlan["kind"]; slots: Slot[] } {
+/** The kinds a profile's fields go on: those its tabletop rules name, else the point of view's. */
+function fieldKinds(world: WorldDoc, profile: ProfileDef): KindId[] {
+  const named = (profile.ruleset.d20?.kinds ?? []).filter((k, i, all) => k !== "" && all.indexOf(k) === i);
+  if (named.length > 0) return named;
   const pov = hasOwn(world.entities, world.pov) ? world.entities[world.pov] : undefined;
-  const kindId = pov?.kind ?? "person";
-  const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
-  const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
-  const label = ownKind?.label ?? packKind?.label ?? words(kindId);
-  // A pack's kind is replaced whole by a world kind of the same id, so the copy keeps every field the pack gives it.
-  const kindIn = (doc: WorldDoc): KindDef => {
-    const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
-    if (existing) return existing;
-    const copy: KindDef = { id: kindId, label, ...(packKind?.extends !== undefined ? { extends: packKind.extends } : {}), fields: structuredClone(packKind?.fields ?? {}) };
-    doc.kinds[kindId] = copy;
-    return copy;
-  };
+  return [pov?.kind ?? "person"];
+}
+
+function slotsOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds): { kinds: ProfilePlan["kinds"]; slots: Slot[] } {
+  const kinds: ProfilePlan["kinds"] = [];
   const slots: Slot[] = [];
-  for (const [id, def] of Object.entries(profile.fields)) {
-    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words(id), mine: upChain(world, packKinds, kindId, (_k, k) => (hasOwn(k.fields, id) ? k.fields[id] : undefined)), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
+  const several = fieldKinds(world, profile).length > 1;
+  for (const kindId of fieldKinds(world, profile)) {
+    const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
+    const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
+    const label = ownKind?.label ?? packKind?.label ?? words(kindId);
+    kinds.push({ id: kindId, label, copied: !ownKind });
+    // A pack's kind is replaced whole by a world kind of the same id, so the copy keeps every field the pack gives it.
+    const kindIn = (doc: WorldDoc): KindDef => {
+      const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
+      if (existing) return existing;
+      const copy: KindDef = { id: kindId, label, ...(packKind?.extends !== undefined ? { extends: packKind.extends } : {}), fields: structuredClone(packKind?.fields ?? {}) };
+      doc.kinds[kindId] = copy;
+      return copy;
+    };
+    for (const [id, def] of Object.entries(profile.fields)) {
+      const name = def.label ?? words(id);
+      slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: several ? `${name} (${label})` : name, mine: upChain(world, packKinds, kindId, (_k, k) => (hasOwn(k.fields, id) ? k.fields[id] : undefined)), theirs: def, field: { kind: kindId, id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
+    }
   }
   for (const [id, def] of Object.entries(profile.checks)) {
     slots.push({ path: `checks.${id}`, group: "checks", label: words(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
@@ -184,7 +199,9 @@ function slotsOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds): { 
   }
   slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
   slots.push({ path: "ruleset.combat", group: "ruleset", label: "Combat rules", mine: rulesetPart(world, "combat"), theirs: rs.combat, write: (doc) => void (rulesetIn(doc).combat = structuredClone(rs.combat)) });
-  return { kind: { id: kindId, label, copied: !ownKind }, slots };
+  const d20 = rs.d20;
+  if (d20 !== undefined) slots.push({ path: "ruleset.d20", group: "ruleset", label: "Tabletop rules", mine: rulesetPart(world, "d20"), theirs: d20, write: (doc) => void (rulesetIn(doc).d20 = structuredClone(d20)) });
+  return { kinds, slots };
 }
 
 function statusOf(slot: Slot): ProfileStatus {
@@ -216,30 +233,34 @@ function fitted(def: FieldDef, v: JsonValue): JsonValue | null | undefined {
 }
 
 function planOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds, choices: Readonly<Record<string, ProfileChoice>>): { plan: ProfilePlan; write: Slot[] } {
-  const { kind, slots } = slotsOf(world, profile, packKinds);
+  const { kinds, slots } = slotsOf(world, profile, packKinds);
   const items = slots.map((slot): ProfileItem => ({ path: slot.path, group: slot.group, label: slot.label, status: statusOf(slot) }));
   const write = slots.filter((slot, i) => {
     const status = items[i]?.status;
     return status === "add" || (status === "conflict" && choices[slot.path] === "profile");
   });
-  const taken = new Map<string, FieldDef>();
-  for (const slot of write) if (slot.field) taken.set(slot.field.id, slot.field.def);
+  // The fields taken, by the kind they go on.
+  const taken = new Map<KindId, Map<string, FieldDef>>(kinds.map((k) => [k.id, new Map<string, FieldDef>()]));
+  for (const slot of write) if (slot.field) taken.get(slot.field.kind)?.set(slot.field.id, slot.field.def);
   const values: ProfileValue[] = [];
   let people = 0;
   for (const [id, e] of Object.entries(world.entities)) {
-    if (!upChain(world, packKinds, e.kind, (k) => (k === kind.id ? true : undefined))) continue;
+    // The nearest of the kinds that an entity's kind is or inherits: its fields are the ones it reads.
+    const under = upChain(world, packKinds, e.kind, (k) => (taken.has(k) ? k : undefined));
+    if (under === undefined) continue;
     people++;
-    for (const [field, def] of taken) {
+    for (const [field, def] of taken.get(under) ?? []) {
       if (def.derived !== undefined || !hasOwn(e.fields, field)) continue;
-      // A kind between the entity's and the POV's that defines the field keeps its own definition, so its values stay.
-      if (upChain(world, packKinds, e.kind, (k, d) => (k === kind.id ? false : hasOwn(d.fields, field) ? true : undefined)) === true) continue;
+      // A kind between the entity's and the one the field goes on that defines the field keeps its own definition, so its values stay.
+      if (upChain(world, packKinds, e.kind, (k, d) => (k === under ? false : hasOwn(d.fields, field) ? true : undefined)) === true) continue;
       const from = e.fields[field];
       if (from === undefined) continue;
       const to = fitted(def, from);
       if (to !== undefined) values.push({ entity: id, name: e.name, field, from, to });
     }
   }
-  return { plan: { profile: profile.id, kind, items, people, values }, write };
+  const kind = kinds[0] ?? { id: "person", label: words("person"), copied: true };
+  return { plan: { profile: profile.id, kind, kinds, items, people, values }, write };
 }
 
 /** What applying `profile` to `world` would add, leave and ask about, with the given conflict choices (unchosen: keep mine). */

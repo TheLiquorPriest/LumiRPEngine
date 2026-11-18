@@ -1,5 +1,6 @@
 // What a ruleset profile is (DESIGN §11): a world fragment in the shapes the engine already reads.
 
+import type { D20Def } from "../d20";
 import type { ActionId, CheckId, DomainId, FieldId, Level, ProgressionId, TableId } from "../ids";
 import type { DataTable } from "../tables";
 import type { ActionDef, AdjudicationDef, CheckDef, CombatDef, FieldDef, ProgressionDef, SheetLayoutDef } from "../world";
@@ -11,7 +12,10 @@ export interface ProfileDef {
   label: string;
   /** One line on what it gives a world, for the picker. */
   summary: string;
-  /** Fields for the kind of the world's people: the point of view's kind. */
+  /**
+   * Fields for the kinds that carry them: every kind `ruleset.d20.kinds` names when the profile has that part, else the kind of
+   * the world's people, the point of view's kind.
+   */
   fields: Record<FieldId, FieldDef>;
   checks: Record<CheckId, CheckDef>;
   actions: Record<ActionId, ActionDef>;
@@ -22,5 +26,7 @@ export interface ProfileDef {
     minLevels: Partial<Record<DomainId, Level>>;
     adjudication: AdjudicationDef;
     combat: CombatDef;
+    /** The tabletop rules layer's part (the `d20` pack): abilities, totals, the tables it names, and the kinds the fields go on. */
+    d20?: D20Def;
   };
 }
