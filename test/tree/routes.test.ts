@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { YAML } from "bun";
-import type { RuleView } from "rp-harness/contract";
+import type { FileProblem, RuleView } from "rp-harness/contract";
 import type { App, RunningServer } from "../../src/app";
 import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type SuggestionFiled, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
@@ -68,6 +68,8 @@ describe("the Files page's routes", () => {
   let port: TreeFiles;
   /** The rules RPH lists for the chat, as the Rules page's switch finds one by its name. */
   let ruled: RuleView[] = [];
+  /** What RPH finds wrong in the files, as the listing and a write's answer say it. */
+  let flagged: FileProblem[] = [];
 
   const call = async <T>(method: string, path: string, body?: unknown, headers: Record<string, string> = page): Promise<{ status: number; body: T }> => {
     const res = await fetch(`${server.url}${path}`, { method, headers: { ...headers, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -105,7 +107,7 @@ describe("the Files page's routes", () => {
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
             measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => ruled, definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => [] }), written: (saved) => void told.push(saved) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => ruled, definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => flagged }), written: (saved) => void told.push(saved) }));
           },
         },
       ],
@@ -312,6 +314,14 @@ describe("the Files page's routes", () => {
 
     await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "global", off: false });
     expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
+  });
+
+  test("a write answers the file as the listing will show it: held out and with what RPH found wrong, in its words", async () => {
+    flagged = [{ path: "rules/blank.md", message: "A rule starts with a header between two `---` lines." }];
+    const written = await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files/rules/blank.md", { level: "chat", chat: CHAT, text: "" });
+    expect(written.body.file).toMatchObject({ path: "rules/blank.md", item: "rules/blank", applies: false, held: "broken", problems: ["A rule starts with a header between two `---` lines."] });
+    flagged = [];
+    expect((await call<{ file: TreeFileEntry }>("PUT", "/api/v1/files/rules/blank.md", { level: "chat", chat: CHAT, text: "---\ndescription: Be kind.\nagents: all\n---\nBe kind.\n" })).body.file).toMatchObject({ applies: true, held: null, problems: [] });
   });
 
   test("the Rules page's switch writes the one list the Files page writes, and a config holding that list under two forms of its key reads as both and is written back as one", async () => {

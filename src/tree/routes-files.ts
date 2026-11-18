@@ -76,6 +76,11 @@ async function handedOf(loc: ChatLocation, agent: string, given: readonly string
 
 export function fileRoutes(kit: RouteKit) {
   const { deps, own } = kit;
+  /** A file as the listing shows it: with RPH's standing of it (held out, what it found wrong, whose stacks it joins), which an entry of the file alone does not have. */
+  const shown = async (user: string, chat: string | null, loc: ChatLocation, path: string) => {
+    const entry = await kit.entryOf(user, loc, path);
+    return entry === null || (entry.item === null && entry.hooks === undefined) ? entry : withStanding(entry, await rphStanding(deps.guidance(user, chat)));
+  };
   return [
     route({
       method: "GET",
@@ -233,7 +238,7 @@ export function fileRoutes(kit: RouteKit) {
         const level = levelOf(body.level, LEVELS, chat);
         const written = await own.writeAsUser(user, loc, viewPathOf(params["*"]), level, body.text);
         await kit.written(user, chat, written, level);
-        return { file: await kit.entryOf(user, loc, written) };
+        return { file: await shown(user, chat, loc, written) };
       },
     }),
     route({
@@ -284,7 +289,7 @@ export function fileRoutes(kit: RouteKit) {
         if (name === null) throw new RouteError(400, `${listed.path} is not a file RPH takes by its name, so no \`stack.off\` list can name it${listed.hooks === undefined ? "" : ": name one of its hooks"}.`);
         await own.switchOff(loc, level, name, body.off);
         await kit.written(user, chat, listed.path, level);
-        return { file: await kit.entryOf(user, loc, listed.path) };
+        return { file: await shown(user, chat, loc, listed.path) };
       },
     }),
     route({
@@ -301,7 +306,7 @@ export function fileRoutes(kit: RouteKit) {
         const loc = await own.locationFor(user, chat);
         const path = await own.pin(loc, level, viewPathOf(params["*"]), body.agent, body.pinned);
         await kit.written(user, chat, path, level);
-        return { file: await kit.entryOf(user, loc, path) };
+        return { file: await shown(user, chat, loc, path) };
       },
     }),
     route({
@@ -392,7 +397,7 @@ export function fileRoutes(kit: RouteKit) {
         const loc = await own.locationFor(user, chat);
         const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), false);
         await kit.written(user, chat, at.path, at.level);
-        return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
+        return { path: at.path, file: await shown(user, chat, loc, at.path), guidance };
       },
     }),
     route({
@@ -408,7 +413,7 @@ export function fileRoutes(kit: RouteKit) {
         const loc = await own.locationFor(user, chat);
         const { at, guidance } = await own.relocate(user, loc, viewPathOf(body.from), viewPathOf(body.to), true);
         await kit.written(user, chat, at.path, at.level);
-        return { path: at.path, file: await kit.entryOf(user, loc, at.path), guidance };
+        return { path: at.path, file: await shown(user, chat, loc, at.path), guidance };
       },
     }),
   ] as const;
