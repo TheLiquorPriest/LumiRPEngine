@@ -594,6 +594,38 @@ An agent's sampling (temperature, top P and the rest) is the provider's own unle
 - **Sessions** and **Jobs**: the calls a run made against the limit that applies to it, and each agent's window as a gauge, how near compaction it is.
 - **Runtime**: where the time goes across the latest turns.
 
+## Jobs and sessions
+
+### Jobs
+
+A **job** is work that need not finish before your next message: summarizing a stretch of the past, mapping the prompt, indexing lore, what happened meanwhile in the wider world. The Author starts one when its turn can leave the work for later; you start one from a page (**Index now**, **Map again**, a bootstrap, Build's model jobs) or by hand. A job runs as an agent of its own, beside the chat, and what it records is placed before the next turn that begins after it ends. The next briefing tells the Author what a finished job changed.
+
+**Jobs** lists every job of every chat, or of the open chat (**This chat's**, **Every chat's**), newest started first, filtered by **Where it stands**. Each shows its agent and what it was asked, who started it and when, what it spent, the limit it ended at and its report. One opened shows its work step by step, as Live draws a run (behind the spoiler gate), with its calls against its limit and each agent's window, and **What it wrote**. By where it stands: **Cancel**, **Start again**, **Pause** and **Resume**, **Hold** and **Let it go**, **Carry it on with more** at a limit, and **A word to its lead**, which it gets at its next call as yours. A job that asks you a question waits for your answer there.
+
+- **Start a job** by hand: **The agent that does it**, **What it is to do**, **What it is given**, and limits of its own, which hold only where tighter than the limits of every job. It starts at once, or waits for the jobs running to end.
+- **All jobs**: switch jobs off (no job starts, by an agent's call or from a page; those waiting keep waiting), or hold them (those running stop at their agent's next call, and none starts, until you let them go). Beside them, **Limits on jobs**, each with what it is held against.
+- As shipped, two jobs run at once across your chats (**Jobs at once**, `jobs.atOnce`); a job's run has no limit of calls, tokens or time unless you set one (`jobs.run.calls`, `jobs.run.seconds` and the rest); and a job's record is kept 90 days (`jobs.keepDays`).
+
+### Bootstrap: a chat with a past
+
+A chat that comes to RPE with a long past, new to RPE or carried from the previous build, has no story record for it yet. Your past is in Lumiverse, and the agents can read it at any time; the briefing says which range is neither in the prompt nor covered by the record. **Bootstrap** is a job the Author leads, with the skill `bootstrap`, to go over the chat's past and fill in its records, nearest stretch first. Nothing starts one but you.
+
+The **Story** page (and **Jobs**, for any chat) shows how far the record stands, as six facts with their counts: **The lore index**, **The history the window leaves out**, **The cast**, **The story model**, **The horizon**, and **Each principal's base and memories**. Whether that is enough is the job's to judge. **Start a bootstrap job** starts one, with how much to relive (the words the skill offers) and its own token limit. At that limit (**Bootstrap asks before**, `bootstrap.askAtTokens`, 200,000 tokens) the job is held and asks you: **Go on**, with how many more tokens before it asks again, or **End with what it has**. The **Migration** page offers a start for every chat the migration carried.
+
+### Sessions
+
+A **session** is the Author's working memory between turns. Each scene of the story is a session. **Sessions** lists them, newest first, open or closed, with the turn that closed it, and the sessions of the sub-agents, jobs and talks it ran beneath the turn that started them.
+
+A session opened shows **What its next turn carries**, in each of the three ways a session can carry its earlier turns:
+
+- **Continuing**: what the Author did in its earlier turns, as it did it;
+- **Records**: the Author's own record of each earlier turn;
+- **Nothing**: only the summary the scene opened with.
+
+Which one the chats use is **Context carried in a session** (`sessions.carry`, **Continuing** as shipped). The page's **What carrying costs and buys** shows the latest measurement of the three, when one has been run, and **Make a mode the default for** **Every chat** or **This chat**: nothing changes it by itself.
+
+**Compaction.** When a call would not fit its model's window less the room kept for the answer (`compaction.reserveTokens`), a session's earlier turns are summarized, keeping the newest three whole (`compaction.keepTurns`); as shipped, the Author is first given the chance to save what matters (the rule `save-before-compaction`). **Its compactions** lists each, with **Undo the summary**, after a question that says what that costs. **Compact now** asks for one at the next turn. **Close this scene** closes the session, and **Reopen it** opens it again. **Its turns** lists the turns that ran in it, each with its transcript behind the spoiler gate.
+
 ## Authoring
 
 You build worlds in **Build**, which works at phone width as well as on a desktop. Each page opens scrolled to the top, and each has a back button at its top left.
