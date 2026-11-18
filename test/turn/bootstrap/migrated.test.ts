@@ -18,8 +18,8 @@ afterEach(async () => {
 const HERON = "chat-heron";
 const GONE = "chat-gone";
 
-// hardening: a start while one is under way now begins a second job (TurnKinds-10 item 2).
-test.skip("every chat the migration carried is started one after another within the jobs at once; the answer says which started and which were refused, and why", async () => {
+// The answer lists what started and what was refused: a chat Lumiverse does not hold; a chat with a job under way is not refused (e578d7aa3).
+test("every chat the migration carried is started one after another within the jobs at once; the answer says which started and which were refused, and why", async () => {
   const held = { first: gate(), second: gate() };
   const boot = await openBootBed({
     global: "jobs:\n  atOnce: 1\n",
@@ -38,16 +38,8 @@ test.skip("every chat the migration carried is started one after another within 
   ]);
   expect(all.body.refused).toEqual([{ chat: GONE, why: `No bootstrap job was started: There is no chat ${GONE} for this RPE's Lumiverse user.` }]);
 
-  // While both are under way, neither chat's job is started again, whether it runs or waits for its place.
-  const again = await call<BootstrapBatch>("POST", BOOTSTRAP_PATH, {}, { chats: [HERON, CHAT, HERON] });
+  // A chat whose job is under way is started again by a second start, which begins a second job (e578d7aa3); it is not made here, for the model's answers are scripted in order.
   const [lighthouse, heron] = all.body.started.map((s) => s.job.id);
-  expect(again.body).toEqual({
-    started: [],
-    refused: [
-      { chat: HERON, why: `A bootstrap job of chat ${HERON} is queued (job ${heron}). Another can be started once it has ended.` },
-      { chat: CHAT, why: `A bootstrap job of chat ${CHAT} is running (job ${lighthouse}). Another can be started once it has ended.` },
-    ],
-  });
 
   // One at a time, as the setting says: the heron's job runs once the lighthouse's has ended.
   held.first.open();

@@ -41,8 +41,7 @@ test("the routes take their places in RPE's route table", () => {
   ]);
 });
 
-// hardening: a second start now begins a second job (TurnKinds-10 item 2).
-test.skip("the Author is given the skill's text, the player's choice and the setting's limit; a second start while it runs is refused in words; an edited skill is the next brief", async () => {
+test("the Author is given the skill's text, the player's choice and the setting's limit; an edited skill is the next brief", async () => {
   const held = gate();
   const boot = await openBootBed({
     global: "bootstrap:\n  askAtTokens: 150000\n",
@@ -67,9 +66,7 @@ test.skip("the Author is given the skill's text, the player's choice and the set
   expect(asked).toContain(`### bootstrap:job\n\n${JSON.stringify({ relive: "key moments", tokenLimit: 150000 })}`);
   expect(asked).toContain("### bootstrap:facts");
 
-  const again = await call<{ error: string }>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
-  expect(again).toEqual({ status: 409, body: { error: `A bootstrap job of chat ${CHAT} is running (job ${first.body.id}). Another can be started once it has ended.` } });
-  expect((await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.length).toBe(1);
+  // A second start while it runs begins a second job and is not refused (e578d7aa3); it is not made here, for the model's answers are scripted in order.
 
   held.open();
   const ended = await b.until("the job to end", async () => {
@@ -98,18 +95,19 @@ test.skip("the Author is given the skill's text, the player's choice and the set
   expect(told).toContain(`### bootstrap:job\n\n${JSON.stringify({ tokenLimit: 150000 })}`);
 });
 
-// hardening: with the skill switched off a start now goes ahead (TurnKinds-10 item 1).
-test.skip("a start is refused in words for a chat Lumiverse does not hold, and where the skill is switched off", async () => {
+// A start is never refused for the skill being off (e578d7aa3).
+test("a start is refused in words for a chat Lumiverse does not hold, and goes ahead with no brief where the skill is switched off", async () => {
   const boot = await openBootBed({ answers: [], off: ["rules/turn-unrecorded", "skills/bootstrap"] });
   beds.push(boot);
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: "chat-nowhere" }, {})).toEqual({ status: 404, body: { error: "No bootstrap job was started: There is no chat chat-nowhere for this RPE's Lumiverse user." } });
-  expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `No bootstrap job was started: the skill bootstrap is switched off or missing in the files of chat ${CHAT}.` } });
+  // With the skill switched off a start goes ahead with no brief (e578d7aa3).
+  const off = await boot.call<JobView>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
+  expect([off.status, off.body.brief]).toEqual([200, ""]);
   expect(await boot.call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, { relive: 3 })).toEqual({ status: 400, body: { error: expect.stringContaining("does not take this body") } });
-  expect((await boot.b.turns.harness.jobs.list({ user: USER })).jobs).toEqual([]);
 });
 
-// hardening: a second start now begins a second job (TurnKinds-10 item 2).
-test.skip("the bootstrap reads its jobs as its user's", async () => {
+// A second start begins a second job beside the first (e578d7aa3).
+test("the bootstrap reads its jobs as its user's", async () => {
   const boot = await openBootBed({ answers: [{ pieces: [{ hold: gate() }, { text: "Read the last two scenes." }] }] });
   beds.push(boot);
   const { b, jobs, call } = boot;
@@ -117,13 +115,12 @@ test.skip("the bootstrap reads its jobs as its user's", async () => {
   expect(started.status).toBe(200);
   // What the bootstrap keeps of the chat's jobs is his, in RPH's store: another user's scope holds none of it.
   expect([(await b.turns.env.store.list({ user: USER }, "rpe/bootstrap/")).length, await b.turns.env.store.list({ user: "user-tamsin" }, "rpe/bootstrap/")]).toEqual([1, []]);
-  // His chat's page reads his job as RPH holds it for him, and a second start of his finds it under way.
+  // His chat's page reads his job as RPH holds it for him; a second start of his begins a second job beside it (e578d7aa3).
   expect((await jobs.chat(USER, CHAT)).underWay.map((j) => [j.id, j.view?.state])).toEqual([[started.body.id, "running"]]);
-  expect(await call("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {})).toEqual({ status: 409, body: { error: `A bootstrap job of chat ${CHAT} is running (job ${started.body.id}). Another can be started once it has ended.` } });
 });
 
-// hardening: the token limit is now the point where the job asks (TurnKinds-13 item 1).
-test.skip("the job is stopped at the token limit the player set: it ends with what it has, and its record says which limit stopped it", async () => {
+// A job at the token limit holds to ask the player, and goes on or ends on his word (e578d7aa3; it was ended at the limit before).
+test("the job asks the player at the token limit he set: it holds with what it has, and ends with what it has when he says no", async () => {
   const boot = await openBootBed({
     global: "bootstrap:\n  askAtTokens: 1000\n",
     answers: [
@@ -136,10 +133,16 @@ test.skip("the job is stopped at the token limit the player set: it ends with wh
   const { b, call } = boot;
   const started = await call<JobView>("POST", BOOTSTRAP_CHAT_PATH, { chat: CHAT }, {});
   expect(started.status).toBe(200);
-  const ended = await b.until("the job to end", async () => {
-    const view = (await boot.jobs.jobs(USER, CHAT, 50)).items[0]?.view;
-    return view !== null && view !== undefined && view.state !== "running" && view.state !== "queued" ? (await boot.jobs.jobs(USER, CHAT, 50)).items[0] : null;
+  const asking = await b.until("the job to ask", async () => {
+    const item = (await boot.jobs.jobs(USER, CHAT, 50)).items[0];
+    return item?.view?.state === "asking" ? item : null;
   });
-  expect([ended?.tokenLimit, ended?.view?.limit]).toEqual([1000, { limit: "tokens", per: "job", max: 1000, value: 1100 }]);
+  expect([asking.tokenLimit, asking.view?.asks]).toEqual([1000, { at: 1000, tokens: 1100 }]);
+  expect((await call("POST", `${BOOTSTRAP_CHAT_PATH}/:job/answer`, { chat: CHAT, job: started.body.id }, { go: "end" })).status).toBe(200);
+  const ended = await b.until("the job to end", async () => {
+    const item = (await boot.jobs.jobs(USER, CHAT, 50)).items[0];
+    return item?.view?.state !== undefined && item.view.state !== "asking" && item.view.state !== "running" && item.view.state !== "queued" ? item : null;
+  });
+  expect(ended.view?.stoppedBy).toBeDefined();
   expect(b.model.requests).toHaveLength(1);
 });

@@ -23,14 +23,17 @@ const BOOK = { id: "wb-gannet", name: "Gannet Rock" };
 const STAIR = { id: "wbe-stair", title: "The lamp-room stair", keys: ["stair"], content: "Ninety-one iron steps wind up to the lamp room." };
 const SKERRY = { id: "wbe-skerry", title: "The north skerry", keys: ["skerry"], content: "A reef that shows only at the lowest tides." };
 const NO_STORY = { known: true as const, premise: 0, chapters: 0, scenes: 0, beats: 0, threads: 0, openThreads: 0, arcs: 0, principals: 0, principalsWithArc: 0, player: 0 };
+/** The horizon's seed in a played world with nothing set by a change: each part is recorded and no value of it has a standing (fc17be423). */
+const NO_STANDING = { recorded: true, established: 0, assumed: 0, proposed: 0, none: 0 };
+const NO_HORIZON = { known: true as const, entries: 0, named: 0, clock: true, time: NO_STANDING, place: NO_STANDING, onStage: NO_STANDING, holdings: NO_STANDING };
 
 /** The facts whose counts differ between two readings, in the skill's order. */
 function changed(before: DoneEnough, after: DoneEnough): (keyof DoneEnough)[] {
   return (["lore", "history", "cast", "story", "horizon", "principals"] as const).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
 }
 
-// hardening: facts 5 and 6 now count by standing and by who wrote each memory (TurnKinds-11); its expectations name the old fields.
-test.skip("each fact's counts change exactly when its own records are written, and neither the job nor the page is given a verdict", async () => {
+// Facts 5 and 6 count by standing and by who wrote each memory (fc17be423).
+test("each fact's counts change exactly when its own records are written, and neither the job nor the page is given a verdict", async () => {
   const boot = await openBootBed({ global: "history:\n  window: 2\n", answers: [replying("Wren trims the wick and waits.")] });
   beds.push(boot);
   const { b, jobs } = boot;
@@ -58,7 +61,7 @@ test.skip("each fact's counts change exactly when its own records are written, a
     history: { known: true, messages: 3, leftOut: 1, covered: 0, stretches: 0, summarized: 0, nearestUncovered: { from: 0, to: 0 }, nearestUnsummarized: null },
     cast: { known: true, listed: 0, cast: 0, uncast: [] },
     story: NO_STORY,
-    horizon: { known: true, entries: 0, named: 0, clock: true },
+    horizon: NO_HORIZON,
     principals: { known: true, principals: [] },
   });
   /** The facts now, with which of them changed since the last reading. */
@@ -88,7 +91,7 @@ test.skip("each fact's counts change exactly when its own records are written, a
   expect([step.moved, step.now.cast]).toEqual([["cast"], { known: true, listed: 1, cast: 0, uncast: ["Wren Hale"] }]);
   await b.app.writes.run((db) => pinCasting(db, USER, wren.id, "principal"));
   step = await next();
-  expect([step.moved, step.now.cast, step.now.principals] as unknown).toEqual([["cast", "story", "principals"], { known: true, listed: 1, cast: 1, uncast: [] }, { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: [], memories: 0 }] }]);
+  expect([step.moved, step.now.cast, step.now.principals] as unknown).toEqual([["cast", "story", "principals"], { known: true, listed: 1, cast: 1, uncast: [] }, { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: [], memories: 0, own: 0, ownFromPerceptions: 0 }] }]);
 
   // 4. The story model: a premise, the scene already there for the timeline, a thread, an arc for the principal, a first read of the player.
   await story([
@@ -101,17 +104,17 @@ test.skip("each fact's counts change exactly when its own records are written, a
   expect([step.moved, step.now.story]).toEqual([["story"], { ...NO_STORY, premise: 1, scenes: 1, beats: 1, threads: 1, openThreads: 1, arcs: 1, principals: 1, principalsWithArc: 1, player: 1 }]);
 
   // 5. The horizon: the Author's list, set by a recorded change.
-  await b.app.writes.run(() => store.addChanges(turn, [{ lane: "story", op: "store.horizon", value: { list: ["bram"] }, by: "author", source: "author" }]));
+  await b.app.writes.run(() => store.addChanges(turn, [{ lane: "story", op: "story.horizon", value: { list: ["bram"] }, by: "author", source: "author" }]));
   step = await next();
-  expect([step.moved, step.now.horizon] as unknown).toEqual([["horizon"], { known: true, entries: 1, named: 1, clock: true }]);
+  expect([step.moved, step.now.horizon] as unknown).toEqual([["horizon"], { ...NO_HORIZON, entries: 1, named: 1 }]);
 
   // 6. The principal's base, then a memory written by its own agent.
   await b.app.writes.run((db) => writeBase(db, { user: USER, chat: CHAT, turn, by: "author", agent: "author-1", now: Date.now() }, wren.id, { seed: "A keeper's daughter who never sleeps before the lamp is lit." }, {}));
   step = await next();
-  expect([step.moved, step.now.principals] as unknown).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 0 }] }]);
+  expect([step.moved, step.now.principals] as unknown).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 0, own: 0, ownFromPerceptions: 0 }] }]);
   await b.app.writes.run(() => writeCast(b.turns.store, { ...at, by: "character", agent: "character-1", at: null }, [{ character: wren.id, part: "memory", item: null, value: { text: "The night the lamp nearly failed." } }]));
   step = await next();
-  expect([step.moved, step.now.principals] as unknown).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 1 }] }]);
+  expect([step.moved, step.now.principals] as unknown).toEqual([["principals"], { known: true, principals: [{ id: wren.id, name: "Wren Hale", base: ["seed"], memories: 1, own: 1, ownFromPerceptions: 0 }] }]);
 
   // What a job's agent is given by name, and what the chat's page reads, are the same counts: with every record of the six written, no fact says it holds.
   const given = await jobs.view({ user: USER, chat: CHAT, session: "none" }, { id: "author-1", definition: "author", job: "job-1" }, BOOTSTRAP_FACTS);
