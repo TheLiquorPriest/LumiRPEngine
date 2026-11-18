@@ -378,7 +378,7 @@ export function fileRoutes(kit: RouteKit) {
       path: "/api/v1/files-copy",
       access: "page",
       group: "files",
-      does: "Copies a file or folder of the user's to a path nothing stands at (the copy of a folder leaves its links out); a file copied into a folder of guidance is a file of that kind, which the answer says. Never a shipped file or one RPE makes again.",
+      does: "Copies a file or folder to a path nothing stands at (the copy of a folder leaves its links out); a shipped file or folder is only read, and its copy is the user's own file; a file copied into a folder of guidance is a file of that kind, which the answer says. Never into the shipped level or a place RPE makes again.",
       body: fileMoveBody,
       reply: fileMovedReply,
       handle: async ({ user, body }) => {

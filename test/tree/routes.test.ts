@@ -439,6 +439,16 @@ describe("the Files page's routes", () => {
     expect((await moved("rules/none.md", "rules/other.md")).status).toBe(404);
   });
 
+  test("a shipped file or folder is only read by a copy, so its copy is the user's own at the level asked for; a copy into the shipped level is refused, and so is a move of a shipped file", async () => {
+    const copy = await call<{ path: string; guidance: string | null }>("POST", "/api/v1/files-copy", { chat: CHAT, from: "@shipped/.rules/examples/nudge.md", to: "@global/.rules/nudge.md" });
+    expect(copy.body).toMatchObject({ path: "@global/.rules/nudge.md", guidance: "rules" });
+    expect(await readFile(join(app.paths.files, ".rules", "nudge.md"), "utf8")).toContain("A nudge.");
+    expect((await call("POST", "/api/v1/files-copy", { chat: CHAT, from: "@shipped/WORLD.md", to: "WORLD.md" })).status).toBe(200);
+    expect(await readFile(join(chatFolder, "WORLD.md"), "utf8")).toBe("# World\n");
+    expect((await call("POST", "/api/v1/files-copy", { chat: CHAT, from: "@global/.rules/nudge.md", to: "@shipped/.rules/nudge.md" })).status).toBe(403);
+    expect((await call("POST", "/api/v1/files-move", { chat: CHAT, from: "@shipped/.rules/examples/nudge.md", to: "rules/nudge.md" })).status).toBe(403);
+  });
+
   test("a chat RPE has not played yet has its levels on the Files page: listing it places its folders, and writing its WORLD.md leaves the chat's file for its first turn", async () => {
     const ghost = "chat-lamp";
     expect(await app.db.query("SELECT 1 FROM tree_chat WHERE chat = ?").get(ghost)).toBeNull();

@@ -185,14 +185,15 @@ export class OwnFiles {
 
   /**
    * Renames or moves a file or folder of the user's to a path that is not taken, or with `copy` copies it there (a copy of a folder
-   * leaves its links out). Both are the user's: neither a shipped file nor one RPE makes again. A file written there is kept as the
-   * user's now. Answers where it went, and the kind of guidance the place is a folder of, if it is one (a file moved into `rules/`
-   * is a rule).
+   * leaves its links out). The place it goes to is the user's: never the shipped level or a place RPE makes again. What is moved is the
+   * user's too, since a move takes it away from where it stands; what is copied is only read, so a shipped file or folder is copied as
+   * the user's own. A file written there is kept as the user's now. Answers where it went, and the kind of guidance the place is a
+   * folder of, if it is one (a file moved into `rules/` is a rule).
    */
   async relocate(user: string, loc: ChatLocation, from: string, to: string, copy: boolean): Promise<{ at: FoundFile; guidance: GuidanceKind | null }> {
     const source = await this.found(loc, from);
     if (source.is === "none") throw new RouteError(404, `The tree has no file or folder ${source.path}.`);
-    this.#yours(source);
+    if (!copy) this.#yours(source);
     const target = await this.found(loc, to);
     if (target.is !== "none") throw new RouteError(409, `${target.path} is there already.`);
     this.#yours(target);
