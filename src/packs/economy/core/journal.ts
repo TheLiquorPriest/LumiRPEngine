@@ -376,6 +376,13 @@ export const EVENTS: EventTypeDef<PackEvent>[] = [
     // Play's name, so an Upgrade that renames the flow too keeps the chat's.
     touches: (e) => [{ entity: str(e, "flow"), aspect: "name" }],
     coarsen: { key: (e) => str(e, "flow"), merge: (_a, b) => b },
+    // The flow gets the name it had before.
+    reverse: (e, before, now) => {
+      const flow = str(e, "flow");
+      if (own(now.entities, flow)?.name !== str(e, "name")) return "changed_since";
+      const was = own(before.entities, flow)?.name;
+      return was === undefined ? "not_reversible" : [{ type: FINANCE_EVENTS.flowRenamed, data: { flow, name: was } }];
+    },
   },
   {
     // Money set aside on an account (a deposit not yet available, a card authorisation), or a hold let go.

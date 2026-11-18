@@ -160,6 +160,8 @@ export interface StageEvent extends EventBase {
    * recorded before it existed: those apply wherever the track stands.
    */
   from?: StageId;
+  /** The minute the track entered the stage, where an Undo puts a quest back on a stage it entered before; none: now. */
+  since?: number;
 }
 
 /** The clock advance applied by a turn: its elapsed time, a timelapse or an applied `time.advance`. */

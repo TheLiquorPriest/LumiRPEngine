@@ -18,7 +18,7 @@ import { FINANCE_EVENTS } from "../shared/finance";
 import type { LedgerEvent, MarkerBody, MaterializeEvent, PostEvent } from "../shared/ledger";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import type { EventTypes } from "../engine/events";
-import { validMarkerBody } from "../engine/events";
+import { applyEvent, validMarkerBody } from "../engine/events";
 import { numOf, objOf, own, strOf } from "../engine/pack-kit";
 import { GONE_FIELD, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -37,7 +37,7 @@ export interface UndoPlan {
   left: Report[];
 }
 
-const leftOf = (code: "changed_since" | "not_reversible", c: ChangeRow): Report => ({ code, values: { change: c.id, op: c.op } });
+const leftOf = (code: "changed_since" | "not_reversible", c: ChangeRow, why?: string): Report => ({ code, values: { change: c.id, op: c.op, ...(why !== undefined ? { why } : {}) } });
 
 /** What one event's reverse is: the events that take it back, in the order they are recorded, or why it has none. */
 type Reversed = JsonObject[] | "changed_since" | "not_reversible";
@@ -125,7 +125,7 @@ function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: Store
     }
     const on = "entity" in inner && typeof inner.entity === "string" ? inner.entity : "from" in inner && typeof inner.from === "string" ? inner.from : null;
     if (inner.type !== "spawn" && on !== null && made.has(on)) continue;
-    const r = reverseEvent(inner, posts, before, now, unlinked, registry);
+    const r = reverseEvent(inner, posts, before, now, unlinked, registry, null);
     if (typeof r === "string") return r;
     out.push(...r);
   }
@@ -137,7 +137,7 @@ function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: Store
  * The reverse of one event, read against the state just before its unit and the state now; `posts` are the postings of its unit. The
  * core events and the engine's and the economy's own are reversed here; any other event type is reversed by the `reverse` its pack gave it.
  */
-function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: StoreState, now: StoreState, unlinked: Set<string>, registry: EventTypes): Reversed {
+function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: StoreState, now: StoreState, unlinked: Set<string>, registry: EventTypes, sim: Sim | null): Reversed {
   const related = (state: StoreState, rel: string, from: string, to: string) => own(state.world.entities, from)?.relations.find((r) => r.type === rel && r.to === to);
   // The Undo of a change that set the clock where nothing had set it before takes the setting off again (A155).
   const unset: JsonObject = setsClock(ev as unknown as JsonValue) && before.marks.world?.[CLOCK_SET] === undefined ? { [CLOCK_UNSET]: true } : {};
@@ -150,6 +150,9 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
       const key = JSON.stringify([ev.rel, ev.from, ev.to]);
       if (unlinked.has(key)) return [];
       unlinked.add(key);
+      // A relation that was there before the unit comes back as it was (its fields and its end); one the unit made is taken off.
+      const was = related(before, ev.rel, ev.from, ev.to);
+      if (was) return [{ type: "link", rel: ev.rel, from: ev.from, to: ev.to, ...(was.fields ? { fields: was.fields } : {}), ...(was.until !== undefined ? { until: was.until } : {}) }];
       return [{ type: "unlink", rel: ev.rel, from: ev.from, to: ev.to }];
     }
     case "unlink": {
@@ -173,6 +176,12 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
       return despawnOf(now.world, ev.entity.id, unlinked) ?? "changed_since";
     case "materialize":
       return reverseMaterialize(ev, before, now, unlinked, registry);
+    case "stage": {
+      // A quest moved back to the stage it stood at, as it was entered then; where something moved it since, that is not this one's to take back.
+      const was = own(before.world.tracks, ev.track);
+      if (own(now.world.tracks, ev.track)?.stage !== ev.to) return "changed_since";
+      return was === undefined ? "not_reversible" : [{ type: "stage", track: ev.track, to: was.stage, from: ev.to, since: was.since }];
+    }
     default: {
       if (ev.type === ENGINE_EVENTS.rewind && "data" in ev) return typeof ev.data.minutes === "number" ? [{ type: "clock", minutes: ev.data.minutes, cause: "advance", ...unset }] : "not_reversible";
       if (ev.type === ENGINE_EVENTS.hint && "data" in ev) return reverseHint(ev.data, before, now);
@@ -181,12 +190,88 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
         const line = reverseLine(ev.data, posts);
         return line === null ? "not_reversible" : [line as unknown as JsonObject];
       }
-      const reverse = registry.get(ev.type)?.reverse;
-      if (reverse === undefined) return "not_reversible";
-      const r = reverse(ev, before.world, now.world);
+      const def = registry.get(ev.type);
+      if (def?.reverse === undefined) return reverseWritten(ev, before, now, sim);
+      const r = def.reverse(ev, before.world, now.world);
       return typeof r === "string" ? r : [...r];
     }
   }
+}
+
+/** What each event of a unit wrote under the packs' slices and in what entities hold (the paths it changed), found by playing the unit on a copy of the world just before it, and that copy as the unit left it. */
+interface Sim {
+  wrote: Map<LedgerEvent, { paths: string[][]; outside: boolean }>;
+  after: WorldState;
+}
+
+/** The topmost paths at which `a` and `b` differ: a key only one holds, or where neither is an object a value that differs. */
+function diffPaths(a: unknown, b: unknown, path: string[], out: string[][]): void {
+  if (jsonEqual(a as JsonValue, b as JsonValue)) return;
+  if (isRecord(a) && isRecord(b)) {
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (key in a && key in b) diffPaths(a[key], b[key], [...path, key], out);
+      else out.push([...path, key]);
+    }
+    return;
+  }
+  out.push(path);
+}
+
+/** The value at `path` below `root`, where there is one. */
+function valueAt(root: unknown, path: readonly string[]): JsonValue | undefined {
+  let at = root;
+  for (const step of path) {
+    if (!isRecord(at) || !(step in at)) return undefined;
+    at = at[step];
+  }
+  return at as JsonValue;
+}
+
+/** What a put-back may give back: the packs' slices and what each entity holds. */
+const heldBy = (state: Readonly<WorldState>): { packs: WorldState["packs"]; entities: WorldState["entities"] } => ({ packs: state.packs, entities: state.entities });
+
+/** The unit's events played one after another on a copy of the world just before it, each with the paths it changed; none where the world's revision is not known. */
+function simulate(unit: readonly ChangeRow[], before: StoreState, env: Pick<FoldEnv, "registry"> & Partial<Pick<FoldEnv, "worlds">>): Sim | null {
+  const doc = env.worlds?.(before.world.revision);
+  if (!doc) return null;
+  const scratch = structuredClone(before.world);
+  const ctx = env.registry.context(doc, scratch);
+  const wrote = new Map<LedgerEvent, { paths: string[][]; outside: boolean }>();
+  for (const c of unit) {
+    const ev = c.applied ? eventOf(c.op, c.value) : null;
+    if (ev === null) continue;
+    const prev = structuredClone(scratch);
+    try {
+      applyEvent(env.registry, ev, scratch, ctx);
+    } catch {
+      continue;
+    }
+    const paths: string[][] = [];
+    diffPaths(heldBy(prev), heldBy(scratch), [], paths);
+    // What it wrote of the world beyond the slices and what the entities hold (a balance, the clock, a new entity) is not a put-back's to give.
+    const { packs: _before, entities: _entities, ...rest } = prev;
+    const { packs: _after, entities: _entitiesAfter, ...rested } = scratch;
+    const outside: string[][] = [];
+    diffPaths(rest, rested, [], outside);
+    wrote.set(ev, { paths, outside: outside.length > 0 || paths.some((p) => p[0] === "entities" && p.length < 3) });
+  }
+  return { wrote, after: scratch };
+}
+
+/**
+ * The reverse of an event that has none of its own: what it wrote under the packs' slices goes back to what the world held before its
+ * unit, unless a later change has written that since (the slice is not what the unit left).
+ */
+function reverseWritten(ev: LedgerEvent, before: StoreState, now: StoreState, sim: Sim | null): Reversed {
+  const wrote = sim?.wrote.get(ev);
+  if (sim === null || wrote === undefined || wrote.outside) return "not_reversible";
+  const out: JsonObject[] = [];
+  for (const path of wrote.paths) {
+    if (!jsonEqual(valueAt(now.world, path) ?? null, valueAt(sim.after, path) ?? null)) return "changed_since";
+    const was = valueAt(before.world, path);
+    out.push({ type: ENGINE_EVENTS.put, data: { path, ...(was === undefined ? {} : { value: was }) } });
+  }
+  return out;
 }
 
 /** What the control a marker sets holds in `world`; undefined where it holds none. */
@@ -228,7 +313,7 @@ function markerValue(world: Readonly<WorldState>, body: Exclude<MarkerBody, { ki
 }
 
 /** The reverse of one change of `unit`, read against the state just before the unit and the state now; or why it has none. */
-function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string, unlinked: Set<string>, registry: EventTypes): ChangeInput[] | Report {
+function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string, unlinked: Set<string>, registry: EventTypes, sim: Sim | null): ChangeInput[] | Report {
   const input = (op: string, value: JsonValue): ChangeInput => ({ lane: c.lane, op, value, precision: c.precision, standing: c.standing });
   const ev = eventOf(c.op, c.value);
   if (ev) {
@@ -236,7 +321,9 @@ function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState
       .filter((u) => u.applied)
       .map((u) => eventOf(u.op, u.value))
       .filter((e): e is PostEvent => e?.type === "post");
-    const r = reverseEvent(ev, posts, before, now, unlinked, registry);
+    const nature = registry.get(ev.type)?.irreversible;
+    if (nature !== undefined) return leftOf("not_reversible", c, nature);
+    const r = reverseEvent(ev, posts, before, now, unlinked, registry, sim);
     return typeof r === "string" ? leftOf(r, c) : r.map((e) => input(String(e.type), { ...e, group }));
   }
   const v = isRecord(c.value) ? c.value : {};
@@ -318,10 +405,11 @@ function reverseArea(c: ChangeRow, area: { id: string; name: string; def: AreaOp
  * where it is one of his. A field or relation an event wrote, or an area's part, that a later turn or
  * a later change of his wrote since is changed since (a sum such as a balance is not).
  */
-export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState, env: Pick<FoldEnv, "registry" | "areas">, later: readonly ChangeRow[] = []): UndoPlan {
+export function reversal(unit: readonly ChangeRow[], before: StoreState, now: StoreState, env: Pick<FoldEnv, "registry" | "areas"> & Partial<Pick<FoldEnv, "worlds">>, later: readonly ChangeRow[] = []): UndoPlan {
   const group = `undo:${unit[0]?.id ?? 0}`;
   const out: UndoPlan = { inputs: [], left: [] };
   const unlinked = new Set<string>();
+  const sim = simulate(unit, before, env);
   for (const c of [...unit].reverse()) {
     if (!c.applied) continue;
     const found = env.areas?.of(c.op) ?? null;
@@ -331,7 +419,7 @@ export function reversal(unit: readonly ChangeRow[], before: StoreState, now: St
         ? reverseArea(c, { id: found.area.id, name: found.name, def: found.def, initial: found.area.initial?.() ?? {} }, before, now)
         : c.op === STORE_OPS.fact
           ? reverseFact(c, now)
-          : reverseOne(c, unit, before, now, group, unlinked, env.registry);
+          : reverseOne(c, unit, before, now, group, unlinked, env.registry, sim);
     if (Array.isArray(r)) out.inputs.push(...r);
     else out.left.push(r);
   }

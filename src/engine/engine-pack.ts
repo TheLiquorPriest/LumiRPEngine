@@ -86,6 +86,8 @@ export const ENGINE_EVENTS = {
   unlist: "engine.unlist",
   /** A number at `path` in a pack's slice changed by `delta` (`pack`, `path`, `delta`), where the path holds one: the Undo of an event that added to it. */
   bump: "engine.bump",
+  /** What an event wrote under a pack's slice or in what an entity holds put back as it was (`path`, its first key `packs` or `entities`, and `value`; none: taken off): the Undo of an event that has no reverse of its own. */
+  put: "engine.put",
 } as const;
 
 /** The event that takes the newest entry equal to `entry` off the list at `path` in a pack's slice, for an event's `reverse` (`ENGINE_EVENTS.unlist`). */
@@ -315,6 +317,30 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: () => "",
   },
   {
+    // What an event wrote under a pack's slice put back as it was before: the value at `path` (its first key the pack's), or taken off where there was none.
+    type: ENGINE_EVENTS.put,
+    validate: (e) => (Array.isArray(e.data.path) && e.data.path.length > 1 && (e.data.path[0] === "packs" || e.data.path[0] === "entities") && e.data.path.every((k) => typeof k === "string" && safeKey(k)) ? null : { code: "bad_event", reason: say("why_putting_a_value_back_needs_a_path") }),
+    apply: (e, state) => {
+      const path = (Array.isArray(e.data.path) ? e.data.path : []).filter((k): k is string => typeof k === "string");
+      const root = path.shift();
+      const key = path.pop();
+      if (key === undefined || (root !== "packs" && root !== "entities")) return;
+      let at = (root === "packs" ? state.packs : state.entities) as unknown as JsonObject;
+      for (const step of path) {
+        let next = at[step];
+        if (!isRecord(next)) {
+          if (e.data.value === undefined) return;
+          next = {};
+          at[step] = next;
+        }
+        at = next as JsonObject;
+      }
+      if (e.data.value === undefined) delete at[key];
+      else at[key] = structuredClone(e.data.value);
+    },
+    describe: () => "",
+  },
+  {
     type: ENGINE_EVENTS.caught,
     validate: (e, ctx) => {
       const missing = need(e, "agent");
@@ -438,6 +464,7 @@ const events: EventTypeDef<PackEvent>[] = [
     validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "actor") }) }),
     apply: noop,
     describe: (e) => say("ev_check", { actor: str(e, "actor"), check: str(e, "check").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(typeof e.data.total === "number" ? { total: String(e.data.total) } : {}), ...(typeof e.data.dc === "number" ? { dc: String(e.data.dc) } : {}) }),
+    irreversible: "roll",
   },
   {
     type: ENGINE_EVENTS.entity,
@@ -572,6 +599,8 @@ const events: EventTypeDef<PackEvent>[] = [
       sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str(e, "outcome"), failed: e.data.failed === true, odds: str(e, "odds"), ...(typeof round === "string" ? { round } : {}) };
     },
     describe: (e) => say("ev_roll", { actor: str(e, "actor"), action: str(e, "action").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(e.data.rolled === true ? { rolled: true } : { why: str(e, "why") }) }),
+    // A roll the player has seen, or the narrator has told, does not unroll: its result stands.
+    irreversible: "roll",
   },
   {
     type: ENGINE_EVENTS.life,

@@ -136,6 +136,12 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
    * says by name and leaves as it is. An event with nothing to take back gives none (`[]`).
    */
   reverse?(event: E, before: Readonly<WorldState>, now: Readonly<WorldState>): readonly JsonObject[] | "changed_since" | "not_reversible";
+  /**
+   * Set only for an event that cannot be taken back by its nature, not for want of code: something that left the world (a message
+   * sent into the chat) or that the player has seen (a roll). A code that the answers' file words ("you have seen how the roll fell").
+   * The Undo leaves such an event as it is and says why, beside the rest it takes back.
+   */
+  irreversible?: string;
 }
 
 /** An extra validation on an event type (`CoreRegistry.guard`). */

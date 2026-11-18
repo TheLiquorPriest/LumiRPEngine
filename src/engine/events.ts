@@ -201,7 +201,7 @@ const stageDef: EventTypeDef<StageEvent> = {
     return reject("stage_moved", say("why_track_is_at_at_now_no_longer", { track: track.label, at: label(at), from: label(e.from) }));
   },
   apply: (e, state) => {
-    if (safeKey(e.track)) state.tracks[e.track] = { stage: e.to, since: state.clock };
+    if (safeKey(e.track)) state.tracks[e.track] = { stage: e.to, since: typeof e.since === "number" ? e.since : state.clock };
   },
   // Labels, not ids; whether the player may see a track's stages is the caller's check (eventVisible).
   describe: (e, ctx) => {

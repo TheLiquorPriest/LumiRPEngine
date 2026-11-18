@@ -942,6 +942,7 @@ why_a_goal_needs_an_organization_an_id: a goal needs an organization, an id, its
 why_an_order_needs_an_organization_an_id: an order needs an organization, an id, whom it is for, its words, a status and where it came from
 why_a_plan_item_put_back_needs_its_organization_and_id: a goal or an order put back needs its organization and its id
 why_a_draft_change_put_back_needs_its_item: a change of the world's draft put back needs the place, path, map or part it was made to
+why_putting_a_value_back_needs_a_path: putting a value back needs the path it was written at, starting with the packs or the entities
 why_a_status_change_needs_a_status_and: a status change needs a status and where it came from
 why_nothing_on_the_plan_is_id: nothing on the plan is {{id}}
 why_no_order_on_the_plan_is_id: no order on the plan is {{id}}
