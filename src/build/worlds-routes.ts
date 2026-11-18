@@ -84,6 +84,7 @@ const revisionRow = shape.named(
     source: opt(shape.oneOf("create", "build", "agent", "import"), "What made it head."),
     note: opt(T, "The note given with the commit."),
     head: field(shape.yesNo(), "It is the world's head now."),
+    before: field(shape.nullable(T), "The revision that was the head before it; null for the world's first revision."),
     changed: field(shape.nullable(N), "How many things it changed against the revision before it; null for the world's first revision, and for one whose file is gone."),
     chats: field(shape.list(shape.object({ chat: field(T, "The chat's id."), name: field(T, "Its name in Lumiverse; its id where Lumiverse gives none.") })), "The chats that play it now."),
   }),

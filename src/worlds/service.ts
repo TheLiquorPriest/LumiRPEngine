@@ -62,6 +62,8 @@ export interface RevisionRow {
   note?: string;
   /** It is the world's head now. */
   head: boolean;
+  /** The revision that was the head before it; null for the world's first. */
+  before: RevisionId | null;
   /** How many things it changed against the revision before it; null for the world's first, and for one whose file is gone. */
   changed: number | null;
   /** The chats that play it now, by name. */
@@ -224,6 +226,7 @@ export class WorldService {
         revision: entry.revision,
         ...(entry.note === undefined ? {} : { at: entry.note.at, source: entry.note.source, ...(entry.note.note === undefined ? {} : { note: entry.note.note }) }),
         head: entry.revision === index.head,
+        before: entries[at - 1]?.revision ?? null,
         changed: at === 0 || doc === null || before === null ? null : same ? 0 : changesBetween(before, doc).length,
         chats: chats.filter((c) => c.revision === entry.revision).map((c) => ({ chat: c.chat, name: c.name })),
       });

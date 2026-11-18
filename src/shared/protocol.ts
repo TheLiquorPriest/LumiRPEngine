@@ -420,7 +420,9 @@ export interface JobUpdate extends Envelope<"lre.job.update"> {
  * editor write's is (DESIGN §23). `templates` lists the starter worlds `create` takes; `chats` lists
  * the user's chats that play a world (one world's with `worldId`, one chat with `chatId`). `updates`
  * lists the data tables this build ships newer than the world's copies (`TableUpdate`): the draft's,
- * or one revision's (a chat's, for Pins and upgrade).
+ * or one revision's (a chat's, for Pins and upgrade). `revisions` reads a page of the world's history,
+ * newest first (the next page by the `next` the last one gave, as `cursor`). `changes` lists what changed
+ * from `from` (the head by default) to `to` (the draft by default), part by part.
  */
 export type WorldRequest = Request<"lre.world"> &
   (
@@ -440,6 +442,8 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "templates" }
     | { op: "chats"; worldId?: WorldId; chatId?: ChatId }
     | { op: "updates"; worldId: WorldId; revision?: RevisionId }
+    | { op: "revisions"; worldId: WorldId; cursor?: string }
+    | { op: "changes"; worldId: WorldId; from?: RevisionId; to?: RevisionId }
   );
 
 /** A starter world `lre.world create` can start from. */
@@ -464,6 +468,38 @@ export interface WorldChatInfo {
   /** The world's head revision, which a chat that is behind moves to; null where the world is gone. */
   head?: RevisionId | null;
   reason?: string;
+}
+
+/** One revision of a world as its history lists it (`lre.world revisions`): when it became head and what made it, its note, how many things it changed against the revision before it, whether it is the head now, and the chats that play it. */
+export interface WorldRevisionInfo {
+  revision: RevisionId;
+  /** When it became head, in ms since the epoch; none for a revision that became head before the world kept a history. */
+  at?: number;
+  source?: RevisionNote["source"];
+  note?: string;
+  head: boolean;
+  /** The revision that was the head before it; null for the world's first. */
+  before: RevisionId | null;
+  /** Null for the world's first revision, and for one whose file is gone. */
+  changed: number | null;
+  chats: { chat: ChatId; name: string }[];
+}
+
+/** What changed from one version of a world to another, part by part (`lre.world changes`); `to` is null for the draft. */
+export interface WorldChangesInfo {
+  from: RevisionId;
+  to: RevisionId | null;
+  total: number;
+  parts: {
+    /** The collection (`entities`, `places`…) or the part (`calendar`…) of the world's document. */
+    part: string;
+    added: number;
+    changed: number;
+    removed: number;
+    /** The first things it changed, named; none for a part that holds no things of its own. */
+    things: { id: string; name: string | null; kind: "added" | "changed" | "removed" }[];
+    more: number;
+  }[];
 }
 
 /**
@@ -888,7 +924,7 @@ export interface ResultBodies {
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number } };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */

@@ -4088,6 +4088,8 @@ export interface WorldRevisionRow {
   note?: string;
   /** It is the world's head now. */
   head: boolean;
+  /** The revision that was the head before it; null for the world's first revision. */
+  before: string | null;
   /** How many things it changed against the revision before it; null for the world's first revision, and for one whose file is gone. */
   changed: number | null;
   /** The chats that play it now. */

@@ -1,8 +1,9 @@
 // Build (DESIGN §13): a stack of pages, Worlds → World → Collection → Item
 // → sub-editor pages, each of them usable on a phone. Worlds lists the worlds (open, Export,
 // Delete) and New world starts one from a template or a file. Inside a world a
-// sticky bar keeps Back, the draft's state and Commit in reach, with Discard in its overflow; the
-// world's home groups its parts, its content and its tools; a collection lists its items by name,
+// sticky bar keeps Back, the draft's state (a press shows what it changes against the last revision) and
+// Commit (which takes a note) in reach, with Discard in its overflow; the world's home groups its parts,
+// its content, its tools and its revisions (each opened for what it changed, and put in the draft); a collection lists its items by name,
 // and + New asks for a name and derives the id. Item and part pages keep Save to draft and Revert
 // in a sticky bar at the bottom. Packs replace the item page per collection (`UiRegistry.editor`).
 
@@ -37,6 +38,7 @@ import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { DataUpdatesSection, useTableUpdates } from "./data-updates";
 import { ChangedElsewhere, useHeld } from "./held";
 import { WorldChatsSection } from "./upgrade";
+import { CommitPanel, RevisionsSection, UncommittedPanel } from "./history";
 import { JOB_INFO, jobStore, JobStatusBadge, JobView, keptJobs } from "./jobs";
 import { LookupTableEditor } from "./lookup-editor";
 import { MindsEditor } from "./minds-editor";
@@ -174,6 +176,7 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
   const route = useUi((ui) => ui.build);
   const [failed, setFailed] = useState(false);
   const [busy, run] = useBusy();
+  const [panel, setPanel] = useState<"commit" | "changes" | null>(null);
   const load = () => {
     setFailed(false);
     void loadDraft(app, props.worldId).then((loaded) => setFailed(loaded === null));
@@ -182,6 +185,7 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
     if (draft?.worldId === props.worldId) return;
     load();
   }, [props.worldId]);
+  useEffect(() => setPanel(null), [props.worldId]);
   if (!draft || draft.worldId !== props.worldId) {
     return (
       <div class="lre-build-page" data-lre-section="build">
@@ -218,18 +222,36 @@ function WithDraft(props: { worldId: WorldId; children: ComponentChildren }) {
             <span class="lre-build-bar-name">{draft.doc.name}</span>
             <span class="lre-build-bar-state" data-lre-draft={draft.dirty ? "changed" : "committed"}>
               {draft.dirty ? <span class="lre-dot" aria-hidden="true" /> : null}
-              <span>{draft.dirty ? <>Uncommitted<span class="lre-sr"> changes</span></> : "All committed"}</span>
+              {draft.dirty ? (
+                <button type="button" class="lre-build-source-name" aria-expanded={panel === "changes"} title="Show what the draft changes" onClick={() => setPanel(panel === "changes" ? null : "changes")}>
+                  Uncommitted<span class="lre-sr"> changes</span>
+                </button>
+              ) : (
+                <span>All committed</span>
+              )}
               {errors > 0 ? <Badge tone="neg">{errors === 1 ? "1 error" : `${errors} errors`}</Badge> : null}
               {warnings > 0 ? <Badge tone="warn">{warnings === 1 ? "1 warning" : `${warnings} warnings`}</Badge> : null}
             </span>
           </div>
-          <Button size="sm" variant={draft.dirty ? "primary" : "secondary"} disabled={!draft.dirty} busy={busy} title={blocked} label={blocked ? `Commit, ${blocked}` : undefined} onClick={() => run(() => commitDraft(app))}>
+          <Button size="sm" variant={draft.dirty ? "primary" : "secondary"} disabled={!draft.dirty} busy={busy} title={blocked} label={blocked ? `Commit, ${blocked}` : undefined} onClick={() => setPanel(panel === "commit" ? null : "commit")}>
             Commit
           </Button>
           <OverflowMenu label="Draft actions" items={[{ label: "Discard changes", icon: "trash", danger: true, disabled: !draft.dirty || busy, onSelect: () => run(() => discardDraft(app)) }]} />
         </div>
         <ChangedElsewhere />
       </div>
+      {draft.dirty && panel === "changes" ? <UncommittedPanel worldId={props.worldId} version={draft.version} onClose={() => setPanel(null)} /> : null}
+      {draft.dirty && panel === "commit" ? (
+        <CommitPanel
+          busy={busy}
+          onCommit={(note) =>
+            run(async () => {
+              if (await commitDraft(app, note)) setPanel(null);
+            })
+          }
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
       {props.children}
     </div>
   );
@@ -539,6 +561,7 @@ function WorldHome() {
         </List>
       </Section>
       <WorldChatsSection worldId={draft.worldId} />
+      <RevisionsSection worldId={draft.worldId} />
     </div>
   );
 }

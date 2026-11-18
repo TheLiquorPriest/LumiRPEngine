@@ -20,7 +20,9 @@ type JsonRoute = DeclaredRoute<any, any, any, any, any, any>;
 /** `route` asked as the server asks it: its reply, or the `RouteError` its declaration or its handler refuses with. */
 export async function callRoute<R extends JsonRoute>(route: R, given: Given): Promise<RouteReply<R>> {
   const at = `${route.method} ${route.path}`;
-  const read = readQuery(route.query ?? {}, new URLSearchParams(Object.entries(given.query ?? {}).map(([name, value]) => [name, String(value)])), at);
+  // `limit` and `cursor` belong to a route that pages, not to its declared query.
+  const { limit: _limit, cursor: _cursor, ...declared } = given.query ?? {};
+  const read = readQuery(route.query ?? {}, new URLSearchParams(Object.entries(route.paged === undefined ? (given.query ?? {}) : declared).map(([name, value]) => [name, String(value)])), at);
   if (!read.ok) throw new RouteError(400, read.why);
   let body: unknown;
   if (route.body === undefined) {
@@ -32,7 +34,9 @@ export async function callRoute<R extends JsonRoute>(route: R, given: Given): Pr
     if (problems.length > 0) throw new RouteError(400, `${at} does not take this body: ${problems.slice(0, 3).join(" ")}`);
   }
   const handle = route.handle as (call: unknown) => unknown;
-  const reply = await handle({ params: given.params ?? {}, query: read.value, body, user: given.user, auth: { user: given.user, access: route.access, listener: "tcp", credential: null }, signal: new AbortController().signal });
+  // A route that pages is given what the server gives its handler: the size asked for (the route's own default where none is) and the place its page starts after (the cursor as given: the server's seal is its own).
+  const paging = route.paged === undefined ? {} : { limit: _limit !== undefined ? Number(_limit) : route.paged.sizes === undefined ? undefined : (await route.paged.sizes({ params: given.params ?? {}, user: given.user })).default, ...(_cursor === undefined ? {} : { after: String(_cursor) }) };
+  const reply = await handle({ params: given.params ?? {}, query: { ...read.value, ...paging }, body, user: given.user, auth: { user: given.user, access: route.access, listener: "tcp", credential: null }, signal: new AbortController().signal });
   const sent = reply === undefined ? undefined : JSON.parse(JSON.stringify(reply));
   const wrong = problemsOf(route.reply, sent, "reply");
   if (wrong.length > 0) throw new Error(`${at} answered what its declaration does not take: ${wrong.slice(0, 3).join(" ")}`);

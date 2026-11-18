@@ -8,7 +8,7 @@
 // that change: a push they bring about is judged only when they have ended and Build holds what
 // they answered and read.
 
-import type { WorldId } from "../../shared/ids";
+import type { RevisionId, WorldId } from "../../shared/ids";
 import type { ErrorMessage, ResultMessage } from "../../shared/protocol";
 import type { App, Draft } from "../app";
 import type { Send } from "../registry";
@@ -189,11 +189,12 @@ export function draftSend(app: App): Send {
 }
 
 /** Commits the draft Build holds, at the version it holds; then reads the world again, whatever it held meanwhile. */
-export async function commitDraft(app: App): Promise<boolean> {
+export async function commitDraft(app: App, note?: string): Promise<boolean> {
   const draft = app.drafts.get();
   if (!draft) return false;
   return ownWrite(draft.worldId, async () => {
-    const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base, version: draft.version });
+    const said = note?.trim() ?? "";
+    const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base, version: draft.version, ...(said === "" ? {} : { note: said }) });
     if (message.type === "lre.error") {
       app.toast(message.code === "validation" ? `Fix ${message.lint?.length ?? 0} error(s) before committing.` : message.message, "error");
       if (message.lint) app.drafts.set({ ...draft, lint: message.lint });
@@ -221,5 +222,30 @@ export async function discardDraft(app: App): Promise<void> {
       return;
     }
     if (message.request === "lre.editor") app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
+  });
+}
+
+/**
+ * Puts one of the world's earlier revisions in the draft, in place of what the draft holds; nothing is committed until Commit. A draft
+ * with uncommitted changes asks first, saying they will be replaced. `named` says which revision, in words ("the revision of 3 May").
+ */
+export async function restoreRevision(app: App, revision: RevisionId, named: string): Promise<boolean> {
+  const held = app.drafts.get();
+  if (!held) return false;
+  if (held.dirty && !(await app.host.confirm("Replace the draft", `Your draft has uncommitted changes. Putting ${named} in the draft replaces them, and they cannot be brought back.`, "danger", "Replace the draft"))) return false;
+  // Read again: the draft may have moved while you were asked.
+  const draft = app.drafts.get();
+  if (!draft || draft.worldId !== held.worldId) return false;
+  return ownWrite(draft.worldId, async () => {
+    const message = await app.send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, version: draft.version, op: "restore", revision });
+    if (message.type === "lre.error") {
+      app.toast(message.code === "conflict" ? "Nothing was put in the draft: it changed while you were asked. Build reloaded it." : message.message, "error");
+      if (message.code === "conflict") await refreshDraft(app, draft.worldId);
+      return false;
+    }
+    if (message.request !== "lre.editor") return false;
+    app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
+    app.toast(`${named[0]?.toUpperCase() ?? ""}${named.slice(1)} is in the draft. Commit makes it the world's newest revision.`, "info");
+    return true;
   });
 }

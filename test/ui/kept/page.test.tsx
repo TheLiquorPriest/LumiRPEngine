@@ -111,9 +111,23 @@ describe("the Build page", () => {
     const set = rpe.asked.find((a) => a.key === "PUT /api/v1/worlds/:world/draft/parts/:part")?.body;
     expect(set).toMatchObject({ base: fernwick?.head, version: 0, value: { name: "Fernwick Vale" } });
 
+    // What the draft changes against the last revision, one press from the bar.
+    await act(() => (root.querySelector("[data-lre-draft] button") as PageElement).click());
+    await until("what the draft changes", () => root.querySelector("[data-lre-uncommitted] [data-lre-changes]") !== null);
+    expect(words(root.querySelector("[data-lre-uncommitted] [data-lre-changes]") as PageElement)).toMatch(/\d things? changed, part by part:World/);
+    // Commit offers one line for a note, and sends it with the commit.
     await act(() => button(root, "Commit").click());
+    const note = root.querySelector("[data-lre-commit] input");
+    if (note === null) throw new Error("Commit offered no note.");
+    note.value = "Renamed the world";
+    await act(() => {
+      note.dispatchEvent(new PageEvent("input"));
+    });
+    await act(() => {
+      (root.querySelector("[data-lre-commit]") as PageElement).dispatchEvent(new PageEvent("submit"));
+    });
     await until("the commit's toast", () => root.querySelectorAll(".lre-toast").some((t) => words(t) === "Committed a new revision."));
-    expect(rpe.asked.filter((a) => a.key === "POST /api/v1/worlds/:world/commit").map((a) => a.body)).toEqual([{ base: fernwick?.head, version: 1 }]);
+    expect(rpe.asked.filter((a) => a.key === "POST /api/v1/worlds/:world/commit").map((a) => a.body)).toEqual([{ base: fernwick?.head, version: 1, note: "Renamed the world" }]);
     expect(root.querySelector("[data-lre-draft]")?.getAttribute("data-lre-draft")).toBe("committed");
 
     root
@@ -122,6 +136,23 @@ describe("the Build page", () => {
       ?.click();
     await until("the world's home again", () => root.querySelector("[data-lre-world-home]") !== null);
     expect({ said: root.querySelectorAll("[data-rpe-said]").length, asked: rpe.asked.filter((a) => a.key === "GET /api/v1/build/jobs").length >= 2 }).toEqual({ said: 0, asked: true });
+
+    // The world's history on its home: newest first, each with its note and how many things it changed; a press opens one for what it changed.
+    await until("the revisions", () => root.querySelectorAll("[data-lre-revisions] .lre-listrow").length === 2);
+    const revisions = (): PageElement[] => root.querySelectorAll("[data-lre-revisions] button.lre-listrow-hit");
+    expect(revisions().map(words)).toEqual([expect.stringContaining("Renamed the world"), expect.stringContaining("Where the world started")]);
+    expect(words(revisions()[0] as PageElement)).toMatch(/\d things? changed/);
+    await act(() => (revisions()[0] as PageElement).click());
+    await until("what the newest revision changed", () => root.querySelector("[data-lre-revision-detail] [data-lre-changes]") !== null);
+    expect(words(root.querySelector("[data-lre-revision-detail] [data-lre-changes]") as PageElement)).toContain("World");
+    expect(root.querySelectorAll("button").some((b) => words(b) === "Put this revision in the draft")).toBe(false);
+    // The first revision is an earlier one: it goes into the draft, and nothing is committed.
+    await act(() => (revisions()[1] as PageElement).click());
+    await until("the first revision's detail", () => root.querySelector("[data-lre-revision-detail]")?.textContent.includes("The world started here") === true);
+    await act(() => button(root, "Put this revision in the draft").click());
+    await until("the restored draft", () => root.querySelector("[data-lre-draft]")?.getAttribute("data-lre-draft") === "changed");
+    expect(rpe.asked.filter((a) => a.key === "POST /api/v1/worlds/:world/draft/restore").map((a) => a.body)).toMatchObject([{ revision: fernwick?.head }]);
+    expect(rpe.asked.filter((a) => a.key === "POST /api/v1/worlds/:world/commit")).toHaveLength(1);
 
     await act(() => render(null, root as unknown as HTMLElement));
     const calls = rpe.asked.length;

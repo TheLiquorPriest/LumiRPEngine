@@ -71,14 +71,22 @@ async function world(request: Of<"lre.world">, ctx: CallContext): Promise<Result
       return { revision: done.revision, ...(done.waiting ? { pending: true } : {}), ...(done.edit === null ? {} : { undo: done.edit }) };
     }
     case "limits": {
-      // The sizes Build's "Change the selected" writes its patch in: `engine.maxEditOps` operations at a time, never more than one patch of a draft may carry.
+      // The sizes Build's "Change the selected" writes its patch in: `engine.maxEditOps` operations at a time, never more than one patch of a draft may carry; and the longest note a commit keeps.
       const read = await call("GET /api/v1/settings", {});
       const whole = (key: string): number => {
         const value = read.settings.find((s) => s.key === key)?.value;
         if (typeof value !== "number") throw new Refusal("internal", `RPE gave no value for ${key}.`);
         return value;
       };
-      return { limits: { editOps: whole("engine.maxEditOps"), patchOps: whole("worlds.maxPatchOps") } };
+      return { limits: { editOps: whole("engine.maxEditOps"), patchOps: whole("worlds.maxPatchOps"), noteChars: whole("worlds.noteChars") } };
+    }
+    case "revisions": {
+      const page = await call("GET /api/v1/worlds/:world/revisions", { world: request.worldId }, { query: request.cursor === undefined ? {} : { cursor: request.cursor } });
+      return { revisions: todays(page.items), next: page.next };
+    }
+    case "changes": {
+      const answer = await call("GET /api/v1/worlds/:world/changes", { world: request.worldId }, { query: { ...(request.from === undefined ? {} : { from: request.from }), ...(request.to === undefined ? {} : { to: request.to }) } });
+      return { changes: todays(answer) };
     }
     case "undo_upgrade": {
       const done = await call("POST /api/v1/chats/:chat/upgrade/undo", { chat: request.chatId }, { body: { edit: request.edit } });

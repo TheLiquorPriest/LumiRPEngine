@@ -66,6 +66,8 @@ textarea.lre-input.lre-build-prose{font-family:inherit;font-size:var(--lre-fs-md
 .lre-build-issues{display:flex;flex-direction:column;min-width:0}
 .lre-build-issues>.lre-lint{padding:var(--lre-s3)}
 .lre-build-well{overflow:hidden;border-radius:var(--lre-r-lg);background:var(--lre-well)}
+.lre-build-detail{display:flex;flex-direction:column;gap:var(--lre-s3);min-width:0;padding:var(--lre-s2) var(--lre-s3) var(--lre-s3);background:var(--lre-well);border-top:1px solid var(--lre-hairline)}
+.lre-build-detail .lre-build-well{background:var(--lre-card)}
 .lre-progress{height:8px;border-radius:var(--lre-r-pill);background:var(--lre-neutral-soft);overflow:hidden}
 .lre-progress>span{display:block;height:100%;border-radius:inherit;background:var(--lre-accent);transition:width var(--lre-med)}
 .lre-build-picks{display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--lre-hairline);border-radius:var(--lre-r-lg)}
