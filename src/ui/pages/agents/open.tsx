@@ -19,6 +19,7 @@ import { filesCalls, type WriteLevel, writeLevels } from "../files/model";
 import { Handed } from "../files/stack";
 import type { SettingsShown } from "../settings";
 import type { RowActions } from "../settings/row";
+import { SettingName } from "../settings/names";
 import { windowOfModel } from "../usage";
 import { listLine, rewrite, splitFile } from "./header";
 import { AgentSettings } from "./settings";
@@ -79,7 +80,17 @@ function ModelSection(props: { agent: ListedDefinition; connections: readonly Co
         </p>
       )}
       <p class="rpe-line" data-effort>
-        {run.effort === null ? "Its effort is left to its provider's own default" : <>It is set to think at <strong>{run.effort}</strong>. A model that has no level so high is sent the nearest level it has, which the turn's record names for each run (its “effort”)</>}
+        {run.effort === null ? (
+          "Its effort is left to its provider's own default"
+        ) : run.sent !== null && run.sent !== run.effort ? (
+          <>
+            It is set to think at <strong>{run.effort}</strong>; its model has no level so high, so it is sent <strong>{run.sent}</strong>
+          </>
+        ) : (
+          <>
+            It is set to think at <strong>{run.effort}</strong>
+          </>
+        )}
         {agent.effort === undefined ? ". Its definition sets none." : `. Its definition says ${agent.effort}.`} An effort set for its connection on the Settings page stands over its definition's, and one set below, for every chat or this one, over both.
       </p>
     </Section>
@@ -106,8 +117,8 @@ function ToolsSection(props: { chat: string | null; agent: ListedDefinition }) {
       </ul>
       {tools.value === null ? null : (
         <p class="rpe-meta" data-declared>
-          Its requests carry {counted(tools.value.declared.length, "tool")}, {num(tools.value.tokens)} tokens of at most {num(tools.value.most)}
-          {over ? ": over the most, which is only marked here" : ""}. {props.agent.toolsAs === undefined || props.agent.toolsAs === "auto" ? "Offered as the connection does best." : `Offered as ${props.agent.toolsAs} tool calls.`} It reaches the rest of what is registered through
+          Its requests carry {counted(tools.value.declared.length, "tool")} that take {num(tools.value.tokens)} tokens, and you allow {num(tools.value.most)} (<SettingName settingKey="tools.fixedTokens" /> on the Settings page).
+          {over ? " That is over what you allow, so the list is marked here and nothing is refused: it is still sent whole." : " That is within what you allow."} {props.agent.toolsAs === undefined || props.agent.toolsAs === "auto" ? "Offered as the connection does best." : `Offered as ${props.agent.toolsAs} tool calls.`} It reaches the rest of what is registered through
           <code> tool_search</code> and <code>tool_use</code>.
         </p>
       )}

@@ -20,11 +20,11 @@ export function sortedAgents(agents: readonly ListedDefinition[]): ListedDefinit
   return [...agents].sort((a, b) => Number(a.off) - Number(b.off) || a.name.localeCompare(b.name));
 }
 
-/** What an agent runs on, in a few words, for the list. */
+/** What an agent runs on, in a few words, for the list: the level its model is sent beside the effort set, where they differ. */
 export function runsWords(agent: ListedDefinition): string {
-  const { connection, model, effort } = agent.runsOn;
+  const { connection, model, effort, sent } = agent.runsOn;
   if (connection === null) return "no connection resolves";
-  return `${connection.name}${model === null ? "" : ` · ${model}`}${effort === null ? "" : ` · ${effort}`}`;
+  return `${connection.name}${model === null ? "" : ` · ${model}`}${effort === null ? "" : ` · ${effort}`}${sent !== null && sent !== effort ? ` (sent ${sent})` : ""}`;
 }
 
 export function AgentLine(props: { agent: ListedDefinition; open: boolean; onOpen(): void }) {
