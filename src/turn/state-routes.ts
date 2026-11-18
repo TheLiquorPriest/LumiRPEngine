@@ -70,10 +70,9 @@ function said(v: unknown): string | null {
 }
 
 export function stateRoutes(turns: Turns) {
-  /** A chat RPE holds is there; any other is not (plan §6.1). A turn asked for is one of the chat's; a joined one is answered as a fact. */
+  /** The chat's store: a chat RPE does not hold reads as an untouched one. A turn asked for is one of the chat's; a joined one is answered as a fact. */
   const held = (user: string, chat: string, turn?: string): UserStore => {
     const s = turns.store.user(user);
-    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat} of yours.`);
     if (turn !== undefined) {
       const row = s.turn(turn);
       if (row === null || row.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
@@ -158,8 +157,7 @@ export function stateRoutes(turns: Turns) {
       reply: chatExportReply,
       handle: async ({ user, params }) => {
         const s = held(user, params.chat);
-        const chat = s.chat(params.chat);
-        if (chat === null) throw new RouteError(404, `RPE holds no chat ${params.chat} of yours.`);
+        const chat = s.chatOrUntouched(params.chat);
         const { state } = s.headState(params.chat);
         const doc = turns.store.env.worlds(state.world.revision);
         if (doc === undefined) throw new RouteError(404, `The world revision ${state.world.revision} of chat ${params.chat} is not held.`);

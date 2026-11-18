@@ -31,7 +31,7 @@ import { OWNER_ONLY_FILE } from "./disk";
 import type { LiveHub, LiveSocketData } from "./live";
 import { liveSockets, TOKEN_PROTOCOL_PREFIX } from "./live";
 import type { AnyShape, CallAuth, DeclaredRoute, FormProblem, JoinedAnswer, Method, PageSizes, Placed, QueryFields, RouteTable } from "./routes";
-import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords } from "./routes";
+import { bodyProblem, JOINED_STATUS, problemsOf, readQuery, RouteError, shape, shapeWords, takesChat } from "./routes";
 import { RefusedSignIns } from "./refusals";
 import { LUMIVERSE_SIGNIN_PATH } from "./signin-routes";
 import type { Workers } from "./workers/pool";
@@ -41,9 +41,6 @@ import type { ChatNamedHook } from "./hooks";
 function addressOf(server: Server<LiveSocketData> | null, request: Request): string {
   return server?.requestIP(request)?.address ?? "an address RPE could not read";
 }
-
-/** A route whose path names a chat first: the chat is taken on before it answers. */
-const CHAT_ROUTE = /^\/api\/v1\/chats\/:chat(\/|$)/;
 
 export interface ServerParts {
   config: AppConfig;
@@ -58,7 +55,7 @@ export interface ServerParts {
   answers: Answers;
   /** Where the command line's socket goes, in the data folder; absent, the command line's routes are served nowhere. */
   commandSocket?: string;
-  /** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before the route is given the call (plan §4.2: nothing has to be prepared first); absent, nothing is done first. */
+  /** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before a route that keeps or changes something of it is given the call (`takesChat`; plan §4.2: nothing has to be prepared first); absent, nothing is done first. */
   chatNamed?: ChatNamedHook;
 }
 
@@ -397,8 +394,9 @@ export function startServer(parts: ServerParts): RunningServer {
     };
     const rest = route.path.endsWith("/*") ? restOf(route.path, path) : null;
     try {
-      // The chat a route names is taken on before the route answers: a chat Lumiverse does not have is refused in words.
-      if (parts.chatNamed !== undefined && CHAT_ROUTE.test(route.path) && typeof params.chat === "string") await parts.chatNamed(user, params.chat);
+      // The chat a route that keeps or changes something of it names is taken on before the route answers: a chat Lumiverse does not have is refused in words.
+      // A route that only reads it answers a chat RPE does not hold as an untouched chat reads, and makes nothing.
+      if (parts.chatNamed !== undefined && takesChat(route) && typeof params.chat === "string") await parts.chatNamed(user, params.chat);
       if ("raw" in route) {
         const given = bytes === null ? request : new Request(request.url, { method: request.method, headers: request.headers, body: bytes, signal: request.signal });
         // A socket keeps what auth answered, its credential's hash and end, and never the credential's text.

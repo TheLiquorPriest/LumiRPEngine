@@ -38,10 +38,9 @@ export interface PlaceAt {
   ctx: ReadContext;
 }
 
-/** The point `turn` of `chat` (null: its head), or null where the chat or the world its state is played on is not held. */
+/** The point `turn` of `chat` (null: its head; a chat the store does not hold, as an untouched one), or null where the world its state is played on is not held. */
 export function placeAt(store: Store, user: string, chat: string, turn: string | null): PlaceAt | null {
   const u = store.user(user);
-  if (u.chat(chat) === null) return null;
   const state = (turn === null ? u.headState(chat) : u.stateAt(turn)).state;
   const doc = store.env.worlds(state.world.revision);
   if (doc === undefined) return null;

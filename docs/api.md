@@ -6,6 +6,8 @@ Who may call a route: **public**, anyone who reaches RPE; **page**, a page of th
 
 Every request's body is held to its route's limit, whatever its method: one over it is refused with 413. A GET takes no body on any route, nor does a DELETE on a route that answers in JSON, so either is refused with 400 when it carries one. A route in the form that answers in JSON is held to its declaration before its code runs: a name or a value in its query that it does not declare, or a body it does not take, is refused with 400, and the answer's `error` says why. A route that answers in its own way (the provider endpoint, the extension's routes, the live socket, the web UI's files) is handed the request within its body limit, reads its query and its body itself, and says in its own words what it does not take. A route that takes a turn's id (in its path, its query or its body) says so in its listing, and answers a turn that was joined to another (a continue's held turn) as a fact: status 409 and `{ "joined": { "turn", "joined" } }`, naming the turn it joined, which is the one to ask for; a page follows it, and it is never a failure of the server. A route marked as a tunnel carries the previous build's messages as that build wrote them, until the pages that send them have routes of their own. A refusal is `{ "error": "<why>" }` on every route but the provider endpoint's, which answers as OpenAI does.
 
+A route under `/api/v1/chats/:chat` takes that chat on first only where it keeps or changes something of it: RPE's record of the chat and its folders are made then, by what Lumiverse says of it, and a chat Lumiverse does not have is refused with 404. A route that only reads the chat, or one that names a turn, a request, a session or another record only a chat RPE holds has, answers a chat RPE does not hold as an untouched one reads (no world, no turn, empty lists), and makes nothing. Each says which under **The chat**.
+
 A route that pages takes `limit` and `cursor` in its query and answers `{ items, next }`: `next` is where the next page starts, given back as `cursor`, and null at the end. A cursor names the place after the last item a page gave, by that item's place in the list's own order, never by a count of items, so a walk over a list that changes between its pages neither repeats nor skips an item that stayed. A route refuses with 400 a cursor it did not give for that list: another route's, another list's, one changed, or one given before RPE last started.
 
 ## Contents
@@ -63,7 +65,7 @@ The models the provider endpoint offers to the request's key: those of the conne
 
 ### `GET /api/v1/chats`
 
-The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one a page or a job named before its first turn), by name.
+The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one where something of it was kept before its first turn: a change, a setting, a job), by name. A chat a page only read is not among them.
 
 | | |
 |---|---|
@@ -86,6 +88,7 @@ A chat's messages as Lumiverse holds them, by a list of ids or by a stretch of i
 | Query | `ids` (may be left out): `string`, The messages' ids, separated by commas<br>`from` (may be left out): `number`, The first place (`index_in_chat`) of a stretch<br>`to` (may be left out): `number`, The place a stretch ends before: the messages from `from` up to but not including it |
 | Body | none |
 | Reply | [`ChatMessagesReply`](#chatmessagesreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/requests`
 
@@ -99,6 +102,7 @@ What waits in a chat for the next message, asked for beside his words: each requ
 | Query | none |
 | Body | none |
 | Reply | [`RequestsReply`](#requestsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/requests`
 
@@ -112,6 +116,7 @@ Holds a composer control's ask (depth or swipe) for the next message, in place o
 | Query | none |
 | Body | [`RequestAsk`](#requestask) |
 | Reply | [`RequestHeldReply`](#requestheldreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `DELETE /api/v1/chats/:chat/requests/:request`
 
@@ -125,6 +130,7 @@ Withdraws a request that waits; one kept with a turn already stays, and the answ
 | Query | none |
 | Body | none |
 | Reply | [`RequestWithdrawnReply`](#requestwithdrawnreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/window`
 
@@ -138,6 +144,7 @@ What the chat's history window is now, for its marker: whether it is on, the fir
 | Query | none |
 | Body | none |
 | Reply | [`ChatWindowReply`](#chatwindowreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ## Turns
 
@@ -153,6 +160,7 @@ His word on a question a lane set to Confirm is waiting on: go ahead, or not wit
 | Query | none |
 | Body | [`ApprovalAnswerBody`](#approvalanswerbody) |
 | Reply | [`ApprovalAnswerReply`](#approvalanswerreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/newest`
 
@@ -166,6 +174,7 @@ The newest turn on the chat's path in one read, as the turn's own route gives it
 | Query | `run` (may be left out): `string`, One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole<br>`from` (may be left out): `number`, The named run's records are given from the one with this number; 1 when left out |
 | Body | none |
 | Reply | [`TurnReply`](#turnreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/prompt`
@@ -180,6 +189,7 @@ The prompt map of the chat's preset as found in a turn's prompt: each slice's ma
 | Query | `turn` (may be left out): [`TurnId`](#turnid), The turn whose prompt is read; the chat's newest whose prompt RPE still keeps when left out |
 | Body | none |
 | Reply | [`PromptShown`](#promptshown) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/prompt/edit`
@@ -194,6 +204,7 @@ Makes one of his edits to the prompt map as found in a turn's prompt (rename a m
 | Query | `turn` (may be left out): [`TurnId`](#turnid), The turn whose prompt is read; the chat's newest whose prompt RPE still keeps when left out |
 | Body | [`PromptEditAsk`](#prompteditask) |
 | Reply | [`PromptShown`](#promptshown) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/prompt/history`
@@ -208,6 +219,7 @@ Each turn's prompt notices and front, newest first, with its number on the chat'
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | `{ items: PromptTurnShown[]; next: string | null }`, a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/replies`
 
@@ -221,6 +233,7 @@ The line under each reply asked for, by the swipe Lumiverse shows: its turn, the
 | Query | `ids`: `string`, The messages' ids, comma-separated: the rows the page has mounted |
 | Body | none |
 | Reply | [`RepliesReply`](#repliesreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/settle`
 
@@ -234,6 +247,7 @@ Settle now: a run on the chat's newest turn that writes nothing into the chat; a
 | Query | none |
 | Body | none |
 | Reply | [`SettleReply`](#settlereply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/turns`
 
@@ -247,6 +261,7 @@ A chat's turns, newest first, each with what its runs spent together and each of
 | Query | `limit` (may be left out): `number`, How many turns to give: the setting `turns.page` when left out, and at most `turns.maxPage`<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
 | Body | none |
 | Reply | [`TurnsReply`](#turnsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn`
@@ -261,6 +276,7 @@ One turn, read on from where a page has read to: its intent record, what went to
 | Query | `run` (may be left out): `string`, One of the turn's runs, by RPH's own id for it (its records' `run`), that `from` counts in; the turn's first when left out. Every record of each run that began after it is given whole<br>`from` (may be left out): `number`, The named run's records are given from the one with this number; 1 when left out |
 | Body | none |
 | Reply | [`TurnReply`](#turnreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/card`
@@ -275,6 +291,7 @@ A turn's one review card: whether the turn was dropped with nothing saved, so th
 | Query | none |
 | Body | none |
 | Reply | [`ReviewCardReply`](#reviewcardreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/changes/:change/undo`
@@ -289,6 +306,7 @@ Undoes one change of a turn as his own (source player): records the changes that
 | Query | none |
 | Body | none |
 | Reply | [`UndoReply`](#undoreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/files`
@@ -303,6 +321,7 @@ The whole of a turn's folder, every level down, each entry with its size; none f
 | Query | none |
 | Body | none |
 | Reply | [`FolderReply`](#folderreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/files/*`
@@ -317,6 +336,7 @@ One file of a turn's folder, by its path below the folder, as text; no path leav
 | Query | none |
 | Body | none |
 | Reply | [`FileReply`](#filereply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/live`
@@ -331,6 +351,7 @@ Whether a turn runs now and whether his pause holds it, read at once, for a page
 | Query | none |
 | Body | none |
 | Reply | [`TurnLiveState`](#turnlivestate) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/pause`
@@ -345,6 +366,7 @@ Holds a turn's run before its next model call (the call in flight finishes; Stop
 | Query | none |
 | Body | none |
 | Reply | [`TurnControlled`](#turncontrolled) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/requests`
@@ -359,6 +381,7 @@ What a turn was told beside his words and keeps, and what was played as its mess
 | Query | none |
 | Body | none |
 | Reply | [`RequestsReply`](#requestsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/requests/*`
@@ -373,6 +396,7 @@ One model call's request, by its file below the turn's folder (a run's `requests
 | Query | none |
 | Body | none |
 | Reply | [`RequestReply`](#requestreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/resume`
@@ -387,6 +411,7 @@ Lets a turn's run go on where his pause held it.
 | Query | none |
 | Body | none |
 | Reply | [`TurnControlled`](#turncontrolled) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/say`
@@ -401,6 +426,7 @@ Says something to the Author while the turn runs: the lead hears it at its next 
 | Query | none |
 | Body | [`TurnSay`](#turnsay) |
 | Reply | [`TurnControlled`](#turncontrolled) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/turns/:turn/stop`
@@ -415,6 +441,7 @@ Stops a turn going on now; says whether it was running.
 | Query | none |
 | Body | none |
 | Reply | [`StopReply`](#stopreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ## State
@@ -431,6 +458,7 @@ The Undo of an edit of his, by the edit's own id (the `undo` its answer gave): a
 | Query | none |
 | Body | none |
 | Reply | [`TapReply`](#tapreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/gm/parts/:part`
 
@@ -444,6 +472,7 @@ One part of the GM view of the chat at its head (everything, secrets included): 
 | Query | `id` (may be left out): `string`, One entity, party or organization, by its id or name<br>`ids` (may be left out): `string`, Several, by their ids, joined by commas<br>`kind` (may be left out): `string`, Only those of this kind or one extending it<br>`since` (may be left out): `string`, The key of the answer held<br>`bytes` (may be left out): `string`, `true`: the outline tells each part's bytes |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/gm/people/:entity/things`
 
@@ -457,6 +486,7 @@ A person's things as the GM reads them, with the pickers.
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/gm/things`
 
@@ -470,6 +500,7 @@ GM → Things' list of the chat at its head: each thing with who has it and wher
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/gm/things/:entity`
 
@@ -483,6 +514,7 @@ A thing's page as the GM reads it: the page, the pickers, and what the GM's adds
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/made`
 
@@ -496,6 +528,7 @@ What the chat made in play (things, places, the grids laid or changed) that the 
 | Query | none |
 | Body | `{ draft: JsonValue }` |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/made/keep`
 
@@ -509,6 +542,7 @@ Keep in the world: the draft patch that copies the picked places, then things, i
 | Query | none |
 | Body | `{ draft: JsonValue; things: string[]; places: string[] }` |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/people/:entity/day`
 
@@ -522,6 +556,7 @@ A person's usual day at the chat's head: as far as the player character may know
 | Query | `view`: `"player" | "gm"`<br>`day` (may be left out): `string`, The day's index, for the GM's view; today's where left out |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/people/:entity/things`
 
@@ -535,6 +570,7 @@ A person's things: what they carry, wear and keep, and where each is; none for a
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/plays`
 
@@ -548,6 +584,7 @@ A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line
 | Query | none |
 | Body | [`PlayAsk`](#playask) |
 | Reply | [`PlayedReply`](#playedreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/requests/panel`
 
@@ -561,6 +598,7 @@ A panel's tap for his next message (the palette, Walk here, any tap with no word
 | Query | none |
 | Body | [`PanelTapAsk`](#paneltapask) |
 | Reply | [`PanelHeldReply`](#panelheldreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/routines/changed`
 
@@ -574,6 +612,7 @@ Whose routines or schedules this chat changed, by him or by the story.
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/state`
 
@@ -587,6 +626,7 @@ A chat's state view, at its head or as it stood at one of its turns, in the shap
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the state as it stood at that turn; left out, at the chat's head |
 | Body | none |
 | Reply | [`StateView`](#stateview) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/state/due`
@@ -601,6 +641,7 @@ What a turn's time brought due, each thing with what the turn recorded for it.
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id; left out, the chat's newest turn |
 | Body | none |
 | Reply | [`DueReply`](#duereply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/state/export`
@@ -615,6 +656,7 @@ A chat's head as one document, for the command line's sandbox to open a scratch 
 | Query | none |
 | Body | none |
 | Reply | [`ChatExportReply`](#chatexportreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/state/history`
 
@@ -628,6 +670,7 @@ The history of one value by turn: every change along the chat's path, at its hea
 | Query | `at`: `string`, The level, by its tree ref (`entity:<id>`, `place:<id>`, `world`, `track:<id>`, an area's own ref)<br>`part`: `string`, The part of it: a field's or relation's name, `posted`, `stage`, a fact's key, a world value's key, an area item's part<br>`turn` (may be left out): [`TurnId`](#turnid), Read the path up to this turn; the chat's head when left out<br>`limit` (may be left out): `number`, The most changes on the page; all of them when left out<br>`cursor` (may be left out): `string`, Where the page starts: the `next` of the page before |
 | Body | none |
 | Reply | [`ValueHistoryReply`](#valuehistoryreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/state/not-applied`
 
@@ -641,6 +684,7 @@ What no longer applies at the chat's head on the swipes now showing: each change
 | Query | none |
 | Body | none |
 | Reply | [`NotAppliedReply`](#notappliedreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/state/systems`
 
@@ -654,6 +698,7 @@ A level's typed systems, at the chat's head or as it stood at a turn: each game 
 | Query | `at`: `string`, The level, by its tree ref (`world`, `place:<id>`, `entity:<id>`) or a bare id<br>`turn` (may be left out): [`TurnId`](#turnid), A turn's id: the systems as they stood at that turn; left out, at the chat's head |
 | Body | none |
 | Reply | [`SystemsReply`](#systemsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/taps`
@@ -668,6 +713,7 @@ A tap that manages, or a correction from any page, recorded at once as his own e
 | Query | none |
 | Body | [`TapAsk`](#tapask) |
 | Reply | [`TapReply`](#tapreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/things`
 
@@ -681,6 +727,7 @@ The chat's things at its head: each thing in play with who has it, where it stan
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/things/:entity`
 
@@ -694,6 +741,7 @@ A thing's page: what it is, where it stands, who has it and why, what it holds, 
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/things/find`
 
@@ -707,6 +755,7 @@ The ids of the chat's things that the words name.
 | Query | `words`: `string` |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/things/types`
 
@@ -720,6 +769,7 @@ The catalog the player's + Add offers: the types of things and the vehicle class
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/tidy`
 
@@ -733,6 +783,7 @@ Tidy up: what does not add up among the chat's things at its head, every kind, e
 | Query | none |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/tidy/left`
 
@@ -746,6 +797,7 @@ Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft
 | Query | none |
 | Body | `{ key: string; left: boolean }` |
 | Reply | `JsonValue` |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/time`
 
@@ -759,6 +811,7 @@ One of the HUD's time controls (Pause clock, Resume clock, and the others the cl
 | Query | none |
 | Body | `{ control: string; scope: JsonValue; to: JsonValue }` |
 | Reply | [`TapReply`](#tapreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/walk`
 
@@ -772,6 +825,7 @@ What a step to a square of the grid the player's character stands on would take:
 | Query | `x`: `number`<br>`y`: `number` |
 | Body | none |
 | Reply | `{ minutes: number; disabled?: string }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/world`
 
@@ -785,6 +839,7 @@ The world's tree for a chat: the level asked for, then each level below it to th
 | Query | `at` (may be left out): `string`, The level to start at, by its ref; `world` when left out<br>`depth` (may be left out): `number`, How many levels below it to give; 1 when left out<br>`values` (may be left out): `"none" | "own" | "all"`, Which values each level carries: none, its own, or all; `own` when left out<br>`turn` (may be left out): [`TurnId`](#turnid), A turn's id: the world as it stood at that turn; left out, at the chat's head |
 | Body | none |
 | Reply | [`WorldReply`](#worldreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ## Cast
@@ -801,6 +856,7 @@ Every character a chat knows, with what each holds on the path read: at the chat
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the cast as it stood at that turn; left out, at the chat's newest |
 | Body | none |
 | Reply | [`CastReply`](#castreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/cast/:character`
@@ -815,6 +871,7 @@ Everything on one character's record, by kind: at the chat's newest turn, or as 
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the cast as it stood at that turn; left out, at the chat's newest<br>`part` (may be left out): [`CharacterListName`](#characterlistname), Read this list further back: with no part named, every list<br>`skip` (may be left out): `number`, How many of a list's newest entries to pass over; 0 when left out |
 | Body | none |
 | Reply | [`CharacterReply`](#characterreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/cast/:character/base`
@@ -829,6 +886,7 @@ Redraws documents of a character's base as the owner's own change: each document
 | Query | none |
 | Body | [`BaseAsk`](#baseask) |
 | Reply | [`CastEditedReply`](#casteditedreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/cast/:character/casting`
 
@@ -842,6 +900,7 @@ Sets how large a part a character plays, as the owner's own change: pinned, it s
 | Query | none |
 | Body | [`CastingAsk`](#castingask) |
 | Reply | [`CastEditedReply`](#casteditedreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/cast/:character/perceptions`
 
@@ -855,6 +914,7 @@ Writes a perception for a character, corrects one or strikes one, as the player'
 | Query | none |
 | Body | [`PerceptionAsk`](#perceptionask) |
 | Reply | [`PerceptionWrittenReply`](#perceptionwrittenreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/cast/:character/person`
@@ -869,6 +929,7 @@ Says which of the world's people a character is, by the person's id or name (nul
 | Query | none |
 | Body | [`PersonAsk`](#personask) |
 | Reply | [`CastEditedReply`](#casteditedreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/cast/:character/sources`
 
@@ -882,6 +943,7 @@ Binds a source to a character (a card, a persona, a lore entry or a memory entit
 | Query | none |
 | Body | [`SourceAsk`](#sourceask) |
 | Reply | [`CastEditedReply`](#casteditedreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/cast/:character/strike`
 
@@ -895,6 +957,7 @@ Strikes an entry of a character's record, or takes its strike back, as the playe
 | Query | none |
 | Body | [`CastStrikeAsk`](#caststrikeask) |
 | Reply | [`CastStrikeReply`](#caststrikereply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/perceptions`
 
@@ -908,6 +971,7 @@ The perception record of a turn, or of the stretch of turns ending at it: who wa
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the cast as it stood at that turn; left out, at the chat's newest<br>`count` (may be left out): `number`, How many turns of the path, ending at the turn read; left out, that turn alone |
 | Body | none |
 | Reply | [`PerceptionRecordReply`](#perceptionrecordreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ## Story
@@ -924,6 +988,7 @@ A chat's story record, at its newest turn or as it stood at one of its turns: th
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the record as it stood at that turn; left out, at the chat's newest<br>`part` (may be left out): [`StoryListName`](#storylistname), Read this list further back: with no part named, every list<br>`skip` (may be left out): `number`, How many of a list's newest items to pass over; 0 when left out |
 | Body | none |
 | Reply | [`StoryReply`](#storyreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/story/correct`
@@ -938,6 +1003,7 @@ Corrects any field of any item of the story record (a beat's text, a thread's st
 | Query | none |
 | Body | [`StoryCorrectAsk`](#storycorrectask) |
 | Reply | [`StoryCorrectReply`](#storycorrectreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/story/coverage`
 
@@ -951,6 +1017,7 @@ What the record covers of the whole chat: every stretch of messages with the sam
 | Query | none |
 | Body | none |
 | Reply | [`StoryCoverage`](#storycoverage) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/story/so-far`
 
@@ -964,6 +1031,7 @@ The story so far as the next briefing gives it to the Author, worked out at the 
 | Query | none |
 | Body | none |
 | Reply | [`StorySoFarReply`](#storysofarreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/story/strike`
 
@@ -977,6 +1045,7 @@ Strikes an item of the story record, or takes its strike back, as the player's o
 | Query | none |
 | Body | [`StoryStrikeAsk`](#storystrikeask) |
 | Reply | [`StoryStrikeReply`](#storystrikereply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/story/timeline`
 
@@ -990,6 +1059,7 @@ The chat's chapters, scenes and beats as one list in the chat's order, oldest fi
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | [`StoryTimeline`](#storytimeline), a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ## Places
 
@@ -1005,6 +1075,7 @@ The grids of a chat: each place that has one, the grid's id and the map that dra
 | Query | none |
 | Body | none |
 | Reply | [`MapsReply`](#mapsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/maps`
 
@@ -1018,6 +1089,7 @@ Lays a grid for a place, by the same code as the `map_lay` tool: rows of symbols
 | Query | none |
 | Body | `{ place: string; rows?: string[]; width?: number; height?: number; doors?: number[][]; legend?: { [key: string]: JsonValue }; feet?: number; title?: string; over?: string; square?: number[]; tell?: boolean }` |
 | Reply | [`MapWrote`](#mapwrote) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/maps/:place`
 
@@ -1031,6 +1103,7 @@ One grid in full, both layers as data: what is drawn with the squares the chat c
 | Query | `turn` (may be left out): [`TurnId`](#turnid), Read the grid as the chat stood at this turn; at its head when left out |
 | Body | none |
 | Reply | [`MapGridReply`](#mapgridreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `POST /api/v1/chats/:chat/maps/:place/keep`
@@ -1045,6 +1118,7 @@ Keeps the chat's map of a place in the world: its map as the chat plays it, with
 | Query | none |
 | Body | `{ places?: string[]; paths?: string[]; settings?: boolean }` |
 | Reply | [`MapKept`](#mapkept) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/maps/:place/moves`
 
@@ -1058,6 +1132,7 @@ Drags someone or something to a square of the grid of a place: his own change, a
 | Query | none |
 | Body | `{ who: string; square: number[]; tell?: boolean }` |
 | Reply | [`MapWrote`](#mapwrote) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/maps/:place/squares`
 
@@ -1071,6 +1146,7 @@ Edits squares of the grid of a place, by the same code as the `map_edit` tool: s
 | Query | none |
 | Body | `{ strokes: { symbol: string; squares?: number[][]; rect?: number[][]; line?: number[][] }[]; legend?: { [key: string]: JsonValue }; tell?: boolean }` |
 | Reply | [`MapWrote`](#mapwrote) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/places`
 
@@ -1084,6 +1160,7 @@ The chat's places as it plays them, the world's own and those made in play, a pa
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the places as they stood at that turn; left out, at the chat's newest<br>`limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | [`Places`](#places), a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/places/:place`
@@ -1098,6 +1175,7 @@ One place of the chat in full, by its id or its name, at the chat's newest turn 
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the place as it stood at that turn; left out, at the chat's newest |
 | Body | none |
 | Reply | [`PlaceRecord`](#placerecord) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `PUT /api/v1/chats/:chat/places/:place/base`
@@ -1112,6 +1190,7 @@ Writes the owner's own words as a place's base, a change of his own with source 
 | Query | none |
 | Body | `{ text: string }` |
 | Reply | [`PlaceBaseWritten`](#placebasewritten) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ## Quests
 
@@ -1127,6 +1206,7 @@ The player's journal: each quest he may see, at the chat's newest turn or as it 
 | Query | `turn` (may be left out): [`TurnId`](#turnid), A turn's id: the journal as it stood at that turn; left out, at the chat's newest |
 | Body | none |
 | Reply | [`Journal`](#journal) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/chats/:chat/quests`
@@ -1141,6 +1221,7 @@ The chat's quests, the world's and those opened in play, in brief, a page at a t
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | [`QuestRecords`](#questrecords), a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/quests/:quest`
 
@@ -1154,6 +1235,7 @@ One quest of the chat in full, by its id or its name: its record, and every writ
 | Query | none |
 | Body | none |
 | Reply | [`QuestRecord`](#questrecord) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ## Lore
 
@@ -1325,6 +1407,7 @@ Every book of the user's by its id and name, for the Settings page's choice of t
 | Query | none |
 | Body | none |
 | Reply | [`LoreBooks`](#lorebooks) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/lore/index`
 
@@ -1338,6 +1421,7 @@ The lore index of a chat, a page at a time in the order of the lore map's catalo
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | `{ items: LoreIndexRow[]; next: string | null }`, a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `PUT /api/v1/chats/:chat/lore/index/:entry`
 
@@ -1351,6 +1435,7 @@ Your own lines for one entry of a chat's lore: its kind (any one line of text, n
 | Query | none |
 | Body | `{ kind?: string | null; line?: string | null; defines?: { what: string; aspect: string }[] | null; related?: string[] | null }` |
 | Reply | [`LoreIndexRow`](#loreindexrow) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/lore/index/jobs`
 
@@ -1364,6 +1449,7 @@ Starts a lore indexing job for a chat: the indexer's definition as a job of the 
 | Query | none |
 | Body | none |
 | Reply | [`LoreIndexJob`](#loreindexjob) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/chats/:chat/lore/index/status`
 
@@ -1377,6 +1463,7 @@ Where a chat's lore indexing stands: its entries and how many no run has indexed
 | Query | none |
 | Body | none |
 | Reply | [`LoreIndexStatus`](#loreindexstatus) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/lore/overlays`
 
@@ -1390,6 +1477,7 @@ The overlays on a chat's path, in the path's order: each with its entry and the 
 | Query | none |
 | Body | none |
 | Reply | [`LoreOverlays`](#loreoverlays) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/lore/projection`
 
@@ -1403,6 +1491,7 @@ Whether the chat has the projection book on (the setting `lore.projection`, off 
 | Query | none |
 | Body | none |
 | Reply | [`LoreProjectionState`](#loreprojectionstate) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/lore/projection/refresh`
 
@@ -1416,6 +1505,7 @@ Applies the chat's `lore.projection` setting now: on, the chat's own book of wha
 | Query | none |
 | Body | none |
 | Reply | [`LoreProjectionRefreshed`](#loreprojectionrefreshed) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/lore/save`
 
@@ -1429,6 +1519,7 @@ Saves the chat's latest reply, or an excerpt of its messages (found whatever its
 | Query | none |
 | Body | `{ text?: string }` |
 | Reply | `{ world: string; id: string }` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/lore`
 
@@ -1442,6 +1533,7 @@ The lore Lumiverse activated for a turn's prompt, in the tag's order: each entry
 | Query | none |
 | Body | none |
 | Reply | [`TurnLoreReply`](#turnlorereply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/lore/proposals`
@@ -1837,6 +1929,7 @@ A chat's sessions in the order they were opened, a page at a time: scenes, and t
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | `{ items: SessionShown[]; next: string | null }`, a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/sessions/:session`
 
@@ -1850,6 +1943,7 @@ One session with what its next turn would carry in the mode asked for (continuin
 | Query | `carry` (may be left out): [`CarryMode`](#carrymode), Which carry mode to show: continuing, records or nothing; continuing when left out |
 | Body | none |
 | Reply | [`SessionRead`](#sessionread) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/sessions/:session/close`
 
@@ -1863,6 +1957,7 @@ Closes the Author's open scene as his own change, placed after the chat's newest
 | Query | none |
 | Body | none |
 | Reply | [`SessionClosed`](#sessionclosed) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/sessions/:session/compact`
 
@@ -1876,6 +1971,7 @@ Asks for the open session to be compacted: it runs at the session's next turn, t
 | Query | none |
 | Body | none |
 | Reply | [`SessionCompactAnswer`](#sessioncompactanswer) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/sessions/:session/reopen`
 
@@ -1889,6 +1985,7 @@ His Undo of a close: takes back the change the close answered with, so the scene
 | Query | none |
 | Body | [`SessionReopenAsk`](#sessionreopenask) |
 | Reply | [`SessionOne`](#sessionone) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/sessions/:session/turns`
 
@@ -1902,6 +1999,7 @@ The turns played in a session, newest first, a page at a time: each with its num
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | `{ items: SessionTurnRow[]; next: string | null }`, a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/sessions/:session/uncompact`
 
@@ -1915,6 +2013,7 @@ Undoes one compaction of a session by its id: from its next turn the turns the s
 | Query | none |
 | Body | [`SessionUncompactAsk`](#sessionuncompactask) |
 | Reply | [`SessionCompactions`](#sessioncompactions) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/sessions/measurements`
 
@@ -1995,6 +2094,7 @@ A chat's bootstrap: the six facts of "done enough"; the start as it stands (whet
 | Query | none |
 | Body | none |
 | Reply | [`BootstrapChatReply`](#bootstrapchatreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/bootstrap`
 
@@ -2008,6 +2108,7 @@ Starts a chat's bootstrap job (taking on a story with a past), with his choice o
 | Query | none |
 | Body | [`BootstrapStartAsk`](#bootstrapstartask) |
 | Reply | [`JobView`](#jobview) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/bootstrap/:job/answer`
 
@@ -2021,6 +2122,7 @@ His word to a bootstrap job of the chat that waits for it at its token limit: go
 | Query | none |
 | Body | [`BootstrapAnswerAsk`](#bootstrapanswerask) |
 | Reply | [`JobView`](#jobview) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/bootstrap/jobs`
 
@@ -2034,6 +2136,7 @@ A chat's bootstrap jobs a page at a time, the newest started first, each with wh
 | Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
 | Body | none |
 | Reply | `{ items: BootstrapJobShown[]; next: string | null }`, a page at a time |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/jobs`
 
@@ -2047,6 +2150,7 @@ He starts a job of the chat, as his own and tied to no turn, with any agent defi
 | Query | none |
 | Body | [`JobStartAsk`](#jobstartask) |
 | Reply | [`JobReply`](#jobreply) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/jobs`
 
@@ -2323,6 +2427,7 @@ What each agent definition in force for a chat is given by name, each name's kin
 | Query | none |
 | Body | none |
 | Reply | [`GivenReply`](#givenreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ## Rules
 
@@ -2338,6 +2443,7 @@ Runs a rule, as it reads now, against a past turn of the chat, with that turn's 
 | Query | none |
 | Body | [`RuleTestAsk`](#ruletestask) |
 | Reply | [`RuleTest`](#ruletest) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Long | over TCP it answers at once, status 202, with `{ answer: <id> }`, and its reply is read from `GET /api/v1/answers/:id` once ready |
 
 ### `GET /api/v1/chats/:chat/rules/firings`
@@ -2352,6 +2458,7 @@ The rules that fired in a chat, newest first, a page at a time (a job's of his a
 | Query | `rule` (may be left out): `string`, Only this rule's firings<br>`limit` (may be left out): `number`, How many to give: the setting `turns.page` when left out, and at most `turns.maxPage`<br>`cursor` (may be left out): `string`, The id of the last firing read: older ones follow it |
 | Body | none |
 | Reply | [`FiringsReply`](#firingsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/rules`
 
@@ -2671,6 +2778,7 @@ What moving the chat to a revision of its world would bring in, entity by entity
 | Query | `to`: `string`, The revision to move to |
 | Body | none |
 | Reply | `JsonValue` |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `POST /api/v1/chats/:chat/upgrade`
 
@@ -2684,6 +2792,7 @@ Moves the chat to a revision of its world from its next turn, with his picks (a 
 | Query | none |
 | Body | `{ to: string; merge?: JsonValue }` |
 | Reply | [`ChatUpgraded`](#chatupgraded) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `POST /api/v1/chats/:chat/upgrade/undo`
 
@@ -2697,6 +2806,7 @@ Takes an Upgrade of the chat back, whole: the chat goes to the revision it came 
 | Query | none |
 | Body | `{ edit: string }` |
 | Reply | [`ChatUpgradeUndone`](#chatupgradeundone) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
 
 ### `GET /api/v1/worlds`
 
@@ -3104,6 +3214,7 @@ A migrated chat's carried turns, in the order the run imported them, each tied t
 | Query | `from` (may be left out): `number`, How many carried turns to pass over; none when left out<br>`limit` (may be left out): `number`, How many carried turns to give: the setting `migration.page` when left out, and at most `migration.maxPage` |
 | Body | none |
 | Reply | [`CarriedTurnsReply`](#carriedturnsreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
 ### `GET /api/v1/chats/:chat/turns/:turn/carried`
 
@@ -3117,6 +3228,7 @@ What an old engine recorded on a reply the migration carried, for the reply's Tu
 | Query | none |
 | Body | none |
 | Reply | [`CarriedTurnReply`](#carriedturnreply) |
+| The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
 
 ### `GET /api/v1/migration`

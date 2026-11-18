@@ -54,7 +54,6 @@ export function givenRoutes(turns: Turns) {
       reply: givenReply,
       handle: async ({ user, params }) => {
         const store = turns.store.user(user);
-        if (store.chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
         // The newest turn on the path that RPE ran, read in the session it played in; a turn a migration carried played in none.
         const path = store.path(params.chat);
         let run: RunRecord | null = null;

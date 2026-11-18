@@ -48,10 +48,12 @@ async function refuse(deps: PlacesRoutesDeps, user: string, chat: string, status
   throw new RouteError(status, lines.line(line, fields) ?? "");
 }
 
-/** The chat read at the turn named (none: its head); a turn joined to another is answered as the fact it is, for the server to say in its one place. */
+/**
+ * The chat read at the turn named (none: its head), a chat RPE does not hold as an untouched one; a turn joined to another is answered
+ * as the fact it is, for the server to say in its one place.
+ */
 async function readingAt(deps: PlacesRoutesDeps, user: string, chat: string, turn: string | null): Promise<PlaceAt> {
   const s = deps.store.user(user);
-  if (s.chat(chat) === null) return refuse(deps, user, chat, 404, "no_chat", { id: chat });
   if (turn !== null) {
     const row = s.turn(turn);
     if (row === null || row.chat !== chat) return refuse(deps, user, chat, 404, "no_turn", { id: turn });

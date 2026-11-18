@@ -138,10 +138,9 @@ function sectionOf(world: Compiled | null, section: keyof typeof SECTION_NONE): 
   return text === "" ? "" : part.body.render(part.header, { [section]: text }).trim();
 }
 
-/** The world's ruleset as `world_query` gives it, at the scope's turn or the chat's head; null where the store has no such chat, turn or world. */
+/** The world's ruleset as `world_query` gives it, at the scope's turn or the chat's head (a chat the store does not hold, as an untouched one); null where there is no such turn or world. */
 function rulesetView(deps: EventsDeps, scope: Scope): string | null {
   const store = deps.store.user(scope.user);
-  if (store.chat(scope.chat) === null) return null;
   const turn = scope.turn === undefined ? null : store.turn(scope.turn);
   if (scope.turn !== undefined && turn?.chat !== scope.chat) return null;
   const state = turn === null ? store.headState(scope.chat).state : store.stateAt(turn.id).state;

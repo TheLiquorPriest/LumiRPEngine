@@ -157,13 +157,14 @@ function runs(count: number, at: (place: number) => boolean): Stretch[] {
 async function historyFact(deps: DoneEnoughDeps, scope: Scope): Promise<HistoryFact> {
   const store = deps.store.user(scope.user);
   const { window } = await turnSettings(deps.files, scope, deps.log);
-  // A chat the store has not met is covered nowhere: its length is Lumiverse's.
-  if (store.chat(scope.chat) === null) {
+  // A chat whose messages the store has not compared yet (one it does not hold, or one taken on before its first turn) is covered
+  // nowhere: its length is Lumiverse's.
+  const messages = store.path(scope.chat);
+  if (messages.length === 0) {
     const { length } = await deps.chat.info(scope);
     const leftOut = windowStart(length, window, () => false);
     return { messages: length, leftOut, covered: 0, stretches: 0, summarized: 0, nearestUncovered: runs(leftOut, () => true).at(-1) ?? null, nearestUnsummarized: null };
   }
-  const messages = store.path(scope.chat);
   const { covered, unsummarized } = storyCoverage({ store: deps.store, user: scope.user, chat: scope.chat, turn: null });
   const isCovered = (place: number): boolean => covered.has(messages[place]?.message ?? "");
   const isUnsummarized = (place: number): boolean => unsummarized.has(messages[place]?.message ?? "");

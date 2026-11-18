@@ -287,10 +287,9 @@ export class PlayService {
     });
   }
 
-  /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`). */
+  /** What `turn`'s time brought due, or the chat's newest turn's where none is named (`due.ts`); a chat RPE does not hold has no turn yet. */
   async due(user: string, chat: string, turn: string | null): Promise<DueRead> {
     const s = this.deps.store.user(user);
-    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat}.`);
     const at = turn ?? headTurn(s, chat);
     if (at === null) throw new RouteError(404, `Chat ${chat} has no turn yet.`);
     const row = s.turn(at);

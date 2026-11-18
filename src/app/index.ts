@@ -44,6 +44,7 @@ export {
   RouteTable,
   shape,
   shapeWords,
+  takesChat,
   TURN_PARAM,
   type Access,
   type CallAuth,

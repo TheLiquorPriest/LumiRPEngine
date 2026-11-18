@@ -271,6 +271,8 @@ export function gmRoutes(deps: GmReadDeps) {
       does: "What the chat made in play (things, places, the grids laid or changed) that the world's draft sent does not have, or has already.",
       body: shape.object({ draft: draftParts }),
       reply: answer,
+      // It only reads the chat against the draft sent: a chat RPE does not hold is not taken on.
+      takesChat: false,
       handle: ({ user, params, body }) => {
         const draft = draftOf(body.draft);
         return read(user, params.chat, (ctx) => ({ made: { things: madeThings(ctx, draft), places: madePlaceViews(ctx, draft) } }));
@@ -284,6 +286,8 @@ export function gmRoutes(deps: GmReadDeps) {
       does: "Keep in the world: the draft patch that copies the picked places, then things, into the world's draft sent, each under its own id, with what would be kept, what skipped and why. The page sends the patch to Build's draft route.",
       body: shape.object({ draft: draftParts, things: shape.list(T), places: shape.list(T) }),
       reply: answer,
+      // It answers a patch for the page to send to Build, and keeps nothing of the chat.
+      takesChat: false,
       handle: ({ user, params, body }) => {
         const draft = draftOf(body.draft);
         return read(user, params.chat, (ctx) => {

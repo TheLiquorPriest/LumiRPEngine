@@ -134,6 +134,8 @@ export function loreRoutes(lore: BuildLore, index: IndexEntries) {
       does: "Saves the chat's latest reply, or an excerpt of its messages (found whatever its spacing and case; text it does not hold word for word is saved at its latest reply), as a draft lore entry of the world the chat plays, with the message it came from. The title is its first words; nothing is committed; the same title twice gets a fresh id. A chat that plays no world is refused.",
       body: shape.object({ text: opt(T, "An excerpt of the chat's messages; the latest reply when left out.") }),
       reply: shape.object({ world: field(T, "The world whose draft took the entry."), id: field(T, "The entry's id in the world's lore.") }),
+      // What it keeps is the world's draft's, not the chat's, and only a chat RPE holds plays a world: a chat RPE does not hold is not taken on.
+      takesChat: false,
       handle: ({ params, body, user }) => guarded(async () => {
         const saved = await lore.save(user, params.chat, body.text);
         return { world: saved.worldId, id: saved.id };

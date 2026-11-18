@@ -359,12 +359,12 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats",
       access: "page",
       group: "chats",
-      does: "The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one a page or a job named before its first turn), by name.",
+      does: "The chats RPE played, the most recently played first, then the chats its store holds that it has not played (one a migration carried, one a world was attached to, one where something of it was kept before its first turn: a change, a setting, a job), by name. A chat a page only read is not among them.",
       reply: chatsReply,
       handle: async ({ user }) => {
         // The chats played on RPE, newest first; then each chat the store holds that RPE has played no turn of (one a migration imported,
-        // one taken on when something named it before its first turn), by name. Played is the store's one test (`playedIn`): a chat
-        // whose only run of RPE's was a Settle now on a carried turn is not.
+        // one taken on when something of it was kept before its first turn; a read takes no chat on), by name. Played is the store's one
+        // test (`playedIn`): a chat whose only run of RPE's was a Settle now on a carried turn is not.
         // Each says whether it was played, and whether the store has a world for it, so a page offers a world's panels only there.
         const store = turns.store.user(user);
         const played = turns.runs.chats(user).filter((c) => store.playedIn(c.chat));
@@ -531,7 +531,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       joined: true,
       handle: ({ user, params, query }) => {
         const store = turns.store.user(user);
-        if (store.chat(params.chat) === null) throw new RouteError(404, `RPE has played no chat ${params.chat}.`);
         const turn = query.turn ?? null;
         if (turn !== null && store.turn(turn)?.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${turn}.`);
         if (turn !== null) notJoined(user, params.chat, turn);

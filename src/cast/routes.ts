@@ -181,7 +181,7 @@ interface Reading {
   imported(turn: string): boolean;
 }
 
-/** The cast at `turn` of the chat (null: its newest), for a chat the user's store holds. */
+/** The cast at `turn` of the chat (null: its newest); a chat the user's store does not hold reads as an untouched one. */
 function readingAt(store: Store, user: string, chat: string, turn: string | null): Reading {
   const s = store.user(user);
   const known = new Map<string, boolean>();
@@ -200,7 +200,7 @@ function readingAt(store: Store, user: string, chat: string, turn: string | null
   };
 }
 
-/** The user's store, holding the chat the path names. */
+/** The user's store, holding the chat the path names: for a change of it, whose route took the chat on first. */
 function chatHeld(store: Store, user: string, chat: string): UserStore {
   const s = store.user(user);
   if (s.chat(chat) === null) throw new Refused(404, "no_chat", { id: chat });
@@ -208,11 +208,11 @@ function chatHeld(store: Store, user: string, chat: string): UserStore {
 }
 
 /**
- * The turn the query names, one of the chat's (none named: the chat's newest), of a chat the user's store holds. A turn that was
- * joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
+ * The turn the query names, one of the chat's (none named: the chat's newest); a chat the user's store does not hold has none. A turn
+ * that was joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
  */
 function asked(store: Store, user: string, chat: string, turn: string | undefined): string | null {
-  const s = chatHeld(store, user, chat);
+  const s = store.user(user);
   if (turn === undefined) return null;
   const row = s.turn(turn);
   if (row?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });

@@ -45,10 +45,6 @@ export type Mirrors = [FactMirrored, TestMirrored];
 export function rulesRoutes(turns: Turns) {
   /** The scope the rules are read in: a chat's, or with none the shipped and global levels a new chat takes. */
   const scopeOf = (user: string, chat: string | undefined) => ({ user, chat: chat ?? NO_CHAT, session: NO_SESSION });
-  /** A chat RPE holds; another is not there. */
-  const held = (user: string, chat: string): void => {
-    if (turns.store.user(user).chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat}.`);
-  };
   return [
     route({
       method: "GET",
@@ -59,7 +55,6 @@ export function rulesRoutes(turns: Turns) {
       query: { chat: opt(T, "The chat whose stack is read; left out, the shipped and global levels.") },
       reply: shape.named("RulesReply", "The rules of a chat's stack, or of the levels every chat shares.", shape.object({ chat: shape.nullable(T), rules: shape.list(ruleView) })),
       handle: async ({ user, query }) => {
-        if (query.chat !== undefined) held(user, query.chat);
         return { chat: query.chat ?? null, rules: await turns.harness.rules.list(scopeOf(user, query.chat)) };
       },
     }),
@@ -72,7 +67,6 @@ export function rulesRoutes(turns: Turns) {
       query: { chat: opt(T, "The chat whose values are read; left out, no value is given.") },
       reply: shape.named("FactsReply", "The facts a trigger can name.", shape.object({ facts: shape.list(factShown) })),
       handle: async ({ user, query }) => {
-        if (query.chat !== undefined) held(user, query.chat);
         const scope = scopeOf(user, query.chat);
         const [listed, rules] = await Promise.all([turns.harness.rules.facts(scope), turns.harness.rules.list(scope)]);
         // Each rule's own text, as its file holds it: a fact is the rule's where the text names it.
@@ -101,7 +95,6 @@ export function rulesRoutes(turns: Turns) {
       },
       reply: shape.named("FiringsReply", "A page of a chat's firings, newest first, and the cursor of the next page (null: none).", shape.object({ items: shape.list(firingShown), next: shape.nullable(T) })),
       handle: async ({ user, params, query }) => {
-        held(user, params.chat);
         const { turnsPage } = await turnSettings(turns.files, { user, chat: params.chat, session: NO_SESSION }, turns.env.log);
         const limit = Math.min(query.limit ?? turnsPage.size, turnsPage.most);
         const before = query.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(query.cursor);
@@ -127,6 +120,8 @@ export function rulesRoutes(turns: Turns) {
       does: "Runs a rule, as it reads now, against a past turn of the chat, with that turn's facts; writes nothing. A turn joined to another is answered as such.",
       body: shape.named("RuleTestAsk", "The past turn to run the rule against.", shape.object({ turn: T })),
       reply: ruleTest,
+      // It writes nothing: a chat RPE does not hold is not taken on, and has no turn to test against.
+      takesChat: false,
       handle: async ({ user, params, body }) => {
         const row = turns.store.user(user).turn(body.turn);
         if (row === null || row.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);

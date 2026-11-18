@@ -126,10 +126,9 @@ function originOf(state: Readonly<WorldState>, drawn: Drawn): "world" | "laid" |
 }
 
 export function mapRoutes(deps: MapRoutesDeps) {
-  /** A chat RPE holds is there; any other is not. A turn asked for is one of the chat's; a joined one is answered as a fact. */
+  /** The chat's store: a chat RPE does not hold reads as an untouched one. A turn asked for is one of the chat's; a joined one is answered as a fact. */
   const held = (user: string, chat: string, turn?: string): UserStore => {
     const s = deps.store.user(user);
-    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat} of yours.`);
     if (turn !== undefined) {
       const row = s.turn(turn);
       if (row === null || row.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
@@ -346,6 +345,8 @@ export function mapRoutes(deps: MapRoutesDeps) {
       does: "Keeps the chat's map of a place in the world: its map as the chat plays it, with the squares drawn on it, copied into the world's draft, the working copy Build edits, with the places, paths and settings named; the chat keeps its own changes until the world takes them in.",
       body: shape.object({ places: opt(shape.list(T), "Places of the world's own this chat changed, to keep with the map."), paths: opt(shape.list(T), "Paths of the world's own this chat changed, to keep with the map."), settings: opt(shape.yesNo(), "Whether to keep the map settings this chat changed.") }),
       reply: keptReply,
+      // What it keeps is the world's draft's, not the chat's, and only a chat RPE holds plays a world: a chat RPE does not hold is not taken on.
+      takesChat: false,
       handle: async ({ user, params, body }) => {
         const s = held(user, params.chat);
         const { doc, state, world } = played(s, params.chat);

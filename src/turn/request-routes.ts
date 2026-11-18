@@ -21,11 +21,6 @@ export function requestRoutes(turns: Turns) {
     const part = await loadGuidance(turns.files, { user, chat, session: NO_SESSION }).part(REQUEST_ANSWERS);
     throw new RouteError(status, (part?.format === "lines" ? part.line(name, fields) : undefined) ?? name);
   };
-  /** A chat RPE does not hold is not there (plan §6.1). */
-  const held = async (user: string, chat: string): Promise<void> => {
-    if (turns.store.user(user).chat(chat) === null) await refused(user, chat, 404, "no_chat", { chat });
-  };
-
   return [
     route({
       method: "GET",
@@ -34,10 +29,7 @@ export function requestRoutes(turns: Turns) {
       group: "chats",
       does: "What waits in a chat for the next message, asked for beside his words: each request with its kind, what was asked and when.",
       reply: requestsReply,
-      handle: async ({ user, params }) => {
-        await held(user, params.chat);
-        return { requests: turns.requests.waiting(user, params.chat) };
-      },
+      handle: ({ user, params }) => ({ requests: turns.requests.waiting(user, params.chat) }),
     }),
     route({
       method: "POST",
@@ -48,7 +40,6 @@ export function requestRoutes(turns: Turns) {
       body: requestAsk,
       reply: requestHeldReply,
       handle: async ({ user, params, body }) => {
-        await held(user, params.chat);
         const words = typeof body.words === "string" && body.words.trim() !== "" ? body.words : null;
         const asked = { choice: body.choice, words };
         const { requestsTextMost } = await turnSettings(turns.files, { user, chat: params.chat, session: NO_SESSION }, turns.env.log);
@@ -65,7 +56,6 @@ export function requestRoutes(turns: Turns) {
       does: "Withdraws a request that waits; one kept with a turn already stays, and the answer names the turn.",
       reply: requestWithdrawnReply,
       handle: async ({ user, params }) => {
-        await held(user, params.chat);
         const out = await turns.requests.withdraw(user, params.chat, params.request);
         if (out === null) return await refused(user, params.chat, 404, "not_found", { request: params.request });
         if ("kept" in out) return await refused(user, params.chat, 409, "kept", { turn: out.kept });

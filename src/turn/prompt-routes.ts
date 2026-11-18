@@ -130,6 +130,8 @@ export function promptRoutes(turns: Turns) {
       body: promptEditAsk,
       reply: promptShownReply,
       joined: true,
+      // What it keeps is the preset's, not the chat's, and it edits the map found in a turn's prompt, which only a chat RPE holds has.
+      takesChat: false,
       handle: async ({ user, params, query, body }) => {
         const scope = scopeOf(user, params.chat, query.turn);
         const edited = await turns.harness.promptMap.edit(scope, body, { id: PLAYER, definition: PLAYER });

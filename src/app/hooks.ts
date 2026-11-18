@@ -26,7 +26,7 @@ export interface DoorFills {}
 /** Lists what the user's files name that runs a command or calls out, as the files stand now, so that the registry holds each as waiting before anything reads it; says what the files name now, null where that is not known. */
 export type ListFilesHook = () => Promise<NamedNow | null>;
 
-/** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before the route answers: a chat Lumiverse does not have is refused in words. */
+/** Takes on the chat a route names in its path (`/api/v1/chats/:chat/…`) before a route that keeps or changes something of it answers (`takesChat`): a chat Lumiverse does not have is refused in words. */
 export type ChatNamedHook = (user: string, chat: string) => Promise<void>;
 
 /** What one area adds to the hooks of the others. */

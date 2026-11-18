@@ -50,6 +50,10 @@ const ACCESS_WORDS: Readonly<Record<RouteInfo["access"], string>> = {
   command: "the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it",
 };
 
+/** What a route whose path names a chat does with a chat RPE does not hold yet (`takesChat`). */
+const CHAT_TAKEN = "taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404";
+const CHAT_READ = "not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made";
+
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 function key(name: string): string {
@@ -337,6 +341,8 @@ Who may call a route: **public**, anyone who reaches RPE; **page**, a page of th
 
 Every request's body is held to its route's limit, whatever its method: one over it is refused with 413. A GET takes no body on any route, nor does a DELETE on a route that answers in JSON, so either is refused with 400 when it carries one. A route in the form that answers in JSON is held to its declaration before its code runs: a name or a value in its query that it does not declare, or a body it does not take, is refused with 400, and the answer's \`error\` says why. A route that answers in its own way (the provider endpoint, the extension's routes, the live socket, the web UI's files) is handed the request within its body limit, reads its query and its body itself, and says in its own words what it does not take. A route that takes a turn's id (in its path, its query or its body) says so in its listing, and answers a turn that was joined to another (a continue's held turn) as a fact: status 409 and \`{ "joined": { "turn", "joined" } }\`, naming the turn it joined, which is the one to ask for; a page follows it, and it is never a failure of the server. A route marked as a tunnel carries the previous build's messages as that build wrote them, until the pages that send them have routes of their own. A refusal is \`{ "error": "<why>" }\` on every route but the provider endpoint's, which answers as OpenAI does.
 
+A route under \`/api/v1/chats/:chat\` takes that chat on first only where it keeps or changes something of it: RPE's record of the chat and its folders are made then, by what Lumiverse says of it, and a chat Lumiverse does not have is refused with 404. A route that only reads the chat, or one that names a turn, a request, a session or another record only a chat RPE holds has, answers a chat RPE does not hold as an untouched one reads (no world, no turn, empty lists), and makes nothing. Each says which under **The chat**.
+
 A route that pages takes \`limit\` and \`cursor\` in its query and answers \`{ items, next }\`: \`next\` is where the next page starts, given back as \`cursor\`, and null at the end. A cursor names the place after the last item a page gave, by that item's place in the list's own order, never by a count of items, so a walk over a list that changes between its pages neither repeats nor skips an item that stayed. A route refuses with 400 a cursor it did not give for that list: another route's, another list's, one changed, or one given before RPE last started.
 `;
 
@@ -370,6 +376,7 @@ export function renderReference(table: Table): string {
       lines.push(`### \`${routeKey(e.info)}\``, "", e.does, "", "| | |", "|---|---|", `| Access | ${e.info.access}: ${ACCESS_WORDS[e.info.access]} |`, `| Body limit | ${bodyLimit(e.info, table)} |`, `| Params | ${paramsCell(e.info)} |`);
       if ("answers" in e) lines.push(`| Answers | ${e.answers} |`);
       else lines.push(`| Query | ${queryCell(e, names)} |`, `| Body | ${e.body === null ? "none" : typeCell(e.body, names)} |`, `| Reply | ${e.reply.kind === "nothing" ? "nothing (204)" : typeCell(e.reply, names)}${e.paged ? ", a page at a time" : ""} |`);
+      if (e.info.path.startsWith("/api/v1/chats/:chat/")) lines.push(`| The chat | ${e.info.takesChat ? CHAT_TAKEN : CHAT_READ} |`);
       if ("long" in e && e.long) lines.push(`| Long | over TCP it answers at once, status ${ANSWER_STATUS}, with \`{ answer: <id> }\`, and its reply is read from \`GET ${ANSWERS_PATH}/:id\` once ready |`);
       if (e.joined) lines.push(`| Also answers | status ${JOINED_STATUS}, ${typeCell(joinedAnswer, names)}: the turn is joined to another, and the turn it joined is the one to ask for |`);
       lines.push("");

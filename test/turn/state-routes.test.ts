@@ -31,8 +31,10 @@ describe("the state routes", () => {
     expect(exported.body.state).toEqual(JSON.parse(JSON.stringify(head)));
     const doc = exported.body.worldDoc;
     expect(typeof doc === "object" && doc !== null && "id" in doc ? doc.id : undefined).toBe(row?.world ?? "blank");
-    // A chat RPE does not hold, and a caller that is not the owner's page, read nothing.
-    expect((await b.page("GET", "/api/v1/chats/chat-elsewhere/state/export")).status).toBe(404);
+    // A chat RPE does not hold reads as an untouched one, and nothing of it is made; a caller that is not the owner's page reads nothing.
+    const untouched = await b.page<Export>("GET", "/api/v1/chats/chat-elsewhere/state/export");
+    expect(untouched).toMatchObject({ status: 200, body: { chat: "chat-elsewhere", world: null } });
+    expect(b.turns.store.user(USER).chat("chat-elsewhere")).toBeNull();
     expect((await fetch(`${b.listening.url}/api/v1/chats/${CHAT}/state/export`)).status).toBe(401);
   });
 });

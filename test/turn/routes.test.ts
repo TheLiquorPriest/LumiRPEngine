@@ -271,7 +271,11 @@ describe("a turn's runs, its folder, and the world", () => {
     expect((await world("?depth=deep")).status).toBe(400);
     expect((await world("?at=place-nowhere")).status).toBe(404);
     expect((await world("?turn=turn-none")).status).toBe(404);
-    expect((await b.page("GET", "/api/v1/chats/chat-elsewhere/world")).status).toBe(404);
+    // A chat RPE does not hold reads as an untouched one: no world, the level alone; and nothing of it is made.
+    const untouched = await b.page<World>("GET", "/api/v1/chats/chat-elsewhere/world");
+    expect(untouched.status).toBe(200);
+    expect(untouched.body.nodes.map((n) => [n.ref, n.children])).toEqual([["world", []]]);
+    expect(b.turns.store.user(USER).chat("chat-elsewhere")).toBeNull();
   });
 
   test("a token of anyone but the user this RPE belongs to reads nothing", async () => {

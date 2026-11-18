@@ -199,11 +199,12 @@ describe("the cast of a chat", () => {
     expect(before.characters.find((c) => c.id === wren)?.casting).toBeNull();
   });
 
-  test("is not another user's to read, and refuses a chat or a turn it does not have in the cast's words", async () => {
+  test("reads a chat the user's store does not hold as an untouched one, and refuses a turn it does not have in the cast's words", async () => {
     const { page, first } = await played();
-    await expect(page.list({}, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
-    await expect(page.list({ turn: first.id }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
-    await expect(page.list({}, USER, "chat-nowhere")).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: "chat-nowhere" }) });
+    // Another user's store holds none of it: his cast reads as an untouched chat's, and the turn is none of his.
+    expect(await page.list({}, OTHER)).toEqual({ chat: CHAT, turn: null, characters: [] });
+    await expect(page.list({ turn: first.id }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_turn", { id: first.id }) });
+    expect(await page.list({}, USER, "chat-nowhere")).toEqual({ chat: "chat-nowhere", turn: null, characters: [] });
     await expect(page.list({ turn: "turn-nowhere" })).rejects.toMatchObject({ status: 404, message: words("no_turn", { id: "turn-nowhere" }) });
     expect(words("no_chat", { id: CHAT })).toContain(CHAT);
   });
@@ -265,10 +266,10 @@ describe("one character's record", () => {
     ]);
   });
 
-  test("refuses a character the cast does not hold, and is not another user's to read", async () => {
+  test("refuses a character the cast does not hold, as an untouched chat's cast holds none", async () => {
     const { page, wren } = await played();
     await expect(page.one("Tam")).rejects.toMatchObject({ status: 404, message: words("no_character", { who: "Tam" }) });
-    await expect(page.one(wren, {}, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
+    await expect(page.one(wren, {}, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_character", { who: wren }) });
   });
 });
 

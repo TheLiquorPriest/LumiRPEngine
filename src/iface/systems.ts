@@ -499,8 +499,8 @@ function levelOf(ref: string): Level {
  */
 export function systemsAt(store: Store, user: string, chat: string, asked: string, turn: string | null): { at: string; systems: SystemOut[] } {
   const s = store.user(user);
-  const chatRow = s.chat(chat);
-  if (chatRow === null) throw new RouteError(404, `RPE holds no chat ${chat}.`);
+  // A chat RPE does not hold reads as an untouched one: it plays no world, so no system keeps anything there.
+  const chatRow = s.chatOrUntouched(chat);
   if (turn !== null) {
     const t = s.turn(turn);
     if (t?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);

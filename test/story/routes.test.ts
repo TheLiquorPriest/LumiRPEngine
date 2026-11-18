@@ -202,10 +202,11 @@ describe("the story record of a chat", () => {
     expect(everyList.timeline.beat.items.map((b) => b.id)).toEqual(["b:x1", ids.beat]);
   });
 
-  test("refuses what it cannot read in the story's words, and is not another user's to read", async () => {
+  test("refuses what it cannot read in the story's words, and reads a chat the user's store does not hold as an untouched one", async () => {
     const { page, first } = await played();
-    await expect(page.story({}, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
-    await expect(page.story({ turn: first.id }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_chat", { id: CHAT }) });
+    // Another user's store holds none of it: his record reads as an untouched chat's, and the turn is none of his.
+    expect(await page.story({}, OTHER)).toMatchObject({ chat: CHAT, turn: null, timeline: { beat: { items: [], total: 0 } } });
+    await expect(page.story({ turn: first.id }, OTHER)).rejects.toMatchObject({ status: 404, message: words("no_turn", { id: first.id }) });
     await expect(page.story({ turn: "turn-nowhere" })).rejects.toMatchObject({ status: 404, message: words("no_turn", { id: "turn-nowhere" }) });
     const parts = "chapter, scene, beat, thread, arc, player, future, canon, retcon, record";
     await expect(page.story({ part: "premise" })).rejects.toMatchObject({ status: 400 });

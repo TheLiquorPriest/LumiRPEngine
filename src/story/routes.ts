@@ -121,7 +121,7 @@ interface Reading {
   imported(turn: string): boolean;
 }
 
-/** The record at `turn` of the chat (null: its newest), for a chat the user's store holds. */
+/** The record at `turn` of the chat (null: its newest); a chat the user's store does not hold reads as an untouched one. */
 function readingAt(store: Store, user: string, chat: string, turn: string | null): Reading {
   const s = store.user(user);
   const known = new Map<string, boolean>();
@@ -137,7 +137,7 @@ function readingAt(store: Store, user: string, chat: string, turn: string | null
   };
 }
 
-/** The user's store, holding the chat the path names. */
+/** The user's store, holding the chat the path names: for a change of it, whose route took the chat on first. */
 function chatHeld(store: Store, user: string, chat: string): UserStore {
   const s = store.user(user);
   if (s.chat(chat) === null) throw new Refused(404, "no_chat", { id: chat });
@@ -145,11 +145,11 @@ function chatHeld(store: Store, user: string, chat: string): UserStore {
 }
 
 /**
- * The turn the query names, one of the chat's (none named: the chat's newest), of a chat the user's store holds. A turn that was
- * joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
+ * The turn the query names, one of the chat's (none named: the chat's newest); a chat the user's store does not hold has none. A turn
+ * that was joined to another (a continue's held turn) is answered as a fact naming the turn it joined, for the server to answer in its one place.
  */
 function asked(store: Store, user: string, chat: string, turn: string | undefined): string | null {
-  const s = chatHeld(store, user, chat);
+  const s = store.user(user);
   if (turn === undefined) return null;
   const row = s.turn(turn);
   if (row?.chat !== chat) throw new Refused(404, "no_turn", { id: turn });
@@ -398,7 +398,6 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       refusal,
       handle: ({ user, params, query }) =>
         inWords(deps, user, params.chat, (): StoryTimelinePage => {
-          chatHeld(deps.store, user, params.chat);
           return timelinePage(readingAt(deps.store, user, params.chat, null), query.after, query.limit);
         }),
     }),
@@ -412,7 +411,6 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       refusal,
       handle: ({ user, params }) =>
         inWords(deps, user, params.chat, async (): Promise<StoryCoverageAnswer> => {
-          chatHeld(deps.store, user, params.chat);
           const window = (await deps.window?.(user, params.chat)) ?? { edge: null, hiddenReadable: false };
           return coverageAnswer(readingAt(deps.store, user, params.chat, null), params.chat, window);
         }),
@@ -427,7 +425,6 @@ export function storyRoutes(deps: StoryRoutesDeps) {
       refusal,
       handle: ({ user, params }) =>
         inWords(deps, user, params.chat, async (): Promise<StorySoFarAnswer> => {
-          chatHeld(deps.store, user, params.chat);
           if (deps.soFar === undefined) throw new Refused(404, "so_far_unavailable");
           const { text, tokens, budget, leftOut } = await deps.soFar(user, params.chat);
           return { text, tokens, budget, leftOut };

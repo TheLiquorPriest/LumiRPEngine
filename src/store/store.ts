@@ -887,6 +887,11 @@ export class UserStore {
     return r ? chatOf(r) : null;
   }
 
+  /** The chat's row, or for a chat the store does not hold the row an untouched chat reads as (no world, its id for its seed), never stored. */
+  chatOrUntouched(id: string): ChatRow {
+    return chatOf(this.chatRead(id));
+  }
+
   /** The chat's row as stored, its path included; null for a chat the store does not know. */
   private chatDb(id: string): ChatDb | null {
     return this.db.query<ChatDb, [string, string]>("SELECT * FROM chat WHERE user = ? AND id = ?").get(this.id, id);
@@ -931,6 +936,14 @@ export class UserStore {
     const r = this.chatDb(id);
     if (!r) throw new StoreInputError(`no chat ${id}`);
     return r;
+  }
+
+  /**
+   * The chat's row for a reading: as stored, or for a chat the store does not hold, the row an untouched chat has (no world, no
+   * turn, an empty path), which is never stored: a read of a chat RPE has not taken on answers as an untouched chat reads.
+   */
+  private chatRead(id: string): ChatDb {
+    return this.chatDb(id) ?? { id, world: null, revision: null, source_chat: null, source_message: null, head: null, path: "[]", heard: "{}", heard_count: 0, created: 0, compared: null, deleted: null, seed: null, started: null, was_on: null, engine: null, kept: null };
   }
 
   /**
@@ -1376,8 +1389,9 @@ export class UserStore {
 
   // ------------------------------------------------------------ the path
 
+  /** The chat's path; empty for a chat the store does not hold, as an untouched chat's is. */
   path(chat: string): PathEntry[] {
-    return pathOf(this.chatOrThrow(chat).path);
+    return pathOf(this.chatRead(chat).path);
   }
 
   /**
@@ -2110,10 +2124,10 @@ export class UserStore {
 
   /**
    * State at the end of the chat's path: rebased turns' changes applied again where they now stand, and his own changes no turn of
-   * the path began after, at once (plan §6.3 l.632, R-22).
+   * the path began after, at once (plan §6.3 l.632, R-22). For a chat the store does not hold, an untouched chat's: the start of no world.
    */
   headState(chat: string): Folded {
-    const row = this.chatOrThrow(chat);
+    const row = this.chatRead(chat);
     return this.withOwner(chat, row.head === null ? null : row.head, row.revision);
   }
 

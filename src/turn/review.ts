@@ -90,10 +90,9 @@ function questionOf(row: ApprovalRow): {
 }
 
 export function reviewRoutes(turns: Turns) {
-  /** A chat RPE holds, and a turn of it that is not joined to another (a joined one is answered as the fact it is). */
+  /** A turn of the chat that is not joined to another (a joined one is answered as the fact it is); a chat RPE does not hold has none. */
   const held = (user: string, chat: string, turn: string): UserStore => {
     const s = turns.store.user(user);
-    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat} of yours.`);
     const row = s.turn(turn);
     if (row === null || row.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
     if (row.joined !== null) throw new JoinedTurnError(turn, row.joined);
@@ -158,7 +157,6 @@ export function reviewRoutes(turns: Turns) {
       body: answerBody,
       reply: answerReply,
       handle: async ({ user, params, body }) => {
-        if (turns.store.user(user).chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat} of yours.`);
         const word = answerOf(body);
         if (word === null) throw new RouteError(400, "Your word is go, true or false, and with false a reason.");
         const done = await turns.approvals.answer(user, params.approval, word);

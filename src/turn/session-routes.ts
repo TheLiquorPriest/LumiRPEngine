@@ -186,15 +186,8 @@ function newestTurn(s: UserStore, chat: string): string | null {
 export function sessionRoutes(deps: SessionRoutesDeps) {
   const { turns, writes } = deps;
   const sessions = turns.harness.sessions;
-  /** A chat RPE holds is there; any other is not (plan §6.1). */
-  const held = (user: string, chat: string): UserStore => {
-    const s = turns.store.user(user);
-    if (s.chat(chat) === null) throw new RouteError(404, `RPE holds no chat ${chat} of yours.`);
-    return s;
-  };
-  /** The session the path names, one of the chat's. */
+  /** The session the path names, one of the chat's; a chat RPE does not hold reads as an untouched one, with no session. */
   const found = async (user: string, chat: string, id: string): Promise<SessionView> => {
-    held(user, chat);
     const view = await sessions.get({ user, chat, session: id });
     if (view === undefined || view.chat !== chat) throw new RouteError(404, `Chat ${chat} has no session ${id}.`);
     return view;
@@ -226,7 +219,6 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       reply: shape.page(sessionShown),
       paged: {},
       handle: async ({ user, params, query }) => {
-        held(user, params.chat);
         const page = await sessions.list(user, params.chat, { ...(query.after === undefined ? {} : { after: query.after }), ...(query.limit === undefined ? {} : { limit: query.limit }) });
         return { items: page.sessions.map((s) => shown(user, s)), next: page.next ?? null };
       },
@@ -255,7 +247,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       does: "Closes the Author's open scene as his own change, placed after the chat's newest turn: the close is written in the story record, and the scene's session closes with it, hung after that turn so that its Undo, a swipe or a delete of that turn takes the closing back. Refused while a turn of the chat runs, for a session that is not a scene's, or one closed already.",
       reply: sessionClosed,
       handle: async ({ user, params }) => {
-        const s = held(user, params.chat);
+        const s = turns.store.user(user);
         const view = await found(user, params.chat, params.session);
         if (view.kind !== "scene") throw new RouteError(409, `Session ${view.id} is not a scene's: only a scene is closed by hand.`);
         if (view.state !== "open") throw new RouteError(409, `Session ${view.id} is closed already.`);
@@ -340,7 +332,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       // The page's size is RPH's `sessions.page`, the global level's; the most the caller may name is ten pages.
       paged: { sizes: () => ({ default: pageSize(), most: pageSize() * 10 }) },
       handle: async ({ user, params, query }) => {
-        const s = held(user, params.chat);
+        const s = turns.store.user(user);
         const view = await found(user, params.chat, params.session);
         const byTurn = new Map<string, { at: number; runs: string[] }>();
         for (const r of turns.store.db.query<{ id: string; turn: string; received: number }, [string, string, string]>("SELECT id, turn, received FROM turn_run WHERE user = ? AND chat = ? AND session = ? ORDER BY received, rowid").all(user, params.chat, view.id)) {

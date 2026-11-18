@@ -57,8 +57,8 @@ interface Standing {
 
 async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, turn: string | null): Promise<Standing> {
   const s: UserStore = deps.store.user(user);
-  const row = s.chat(chat);
-  if (row === null) return refuse(deps, user, chat, 404, "no_chat", { id: chat });
+  // A chat RPE does not hold reads as an untouched one.
+  const row = s.chatOrUntouched(chat);
   if (turn !== null) {
     const t = s.turn(turn);
     if (t?.chat !== chat) return refuse(deps, user, chat, 404, "no_turn", { id: turn });

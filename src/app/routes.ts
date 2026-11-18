@@ -571,6 +571,8 @@ export interface DeclaredRoute<
    * `JoinedAnswer`, status 409, in the one place the server turns a throw into an answer.
    */
   readonly joined?: true;
+  /** Whether the chat its path names is taken on before it answers (`takesChat`); declared only where the route does otherwise than its method says. */
+  readonly takesChat?: boolean;
   /**
    * Words its own refusal of a request the form refused before the handler ran (its query or its body), from what the form found,
    * for the user and the path's params; absent, the form's own words say it.
@@ -619,6 +621,8 @@ export interface DeclaredRawRoute<P extends string = string, A extends Access = 
   readonly raw: (request: Request, call: RawCall<P, A>) => Response | undefined | Promise<Response | undefined>;
   /** A turn that was joined to another is answered as a fact (`JoinedAnswer`, status 409), whatever this route reads. */
   readonly joined?: true;
+  /** As a JSON route's. */
+  readonly takesChat?: boolean;
 }
 
 /** A route in the form, of any types. */
@@ -684,6 +688,8 @@ export interface RouteInfo {
   params: string[];
   /** Its declaration. */
   declared: RouteDeclaration;
+  /** Whether the server takes on the chat its path names before it answers (`takesChat`). */
+  takesChat: boolean;
 }
 
 export interface Placed {
@@ -735,6 +741,8 @@ function declarationProblem(r: Declared): string | null {
   if (!groupsFor(r.path)(r.group)) return `a route at ${r.path} is not in the ${r.group} group.`;
   if (typeof r.does !== "string" || r.does.trim() === "" || r.does.includes("\n")) return "it says what it does in one line.";
   if (r.joined !== undefined && r.joined !== true) return "joined is true where the route takes a turn's id, and left out where it does not.";
+  if (r.takesChat !== undefined && !CHAT_PATH.test(r.path)) return "takesChat is declared only on a route whose path names a chat first.";
+  if (r.takesChat !== undefined && r.takesChat === takesByMethod(r)) return "takesChat is declared only where the route does otherwise than its method says: a GET that keeps something of the chat, or a POST that keeps nothing of it.";
   if ("raw" in r) return typeof r.answers !== "string" || r.answers.trim() === "" || r.answers.includes("\n") ? "a raw route says what it answers in one line." : null;
   const params = new Set(paramsOf(r.path));
   for (const [name, f] of Object.entries(r.query ?? {})) {
@@ -785,6 +793,28 @@ function takesTurn(r: Declared): boolean {
   return Object.values(query).some((f) => holdsTurnId(fieldOf(f).of)) || (r.body !== undefined && holdsTurnId(r.body));
 }
 
+/** A path that names a chat first (`/api/v1/chats/:chat/…`). */
+const CHAT_PATH = /^\/api\/v1\/chats\/:chat(\/|$)/;
+/** The params that name a record RPE keeps of a chat, which only a chat it holds has. */
+const HELD_PARAMS: Readonly<Record<string, true>> = { [TURN_PARAM]: true, request: true, edit: true, approval: true, session: true, job: true };
+
+/** What a route's method says of it: any but a GET keeps or changes something, unless its path names a record only a held chat has. */
+function takesByMethod(r: Declared): boolean {
+  return r.method !== "GET" && !paramsOf(r.path).some((p) => Object.hasOwn(HELD_PARAMS, p));
+}
+
+/**
+ * Whether the server takes on the chat a route's path names before the route answers: its row and its folders made, by what
+ * Lumiverse says of it (`ChatNamedHook`). Only a route that keeps or changes something of the chat does; one that only reads it
+ * answers a chat RPE does not hold as an untouched chat reads, and makes nothing. One that names a turn, a request or another
+ * record of the chat finds the chat held already, or answers that there is no such record. By the route's own `takesChat` where
+ * it declares it (a GET that keeps something of the chat, a POST that keeps nothing of it), else by its method.
+ */
+export function takesChat(r: Declared): boolean {
+  if (!CHAT_PATH.test(r.path)) return false;
+  return r.takesChat ?? takesByMethod(r);
+}
+
 /** A route's declaration as the table lists it. */
 function declarationOf(r: Route): RouteDeclaration {
   const turn = takesTurn(r);
@@ -828,7 +858,7 @@ export class RouteTable {
   }
 
   list(): RouteInfo[] {
-    return this.placed.map(({ area, route: r }) => ({ area, method: r.method, path: r.path, access: r.access, maxBody: r.maxBody ?? null, raw: "raw" in r, params: paramsOf(r.path), declared: declarationOf(r) }));
+    return this.placed.map(({ area, route: r }) => ({ area, method: r.method, path: r.path, access: r.access, maxBody: r.maxBody ?? null, raw: "raw" in r, params: paramsOf(r.path), declared: declarationOf(r), takesChat: takesChat(r) }));
   }
 
   /** Fixes the table for the server: each path pattern with its routes by method. */
