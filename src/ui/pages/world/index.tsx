@@ -57,6 +57,12 @@ export function NotApplied(props: { read: NotAppliedReply | null }) {
   );
 }
 
+/** How many of the things the turn's time brought due have nothing recorded for them yet, counted from the same items the list shows. */
+function DueLeft(props: { items: readonly { changes: readonly string[] }[] }) {
+  const left = props.items.filter((item) => item.changes.length === 0).length;
+  return <p class="rpe-meta lre-section-body">{`${left} of these ${props.items.length} ${left === 1 ? "has" : "have"} no outcome recorded yet.`}</p>;
+}
+
 /** What the chosen turn's time brought due, each with the outcome recorded for it; those at a level also show at it. */
 export function DueSection(props: { read: DueReply | null }) {
   const { read } = props;
@@ -72,6 +78,7 @@ export function DueSection(props: { read: DueReply | null }) {
           <DueItem key={i} item={item} />
         ))}
       </ul>
+      {read.more === 0 && read.items.some((item) => item.changes.length === 0) ? <DueLeft items={read.items} /> : null}
       {read.more === 0 ? null : <p class="rpe-meta lre-section-body">{read.more === null ? "More fell due than this list holds." : `${counted(read.more, "more item")} fell due than this list holds.`}</p>}
     </section>
   );

@@ -160,18 +160,22 @@ function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeV
 /** What time brings due over the store's states: what the world state and the engine's tools take as `due`. */
 export function timeDue(store: Store): DueSource {
   return {
-    due(state, span, at, most) {
+    due(state, span, at, most, except = []) {
       const doc = store.env.worlds(state.world.revision);
       if (!doc || span.to <= span.from) return { items: [], more: 0 };
       const ctx = store.env.registry.context(doc, state.world);
       const world = ctx.world;
       const view = store.viewOf(state);
       const root = at === null ? null : view.resolve(at);
-      // Inside the part of the tree asked about: the level itself, or anything in it.
-      const inside = (ref: string): boolean => {
-        for (let r: string | null = ref; r !== null; r = view.parentOf(r)) if (r === root) return true;
+      // Inside a part of the tree: the level itself, or anything in it.
+      const within = (ref: string, top: string | null): boolean => {
+        for (let r: string | null = ref; r !== null; r = view.parentOf(r)) if (r === top) return true;
         return false;
       };
+      const inside = (ref: string): boolean => within(ref, root);
+      // The parts whose own lists hold what concerns them (`except`): what concerns one of them is not listed or counted here.
+      const elsewhere = except.flatMap((ref) => view.resolve(ref) ?? []);
+      const listedElsewhere = (ref: string): boolean => elsewhere.some((top) => within(ref, top));
       // What each slot's start is listed as, worked out once for the slot; null for a slot not listed here.
       const entries = new Map<ScheduleDef, (Omit<DueEntry, "at"> | null)[]>();
       const entryOf = (schedule: ScheduleDef, slot: number): Omit<DueEntry, "at"> | null => {
@@ -184,9 +188,11 @@ export function timeDue(store: Store): DueSource {
             const place = schedule.target === "place" && typeof s.value === "string" && own(world.places, s.value) ? `place:${s.value}` : null;
             // A person's schedule outside the part asked about is not listed; the world's own processes concern every part.
             const here = root === null ? who : who.filter((id) => inside(`entity:${id}`) || (place !== null && inside(place)));
-            if (who.length > 0 && here.length === 0) return null;
+            // What concerns a part listed elsewhere is that list's, and what concerns every part (the world's own processes) is the first list's.
+            const mine = place !== null && listedElsewhere(place) ? [] : here.filter((id) => !listedElsewhere(`entity:${id}`));
+            if (who.length > 0 ? mine.length === 0 : elsewhere.length > 0) return null;
             const what: JsonValue = s.value === undefined || place !== null ? schedule.id : s.value;
-            return { kind: schedule.target, ...(place !== null ? { where: place } : {}), ...(here.length > 0 ? { who: here } : {}), what };
+            return { kind: schedule.target, ...(place !== null ? { where: place } : {}), ...(mine.length > 0 ? { who: mine } : {}), what };
           });
           entries.set(schedule, slots);
         }
@@ -200,7 +206,7 @@ export function timeDue(store: Store): DueSource {
       }
       // The rest of what falls due, each kind kept to the part asked about.
       const others = otherDue(store, ctx, state, view, span.from, span.to)
-        .filter((o) => root === null || o.refs.some((r) => r !== null && inside(r)))
+        .filter((o) => (root === null || o.refs.some((r) => r !== null && inside(r))) && !o.refs.some((r) => r !== null && listedElsewhere(r)))
         .map((o) => o.entry)
         .sort((a, b) => a.at - b.at);
       // A span that holds more than the list has room for is cut so that the routine's many starts never crowd out the rest: the rest

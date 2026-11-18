@@ -22,6 +22,7 @@ lines:
   on_the_way: '{{who}} is on the way to {{to}}{{#after}}, arriving in {{after}} minutes{{/after}}'
   due: '{{#when}}{{when}}{{/when}}{{^when}}in {{after}} minutes{{/when}}: {{kind}}{{#where}} at {{where}}{{/where}}{{#who}}, {{who}}{{/who}}{{#what}} ({{what}}){{/what}}'
   fell_due: '{{#when}}{{when}}{{/when}}{{^when}}{{ago}} minutes ago{{/when}}: {{kind}}{{#where}} at {{where}}{{/where}}{{#who}}, {{who}}{{/who}}{{#what}} ({{what}}){{/what}}'
+  fell_left: '{{left}} of the {{total}} that fell due {{#one}}has{{/one}}{{^one}}have{{/one}} no change recorded for {{#one}}it{{/one}}{{^one}}them{{/one}}:'
   due_none: 'The world state lists nothing due in the next {{minutes}} minutes of story time.'
   due_scene: 'Due in the scene'
   due_around: 'Due in the places beside it'

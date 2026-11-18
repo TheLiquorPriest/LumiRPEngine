@@ -24,6 +24,7 @@ import { own } from "../engine/pack-kit";
 import { presetOf } from "../engine/realism";
 import { clockPaused } from "../engine/time";
 import { BLANK_REVISION, clockRecorded } from "./blank";
+import { answers } from "./due";
 import { standing } from "./facts";
 import { aboutOf, type FoldEnv } from "./fold";
 import type { UserStore } from "./store";
@@ -132,10 +133,14 @@ export interface DueListing {
 /** What falls due under each level of the tree: how many (null: more than are counted), and the soonest's time and kind; null for none. */
 export type DueUnder = (level: string) => { n: number | null; at: number; kind: string } | null;
 
-/** What time brings due for a span and a part of the tree, the soonest `most` of it (the engine tools' `DueList`). */
+/**
+ * What time brings due for a span and a part of the tree, the soonest `most` of it (the engine tools' `DueList`). `except` names parts of the
+ * tree whose own lists hold what concerns them: what concerns one of them is neither listed nor counted, so lists asked for one after
+ * another make the span's whole and count it once.
+ */
 export interface DueSource {
-  due(state: StoreState, span: { from: number; to: number }, at: string | null, most: number): DueListing;
-  /** Every level's at once, as `due(state, span, level, 1)` gives it for each. Where a source gives none, each level is asked by `due`. */
+  due(state: StoreState, span: { from: number; to: number }, at: string | null, most: number, except?: readonly string[]): DueListing;
+  /** Every level's at once: how many fall due under it, and the soonest's time and kind. Where a source gives none, each level is asked by `due`. */
   under?(state: StoreState, span: { from: number; to: number }): DueUnder;
 }
 
@@ -271,13 +276,17 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     if (d.who !== undefined && d.who.length > 0) out.who = d.who.map((id) => nameOf(`entity:${id}`)).join(", ");
     return { kind, depth: 0, fields: out };
   };
-  // Beside a move of the clock in the turn before: what fell due in the time it moved past, which nothing applied (plan §6.1, §6.4).
+  // Beside a move of the clock in the turn before: what fell due in the time it moved past, which nothing applied (plan §6.1, §6.4). Only what
+  // no change of that turn answers is listed (`answers`), headed by how many of how many that is, and the cut counts what it leaves out of
+  // those: what the section says is left, it lists, and the count is the list's. Every item of the span is read to tell which are left, up
+  // to `READ_THROUGH`; past that the section does not count, and says so.
   if (want("passed") && input.due !== undefined && before !== null && lastRows.some((r) => r.applied && r.op === "clock")) {
     const since = store.startOf(before.id).state.world.clock;
     if (now > since) {
-      const listed = dueShown(part, input.due, state, { from: since, to: now }, budget, (d) => dueLine("fell_due", d, { ago: now - d.at }));
-      sections.passed = listed.lines;
-      beyond.passed = listed.more;
+      const listed = dueShown(part, input.due, state, { from: since, to: now }, budget, (d) => dueLine("fell_due", d, { ago: now - d.at }), null, (d) => lastRows.some((r) => answers(d, r)), [], READ_THROUGH);
+      const counted = listed.more === 0;
+      sections.passed = counted && listed.lines.length > 0 ? [{ kind: "fell_left", depth: 0, fields: { left: listed.lines.length, total: listed.fetched, one: listed.lines.length === 1 } }, ...listed.lines] : listed.lines;
+      beyond.passed = counted ? 0 : null;
     }
   }
   // Without a source of what falls due (a world state read where no clock runs) there is no section to give.
@@ -290,15 +299,16 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     const source = input.due;
     const span = { from: now, to: now + settings.dueAhead };
     const line = (d: DueEntry): ViewLine => dueLine("due", d, { after: d.at - now });
-    const seen = new Set<string>();
-    const keyOf = (d: DueEntry): string => JSON.stringify([d.at, d.kind, d.where ?? null, d.who ?? [], d.what]);
+    // The three lists make the span's whole: each holds what concerns its own parts and leaves out what an earlier one holds
+    // (`DueSource.due`'s `except`), so what each shows, with what it counts as left, adds up to what falls due, once.
+    const held: string[] = [];
     const listOf = (head: string, ats: readonly (string | null)[]): void => {
       const list: DueList = { lines: [], more: 0 };
       for (const at of ats) {
-        const shown = dueShown(part, source, state, span, Math.floor(budget / 3), line, at, (d) => seen.has(keyOf(d)));
-        for (const d of shown.items) seen.add(keyOf(d));
+        const shown = dueShown(part, source, state, span, Math.floor(budget / 3), line, at, undefined, held);
         list.lines.push(...shown.lines);
         list.more = list.more === null || shown.more === null ? null : list.more + shown.more;
+        if (at !== null) held.push(at);
       }
       if (list.lines.length > 0) dueLists.push({ lines: [{ kind: head, depth: 0, fields: {} }, ...list.lines], more: list.more });
     };
@@ -378,7 +388,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   let sharing = needs.length + (want("outline") ? 1 : 0);
   for (const [s, need] of needs.sort((a, b) => a[1] - b[1])) {
     const room = Math.min(need, Math.floor(left / sharing));
-    const kept = s === "due" && dueLists.length > 0 ? fitLists(part, dueLists, room) : fit(part, s, sections[s] ?? [], room, beyond[s] ?? 0);
+    const kept = s === "due" && dueLists.length > 0 ? fitLists(part, dueLists, room) : fit(part, s, sections[s] ?? [], room, beyond[s] ?? 0, s === "passed" && sections[s]?.[0]?.kind === "fell_left" ? 1 : 0);
     sections[s] = kept.lines;
     left -= kept.used;
     sharing--;
@@ -417,14 +427,15 @@ function costOf(part: Part, line: ViewLine): number {
  * how many the span holds was not counted); when not even that fits, the section is that line alone,
  * past its share: nothing is dropped for space without a word (B-3).
  */
-function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[], room: number, beyond: number | null): { lines: ViewLine[]; used: number } {
+function fit(part: Part, section: WorldStateSection, lines: readonly ViewLine[], room: number, beyond: number | null, head = 0): { lines: ViewLine[]; used: number } {
   const costs = lines.map((l) => costOf(part, l));
   let used = 0;
   let k = 0;
   while (k < lines.length && used + (costs[k] as number) <= room) used += costs[k++] as number;
   if (k === lines.length && beyond === 0) return { lines: [...lines], used };
+  // The `left_out` line counts the items left out: the lines past those shown, less the `head` lines that head the list and are items of nothing.
   const noteAt = (at: number): ViewLine => {
-    const n = beyond === null ? null : lines.length - at + beyond;
+    const n = beyond === null ? null : lines.length - head - Math.max(0, at - head) + beyond;
     const depth = (lines[at] ?? lines[at - 1])?.depth ?? 0;
     return n === null ? { kind: "left_out_uncounted", depth, fields: { section, [section]: true } } : { kind: "left_out", depth, fields: { n, one: n === 1, section, [section]: true } };
   };
@@ -487,22 +498,30 @@ function holdLine(h: TidyFinding, nameOf: (ref: string) => string, view: TreeVie
   return { kind: "unsettled_hold", depth: 0, fields };
 }
 
+/** The most items of a span read to tell which of what fell due are left: more is not counted. */
+const READ_THROUGH = 4096;
+
 /**
- * What `span` brings due under `at` (null: the whole world) as the lines of a section, the soonest first, less what `skip` says is
- * listed already: as many as all of `room` could show at each line's own cost, and one more where the span holds more, with how many
- * more it holds than those (null: more, not counted). The due list is asked for in batches, each twice the last, so what a span costs
- * is what the lines its budget can show cost, however long the span. A layout that words none of the lines asked for shows none, and
- * is asked for no more.
+ * What `span` brings due under `at` (null: the whole world, less `except`) as the lines of a section, the soonest first, less what `skip`
+ * says is not wanted: as many as all of `room` could show at each line's own cost, and one more where the span holds more, with how
+ * many more it holds than those (null: more, not counted), and how many items were read to make the lines. The due list is asked for in
+ * batches, each twice the last, so what a span costs is what the lines its budget can show cost, however long the span. A layout that
+ * words none of the lines asked for shows none, and is asked for no more. With `through`, every item is read, up to that many, whatever the room.
  */
-function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine, at: string | null = null, skip: (d: DueEntry) => boolean = () => false): { lines: ViewLine[]; items: DueEntry[]; more: number | null } {
+function dueShown(part: Part, source: DueSource, state: StoreState, span: { from: number; to: number }, room: number, line: (d: DueEntry) => ViewLine, at: string | null = null, skip: (d: DueEntry) => boolean = () => false, except: readonly string[] = [], through = 0): { lines: ViewLine[]; items: DueEntry[]; fetched: number; more: number | null } {
   for (let most = 1; ; most *= 2) {
-    const listing = source.due(state, span, at, most);
+    const listing = source.due(state, span, at, most, except);
     const items = listing.items.filter((d) => !skip(d));
     const lines = items.map(line);
+    const read = { lines, items, fetched: listing.items.length, more: listing.more };
+    if (through > 0) {
+      if (listing.more === 0 || listing.items.length < most || most >= through) return read;
+      continue;
+    }
     let used = 0;
     let k = 0;
     for (; k < lines.length && used + costOf(part, lines[k] as ViewLine) <= room; k++) used += costOf(part, lines[k] as ViewLine);
-    if (k < lines.length || used === 0 || listing.more === 0 || listing.items.length < most) return { lines, items, more: listing.more };
+    if (k < lines.length || (used === 0 && lines.length > 0) || listing.more === 0 || listing.items.length < most) return read;
   }
 }
 
@@ -520,7 +539,7 @@ function fitLists(part: Part, lists: readonly DueList[], room: number): { lines:
   [...lists]
     .sort((a, b) => needOf(a) - needOf(b))
     .forEach((l, i, all) => {
-      const got = fit(part, "due", l.lines, Math.min(needOf(l), Math.floor(left / (all.length - i))), l.more);
+      const got = fit(part, "due", l.lines, Math.min(needOf(l), Math.floor(left / (all.length - i))), l.more, 1);
       kept.set(l, got.lines);
       left -= got.used;
     });

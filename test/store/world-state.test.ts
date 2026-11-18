@@ -231,8 +231,8 @@ describe("what falls due in the world state", () => {
     let made = 0;
     return {
       source: {
-        due: (state, span, at, most) => {
-          const listing = source.due(state, span, at, most);
+        due: (state, span, at, most, except) => {
+          const listing = source.due(state, span, at, most, except);
           made += listing.items.length;
           return listing;
         },
@@ -257,13 +257,15 @@ describe("what falls due in the world state", () => {
     // Eight slots start in the two days; the point-of-view character's hunger, fatigue and social needs also cross their lines in them.
     expect(fell.length).toBe(8 + 3);
     const calendar = calendarOf(world);
-    // A need is said in its words (as the Needs view says it), never as it is kept.
-    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), d.words ?? (typeof d.what === "string" ? d.what : JSON.stringify(d.what))]));
+    // Nothing was decided, so every one is left: the section says how many of how many, then lists them; a need is said in its words (as the Needs view says it), never as it is kept.
+    expect(block.sections.passed?.[0]).toEqual({ kind: "fell_left", depth: 0, fields: { left: fell.length, total: fell.length, one: false } });
+    expect(block.sections.passed?.slice(1).map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), d.words ?? (typeof d.what === "string" ? d.what : JSON.stringify(d.what))]));
     expect(fell.filter((d) => d.kind === "need").map((d) => d.words?.split(",")[0])).toEqual(["Hunger 80 of 100", "Fatigue 80 of 100", "Social 80 of 100"]);
     const lines = block.text.split("\n");
     const heading = lines.indexOf("### Fell due as the clock moved last turn");
     expect(heading).toBeGreaterThanOrEqual(0);
-    expect(lines[heading + 2]).toBe(wordLine(SHIPPED_PART, block.sections.passed?.[0] as ViewLine) ?? "the layout words a fell_due line");
+    expect(lines[heading + 2]).toBe(wordLine(SHIPPED_PART, block.sections.passed?.[0] as ViewLine) ?? "the layout words a fell_left line");
+    expect(lines[heading + 2]).toBe(`${fell.length} of the ${fell.length} that fell due have no change recorded for them:`);
     // What is due is still listed from the new time on.
     expect(block.sections.due?.filter((l) => l.kind === "due").every((l) => typeof l.fields.after === "number" && l.fields.after > 0)).toBe(true);
 
@@ -273,13 +275,13 @@ describe("what falls due in the world state", () => {
     expect(worldState(s, { chat: "c", turn: after.id, layout: SHIPPED_LAYOUT, due, charsPerToken: 4 }).sections.passed).toBeUndefined();
   });
 
-  test("a due span of a century costs no more than a day's: the list stops at what the budget can show, and the rest is counted", () => {
+  test("a due span of a century costs no more than a decade's: the list stops at what the budget can show, and what is shown with what is counted as left is everything that falls due, once", () => {
     const { s, store } = scheduledStore();
     play(s, "c", "m1", "Wren sits by the fire.", 1, []);
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     const state = s.stateAt(next.id).state;
     const now = state.world.clock;
-    // A layout that holds the due section alone, and a budget a day's starts overflow in each of its lists (scene, around, beyond: each has its own share, 1c406c3f9) and one line of each fits: what it can show is the bound.
+    // A layout that holds the due section alone, and a budget that shows one line of each list at most: what it can show is the bound.
     const layout = `${SHIPPED_LAYOUT.slice(0, SHIPPED_LAYOUT.indexOf("\n---\n") + 5)}{{#due}}\n{{due}}\n{{/due}}\n`;
     const budget = { budget: 60 };
     const listed = (dueAhead: number) => {
@@ -288,15 +290,17 @@ describe("what falls due in the world state", () => {
       return { made: due.made(), lines: block.sections.due ?? [] };
     };
     const day = listed(DAY);
+    const decade = listed(10 * 365 * DAY);
     const century = listed(100 * 365 * DAY);
-    expect(day.lines.at(-1)?.kind).toBe("left_out");
-    expect(century.made).toBeLessThanOrEqual(day.made);
-    // The rest is counted from what the store's due list says remains in the span.
-    const shown = century.lines.filter((l) => l.kind.startsWith("due")).length;
-    const all = timeDue(store).due(state, { from: now, to: now + 100 * 365 * DAY }, null, 0).more;
-    expect(all).toBeGreaterThan(100 * 365 * 4 - 8);
-    expect(shown).toBeGreaterThan(0);
+    expect(day.lines.some((l) => l.kind === "left_out")).toBe(true);
+    expect(century.made).toBeLessThanOrEqual(decade.made);
+    // The lists hold what concerns their own parts, so what each shows and what it counts as left make what the store's due list says falls due in the span.
+    for (const [span, got] of [[DAY, day], [10 * 365 * DAY, decade], [100 * 365 * DAY, century]] as const) {
+      const all = timeDue(store).due(state, { from: now, to: now + span }, null, 0).more;
+      const shown = got.lines.filter((l) => l.kind === "due").length;
+      const left = got.lines.filter((l) => l.kind === "left_out").reduce((n, l) => n + Number(l.fields.n), 0);
+      expect(shown + left).toBe(all ?? -1);
+    }
     expect(century.lines.at(-1)?.kind).toBe("left_out");
-    expect(century.lines.at(-1)?.fields.n).toBe((all ?? 0) - shown);
   });
 });
