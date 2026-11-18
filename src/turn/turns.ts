@@ -165,18 +165,29 @@ interface Ending {
   heading: ((agent: AgentRef) => string | undefined) | null;
 }
 
-/** The definitions the progress part's `thinking` row names by their own words; any other agent is named by its definition. */
+/** The definitions the progress part's rows name by their own words; any other agent is named by its definition. */
 const THINKERS: Readonly<Record<string, true>> = { author: true, gm: true, narrator: true, character: true };
 
 /**
- * The line that heads a stretch of `agent`'s thinking: the progress part's `thinking` row, filled with whose it is (`is.<definition>`,
- * or `is.other`) and its name: the character's it plays, by `character`, or its definition's. A character agent whose character cannot
- * be found is named by its definition, as another agent is.
+ * What a person calls `agent`, as the fields the progress part's rows name it by: whose it is (`is.<definition>`, or `is.other`) and
+ * its name, the character's it plays, by `character`, or its definition's. A character agent whose character cannot be found is named
+ * by its definition, as another agent is. The one naming of an agent for a person: the thinking block's headings take it, and the
+ * harness's progress lines about an agent take it through `names`.
  */
-export function thinkingHeading(progress: LinesPart | undefined, agent: AgentRef, character: (id: string) => string | null): string | undefined {
+export function agentNaming(agent: AgentRef, character: (id: string) => string | null): JsonObject {
   const played = agent.plays === undefined ? null : character(agent.plays);
   const kind = agent.definition === "character" && played === null ? "other" : Object.hasOwn(THINKERS, agent.definition) ? agent.definition : "other";
-  return progress?.line("thinking", { is: { [kind]: true }, name: played ?? agent.definition });
+  return { is: { [kind]: true }, name: played ?? agent.definition };
+}
+
+/** A chat's character by its id or its name, as the cast names it there, the chats it carries on from among them; null for one it does not know. */
+export function characterName(store: Store, user: string, chat: string): (id: string) => string | null {
+  return (id) => findCharacter(store.db, user, chatLine(store.user(user), chat), id)?.name ?? null;
+}
+
+/** The line that heads a stretch of `agent`'s thinking: the progress part's `thinking` row, filled with what a person calls it (`agentNaming`). */
+export function thinkingHeading(progress: LinesPart | undefined, agent: AgentRef, character: (id: string) => string | null): string | undefined {
+  return progress?.line("thinking", agentNaming(agent, character));
 }
 
 /**
@@ -854,7 +865,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       void over.promise.then(() => this.#project(user, chat));
       // Each stretch of an agent's thinking is headed in the progress part's words, a character by the name the cast gives it in this chat.
       const progressLines = lines(progress);
-      const heading = (agent: AgentRef): string | undefined => thinkingHeading(progressLines, agent, (id) => findCharacter(this.#d.store.db, user, chatLine(this.#d.store.user(user), chat), id)?.name ?? null);
+      const characterOf = characterName(this.#d.store, user, chat);
+      const heading = (agent: AgentRef): string | undefined => thinkingHeading(progressLines, agent, characterOf);
       // The intake's own line goes out before anything the harness says.
       await introduced;
       await this.#run(run, request, out, signal, { errors: lines(errors), lastText: settings.lastText, hold: tagged.whole === true ? (tagged.hold ?? null) : null, heading }, afterFolder);

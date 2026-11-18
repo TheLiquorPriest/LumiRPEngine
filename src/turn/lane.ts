@@ -69,7 +69,7 @@ import { SinceKept } from "./since";
 import { closedScenesAt, scenesOf, stagesAt } from "./stage";
 import { guidanceTexts } from "./texts";
 import { type TurnTrace, turnTrace } from "./trace";
-import { type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
+import { agentNaming, characterName, type MigratedSource, NO_SESSION, turnErrorWords, TurnLane } from "./turns";
 
 /**
  * RPE's file port for the one user it serves, that user read each time the port is asked, since it may
@@ -617,6 +617,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     // The one home of the decision whether a write goes ahead: each lane Auto, Confirm or Never as he set it for the chat. A continue's held turn is the turn it was joined to.
     approvals: { permission: (scope, lane) => approvals.permission(joined(scope), lane), ask: (scope, ask, signal) => approvals.ask(joined(scope), ask, signal) },
     switches: app.switches,
+    // An agent named in RPH's progress lines as the thinking block's headings name it: a character by the name the cast gives it in the chat.
+    names: { agent: (scope, agent) => agentNaming(agent, scope.chat === undefined ? () => null : characterName(store, scope.user, scope.chat)) },
     store: kvStore(app.db, app.writes),
     trace,
     events: {
