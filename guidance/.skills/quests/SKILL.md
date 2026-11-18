@@ -35,7 +35,7 @@ Whether a stage's condition is met is a judgment, and it is yours or the Author'
 
 A stage can be moved back when the story undoes what met it. Say why.
 
-A puzzle answered in the story is the action `answer` (`puzzle`, `answer`), carried out with the `world_apply` operation `act`.
+A puzzle answered in the story is the action `answer` (`puzzle`, `answer`), carried out with the `world_apply` operation `act`; `who` is the one answering. So is any action the world made for a quest's step: `world_query` at `ruleset` lists every action the world has. A requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`); `act` passes no time.
 
 When a `quest` operation moves a stage the world built, its answer carries `authored`: what the world built for the stage reached (`reached`: its effects, rewards, gate, truth, cue, hints and the stages it goes on to) and for the one left (`left`: its rewards and effects). It is data and nothing in it is applied: what the story hands over, you land as ordinary operations (see the rewards below). `world_query` at the quest gives the same for every stage.
 
