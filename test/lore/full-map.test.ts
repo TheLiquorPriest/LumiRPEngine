@@ -105,21 +105,21 @@ describe("the lore map in full", () => {
     expect(read?.text.split("\n\n").slice(1)).toEqual(["The lamp was relit after the wreck.", "Its glass cracked in the storm."]);
   });
 
-  // The shipped layout and lines are being reworded for how each entry came in and what changed since it was indexed: hardening.
-  test.skip("is laid out by the shipped part, each entry worded by the lore's lines", async () => {
+  // The shipped layout and lines word how each entry came into the prompt, that it changed since it was indexed and the turn a note was written on (c7ce1232f, 557dbe620).
+  test("is laid out by the shipped part, each entry worded by the lore's lines", async () => {
     const guidance = files.guidance(CHAT);
     const part = await guidance.part("lore-map");
     if (part?.format !== "template") throw new Error("the shipped lore map part did not load as a template");
     const text = part.render({ ...loreMapFields(map, await loreLines(guidance)) }).text.trim();
     expect(text.split("\n")).toEqual([
-      "### In the prompt",
+      "### In the prompt, each in full, as its text alone with no title or id",
       "",
-      "- [e-2] The lamp room (place): The lighthouse's lamp room. Defines The Lighthouse (layout).",
-      `- [e-3] ${GULL} (not indexed yet; keys: gull)`,
+      "- [e-2] The lamp room (place): The lighthouse's lamp room. Defines The Lighthouse (layout). The lamp was relit after the wreck. (on turn 1). Its glass cracked in the storm. (on turn 2). (by a key)",
+      `- [e-3] ${GULL} (by a key) (not indexed yet; keys: gull)`,
       "",
       "### Changed by the story",
       "",
-      "- [e-2] The lamp room: The lamp was relit after the wreck. Its glass cracked in the storm.",
+      "- [e-2] The lamp room: The lamp was relit after the wreck. (on turn 1) Its glass cracked in the storm. (on turn 2)",
       "",
       "### From the world's own lore, not in the prompt",
       "",
@@ -132,7 +132,7 @@ describe("the lore map in full", () => {
       `- [${W.cove_route}] The cove route (rule): Sefa's brandy run. Bound to Sefa Moor.`,
       "- and 1 more",
       "",
-      "2 attached entries are not indexed yet. They show by title and keys only.",
+      "4 attached entries are not indexed yet. Where one is listed here, it shows by title and keys only.",
     ]);
   });
 
