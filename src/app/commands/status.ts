@@ -13,6 +13,7 @@ import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { atWords } from "./words";
 import { runningServer } from "./writer";
+import { runtimeFoldersOf } from "../../migrate/runtime-folders";
 
 /** Whether RPE's service is installed, and if so whether it runs, stopped at its start limit, or stopped otherwise; and whether it fell back to the known-good copy. */
 async function serviceLines(paths: DataPaths, io: CliIO): Promise<string[]> {
@@ -45,6 +46,10 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
   const source = await recordedSource(paths.root);
   if (source !== null) io.out(`Updates come from: ${source}`);
   io.out(`Lumiverse: ${config.lumiverse.url ?? "not set"}, for user ${config.lumiverse.user ?? "not set"}`);
+  // The folders of the previous build's runtime that `rpe up` and `rpe migrate` read, as XDG_CONFIG_HOME and XDG_DATA_HOME decide them, so they can be checked before a step.
+  const runtime = runtimeFoldersOf(io.env, io.home);
+  const there = (folder: string): string => `${folder} (${existsSync(folder) ? "there" : "not there"})`;
+  io.out(`Previous build's runtime, read by rpe up and rpe migrate: config ${there(runtime.configDir)}, data ${there(runtime.dataDir)}; --runtime-config and --runtime-data name others.`);
   if (!existsSync(paths.database)) {
     io.out("Database: not made yet");
     return 0;

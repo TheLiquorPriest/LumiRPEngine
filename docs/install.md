@@ -61,7 +61,7 @@ Every command `rpe` has:
 
 - `rpe up`: the above. Where the previous build's runtime of yours is in Lumiverse's data folder and the extension runs the new build, `rpe up` is the switch from the previous build instead, with no flag: see [Moving from the previous build](migration.md#3-the-switch). Where the previous build is still installed, it says so and changes nothing.
 - `rpe serve`: runs RPE in the foreground.
-- `rpe status`: the build, the data folder, where RPE listens and whether it answers, the builds that run, the Lumiverse it belongs to, its keys, and anything waiting to be switched on.
+- `rpe status`: the build, the data folder, where RPE listens and whether it answers, the builds that run, the Lumiverse it belongs to, the previous build's runtime folders that `rpe up` and `rpe migrate` read (as `XDG_CONFIG_HOME` and `XDG_DATA_HOME` decide them) and whether each is there, its keys, and anything waiting to be switched on.
 - `rpe down`: stops and removes RPE's service. Its data stays where it is.
 - `rpe lumiverse`: which Lumiverse this RPE belongs to, and its sign-in. With `--url` and `--user` it signs in again; `--database <file>` reads Lumiverse's database file directly, and `--connection <id>` names RPE's connection in Lumiverse.
 - `rpe version`: this build's id.
