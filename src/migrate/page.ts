@@ -9,6 +9,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
+import { IMPORTED_KIND } from "../cast/carried";
+import { isFiled } from "../cast/imported";
+import { castAt } from "../cast/path";
+import { CastRecord } from "../cast/record";
 import type { JsonObject } from "../shared/json";
 import type { Store } from "../store";
 import type { ChatCarried } from "./briefing";
@@ -76,7 +80,7 @@ export type Waiting =
   | { kind: "staged"; chat: string; staged: number; done: boolean }
   /** A chat's chips, review cards and a rollback never applied, as today's build left them: on its turns (the rollback archived). */
   | { kind: "chat"; chat: string; chips: number; reviewCards: number; rollback: boolean; done: boolean }
-  /** A chat whose characters' mind files and notes are attached and not yet filed: the filing job and bootstrap are his to start. */
+  /** A chat whose characters' mind files and notes are attached and not yet filed: the filing job and bootstrap are his to start. `done` once the filing has left its mark (`filedOn`). */
   | { kind: "filing"; chat: string; characters: number; notes: boolean; done: boolean }
   /** A file found that no row names: one press gives it a row (`migration.rows`), which the next rehearsal uses. */
   | { kind: "row"; path: string; done: boolean }
@@ -191,6 +195,18 @@ export function offRpeNow(input: Pick<MigrationPageInput, "user" | "database" | 
   return offRpeOf(report, { now: input.rehearsals.lumiverseNow(input.user, lumiverse), rpe: new Set(input.rpeConnections ?? []), played: (chat) => mine?.playedIn(chat) ?? false });
 }
 
+/**
+ * Whether a chat's carried files have been filed, as the filing leaves it: every mind file the migration attached to its characters, as the
+ * chat's head holds them, is marked filed (`cast_update` `filed`); and where the chat carried notes, which have no mark of their own, a job
+ * of the chat has ended done since the run read it (the filing job is what files them). Read from RPE's store, which the caller gives.
+ */
+function filedOn(store: Store, user: string, chat: string, notes: boolean, since: number): boolean {
+  const mine = store.user(user);
+  if (mine.chat(chat) === null) return false;
+  const unfiled = [...CastRecord.read(store, user, castAt(mine, chat, null)).items.values()].some((i) => i.part === "mind" && i.fields.kind === IMPORTED_KIND && !i.dropped && !isFiled(i));
+  return !unfiled && (!notes || store.db.query("SELECT 1 FROM job WHERE user = ? AND chat = ? AND state = 'done' AND started >= ? LIMIT 1").get(user, chat, since) !== null);
+}
+
 /** The ids of the folders (`<id>/`) or files (`<id>.md`) of a folder, in name order; none where it is not there. */
 function idsIn(folder: string, files: boolean): string[] {
   try {
@@ -274,10 +290,11 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
     const w = c.waiting;
     if (w.chips > 0 || w.rollback) out.waiting.push({ kind: "chat", chat: c.chatId, chips: w.chips, reviewCards: w.reviewCards, rollback: w.rollback, done: false });
   }
+  const ranAt = Number.isNaN(Date.parse(report.at)) ? 0 : Date.parse(report.at);
   for (const c of report.imports ?? []) {
     if (c.outcome !== "imported" && c.outcome !== "replaced") continue;
     const carried = chatRecord(input.db, input.user, c.chatId)?.carried ?? null;
-    if (carried !== null && (carried.characters.length > 0 || carried.notes !== null)) out.waiting.push({ kind: "filing", chat: c.chatId, characters: carried.characters.length, notes: carried.notes !== null, done: false });
+    if (carried !== null && (carried.characters.length > 0 || carried.notes !== null)) out.waiting.push({ kind: "filing", chat: c.chatId, characters: carried.characters.length, notes: carried.notes !== null, done: input.store !== undefined && filedOn(input.store, input.user, c.chatId, carried.notes !== null, ranAt) });
   }
   out.waiting.push(...rows);
   for (const p of pins?.forAuthor ?? []) out.waiting.push({ kind: "pin", file: p.file, role: p.role, done: false });

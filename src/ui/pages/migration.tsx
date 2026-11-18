@@ -54,7 +54,7 @@ function waitingSplit(w: WaitingOnUser): { before: string; chat: string | null; 
     case "chat":
       return about(w.chat, `: ${andList([w.chips > 0 ? counted(w.chips, "chip") : "", w.reviewCards > 0 ? counted(w.reviewCards, "review card") : "", w.rollback ? "a rollback never applied, archived" : ""].filter((p) => p !== ""))}, on its turns.`);
     case "filing":
-      return about(w.chat, `: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`);
+      return about(w.chat, w.characters === 0 ? ": its notes are attached and not yet filed." : `: the mind files of ${counted(w.characters, "character")}${w.notes ? ", and its notes," : ""} are attached and not yet filed.`);
     case "row":
       return plain(`${w.path} is found and no row names it: give it a row, and the next rehearsal uses it.`);
     case "pin":
