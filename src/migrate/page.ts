@@ -263,8 +263,9 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   }
   // The chats the run found off RPE, as Lumiverse and RPE hold them now.
   out.offRpe.push(...offRpeNow(input, report));
-  // The chats it did not carry, with the line that runs it again over the folder it read (every report that says so names it) and, where a switch was made, the one that goes back.
-  out.notCarried = notCarriedShown(notCarriedOf(report), { again: ["rpe", "migrate", "--lumiverse", sources?.lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" });
+  // The chats it did not carry, named as Lumiverse's database names them (the folder the run read, else the one RPE's config names, as the list of chats reads it), with the line that runs it again over that folder and, where a switch was made, the one that goes back.
+  const lumiverse = sources?.lumiverse ?? (input.database === null ? null : dirname(input.database));
+  out.notCarried = notCarriedShown(notCarriedOf(report), { again: ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user });
   if (out.run !== null) out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));

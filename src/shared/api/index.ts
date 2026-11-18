@@ -2075,10 +2075,10 @@ export interface NotAppliedShown {
   reason: string;
 }
 
-/** The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id with why, what of it RPE holds and what it does not, and what to do. */
+/** The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and why) and what of it RPE holds and what it does not, and what to do. */
 export interface NotCarriedShown {
   head: string;
-  chats: { chat: string; why: string; lines: string[] }[];
+  chats: { chat: string; line: string; lines: string[] }[];
 }
 
 /** A note file of a chat: its path in the chat's view, its size now (0 for one no longer there), and how many times agents wrote it in turns. */

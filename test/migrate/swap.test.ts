@@ -23,7 +23,7 @@ import { sha256 } from "../../src/migrate/files";
 import { PREVIOUS_PERMISSIONS } from "../../src/migrate/going-back";
 import { isRecord } from "../../src/shared/json";
 import { say } from "../../src/shared/lines";
-import { buildFixture, CHAT, IDENT, OTHER_USER, RUNTIME, STRAY, treeSums, USER, USERNAME, type Fixture } from "./fixture";
+import { buildFixture, CHARACTER, CHAT, IDENT, OTHER_USER, RUNTIME, STRAY, treeSums, USER, USERNAME, type Fixture } from "./fixture";
 
 const PASSWORD = "invented swap password";
 const TODAYS_CONNECTION = "conn-today";
@@ -605,12 +605,12 @@ describe("the swap, and going back", () => {
   });
 
   test("a chat the previous build's fold fails on at the switch is named ahead of the report with why, what RPE holds of it and the way back; the switch goes through, says it again last and ends with 1", async () => {
-    // RPE's service stopped: the whole swap is made again, and the importer's fold fails on the agents chat (its messages are `m-a…`).
+    // RPE's service stopped: the whole swap is made again, and the importer's fold fails on the harness chat (its messages are `m-h…`).
     await rm(flags.rpe);
     const turns = (): number => {
       const db = new Database(join(data, "rpe.db"), { readonly: true });
       try {
-        return db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM turn WHERE chat = ?").get(CHAT.agents)?.n ?? 0;
+        return db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM turn WHERE chat = ?").get(CHAT.harness)?.n ?? 0;
       } finally {
         db.close();
       }
@@ -619,7 +619,7 @@ describe("the swap, and going back", () => {
     expect(before).toBeGreaterThan(0);
     const real = CapturingFold.prototype.last;
     const spy = spyOn(CapturingFold.prototype, "last").mockImplementation(function (this: CapturingFold, input) {
-      if (input.chain.some((m) => m.id.startsWith("m-a"))) throw new Error("an invented fault of the previous build's fold");
+      if (input.chain.some((m) => m.id.startsWith("m-h"))) throw new Error("an invented fault of the previous build's fold");
       return real.call(this, input);
     });
     let ran: { code: number; out: string };
@@ -635,13 +635,15 @@ describe("the swap, and going back", () => {
     expect(at).toBeGreaterThanOrEqual(0);
     expect(lines.slice(at, at + 7)).toEqual([
       head,
-      `  ${say("migration_not_carried_chat", { chat: CHAT.agents, why: say("migration_not_carried_fold") })}`,
+      // Named as Lumiverse's database names it: the chat's name, its character's, and its id after them.
+      `  ${say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Fog (harness)", character: CHARACTER.name, chat: CHAT.harness }), why: say("migration_not_carried_fold") })}`,
       `    ${say("migration_not_carried_stands")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again_switched", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}` })}`,
       `    ${say("migration_not_carried_back", { line: `rpe down --data ${data}` })}`,
       "",
     ]);
+    expect(lines[at + 1]).toStartWith(`  Fog (harness), with ${CHARACTER.name} (${CHAT.harness}): `);
     expect(at).toBeLessThan(lines.findIndex((l) => l.startsWith("Migration real run")));
     // The switch went through as the plan orders it: RPE's service runs in the previous runtime's place; what the earlier run carried of the chat stands.
     expect(ran.out).toContain(`Started ${UNIT}, RPE's service`);

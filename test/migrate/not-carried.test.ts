@@ -64,7 +64,9 @@ describe("a chat the run does not carry", () => {
   test("is named first with why and what to do, said again last, and the run ends with 1; the page says it at its top while it is so", async () => {
     const head = say("migration_not_carried_head", { count: 1 });
     expect(head).not.toBe("");
-    const why = say("migration_not_carried_fold");
+    // Named as Lumiverse's database names it, the chat's name and its id after it (the agents chat has no character).
+    const line = say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Gate (agents)", character: null, chat: CHAT.agents }), why: say("migration_not_carried_fold") });
+    expect(line).toStartWith(`Gate (agents) (${CHAT.agents}): `);
 
     // The first run: the fold fails on the agents chat, and no run carried it before, so RPE holds nothing of it.
     const failing = foldFailsOnAgents();
@@ -79,7 +81,7 @@ describe("a chat the run does not carry", () => {
     // switch was made, so there is nothing to go back from. The report follows, and the last line says it again.
     expect(first.text.split("\n").slice(0, 7)).toEqual([
       head,
-      `  ${say("migration_not_carried_chat", { chat: CHAT.agents, why })}`,
+      `  ${line}`,
       `    ${say("migration_not_carried_none")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again", { line: ["rpe", "migrate", ...args()].join(" ") })}`,
@@ -88,7 +90,7 @@ describe("a chat the run does not carry", () => {
     ]);
     expect(out.at(-1)).toBe(say("migration_not_carried_end", { count: 1 }));
     expect(turnsOfAgents()).toBe(0);
-    expect(page().notCarried).toEqual({ head: say("migration_not_carried_page", { count: 1 }), chats: [{ chat: CHAT.agents, why, lines: expect.arrayContaining([say("migration_not_carried_none"), say("migration_not_carried_kept")]) }] });
+    expect(page().notCarried).toEqual({ head: say("migration_not_carried_page", { count: 1 }), chats: [{ chat: CHAT.agents, line, lines: expect.arrayContaining([say("migration_not_carried_none"), say("migration_not_carried_kept")]) }] });
 
     // Mended: the next run carries it, ends with 0, and the page says nothing of it.
     const mended = await rpe();
@@ -107,7 +109,7 @@ describe("a chat the run does not carry", () => {
       again.restore();
     }
     expect(later.code).toBe(1);
-    expect(later.text.split("\n").slice(0, 3)).toEqual([head, `  ${say("migration_not_carried_chat", { chat: CHAT.agents, why })}`, `    ${say("migration_not_carried_stands")}`]);
+    expect(later.text.split("\n").slice(0, 3)).toEqual([head, `  ${line}`, `    ${say("migration_not_carried_stands")}`]);
     expect(turnsOfAgents()).toBe(carried);
     expect(page().notCarried?.chats[0]?.lines[0]).toBe(say("migration_not_carried_stands"));
   });

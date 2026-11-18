@@ -89,7 +89,7 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
     const switched = missing.length > 0 && readRpe(dataPaths(data).database, (db) => lastSwap(db, user)) !== null;
     if (switches.has("json")) io.out(`${JSON.stringify(report, null, 2)}\n`);
     else {
-      const first = notCarriedLines(missing, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null });
+      const first = notCarriedLines(missing, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null }, { lumiverse, user });
       if (first.length > 0) io.out(`${first.join("\n")}\n`);
       io.out(reportText(report));
       if (missing.length > 0) io.out(notCarriedEnd(missing, false));

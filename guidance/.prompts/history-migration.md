@@ -1,9 +1,10 @@
 ---
-description: What the migration says of a chat that holds records of the previous build and that a run did not carry - said first, ahead of the report, in what rpe migrate and rpe up print, and at the top of the Migration page while the last real run's report holds one - and the closing line of a command that ends with exit code 1 for it. Each line says what is so and what to do; none asks anything. One line per name, a name, a colon, then its text. A name in double braces puts in what the run knows (a chat's id, a count, a command line to run). Change the words freely. Delete a line and that is not said at all.
+description: What the migration says of a chat that holds records of the previous build and that a run did not carry - said first, ahead of the report, in what rpe migrate and rpe up print, and at the top of the Migration page while the last real run's report holds one - and the closing line of a command that ends with exit code 1 for it. Each line says what is so and what to do; none asks anything. One line per name, a name, a colon, then its text. A name in double braces puts in what the run knows (a chat's name, its character's and its id, a count, a command line to run); a block opened with a hash and closed with a slash shows only when that value is there, and one opened with a caret only when it is not. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
   migration_not_carried_head, migration_not_carried_page: the head of the notice, in a command's output and at the top of the Migration page - count
-  migration_not_carried_chat: one chat not carried, by its id, with why - chat, why
+  migration_not_carried_chat: one chat not carried, as migration_not_carried_label names it, with why - label, why
+  migration_not_carried_label: how a chat not carried is named, in the command's output and on the page - its name in Lumiverse (none where Lumiverse's database cannot be read or names none), its character's name (none for a chat with no character), and its id - name, character, chat
   migration_not_carried_fold, migration_not_carried_store, migration_not_carried_unopened: why a chat was not carried
   migration_not_carried_stands, migration_not_carried_none, migration_not_carried_kept: what of the chat RPE holds and what it does not, and that the previous build's data holds it all
   migration_not_carried_again, migration_not_carried_again_switched, migration_not_carried_back: what to do - line, the command to run
@@ -11,7 +12,8 @@ keys:
 ---
 migration_not_carried_head: Not carried: {{count}} chat(s) that hold records of the previous build. This run did not bring them into RPE. Each is named below with why, what of it RPE holds, and what to do; the rest of the report follows.
 migration_not_carried_page: The last real run did not carry {{count}} chat(s) that hold records of the previous build. Each is named below with why, what of it RPE holds, and what to do.
-migration_not_carried_chat: {{chat}}: {{why}}
+migration_not_carried_chat: {{label}}: {{why}}
+migration_not_carried_label: {{#name}}{{name}}{{#character}}, with {{character}}{{/character}} ({{chat}}){{/name}}{{^name}}{{chat}}{{/name}}
 migration_not_carried_fold: the previous build's own fold failed on it, so its turns could not be read
 migration_not_carried_store: RPE's store refused what the previous build's fold gave for it
 migration_not_carried_unopened: the previous build's reader could not open it, as its world could not be read

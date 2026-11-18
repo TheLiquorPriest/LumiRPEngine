@@ -533,8 +533,7 @@ export function MigrationView(props: {
           <ul class="lre-stack rpe-plain" data-not-carried="">
             {shown.notCarried.chats.map((c) => (
               <li key={c.chat} class="rpe-line" data-chat={c.chat}>
-                <ChatLabel chat={c.chat} name={names(c.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />
-                {`: ${c.why}`}
+                <span class="rpe-strong">{c.line}</span>
                 {c.lines.map((line) => (
                   <p key={line} class="rpe-meta">
                     {line}

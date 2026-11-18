@@ -97,8 +97,8 @@ const offRpe = shape.named(
 
 const notCarried = shape.named(
   "NotCarriedShown",
-  "The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id with why, what of it RPE holds and what it does not, and what to do.",
-  shape.object({ head: T, chats: shape.list(shape.object({ chat: T, why: T, lines: shape.list(T) })) }),
+  "The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and why) and what of it RPE holds and what it does not, and what to do.",
+  shape.object({ head: T, chats: shape.list(shape.object({ chat: T, line: T, lines: shape.list(T) })) }),
 );
 
 const folders = shape.object({ configDir: T, dataDir: T });

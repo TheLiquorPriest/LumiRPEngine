@@ -7047,12 +7047,12 @@ export interface NotAppliedShown {
 
 ### `NotCarriedShown`
 
-The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id with why, what of it RPE holds and what it does not, and what to do.
+The chats a real run did not carry that hold records of the previous build, in the migration's own words (`.prompts/history-migration.md`): the head, and each chat by its id, with its line (its name and its character's as Lumiverse's database holds them, its id, and why) and what of it RPE holds and what it does not, and what to do.
 
 ```ts
 export interface NotCarriedShown {
   head: string;
-  chats: { chat: string; why: string; lines: string[] }[];
+  chats: { chat: string; line: string; lines: string[] }[];
 }
 ```
 
