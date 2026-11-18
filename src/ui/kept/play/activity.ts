@@ -10,6 +10,7 @@
 
 import type { Activity } from "../../../shared/turn-activity";
 import type { LiveEvent, TurnReply } from "../../../shared/api";
+import { endedWords } from "../../trace-view";
 
 /**
  * What the page knows of the chat's run: the line shown (null when none runs and none failed), whether the run's call is held, and the
@@ -52,14 +53,6 @@ const ENDED_EMPTY = "The turn ended before a word of its reply went out.";
 const AGENT_WORDS: Readonly<Record<string, string>> = { author: "The Author", gm: "The GM", narrator: "The narrator", character: "A character" };
 const agentWords = (definition: string | undefined): string => (definition === undefined ? "An agent" : Object.hasOwn(AGENT_WORDS, definition) ? AGENT_WORDS[definition]! : `The ${definition}`);
 
-/** What a failed run says, in a line: the run's own error code and detail. */
-function failure(outcome: { status: string; error?: { code: string; detail?: string; agent?: string } }): string {
-  const error = outcome.error;
-  if (error === undefined) return `The turn ended: ${outcome.status}.`;
-  const who = error.agent === undefined ? "" : ` (${error.agent})`;
-  return `The turn failed${who}: ${error.detail ?? error.code}.`;
-}
-
 /** The run line after `events` (a chat's, in order) came. */
 export function foldRun(chat: string, before: RunLine, events: readonly LiveEvent[]): RunLine {
   let line = before;
@@ -101,11 +94,12 @@ export function foldRun(chat: string, before: RunLine, events: readonly LiveEven
       line = { ...line, held: false };
     } else if (said.kind === "run_ended") {
       // A run that failed stays as the line until the next run begins; any other end clears it, but for the empty reply its turn left.
-      const status = (said.outcome as { status?: string } | undefined)?.status;
-      const failed = status === "failed" || status === "limit";
+      const outcome = said.outcome;
+      const failed = outcome.status === "failed" || outcome.status === "limit";
       const empty = line.empty !== undefined && line.empty.turn === scope.turn ? line.empty : undefined;
-      if (empty !== undefined) line = { held: false, activity: { chatId: chat, turn: empty.turn, state: "failed", label: `${failed ? failure(said.outcome) : ENDED_EMPTY} ${empty.words}`, since: at }, empty };
-      else line = failed ? { held: false, activity: { chatId: chat, turn: scope.turn ?? null, state: "failed", label: failure(said.outcome), since: at } } : NO_RUN;
+      // It is said in the Turn page's words (`endedWords`): the limit it reached and how far it went, the provider's tries and what broke the last.
+      if (empty !== undefined) line = { held: false, activity: { chatId: chat, turn: empty.turn, state: "failed", label: `${failed ? endedWords(undefined, outcome) : ENDED_EMPTY} ${empty.words}`, since: at }, empty };
+      else line = failed ? { held: false, activity: { chatId: chat, turn: scope.turn ?? null, state: "failed", label: endedWords(undefined, outcome), since: at } } : NO_RUN;
     }
   }
   return line;

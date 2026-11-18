@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LiveEvent, TurnReply } from "../../../../src/shared/api";
 import { chatState } from "../../../../src/ui/kept/play/source";
+import { whyEnded } from "../../../../src/ui/trace-view";
 import { recordedRpe } from "./bed";
 import { CHAT, recordedView } from "./recorded";
 
@@ -45,12 +46,12 @@ describe("the HUD's run line", () => {
   });
 
   test("a turn that failed while the page was closed says so with its reason, and what to do with the empty reply it left", async () => {
-    const failed = turnRead("failed", [record(1, 1000, { kind: "run_started", run: "turn", lead: "author" }), record(2, 2000, { kind: "run_ended", outcome: { status: "failed", error: { code: "provider", detail: "the model could not be reached" } } })], [], "msg-empty");
+    const failed = turnRead("failed", [record(1, 1000, { kind: "run_started", run: "turn", lead: "author" }), record(2, 2000, { kind: "run_ended", outcome: { status: "failed", error: { code: "provider", detail: "The model could not be reached." } } })], [], "msg-empty");
     const { state } = opened(failed);
     await settle();
     const activity = state.get().activity;
     expect(activity).toMatchObject({ state: "failed", turn: "turn-1" });
-    expect(activity?.label).toStartWith("The turn failed: the model could not be reached.");
+    expect(activity?.label).toStartWith("The model's provider failed. The model could not be reached.");
     expect(activity?.label).toContain("Its empty reply stays in your chat");
     state.stop();
   });
@@ -88,6 +89,42 @@ describe("the HUD's run line", () => {
     said([{ kind: "delta", data: { run: "run-1", agent: "lead-7", call: 2, text: "<reply>The", at: 5500 } }]);
     await settle();
     expect(state.get().activity?.label).toBe("The Author is writing");
+    state.stop();
+  });
+
+  test("every way a turn ends is said in the Turn page's words: the limit it reached and how far, the tries a provider was given, what was left", async () => {
+    const { rpe, state } = opened(null);
+    await settle();
+    let seq = 0;
+    const ended = async (outcome: Record<string, unknown>, after: { kind: string; data: unknown; at?: number }[] = []): Promise<string | null> => {
+      rpe.publish([
+        { kind: "trace", data: record(++seq, 1000 * seq, { kind: "run_started", run: "turn", lead: "author" }) },
+        { kind: "trace", data: record(++seq, 1000 * seq, { kind: "run_ended", outcome: { released: false, usage: {}, ...outcome } }) },
+        ...after,
+      ] as unknown as Pick<LiveEvent, "kind" | "data">[]);
+      await settle();
+      return state.get().activity?.label ?? null;
+    };
+    const calls = { limit: "calls", per: "turn", max: 6, value: 6 };
+    expect(await ended({ status: "released", released: true })).toBeNull();
+    expect(await ended({ status: "stopped" })).toBeNull();
+    expect(await ended({ status: "failed", error: { code: "failed", detail: "The session file could not be written." } })).toBe("The harness failed. The session file could not be written.");
+    const limit = await ended({ status: "limit", limit: calls, error: { code: "limit", limit: calls } });
+    expect(limit).toBe("Reached the limit on model calls in a turn: 6 of 6.");
+    // The Turn page says the same of the same turn.
+    expect(whyEnded({ code: "limit", limit: calls } as never, "limit")).toBe(limit);
+    // A limit reached after the reply went out is the outcome's alone, its error saying nothing.
+    expect(await ended({ status: "limit", released: true, limit: { limit: "tokensOut", per: "turn", max: 300, value: 300 } })).toBe(
+      "Reply released, then its run stopped at a limit. Reached the limit on tokens written in a turn: 300 of 300.",
+    );
+    expect(await ended({ status: "limit", limit: { limit: "tokensOut", per: "turn", max: 300, value: 279, floor: 256 } })).toBe(
+      'Stopped at the limit on tokens written in a turn: 21 of 300 left, less than the 256 tokens your setting "Least room for an answer" keeps for an answer, so the next call was not made.',
+    );
+    expect(await ended({ status: "failed", error: { code: "provider", detail: "529: Overloaded", broke: { failure: "overloaded", tries: 3 } } })).toBe(
+      "The model's provider failed after 3 tries; the last time, the provider was busy or asked to slow down. 529: Overloaded",
+    );
+    const empty = await ended({ status: "limit", limit: calls, error: { code: "limit", limit: calls } }, [{ kind: "empty_reply", data: { turn: "turn-1", off: true }, at: 99_000 }]);
+    expect(empty).toStartWith("Reached the limit on model calls in a turn: 6 of 6. Its empty reply stays in your chat");
     state.stop();
   });
 });

@@ -16,7 +16,7 @@ import { Badge, Banner, Button, Empty, Gated, PageHeader, Section } from "../../
 import { type RunNode, runsOf } from "../../live-model";
 import { NOTHING_WATCHED, onChatChange, watchTurn, type WatchLimits, type Watched } from "../../live-watch";
 import { type NoticeLines, useNoticeLines } from "../../notice-words";
-import { answeringRun, replyErrorWords, statusWords, TURN_KIND_WORDS } from "../../trace-view";
+import { answeringRun, statusWords, TURN_KIND_WORDS, whyEnded } from "../../trace-view";
 import { latestOf, liveTurn } from "../../turn-model";
 import { useUiSetting } from "../../ui-settings";
 import { counted, duration, errorWords, tokenWords, when } from "../../words";
@@ -459,7 +459,9 @@ export function TurnView(props: TurnViewProps) {
   const replied = (head?.timings.released ?? turn.timings.released) !== null;
   const status = head === undefined ? statusWords(turn.kind, turn.status, replied) : statusWords(head.kind, head.status, replied);
   const error = head === undefined ? turn.error : head.error;
-  const failure = error === null || (kind === "settle" && (head?.status ?? turn.status) === "no-reply") ? null : replyErrorWords(error, head?.status ?? turn.status);
+  // A limit reached after the reply went out is in the run's record of what stopped it alone: it is named as one reached before.
+  const reached = head?.stoppedBy != null && "limit" in head.stoppedBy ? head.stoppedBy.limit : undefined;
+  const failure = kind === "settle" && (head?.status ?? turn.status) === "no-reply" ? null : whyEnded(error, head?.status ?? turn.status, reached);
   const later = answering === undefined ? [] : turn.runs.filter((r) => r.nth > answering.nth);
   const parts: TurnParts = { turn, runs: props.runs, now: props.now, folder: props.folder, notices: props.notices, lead: props.lead, loreRows: props.loreRows, stage: props.stage, review: props.review, onOpenQuest: props.onOpenQuest, onOpenFile: props.onOpenFile, onOpenRequest: props.onOpenRequest, onCloseFile: props.onCloseFile };
   return (

@@ -4,7 +4,7 @@
 // Every kind of record has its own words here; a kind this build does not know is drawn as it came.
 
 import type { ComponentChildren } from "preact";
-import type { ReleaseForm, ReplyError, RunStatus } from "rp-harness/contract";
+import type { LimitHit, ReleaseForm, ReplyError, RunOutcome, RunStatus } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
 import { markdown, Written } from "./markdown";
 import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
@@ -107,13 +107,44 @@ export function callFailedWords(event: EventOf<"call_failed">): string {
   return `${head} Not tried again: trying again after this kind of failure is switched off in Settings.`;
 }
 
-/** Why a reply failed, in words; null where the status beside it already says all of it. A provider that failed after its call was made more than once says how many times, and what broke the last. */
+/** A limit's head, in words: reached, or stopped at where it was not passed but too little was left under it for an answer (`floor`). */
+function limitHead(hit: LimitHit): string {
+  return `${hit.floor === undefined ? "Reached" : "Stopped at"} the limit on ${limitName(hit)}`;
+}
+
+/**
+ * Why a reply failed, in words; null where the status beside it already says all of it. A limit is named, with how far it went; a provider
+ * that failed after its call was made more than once says how many times, and what broke the last.
+ */
 export function replyErrorWords(error: ReplyError, status: RunStatus | "running"): string | null {
-  if (error.code === status && error.detail === undefined && error.broke === undefined) return null;
-  const limit = error.limit === undefined ? "" : ` (${limitName(error.limit)}: ${limitCount(error.limit)})`;
+  if (error.code === status && error.detail === undefined && error.broke === undefined && error.limit === undefined) return null;
   const lead = error.agent === undefined ? "" : ` (the lead: ${error.agent})`;
-  const words = error.broke === undefined ? REPLY_ERROR_WORDS[error.code] : `${REPLY_ERROR_WORDS[error.code].slice(0, -1)} after ${counted(error.broke.tries, "try", "tries")}; the last time, ${FAILURE_WORDS[error.broke.failure]}.`;
-  return `${words}${limit}${lead}${error.detail === undefined ? "" : ` ${error.detail}`}`;
+  const detail = error.detail === undefined ? "" : ` ${error.detail}`;
+  if (error.code === "limit" && error.limit !== undefined) return `${limitHead(error.limit)}: ${limitCount(error.limit)}${lead}.${detail}`;
+  const limit = error.limit === undefined ? "" : `; the limit on ${limitName(error.limit)}: ${limitCount(error.limit)}`;
+  const broke = error.broke === undefined ? "" : ` after ${counted(error.broke.tries, "try", "tries")}; the last time, ${FAILURE_WORDS[error.broke.failure]}`;
+  return `${REPLY_ERROR_WORDS[error.code].replace(/\.$/, "")}${broke}${limit}${lead}.${detail}`;
+}
+
+/**
+ * Why a run ended as it did, in words (`replyErrorWords`): its error, with the limit it reached where only its outcome or its record names
+ * that (a limit reached after its reply went out, whose error says nothing); null where nothing says more than its status.
+ */
+export function whyEnded(error: ReplyError | null | undefined, status: RunStatus | "running", limit?: LimitHit): string | null {
+  const said = error ?? (limit !== undefined ? { code: "limit" as const } : undefined);
+  if (said === undefined) return null;
+  return replyErrorWords(said.limit === undefined && limit !== undefined ? { ...said, limit } : said, status);
+}
+
+/**
+ * How a run ended, in a line, from its outcome (the live trace's `run_ended`): why (`whyEnded`, the Turn page's words), after how it stands
+ * where its reply had gone out first; how it stands, where nothing says why. The HUD's line for a turn that failed or reached a limit.
+ */
+export function endedWords(kind: TurnRunKind | undefined, outcome: Pick<RunOutcome, "status" | "released" | "limit" | "error">): string {
+  const status = statusWords(kind, outcome.status, outcome.released).words;
+  const why = whyEnded(outcome.error, "running", outcome.limit);
+  if (why === null) return `${status}.`;
+  return outcome.released ? `${status}. ${why}` : why;
 }
 
 /** What a run is, in a few words: "New reply, led by author". */
@@ -481,7 +512,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
         </div>
       );
     case "limit":
-      return <NoteHead icon="alert" title={`Reached a limit on ${limitName(event.hit)}: ${limitCount(event.hit)}`} />;
+      return <NoteHead icon="alert" title={`${limitHead(event.hit)}: ${limitCount(event.hit)}`} />;
     case "progress_missing": {
       // Its words are the notices file's, whatever they are; a line the file no longer holds leaves the event drawn as it came.
       const words = noticeLine(notices, "progress_missing", { time: event.time });
