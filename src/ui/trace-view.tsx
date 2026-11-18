@@ -12,7 +12,7 @@ import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
 import { JOB_STATE_WORDS } from "./pages/jobs/words";
-import { counted, duration, json, num, tokenWords } from "./words";
+import { counted, duration, json, limitCount, limitName, num, tokenWords } from "./words";
 
 export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle an edit" };
 
@@ -62,7 +62,7 @@ const REPLY_ERROR_WORDS: Readonly<Record<ReplyError["code"], string>> = {
 /** Why a reply failed, in words; null where the status beside it already says all of it. */
 export function replyErrorWords(error: ReplyError, status: RunStatus | "running"): string | null {
   if (error.code === status && error.detail === undefined) return null;
-  const limit = error.limit === undefined ? "" : ` (${error.limit.limit} per ${error.limit.per}: ${num(error.limit.value)} of ${num(error.limit.max)})`;
+  const limit = error.limit === undefined ? "" : ` (${limitName(error.limit)}: ${limitCount(error.limit)})`;
   const lead = error.agent === undefined ? "" : ` (the lead: ${error.agent})`;
   return `${REPLY_ERROR_WORDS[error.code]}${limit}${lead}${error.detail === undefined ? "" : ` ${error.detail}`}`;
 }
@@ -418,7 +418,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
         </div>
       );
     case "limit":
-      return <NoteHead icon="alert" title={`Reached a limit: ${event.hit.limit} per ${event.hit.per}, ${num(event.hit.value)} of ${num(event.hit.max)}`} />;
+      return <NoteHead icon="alert" title={`Reached a limit on ${limitName(event.hit)}: ${limitCount(event.hit)}`} />;
     case "progress_missing": {
       // Its words are the notices file's, whatever they are; a line the file no longer holds leaves the event drawn as it came.
       const words = noticeLine(notices, "progress_missing", { time: event.time });
@@ -438,13 +438,13 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
     case "job":
       return (
         <div class="lre-stack">
-          <NoteHead icon="briefcase" title={`Job ${event.job.id} (${event.job.agent}): ${event.job.state}`} />
+          <NoteHead icon="briefcase" title={`Job ${event.job.id} (${event.job.agent}): ${JOB_STATE_WORDS[event.job.state].words}`} />
           <p class="rpe-line">{event.job.brief}</p>
           {event.job.report === undefined ? null : <Pre text={event.job.report} mono={false} />}
         </div>
       );
     case "agent_ended":
-      return <NoteHead icon="check" title={`Ended: ${AGENT_WORDS[event.status].words}${event.limit === undefined ? "" : ` (${event.limit.limit} per ${event.limit.per})`}, ${counted(event.usage.calls, "call")}, ${tokenWords(event.usage)}`} />;
+      return <NoteHead icon="check" title={`Ended: ${AGENT_WORDS[event.status].words}${event.limit === undefined ? "" : ` (at its limit on ${limitName(event.limit)})`}, ${counted(event.usage.calls, "call")}, ${tokenWords(event.usage)}`} />;
     case "run_ended":
       return <NoteHead icon="flag" title={`The run ended: ${STATUS_WORDS[event.outcome.status].words.toLowerCase()}, ${counted(event.outcome.usage.calls, "call")}, ${tokenWords(event.outcome.usage)}`} />;
     default:
