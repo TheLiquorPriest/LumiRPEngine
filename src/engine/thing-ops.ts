@@ -760,10 +760,14 @@ export function applyItemOp(w: Working, op: Exclude<ItemOp, { do: "remove" }>, o
       return grant(w, op, opts);
     case "home": {
       const bad = op.home !== null ? restProblem(ctx, op.home) : null;
-      if (bad) return bad;
+      // With advice asked, a holder that holds nothing is where the thing rests all the same, and the rule it bends is advised (never refused), as a thing put with one is (`landing`).
+      const bent = bad !== null && bad.code === "cant_hold" && opts.advise === true && op.home !== null && op.home !== "owner" && "in" in op.home ? op.home.in : null;
+      if (bad && bent === null) return bad;
       const value = op.home === null ? null : restValue(op.home);
       if ((own(ctx.state.entities, op.item)?.fields.home ?? null) === value) return reject("no_change", say("why_it_rests_there_already"));
-      return applyAll(w, [{ type: "set", entity: op.item, field: "home", value }]) ?? {};
+      const done = applyAll(w, [{ type: "set", entity: op.item, field: "home", value }]);
+      if (done) return done;
+      return bent === null ? {} : { advice: [{ code: "rule_bent", values: { what: ref(ctx, op.item), where: ref(ctx, bent), code: "cant_hold" } }] };
     }
     case "use": {
       const n = op.qty ?? 1;
