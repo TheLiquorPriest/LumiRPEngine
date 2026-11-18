@@ -9,8 +9,9 @@
 // and a slot whose value is left to chance is listed by its schedule, its chance never drawn. What the
 // clock's passing does by itself is not in it: pay, bills and standing payments, and a schedule that sets
 // a thing's own value, happen as the clock passes them (`standingRun`) and are told as what happened.
-// The list stops at the bound the caller gives, soonest first, and the rest is counted, not made: a span
-// of years costs what its first page does.
+// The list stops at the bound the caller gives, and the rest is counted, not made: a span of years costs
+// what its first page does. Soonest first, except that what is not a routine's slot keeps at least half
+// the list, so a day of routine never hides a need crossing its line.
 
 import type { JsonValue } from "../shared/json";
 import type { ScheduleDef } from "../shared/world";
@@ -192,16 +193,24 @@ export function timeDue(store: Store): DueSource {
         return slots[slot] ?? null;
       };
       const { starts, more } = slotStarts(chatWorld(ctx), chatSchedulesIn(ctx), span.from, span.to, most, (schedule, slot) => entryOf(schedule, slot) !== null);
-      const items: DueEntry[] = [];
+      const slots: DueEntry[] = [];
       for (const i of starts) {
         const entry = entryOf(i.schedule, i.slot);
-        if (entry !== null) items.push({ at: i.at, ...entry });
+        if (entry !== null) slots.push({ at: i.at, ...entry });
       }
-      // The rest of what falls due, each kind kept to the part asked about, merged in time order with the slots.
-      for (const o of otherDue(store, ctx, state, view, span.from, span.to)) if (root === null || o.refs.some((r) => r !== null && inside(r))) items.push(o.entry);
-      items.sort((a, b) => a.at - b.at);
-      const listed = items.slice(0, Math.max(0, most));
-      return { items: listed, more: more === null ? null : more + (items.length - listed.length) };
+      // The rest of what falls due, each kind kept to the part asked about.
+      const others = otherDue(store, ctx, state, view, span.from, span.to)
+        .filter((o) => root === null || o.refs.some((r) => r !== null && inside(r)))
+        .map((o) => o.entry)
+        .sort((a, b) => a.at - b.at);
+      // A span that holds more than the list has room for is cut so that the routine's many starts never crowd out the rest: the rest
+      // (a need crossing its line, an arrival, an ending, a future) keeps at least half the list, and the soonest of each is kept.
+      const room = Math.max(0, most);
+      const otherRoom = Math.min(others.length, Math.max(room - slots.length, Math.floor(room / 2)));
+      const slotRoom = Math.min(slots.length, room - otherRoom);
+      const listed = [...slots.slice(0, slotRoom), ...others.slice(0, otherRoom)].sort((a, b) => a.at - b.at);
+      const left = slots.length - slotRoom + (others.length - otherRoom);
+      return { items: listed, more: more === null ? null : more + left };
     },
     under(state, span) {
       const doc = store.env.worlds(state.world.revision);

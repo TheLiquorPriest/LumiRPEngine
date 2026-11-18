@@ -144,6 +144,7 @@ due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of wha
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
 ran_said: Operation {{n}} ({{op}}): what the world's own records arrange over this span (pay, bills, standing payments, interest and the rest of what an account or a job sets going) happened in its order, and {{total}} {{#one}}change is{{/one}}{{^one}}changes are{{/one}} recorded. ran says what they were, with times where one happened more than once. None of it needs a decision from you.
 ran_more: Operation {{n}} ({{op}}): only the first {{listed}} lines of what happened are in ran; {{more}} more lines are recorded all the same.
+due_open: Operation {{n}} ({{op}}): nothing in due has happened yet; where people went, what they did, a meal or a night's sleep, the weather and a quest stage met are yours to record, as the story says it went.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.

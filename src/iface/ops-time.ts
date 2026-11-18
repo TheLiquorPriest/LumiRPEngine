@@ -201,7 +201,10 @@ const passTime: OpDef = {
     o.after((state): JsonObject => {
       const span: JsonObject = { from: clockText(o, Math.min(now, reached), state), to: clockText(o, Math.max(now, reached), state) };
       const listing = due.due(state, { from: Math.min(now, reached), to: Math.max(now, reached) }, at?.ref ?? null, o.call.settings.dueItems);
-      return { span, ...(ran.lines.length > 0 ? { ran: ran.lines } : {}), due: listDue(o, listing, { n: o.n, op: o.op }, state) };
+      const listed = listDue(o, listing, { n: o.n, op: o.op }, state);
+      // What is listed has not happened: the Author is told which of it is its own to record.
+      if (listing.items.length > 0) o.reply.line("due_open", { n: o.n, op: o.op });
+      return { span, ...(ran.lines.length > 0 ? { ran: ran.lines } : {}), due: listed };
     });
     return undefined;
   },

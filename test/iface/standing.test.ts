@@ -8,7 +8,7 @@ import { occurrences } from "../../src/packs/economy/core/flows";
 import { balance } from "../../src/packs/economy/core/model";
 import type { WorldDoc } from "../../src/shared/world";
 import { familyRig } from "./families/kit";
-import { dataOf, texts, wordsFromFiles } from "./rig";
+import { dataOf, rig, texts, wordsFromFiles } from "./rig";
 
 const SRC = { from: "prose", message: "m-1" };
 const DAY = 24 * 60;
@@ -89,6 +89,15 @@ describe("what no record arranges", () => {
     // Bram's mood is set by his schedule at nine; Tam stays where the story has him.
     expect(t.s.stateAt(t.turn.id).state.world.entities.bram?.fields.mood).toBe("cheerful");
     expect(place()).toBe(where);
+    // The rig's list holds an arrival: the answer says that nothing it lists has happened.
+    expect(texts(r).some((x) => x.includes("nothing in due has happened yet"))).toBe(true);
     wordsFromFiles(r);
+  });
+
+  test("an answer whose span lists nothing says nothing of what is left to the Author", async () => {
+    const t = await rig({ due: { due: () => ({ items: [], more: 0 }) } });
+    const r = await t.call("world_apply", { operations: [{ op: "pass_time", for: "two hours", source: SRC }] });
+    expect(r.error).toBeUndefined();
+    expect(texts(r).some((x) => x.includes("nothing in due has happened"))).toBe(false);
   });
 });
