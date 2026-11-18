@@ -11,7 +11,7 @@ import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shar
 import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
-import { JOB_STATE_WORDS } from "./pages/jobs/words";
+import { JOB_STATE_WORDS, stoppedByWords } from "./pages/jobs/words";
 import { counted, duration, json, limitCount, limitName, num, tokenWords } from "./words";
 
 export const TURN_KIND_WORDS: Readonly<Record<TurnRunKind, string>> = { new: "New reply", swipe: "Swipe", regenerate: "Regenerate", continue: "Continue", impersonate: "Impersonation", settle: "Settle run" };
@@ -367,7 +367,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
           <NoteHead icon="user-plus" title="Began work">
             <span class="rpe-meta">
               {event.connection} · {event.model}
-              {event.effort === undefined ? "" : ` · effort ${event.effort}`} · session {event.session}
+              {event.effort === undefined ? "" : event.set !== undefined && event.set !== event.effort ? ` · set to think at ${event.set}; this model has no level so high and is sent ${event.effort}` : ` · effort ${event.effort}`} · session {event.session}
             </span>
           </NoteHead>
           {event.given.length === 0 ? null : <p class="rpe-meta">Given: {event.given.join(", ")}</p>}
@@ -451,16 +451,29 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
       return <NoteHead icon="alert" title={`Tool ${event.tool} of ${event.definition}: ${UNHELD_WORDS[event.reason]}`} />;
     case "rule_failed":
       return <NoteHead icon="alert" title={event.why === "time" ? `Rule ${event.rule} (${event.path}) ran out of time on a text of ${counted(event.length, "character")}: counted as no match` : `Rule ${event.rule} (${event.path}) could not run its command: ${event.detail}`} />;
-    case "job":
+    case "rule_waiting":
+      return (
+        <div class="lre-stack">
+          <NoteHead
+            icon="alert"
+            title={`Your rule ${event.rule} (${event.path}) matched, but its command ${event.state === "waiting" ? "waits for you to allow it" : "is switched off"}, so it did not run and the rule did not fire. To allow it, type on the server: rpe allow ${event.thing.name}`}
+          />
+          <p class="rpe-meta">Its command: {event.thing.target}</p>
+        </div>
+      );
+    case "job": {
+      const stopped = stoppedByWords(event.job);
       return (
         <div class="lre-stack">
           <NoteHead icon="briefcase" title={`Job ${event.job.id} (${event.job.agent}): ${JOB_STATE_WORDS[event.job.state].words}`} />
           <p class="rpe-line">{event.job.brief}</p>
+          {stopped === null ? null : <p class="rpe-meta">{stopped}</p>}
           {event.job.report === undefined ? null : <Written text={event.job.report} />}
         </div>
       );
+    }
     case "agent_ended":
-      return <NoteHead icon="check" title={`Ended: ${AGENT_WORDS[event.status].words}${event.limit === undefined ? "" : ` (at its limit on ${limitName(event.limit)})`}, ${counted(event.usage.calls, "call")}, ${tokenWords(event.usage)}`} />;
+      return <NoteHead icon="check" title={`Ended: ${AGENT_WORDS[event.status].words}${event.limit === undefined ? "" : ` (at its limit on ${limitName(event.limit)}: ${limitCount(event.limit)})`}, ${counted(event.usage.calls, "call")}, ${tokenWords(event.usage)}`} />;
     case "run_ended":
       return <NoteHead icon="flag" title={`The run ended: ${STATUS_WORDS[event.outcome.status].words.toLowerCase()}, ${counted(event.outcome.usage.calls, "call")}, ${tokenWords(event.outcome.usage)}`} />;
     default:
