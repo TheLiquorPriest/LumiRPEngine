@@ -26,9 +26,6 @@ import type { WorldState } from "./state";
 
 /** An action as a pack declares it: the words of it (its label, its description, its params' labels) are the lines' (`engine/action-lines.ts`). */
 export type PackAction = Omit<ActionDef, "label" | "description"> & {
-  /** Only for a pack whose words are not in the lines yet: what the lines do not say. */
-  label?: string;
-  description?: string;
   /** What its lines are filled with, where they name something the code knows (a level, a list of ids). */
   words?: { readonly [name: string]: JsonValue | undefined };
 };

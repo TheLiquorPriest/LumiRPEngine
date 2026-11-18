@@ -9,7 +9,7 @@ import type { PackAction } from "./registry";
 
 /** The action as the registry holds it: `def` with its label, its description and its params' labels read through the lines. */
 export function spoken(def: PackAction): ActionDef {
-  const { words, label, description, ...given } = def;
+  const { words, ...given } = def;
   const id = def.id;
   const params: Record<string, ParamDef> = {};
   for (const [name, written] of Object.entries(def.params)) {
@@ -19,8 +19,8 @@ export function spoken(def: PackAction): ActionDef {
   }
   const action = { ...given, params } as ActionDef;
   Object.defineProperties(action, {
-    label: { enumerable: true, configurable: true, get: () => say(`action_${id}_label`, words) || label || id },
-    description: { enumerable: true, configurable: true, get: () => say(`action_${id}_description`, words) || description },
+    label: { enumerable: true, configurable: true, get: () => say(`action_${id}_label`, words) || id },
+    description: { enumerable: true, configurable: true, get: () => say(`action_${id}_description`, words) || undefined },
   });
   return action;
 }
