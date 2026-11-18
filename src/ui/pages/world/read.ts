@@ -2,7 +2,7 @@
 // what a turn's time brought due, what no longer applies on another swipe, what the chat plays by on its own,
 // and the owner's own edit.
 
-import type { ApiRoutes, DueReply, EditOpAsk, NotAppliedReply, OwnAnswer, OwnAsk, OwnValues, SystemsReply, TapReply, TurnId, ValueChangeShown, WorldReply } from "../../../shared/api";
+import type { ApiRoutes, ChatUpgradeUndone, DueReply, EditOpAsk, NotAppliedReply, OwnAnswer, OwnAsk, OwnValues, RulesAnswer, RulesAsk, SystemsReply, TapReply, TurnId, ValueChangeShown, WorldReply } from "../../../shared/api";
 import { replyOf, type RpeClient } from "../../client";
 import type { PageOf } from "../../reading";
 import { errorWords } from "../../words";
@@ -80,4 +80,14 @@ export function readOwn(client: Pick<RpeClient, "call">, chat: string): Promise<
 /** One change to what this chat plays by on its own: recorded as the owner's own edit, from now on, with the Undo its answer names. */
 export function sendOwn(client: Pick<RpeClient, "call">, chat: string, ask: OwnAsk): Promise<OwnAnswer> {
   return client.call("POST /api/v1/chats/:chat/own-values", { chat }, { body: ask }).then(replyOf);
+}
+
+/** Puts a rule set on this chat's world (or, with `preview`, says what it would add): the world's next revision, which this chat moves to from its next turn. */
+export function sendRules(client: Pick<RpeClient, "call">, chat: string, ask: RulesAsk): Promise<RulesAnswer> {
+  return client.call("POST /api/v1/chats/:chat/rule-set", { chat }, { body: ask }).then(replyOf);
+}
+
+/** Takes an Upgrade of this chat back, whole, by the id its answer gave: the chat goes to the revision it came from, and what came with it. */
+export function sendUpgradeUndo(client: Pick<RpeClient, "call">, chat: string, edit: string): Promise<ChatUpgradeUndone> {
+  return client.call("POST /api/v1/chats/:chat/upgrade/undo", { chat }, { body: { edit } }).then(replyOf);
 }

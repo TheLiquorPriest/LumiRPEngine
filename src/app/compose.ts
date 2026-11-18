@@ -371,6 +371,7 @@ export function compose(options: ComposeOptions = {}): Composition {
     build,
     playArea(() => ({
       store: made().store,
+      worlds: worlds.service(),
       turning,
       guidance: RPE_GUIDANCE,
       texts: files,

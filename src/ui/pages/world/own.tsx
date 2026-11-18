@@ -14,6 +14,7 @@ import { useApp } from "../../app";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
 import { readOwn, sendOwn, sendUndo } from "./read";
+import { RulesPress } from "./rules";
 
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
@@ -203,6 +204,7 @@ export function OwnValuesSection(props: { chat: string }) {
             <Levels values={values.realism} disabled={busy} onAsk={send} />
             <Claims values={values.claims} disabled={busy} onAsk={send} />
             <Checks values={values.checks} disabled={busy} onAsk={send} />
+            <RulesPress chat={chat} disabled={busy} onDone={read.again} />
           </>
         )}
       </div>

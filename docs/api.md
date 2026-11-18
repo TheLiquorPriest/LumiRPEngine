@@ -669,6 +669,20 @@ Whose routines or schedules this chat changed, by him or by the story.
 | Reply | `JsonValue` |
 | The chat | not taken on: a chat RPE does not hold is answered as an untouched one reads, and nothing of it is made |
 
+### `POST /api/v1/chats/:chat/rule-set`
+
+Puts a ready-made tabletop rule set on the chat's world as the world's next revision, which this chat alone moves to from its next turn, switches the rules on for this chat and says who has no sheet yet; with preview, only says what it would add and keep. What the world has of its own is kept. A refusal is answered in words with nothing changed. The Undo is the Upgrade's.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
+| Params | `chat` |
+| Query | none |
+| Body | [`RulesAsk`](#rulesask) |
+| Reply | [`RulesAnswer`](#rulesanswer) |
+| The chat | taken on first, as the route keeps or changes something of it: RPE's record of the chat and its folders are made, by what Lumiverse says of it; a chat Lumiverse does not have is refused with 404 |
+
 ### `GET /api/v1/chats/:chat/state`
 
 A chat's state view, at its head or as it stood at one of its turns, in the shape the previous build's pages take.
@@ -8191,6 +8205,29 @@ export interface RuleFiring {
   action: "cut" | "remind" | "hold" | "follow-up" | "briefing" | "call";
   dropped?: string;
   then?: { did: "called"; tools: string[] } | { did: "wrote" } | { did: "released" } | { did: "ended" };
+}
+```
+
+### `RulesAnswer`
+
+What putting a rule set on the chat's world came to: whether the world has a new revision this chat moves to or the chat's rules were switched on, the id the Undo of the Upgrade takes (null where nothing was recorded), and the answer in words, one sentence each.
+
+```ts
+export interface RulesAnswer {
+  made: boolean;
+  undo: string | null;
+  words: string[];
+}
+```
+
+### `RulesAsk`
+
+A rule set to put on a chat's world, by its id, and whether to only say what it would add and keep, with nothing changed.
+
+```ts
+export interface RulesAsk {
+  rules: string;
+  preview?: boolean;
 }
 ```
 

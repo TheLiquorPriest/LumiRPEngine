@@ -2766,6 +2766,19 @@ export interface RuleFiring {
   then?: { did: "called"; tools: string[] } | { did: "wrote" } | { did: "released" } | { did: "ended" };
 }
 
+/** What putting a rule set on the chat's world came to: whether the world has a new revision this chat moves to or the chat's rules were switched on, the id the Undo of the Upgrade takes (null where nothing was recorded), and the answer in words, one sentence each. */
+export interface RulesAnswer {
+  made: boolean;
+  undo: string | null;
+  words: string[];
+}
+
+/** A rule set to put on a chat's world, by its id, and whether to only say what it would add and keep, with nothing changed. */
+export interface RulesAsk {
+  rules: string;
+  preview?: boolean;
+}
+
 /** The rules of a chat's stack, or of the levels every chat shares. */
 export interface RulesReply {
   chat: string | null;
@@ -5184,6 +5197,16 @@ export interface ApiRoutes {
     query: Record<string, never>;
     body: undefined;
     reply: JsonValue;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** Puts a ready-made tabletop rule set on the chat's world as the world's next revision, which this chat alone moves to from its next turn, switches the rules on for this chat and says who has no sheet yet; with preview, only says what it would add and keep. What the world has of its own is kept. A refusal is answered in words with nothing changed. The Undo is the Upgrade's. */
+  "POST /api/v1/chats/:chat/rule-set": {
+    params: { chat: string };
+    query: Record<string, never>;
+    body: RulesAsk;
+    reply: RulesAnswer;
     paged: false;
     long: false;
     joined: false;
