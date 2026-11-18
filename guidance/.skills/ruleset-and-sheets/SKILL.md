@@ -53,7 +53,7 @@ Where the story has settled an outcome, or the GM rules it without a roll, give 
 - **An attack's harm comes from the attack.** For harm no weapon gives, `harm`: `amount` (dice such as 2d6, or a number the story gives), `type`, and who is harmed (`who`, `targets`, or a `centre` and a `radius` on the grid for everyone in an area). `save` with `difficulty` makes each roll a save, and `half` says a save made halves the harm; `nonlethal` for harm that does not kill.
 - The action reads each one's reduction and resistance to the type, holds the hit points to the bounds the sheet gives, and puts the states they bring (disabled, dying, dead or what the rules call them) on the sheet as conditions, each recorded. Do not `set` hit points or those conditions yourself.
 - `heal`: `amount` (dice or a number the story gives); `nonlethal` for nonlethal harm only, `temporary` for temporary hit points, `stabilize` to make someone who is dying stable.
-- `d20_rest` is a night's rest (its id is that, since `rest` is another action's): `hours` left out is the rules' night, `also` the others who rest. It gives back what the rules give: hit points by level, nonlethal harm by the hour, and each daily gauge.
+- `d20_rest` is a night's rest (its id is that, since `rest` is another action's): `hours` left out is the rules' night, `also` the others who rest. It gives back what the rules give: hit points by level, nonlethal harm by the hour, and each daily gauge. Like any action it passes no time: the answer gives the hours, and `pass_time` moves the clock.
 
 ### Conditions and effects, and how long they last
 
