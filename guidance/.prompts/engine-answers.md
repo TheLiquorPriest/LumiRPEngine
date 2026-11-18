@@ -125,7 +125,7 @@ derived: Operation {{n}} ({{op}}): {{name}}'s {{key}} is worked out by the rules
 world_unlisted: Operation {{n}} ({{op}}): {{key}} is not a value the world's setup lists; {{value}} is recorded as the world's own, and every level below takes it unless it sets its own.
 system_keeps: Operation {{n}} ({{op}}): {{system}} keeps {{key}} itself, as {{kept}}; that stands in the tree and in the sums, and {{value}} is recorded at the world beside it.
 fact_lane_default: Operation {{n}} ({{op}}): no lane was named, so this fact is recorded in the {{lane}} lane.
-off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} is now {{value}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}).
+off_the_sheet: Operation {{n}} ({{op}}): {{key}} of {{name}} {{#kept}}was given as {{value}}{{/kept}}{{^kept}}is now {{value}}{{/kept}}, outside what its sheet allows ({{type}}{{#min}}, at least {{min}}{{/min}}{{#max}}, at most {{max}}{{/max}}{{#choices}}, one of {{choices}}{{/choices}}){{#kept}}, and is held at {{held}}, its gauge's bound{{/kept}}.
 not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, so nothing was added to it and it stays as it was; the change is recorded as given.
 capped: Operation {{n}} ({{op}}): {{field}} of {{entity}} was {{was}} and is held to {{now}}, the cap given; the change is recorded as given.
 advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).
@@ -185,7 +185,7 @@ rules_row_added: {{id}} is a new row of {{table}} in revision {{revision}} of th
 rules_row_changed: {{id}} of {{table}} was changed in revision {{revision}} of the world. This chat moves to it from its next turn; the world's other chats stay on the revision they play. One Undo of the Upgrade takes it back.
 rules_row_same: {{id}} is already a row of {{table}} as given, so no revision was made.
 wants_patch: a list of operations, each an object with op (add, remove, replace, move, copy or test) and path, as RFC 6902 gives them, the paths JSON pointers into the document
-check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
+check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; target takes who it is rolled against, or against the difficulty the total has to reach.
 totals_cut_short: The run ended at {{reached}}, short of {{until}}: the engine's own cap on a run of this size stopped it there. The totals are for the span up to {{reached}}.
 store_failed: {{#n}}Operation {{n}} ({{op}}): {{/n}}the engine failed while applying it, so it did not apply. The error is in RPE's log.
 store_unknown_revision: {{#n}}Operation {{n}} ({{op}}): {{/n}}the world revision {{revision}} is not to hand, so it did not apply.
@@ -260,6 +260,7 @@ acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} alre
 out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
 out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
 fight_cost_not_left: Operation {{n}} ({{op}}): the action costs {{cost}} of the fight's budgets, which {{who}} has not left ({{why}}); it was carried out and recorded into the fight all the same.
+no_d20_rules: This world has no tabletop rules (its ruleset has no d20 part), so there is no sheet of them to read; world_query at the person reads what it holds.
 rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
 harm_kept: Operation {{n}} ({{op}}): this world's ruleset names no gauge a fight's harm comes off (its combat hp), so the {{harm}} harm to {{who}} was kept with the act and no value changed.
 harm_no_gauge: Operation {{n}} ({{op}}): {{who}} has no {{gauge}}, the gauge this world's ruleset takes a fight's harm off, so the {{harm}} harm was kept with the act and no value changed.

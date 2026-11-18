@@ -153,12 +153,12 @@ function rollsBefore(call: Call, turn: string, who: string): number {
 type RollBy = { dice: string } | { check: string; def: CheckDef };
 
 /** A roll drawn and drafted on the state as it stands: what it came to, or the reply that says why it could not be made. */
-function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null, sum: { expression: string; total: number } | null): { out: JsonObject | Reply; draft: Draft | null } {
+function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null, sum: { expression: string; total: number } | null, target: Found | null): { out: JsonObject | Reply; draft: Draft | null } {
   const reply = call.reply();
   const turn = reading.turn;
   // A roll is drawn from the turn, who rolls and how many rolls the turn has recorded for them; a call of no turn, from its job or session and the call: no wording moves it.
   const rng = createRng(turn === null ? hashParts("rpe.roll", call.agent.job ?? call.scope.session, call.callId, who.id) : hashParts("rpe.roll", turn.id, who.id, String(rollsBefore(call, turn.id, who.id))));
-  const data: JsonObject = { actor: who.id, for: purpose };
+  const data: JsonObject = { actor: who.id, for: purpose, ...(target !== null ? { target: target.id } : {}) };
   if ("dice" in by) {
     let rolled;
     try {
@@ -169,9 +169,9 @@ function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by:
     }
     Object.assign(data, { check: "", notation: rolled.notation, dice: rolled.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: against, outcome: against === null ? "rolled" : rolled.total >= against ? "success" : "failure" });
   } else {
-    // A difficulty given stands for any opposition the check has: nobody is named to roll against.
+    // A difficulty given stands for any opposition the check has: nobody is named to roll against. Without one, the target is who it is rolled against.
     const { vs: _vs, ...unopposed } = by.def;
-    const ready = readyCheck(reading.registry, reading.ctx, against === null ? by.def : { ...unopposed, dc: String(against) }, { self: who.id, actor: who.id });
+    const ready = readyCheck(reading.registry, reading.ctx, against === null ? by.def : { ...unopposed, dc: String(against) }, { self: who.id, actor: who.id, ...(target !== null ? { target: target.id } : {}) });
     if ("code" in ready) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: ready.code }).fail(), draft: null };
     const rolled = rollCheck(ready, rng);
     Object.assign(data, { check: by.check, notation: ready.notation, dice: rolled.roll.dice.filter((d) => d.kept).map((d) => d.value), natural: rolled.natural, total: rolled.total, dc: ready.dc, outcome: rolled.outcome });
@@ -241,7 +241,7 @@ export const ROLL: ToolSpec = {
   family: "state",
   tier: "write",
   lane: "engine",
-  properties: { who: TEXT, for: TEXT, dice: TEXT, check: TEXT, against: WHOLE, sum: TEXT },
+  properties: { who: TEXT, for: TEXT, dice: TEXT, check: TEXT, against: WHOLE, target: TEXT, sum: TEXT },
   required: [],
   example: { who: "wren", for: "whether she slips past the gate guard unseen", check: "stealth", against: 13 },
   async run(args, call) {
@@ -272,13 +272,15 @@ export const ROLL: ToolSpec = {
       const near = nearestOf(checkId ?? "", ids, call.settings).slice(0, call.settings.nearMatches);
       return reply.line("unknown", unknownFields(call.lines, "check", "check", checkId ?? "", near, [], ids.length === 0)).refusedWith({ field: "check", near: near.map((id) => ({ id, name: id, what: "check" })) }).fail();
     }
-    // A check rolled against someone has no one to roll against here: it says what it needs.
-    if ("check" in by && by.def.vs !== undefined && against === null) return reply.line("check_needs_against", { check: by.check }).fail();
+    const target = args.target === undefined || args.target === null || args.target === "" ? null : foundOr(reading, reply, "target", args.target, "entity");
+    if (target === null && args.target !== undefined && args.target !== null && args.target !== "") return reply;
+    // A check rolled against someone, with no one named and no difficulty given, says what it needs.
+    if ("check" in by && by.def.vs !== undefined && against === null && target === null) return reply.line("check_needs_against", { check: by.check }).fail();
     // Drawn inside the write that records it, on the state as it stands then, so a roll made at the same time for the same person is counted before this one and draws other dice.
     const worked = await commit(call, () => {
       const missing = call.reply();
       const now = readingOr(call, missing);
-      return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against, sum);
+      return now === null ? { out: missing, draft: null } : drawRoll(call, now, who, purpose, by, against, sum, target);
     });
     if (worked.gone) return unreadable(call, worked.gone);
     if (worked.out instanceof Reply) return worked.out;

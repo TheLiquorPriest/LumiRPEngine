@@ -16,7 +16,7 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { optionalService, own } from "../engine/pack-kit";
 import { baseWorld } from "../engine/places-in-play";
 import { createRng } from "../engine/rng";
-import { fieldDef, formulaFigure, GONE_FIELD, isGone, placeOfEntity } from "../engine/scope";
+import { fieldDef, formulaFigure, GONE_FIELD, isGone, placeOfEntity, scopeEnv } from "../engine/scope";
 import { applyItemOp } from "../engine/thing-ops";
 import { isThing, possessorOf } from "../engine/things";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
@@ -307,7 +307,18 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
     if (corrected !== null) return corrected;
     if (to !== undefined) value = to;
   }
-  const event: LedgerEvent = add !== undefined ? { type: "add", entity, field: key, delta: add } : { type: "set", entity, field: key, value: value ?? null };
+  // A gauge is held to its bounds (its floor may be a formula): a number past them is set at the bound, and what was asked is said.
+  let held: { asked: number; to: number } | null = null;
+  if (def?.pool !== undefined && key !== "cash") {
+    const bounds = fieldBounds(reg, w.ctx, entity, def);
+    const before = scopeEnv({ reg, ctx: w.ctx, bindings: { self: entity } }).lookup(["self", key]);
+    const asked = add !== undefined ? (typeof before === "number" ? before : 0) + add : typeof value === "number" ? value : null;
+    if (asked !== null) {
+      const to = Math.min(bounds.max ?? asked, Math.max(bounds.min ?? asked, asked));
+      if (to !== asked) held = { asked, to };
+    }
+  }
+  const event: LedgerEvent = held !== null ? { type: "set", entity, field: key, value: held.to } : add !== undefined ? { type: "add", entity, field: key, delta: add } : { type: "set", entity, field: key, value: value ?? null };
   const bad = o.draft.applyAll([event]);
   if (bad) return refusedAs(o, bad, "at", "entity");
   const name = named(o.reading, entity);
@@ -316,8 +327,8 @@ function setField(o: OpContext, entity: string, key: string, value: JsonValue | 
     if (value !== null && value !== undefined) o.draft.adviseOp(o.n, { code: "derived", values: { name, key, value: JSON.stringify(value), figure: String(formulaFigure(reg, w.ctx, entity, key) ?? "") } });
   } else {
     const now = own(w.state.entities, entity)?.fields[key];
-    const off = now === undefined ? null : offSheet(o, entity, key, now);
-    if (off !== null) o.reply.report("off_the_sheet", off);
+    const off = held !== null ? offSheet(o, entity, key, held.asked) : now === undefined ? null : offSheet(o, entity, key, now);
+    if (off !== null) o.reply.report("off_the_sheet", held !== null ? { ...off, held: held.to, kept: true } : off);
   }
   // A level that follows experience is kept as stated; where the two disagree it is said.
   const following = levelProgression(reg, w.ctx.world, e.kind, key);

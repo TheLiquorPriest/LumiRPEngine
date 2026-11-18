@@ -6,6 +6,8 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { BESTIARY_TABLE } from "../packs/combat/core/bestiary";
+import { D20_ACTIONS, type D20Def, type D20TableRole } from "../shared/d20";
+import { say } from "../shared/lines";
 import type { TableRow } from "../shared/tables";
 import type { RulesetDef, WorldDoc } from "../shared/world";
 
@@ -45,11 +47,38 @@ export function bestiaryRow(world: Pick<WorldDoc, "tables">, said: string): Best
   return rows.find((r) => r.id === said.trim()) ?? rows.find((r) => r.id.toLowerCase() === lower || r.name.toLowerCase() === lower);
 }
 
+/**
+ * The tabletop rules as the GM reads them (RULESET-DESIGN §5.4): which ruleset, its abilities, skills, saves, classes, conditions and
+ * usual difficulties, the totals its sheets give, and the actions that work its numbers out, with a line saying how they are used.
+ */
+function d20Summary(world: Pick<WorldDoc, "ruleset" | "tables">, d20: D20Def): JsonObject {
+  const rows = (role: D20TableRole): [string, TableRow][] => {
+    const id = d20.tables[role];
+    const t = id === undefined ? undefined : world.tables[id];
+    return t ? Object.entries(t.rows) : [];
+  };
+  const label = (id: string, row: TableRow): string => (typeof row.label === "string" && row.label !== "" ? row.label : id);
+  return {
+    ...(typeof world.ruleset?.profile === "string" ? { ruleset: world.ruleset.profile } : {}),
+    abilities: d20.abilities,
+    saves: Object.keys(d20.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)),
+    totals: Object.keys(d20.totals),
+    skills: rows("skills").map(([id, row]) => say("d20_ruleset_skill", { skill: label(id, row), id, ability: String(row.ability ?? ""), ...(row.trained === true ? { trained: true } : {}), ...(row.armor === true ? { armor: true } : {}) })),
+    classes: rows("classes").map(([id, row]) => `${label(id, row)} [${id}]`),
+    conditions: rows("conditions").map(([id, row]) => `${label(id, row)} [${id}]`),
+    difficulties: rows("difficulties").map(([id, row]) => `${label(id, row)} ${String(row.dc ?? "")}`),
+    actions: [...D20_ACTIONS],
+    use: say("d20_ruleset_use"),
+  };
+}
+
 /** The world's ruleset part as data, its bestiary with it: what the GM reads to rule by. `actions`: the ids of the actions listed, the world's own when not given. */
 export function rulesetData(world: Pick<WorldDoc, "ruleset" | "tables" | "checks" | "actions">, actions: readonly string[] = Object.keys(world.actions)): JsonObject {
   const ruleset: RulesetDef = world.ruleset ?? {};
+  const { d20, ...rest } = ruleset;
   return {
-    ...(JSON.parse(JSON.stringify(ruleset)) as JsonObject),
+    ...(JSON.parse(JSON.stringify(rest)) as JsonObject),
+    ...(d20 !== undefined ? { d20: d20Summary(world, d20) } : {}),
     checks: Object.keys(world.checks) as JsonValue,
     actions: [...actions] as JsonValue,
     bestiary: bestiaryOf(world).map((r) => ({ ...r }) as unknown as JsonValue),

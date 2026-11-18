@@ -7,6 +7,7 @@ import { BUSINESS_TOOLS } from "./families/business";
 import { CALENDAR_TOOLS } from "./families/calendar";
 import { CARRIED_TOOLS } from "./families/carried";
 import { CHECK_TOOLS } from "./families/checks";
+import { SHEET_TOOLS } from "./families/sheet";
 import { FIGHT_TOOLS } from "./families/fights";
 import { GROUP_TOOLS } from "./families/groups";
 import { MONEY_TOOLS } from "./families/money";
@@ -23,4 +24,4 @@ import { UPKEEP_TOOLS } from "./families/upkeep";
 import { VEHICLE_TOOLS } from "./families/vehicles";
 import { WORLD_TOOLS } from "./families/world";
 
-export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...BUSINESS_TOOLS, ...TIME_TOOLS, ...TOTALS_TOOLS, ...CALENDAR_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...ROUND_TOOLS, ...VEHICLE_TOOLS, ...UPKEEP_TOOLS, ...PEOPLE_TOOLS, ...CHECK_TOOLS, ...NOTE_TOOLS, ...READ_TOOLS, ...PLACE_TOOLS, ...CARRIED_TOOLS, ...WORLD_TOOLS, ...RULES_TOOLS];
+export const SEARCHABLE_TOOLS: readonly ToolSpec[] = [...THING_TOOLS, ...MONEY_TOOLS, ...BUSINESS_TOOLS, ...TIME_TOOLS, ...TOTALS_TOOLS, ...CALENDAR_TOOLS, ...GROUP_TOOLS, ...FIGHT_TOOLS, ...ROUND_TOOLS, ...VEHICLE_TOOLS, ...UPKEEP_TOOLS, ...PEOPLE_TOOLS, ...CHECK_TOOLS, ...SHEET_TOOLS, ...NOTE_TOOLS, ...READ_TOOLS, ...PLACE_TOOLS, ...CARRIED_TOOLS, ...WORLD_TOOLS, ...RULES_TOOLS];
