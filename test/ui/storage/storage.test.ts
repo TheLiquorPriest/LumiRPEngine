@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { StorageKindsReply, StoragePruneReply, StorageReply } from "../../../src/shared/api";
+import type { SettingView, StorageKindsReply, StoragePruneReply, StorageReply } from "../../../src/shared/api";
 import { NO_STORAGE, StorageView, type StorageViewProps, storageCalls, storageControl, type StorageShown } from "../../../src/ui/pages/storage";
 import { askingClient, settle } from "../asking";
 import { expand, press, textOf } from "../vnodes";
@@ -12,21 +12,30 @@ const KINDS: StorageKindsReply = { kinds: [{ kind: "turn-folders", count: 50, by
 const CHATS = (names: string[], next: string | null): StorageReply => ({ chats: names.map((n) => ({ chat: n, folder: `${n}-f`, bytes: 1000, areas: { notes: 1, turns: 2, sessions: 3, files: 4 }, rows: 500, measured: 1 })), next, global: 10, globalNotes: 1, shipped: 20, database: 30, rest: 5 });
 const PLAN: StoragePruneReply = { plan: "plan-1", removed: false, files: 12, bytes: 3_000_000, items: [{ kind: "turn-folder", path: "turns/0001", files: 12, bytes: 3_000_000 }] };
 
+/** The two settings the kinds name, as the Settings page's route gives them: a name, and what no value means. */
+const SETTINGS = new Map<string, SettingView>([
+  ["retention.turnFolders", { key: "retention.turnFolders", name: "Turn folders kept whole", unit: null, none: null, unset: null } as unknown as SettingView],
+  ["notes.versionsKept", { key: "notes.versionsKept", name: "Turns back note versions are kept", unit: null, none: "all of them", unset: null } as unknown as SettingView],
+]);
+
 function view(shown: Partial<StorageShown>) {
   const calls: string[] = [];
-  const props: StorageViewProps = { shown: { ...NO_STORAGE, ...shown }, onSetting: (k) => void calls.push(`setting:${k}`), onMore: () => void calls.push("more"), onNotes: (c) => void calls.push(`notes:${c}`), onOpenFile: (c, p) => void calls.push(`file:${c}:${p}`), onPrune: (a) => void calls.push(`prune:${a.what}`), onConfirm: () => void calls.push("confirm"), onDismiss: () => void calls.push("dismiss") };
+  const props: StorageViewProps = { shown: { ...NO_STORAGE, ...shown }, settings: SETTINGS, onSetting: (k) => void calls.push(`setting:${k}`), onMore: () => void calls.push("more"), onNotes: (c) => void calls.push(`notes:${c}`), onOpenFile: (c, p) => void calls.push(`file:${c}:${p}`), onPrune: (a) => void calls.push(`prune:${a.what}`), onConfirm: () => void calls.push("confirm"), onDismiss: () => void calls.push("dismiss") };
   const tree = expand(h(StorageView, props));
   return { tree, text: textOf(tree), calls };
 }
 
 describe("the Storage page", () => {
-  test("turn folders show 50 kept whole with a link to retention.turnFolders, and their oldest", () => {
+  test("a kind a setting decides names the setting and says its value as it reads now: the turn folders' 50, and the note versions' none as the setting words it", () => {
     const page = view({ kinds: KINDS });
     expect(page.text).toContain("Turn folders kept whole");
     expect(page.text).toContain("50 items");
-    expect(page.text).toContain("the newest 50 kept by");
-    press(page.tree, "retention.turnFolders");
+    expect(page.text).toContain("kept as Turn folders kept whole says: 50");
+    press(page.tree, "Turn folders kept whole");
     expect(page.calls).toEqual(["setting:retention.turnFolders"]);
+    const versions = view({ kinds: { kinds: [{ kind: "note-versions", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: null } }], lastPrune: null } });
+    expect(versions.text).toContain("kept as Turns back note versions are kept says: all of them");
+    expect(view({ kinds: { kinds: [{ kind: "note-versions", count: 4, bytes: 90, oldest: null, kept: { by: "setting", setting: "notes.versionsKept", value: 2 } }], lastPrune: null } }).text).toContain("says: 2");
   });
 
   test("chats are read a page at a time, each with what it takes in the database", async () => {

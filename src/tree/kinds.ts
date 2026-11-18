@@ -14,10 +14,10 @@ import type { TreeChats } from "./chats";
 import { walk } from "./files";
 import { CHATS_FOLDER, SESSIONS_FOLDER, SHIPPED_FOLDER, TURNS_FOLDER } from "./layout";
 import { KEPT_IN_OLD_TURNS } from "./retention";
-import { treeSettingsOf } from "./settings";
+import { treeSettingsOf, versionsKeptOf } from "./settings";
 import { type ChatLocation, kindOf } from "./view";
 
-/** How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which names its key and gives what it is now (null: none, all kept). */
+/** How long a kind is kept: for good, until the chat is deleted or he prunes it, or by a setting, which names its key and gives what it is now at his own level (null: none, all kept). */
 export type KeptFor = { by: "never" } | { by: "chat" } | { by: "setting"; setting: string; value: number | null };
 
 export interface StorageKind {
@@ -113,6 +113,7 @@ export async function storageKinds(deps: KindsDeps, user: string): Promise<Stora
   for (const t of totals.turns.values()) add(t.whole ? whole : pruned, t.bytes, t.oldest);
 
   const global = await treeSettingsOf(none);
+  const versionsKept = await versionsKeptOf(none);
   const versions = deps.db.query<{ n: number; bytes: number; oldest: number | null }, [string]>("SELECT count(*) AS n, COALESCE(sum(COALESCE(length(before), 0) + COALESCE(length(after), 0) + COALESCE(length(text), 0)), 0) AS bytes, min(at) AS oldest FROM note_version WHERE user = ?").get(user);
   const suggestions = deps.db.query<{ n: number; bytes: number; oldest: number | null }, [string]>("SELECT count(*) AS n, COALESCE(sum(length(text) + length(reason)), 0) AS bytes, min(at) AS oldest FROM suggestion WHERE user = ?").get(user);
   const database = deps.db.filename === "" || deps.db.filename === ":memory:" ? 0 : (await stat(deps.db.filename).then((s) => s.size, () => 0)) + (await stat(`${deps.db.filename}-wal`).then((s) => s.size, () => 0));
@@ -127,7 +128,7 @@ export async function storageKinds(deps: KindsDeps, user: string): Promise<Stora
   return {
     kinds: [
       of("notes", totals.notes, { by: "never" }),
-      of("note versions", { count: versions?.n ?? 0, bytes: versions?.bytes ?? 0, oldest: versions?.oldest ?? null }, { by: "setting", setting: "notes.versionsKept", value: null }),
+      of("note versions", { count: versions?.n ?? 0, bytes: versions?.bytes ?? 0, oldest: versions?.oldest ?? null }, { by: "setting", setting: "notes.versionsKept", value: versionsKept }),
       of("suggestions", { count: suggestions?.n ?? 0, bytes: suggestions?.bytes ?? 0, oldest: suggestions?.oldest ?? null }, { by: "setting", setting: "suggestions.decidedKept", value: global.suggestionsDecidedKept }),
       of("turn folders kept whole", whole, { by: "setting", setting: "retention.turnFolders", value: global.turnFolders }),
       of("turn folders pruned", pruned, { by: "chat" }),

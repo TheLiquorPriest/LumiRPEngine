@@ -5,15 +5,15 @@
 // exactly what will go and what stays, then taken on his yes. What RPE refuses is shown in its words.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { BackupShown, ChatStorageRow, StorageKindRow, StoragePruneAsk } from "../../../shared/api";
+import type { BackupShown, ChatStorageRow, SettingView, StorageKindRow, StoragePruneAsk } from "../../../shared/api";
 import { useApp } from "../../app";
 import { Badge, Banner, Button, Disclosure, PageHeader, Row, Section } from "../../../frontend/components";
 import type { PageEntry } from "../../page-entry";
 import { useUiSetting } from "../../ui-settings";
 import { bytesWords, counted, when } from "../../words";
 import { NO_STORAGE, type PruneShown, type StorageControl, storageCalls, storageControl, type StorageShown } from "./model";
-import { numberWords } from "../settings/model";
-import { useSettingView } from "../settings/names";
+import { valueWords } from "../settings/model";
+import { useSettingMap } from "../settings/names";
 
 export { NO_STORAGE, storageCalls, storageControl } from "./model";
 export type { StorageShown } from "./model";
@@ -33,22 +33,23 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
   archives: "Archives rpe backup made",
 };
 
-function KeptWords(props: { row: StorageKindRow; onSetting(key: string): void }) {
+function KeptWords(props: { row: StorageKindRow; setting: SettingView | undefined; onSetting(key: string): void }) {
   const { kept } = props.row;
-  const setting = useSettingView(kept.by === "setting" ? kept.setting : "");
-  if (kept.by === "never") return <span>kept for good</span>;
+  const { setting } = props;
+  if (kept.by === "never") return <span>RPE never removes it</span>;
   if (kept.by === "chat") return <span>kept until its chat is deleted or you prune it</span>;
   return (
     <span>
-      {kept.value === null ? "all of it kept" : `the newest ${setting === undefined ? kept.value : numberWords(kept.value, setting.unit)} kept`} by{" "}
+      kept as{" "}
       <Button size="sm" variant="ghost" title={kept.setting} onClick={() => props.onSetting(kept.setting)}>
         {setting === undefined ? "its setting" : setting.name}
       </Button>
+      {setting === undefined ? "" : ` says: ${valueWords(setting, kept.value)}`}
     </span>
   );
 }
 
-function KindsSection(props: { shown: StorageShown; onSetting(key: string): void }) {
+function KindsSection(props: { shown: StorageShown; settings: ReadonlyMap<string, SettingView> | null; onSetting(key: string): void }) {
   const { kinds, kindsProblem } = props.shown;
   return (
     <Section title="What RPE keeps" id="kinds">
@@ -67,7 +68,7 @@ function KindsSection(props: { shown: StorageShown; onSetting(key: string): void
             <div key={row.kind} class="rpe-entry" data-kind={row.kind}>
               <Row k={KIND_WORDS[row.kind] ?? row.kind} v={`${counted(row.count, "item")} · ${bytesWords(row.bytes)}`} sub={row.oldest === null ? undefined : `the oldest from ${when(row.oldest)}`} />
               <p class="rpe-meta">
-                <KeptWords row={row} onSetting={props.onSetting} />
+                <KeptWords row={row} setting={row.kept.by === "setting" ? props.settings?.get(row.kept.setting) : undefined} onSetting={props.onSetting} />
               </p>
             </div>
           ))}
@@ -175,6 +176,8 @@ function BackupsSection(props: { backups: readonly BackupShown[]; onPrune(ask: S
 
 export interface StorageViewProps {
   shown: StorageShown;
+  /** The settings by key, as the Settings page declares them: the kinds that a setting decides name it and say its value as it reads now. Null until read. */
+  settings?: ReadonlyMap<string, SettingView> | null;
   onSetting(key: string): void;
   onMore(): void;
   onNotes(chat: string | null): void;
@@ -191,7 +194,7 @@ export function StorageView(props: StorageViewProps) {
     <div class="lre-stack rpe-page" data-page="storage">
       <PageHeader title="Storage" subtitle="What RPE keeps, how much, and for how long." />
       {shown.prune === null ? null : <PruneQuestion prune={shown.prune} onConfirm={props.onConfirm} onDismiss={props.onDismiss} />}
-      <KindsSection shown={shown} onSetting={props.onSetting} />
+      <KindsSection shown={shown} settings={props.settings ?? null} onSetting={props.onSetting} />
       <Section title="Everything" id="totals">
         {totals === null ? (
           <p class="lre-muted rpe-line">Reading what the tree takes…</p>
@@ -267,6 +270,7 @@ export function StorageView(props: StorageViewProps) {
 export function StoragePage() {
   const app = useApp();
   const [shown, setShown] = useState<StorageShown>(NO_STORAGE);
+  const settings = useSettingMap();
   const [control, setControl] = useState<StorageControl | null>(null);
   const perPage = useUiSetting("chatsAtATime");
   const limit = useRef(perPage);
@@ -279,6 +283,7 @@ export function StoragePage() {
   return (
     <StorageView
       shown={shown}
+      settings={settings}
       onSetting={(key) => app.go({ page: "settings", chat: app.route.get().chat ?? null, at: [key] })}
       onMore={() => control?.more()}
       onNotes={(chat) => control?.notes(chat)}

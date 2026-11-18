@@ -42,6 +42,25 @@ export function useSettingView(key: string): SettingView | undefined {
   return view;
 }
 
+/** Every setting as the Settings page declares it, by key; null until it is read: for a page that draws its lines from plain props and so names several settings at once. */
+export function useSettingMap(): ReadonlyMap<string, SettingView> | null {
+  const app = useApp();
+  const [all, setAll] = useState<ReadonlyMap<string, SettingView> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    settingsByKey(app.client).then(
+      (read) => {
+        if (alive) setAll(read);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return all;
+}
+
 /** The setting's own name, as the Settings page says it (its key, small, as the tooltip), in a sentence or a label. */
 export function SettingName(props: { settingKey: string }) {
   const view = useSettingView(props.settingKey);
