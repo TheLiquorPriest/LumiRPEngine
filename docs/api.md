@@ -5856,7 +5856,7 @@ export interface JournalQuestRow {
   where: string[];
   /** What it involves, as tree refs. */
   things: string[];
-  /** How it closed; null while it is open. */
+  /** How it closed; null while it is open. A quest of the world's standing on an end stage the story never closed is closed as that stage ended it. */
   closed: QuestClosedRow | null;
   /** The player sees the whole quest; false: only its name and the stages named. */
   whole: boolean;
