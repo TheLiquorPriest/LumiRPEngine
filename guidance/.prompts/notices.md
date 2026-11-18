@@ -4,7 +4,7 @@ format: lines
 keys:
   changed_since: something before it changed what it was about
   later_value: a later turn had already set that value
-  another_swipe: it was about a swipe of an earlier reply that is not the one showing now
+  another_swipe: it was written on another swipe of an earlier reply, and that swipe is not the one showing now
   tied: it was tied to a change that did not apply
   unknown_revision: the world it was made in is not there
   no_handler: nothing in this world handles that kind of change
