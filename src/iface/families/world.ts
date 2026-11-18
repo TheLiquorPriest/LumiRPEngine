@@ -77,7 +77,7 @@ function lintData(call: Call, lint: readonly LintIssue[]): JsonObject {
 }
 
 /** A refusal of the world service, as the answer says it: the code, its reason, and the lint issues it carries. */
-function refused(call: Call, reply: Reply, error: unknown): Reply {
+export function refused(call: Call, reply: Reply, error: unknown): Reply {
   if (!(error instanceof WorldError)) throw error;
   reply.line(`world_${error.code}`, { why: error.message }).fail();
   if (error.lint.length > 0) reply.data({ lint: lintData(call, error.lint) });

@@ -10,7 +10,7 @@
 
 import type { LiveHub, WriteQueue } from "../app";
 import { validMarkerBody } from "../engine/events";
-import type { RevisionId, UserId, WorldId } from "../shared/ids";
+import type { DomainId, Level, RevisionId, UserId, WorldId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityUpgradePick, MarkerBody, UpgradePicks } from "../shared/ledger";
@@ -227,7 +227,15 @@ export class WorldChats {
     const marker = validMarkerBody({ kind: "migrate", to: moved.from, merge });
     if (marker === null) throw new WorldError("bad_request", "the Upgrade cannot be taken back: its reversal is no Upgrade");
     const input: ChangeInput = { lane: "engine", op: STORE_OPS.marker, value: marker as unknown as JsonValue, by: "player", source: "player", cite: { undoes: change.id } };
-    await this.deps.writes.run(() => s.record(s.writeTarget({ chat }), [input]), "taking an Upgrade back");
+    // What was recorded with the Upgrade under its edit (the level a rule set put on: `src/worlds/rules.ts`) goes back to what it was, in the same unit.
+    const inputs: ChangeInput[] = [input];
+    for (const c of own) {
+      if (!c.applied || !isRecord(c.cite) || c.cite.tap !== edit || c.id === change.id || typeof c.cite.was !== "number" || typeof c.cite.domain !== "string") continue;
+      if (own.some((u) => isRecord(u.cite) && u.cite.undoes === c.id)) continue;
+      const level = validMarkerBody({ kind: "resolve", domain: c.cite.domain as DomainId, scope: { all: true }, to: c.cite.was as Level });
+      if (level !== null) inputs.push({ lane: "engine", op: STORE_OPS.marker, value: level as unknown as JsonValue, by: "player", source: "player", cite: { undoes: c.id } });
+    }
+    await this.deps.writes.run(() => s.record(s.writeTarget({ chat }), inputs), "taking an Upgrade back");
     this.told(chat);
     return { undone: true, words: "" };
   }

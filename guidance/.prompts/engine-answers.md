@@ -161,6 +161,29 @@ world_bad_request: {{why}}
 world_bad_pointer: at {{at}} is not a JSON pointer: {{why}}
 world_nothing_at: The document holds nothing at {{at}}.{{#near}} What its parent holds: {{near}}.{{/near}}
 world_outline: The value at {{at}} is {{size}} characters, more than one answer holds, so what it holds is outlined: read further into one member with at.
+rules_unknown: There is no rule set {{rules}}. The rule sets: {{choices}}.
+rules_no_world: This chat plays no world, so there is nothing to put rules on or add a row to.
+rules_behind: This chat plays an older revision of its world than the newest, which has changes this chat does not have yet. Move the chat to the newest first (world_upgrade), then try again. Nothing was changed.
+rules_draft_open: The world has changes in Build that are not kept yet, and a revision made for the rules would keep them too. Nothing was changed: whoever owns the world keeps them or discards them in Build first.
+rules_not_conflict: {{paths}}: {{rules}} has no conflict with this world there. Its conflicts: {{conflicts}}. Nothing was changed.
+rules_plan: Nothing was changed. {{rules}} would add {{added}} to this world, finds {{same}} there already, and meets {{kept}} of the world's own that it would change{{#taken}}, {{taken}} of them as you named{{/taken}}.
+rules_done: {{rules}} is on this world as revision {{revision}}: {{added}} added{{#taken}}, {{taken}} of the world's own replaced as you named{{/taken}}. This chat moves to it from its next turn; the world's other chats stay on the revision they play. One Undo of the Upgrade takes it back.
+rules_already: This world has all of {{rules}} already, so no revision was made.
+rules_kept: The world has its own {{labels}}, where {{rules}} would write; {{#one}}it was{{/one}}{{^one}}they were{{/one}} kept as {{#one}}it is{{/one}}{{^one}}they are{{/one}}. Name {{#one}}its path{{/one}}{{^one}}their paths{{/one}} in take to put the rule set's in {{#one}}its{{/one}}{{^one}}their{{/one}} place.
+rules_on: The tabletop rules are on for this chat now.
+rules_no_sheet: {{count}} {{#one}}person has{{/one}}{{^one}}people have{{/one}} no sheet yet: {{names}}{{#more}} and {{more}} more{{/more}}. Give each a sheet with the stat_as action, or set their abilities.
+rules_table_unknown: {{table}} is no table of the rules. They are: {{choices}}.
+rules_bad_id: {{id}} cannot be a row's key: use letters, digits, underscores, dots and hyphens, at most 64.
+rules_no_rules: This world has no tabletop rules yet: put a rule set on it with rules_apply first.
+rules_no_table: The world's rules name no table for {{role}}, or the world does not have it.
+rules_bad_row: {{id}} cannot be a row of {{table}} as given, so nothing was written:
+rules_row_missing: It has no {{column}}{{#doc}}, which is {{doc}}{{/doc}}.
+rules_row_extra: It has a column {{column}}, which the table does not have. The table's columns: {{columns}}.
+rules_row_type: Its {{column}} is {{wants}} in the table, and the row gives something else.
+rules_row_lint: The world's own checks say of it: {{message}}
+rules_row_added: {{id}} is a new row of {{table}} in revision {{revision}} of the world. This chat moves to it from its next turn; the world's other chats stay on the revision they play. One Undo of the Upgrade takes it back.
+rules_row_changed: {{id}} of {{table}} was changed in revision {{revision}} of the world. This chat moves to it from its next turn; the world's other chats stay on the revision they play. One Undo of the Upgrade takes it back.
+rules_row_same: {{id}} is already a row of {{table}} as given, so no revision was made.
 wants_patch: a list of operations, each an object with op (add, remove, replace, move, copy or test) and path, as RFC 6902 gives them, the paths JSON pointers into the document
 check_needs_against: {{check}} is a check rolled against someone, and the roll names no one to roll against; against takes the difficulty the total has to reach.
 totals_cut_short: The run ended at {{reached}}, short of {{until}}: the engine's own cap on a run of this size stopped it there. The totals are for the span up to {{reached}}.
@@ -236,6 +259,7 @@ cannot_fight: Operation {{n}} ({{op}}): {{who}} cannot take part by the world's 
 acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} already (this is act {{times}} of theirs in it); it was recorded all the same.
 out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
 out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
+fight_cost_not_left: Operation {{n}} ({{op}}): the action costs {{cost}} of the fight's budgets, which {{who}} has not left ({{why}}); it was carried out and recorded into the fight all the same.
 rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
 harm_kept: Operation {{n}} ({{op}}): this world's ruleset names no gauge a fight's harm comes off (its combat hp), so the {{harm}} harm to {{who}} was kept with the act and no value changed.
 harm_no_gauge: Operation {{n}} ({{op}}): {{who}} has no {{gauge}}, the gauge this world's ruleset takes a fight's harm off, so the {{harm}} harm was kept with the act and no value changed.
