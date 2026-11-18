@@ -57,7 +57,7 @@ Record it as a `fact` about the place with a `part`: `since` for what the story 
 
 ## How a change is recorded
 
-- A move: `world_apply` with a `move` operation. Give the square, or "next to" someone, or a zone.
+- A move: `world_apply` with a `move` operation. Give the square, or "next to" someone, or a zone. The engine's own moves are the actions `go` (`to`, and `with` for those who go along) and `step` (`x`, `y`, a square of the grid the doer stands on), carried out with the operation `act`; `who` is the one who goes. A player's press on Go to or Walk here names one. The answer gives the minutes the way takes, and passing them is yours (`act` passes no time). A requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`). `world_query` at `ruleset` lists every action the world has.
 - Something put down, picked up, opened, closed or locked: `world_apply` with `place`, or `map_door`.
 - The place itself changing (a wall broken, a door barred): `map_edit`. A fixture that starts to move (a table overturned) is no longer drawn: `map_edit`'s `things` makes it a thing with a square of its own in the same call, so that it is placed, moved and measured like any other thing.
 
