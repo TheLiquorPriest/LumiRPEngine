@@ -591,6 +591,7 @@ const weaponRows: Record<string, TableRow> = {
   cleaver: melee("Cleaver", "1d6", 19, "simple", "light", S, "small"),
   knife: melee("Knife", "1d4", 19, "simple", "light", P, "tiny", { range: 10, finesse: true }),
   hunting_knife: melee("Hunting knife", "1d4", 19, "simple", "light", P, "tiny", { range: 10, finesse: true }),
+  pocketknife: melee("Pocketknife", "1d4", 19, "simple", "light", P, "tiny", { finesse: true }),
   metal_baton: melee("Baton", "1d6", 19, "simple", "one", B, "medium"),
   baton_expandable: melee("Expandable baton", "1d6", 19, "simple", "one", B, "medium"),
   tonfa: melee("Side-handle baton", "1d6", 20, "simple", "one", B, "medium"),
