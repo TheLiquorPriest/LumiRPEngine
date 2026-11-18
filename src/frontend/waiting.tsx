@@ -34,6 +34,14 @@ export function holdsPick(staged: StagedPress | null | undefined, action: string
   return !!staged && staged.action === action && Object.entries(params).every(([key, value]) => JSON.stringify(staged.values[key]) === JSON.stringify(value));
 }
 
+/** Whether a turn of the chat runs now: Lumiverse would stop its reply to start another, so nothing is sent now meanwhile. */
+export function turnRuns(view: StateView): boolean {
+  return view.status === "in_flight" || view.status === "paused";
+}
+
+/** Why Send now waits while a turn runs. */
+export const TURN_RUNS = "A turn is running: send it once the reply is in.";
+
 /**
  * What waits for your next message, with Send now and Take it back; nothing while none waits. `block`: laid out in a view's body
  * (the palette, the map) rather than in the HUD's strip.
@@ -63,7 +71,7 @@ export function WaitingPress(props: { view: StateView; block?: boolean }) {
       </span>
       {next === undefined ? null : (
         <>
-          <Button variant="secondary" size="sm" icon="send" busy={busy} title="Put it in the chat as your message now, and start the reply" onClick={() => press(true)}>
+          <Button variant="secondary" size="sm" icon="send" busy={busy} disabled={turnRuns(props.view)} title={turnRuns(props.view) ? TURN_RUNS : "Put it in the chat as your message now, and start the reply"} onClick={() => press(true)}>
             Send now
           </Button>
           <IconButton icon="close" label="Take it back" disabled={busy} onClick={() => press(false)} />

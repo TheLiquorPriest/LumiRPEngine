@@ -3,7 +3,9 @@
 // overrides), plus Pause/Resume clock. Each option shows its price, its time and one odds bar with
 // the chances in words; why it can't be taken now shows inline. Pay and Buy offer Paying as where the
 // player character may spend for an organization (ORG-SPEC §3.6). Everything comes from
-// `StateView.palette`; a choice sends one `lre.action`.
+// `StateView.palette`; a choice sends one `lre.action`. By its kind (plan §10.10): one that manages
+// (`atOnce`) is done at once; any other waits for your next message, shown chosen while it waits (the
+// same choice again takes it back), or Send now puts its line in the chat as your message at once.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
@@ -23,8 +25,8 @@ import type { TabPanelProps } from "./components";
 import { formatCents, formatMinutes, formatOdds, humanize } from "./format";
 import { Icon } from "../ui/icons";
 import { MoneyInput } from "./money-input";
-import { paletteRequest, timelapseRequest, timeMarker } from "./requests";
-import { holdsPick, isStaged, WaitingPress } from "./waiting";
+import { paletteRequest, type Req, timelapseRequest, timeMarker } from "./requests";
+import { holdsPick, isStaged, SENT_NOW, TURN_RUNS, turnRuns, WaitingPress } from "./waiting";
 
 // Combat leads while it's there: in a fight its actions are what the player wants first.
 const GROUP_LABEL: Record<PaletteEntry["group"], string> = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
@@ -348,6 +350,14 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
       if (sent) props.onSent();
     });
   };
+  // A press that would wait, played now instead (plan §10.10, a tap that plays now): its line goes in the chat as his message and the reply starts.
+  const sendNow = (asking: Req<"lre.action">) =>
+    run(async () => {
+      const result = await app.request({ ...asking, now: true });
+      if (result === null) return;
+      if ("messageId" in result) app.toast(SENT_NOW, "info");
+      props.onSent();
+    });
   const chain = selected ? selected.picks.map((p) => p.label).filter((part) => part !== selected.entry.label) : [];
   const payer = selected?.entry.acting?.options.find((o) => o.id === payingAs)?.name;
   const named = !selected ? "" : chain.length > 0 ? `${selected.entry.label}: ${chain.join(" → ")}` : selected.entry.label;
@@ -424,8 +434,13 @@ function ActionList(props: { view: StateView; head: ComponentChildren; entries: 
         {selected && !pending && !props.edit && selected.entry.atOnce !== true ? (
           <span class="lre-chat-hint" data-lre-palette-waits>
             <Icon name="info" size={14} />
-            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then what you pressed and on what."}
+            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then what you pressed and on what. Send now puts it in the chat as your message at once."}
           </span>
+        ) : null}
+        {asking !== null && selected?.entry.atOnce !== true && !waits ? (
+          <Button variant="secondary" icon="send" disabled={busy || turnRuns(props.view)} title={turnRuns(props.view) ? TURN_RUNS : "Put it in the chat as your message now, and start the reply"} onClick={() => sendNow(asking)}>
+            Send now
+          </Button>
         ) : null}
         <button type="button" class="lre-btn primary lre-chat-go" disabled={!selected || pending !== undefined || !amountOk || !countOk || busy} aria-busy={busy || undefined} onClick={go} data-lre-go>
           {selected && !pending ? <Icon name={waits ? "close" : "check"} /> : null}
@@ -578,8 +593,27 @@ function TimelapsePanel(props: { view: StateView; timelapse: TimelapseView; edit
         {named !== null && !edit ? (
           <span class="lre-chat-hint" data-lre-palette-waits>
             <Icon name="info" size={14} />
-            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then how long, and plays the stretch of time."}
+            {waits ? "It waits for your next message; pressed again, it no longer does." : "It waits for your next message, and the Author is told then how long, and plays the stretch of time. Send now puts it in the chat as your message at once."}
           </span>
+        ) : null}
+        {asking !== null && !edit && !waits ? (
+          <Button
+            variant="secondary"
+            icon="send"
+            block
+            disabled={busy || timelapse.blocked !== null || turnRuns(props.view)}
+            title={turnRuns(props.view) ? TURN_RUNS : "Put it in the chat as your message now, and start the reply"}
+            onClick={() =>
+              run(async () => {
+                const result = await app.request({ ...asking, now: true });
+                if (result === null) return;
+                if ("messageId" in result) app.toast(SENT_NOW, "info");
+                props.onSent();
+              })
+            }
+          >
+            Send now
+          </Button>
         ) : null}
         <button
           type="button"

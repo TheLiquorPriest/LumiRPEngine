@@ -41,6 +41,7 @@ import { canSeeEntity, canSeePlace, playerTrack, shownTrackId, unrevealedSecrets
 import { Working } from "../engine/working";
 import { chatDraftOf, draftEvent } from "../engine/world-draft";
 import type { Writes as LumiverseWrites } from "../adapter/lumiverse/writes";
+import { LumiverseError } from "../adapter/lumiverse/session";
 import { hasLedger } from "../packs/economy/core/model";
 import { hashParts } from "../shared/hash";
 import { isRecord, type JsonObject, type JsonValue, safeKey } from "../shared/json";
@@ -66,7 +67,7 @@ import { TIMELAPSE_ACTION } from "./state/palette";
 import { playerReason } from "./state/requirement-words";
 import { unfitRef } from "./state/unfit-ref";
 import { unfitWords } from "./unfit";
-import { chatView, headTurn, stagedOf } from "./view";
+import { chatView, headTurn, pressedLine, stagedOf } from "./view";
 
 /** The prompt part this area's words are in, under the guidance folder's `.prompts/`. */
 export const PLAY_ANSWERS = "play-answers";
@@ -442,10 +443,12 @@ export class PlayService {
   }
 
   /**
-   * A tap played now (plan §10.10, §4.2): its line, the words typed or else what was pressed, put in the chat as his message, text only,
-   * and the reply started, both through Lumiverse's own routes as him; nothing is written into the message's or the chat's metadata. The
-   * request is kept as played now with that message, so the turn that answers it is told what was pressed and its values. A request that
-   * waits (Send now) is played so, and waits no more.
+   * A tap played now (plan §10.10, §4.2): its line, the words typed or else what was pressed and on what (`pressedLine`, the words its
+   * view showed), put in the chat as his message, text only, and the reply started, both through Lumiverse's own routes as him; nothing
+   * is written into the message's or the chat's metadata. The request is kept as played now with that message, so the turn that answers
+   * it is told what was pressed and its values. A request that waits (Send now) is played so, and waits no more. Nothing is written while
+   * a turn of the chat runs (Lumiverse would stop its reply to start this one), nor where RPE is not set up for a Lumiverse; what
+   * Lumiverse refuses is said in its words, and a line it took whose reply it did not start says so.
    */
   private async playNow(user: string, chat: string, ask: { tap: PanelTap; words: string } | { request: string }): Promise<Played> {
     let asked: PanelAsk;
@@ -458,11 +461,21 @@ export class PlayService {
       asked = await this.pressed(user, chat, ask.tap, ask.words);
       words = ask.words.trim();
     }
-    const lumiverse = this.deps.lumiverse();
-    const message = await lumiverse.appendMessage(user, chat, words !== "" ? words : asked.what);
+    if (this.deps.turning(user, chat)) throw new Refused("conflict", { line: "turn_running" });
+    let lumiverse: Pick<LumiverseWrites, "appendMessage" | "startGeneration">;
+    try {
+      lumiverse = this.deps.lumiverse();
+    } catch {
+      throw new Refused("unavailable", { line: "no_lumiverse" });
+    }
+    const refused = (line: string) => (error: unknown): never => {
+      if (error instanceof LumiverseError) throw new Refused("unavailable", { line, fields: { why: error.message } });
+      throw error;
+    };
+    const message = await lumiverse.appendMessage(user, chat, words !== "" ? words : pressedLine(asked)).catch(refused("lumiverse_refused"));
     const sent = "request" in ask ? await this.deps.requests.played(user, chat, ask.request, message.id) : null;
     const kept = sent ?? (await this.deps.requests.hold(user, chat, { kind: "panel", asked, played: true, message: message.id }, Date.now()));
-    const generation = await lumiverse.startGeneration(user, chat, {});
+    const generation = await lumiverse.startGeneration(user, chat, {}).catch(refused("reply_not_started"));
     return { message: message.id, generation, request: kept.id };
   }
 
