@@ -38,6 +38,16 @@ textarea.lre-input.lre-minds-prompt-input{min-height:200px;font-family:var(--lre
 .lre-minds-var{display:contents}
 .lre-minds-var dt{font:var(--lre-fs-sm)/1.45 var(--lre-mono)}
 .lre-minds-var dd{margin:0;color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-minds-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:var(--lre-s2);min-width:0}
+.lre-minds-choice{display:flex;flex-direction:column;align-items:stretch;gap:var(--lre-s1);min-width:0;min-height:var(--lre-tap-lg);padding:var(--lre-s3);border:1px solid var(--lre-hairline);border-radius:var(--lre-r-xl);background:transparent;color:inherit;font:inherit;text-align:left;transition:background-color var(--lre-fast),border-color var(--lre-fast)}
+.lre-minds-choice:hover:not(:disabled):not([aria-checked=true]){background:var(--lre-hover)}
+.lre-minds-choice[aria-checked=true]{border-color:var(--lre-accent);background:var(--lre-accent-soft);box-shadow:inset 0 0 0 1px var(--lre-accent)}
+.lre-minds-choice:disabled{cursor:progress}
+.lre-minds-choice-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lre-s2);min-width:0}
+.lre-minds-choice-name{font-size:var(--lre-fs-md);font-weight:600}
+.lre-minds-choice-mark{display:inline-flex;align-items:center;gap:var(--lre-s1);font-size:var(--lre-fs-sm);font-weight:600;color:var(--lre-accent-text)}
+.lre-minds-choice-text{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-minds-choice[aria-checked=true] .lre-minds-choice-text{color:var(--lre-fg)}
 /* Play → What you know (packs/minds/ui/known.tsx) */
 .lre-known-tags{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lre-s1) var(--lre-s2);min-width:0}
 .lre-known-kept{font-size:var(--lre-fs-sm);color:var(--lre-muted);overflow-wrap:anywhere}
