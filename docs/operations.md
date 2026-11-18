@@ -1768,16 +1768,16 @@ Worked example:
 
 #### fight_round
 
-Records what each fighter did, as the story decided it, and goes on to the next turn after each; once everyone has had theirs the fight is in its next round. Nothing is chosen or rolled here: who acts, what they do and how it comes out are the call's. A fighter who acts twice in a round, who acts out of the order, or who strikes someone beyond reach on the map is recorded all the same and reported. Where the fight is on a grid that counts rounds, the rounds that pass move the clock by the grid's seconds. The answer gives the fight as it now stands.
+Records what each fighter did, as the story decided it, and goes on to the next turn after each; once everyone has had theirs the fight is in its next round. Nothing is chosen or rolled here: who acts, what they do and how it comes out are the call's. Harm comes off the gauge the world's ruleset names for a fight, held to its bounds, and anyone it leaves down by the ruleset's rule is marked down; in a world whose ruleset names no gauge, or for someone who has none, the harm is kept with the act and the answer says that no value changed. A fighter who acts twice in a round, who acts out of the order, or who strikes someone beyond reach on the map is recorded all the same and reported. Where the fight is on a grid that counts rounds, the rounds that pass move the clock by the grid's seconds. The answer gives the fight as it now stands.
 
 Writes the engine lane.
 
 | Argument | Shape | Needed | What it is |
 |---|---|---|---|
 | `fight` | text |  | The id of the fight; left out, the one fight under way. |
-| `actions` | list of object: who, did, to, result, roll | yes | What each fighter did, in the order they did it. |
+| `actions` | list of object: who, did, to, result, roll, harm | yes | What each fighter did, in the order they did it. |
 
-Reports its code (`src/iface/families/rounds.ts`) can give: `acted_twice`, `out_of_reach`, `out_of_turn`.
+Reports its code (`src/iface/families/rounds.ts`) can give: `acted_twice`, `harm_kept`, `harm_no_gauge`, `out_of_reach`, `out_of_turn`.
 
 Worked example:
 
@@ -1788,7 +1788,8 @@ Worked example:
       "who": "Mara",
       "did": "swings her axe",
       "to": "Grey wolf",
-      "result": "hit, 5 damage",
+      "result": "hit",
+      "harm": 5,
       "roll": "roll-0011"
     },
     {

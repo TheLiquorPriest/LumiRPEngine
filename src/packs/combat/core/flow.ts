@@ -269,14 +269,13 @@ export function breakOff(w: Working, seed: string, fight?: string): string[] {
 }
 
 /**
- * After anything happened in a fight: whether the POV has left it, who went down or got back up
- * (with the rules' condition, through the Sheets pack's `sheets.condition` where it's loaded, and
- * the rules' life state: falling into it, and alive again once back up from it), then whether it's
- * over or has stalled. True when no fight is under way any more.
+ * Who of a fight went down or got back up by the rules' down rule since its record last said: each recorded (`combat.down`), with
+ * the rules' condition (through the Sheets pack's `sheets.condition` where it's loaded) and life state (falling into it, and alive
+ * again once back up from it); the narrator's line for each, in order. The engine's own round asks it, and so does `fight_round`
+ * after the harm it records.
  */
-function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
-  const enc = encounterOf(w.state);
-  if (!enc || leave(w, rng.fork("left"), lines)) return true;
+export function downsOf(w: Working, rules: CombatDef, enc: Encounter, rng: Rng): string[] {
+  const out: string[] = [];
   const condition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
   const life = typeof rules.down?.life === "string" && isLifeState(w.world, rules.down.life) && rules.down.life !== ALIVE ? rules.down.life : null;
   for (const f of enc.order) {
@@ -290,8 +289,19 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
     applyEffects(w.reg, w, effects, { bindings: { self: f.id }, rng: fall });
     asUnit(w, from, fall.seed);
     const who = nameFor(w.ctx, f.id);
-    if (who !== "someone") lines.push(say(down ? "fight_who_down" : "fight_who_back_up", { who: capital(who), you: f.id === w.world.pov }));
+    if (who !== "someone") out.push(say(down ? "fight_who_down" : "fight_who_back_up", { who: capital(who), you: f.id === w.world.pov }));
   }
+  return out;
+}
+
+/**
+ * After anything happened in a fight: whether the POV has left it, who went down or got back up (`downsOf`), then whether it's over
+ * or has stalled. True when no fight is under way any more.
+ */
+function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
+  const enc = encounterOf(w.state);
+  if (!enc || leave(w, rng.fork("left"), lines)) return true;
+  for (const line of downsOf(w, rules, enc, rng)) lines.push(line);
   const now = encounterOf(w.state);
   if (!now) return true;
   if (!endHolds(w.ctx, rules, now)) return stalled(w, rules, rng.fork("calm"), lines);

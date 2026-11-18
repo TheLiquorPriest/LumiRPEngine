@@ -35,4 +35,27 @@ describe("fight_round", () => {
     expect(twice.error).toBeUndefined();
     expect((twice.reports ?? []).some((x) => x.includes("has acted in round"))).toBe(true);
   });
+
+  test("harm comes off the gauge the ruleset names, the wolf it leaves at nothing is down, and no field of the call's naming is made", async () => {
+    const t = await familyRig(fightWorld);
+    await t.call("fight_start", { with: ["Wren"], foes: ["Grey wolf"], ...SRC });
+    const r = await t.call("fight_round", { actions: [{ who: "Wren", did: "swings her staff", to: "Grey wolf", result: "a hit", harm: 4 }, { who: "Grey wolf", did: "bites", to: "Wren", result: "a hit", harm: 3 }], ...SRC });
+    expect(r.error).toBeUndefined();
+    const world = () => t.s.stateAt(t.turn.id).state.world;
+    expect(world().entities.wolf?.fields.hp).toBe(3);
+    expect(world().entities.wren?.fields.hp).toBe(9);
+    await t.call("fight_round", { actions: [{ who: "Wren", did: "swings again", to: "Grey wolf", result: "a hit", harm: 10 }], ...SRC });
+    expect(world().entities.wolf?.fields.hp).toBe(0);
+    expect(fightsOf(world())[0]?.order.find((f) => f.id === "wolf")?.down).toBe(true);
+  });
+
+  test("in a world whose ruleset names no gauge, harm is kept with the act and said, and no value is changed", async () => {
+    const t = await familyRig();
+    await t.call("fight_start", { with: ["Wren"], foes: ["Bram"], ...SRC });
+    const r = await t.call("fight_round", { actions: [{ who: "Wren", did: "shoves", to: "Bram", result: "a hit", harm: 2 }], ...SRC });
+    expect(r.error).toBeUndefined();
+    expect((r.reports ?? []).some((x) => x.includes("names no gauge"))).toBe(true);
+    expect(t.s.stateAt(t.turn.id).state.world.entities.bram?.fields.hp).toBeUndefined();
+    expect(t.s.changes(t.turn.id).some((c) => c.op === "combat.act" && JSON.stringify(c.value).includes('"harm":2'))).toBe(true);
+  });
 });

@@ -233,7 +233,10 @@ acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} alre
 out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
 out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
 rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
-wants_fight_action: an object with who (a fighter) and did (what they did), and optionally to (whom it was aimed at), result (how it came out) and roll (the id of the roll that decided it)
+harm_kept: Operation {{n}} ({{op}}): this world's ruleset names no gauge a fight's harm comes off (its combat hp), so the {{harm}} harm to {{who}} was kept with the act and no value changed.
+harm_no_gauge: Operation {{n}} ({{op}}): {{who}} has no {{gauge}}, the gauge this world's ruleset takes a fight's harm off, so the {{harm}} harm was kept with the act and no value changed.
+wants_harm: a number of 0 or more, what the one it was aimed at lost
+wants_fight_action: an object with who (a fighter) and did (what they did), and optionally to (whom it was aimed at), result (how it came out), harm (what they lost) and roll (the id of the roll that decided it)
 fight_broke_off: Operation {{n}} ({{op}}): the fight under way was ended as the story moved on; no winner was recorded.
 fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothing was recorded.
 joined: Operation {{n}} ({{op}}): {{who}} joined the fight {{fight}}, which was under way; no one else was added.

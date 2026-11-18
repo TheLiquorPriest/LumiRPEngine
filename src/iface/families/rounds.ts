@@ -9,14 +9,18 @@ import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../../shared/json";
 import type { LedgerEvent } from "../../shared/ledger";
 import { mapSettingsOf } from "../../shared/maps";
+import { applyEffects } from "../../engine/effects";
+import { own } from "../../engine/pack-kit";
 import type { ReadContext } from "../../engine/registry";
-import { nextTurn } from "../../packs/combat/core/flow";
+import { createRng } from "../../engine/rng";
+import { fieldDef } from "../../engine/scope";
+import { downsOf, nextTurn } from "../../packs/combat/core/flow";
 import { fightById, fighterOf, fightsOf, rulesOf, type Encounter } from "../../packs/combat/core/model";
 import { spotOf } from "../../packs/space/core/grid-model";
 import { reach } from "../../packs/space/core/positions";
 import { TEXT } from "../kit";
 import { roundsClock } from "../map/time";
-import { find, isUnread, named, notAs, notOneOf, type OpContext } from "../ops";
+import { find, isUnread, named, notAs, notOneOf, type OpContext, type Unread } from "../ops";
 import { fightAfter, noSuchFight } from "./fights";
 import { notApplicable, type WriteDef, writeTool } from "./run";
 
@@ -29,6 +33,8 @@ interface Act {
   to: string | null;
   result: string | null;
   roll: string | null;
+  /** What the one it was aimed at lost, off the gauge the world's ruleset takes a fight's harm off. */
+  harm: number | null;
 }
 
 /** The turn after the current one, as the fight's rules count it; with no rules, the next in the order. */
@@ -64,9 +70,43 @@ function actsOf(o: OpContext, fight: Encounter): Act[] | ReturnType<typeof notAs
       to = target.id;
     }
     const text = (v: JsonValue | undefined): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
-    out.push({ who: who.id, did, to, result: text(raw.result), roll: text(raw.roll) });
+    let harm: number | null = null;
+    if (raw.harm !== undefined && raw.harm !== null) {
+      if (typeof raw.harm !== "number" || !Number.isFinite(raw.harm) || raw.harm < 0) return notAs(o, "actions.harm", raw.harm, "harm");
+      if (to === null) return { line: "needs", fields: { n: o.n, op: o.op, fields: ["actions.to"] } };
+      harm = raw.harm;
+    }
+    out.push({ who: who.id, did, to, result: text(raw.result), roll: text(raw.roll), harm });
   }
   return out;
+}
+
+/**
+ * The harm an act did, off the gauge the world's ruleset takes a fight's harm off (`ruleset.combat.hp`, a pool on the fighter's kind),
+ * through the engine's `add`, held to the pool's bounds as any change to it is; then who went down or got back up by the rules' down
+ * rule (`downsOf`). Where the ruleset names no gauge, or the one harmed has none, the harm is kept with the act and the answer says so:
+ * no value is made up for it. What could not be applied, when it could not.
+ */
+function harmed(o: OpContext, fight: string, to: string, harm: number): Unread | undefined {
+  const w = o.draft.w;
+  const rules = rulesOf(w.world);
+  const who = named(o.reading, to);
+  if (rules === null) {
+    o.reply.report("harm_kept", { n: o.n, op: o.op, who, harm });
+    return undefined;
+  }
+  const e = own(w.state.entities, to);
+  if (e === undefined || fieldDef(w.reg, w.world, e.kind, rules.hp) === undefined) {
+    o.reply.report("harm_no_gauge", { n: o.n, op: o.op, who, harm, gauge: rules.hp });
+    return undefined;
+  }
+  const rng = createRng(o.draft.seed(o.n)).fork(`harm:${to}`);
+  const out = applyEffects(w.reg, w, [{ type: "add", args: { entity: to, field: rules.hp, delta: -harm } }], { bindings: {}, rng, literal: true });
+  const refused = out.rejected[0]?.rejection;
+  if (refused !== undefined) return notApplicable(o, o.draft.note(refused).code);
+  const enc = fightById(w.state, fight);
+  if (enc !== null) downsOf(w, rules, enc, rng.fork("down"));
+  return undefined;
 }
 
 const round: WriteDef = {
@@ -75,10 +115,10 @@ const round: WriteDef = {
   lane: "engine",
   properties: {
     fight: TEXT,
-    actions: { type: "array", minItems: 1, items: { type: "object", required: ["who", "did"], properties: { who: TEXT, did: TEXT, to: TEXT, result: TEXT, roll: TEXT } } },
+    actions: { type: "array", minItems: 1, items: { type: "object", required: ["who", "did"], properties: { who: TEXT, did: TEXT, to: TEXT, result: TEXT, roll: TEXT, harm: { type: "number", minimum: 0 } } } },
   },
   required: ["actions"],
-  example: { actions: [{ who: "Mara", did: "swings her axe", to: "Grey wolf", result: "hit, 5 damage", roll: "roll-0011" }, { who: "Grey wolf", did: "bites at her arm", to: "Mara", result: "miss" }], source: { from: "prose", message: "m-0503" } },
+  example: { actions: [{ who: "Mara", did: "swings her axe", to: "Grey wolf", result: "hit", harm: 5, roll: "roll-0011" }, { who: "Grey wolf", did: "bites at her arm", to: "Mara", result: "miss" }], source: { from: "prose", message: "m-0503" } },
   run(o) {
     const w = o.draft.w;
     const under = fightsOf(w.state);
@@ -100,9 +140,13 @@ const round: WriteDef = {
       if (before > 0) o.reply.report("acted_twice", { n: o.n, op: o.op, who: named(o.reading, act.who), round: enc.round, times: before + 1 });
       if (whose !== undefined && whose !== act.who) o.reply.report("out_of_turn", { n: o.n, op: o.op, who: named(o.reading, act.who), whose: named(o.reading, whose) });
       if (act.to !== null && beyondReach(w.ctx, act.who, act.to)) o.reply.report("out_of_reach", { n: o.n, op: o.op, who: named(o.reading, act.who), target: named(o.reading, act.to) });
-      const data: JsonObject = { encounter: enc.id, actor: act.who, action: act.did, label: act.did, ...(act.to !== null ? { target: act.to } : {}), ...(act.result !== null ? { outcome: act.result } : {}), ...(act.roll !== null ? { roll: act.roll } : {}) };
+      const data: JsonObject = { encounter: enc.id, actor: act.who, action: act.did, label: act.did, ...(act.to !== null ? { target: act.to } : {}), ...(act.result !== null ? { outcome: act.result } : {}), ...(act.roll !== null ? { roll: act.roll } : {}), ...(act.harm !== null ? { harm: act.harm } : {}) };
       const done = o.draft.applyAll([{ type: "combat.act", data }]);
       if (done) return notApplicable(o, done.code);
+      if (act.harm !== null && act.to !== null) {
+        const hurt = harmed(o, fight.id, act.to, act.harm);
+        if (hurt !== undefined) return hurt;
+      }
       const now = fightById(w.state, fight.id);
       const next = now === null ? null : turnAfter(w.ctx, now);
       if (next !== null) {
