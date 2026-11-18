@@ -1,6 +1,9 @@
 ---
 description: The sentences of what a character's mind holds and does - what it intends, how it reacts, its mood, what it knows, believes, was told or forgot, what it keeps in memory, and what it learned in a round. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
+keys:
+  mind_*: what a character's mind does and is told in the chat's history (a round of minds run or switched off, a mind's line and its memory, who was present, a plan's or commitment's status, a part deleted or edited, older notes folded, a mind pinned, unpinned or given a fresh start, an intent set or cleared, a time skip stopped, a fact for the minds, what someone learned, holds, forgot or keeps from whom, knowledge tracking and its threshold) - each is filled with what it names
+  knowledge_*: how a holding reads - known, suspected, disbelieved or unsure, how they came by it (from the start, saw it, told, worked out, a guess), whom it is kept from, and the narrator's Who knows what lines (knowledge_person, knowledge_notKnown, knowledge_everyoneHere) - claim, how, percent, whom, by, name, line
 ---
 mind_round_on: A round of character minds ran
 mind_round_off: Character minds are switched off

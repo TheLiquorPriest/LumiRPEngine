@@ -2,7 +2,7 @@
 description: The sentences of the narrator's vehicles section and of a vehicle's record - where it stands, whose it is and who may use it, its state and fuel, its service, who drives it and who is aboard, what it carries, and its specs. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
-  trip_*: a way to a place by a vehicle as the travel options give it - its name (drive, sail or fly the vehicle to a place), why it is offered greyed (broken down, not enough fuel) and what each leg of it takes the minutes for (reaching it, getting going, driving, parking, walking the rest)
+  trip_*: a way to a place by a vehicle as the travel options give it - its name (drive, sail or fly the vehicle to a place - vehicle, place; trip_the_vehicle gives the vehicle as a phrase - name), why it is offered greyed (broken down, not enough fuel) and what each leg of it takes the minutes for (reaching it at home or at a place, getting going, driving, sailing, flying, parking, tying up, landing, walking the rest from a place - place where one is named)
   vehicle_service_due: a vehicle is due for service - name
   vehicle_line: one vehicle in the narrator's section - name, parts
   vehicle_someone: no one the player may know

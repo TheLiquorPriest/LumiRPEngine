@@ -1229,7 +1229,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
   },
   {
     type: "castlife.decision",
-    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : { code: "bad_event", reason: say("why_decision_needs_key_and_choice") }),
+    validate: (e) => (strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : { code: "bad_event", reason: say("why_a_decision_needs_a_key_and_a") }),
     apply: (e, state) => {
       sliceRecord(state, "castlife", "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },

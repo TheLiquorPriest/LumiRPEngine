@@ -3,7 +3,7 @@ description: The narrator's own sections, as the narrator reads them - what a pe
 format: lines
 keys:
   feed_*: the narrator's own sections (what a person is doing and how they regard the player's character, a project, a plan and the orders given, a vote waiting, a quest's stage, what is owed and what is on a person, a thing carried or lent, the date and time, the weather, the conditions someone is under, how an organization names a person and what they may do there, the usual routines of the people here), each a phrase or a sentence filled with what it names; feed_org_type_*, feed_role_*, feed_worn_*, feed_mood_* are the single words those fill in
-  feedset_*: a section's settings in this chat as one sentence (the feedset line, with its parts feedset_scope_*, feedset_cut, feedset_uncapped, feedset_sources); feed_marked_scene and feed_marked_gm mark a fact beyond the player character's knowledge
+  feedset, feedset_*: a section's settings in this chat as one sentence (the feedset line, with its parts feedset_scope_*, feedset_cut, feedset_uncapped, feedset_sources); feed_marked_scene and feed_marked_gm mark a fact beyond the player character's knowledge
 ---
 feed_name_knowsdoesnt_know_you_and_feels_words: {{name}} {{#if_known}}knows{{/if_known}}{{^if_known}}doesn't know{{/if_known}} you{{#if_words}} and feels {{words}} toward you{{/if_words}}.
 feed_right_now_they_are_doing: Right now they are {{doing}}.
@@ -21,20 +21,20 @@ feed_in_weather_weather: in {{weather}} weather
 feed_in_the_start:  in the {{start}}
 feed_perweek_days_a_week: {{perWeek}} day{{^if_perWeek}}s{{/if_perWeek}} a week
 feed_name_usually_told: {{name}} usually: {{told}}.
-feed_usual_routines_background_you_may_use_or: Usual routines (background you may use or ignore, never a fact to state; what the story establishes always comes first):
+feed_usual_routines_background_you_may_use_or: Usual routines (what each tends to do: background, not a record of what happened; what the story establishes always comes first):
 feed_id_name_usually_told: {{id}} ({{name}}) usually: {{told}}.
 feed_your: Your
 feed_whose_name_status_done_of_stepscount_steps: {{whose}} {{name}}: {{status}}; {{done}} of {{stepsCount}} steps done{{#if_next}}; next: {{name2}}{{/if_next}}{{#if_last}}; due to be done {{last}}{{/if_last}}.
-feed_the_engine_runs_each_project_day_by: The engine runs each project day by day: tell its progress only as the time that passes covers, never say a step is done before its day, and never start, finish or drop one yourself. A setback or an extra cost the story makes is noted with project_note.
+feed_the_engine_runs_each_project_day_by: The engine runs each project day by day: a step is done on its day, a project finishes when its last step is done, and it is started, paused or dropped by an action, not by what is narrated. A setback or an extra cost the story makes is noted with project_note.
 feed_your_party: your party
 feed_orgname_the_plan_and_the_orders_given: {{orgName}}: the plan and the orders given, as the story stands.
 feed_set_by_the_gm_by_name_cal: set{{#if_by}} by the GM{{/if_by}}{{^if_by}} by {{name}}{{/if_by}} {{cal}}{{#if_lateOf}} (its time has passed){{/if_lateOf}}
 feed_latest_note_last_source: ; latest: {{note}} ({{last}}, {{source}})
 feed_o_lead_leads_text_at_where_by: - {{o}}{{#if_lead}} ({{lead}} leads){{/if_lead}}: {{text}}{{#if_where}}, at {{where}}{{/if_where}}{{#if_when}}, by {{when}}{{/if_when}}. {{status}}, {{o2}}{{o3}}.{{#if_lived}} By the day as laid it should be done; not told yet.{{/if_lived}}
 feed_goal_g_text_todayby_window_status_g2: Goal, {{g}}: {{text}}{{#if_window}} ({{#if_today}}today{{/if_today}}{{^if_today}}by {{window}}{{/if_today}}){{/if_window}}. {{status}}{{g2}}.
-feed_play_each_one_carrying_out_their_order: Play each one carrying out their order in character unless the scene gives them a reason not to. Show progress only as the player's message and the time that passes cover; never mark anything done, hand out a task, or change who does what yourself.
+feed_play_each_one_carrying_out_their_order: Each of them carries out their order in character unless the scene gives them a reason not to. Progress shows only as the player's message and the time that passes cover; an order is marked done, a task handed out or who does what changed by an action, not by what is narrated.
 feed_to_a_vote_at_org_text_it: - To a vote at {{org}}: {{text}}; it closes {{closes}}; {{pov}}.
-feed_show_a_vote_or_an_answer_only: - Show a vote or an answer only as the player's message and the time that passes cover; never decide one for anyone.
+feed_show_a_vote_or_an_answer_only: - A vote or an answer shows only as the player's message and the time that passes cover; no one's is decided for them.
 feed_t_still_to_do_o: {{t}}, still to do: {{o}}.
 feed_t_a_hint_your_character_has_h: {{t}}, a hint your character has: {{h}}
 feed_t_known_to_be_true_truth: {{t}}, known to be true: {{truth}}
@@ -104,7 +104,7 @@ feed_marked_gm: {{text}} [unknown to you; GM only]
 feed_offered_in_the_story: Offered in the story
 feed_asked_of_you_by_giver_for_orgname: Asked of you by {{giver}} for {{orgName}} ({{o}}): {{text}}
 feed_it_serves_the_goal_text: It serves the goal: {{text}}.
-feed_carry_it_out_as_part_of_your: Carry it out as part of your place there; if you won't, say so in the scene.
+feed_carry_it_out_as_part_of_your: Carrying it out is part of your place there; if you won't, that is said in the scene.
 feed_add_to_the_plan_name_offer: Add to the plan? {{name}}: {{offer}}
 feed_id_orgname_order_for_o_text_status: - [{{id}}] {{orgName}}, order for {{o}}: {{text}} ({{status}})
 feed_a_vote_at_org_put_by_name: - A vote at {{org}}{{#if_m}}, put by {{name}}{{/if_m}}: {{text}}. It closes {{closes}}. You hold {{who}} of the votes; {{#if_mine}}you vote {{vote}}{{#if_rule}} (your standing vote){{/if_rule}}{{/if_mine}}{{^if_mine}}you haven't voted{{/if_mine}}. So far {{who2}}. How you vote counts only when the story tells it.

@@ -2,7 +2,9 @@
 description: The sentences of the changes made to someone's routine, schedule or following in this chat, as the game master reads them, and of how someone follows their routine. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
-  plan_label_*, plan_reason_*, plan_drop_*: the day plan the engine lays for someone - each block's name (sleep, breakfast, time out, see friends, a holiday, a birthday, a meeting, an errand, a visit, work), the reasons given for it, and why a plan was dropped
+  plan_label_*, plan_reason_*, plan_word_they: the day plan the engine lays for someone - each block's name (sleep, breakfast, time out, see friends, a holiday, a birthday, a meeting, an errand, a visit, work, an order), the reasons given for it (utility is the score it won among the options; name is who chose where it was a close call), and plan_word_they for a person whose name is not known
+  reason_*: why a block is in a day plan when a person's own plan or an order put it there (reason_an_order, reason_their_own_plan), and why a plan was dropped (reason_routine_only, reason_no_time_for_it)
+  castlife_decided, castlife_skip: a choice a person's routine made (choice), and a skip planned for people (plans, note)
   fault_*: what is wrong with a routine, a block of one, routine settings or needs settings as written (the problems a write, a proposal or a lint lists) - each is filled with what it names
   castlife_in_chat: a change to someone's routine or schedule in this chat, as the GM reads it - what (the sentence below), story (set where the story made it)
   castlife_follow: how someone follows their routine in this chat - name, parts (the follow_* lines, read as a list); castlife_follow_world when none is set
@@ -115,10 +117,10 @@ plan_reason_a_close_friend: a close friend
 plan_label_birthday: Birthday
 plan_reason_their_birthday: their birthday
 plan_label_a_friend_s_birthday: A friend's birthday
-plan_reason_close_call: close call
+plan_reason_close_call: a close call between options, settled by chance
 plan_word_they: they
-plan_reason_close_call_chose: close call, {{name}} chose
-plan_reason_utility: utility {{utility}}
+plan_reason_close_call_chose: a close call between options, and {{name}} chose
+plan_reason_utility: it scored {{utility}} against the other options
 plan_label_with: With {{host}}
 plan_label_busy: Busy
 plan_reason_their_own_business: their own business

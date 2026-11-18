@@ -1,5 +1,5 @@
 ---
-description: The sentences a fight's own narrator lines and notes say - a fight starts, fighters join, a round and whose turn it is, a fighter acts, spends, goes down or gets up, the player's character is out of it, the fight peters out, breaks off, is over or is decided; and what the narrator is told to do with it. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
+description: The sentences a fight's own narrator lines and notes say - a fight starts, fighters join, a round and whose turn it is, a fighter acts, spends, goes down or gets up, the player's character is out of it, the fight peters out, breaks off, is over or is decided; and the closing line that says the engine settled what the lines above it tell. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
   fight_start: a fight began - party, foes
@@ -12,9 +12,9 @@ keys:
   fight_left: the player's character left the fight
   fight_stalemate: the fight petered out
   fight_broke_off: the fight broke off as time moved on
-  fight_over: the fight is over - won or lost, from the player's side
+  fight_over: the fight is over - won (the player's side won) or lost (it lost); neither where it ended with no winner
   fight_decided: a fighter decided - choice
-  fight_*: what a fight's own narrator lines and notes say (a fight starts, a round and whose turn, you are out of it, it peters out or is over) and what the narrator is told to do with it; each is filled with what it names
+  fight_*: what a fight's own narrator lines and notes say (a fight starts, a round and whose turn, you are out of it, it peters out or is over) and what the narrator is told of the turn it reads them in; each is filled with what it names
 ---
 fight_start: A fight: {{party}} against {{foes}}
 fight_join: {{who}} joined the fight
@@ -34,7 +34,7 @@ fight_the_fight_is_over_your_side_won: The fight is over{{#if_party}}: your side
 fight_a_fight_starts_initiative_names: A fight starts. Initiative: {{names}}.
 fight_you_are_out_of_the_fight_it: You are out of the fight; it goes on (round {{round}}).
 fight_round_round_your_turn_left_left: Round {{round}}, your turn{{#if_left}}: {{left}} left{{/if_left}}.
-fight_narrate_the_fight_in_this_order_add: Narrate the fight in this order; add no other attacks, hits or damage.
+fight_narrate_the_fight_in_this_order_add: The attacks, hits and damage above are what the engine settled this turn, in the order they came.
 fight_the_fight_is_over: The fight is over.
 fight_current_of_max_left:  ({{current}}{{#if_max}} of {{max}}{{/if_max}} left)
 fight_round_round: Round {{round}}.

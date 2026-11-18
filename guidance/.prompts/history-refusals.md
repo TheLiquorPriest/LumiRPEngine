@@ -759,7 +759,6 @@ why_someone_has_attacked_or_been_hurt_since: someone has attacked or been hurt s
 why_a_decision_needs_a_key_and_a: a decision needs a key and a choice
 why_no_one_is_left_to_take_a: no one is left to take a turn
 why_need_needs_an_entity_a_known_need: need needs an entity, a known need and a delta
-why_decision_needs_key_and_choice: decision needs key and choice
 why_invitation_needs_an_agent: invitation needs an agent
 why_a_routine_setting_names_someone_in_the: a routine setting names someone in the world
 why_a_routine_setting_is_a_mode_an: a routine setting is a mode, an awareness, a role, a skip life or some of them, or null to clear it

@@ -6,6 +6,11 @@ keys:
   word_penalty_*: the tax named in a penalty tax's memo (word_penalty_phc, word_penalty_aet)
   list_and: how a list is read, the last item after the others - head (the others, with commas), last; list_or reads a choice the same way
   word_*, mind_how_*, mind_belief_*: the single words and phrases the lines above are filled with (a delinquency stage, an account's status, an entry on a credit report, a pay basis, what was done to a card or a standing payment, a party tier, how a holding is held and believed, whose a line is)
+  feed_org_type_*, feed_role_*, feed_worn_*, feed_mood_*, feed_source_*: the single words the narrator's lines are filled with (an organization's type, someone's role on an account, where a worn thing is, a season's mood, where a fact came from)
+  feed_tier_frame_*: how an order reads to someone in the party at each tier (core, companion, hired, ally)
+  feed_fact_*: the verb of a vote or an approval, in the form for the player's character (you) or for someone else
+  org_motion_ended_*: how a motion ended (carried, failed, was withdrawn)
+  span_*: a span of game time - n (a count) for span_day, span_days, span_hour, span_hours and span_minutes; d, h and min (days, hours, minutes) for span_compact_*
 ---
 list_and: {{head}} and {{last}}
 feed_org_type_company: a company
@@ -30,9 +35,9 @@ feed_source_player: from your message
 feed_source_reply: from the story
 feed_source_gm: by the GM
 feed_source_play: on the plan
-feed_tier_frame_core: You treat it as binding: carry it out as yourself; if you object, say so in the scene, then do it.
-feed_tier_frame_companion: Weigh it in character: you may take it on or refuse, and say so in the scene.
-feed_tier_frame_hired: It's part of the work you're paid for: get it done.
+feed_tier_frame_core: You treat it as binding: you carry it out as yourself and, if you object, say so in the scene first.
+feed_tier_frame_companion: You weigh it in character: you may take it on or refuse, and say so in the scene.
+feed_tier_frame_hired: It's part of the work you're paid for, so you get it done.
 feed_tier_frame_ally: It's a favour asked of you: you may agree to it or not.
 feed_fact_for: {{#you}}vote for{{/you}}{{^you}}votes for{{/you}}
 feed_fact_against: {{#you}}vote against{{/you}}{{^you}}votes against{{/you}}

@@ -7,6 +7,13 @@ keys:
   seat_taken: someone takes a seat - who, title
   seat_incident: the player's group has a new holder of a seat - who (absent where the player may not know them), title, org
   org_log_*: what an organization's own History says it did (admitting, removing, appointing, delegating, renaming, a vote or a request and its end, founding, restructuring, winding up, merging, entry and keys, hiring, pay, a party's changes) and the phrases those fill in, and what an act for an organization records beside its effects (a payment, a sale, a loan, a project's step, a property's let or sale); each is filled with what it names
+  org_entry_*, org_trespass: a place's entry or keys changing as the History records it, and someone entering a place without leave - place, what, name
+  org_request_*, org_the_gm: a request for approval as asked, approved, denied or withdrawn - by, approver, org, text, why, who - and the GM as the one who answered
+  org_motion_*, org_vote, org_abstain: a motion put to a vote, a vote or an abstention, and how a motion ended - by, org, text, closes, who, you (true where the voter is the player), vote, ended, why
+  org_config_*: an organization setting following the world's again, off or on in this chat - key
+  org_spent, org_op_let: what an act records beside its effects, money spent for an organization and a power let to someone - who, amount, org; by, to, powers, limits, until
+  plan_*: a plan's goals and orders as the History records them (a goal, an order, a plan's status, an order due by its day as laid) - text, id, status
+  reason_*: why a power, an account or a position is refused, and how a vote ended - name, power, account, target, title, at, counted, cast, quorum
 ---
 seat_succeeds: {{who}} succeeds {{was}} as {{title}}
 seat_taken: {{who}} takes the seat of {{title}}

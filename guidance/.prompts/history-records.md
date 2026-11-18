@@ -2,7 +2,11 @@
 description: The engine's own record lines, one per kind of record, as the game master's and the author's views and the player's journal show them (a field set, a number added, a link made or ended, a quest stage, a clock, a time lapse, a roll, a check, a thing made or removed, a class or a life change, a thing told, a workspace change and the rest), and the lines of what changed in a draft, a regard, a need or a story flag. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
-  ev_set: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - what each names is in the line itself
+  ev_*: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - each is filled with what it names (ev_set - name, field, value, atMost; ev_add - name, field, delta; ev_link and ev_unlink - from, rel, to; ev_roll - actor, action, outcome, rolled, why; ev_check - actor, check, outcome, total, dc)
+  need_eased, need_rose: a need eased or rose - you (true where it is the player's), name, need
+  story_flag: the record line of a story flag - name
+  regard_*: what changed in someone's regard - by, whose, axis, to, moved, parts
+  draft_*: what changed in a world draft - how, what, from, to, map, place
 ---
 ev_set: {{name}}: {{field}} {{#value}}is {{#atMost}}at most{{/atMost}}{{^atMost}}now{{/atMost}} {{value}}{{/value}}{{^value}}changed{{/value}}
 ev_add: {{name}}: {{field}} {{delta}}

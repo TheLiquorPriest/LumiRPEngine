@@ -16,13 +16,13 @@ keys:
   card_penalty_lifted: six payments on time, so the penalty rate ends - name
   card_payment_late: the minimum was not paid by its day (the first miss) - name, short, fee, penalty
   card_payment_30: thirty days late - name, short, days, fee, penalty
-  card_payment_60: sixty days late - the same
-  card_payment_90: ninety days late - the same
-  card_payment_120: sent to collections - the same
-  card_payment_collections: still in collections - the same
-  card_payment_charged_off: charged off - the same
+  card_payment_60: sixty days late - name, short, days, fee, penalty
+  card_payment_90: ninety days late - name, short, days, fee, penalty
+  card_payment_120: sent to collections - name, short, fee, penalty
+  card_payment_collections: still in collections - name, short, fee, penalty
+  card_payment_charged_off: charged off - name, short, fee, penalty
   flow_paid: a standing payment went out - label, amount, offscreen or world (where it was set up)
-  flow_received: a standing payment came in - the same
+  flow_received: a standing payment came in - label, amount, offscreen or world (where it was set up)
   flow_partial: only part of a standing payment was paid - label, part, amount
   flow_retry: a standing payment did not go through and is tried again - label, amount
   flow_fallback: a standing payment was paid from another account - label, amount, from
@@ -31,13 +31,20 @@ keys:
   flow_why_failed: why, when no reason came with it
   loan_paid_off: a loan between two parties is paid off - borrower, lender
   payday: a paycheck - net, gross (absent where nothing was withheld)
-  invoice_late: an invoice the player owes is late - memo, business (absent where it is hidden from the player), days, amount
-  invoice_late_owner: an invoice a business is owed is late - memo, customer (absent where it is hidden), days, amount
+  invoice_late: an invoice the player owes is late - memo, business (absent where it is hidden from the player), days, one (true where days is 1), amount
+  invoice_late_owner: an invoice a business is owed is late - memo, customer (absent where it is hidden), days, one (true where days is 1), amount
   bond_matured: a bond matured - asset, paid, coupon (absent where none)
   option_exercised: an option was exercised at expiry - asset, value
   option_expired: an option expired worthless - asset
   project_wait_start: a project's step cannot start until its money can be paid - project, step, amount, reason
-  project_wait_finish: a project's step cannot finish until its money can be paid - the same
+  project_wait_finish: a project's step cannot finish until its money can be paid - project, step, amount, reason
+  money_*: the lines of the money summary and the books' notes (a worth no longer fixed or its band, prices up or back to normal, a statement closed, a card payment, a delinquency stage, a standing payment's outcome or new name, a hold, a credit report entry or score, card spending, accounts opened or closed, an account's status, an interest period, a declined payment, a year closed, a foundation's marks and taxes, a dividend, a penalty tax) - each is filled with what it names
+  project_*: a project in the books (started, a step waiting for its money, a step started or done, paused, resumed, dropped, a note on it) - project, step, amount, note, text
+  business_*, asset_*, stake_*, stream_*, income_*: what the books call a business's sales and draws, an asset's quote, yield, listing, close and month-end, a stake sold or bought, a revenue stream earned or adjusted, and the income a holding or a source pays - each is filled with what it names
+  payslip, worked_hours, commission, unemployment_accrued, suta_paid, futa_paid, estimated_tax, profit_goes_to, option_qty_exercised, holding_units, donation, depletion_of, depreciation_of, trust_distributed, cash_rule_*: the books' lines for pay and what it owes, an owner's profit, an option's units, a holding, a donation, an asset written down, a trust's payout and the cash rule in this chat - each is filled with what it names
+  econ_*, fin_*: the economy's own pieces of other lines and records (who a payment goes between, what was bought or sold, a standing payment ended, winding up begun, a market and an investor, an option exercised or matured, a tax named, what a company's holders got in a deal) - each is filled with what it names
+  reason_*: why a business's money has nowhere to be, how many days an account is late, a price corrected
+  feed_prices_at: the narrator's prices at a place - place, taxed (absent where none), offers
 ---
 credit_approved: Approved: a {{product}}{{#apr}} at {{apr}}% APR{{/apr}}{{#limit}} with a {{limit}} limit{{/limit}}.
 credit_declined: The application for a {{product}} was declined: {{reason}}.

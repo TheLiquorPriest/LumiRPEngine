@@ -3,6 +3,8 @@ description: What the engine says of what it did or could not do, apart from a r
 format: lines
 keys:
   eng_*: what the engine says of what it did or could not do, apart from a refused change (the turn's beats, a formula or dice that does not read, a selector or a field value that does not fit, a ruleset or a world draft that is wrong, what a thing's provenance reads, a thing tidied, what someone may not do for an organization) - each is filled with what it names
+  eng2_*: more of what the engine says apart from a refused change (what happens in a beat, an item that replaces another, a private possessive, a name followed by you, a number below or above its bounds, a spawn's path, a basic need, a world's info or lore entry, a routine's block, a sum rounded or the default one) - each is filled with what it names
+  reason_*: why a thing does not fit where it was put (too big to carry or to go in something, a vehicle that goes only on another vehicle, a thing made in play or missing from the world's draft, a place skipped) - each is filled with what it names
 ---
 eng_taking_minutes: , taking {{minutes}}
 eng_what_changed_changes:  What changed: {{changes}}.
@@ -11,7 +13,7 @@ eng_what_the_result_is_decided_outcome_took: {{what}}: the result is decided —
 eng_time_passes_until_its_interrupted_text: Time passes until it's interrupted: {{text}}.
 eng_time_passes_until_mindname_someone_steps_in: Time passes until {{#mindName}}{{mindName}}{{/mindName}}{{^mindName}}someone{{/mindName}} steps in; how they do is in the Minds section.
 eng_time_passes: Time passes.
-eng_the_players_message_fills_this_time_fill:  The player's message fills this time: “{{fill}}”. Narrate that as what the player character does in it.
+eng_the_players_message_fills_this_time_fill:  The player's message fills this time: “{{fill}}”, what the player character does in it.
 eng_span_filled_what_else_happened_in_it: {{span}}{{filled}} What {{#if_filled}}else {{/if_filled}}happened in it is in the Montage.
 eng_name_is_doing: {{name}} is {{doing}}.
 eng_you_are_due_to_be_doing_from: You are due to be {{doing}} from {{minuteOfDay}} (in {{clock}}).
@@ -179,7 +181,7 @@ eng_drop_is_merged_into_keep: {{drop}} is merged into {{keep}}.
 eng_took_this_line_out_of: took this line out of
 eng_rewrote_this_line_in: rewrote this line in
 eng_as_text:  as "{{text}}"
-eng_the_last_turns_final_review_how_the: The last turn's final review {{how}} the narrator's {{part}} section{{then}}: "{{line}}". A line it can't use often means the things are wrong: look at what it names.
+eng_the_last_turns_final_review_how_the: The last turn's final review {{how}} the narrator's {{part}} section{{then}}: "{{line}}". A line the review can't use often means the things it names are wrong.
 eng_staff_only: Staff only
 eng_members_only: Members only
 eng_private: Private
