@@ -20,23 +20,25 @@ A value set on a group reaches its members unless a member has their own: the wa
 
 ## The everyday changes
 
-- **Who belongs, a title, a position:** these are the engine's own records of a group, and its actions make them. Words about a person (a `set`, a `fact` on the person or on the crew) do not make anyone a member: the player's Orgs page, who may do what and the group's History read the record, not your words. Carry the action out with the `world_apply` operation `act`. Outside `params`, `who` is the one who does it, and what the action asks for and did not find is told in the answer; it is carried out all the same. Say why, in a line.
+- **Who belongs, a title, a position:** these are the engine's own records of a group, made by its actions, carried out with the `world_apply` operation `act`. Words about a person (a `set`, a `fact` on the person or on the crew) do not make anyone a member: the player's Orgs page, who may do what and the group's History read the record, not your words. In the call, `who` is the one who does it, and `params` holds what the action takes. Say why, in a line.
   - `org_admit` takes someone in, with a title or a position (`org`, `who`, `title`, `position`). Captain Hale takes Mara on as a deckhand; she is then a member of the crew with the title Deckhand, and the crew's History has the line:
 
     ```
     world_apply {"operations": [{"op": "act", "action": "org_admit", "who": "Captain Hale", "params": {"org": "The Ferry Crew", "who": "Mara", "title": "Deckhand"}, "source": {"from": "prose", "message": "m-0420"}}]}
     ```
 
-  - Also: `org_leave` (the call's `who` leaves; `org`), `org_remove` (`org`, `who`), `org_title` (`org`, `who`, `title`, none to take it away), `org_appoint` (`org`, `who`, `position`, none to take them out of one), `org_position` (a position of the group itself: `org`, `title`, `powers`, `seats`). Every action of the engine has an id, and `checks_odds` (found with `tool_search`) lists them, with what each takes, when it is given an id the world does not have.
-- **How people stand with a group or with each other:** `world_apply` with `relate`: standing, trust, a debt of honour, a grudge. A talk or a present between two people is an action of its own (`chat_with`, `give_gift`), carried out with `act` as above; the skill `time` says what a talk meets.
-- **Pay, dues, shares:** money moves with `pay`, like any payment. What each member pays in, how often an organization pays its staff and sharing out its money are actions of their own (`org_dues`, `org_pay_schedule`, `org_share_out`), and taking someone on for pay is `job_hire`, carried out the same way. A wage that falls due shows in what time brings due (the skill `time`).
-- **A place that only members may enter:** the entry rule belongs to the place and names the group. Who holds a key is a fact of the key.
+  - Also: `org_leave` (`org`; the call's `who` is the one who leaves), `org_remove` (`org`, `who`), `org_title` (`org`, `who`, `title`; no title takes it away), `org_appoint` (`org`, `who`, `position`; no position takes them out of one), `org_position` (a position of the group itself: `org`, `title`, `powers`, `seats`). Taking someone on for pay is `job_hire`; the rest of work and pay is in the skill `economy`.
+  - A requirement of the action that does not hold (the doer may not admit members) is told in the answer, and the action is carried out all the same; `SIMULATION.md` says what to do with that report. `act` passes no time. `world_query` at `ruleset` lists every action the world has; a call that leaves out what its action asks for is answered with what it needs.
+- **How people stand with a group or with each other:** `world_apply` with `relate`: standing, trust, a debt of honour, a grudge. A talk or a present between two people is an action of its own (`chat_with`, `give_gift`), carried out with `act`; the skill `time` says what a talk meets.
+- **Pay, dues, shares:** money moves with `pay`, like any payment. What each member pays in, how often an organization pays its staff and sharing out its money are actions of their own (`org_dues`, `org_pay_schedule`, `org_share_out`), carried out with `act`. A wage that falls due shows in what time brings due (the skill `time`).
+- **A place that only members may enter:** the action `org_entry` (`org`, `place`, `entry`, `keys`) sets who may enter one of the group's places, and its keys. Who holds a key is a fact of the key.
+- **A group's own affairs:** a name (`org_rename`), its structure (`org_restructure`, `org_merge`, `org_wind_up`), a power given for a time or taken back (`org_delegate`, `org_revoke`), how it decides (`org_decisions`, `org_vote_rule`), what its plan holds (`org_goal`, `org_order`, `org_plan_status`). A party: `party_name`, `party_tier`, `party_purse`, `party_hire`.
 
 ## A group that acts
 
 A group does not act by itself. Someone in it decides, by the powers of their position, and others carry it out.
 
-- For a decision that matters, say who made it and by what right.
+- For a decision that matters, say who made it and by what right. A vote is the action `org_vote` (`org`, `motion`, `vote`), a motion withdrawn is `org_motion_end`, and a request for approval is answered with `org_approve` or `org_deny` (`org`, `request`).
 - For what the group does off stage over time, the Author says what it was after; you record what changed: who moved where, what was spent, who now stands how with whom.
 
 ## A new group
