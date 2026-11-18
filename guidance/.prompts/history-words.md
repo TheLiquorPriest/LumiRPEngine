@@ -190,3 +190,15 @@ word_outside_kind_seller: Seller
 word_outside_kind_market: Market
 word_outside_kind_tenant: Outside tenant
 word_outside_kind_closing: Closing
+word_plan: Plan
+word_op_found: found an organization
+word_op_issue_shares: issue shares
+word_op_buy_back_shares: buy back shares
+word_op_list_a_company: list a company on a market
+word_op_take_a_company_off: take a company off a market
+word_op_wind_up: wind up a company
+word_op_merge: merge companies
+word_op_change_exempt: change a tax-exempt status
+word_op_consolidate: file a consolidated return
+word_op_run_projects: run production projects
+word_op_lend_money: lend money

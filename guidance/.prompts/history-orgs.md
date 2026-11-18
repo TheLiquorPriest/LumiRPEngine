@@ -315,3 +315,5 @@ reason_the_trustees_of_name_decide_together: The trustees of {{name}} decide tog
 reason_carried_counted: carried: {{counted}}
 reason_voted_down_counted: voted down: {{counted}}
 reason_no_quorum_cast_took_part_quorum: no quorum: {{cast}} took part, {{quorum}} needed
+plan_status_text: {{status}}: {{text}}
+org_op_let: {{by}} let {{to}} {{powers}}{{#limits}}, up to {{limits}}{{/limits}}{{#until}}, until {{until}}{{/until}}

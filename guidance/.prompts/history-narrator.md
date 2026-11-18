@@ -152,3 +152,7 @@ feed_shows_depiction: Shows: {{depiction}}.
 feed_today_is_holidays: Today is {{holidays}}.
 feed_not_with_you: Not with you: {{thing}}
 feed_you_dont_know_where: you don't know where
+feed_the_rest_of_the_plan: - The rest of the plan: {{who}}: {{text}} ({{status}}).
+feed_tally: {{for}} for, {{against}} against, {{abstain}} abstaining{{#yet}}; not yet voted: {{yet}}{{/yet}}; it needs {{quorum}} to take part and more than {{pass}} of the votes cast for it
+feed_you_asked_approval: - You asked approval for {{org}}: {{text}} ({{why}}). It waits on {{approvers}}.
+feed_waiting_for_approval_at: - Waiting for approval at {{org}}, asked by {{by}}: {{text}} ({{why}}); {{approvers}} may approve it.

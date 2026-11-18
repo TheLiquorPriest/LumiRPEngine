@@ -21,7 +21,7 @@ import { refFor } from "./agenda";
 import { answerEvents, approversOf, orgsWithRequests, requestsOf, requestState } from "./approvals";
 import { castsFor, electorateOf, motionsOf, orgsWithMotions, povIn, rulesOf, voteEvents } from "./motions";
 import { entityNamed, personNamed, statesChange } from "./story";
-import { say } from "../../../engine/lines";
+import { say, orOf } from "../../../engine/lines";
 
 /** The latest closed motions and answered requests the page shows. */
 const RECENT = 10;
@@ -168,7 +168,7 @@ function standingWords(ctx: ReadContext, m: Motion, viewer: EntityId | null): st
   const t = tallyOf(m);
   const yet = Object.keys(m.electorate).filter((v) => m.votes[v] === undefined);
   const names = yet.map((v) => refFor(ctx, viewer, v).name);
-  return `${pctWords(t.for)} for, ${pctWords(t.against)} against, ${pctWords(t.abstain)} abstaining${names.length > 0 ? `; not yet voted: ${names.join(", ")}` : ""}; it needs ${pctWords(m.quorum)} to take part and more than ${pctWords(m.pass)} of the votes cast for it`;
+  return say("feed_tally", { for: pctWords(t.for), against: pctWords(t.against), abstain: pctWords(t.abstain), yet: names.length > 0 ? names.join(", ") : undefined, quorum: pctWords(m.quorum), pass: pctWords(m.pass) });
 }
 
 /**
@@ -191,7 +191,7 @@ export function decisionMindLines(ctx: ReadContext, who: EntityId): string[] {
     if (orgTypeOf(ctx, org) === null) continue;
     for (const r of requestsOf(ctx.state, org)) {
       if (requestState(ctx, r) !== "asked") continue;
-      if (r.by === who) out.push(`- You asked approval for ${labelOf(ctx, org)}: ${r.text} (${r.why}). It waits on ${r.approvers.map((a) => refFor(ctx, who, a).name).join(" or ")}.`);
+      if (r.by === who) out.push(say("feed_you_asked_approval", { org: labelOf(ctx, org), text: r.text, why: r.why, approvers: orOf(r.approvers.map((a) => refFor(ctx, who, a).name)) }));
       else if (approversOf(ctx, org, r).includes(who)) out.push(say("feed_name_asks_your_approval_for_org_text", { name: refFor(ctx, who, r.by).name, org: labelOf(ctx, org), text: r.text, why: r.why }));
     }
   }
@@ -217,7 +217,7 @@ export function decisionNarratorLines(ctx: ReadContext): string[] {
     if (orgTypeOf(ctx, org) === null) continue;
     for (const r of requestsOf(ctx.state, org)) {
       if (requestState(ctx, r) !== "asked" || !(r.by === pov || approversOf(ctx, org, r).includes(pov))) continue;
-      out.push(`- Waiting for approval at ${labelOf(ctx, org)}, asked by ${refFor(ctx, pov, r.by).name}: ${r.text} (${r.why}); ${r.approvers.map((a) => refFor(ctx, pov, a).name).join(" or ")} may approve it.`);
+      out.push(say("feed_waiting_for_approval_at", { org: labelOf(ctx, org), by: refFor(ctx, pov, r.by).name, text: r.text, why: r.why, approvers: orOf(r.approvers.map((a) => refFor(ctx, pov, a).name)) }));
     }
   }
   return out.length > 0 ? [...out, say("feed_show_a_vote_or_an_answer_only")] : [];

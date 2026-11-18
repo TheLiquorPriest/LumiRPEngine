@@ -20,7 +20,7 @@ import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
-import { say } from "../../../engine/lines";
+import { say, listOf, wordOf } from "../../../engine/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
@@ -139,7 +139,7 @@ function duesNow(ctx: ReadContext, org: EntityId): { every: (typeof DUES_EVERY)[
 
 /** An effect another lane's pack registers (shares, founding, entry, the party), or why this world can't run it. */
 function needs(ctx: ReadContext, type: string, what: string): Rejection | null {
-  return ctx.registry.effects.has(type) ? null : refuse("not_available", say("why_this_world_cant_type", { type: what }));
+  return ctx.registry.effects.has(type) ? null : refuse("not_available", say("why_this_world_cant_type", { type: wordOf("op", what) }));
 }
 
 /** The op's effects, or why not. */
@@ -147,7 +147,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
   const name = (id: EntityId): string => labelOf(ctx, id);
   switch (op.do) {
     case "found": {
-      const missing = needs(ctx, "orgs.found", "found an organization");
+      const missing = needs(ctx, "orgs.found", "found");
       if (missing) return missing;
       // An organization founding another names itself as `founder` (a subsidiary, a trust it settles, a nonprofit; no actor, so no power or votes asked); a person founds as themselves.
       const founder: JsonObject = orgTypeOf(ctx, op.founder) !== null ? { founder: op.founder } : { by: op.founder };
@@ -209,7 +209,7 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       if (typeof until === "object") return until;
       const fields: JsonObject = { powers: op.powers, ...(op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}), ...(op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}), ...(op.accounts !== undefined ? { accounts: op.accounts } : {}), by: op.by };
       const limits = [...(op.payment !== undefined && op.payment > 0 ? [say("org_log_currency_a_payment", { currency: money(ctx, op.payment) })] : []), ...(op.month !== undefined && op.month > 0 ? [say("org_log_currency_a_month", { currency: money(ctx, op.month) })] : [])];
-      const text = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => powerWords[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
+      const text = say("org_op_let", { by: name(op.by), to: name(op.to), powers: op.powers.map((p) => powerWords[p]).join(", "), limits: limits.length > 0 ? listOf(limits) : undefined, until: op.until !== undefined ? op.until.slice(0, 10) : undefined });
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...(until !== undefined ? { until } : {}) } },
@@ -245,12 +245,12 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       return [{ type: "economy.job_raise", args: { job: op.job, ...(op.rate !== undefined ? { rate: Math.round(op.rate) } : { pct: op.pct ?? 0 }) } }, ...(job.org !== null && rate > 0 ? [historyLine(job.org, say("org_log_set_worker_s_pay_to_rate", { worker: name(job.worker), rate: money(ctx, rate) }), { names: [job.worker] })] : [])];
     }
     case "issue": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.shares_issue", "issue shares");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.shares_issue", "issue_shares");
       if (missing) return missing;
       return [{ type: "economy.shares_issue", args: { business: op.org, to: op.to, units: Math.round(op.units), price: Math.round(op.price), ...(op.class !== undefined ? { class: op.class } : {}), ...(op.from !== undefined ? { from: op.from } : {}) } }];
     }
     case "buy_back": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.shares_buy_back", "buy back shares");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.shares_buy_back", "buy_back_shares");
       if (missing) return missing;
       return [{ type: "economy.shares_buy_back", args: { business: op.org, from: op.from, units: Math.round(op.units), price: Math.round(op.price) } }];
     }
@@ -262,12 +262,12 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       return [{ type: "economy.stake_sell", args: { business: op.org, party: op.from, buyer: op.to, ...(op.units !== undefined ? { units: Math.round(op.units) } : {}), ...(op.pct !== undefined ? { share: op.pct } : {}), price: Math.round(op.price ?? 0) } }];
     }
     case "list": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.list", "list a company on a market");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.list", "list_a_company");
       if (missing) return missing;
       return [{ type: "economy.list", args: { business: op.org, units: Math.round(op.units), ...(op.price !== undefined ? { price: Math.round(op.price) } : {}), ...(op.symbol !== undefined ? { symbol: op.symbol } : {}) } }];
     }
     case "delist": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.delist", "take a company off a market");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.delist", "take_a_company_off");
       if (missing) return missing;
       return [{ type: "economy.delist", args: { business: op.org, ...(op.price !== undefined ? { price: Math.round(op.price) } : {}) } }];
     }
@@ -307,12 +307,12 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       return [{ type: "orgs.restructure", args: { org: op.org, structure: op.structure } }];
     }
     case "wind_up": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "orgs.wind_up", "wind up a company");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "orgs.wind_up", "wind_up");
       if (missing) return missing;
       return [{ type: "orgs.wind_up", args: { org: op.org, ...(op.stage !== undefined ? { stage: op.stage } : {}), ...(op.property !== undefined ? { property: op.property } : {}), ...(op.to !== undefined ? { to: op.to } : {}), ...(op.why !== undefined ? { why: plainWords(op.why) } : {}) } }];
     }
     case "merge": {
-      const missing = orgProblem(ctx, op.org) ?? orgProblem(ctx, op.into) ?? needs(ctx, "orgs.merge", "merge companies");
+      const missing = orgProblem(ctx, op.org) ?? orgProblem(ctx, op.into) ?? needs(ctx, "orgs.merge", "merge");
       if (missing) return missing;
       return [{ type: "orgs.merge", args: { org: op.org, into: op.into, ...(op.ratio !== undefined ? { ratio: op.ratio } : {}), ...(op.cash !== undefined ? { cash: Math.round(op.cash) } : {}), ...(op.from !== undefined ? { from: op.from } : {}), ...(op.keep === true ? { keep: true } : {}), ...(op.why !== undefined ? { why: plainWords(op.why) } : {}) } }];
     }
@@ -322,14 +322,14 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       return [{ type: "orgs.rename", args: { org: op.org, name: plainWords(op.name) } }];
     }
     case "tax_status": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.tax_status", "change a tax-exempt status");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.tax_status", "change_exempt");
       if (missing) return missing;
       const row = op.status === null ? undefined : ctx.tables.get("economy.exempt")?.rows[op.status];
       const words = op.status === null ? say("org_log_no_longer_exempt_from_income_tax") : say("org_log_exempt_from_income_tax_as_status", { status: strOf(row?.name, op.status) });
       return [{ type: "economy.tax_status", args: { org: op.org, status: op.status ?? "" } }, historyLine(op.org, words)];
     }
     case "consolidate": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.consolidate", "file a consolidated return");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.consolidate", "consolidate");
       if (missing) return missing;
       return [{ type: "economy.consolidate", args: { org: op.org, elect: op.elect } }, historyLine(op.org, op.elect ? say("org_log_elected_to_file_one_consolidated_return") : say("org_log_stopped_filing_a_consolidated_return"))];
     }
@@ -359,12 +359,12 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
     }
     case "project": {
       // The projects' own effects write their History lines.
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.project_start", "run production projects");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.project_start", "run_projects");
       if (missing) return missing;
       return [{ type: `economy.project_${op.act}`, args: { org: op.org, ...(op.project !== undefined ? { project: op.project } : {}), ...(op.template !== undefined ? { template: op.template } : {}), ...(op.name !== undefined ? { name: plainWords(op.name) } : {}), ...(op.account !== undefined ? { account: op.account } : {}), ...(op.step !== undefined ? { step: op.step } : {}), ...(op.days !== undefined ? { days: Math.round(op.days) } : {}), ...(op.cents !== undefined ? { cents: Math.round(op.cents) } : {}), ...(op.why !== undefined ? { text: plainWords(op.why) } : {}), ...(op.act === "note" ? { source: "gm" } : {}) } }];
     }
     case "lend": {
-      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.lend", "lend money");
+      const missing = orgProblem(ctx, op.org) ?? needs(ctx, "economy.lend", "lend_money");
       if (missing) return missing;
       return [{ type: "economy.lend", args: { who: op.org, to: op.to, cents: Math.round(op.cents), ...(op.apr !== undefined ? { apr: op.apr } : {}), ...(op.months !== undefined ? { months: op.months } : {}), ...(op.from !== undefined ? { from: op.from } : {}) } }, historyLine(op.org, say("org_log_lent_cents_to_name", { cents: money(ctx, op.cents), name: name(op.to) }), { names: [op.to] })];
     }

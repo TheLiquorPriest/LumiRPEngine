@@ -533,7 +533,7 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
     }
     if (tier === "core") {
       const rest = planOf(ctx.state, org).orders.filter((o) => isPlanStatusLive(o.status) && !orders.includes(o));
-      for (const o of rest) out.push(`- The rest of the plan: ${o.to.map((id) => (id === ctx.world.pov ? "the player character" : (own(ctx.state.entities, id)?.name ?? id))).join(", ")}: ${o.text} (${planStatusWords[o.status].toLowerCase()}).`);
+      for (const o of rest) out.push(say("feed_the_rest_of_the_plan", { who: o.to.map((id) => (id === ctx.world.pov ? say("feed_the_player_character") : (own(ctx.state.entities, id)?.name ?? id))).join(", "), text: o.text, status: planStatusWords[o.status].toLowerCase() }));
     }
   }
   return out;
@@ -748,7 +748,7 @@ export function agendaLabel(view: Pick<ReadContext, "registry" | "world" | "stat
   const org = itemOrg(state, strOf(p.org), id);
   const plan = org === null ? null : planOf(state, org);
   const text = (plan?.orders.find((o) => o.id === id) ?? plan?.goals.find((g) => g.id === id))?.text ?? id;
-  return `${isPlanStatus(p.status) ? planStatusWords[p.status] : "Plan"}: ${text}`;
+  return say("plan_status_text", { status: isPlanStatus(p.status) ? planStatusWords[p.status] : say("word_plan"), text });
 }
 
 /**
