@@ -78,6 +78,8 @@ Every command `rpe` has:
 
 Every command takes `--help` (or `-h`): given after a command's name, it prints that command's own usage, with each option, what it takes and its default, and one example where this page has one, and runs nothing. Given alone, or as the word `help`, it prints the usage of every command.
 
+Every command, `rpe migrate` included, reads its line alike: a value is given as `--name value` or `--name=value`, a value that starts with `--` only as `--name=value`, and an option the command does not take is refused by name.
+
 Commands that change something are written by the running RPE when it runs, and by the command itself, under the data folder's lock, when it does not: see [The command line](security.md#the-command-line).
 
 ### The data folder

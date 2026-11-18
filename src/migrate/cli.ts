@@ -6,37 +6,16 @@
 // gives it the file tree's layout: its folder names, its tables and where a chat's own folder is.
 
 import type { Setting } from "../app/setting-list";
+import { type Line, parseArgs, UsageError } from "../app/commands/args";
+import { commandSpec, helpText } from "../app/commands/table";
 import { runtimeFoldersOf } from "./runtime-folders";
 import type { CarriedRuns } from "./import-chats";
 import { migrate } from "./migrate";
 import type { TreeLayout } from "./own-files";
 import { reportText } from "./report";
 
-const USAGE = [
-  "rpe migrate [--rehearse] --lumiverse <folder> --user <id> [--data <folder>]",
-  "            [--runtime-config <folder> --runtime-data <folder>] [--runtime <name> | --no-runtime]",
-  "            [--mine <folder>] [--theirs <folder>] [--identifier <id>] [--json]",
-  "",
-  "  --rehearse          read everything, write nothing, print the report",
-  "  --lumiverse         Lumiverse's data folder (the one holding lumiverse.db)",
-  "  --user              the id of the Lumiverse user whose data moves",
-  "  --data              RPE's data folder: the only place the real run writes (default: RPE's own)",
-  "  --runtime-config    the previous runtime's config folder (default: as the previous runtime finds it, ~/.config/lumiah)",
-  "  --runtime-data      the previous runtime's data folder (default: as the previous runtime finds it, ~/.local/share/lumiah)",
-  "  --runtime           the runtime of the previous build that is this user's (default: the one they registered",
-  "                      with this Lumiverse); every other runtime there is left alone",
-  "  --no-runtime        the server runs no runtime of the previous build for this user",
-  "  --mine <name>       a runtime folder no config names holds this user's working copy (give it again for each folder)",
-  "  --theirs <name>     a runtime folder no config names is not this user's: it is left alone",
-  "  --identifier        the extension's identifier in Lumiverse (default: lumi_rp_engine)",
-  "  --json              print the report as JSON instead of words",
-].join("\n");
-
 /** The extension's identifier as its manifest names it (`spindle.json`). */
 const IDENTIFIER = "lumi_rp_engine";
-
-const VALUED = ["lumiverse", "user", "data", "runtime-config", "runtime-data", "runtime", "identifier", "mine", "theirs"] as const;
-const SWITCHES = ["rehearse", "no-runtime", "json"] as const;
 
 export interface CliIo {
   out(text: string): void;
@@ -54,36 +33,43 @@ export interface CliIo {
  * with its tables.
  */
 export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeLayout, settings?: readonly Setting[], runs?: CarriedRuns): Promise<number> {
-  const values: Record<string, string> = {};
+  const spec = commandSpec("migrate");
+  if (spec === undefined) throw new Error("The table of commands has no command migrate.");
+  const usage = helpText(spec);
+  let line: Line;
+  try {
+    line = parseArgs(argv, "migrate");
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+    io.err(`${error.message}\n\n${usage}`);
+    return 2;
+  }
+  const [word] = line.words;
+  if (word !== undefined) {
+    io.err(`Not understood: ${word}\n\n${usage}`);
+    return 2;
+  }
+  const { flags: values, switches } = line;
+  // A runtime folder no config names is this user's (`--mine`) or not (`--theirs`), by its name; one told both ways is refused.
   const folders: Record<string, "mine" | "theirs"> = {};
-  const switches = new Set<string>();
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i] ?? "";
-    const name = arg.startsWith("--") ? arg.slice(2) : "";
-    const next = argv[i + 1];
-    if ((SWITCHES as readonly string[]).includes(name)) switches.add(name);
-    // A value never starts with `--`: `--data --rehearse` is a folder left out, never a real run into a folder named `--rehearse`.
-    else if ((VALUED as readonly string[]).includes(name) && next !== undefined && !next.startsWith("--")) {
-      const value = argv[++i] ?? "";
-      if (name === "mine" || name === "theirs") {
-        if (folders[value] !== undefined && folders[value] !== name) {
-          io.err(`--mine ${value} and --theirs ${value} say opposite things: give one of them.\n\n${USAGE}`);
-          return 2;
-        }
-        folders[value] = name;
-      } else values[name] = value;
-    } else {
-      io.err(`${(VALUED as readonly string[]).includes(name) ? `--${name} needs a value${next === undefined ? "" : `, and ${next} is an option`}.` : `Not understood: ${arg}`}\n\n${USAGE}`);
-      return 2;
+  for (const kind of ["mine", "theirs"] as const) {
+    for (const value of line.repeated[kind] ?? []) {
+      if (folders[value] !== undefined && folders[value] !== kind) {
+        io.err(`--mine ${value} and --theirs ${value} say opposite things: give one of them.\n\n${usage}`);
+        return 2;
+      }
+      folders[value] = kind;
     }
   }
   const { lumiverse, user, data } = values;
+  // `--data` is `rpe migrate`'s own default folder where the command line does not name one, so it is missing only for a caller that gave none.
+  const missing = [lumiverse === undefined ? "--lumiverse" : "", user === undefined ? "--user" : "", data === undefined ? "--data" : ""].filter((m) => m !== "");
   if (lumiverse === undefined || user === undefined || data === undefined) {
-    io.err(`--lumiverse, --user and --data are needed.\n\n${USAGE}`);
+    io.err(`${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} needed.\n\n${usage}`);
     return 2;
   }
   if (switches.has("no-runtime") && values.runtime !== undefined) {
-    io.err(`--runtime names a runtime to take and --no-runtime says there is none: give one of them.\n\n${USAGE}`);
+    io.err(`--runtime names a runtime to take and --no-runtime says there is none: give one of them.\n\n${usage}`);
     return 2;
   }
   const found = runtimeFoldersOf(io.env, io.home);

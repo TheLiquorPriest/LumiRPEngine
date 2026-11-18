@@ -9,6 +9,7 @@ import { compose } from "../compose";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
 import { gatherSettings } from "../hooks";
 import { rpeServiceOf } from "../up";
+import { type Line, parseArgs, UsageError } from "./args";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
 import { treeLayout } from "./tree-layout";
@@ -24,8 +25,15 @@ import { takeLock } from "./writer";
  * and it holds the data folder's lock for as long as it runs, as the server does.
  */
 export async function migrateCommand(rest: readonly string[], io: CliIO, version: string): Promise<number> {
-  const line = rest.includes("--data") ? rest : [...rest, "--data", defaultDataFolder(io.env, io.home)];
-  const folder = line[line.indexOf("--data") + 1];
+  // The line is read as every command's is. One that is not understood is the migration's to say, with its usage and the exit code 2: it reads the line again.
+  let read: Line | null = null;
+  try {
+    read = parseArgs(rest, "migrate");
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+  }
+  const folder = read?.flags.data ?? defaultDataFolder(io.env, io.home);
+  const line = read?.flags.data === undefined ? [...rest, "--data", folder] : rest;
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
   // Each carried setting is checked as the reader of its own key takes it: against the registry of every area's list, which reaches no Lumiverse.
   const noLumiverse = (): never => {
@@ -38,7 +46,7 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
     // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
     return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
   };
-  if (rest.includes("--rehearse") || folder === undefined || folder.startsWith("--")) return await migrate();
+  if (read === null || read.switches.has("rehearse")) return await migrate();
   const paths = dataPaths(folder);
   const config = await loadConfig(paths, io.env);
   const answer = await serverAnswer(config, io);
