@@ -1,37 +1,26 @@
 // "Map again" (plan §4.8, §13.5, R-27): he asks for his preset's prompt to be mapped afresh. RPE starts the mapper as his own job, tied to
-// no turn; the page names the job, leads to its run on Live, and reads the map again when the job has ended, so what it learned shows
-// and his own edits to the map, which RPH keeps with the preset, stay. Nothing here maps anything itself.
+// no turn; the page follows the job where it started it (running, what it has spent, how it ended), leads to its run on Live, and reads the map
+// again when the job has ended, so what it learned shows and his own edits to the map, which RPH keeps with the preset, stay. Nothing here maps
+// anything itself.
 
-import { useEffect, useState } from "preact/hooks";
-import type { JobState } from "../../../shared/api";
+import { useState } from "preact/hooks";
 import { useApp } from "../../app";
 import { Banner, Button } from "../../../frontend/components";
-import { onChatChange } from "../../live-watch";
+import { jobEnded } from "../../job-watch";
 import { errorWords } from "../../words";
+import { type JobRef, JobFollowLine, useJobFollow } from "../jobs/follow";
 
 /** The mapper's own definition, which "Map again" starts. */
 export const MAPPER = "mapper";
 
-const ENDED: readonly JobState[] = ["done", "failed", "cancelled", "interrupted", "off-path"];
-
-const STATE_WORDS: Readonly<Record<JobState, string>> = {
-  queued: "is waiting to start",
-  held: "is held back",
-  running: "is mapping",
-  asking: "is asking you something",
-  done: "has ended: the map below is what it learned",
-  failed: "failed; RPE's log, on Runtime, says why",
-  cancelled: "was cancelled",
-  "off-path": "ended off the path",
-  interrupted: "was interrupted",
-};
-
 export function MapAgain(props: { chat: string; onLearned(): void }) {
   const app = useApp();
   const { chat } = props;
-  const [job, setJob] = useState<{ id: string; state: JobState } | null>(null);
+  const [job, setJob] = useState<JobRef | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const watched = useJobFollow(job, props.onLearned);
+  const going = job !== null && (watched?.job == null ? job.view === undefined || !jobEnded(job.view.state) : !jobEnded(watched.job.state));
   const start = (): void => {
     if (busy) return;
     setBusy(true);
@@ -39,7 +28,7 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
     app.client.call("POST /api/v1/chats/:chat/jobs", { chat }, { body: { definition: MAPPER, brief: "" } }).then(
       (answer) => {
         setBusy(false);
-        setJob({ id: answer.job.id, state: answer.job.state });
+        setJob({ id: answer.job.id, chat, view: answer.job });
       },
       (error: unknown) => {
         setBusy(false);
@@ -47,27 +36,9 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
       },
     );
   };
-  // The job's state is read again whenever a run of the chat begins or ends, until it has ended; the map is read again once it has.
-  const watching = job !== null && !ENDED.includes(job.state);
-  useEffect(() => {
-    if (!watching) return;
-    const read = (): void => {
-      app.client.call("GET /api/v1/jobs", {}, { query: { chat } }).then(
-        (answer) => {
-          const found = answer.items.find((j) => j.id === job?.id);
-          if (found === undefined) return;
-          setJob({ id: found.id, state: found.state });
-          if (ENDED.includes(found.state)) props.onLearned();
-        },
-        () => undefined,
-      );
-    };
-    read();
-    return onChatChange(app.client, chat, read);
-  }, [chat, watching, job?.id]);
   return (
     <div class="lre-stack" data-map-again>
-      <Button size="sm" busy={busy || watching} onClick={start}>
+      <Button size="sm" busy={busy || going} onClick={start}>
         Map again
       </Button>
       {problem === null ? null : (
@@ -76,12 +47,12 @@ export function MapAgain(props: { chat: string; onLearned(): void }) {
         </Banner>
       )}
       {job === null ? null : (
-        <p class="rpe-line" data-map-job>
-          Your own job {job.id} {STATE_WORDS[job.state]}.{" "}
+        <div class="lre-stack" data-map-job>
+          <JobFollowLine job={job} what="Your own mapping job" afterDone="The map below is what it learned." watched={watched} />
           <Button size="sm" variant="ghost" onClick={() => app.go({ page: "live", chat })}>
             Watch its run on Live
           </Button>
-        </p>
+        </div>
       )}
     </div>
   );

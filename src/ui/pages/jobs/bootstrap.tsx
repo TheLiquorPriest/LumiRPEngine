@@ -30,7 +30,7 @@ function ChatBootstrap(props: { chat: string }) {
       reader.current = null;
     };
   }, [chat]);
-  return <BootstrapView shown={shown} onStart={(choice) => reader.current?.start(choice)} onAnswer={(job, word) => reader.current?.answer(job, word)} onOlder={() => reader.current?.older()} />;
+  return <BootstrapView shown={shown} onStart={(choice) => reader.current?.start(choice)} onAnswer={(job, word) => reader.current?.answer(job, word)} onOlder={() => reader.current?.older()} onJobEnded={() => reader.current?.refresh()} />;
 }
 
 /** The bootstrap of the chat open, or of any chat he picks. */

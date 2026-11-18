@@ -8,6 +8,7 @@ import { useApp } from "../../app";
 import { Banner, Button, Section } from "../../../frontend/components";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
+import { JobFollow } from "./follow";
 
 /** The limits a job may be given of its own: each by the key the route takes it under, and as its field is labelled. */
 export const LIMIT_FIELDS = [
@@ -107,9 +108,10 @@ export function StartSection(props: { chat: string | null; onStarted(job: JobVie
         </Button>
       </div>
       {started === null ? null : (
-        <Banner tone="info" icon="check" title="Started">
-          <span data-started>Job {started.id} ({started.state}) is yours: what it records is yours, placed before the next turn that begins after it ends.</span>
-        </Banner>
+        <div class="lre-stack" data-started>
+          <JobFollow job={{ id: started.id, chat, view: started }} what="Your job" />
+          <p class="rpe-meta">What it records is yours, placed before the next turn that begins after it ends.</p>
+        </div>
       )}
       {problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Not started">

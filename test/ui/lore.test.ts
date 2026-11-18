@@ -18,6 +18,7 @@ function view(over: Partial<LoreViewProps> = {}) {
   const asked: string[] = [];
   const indexing: IndexingShown = { busy: false, job: null, problem: null };
   const props: LoreViewProps = {
+    chat: "c-1",
     index: { items: Array.from({ length: 60 }, (_, i) => row(i + 1)), more: false, loading: false, problem: null },
     query: "",
     status: { entries: 60, unindexed: 0, agent: "indexer", connection: { id: "c1", name: "Flash" }, model: "deepseek-v4-flash" },
@@ -28,6 +29,7 @@ function view(over: Partial<LoreViewProps> = {}) {
     onQuery: (q) => void asked.push(`query:${q}`),
     onMore: () => void asked.push("more"),
     onIndex: () => void asked.push("index"),
+    onIndexEnded: () => void asked.push("indexed"),
     onTurn: (t) => void asked.push(`turn:${t}`),
     ...over,
   };

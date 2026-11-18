@@ -15,6 +15,7 @@ import type { PageEntry } from "../page-entry";
 import { type PagedReading, usePaged, useRead } from "../reading";
 import { bytesWords, counted, errorWords } from "../words";
 import { CarriedOffer } from "./bootstrap";
+import { JobFollow, type JobRef } from "./jobs/follow";
 import { GoingBack } from "./migration-going-back";
 import { ChatLabel, ChatName, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
 
@@ -188,6 +189,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
   const app = useApp();
   const { w } = props;
   const [open, setOpen] = useState(false);
+  const [filing, setFiling] = useState<JobRef | null>(null);
   const split = waitingSplit(w);
   const words = (
     <span class="rpe-line">
@@ -239,6 +241,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
         kind="primary"
         run={async () => {
           const job = await app.client.call("POST /api/v1/chats/:chat/bootstrap", { chat: w.chat }, { body: {} });
+          setFiling({ id: job.id, chat: w.chat, view: job });
           props.onDone();
           return `Started job ${job.id}: the offer below follows it, and starts the rest at once.`;
         }}
@@ -256,6 +259,7 @@ function WaitingLine(props: { w: WaitingOnUser; given: MigrationReply["given"]; 
     <li class="lre-stack" data-waiting={w.kind} data-done={w.done ? "true" : undefined}>
       {w.done ? <s>{words}</s> : words}
       {w.done ? null : press}
+      {filing === null ? null : <JobFollow job={filing} what="The bootstrap job" onEnded={() => props.onDone()} />}
     </li>
   );
 }

@@ -12,6 +12,7 @@ import { EntryBindings } from "../../bindings";
 import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { counted, errorWords } from "../../words";
+import { JobFollow } from "../jobs/follow";
 import { ProjectionSection } from "./projection";
 import { ProposalsSection, WritesSection } from "./proposals";
 import { readIndex, readIndexStatus, readOverlays, startIndexing } from "./read";
@@ -72,6 +73,7 @@ export interface IndexingShown {
 }
 
 export interface LoreViewProps {
+  chat: string;
   index: { items: readonly LoreIndexRow[]; more: boolean; loading: boolean; problem: string | null };
   query: string;
   status: LoreIndexStatus | null;
@@ -82,6 +84,8 @@ export interface LoreViewProps {
   onQuery(query: string): void;
   onMore(): void;
   onIndex(): void;
+  /** The indexing job ended: the index and where it stands are read again. */
+  onIndexEnded(): void;
   onTurn(turn: string): void;
   /** The proposals waiting on him, above the index. */
   top?: ComponentChildren;
@@ -118,7 +122,7 @@ export function LoreView(props: LoreViewProps) {
           <Button busy={props.indexing.busy} disabled={status?.connection === null} onClick={props.onIndex}>
             Index now
           </Button>
-          {props.indexing.job === null ? null : <span class="rpe-meta" data-job>{`Started as job ${props.indexing.job}; it shows on Jobs.`}</span>}
+          {props.indexing.job === null ? null : <JobFollow job={{ id: props.indexing.job, chat: props.chat }} what="The indexing job" onEnded={props.onIndexEnded} />}
         </div>
         {props.indexing.problem === null ? null : (
           <Banner tone="warn" icon="alert" title="RPE did not start it">
@@ -204,6 +208,11 @@ export function LorePage(props: { chat: string }) {
       overlays={overlays.value}
       overlaysProblem={overlays.problem}
       indexing={indexing}
+      chat={chat}
+      onIndexEnded={() => {
+        status.again();
+        index.again();
+      }}
       onQuery={setQuery}
       onMore={index.older}
       onIndex={() => {

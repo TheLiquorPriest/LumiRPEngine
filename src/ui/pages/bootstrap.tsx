@@ -21,6 +21,7 @@ import { counted, errorWords, limitCount, limitName, num, tokenWords, when } fro
 import { numberWords } from "./settings/model";
 import { useSettingView } from "./settings/names";
 import { JOB_STATE_WORDS } from "./jobs";
+import { JobFollow, type JobRef } from "./jobs/follow";
 import { logAt } from "./runtime/logs";
 import { ChatLabel, type ChatNames, NO_NAMES, useChatNames } from "./chat-names";
 
@@ -388,6 +389,8 @@ export interface BootstrapViewProps {
   onStart(choice: StartChoice): void;
   onAnswer(job: string, word: AnswerWord): void;
   onOlder(): void;
+  /** The job a start made has ended: what the page shows of the record is read again. */
+  onJobEnded?(): void;
 }
 
 /** The chat's bootstrap: the six facts, the start, the questions of jobs that wait, and its jobs a page at a time. */
@@ -409,11 +412,11 @@ export function BootstrapView(props: BootstrapViewProps) {
         </Banner>
       )}
       {shown.started === null ? null : (
-        <Banner tone="info" icon="check" title="A bootstrap job began">
-          <span>
-            Job {shown.started.id}, {JOB_STATE_WORDS[shown.started.state].words}.
-          </span>
-        </Banner>
+        <JobFollow
+          job={{ id: shown.started.id, chat: typeof shown.started.scope.chat === "string" ? shown.started.scope.chat : null, view: shown.started }}
+          what="The bootstrap job"
+          {...(props.onJobEnded === undefined ? {} : { onEnded: props.onJobEnded })}
+        />
       )}
       {answer === null ? (
         shown.loading ? (
@@ -491,9 +494,11 @@ export interface OfferShown {
   busy: boolean;
   batch: BootstrapBatchReply | null;
   said: string | null;
+  /** The job a start for one chat made, followed where it was started. */
+  followed: JobRef | null;
 }
 
-const NO_OFFER: OfferShown = { items: [], next: null, loading: true, problem: null, busy: false, batch: null, said: null };
+const NO_OFFER: OfferShown = { items: [], next: null, loading: true, problem: null, busy: false, batch: null, said: null, followed: null };
 
 /** The offer on the Migration page, reading itself: the carried chats with how each bootstrap stands, read again when a job changes. */
 export function CarriedOffer() {
@@ -528,17 +533,17 @@ export function CarriedOffer() {
     );
   };
   const startOne = (chat: string, choice: StartChoice): void => {
-    set({ busy: true, said: null });
+    set({ busy: true, said: null, followed: null });
     app.client.call("POST /api/v1/chats/:chat/bootstrap", { chat }, { body: startBody(choice) }).then(
       (job) => {
-        set({ busy: false, said: `Started job ${job.id} for ${names(chat) ?? chat}.` });
+        set({ busy: false, followed: { id: job.id, chat, view: job }, said: `Started job ${job.id} for ${names(chat) ?? chat}.` });
         setStamp((n) => n + 1);
       },
       (error: unknown) => set({ busy: false, said: errorWords(error) }),
     );
   };
   const startAll = (choice: StartChoice): void => {
-    set({ busy: true, batch: null, said: null });
+    set({ busy: true, batch: null, said: null, followed: null });
     app.client.call("POST /api/v1/bootstrap", {}, { body: { chats: "migrated", ...startBody(choice) } }).then(
       (batch) => {
         set({ busy: false, batch });
@@ -593,11 +598,12 @@ export function OfferView(props: { shown: OfferShown; names?: ChatNames; open?(c
         </Banner>
       )}
       {shown.said === null ? null : <p class="rpe-meta">{shown.said}</p>}
+      {shown.followed === null ? null : <JobFollow job={shown.followed} what="The bootstrap job" />}
       {shown.batch === null ? null : (
         <div class="lre-stack" data-batch="true">
           <span class="rpe-caption">Started ({shown.batch.started.length})</span>
           {shown.batch.started.map((s) => (
-            <Row key={s.chat} k={<ChatLabel chat={s.chat} name={names(s.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />} v={`job ${s.job.id}, ${JOB_STATE_WORDS[s.job.state].words}`} />
+            <Row key={s.chat} k={<ChatLabel chat={s.chat} name={names(s.chat)} {...(props.open === undefined ? {} : { onOpen: props.open })} />} v={`job ${s.job.id}, ${JOB_STATE_WORDS[shown.items.find((i) => i.chat === s.chat && i.job?.id === s.job.id)?.job?.view?.state ?? s.job.state].words}`} />
           ))}
           <span class="rpe-caption">Refused ({shown.batch.refused.length})</span>
           {shown.batch.refused.map((r) => (

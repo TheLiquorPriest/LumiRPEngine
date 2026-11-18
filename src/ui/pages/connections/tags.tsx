@@ -5,6 +5,7 @@
 import type { ConnectionShown, TagCheck, TagCheckStarted } from "../../../shared/api";
 import { Badge, Button } from "../../../frontend/components";
 import { when } from "../../words";
+import { JobFollow } from "../jobs/follow";
 import { refusalWords } from "../jobs/words";
 
 /** One connection's tag check as the page holds it: asking, the job it started, RPH's refusal or the page's problem, and what a form it set said. */
@@ -58,9 +59,9 @@ export function TagCheckShown(props: { view: ConnectionShown; state: TagCheckSta
         </Button>
       </div>
       {state.job === null ? null : (
-        <p class="rpe-meta" data-started>
-          The check is job {state.job}; its result shows here when it ends.
-        </p>
+        <div data-started>
+          <JobFollow job={{ id: state.job, chat: null }} what="The tag check" afterDone="Its result shows above." />
+        </div>
       )}
       {state.said === null ? null : <p class="rpe-meta" data-said>{state.said}</p>}
       {state.refusal === null ? null : <p class="rpe-meta" data-refusal>{state.refusal}</p>}
