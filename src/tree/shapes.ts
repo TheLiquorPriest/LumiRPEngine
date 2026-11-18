@@ -2,7 +2,7 @@
 // held to the tree's own types, so that the pages' types and the API reference say what a page sends and
 // is sent, and a change to one stops this compiling until the declaration says the same.
 
-import type { FileKind, GuidanceKind, PartPreview, StackPart } from "rp-harness/contract";
+import type { FileKind, GuidanceKind, PartPreview, RuleView, StackPart } from "rp-harness/contract";
 import { agentRef, type Exactly, type Holds, hookEvent, type Infer, layerLevel, shape } from "../app";
 import type { TreeFileEntry } from "./catalog";
 import type { DiffLine } from "./defaults";
@@ -158,6 +158,24 @@ export const fileRemovedReply = shape.object({
   removed: field(T, "The path of the file removed; for a shipped file, the path of the one switched off."),
   switchedOff: opt(layerLevel, "For a shipped file: the level whose `stack.off` list now names it. The file itself stays."),
 });
+
+const ruleBase = shape.object({
+  name: T,
+  path: T,
+  level: layerLevel,
+  description: T,
+  agents: shape.union(shape.literal("all"), shape.list(T)),
+  trigger: opt(shape.oneOf("always", "pattern", "question", "moment", "command", "interval")),
+  command: opt(shape.object({ runs: T, state: shape.oneOf("on", "waiting", "off") })),
+  inForce: shape.yesNo(),
+  why: opt(shape.oneOf("off", "needs", "example", "broken", "judge")),
+  judge: opt(shape.oneOf("part", "yes", "connection")),
+  replaces: shape.list(shape.object({ level: layerLevel, path: T })),
+});
+type RuleMirrored = Holds<Exactly<Infer<typeof ruleBase>, RuleView>>;
+export const ruleView = shape.named("RuleView", "A rule as the Rules page lists it: where it is, whom it is for, how it is triggered, a command rule's command and where its switch stands, whether it is in force and why not, and the farther files it replaces.", ruleBase);
+export const ruleSwitchBody = shape.named("RuleSwitch", "On or off, at which level, and the chat for the chat's level.", shape.object({ on: shape.yesNo(), level: shape.oneOf("chat", "global"), chat: opt(T) }));
+export const ruleSwitchedReply = shape.named("RuleSwitched", "The rule as it stands after the switch.", shape.object({ rule: ruleView }));
 
 const guidanceKind = shape.named("GuidanceKind", "A kind of guidance a folder of the tree holds: the agents' definitions, skills, rules, hooks, prompt parts or tools.", shape.oneOf("agents", "skills", "rules", "hooks", "prompts", "tools"));
 type GuidanceMirrored = Holds<Exactly<Infer<typeof guidanceKind>, GuidanceKind>>;
@@ -334,4 +352,4 @@ export const partPreviewReply = shape.named(
 type PreviewMirrored = Holds<Exactly<Infer<typeof partPreview>, PartPreview>>;
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, KindMirrored2, PruneItemMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored, PreviewMirrored];
+export type Mirrors = [KindMirrored, GuidanceMirrored, EntryMirrored, ListedMirrored, ListedPageMirrored, DiffMirrored, StateMirrored, SuggestionMirrored, ChatStorageMirrored, StorageMirrored, KindMirrored2, PruneItemMirrored, NoteMirrored, NotesMirrored, PrunedMirrored, StackMirrored, PreviewMirrored, RuleMirrored];

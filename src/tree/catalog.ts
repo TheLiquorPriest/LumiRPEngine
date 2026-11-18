@@ -11,7 +11,7 @@ import type { FileKind, GuidanceKind, HookEvent, Layer, LayerLevel, SwitchState 
 import { hookEvent } from "../app";
 import { readText } from "../app/disk";
 import { isRecord } from "../shared/json";
-import { yamlMapping } from "../app/yaml";
+import { valuesAt } from "../app/yaml";
 import { type DefaultStanding, type DefaultUpdate, updatesSince } from "./defaults";
 import { walk } from "./files";
 import { CHARACTER_FOLDERS, FILE_KEYS } from "./layout";
@@ -125,16 +125,6 @@ export const OFF_KEY = FILE_KEYS.off;
 const LAYERED_KEY = FILE_KEYS.layered;
 export const PINS_KEY = FILE_KEYS.pins;
 
-/** What a config holds at a dotted key (`stack.off`); undefined where it holds nothing there, or a part on the way is no mapping. */
-export function atKey(doc: Record<string, unknown>, key: string): unknown {
-  let at: unknown = doc;
-  for (const part of key.split(".")) {
-    if (!isRecord(at)) return undefined;
-    at = at[part];
-  }
-  return at;
-}
-
 const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "prompts", "tools"];
 
 /** The folder of the rules that are never in force (RPH: "Under `<rules>/examples/` a rule is listed and never in force"). */
@@ -227,25 +217,34 @@ export async function configText(loc: ChatLocation, layer: Layer): Promise<strin
   return await readText(lookup.at.disk);
 }
 
-/** The names switched off, with the levels that switch each off, and the names layered, from every level's config. A config that does not read as YAML, or a key that is not a list of names, says nothing here; RPH reports it. */
+/**
+ * The names switched off, with the levels that switch each off, and the names layered, from every level's config. A key written twice in
+ * one config (`off` and `"off"`, one key to YAML) holds the names of both. A config that does not read as YAML, or a key that is not a list
+ * of names, says nothing here; RPH reports it.
+ */
 export async function namesInForce(loc: ChatLocation, layers: readonly Layer[] = treeLayers()): Promise<NamesInForce> {
   const names: NamesInForce = { off: new Map(), layered: new Set(), pins: [] };
   for (const layer of layers) {
     const text = await configText(loc, layer);
     if (text === null) continue;
-    let doc: Record<string, unknown>;
+    const where = viewPath(layer.level, [layer.config ?? ""]);
+    let off: unknown[];
+    let layered: unknown[];
+    let pins: unknown[];
     try {
-      doc = yamlMapping(text, viewPath(layer.level, [layer.config ?? ""]));
+      off = valuesAt(text, OFF_KEY.split("."), where);
+      layered = valuesAt(text, LAYERED_KEY.split("."), where);
+      pins = valuesAt(text, PINS_KEY.split("."), where);
     } catch {
       continue;
     }
-    for (const name of nameList(atKey(doc, OFF_KEY)) ?? []) {
+    for (const name of off.flatMap((v) => nameList(v) ?? [])) {
       const item = writtenItem(name, layers);
       const levels = names.off.get(item) ?? [];
       if (!levels.includes(layer.level)) names.off.set(item, [...levels, layer.level]);
     }
-    for (const name of nameList(atKey(doc, LAYERED_KEY)) ?? []) names.layered.add(writtenItem(name, layers));
-    for (const pin of pinRecords(atKey(doc, PINS_KEY)) ?? []) names.pins.push({ file: pinPath(pin.file), agent: pin.agent.trim(), level: layer.level });
+    for (const name of layered.flatMap((v) => nameList(v) ?? [])) names.layered.add(writtenItem(name, layers));
+    for (const pin of pins.flatMap((v) => pinRecords(v) ?? [])) names.pins.push({ file: pinPath(pin.file), agent: pin.agent.trim(), level: layer.level });
   }
   return names;
 }

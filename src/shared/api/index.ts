@@ -6138,7 +6138,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Switches a rule on or off at a chat's level or the global one (the level's off: list); one switched off at a farther level stays off. */
+  /** Switches a rule on or off at a chat's level or the global one: its name goes into, or out of, the `stack.off` list of that level's config, the one list the Files page's switch writes; one switched off at a farther level stays off. An example is never in force and is not switched. */
   "POST /api/v1/rules/:name/switch": {
     params: { name: string };
     query: Record<string, never>;

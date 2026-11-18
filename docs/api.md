@@ -2368,7 +2368,7 @@ Every rule of a chat's stack, in force or not and why; with no chat, those of th
 
 ### `POST /api/v1/rules/:name/switch`
 
-Switches a rule on or off at a chat's level or the global one (the level's off: list); one switched off at a farther level stays off.
+Switches a rule on or off at a chat's level or the global one: its name goes into, or out of, the `stack.off` list of that level's config, the one list the Files page's switch writes; one switched off at a farther level stays off. An example is never in force and is not switched.
 
 | | |
 |---|---|

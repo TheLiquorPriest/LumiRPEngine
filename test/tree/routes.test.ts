@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { YAML } from "bun";
+import type { RuleView } from "rp-harness/contract";
 import type { App, RunningServer } from "../../src/app";
 import { CHATS_FOLDER, ChatMeasurer, type DefaultsDeps, layDefaults, NO_CHAT, type NoteFiles, TREE_MIGRATIONS, TreeChats, type TreeFileDiff, type TreeFileEntry, type TreeFiles, type TreeFileText, treeFiles, treeRoutes, type TreeStorage, type SuggestionFiled, type TreeSuggestionView, TreeSuggestions } from "../../src/tree/index";
 import { answeredProblems } from "../app/call";
@@ -65,6 +66,8 @@ describe("the Files page's routes", () => {
   let measurer: ChatMeasurer;
   /** The file port agents write through. */
   let port: TreeFiles;
+  /** The rules RPH lists for the chat, as the Rules page's switch finds one by its name. */
+  let ruled: RuleView[] = [];
 
   const call = async <T>(method: string, path: string, body?: unknown, headers: Record<string, string> = page): Promise<{ status: number; body: T }> => {
     const res = await fetch(`${server.url}${path}`, { method, headers: { ...headers, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -102,7 +105,7 @@ describe("the Files page's routes", () => {
             // A chat RPE has not played yet is placed by the names Lumiverse would give.
             const place = (user: string, chat: string) => chats.place(user, chat, GHOST);
             measurer = new ChatMeasurer({ files: a.paths.files, chats, now: a.now });
-            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => [], definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => [] }), written: (saved) => void told.push(saved) }));
+            a.routes.add("tree", treeRoutes({ files: a.paths.files, chats, db: a.db, writes: a.writes, now: a.now, backups: a.paths.backups, copiesKept: 3, measurer, suggestions, turning: () => turning, stack, preview: async () => ({ part: { fields: [], missing: [], problems: [] }, values: null }), apply, place, openSessions: async () => (open === null ? [] : [open]), guidance: () => ({ rules: async () => ruled, definitions: async () => [], stack: async () => [], external: async () => [], problems: async () => [] }), written: (saved) => void told.push(saved) }));
           },
         },
       ],
@@ -309,6 +312,35 @@ describe("the Files page's routes", () => {
 
     await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "global", off: false });
     expect(await gm()).toMatchObject({ off: false, offIn: [], applies: true });
+  });
+
+  test("the Rules page's switch writes the one list the Files page writes, and a config holding that list under two forms of its key reads as both and is written back as one", async () => {
+    ruled = [{ name: "consent", path: "@shipped/.rules/consent.md", level: "shipped", description: "Asks before a hard turn.", agents: "all", inForce: true, replaces: [] }];
+    const config = join(chatFolder, "RPE.yml");
+    await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, off: true });
+    expect((await call("POST", "/api/v1/rules/consent/switch", { on: false, level: "chat", chat: CHAT })).status).toBe(200);
+    const once = await readFile(config, "utf8");
+    expect(offOf(once)).toEqual(["agents/gm", "rules/consent"]);
+    expect(once.match(/off"?:/g)).toHaveLength(1);
+    expect((await listing()).get("@shipped/.rules/consent.md")).toMatchObject({ off: true, offIn: ["chat"] });
+
+    // The same list under both forms of its key, as a second writer left it: the listing reads both, and a switch writes one list.
+    await writeFile(config, '# mine\nstack:\n  off: [rules/consent]\n  "off": [agents/gm]\n');
+    expect((await listing()).get("@shipped/.rules/consent.md")).toMatchObject({ off: true, offIn: ["chat"] });
+    expect((await listing()).get("@shipped/.agents/gm.md")).toMatchObject({ off: true, offIn: ["chat"] });
+    ruled = [...ruled, { name: "perceptions", path: "@shipped/.rules/perceptions.md", level: "shipped", description: "Asks for perceptions.", agents: "all", inForce: true, replaces: [] }];
+    expect((await call("POST", "/api/v1/rules/perceptions/switch", { on: false, level: "chat", chat: CHAT })).status).toBe(200);
+    const joined = await readFile(config, "utf8");
+    expect(joined.startsWith("# mine\n")).toBe(true);
+    expect(joined.match(/off"?:/g)).toHaveLength(1);
+    expect(offOf(joined)).toEqual(["rules/consent", "agents/gm", "rules/perceptions"]);
+    expect((await call("PUT", "/api/v1/files-off/@shipped/.agents/gm.md", { level: "chat", chat: CHAT, off: false })).status).toBe(200);
+    expect(offOf(await readFile(config, "utf8"))).toEqual(["rules/consent", "rules/perceptions"]);
+
+    // A rule's example is never switched.
+    ruled = [{ name: "nudge", path: "@shipped/.rules/examples/nudge.md", level: "shipped", description: "An example.", agents: "all", inForce: false, why: "example", replaces: [] }];
+    expect((await call("POST", "/api/v1/rules/nudge/switch", { on: false, level: "chat", chat: CHAT })).status).toBe(409);
+    expect((await call("POST", "/api/v1/rules/nowhere/switch", { on: false, level: "chat", chat: CHAT })).status).toBe(404);
   });
 
   test.skip("hardening: pinning a file for an agent writes it in the level's stack.pins with his words kept, unpinning takes it out, a file the view does not hold is refused, and a pin of a file that is gone or an agent no definition names is listed, not dropped", async () => {

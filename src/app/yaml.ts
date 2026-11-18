@@ -154,8 +154,9 @@ interface Entry {
   indent: number;
 }
 
-/** The entry `key` among the lines `[from, to)`, which hold a block mapping's entries at `indent`. */
-function entryOf(lines: readonly string[], from: number, to: number, indent: number, key: string): Entry | null {
+/** Every entry `key` has among the lines `[from, to)`, which hold a block mapping's entries at `indent`; a key written twice has two. */
+function entriesWith(lines: readonly string[], from: number, to: number, indent: number, key: string): Entry[] {
+  const found: Entry[] = [];
   for (let i = from; i < to; i++) {
     if (keyOf(lines[i] ?? "", indent) !== key) continue;
     let end = i + 1;
@@ -167,9 +168,10 @@ function entryOf(lines: readonly string[], from: number, to: number, indent: num
       end++;
     }
     while (end > i + 1 && (lines[end - 1] ?? "").trim() === "") end--;
-    return { at: i, end, indent };
+    found.push({ at: i, end, indent });
+    i = end - 1;
   }
-  return null;
+  return found;
 }
 
 /** The depth an entry's block mapping holds its keys at; null where its value is not a block mapping (written on its line, or a list). */
@@ -189,8 +191,8 @@ function entriesOf(lines: readonly string[], path: readonly string[]): Entry[] {
   let to = lines.length;
   let indent = 0;
   for (const part of path) {
-    const entry = entryOf(lines, from, to, indent, part);
-    if (entry === null) break;
+    const entry = entriesWith(lines, from, to, indent, part)[0];
+    if (entry === undefined) break;
     found.push(entry);
     const child = childIndent(lines, entry);
     if (child === null) break;
@@ -199,6 +201,41 @@ function entriesOf(lines: readonly string[], path: readonly string[]): Entry[] {
     indent = child;
   }
   return found;
+}
+
+/** Every entry the key at `path` has in the mapping that holds it, as far as the lines hold it as block mappings; none where they do not. */
+function entriesOfKey(lines: readonly string[], path: readonly string[]): Entry[] {
+  const key = path.at(-1);
+  if (key === undefined) return [];
+  if (path.length === 1) return entriesWith(lines, 0, lines.length, 0, key);
+  const above = entriesOf(lines, path.slice(0, -1));
+  const parent = above.length === path.length - 1 ? above.at(-1) : undefined;
+  const indent = parent === undefined ? null : childIndent(lines, parent);
+  return parent === undefined || indent === null ? [] : entriesWith(lines, parent.at + 1, parent.end, indent, key);
+}
+
+/**
+ * Every value the text writes for the key at `path`, in the order written: one, unless the key is written twice (`off` and `"off"` are
+ * one key to YAML, and a reader that takes the document alone gets only the last of them). None where the text has no such key.
+ */
+export function valuesAt(text: string, path: readonly string[], where: string): unknown[] {
+  const doc = yamlMapping(text, where);
+  const lines = text.replace(/\n+$/, "").split("\n");
+  const written = entriesOfKey(lines, path);
+  if (written.length > 1) {
+    try {
+      const key = path.at(-1) ?? "";
+      return written.flatMap((entry) => {
+        const parsed: unknown = YAML.parse(lines.slice(entry.at, entry.end).map((line) => line.slice(entry.indent)).join("\n"));
+        const value = isDoc(parsed) ? parsed[key] : undefined;
+        return value === undefined ? [] : [value];
+      });
+    } catch {
+      // A block that does not read alone is read with the document, as one value.
+    }
+  }
+  const held = at(doc, path);
+  return held === undefined ? [] : [held];
 }
 
 /** `{ key: value }` as the block a file writes, at `indent`. */
@@ -237,7 +274,10 @@ export function withKeyAt(text: string, path: readonly string[], value: unknown,
     }
   } else {
     // The key is there, or a value written on its line stands where its mapping would: that entry is written again, or taken away.
+    // The same key written twice (`off` and `"off"` are one key) is one list in the file as written back: the other entries go.
     const now = at(wanted, path.slice(0, depth + 1));
+    const same = depth === path.length - 1 ? entriesOfKey(lines, path) : [deepest];
+    for (const other of same.slice(1).reverse()) lines.splice(other.at, other.end - other.at);
     lines.splice(deepest.at, deepest.end - deepest.at, ...(now === undefined ? [] : blockOf(path[depth] ?? "", now, deepest.indent)));
     // A mapping above it that is left empty goes, its key's line with it.
     for (let d = depth - 1; d >= 0 && at(wanted, path.slice(0, d + 1)) === undefined; d--) {

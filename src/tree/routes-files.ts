@@ -26,7 +26,7 @@ import { chatOf, LEVELS, levelOf, type RouteKit, viewPathOf } from "./route-kit"
 import { treeSettingsOf } from "./settings";
 import { type ChatLocation, locate, treeLayers } from "./view";
 import { rphStanding, withStanding } from "./standing";
-import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, partPreviewBody, partPreviewReply, pinsReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
+import { applyBody, applyReply, chatQuery, fileMoveBody, fileMovedReply, fileRemovedReply, filePinBody, fileSwitchBody, fileWriteBody, fileWrittenReply, folderBody, folderMadeReply, partPreviewBody, partPreviewReply, pinsReply, ruleSwitchBody, ruleSwitchedReply, stackReply, treeDiffReply, treeFileReply, treeListedReply, treeListingReply, type TreeFileDiff } from "./shapes";
 
 /** The routes that name a file: its path in the chat's view follows the route's own segments. */
 const FILE_PATH = "/api/v1/files/*";
@@ -280,6 +280,32 @@ export function fileRoutes(kit: RouteKit) {
         const path = await own.pin(loc, level, viewPathOf(params["*"]), body.agent, body.pinned);
         await kit.written(user, chat, path, level);
         return { file: await kit.entryOf(user, loc, path) };
+      },
+    }),
+    route({
+      method: "POST",
+      path: "/api/v1/rules/:name/switch",
+      access: "page",
+      group: "rules",
+      does: "Switches a rule on or off at a chat's level or the global one: its name goes into, or out of, the `stack.off` list of that level's config, the one list the Files page's switch writes; one switched off at a farther level stays off. An example is never in force and is not switched.",
+      body: ruleSwitchBody,
+      reply: ruleSwitchedReply,
+      handle: async ({ user, params, body }) => {
+        if (body.level === "chat" && body.chat === undefined) throw new RouteError(400, "A rule is switched at a chat's level for a chat: name it.");
+        const chat = chatOf(body.chat);
+        const loc = await own.locationFor(user, chat);
+        // The rule of the name that is in the stack, not an example of it that stands beside one.
+        const rule = async () => {
+          const named = (await deps.guidance(user, chat).rules()).filter((r) => r.name === params.name);
+          const found = named.find((r) => r.why !== "example") ?? named[0];
+          if (found === undefined) throw new RouteError(404, `No rule is named ${params.name}.`);
+          return found;
+        };
+        const before = await rule();
+        if (before.why === "example") throw new RouteError(409, `${before.name} is an example, never in force: copy it into force to use it.`);
+        await own.switchOff(loc, body.level, `rules/${before.name}`, !body.on);
+        await kit.written(user, chat, before.path, body.level);
+        return { rule: await rule() };
       },
     }),
     route({

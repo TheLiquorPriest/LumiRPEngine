@@ -15,8 +15,8 @@ import { dirname, join, sep } from "node:path";
 import type { GuidanceKind, LayerLevel } from "rp-harness/contract";
 import { RouteError } from "../app";
 import { oneFileAtATime, readText, writeWhole } from "../app/disk";
-import { LayoutRefused, withKeyAt, yamlMapping } from "../app/yaml";
-import { atKey, kindAt, nameList, OFF_KEY, PINS_KEY, pinPath, pinRecords, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
+import { LayoutRefused, valuesAt, withKeyAt } from "../app/yaml";
+import { kindAt, nameList, OFF_KEY, PINS_KEY, pinPath, pinRecords, placeAt, userMayWrite, writtenItem, writtenKey } from "./catalog";
 import type { ChatFolders, TreeChats, TreeWrites } from "./chats";
 import { recordWritten } from "./defaults";
 import { type ChatLocation, type Located, locate, treeLayers, viewPath } from "./view";
@@ -140,15 +140,22 @@ export class OwnFiles {
     if (config.is === "folder") throw new RouteError(409, `${config.path} is a folder.`);
     await oneFileAtATime(config.disk, async () => {
       const text = (await readText(config.disk)) ?? "";
-      let read: T[] | undefined;
+      // The list as the file writes it: a key written twice (`off` and `"off"`, which YAML reads as one) holds the names of both.
+      let written: unknown[];
+      const read: T[] = [];
       try {
-        read = parse(atKey(yamlMapping(text, config.path), key));
+        written = valuesAt(text, key.split("."), config.path);
       } catch (error) {
         throw new RouteError(409, error instanceof Error ? error.message : String(error));
       }
-      if (read === undefined) throw new RouteError(409, `\`${key}\` in ${config.path} is not ${shown}: make it one, then try again.`);
+      for (const value of written) {
+        const parsed = parse(value);
+        if (parsed === undefined) throw new RouteError(409, `\`${key}\` in ${config.path} is not ${shown}: make it one, then try again.`);
+        for (const item of parsed) if (!read.some((r) => JSON.stringify(r) === JSON.stringify(item))) read.push(item);
+      }
       const now = next(read);
-      if (JSON.stringify(now) === JSON.stringify(read)) return;
+      // A list written under two forms of its key is written back as one, whether or not the change alters it.
+      if (written.length <= 1 && JSON.stringify(now) === JSON.stringify(read)) return;
       let spliced: string;
       try {
         spliced = withKeyAt(text, key.split("."), now, config.path);

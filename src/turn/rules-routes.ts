@@ -1,14 +1,15 @@
 // The Rules page's routes (plan §14 the Rules row, §5.4 l.524-558, C-10): every rule of a chat's stack (or, with no chat, of the
-// shipped and global levels a new chat takes) with whether it is in force and why not; one switched at the chat's or the global level
-// (RPH writes the level's `stack.off` list, his own press); the facts a trigger can name, RPH's and RPE's, each with its value in the open
+// shipped and global levels a new chat takes) with whether it is in force and why not (a rule is switched on the Files routes' own switch,
+// `POST /api/v1/rules/:name/switch`, which writes the one list the Files page writes); the facts a trigger can name, RPH's and RPE's, each with its value in the open
 // chat where RPE counts it and the rules whose text names it; the rules that fired in a chat, newest first, a job's among them, with
 // what the agent did next; and a rule run against a past turn, which writes nothing. Each mirrors RPH's own type. RPH's hooks are
 // listed by the switches route until RPH gives a reader of them.
 
-import type { ListedFact, RuleTest, RuleView } from "rp-harness/contract";
-import { type Exactly, type Holds, type Infer, layerLevel, route, RouteError, ruleFiring, shape } from "../app";
+import type { ListedFact, RuleTest } from "rp-harness/contract";
+import { type Exactly, type Holds, type Infer, route, RouteError, ruleFiring, shape } from "../app";
 import { JoinedTurnError } from "../store";
 import { NO_CHAT } from "../tree/layout";
+import { ruleView } from "../tree/shapes";
 import type { Turns } from "./lane";
 import { CARRIED_SESSION } from "./runs";
 import { turnSettings } from "./settings";
@@ -17,23 +18,6 @@ import { NO_SESSION } from "./turns";
 const T = shape.text();
 const N = shape.number();
 const opt = shape.optional;
-
-const ruleFields = {
-  name: T,
-  path: T,
-  level: layerLevel,
-  description: T,
-  agents: shape.union(shape.literal("all"), shape.list(T)),
-  trigger: opt(shape.oneOf("always", "pattern", "question", "moment", "command", "interval")),
-  command: opt(shape.object({ runs: T, state: shape.oneOf("on", "waiting", "off") })),
-  inForce: shape.yesNo(),
-  why: opt(shape.oneOf("off", "needs", "example", "broken", "judge")),
-  judge: opt(shape.oneOf("part", "yes", "connection")),
-  replaces: shape.list(shape.object({ level: layerLevel, path: T })),
-};
-const ruleBase = shape.object(ruleFields);
-type RuleMirrored = Holds<Exactly<Infer<typeof ruleBase>, RuleView>>;
-const ruleView = shape.named("RuleView", "A rule as the Rules page lists it: where it is, whom it is for, how it is triggered, a command rule's command and where its switch stands, whether it is in force and why not, and the farther files it replaces.", ruleBase);
 
 const factValue = shape.object({ count: N, names: opt(shape.list(T)), by: opt(shape.record(N)), namesBy: opt(shape.record(shape.list(T))), fields: opt(shape.record(shape.json())) });
 const listedFields = { name: T, counts: T, by: opt(shape.list(T)), fields: opt(shape.list(T)), from: shape.oneOf("rph", "host"), clash: opt(shape.literal(true)) };
@@ -56,7 +40,7 @@ const firingShown = shape.named(
 );
 
 /** The checks above hold, and are read by no one. */
-export type Mirrors = [RuleMirrored, FactMirrored, TestMirrored];
+export type Mirrors = [FactMirrored, TestMirrored];
 
 export function rulesRoutes(turns: Turns) {
   /** The scope the rules are read in: a chat's, or with none the shipped and global levels a new chat takes. */
@@ -77,22 +61,6 @@ export function rulesRoutes(turns: Turns) {
       handle: async ({ user, query }) => {
         if (query.chat !== undefined) held(user, query.chat);
         return { chat: query.chat ?? null, rules: await turns.harness.rules.list(scopeOf(user, query.chat)) };
-      },
-    }),
-    route({
-      method: "POST",
-      path: "/api/v1/rules/:name/switch",
-      access: "page",
-      group: "rules",
-      does: "Switches a rule on or off at a chat's level or the global one (the level's off: list); one switched off at a farther level stays off.",
-      body: shape.named("RuleSwitch", "On or off, at which level, and the chat for the chat's level.", shape.object({ on: shape.yesNo(), level: shape.oneOf("chat", "global"), chat: opt(T) })),
-      reply: shape.named("RuleSwitched", "The rule as it stands after the switch.", shape.object({ rule: ruleView })),
-      handle: async ({ user, params, body }) => {
-        if (body.level === "chat" && body.chat === undefined) throw new RouteError(400, "A rule is switched at a chat's level for a chat: name it.");
-        if (body.chat !== undefined) held(user, body.chat);
-        const rule = await turns.harness.rules.switch(scopeOf(user, body.chat), params.name, body.on, body.level);
-        if (rule === undefined) throw new RouteError(404, `No rule is named ${params.name}.`);
-        return { rule };
       },
     }),
     route({
