@@ -229,6 +229,41 @@ const classRows: Record<string, TableRow> = {
     proficiency: ["simple", "martial"],
     features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] }),
   },
+  adept: {
+    label: "Adept",
+    hit_die: 6,
+    tracks: tracks("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["craft", "handle_animal", "heal", ...LORE, "profession", "spellcraft", "survival"],
+    proficiency: ["simple"],
+    features: features({ 1: ["adept_spells"] }),
+  },
+  aristocrat: {
+    label: "Aristocrat",
+    hit_die: 8,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["appraise", "bluff", "craft", "diplomacy", "disguise", "handle_animal", "intimidate", ...LORE, "linguistics", "perception", "perform", "profession", "ride", "sense_motive", "swim"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] }),
+  },
+  commoner: {
+    label: "Commoner",
+    hit_die: 6,
+    tracks: tracks("poor", "poor", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "perception", "profession", "ride", "swim"],
+    proficiency: ["unarmed_strike"],
+  },
+  expert: {
+    label: "Expert",
+    hit_die: 8,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 6,
+    class_skills: SKILLS.map(([id]) => id),
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "expert_trade"] }),
+  },
 };
 
 // ---------------------------------------------------------------- traits: feats, races, creature types, class features
@@ -646,7 +681,7 @@ const D20: D20Def = {
     temporary: "hp_temp",
     states: [
       { id: "dead", when: `self.hp <= -score(self, 'con') or (${UNDEAD} and self.hp <= 0)`, life: "dead" },
-      { id: "stable", when: `${NEGATIVE} and ${STEADY}`, life: "alive" },
+      { id: "stable", when: `${NEGATIVE} and ${STEADY}` },
       { id: "dying", when: `${NEGATIVE} and not ${STEADY}`, life: "dying" },
       { id: "unconscious", when: `(${NEGATIVE} and not has_trait(self, 'diehard')) or (self.hp >= 0 and self.nonlethal > self.hp)` },
       { id: "disabled", when: `self.hp == 0 or (${NEGATIVE} and has_trait(self, 'diehard'))` },

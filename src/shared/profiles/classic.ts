@@ -239,6 +239,41 @@ const classRows: Record<string, TableRow> = {
     proficiency: ["simple", "martial"],
     features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] }),
   },
+  adept: {
+    label: "Adept",
+    hit_die: 6,
+    tracks: tracks("poor", "poor", "poor", "good"),
+    skill_points: 2,
+    class_skills: ["concentration", "craft", "handle_animal", "heal", ...LORE, "profession", "spellcraft", "survival"],
+    proficiency: ["simple"],
+    features: features({ 1: ["adept_spells"] }),
+  },
+  aristocrat: {
+    label: "Aristocrat",
+    hit_die: 8,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 4,
+    class_skills: ["appraise", "bluff", "diplomacy", "disguise", "forgery", "gather_information", "handle_animal", "intimidate", ...LORE, "listen", "perform", "ride", "sense_motive", "speak_language", "spot", "swim", "survival"],
+    proficiency: ["simple", "martial"],
+    features: features({ 1: ["armor_light", "armor_medium", "armor_heavy", "shield_proficiency"] }),
+  },
+  commoner: {
+    label: "Commoner",
+    hit_die: 4,
+    tracks: tracks("poor", "poor", "poor", "poor"),
+    skill_points: 2,
+    class_skills: ["climb", "craft", "handle_animal", "jump", "listen", "profession", "ride", "spot", "swim", "use_rope"],
+    proficiency: ["unarmed_strike"],
+  },
+  expert: {
+    label: "Expert",
+    hit_die: 6,
+    tracks: tracks("average", "poor", "poor", "good"),
+    skill_points: 6,
+    class_skills: SKILLS.map(([id]) => id),
+    proficiency: ["simple"],
+    features: features({ 1: ["armor_light", "expert_trade"] }),
+  },
 };
 
 // ---------------------------------------------------------------- traits: feats, races, creature types, class features
@@ -538,7 +573,7 @@ const D20: D20Def = {
     temporary: "hp_temp",
     states: [
       { id: "dead", when: "self.hp <= -10", life: "dead" },
-      { id: "stable", when: `${NEGATIVE} and under(self, 'stable')`, life: "alive" },
+      { id: "stable", when: `${NEGATIVE} and under(self, 'stable')` },
       { id: "dying", when: `${NEGATIVE} and not under(self, 'stable')`, life: "dying" },
       { id: "unconscious", when: `(${NEGATIVE}) or (self.hp >= 0 and self.nonlethal > self.hp)` },
       { id: "disabled", when: "self.hp == 0" },
@@ -572,7 +607,7 @@ export const CLASSIC: D20SetDef = {
   id: "classic",
   label: "Classic",
   summary:
-    "Classic fantasy on a d20: six abilities, eleven classes with levels that add up, skills with ranks, feats and peoples as traits, bonuses that stack by type, defence read whole, by touch or flat-footed, weapons and armour with their own numbers, hit points down through dying to dead, and experience by challenge.",
+    "Classic fantasy on a d20: six abilities, eleven classes and five plain ones for common folk, with levels that add up, skills with ranks, feats and peoples as traits, bonuses that stack by type, defence read whole, by touch or flat-footed, weapons and armour with their own numbers, hit points down through dying to dead, and experience by challenge.",
   fields: d20Fields({ hpFloor: -10, rest: PER_DIE, sizes: T.sizes, daily: DAILY }),
   checks: {},
   actions: {},

@@ -400,6 +400,7 @@ export const CORE_WEAPONS: Record<string, TableRow> = {
   unarmed_strike: weapon("Unarmed strike", "1d2", "1d3", 20, 2, null, "simple", "light", B, { nonlethal: true, finesse: true }),
   gauntlet: weapon("Gauntlet", "1d2", "1d3", 20, 2, null, "simple", "light", B, { finesse: true }),
   dagger: weapon("Dagger", "1d3", "1d4", 19, 2, 10, "simple", "light", PS, { finesse: true }),
+  belt_knife: weapon("Belt knife", "1d3", "1d4", 19, 2, 10, "simple", "light", PS, { finesse: true }),
   punching_dagger: weapon("Punching dagger", "1d3", "1d4", 20, 3, null, "simple", "light", P, { finesse: true }),
   spiked_gauntlet: weapon("Spiked gauntlet", "1d3", "1d4", 20, 2, null, "simple", "light", P, { finesse: true }),
   light_mace: weapon("Light mace", "1d4", "1d6", 20, 2, null, "simple", "light", B, { finesse: true }),
@@ -476,8 +477,8 @@ export const SHARED_FEATS: Record<string, TableRow> = {
   shield_proficiency: trait("Shield Training", "feat", "A shield's check penalty does not fall on its bearer's attacks."),
   tower_shield_proficiency: trait("Tower Shield Training", "feat", "A tower shield's check penalty does not fall on its bearer's attacks.", { requires: "has_trait(self, 'shield_proficiency')" }),
   simple_weapon_proficiency: trait("Simple Weapons", "feat", "No -4 to attack with a simple weapon.", { grants: { proficiency: ["simple"] } }),
-  martial_weapon_proficiency: trait("Martial Weapon", "feat", "No -4 to attack with the martial weapon taken as its choice."),
-  exotic_weapon_proficiency: trait("Exotic Weapon", "feat", "No -4 to attack with the exotic weapon taken as its choice.", { requires: `${BASE_ATTACK} >= 1` }),
+  martial_weapon_proficiency: trait("Martial Weapon", "feat", "No -4 to attack with the martial weapon taken as its choice.", { grants: { proficiency: [] } }),
+  exotic_weapon_proficiency: trait("Exotic Weapon", "feat", "No -4 to attack with the exotic weapon taken as its choice.", { grants: { proficiency: [] }, requires: `${BASE_ATTACK} >= 1` }),
   combat_casting: trait("Steady Casting", "feat", "+4 to cast on the defensive or while held without losing the spell."),
   endurance: trait("Endurance", "feat", "+4 on checks and saves against tiring: swimming, running, holding its breath, hunger, thirst, heat and cold."),
   great_fortitude: trait("Hardy", "feat", "+2 Fortitude.", { modifiers: [mod("save.fort", 2)] }),
@@ -501,6 +502,9 @@ export const SHARED_FEATS: Record<string, TableRow> = {
 
 /** The class features the fantasy sets hold alike. */
 export const SHARED_FEATURES: Record<string, TableRow> = {
+  one_simple_weapon: trait("One Weapon", "class feature", "No -4 to attack with the one simple weapon taken as its choice.", { grants: { proficiency: [] } }),
+  expert_trade: trait("Own Trade", "class feature", "Ten skills of its own choosing are its class skills; the class lists every skill, and the GM holds each expert to its ten."),
+  adept_spells: trait("Hedge Spells", "class feature", "Casts a few divine spells a day, prepared from Wisdom; the GM rules which and how many."),
   fast_movement: trait("Fast Movement", "class feature", "+10 speed, except in heavy armour.", { modifiers: [mod("speed", 10, { when: "limit(self, 'armor_weight', 0) < 3" })] }),
   greater_rage: trait("Greater Rage", "class feature", "Raging gives +6 Strength and Constitution and +3 Will (in the raging condition)."),
   indomitable_will: trait("Unbending Will", "class feature", "+4 on Will saves against charms and compulsions while raging."),

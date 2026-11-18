@@ -8,7 +8,9 @@
 //                    kind, a world copy of that kind with the fields added
 //   items            every field, check, action, table and ruleset part is new (`add`), the same as
 //                    the world's (`same`), or different (`conflict`, kept unless the author takes
-//                    the profile's); applying twice therefore changes nothing
+//                    the profile's); applying twice therefore changes nothing. What the world still
+//                    holds exactly as the profile it last started from wrote it is that profile's, not
+//                    the world's own, and another profile's is written in its place (`add`)
 //   people           read each new field's default; a stored value is changed only when a field
 //                    taken from the profile can't hold it (clamped into its bounds, else cleared)
 //
@@ -210,6 +212,17 @@ function statusOf(slot: Slot): ProfileStatus {
   return hashJson(slot.mine) === hashJson(slot.theirs) ? "same" : "conflict";
 }
 
+/**
+ * What the profile the world last started from (`ruleset.profile`) wrote, by path, each as its hash: an item the world still holds
+ * exactly as that profile wrote it is that profile's, not the world's own work, so another profile puts its own in place of it as
+ * it adds a new one. Null where the world started from none, or from this same one.
+ */
+function lastWrote(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds): { label: string; at: Map<string, string> } | null {
+  const last = profileOf(isRecord(world.ruleset) ? world.ruleset.profile : undefined);
+  if (last === null || last.id === profile.id) return null;
+  return { label: last.label, at: new Map(slotsOf(world, last, packKinds).slots.map((s) => [s.path, hashJson(s.theirs)])) };
+}
+
 /** What a field definition makes of a stored value: undefined when it holds it, else the value it can hold (null: none). */
 function fitted(def: FieldDef, v: JsonValue): JsonValue | null | undefined {
   switch (def.type) {
@@ -235,7 +248,12 @@ function fitted(def: FieldDef, v: JsonValue): JsonValue | null | undefined {
 
 function planOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds, choices: Readonly<Record<string, ProfileChoice>>): { plan: ProfilePlan; write: Slot[] } {
   const { kinds, slots } = slotsOf(world, profile, packKinds);
-  const items = slots.map((slot): ProfileItem => ({ path: slot.path, group: slot.group, label: slot.label, status: statusOf(slot) }));
+  const last = lastWrote(world, profile, packKinds);
+  const items = slots.map((slot): ProfileItem => {
+    const status = statusOf(slot);
+    if (status === "conflict" && last !== null && last.at.get(slot.path) === hashJson(slot.mine)) return { path: slot.path, group: slot.group, label: `${slot.label} (in place of ${last.label}'s)`, status: "add" };
+    return { path: slot.path, group: slot.group, label: slot.label, status };
+  });
   const write = slots.filter((slot, i) => {
     const status = items[i]?.status;
     return status === "add" || (status === "conflict" && choices[slot.path] === "profile");
