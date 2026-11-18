@@ -75,11 +75,12 @@ Start a job with `job_start` for work that need not finish before the next messa
 - what happened meanwhile in the wider world;
 - summarizing a stretch of the past that has beats and no summary;
 - mapping the prompt, with the agent `mapper`, when the briefing says it is not mapped or its shape changed: the job reads this turn's prompt;
-- indexing lore, with the agent `indexer`, when the briefing says entries are not indexed.
+- indexing lore, with the agent `indexer`, when the briefing says entries are not indexed;
+- a principal's memory work, where the perceptions rule says it waits.
 
 ## 10. Scenes and chapters
 
-A scene ends when the place, the time or the company changes enough that a novel would start a new one. In that turn, load the skill `scene-end` and write the scene's summary while the scene is in front of you, so that the next session opens with it; start the rest of the skill as a job.
+A scene ends when the place, the time or the company changes enough that a novel would start a new one. In that turn, load the skill `scene-end` and write the scene's summary while the scene is in front of you, so that the next session opens with it; start the rest of the skill as a job. The perceptions rule says whose memory work runs at a scene's end.
 
 A chapter turns when the story would turn a page: a journey ends, a goal is won or lost, a long stretch of time passes. If none of that has happened in ten scenes, turn it anyway, so that no chapter outgrows what can be read at once. Start the skill `chapter-pass` as a job.
 
