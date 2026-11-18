@@ -133,7 +133,7 @@ test("the same files give every area the same values", async () => {
 
 test("a value set in RPE-global.yml for a setting the door declares reaches the door", async () => {
   // The question's largest body, which the door reads as it adds its route at start.
-  const b = await playedBed(["lumiverse:", "  question:", "    body: 16", ""].join("\n"));
+  const b = await playedBed(["lumiverse:", "  question:", "    maxKiB: 16", ""].join("\n"));
   const question = b.app.routes.list().find((r) => r.path === QUESTION_PATH);
   expect(question?.maxBody).toBe(16 * 1024);
 });
