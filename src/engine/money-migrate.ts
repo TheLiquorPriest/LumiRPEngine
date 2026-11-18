@@ -11,6 +11,7 @@
 import { CLASS_TRAITS, LEGACY_TYPE_CLASS, PAY_EVERY, type AccountClass } from "../shared/finance";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { EntityDef, WorldDoc } from "../shared/world";
+import { say } from "./lines";
 
 const AUTOPAY = /^\s*(minimum|statement|full)?\s*(?:from\s+(\S+))?\s*$/i;
 
@@ -169,7 +170,7 @@ function jobOf(doc: WorldDoc, person: EntityDef, taken: Set<string>): EntityDef 
   else if (every === "monthly") job.pay_days = [-1];
   if (typeof f.deposit_to === "string" && f.deposit_to !== "") job.splits = [{ to: f.deposit_to, pct: 100 }];
   if (typeof f.shift_pattern === "string") job.shift_pattern = f.shift_pattern;
-  return { id: freeId(doc, taken, `job_${person.id}`), kind: "job", name: `${person.name}'s work`, tier: "background", fields: job, relations: [] };
+  return { id: freeId(doc, taken, `job_${person.id}`), kind: "job", name: say("name_name_s_work", { name: person.name }), tier: "background", fields: job, relations: [] };
 }
 
 /** The id the holdings module's trades look up, so a later buy of the asset adds to this holding. */

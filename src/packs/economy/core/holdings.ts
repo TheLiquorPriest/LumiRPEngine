@@ -393,7 +393,7 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
     const spawned = !holding;
     if (!holding) {
       holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
-      events.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? `${asset.symbol}${account ? ` in ${labelOf(ctx, account)}` : ""}` : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...(account ? { account } : { owners: [{ party, role: "owner" }] }) }, relations: [] } });
+      events.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? say("name_symbol_in_account", { symbol: asset.symbol, account: account ? labelOf(ctx, account) : undefined }) : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...(account ? { account } : { owners: [{ party, role: "owner" }] }) }, relations: [] } });
     }
     const label = `Bought ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
     const lines: PostingLine[] = [

@@ -435,7 +435,7 @@ function taxFlow(api: FinanceApi, ctx: ReadContext, party: EntityId, through: Re
   if (recordedYears(ctx.state, party).length === 0 && !(grantorTrusts(ctx).get(party) ?? []).some((t) => recordedYears(ctx.state, t).length > 0) && !trustPaid(ctx.state).has(party) && !through.has(party)) return null;
   return {
     id: `investment_tax:${party}`,
-    label: "Tax on investment income",
+    label: say("flow_label_tax_on_investment_income"),
     kind: "tax",
     from: party,
     to: "tax:federal",

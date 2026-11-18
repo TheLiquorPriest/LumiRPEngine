@@ -15,7 +15,7 @@ import { say } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { FILING_STATUSES, FINANCE_ACTIONS, ownersIn, STRUCTURE_WORDS, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
+import { FILING_STATUSES, FINANCE_ACTIONS, ownersIn, type ConsolidationView, type FilingStatus, type Flow, type FlowSchedule, type TaxesView, type TaxYearView } from "../../../shared/finance";
 import type { FieldDef, WorldDoc } from "../../../shared/world";
 import type { LintIssue } from "../../../shared/lint";
 import type { Registry } from "../../../engine/registry-impl";
@@ -38,6 +38,7 @@ import { unemploymentDueAt, unemploymentTotals, unemploymentView } from "./unemp
 import { carriedInto, closedYear, dividendsReceived, earningsAndProfits, foundationProgress, foundationTaxFor, penaltyTables, penaltyTaxesOn, penaltyTaxFor, registerYearClose, taxPaidFor, type CorporateYear } from "./year-close";
 import { grantorOf } from "./gains";
 import type { TaxesExtra } from "../../../shared/tax-year";
+import { structureWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -1275,7 +1276,7 @@ function consolidateEvents(api: FinanceApi, ctx: EffectContext, a: Record<string
     const may = mayAct(ctx, by, org, "org.govern");
     if (!may.ok) return { code: "not_allowed", reason: may.reason };
   }
-  if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: say("why_only_a_c_corporation_that_pays_income", { org: labelOf(ctx, org), org2: STRUCTURE_WORDS[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org), org3: !!(isExempt(ctx, org)) }) };
+  if (elect && (structureOf(ctx.state, org) !== "c_corp" || isExempt(ctx, org))) return { code: "not_corporation", reason: say("why_only_a_c_corporation_that_pays_income", { org: labelOf(ctx, org), org2: structureWords[structureOf(ctx.state, org)] ?? structureOf(ctx.state, org), org3: !!(isExempt(ctx, org)) }) };
   if ((own(ctx.state.entities, org)?.fields.consolidated_return === true) === elect) return { code: "no_change", reason: say("why_org_already_filesdoesnt_file_a_consolidated_return", { org: labelOf(ctx, org), elect: !!(elect) }) };
   const members = affiliatedGroup(ctx, api, org, ctx.state.clock).map((m) => m.id);
   const text = elect ? say("org_log_elected_to_file_one_consolidated_return_with", { members: members.map((m) => labelOf(ctx, m)).join(", "), if_members: members.length > 0 }) : say("org_log_stopped_filing_a_consolidated_return");
@@ -1344,7 +1345,7 @@ export function registerTaxes(r: FinanceRegistry): void {
     flows: (ctx) =>
       deductibleDonors(ctx.state).flatMap((p): Flow[] =>
         own(ctx.state.entities, p) && !isGone(ctx.state, p) && api.feature(ctx, p, "tax_brackets")
-          ? [{ id: `donation_refund:${p}`, label: "Tax saved by donations", kind: "tax", from: "tax:federal", to: p, amount: { provider: "donation_refund", args: { person: p } }, schedule: { every: "year", months: [4], days: [15], roll: "after" }, shortfall: "skip", category: "taxes", link: p, status: "active", source: "donations" }]
+          ? [{ id: `donation_refund:${p}`, label: say("flow_label_tax_saved_by_donations"), kind: "tax", from: "tax:federal", to: p, amount: { provider: "donation_refund", args: { person: p } }, schedule: { every: "year", months: [4], days: [15], roll: "after" }, shortfall: "skip", category: "taxes", link: p, status: "active", source: "donations" }]
           : [],
       ),
   });

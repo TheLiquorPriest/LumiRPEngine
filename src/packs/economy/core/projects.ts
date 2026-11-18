@@ -27,7 +27,7 @@ import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { LintIssue } from "../../../shared/lint";
-import { COST_WHEN_WORDS, costParts, isProjectStatus, lengthWords, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_EVENTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_NOTE, PROJECT_STATUS_WORDS, PROJECTS_SECTION, PROJECTS_TABLE, stepCost, stepDays, stepOrder, stepsIn, type ProjectDef, type ProjectRun, type ProjectStatus, type ProjectStep, type ProjectTemplateView, type ProjectUnlock, type ProjectView, type ProjectsView, type StepNote, type StepRun, type StepState, type StepView } from "../../../shared/projects";
+import { costParts, isProjectStatus, lengthWords, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_EVENTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_NOTE, PROJECTS_SECTION, PROJECTS_TABLE, stepCost, stepDays, stepOrder, stepsIn, type ProjectDef, type ProjectRun, type ProjectStatus, type ProjectStep, type ProjectTemplateView, type ProjectUnlock, type ProjectView, type ProjectsView, type StepNote, type StepRun, type StepState, type StepView } from "../../../shared/projects";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import type { EntityDef, FieldDef, ParamDef, WorldDoc } from "../../../shared/world";
 import { clockAt, clockOfLocal, dateAt, formatStamp, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
@@ -44,6 +44,7 @@ import type { FinanceApi, FinanceRegistry } from "./module";
 import { Run } from "./run";
 import projectsTable from "./tables/modern-us/projects.json";
 import shipped from "./tables/modern-us/shipped.json";
+import { costWhenWords, projectStatusWords } from "../../../engine/word-tables";
 
 /** Who a project's costs are paid to when it names no one. */
 const DEFAULT_PAYEE = "Contractors";
@@ -133,7 +134,7 @@ const isLive = (status: ProjectStatus): boolean => status === "planned" || statu
 
 /** Why a project can't be acted on as it stands: "Well No. 3 is paused". */
 function statusWords(p: Project): string {
-  return `${p.def.name} is ${PROJECT_STATUS_WORDS[p.status].toLowerCase()}`;
+  return `${p.def.name} is ${projectStatusWords[p.status].toLowerCase()}`;
 }
 
 /** The instant a step was done, or null; an authored done step was done as the project started. */
@@ -477,9 +478,9 @@ function unlocksAt(ctx: ReadContext, p: Project, s: ProjectStep, at: number, pai
       const spec = u.stream;
       const id = freeId(ctx, `flow_${p.def.id}_${s.id}_${i + 1}`, taken);
       taken.add(id);
-      const fields: JsonObject = { flow_kind: "income", from: "Purchaser", shortfall: "skip", ...spec, to: strOf(spec.to) || p.def.org, start: day, status: "active" };
+      const fields: JsonObject = { flow_kind: "income", from: say("party_purchaser"), shortfall: "skip", ...spec, to: strOf(spec.to) || p.def.org, start: day, status: "active" };
       if (fields.link === undefined && made !== null) fields.link = made;
-      unit.push({ type: "spawn", entity: { id, kind: "flow", name: u.name ?? `${p.def.name}: income`, tier: "background", fields, relations: [] } });
+      unit.push({ type: "spawn", entity: { id, kind: "flow", name: u.name ?? say("name_name_income", { name: p.def.name }), tier: "background", fields, relations: [] } });
     } else if ("flow" in u) {
       unit.push({ type: "set", entity: u.flow, field: "start", value: day }, { type: "set", entity: u.flow, field: "status", value: "active" });
     } else {
@@ -935,7 +936,7 @@ export function projectView(api: FinanceApi, ctx: ReadContext, p: Project, viewe
     name: p.def.name,
     template: p.def.template ?? null,
     status: p.status,
-    statusWords: PROJECT_STATUS_WORDS[p.status],
+    statusWords: projectStatusWords[p.status],
     start: p.started !== null ? formatStamp(cal, p.started) : null,
     ended: typeof p.run.ended === "number" ? formatStamp(cal, p.run.ended) : null,
     account: account ? { id: account, name: labelOf(ctx, account) } : null,
@@ -1018,7 +1019,7 @@ export function projectNarratorLines(api: FinanceApi, ctx: ReadContext): string[
     const ends = dueEnds(cal, p, now);
     const last = ends && ends.size > 0 ? Math.max(...ends.values()) : null;
     const next = p.def.steps.find((s) => stateOf(p, s) === "ready" || stateOf(p, s) === "pending");
-    out.push(say("feed_whose_name_status_done_of_stepscount_steps", { whose: whose, name: p.def.name, status: nowWords(api, ctx, p, now) ?? PROJECT_STATUS_WORDS[p.status], done: done, stepsCount: p.def.steps.length, name2: next ? next.name : undefined, last: last !== null ? dayText(cal, last) : undefined, if_next: !!(next), if_last: last !== null }));
+    out.push(say("feed_whose_name_status_done_of_stepscount_steps", { whose: whose, name: p.def.name, status: nowWords(api, ctx, p, now) ?? projectStatusWords[p.status], done: done, stepsCount: p.def.steps.length, name2: next ? next.name : undefined, last: last !== null ? dayText(cal, last) : undefined, if_next: !!(next), if_last: last !== null }));
   }
   if (out.length === 0) return [];
   out.push(say("feed_the_engine_runs_each_project_day_by"));
@@ -1149,7 +1150,7 @@ export function registerProjects(r: FinanceRegistry): void {
         if (st?.wait) alerts.push({ tone: "warn", text: say("org_log_name_name2_is_waiting_for_cents_to", { name: p.def.name, name2: s.name, cents: api.money(ctx, st.wait.cents), if_end: st.wait.side === "end" }), ...(account ? { account } : {}) });
         else if (p.status === "active" && typeof st?.start === "number" && typeof st.end === "number") {
           const cents = costParts(s).end + (st.extra ?? 0);
-          if (cents > 0) upcoming.push({ at: dayText(cal, st.end), clock: st.end, label: `${p.def.name}: ${s.name} (${COST_WHEN_WORDS[s.paid ?? "start"]})`, cents: -cents, flow: null, account });
+          if (cents > 0) upcoming.push({ at: dayText(cal, st.end), clock: st.end, label: `${p.def.name}: ${s.name} (${costWhenWords[s.paid ?? "start"]})`, cents: -cents, flow: null, account });
         }
       }
     }

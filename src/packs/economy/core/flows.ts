@@ -293,7 +293,7 @@ function foundationFlows(ctx: ReadContext): Flow[] {
       const cal = calendarOf(ctx.world);
       schedule = { once: clockAt(cal, dateAt(cal, cycle.due).dayIndex, DEFAULT_FLOW_MINUTE) };
     } else schedule = { every: "month", days: [productOf(ctx, id)?.statement_day ?? 1] };
-    out.push({ id: `autopay:${id}`, label: `${e.name} autopay`, kind: t.installment ? "loan_payment" : "card_payment", from, to: id, amount, schedule, shortfall: "skip", category: "transfer", link: id, status: "active", source: "autopay" });
+    out.push({ id: `autopay:${id}`, label: say("flow_label_name_autopay", { name: e.name }), kind: t.installment ? "loan_payment" : "card_payment", from, to: id, amount, schedule, shortfall: "skip", category: "transfer", link: id, status: "active", source: "autopay" });
   }
   const pov = ctx.world.pov;
   const holders = ledgerHolders(ctx);
@@ -302,7 +302,7 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     if (!e || id === pov || isGone(s, id) || !holders.has(id) || !isParty(ctx, id)) continue;
     // Living costs are a person's everyday spending; no organization has them (ORG-SPEC §3.1): a business, a trust, a household, any other group, the party.
     if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
-    out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
+    out.push({ id: `living:${id}`, label: say("flow_label_living_costs"), kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
   }
   // An insurance flow insures: one linked to a vehicle insures it, one linked to nothing every vehicle its payer owns. A vehicle's other flows (its loan, its fuel) don't.
   const cover = Object.keys(s.entities).flatMap((id) => {
@@ -355,7 +355,7 @@ export function planPayments(ctx: ReadContext): PlanPayment[] {
       if (plan.status !== "open" || (plan.kind !== "pay" && plan.kind !== "lend") || !plan.cents || !to || !isParty(ctx, to)) continue;
       const lend = plan.kind === "lend";
       const at = Math.max(plan.when.from, plan.made + 1);
-      out.push({ entity: who, plan, at, flow: { id: `plan:${who}:${plan.id}`, label: lend ? "Loan" : "Payment", kind: "other", from: who, to, amount: { fixed: plan.cents }, schedule: { once: at }, shortfall: "skip", category: lend ? "loan" : "payment", status: "active", source: "minds" } });
+      out.push({ entity: who, plan, at, flow: { id: `plan:${who}:${plan.id}`, label: lend ? say("flow_label_loan") : say("flow_label_payment"), kind: "other", from: who, to, amount: { fixed: plan.cents }, schedule: { once: at }, shortfall: "skip", category: lend ? "loan" : "payment", status: "active", source: "minds" } });
     }
   }
   return out;

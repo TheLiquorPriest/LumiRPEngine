@@ -1019,7 +1019,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
             // The lender decides at the payer's credit, up to what the vehicle is worth.
             const w = new Working(ctx.registry, ctx.world, ctx.state);
             w.applyAll(made.events);
-            const loan = makeApi(hooks).applyCredit(w.ctx, payer, { product: "loan", cents: financed, term_months: term, secured_by: made.entity, into: external(`seller:${made.entity}`), id: `${made.entity}:loan`, name: `Car loan, ${name}` });
+            const loan = makeApi(hooks).applyCredit(w.ctx, payer, { product: "loan", cents: financed, term_months: term, secured_by: made.entity, into: external(`seller:${made.entity}`), id: `${made.entity}:loan`, name: say("name_car_loan_name", { name }) });
             if (isRejection(loan)) return loan;
             out.push(...loan);
           }

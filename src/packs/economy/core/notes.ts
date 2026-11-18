@@ -113,8 +113,8 @@ function lendNow(api: FinanceApi, ctx: ReadContext, a: Record<string, JsonValue>
   const noteFields: JsonObject = { owners: [{ party: lender, role: "owner" }], product: "note", opening: 0, opened, status: "open", loan, collect_into: source, apr_pct: apr, term_months: months };
   const loanFields: JsonObject = { owners: [{ party: borrower, role: "owner" }], product: "loan", opening: 0, opened, status: "open", note, apr_pct: apr, term_months: months, months_left: months, due_day: dueDay, autopay: "minimum", autopay_from: into, institution: lenderName, ...(typeof a.payment === "number" && a.payment > 0 ? { payment: Math.round(a.payment) } : {}) };
   const events: LedgerEvent[] = [
-    { type: "spawn", entity: { id: note, kind: "account", name: `Loan to ${borrowerName}`, tier: "background", fields: noteFields, relations: [] } },
-    { type: "spawn", entity: { id: loan, kind: "account", name: `Loan from ${lenderName}`, tier: "background", fields: loanFields, relations: [] } },
+    { type: "spawn", entity: { id: note, kind: "account", name: say("name_loan_to_borrowername", { borrowerName }), tier: "background", fields: noteFields, relations: [] } },
+    { type: "spawn", entity: { id: loan, kind: "account", name: say("name_loan_from_lendername", { lenderName }), tier: "background", fields: loanFields, relations: [] } },
     { type: FINANCE_EVENTS.open, data: { accounts: [note, loan] } },
     ...posting([{ account: source, amount: -cents }, { account: note, amount: cents }], { memo: say("memo_lent_money_to_borrowername", { money, borrowerName }), kind: "transfer", category: "lending", counterparty: borrower, payer: lender }),
     ...posting([{ account: loan, amount: -cents }, { account: into, amount: cents }], { memo: say("memo_borrowed_money_from_lendername", { money, lenderName }), kind: "deposit", category: "loan", counterparty: borrower, payer: lender }),

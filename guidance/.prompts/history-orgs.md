@@ -2,6 +2,7 @@
 description: The sentences of an organization's own History and of what an act for an organization records beside its effects - admitting, removing, appointing, delegating, renaming, a vote or a request and its end, founding, restructuring, winding up, merging, entry and keys, hiring, pay, a party's changes, a plan and the orders given, and who takes a seat. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
+  title_*: the title of a position the engine makes (the Director of a founded organization, the Leader of a party, the Head a lint adds)
   seat_succeeds: someone succeeds another in a seat - who, was, title
   seat_taken: someone takes a seat - who, title
   seat_incident: the player's group has a new holder of a seat - who (absent where the player may not know them), title, org
@@ -303,3 +304,6 @@ org_log_by_cant_end_that_job: {{by}} can't end that job
 org_log_who_s_job_no_longer_has_a: {{who}}'s job no longer has a title of its own
 org_log_sold_a_share_share_of_name_for: Sold {{#if_share}}a {{share}}% share of {{/if_share}}{{name}} for {{price}}
 org_log_name_name2_is_waiting_for_cents_to: {{name}}: {{name2}} is waiting for {{cents}} to {{#if_end}}finish{{/if_end}}{{^if_end}}start{{/if_end}}
+title_director: Director
+title_leader: Leader
+title_head: Head

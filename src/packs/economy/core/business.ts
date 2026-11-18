@@ -164,7 +164,7 @@ function walkInFlow(ctx: ReadContext, api: FinanceApi, business: EntityId): Flow
   const deposit = operatingAccount(api, ctx, business);
   if (daily <= 0 || !deposit) return null;
   const closed = chatWorld(ctx).calendar.holidays.filter((h) => h.dayOff).map((h) => h.id);
-  return { id: `walkin:${business}`, label: "Walk-in takings", kind: "income", from: "Walk-in customers", to: deposit, amount: { provider: "walk_in_sales", args: { business } }, schedule: { every: "week", weekdays: tradingDays(ctx.state, business), at: CLOSING, roll: "none", ...(closed.length > 0 ? { except: closed } : {}) }, shortfall: "skip", category: "sales", link: business, status: "active", source: "business" };
+  return { id: `walkin:${business}`, label: say("flow_label_walk_in_takings"), kind: "income", from: say("party_walk_in_customers"), to: deposit, amount: { provider: "walk_in_sales", args: { business } }, schedule: { every: "week", weekdays: tradingDays(ctx.state, business), at: CLOSING, roll: "none", ...(closed.length > 0 ? { except: closed } : {}) }, shortfall: "skip", category: "sales", link: business, status: "active", source: "business" };
 }
 
 function walkInPosting(ctx: ReadContext, api: FinanceApi, business: EntityId, at: number, rng: Rng): FlowPosting | null {
@@ -196,9 +196,9 @@ function settleFlows(ctx: ReadContext, api: FinanceApi, business: EntityId): Flo
   if (!deposit) return [];
   const out: Flow[] = [];
   // A stream's own margin can leave it owing its suppliers even where its own `margin_pct` keeps everything.
-  if (marginOf(ctx.state, business) < 100 || payablesOf(ctx.state, business).suppliers > 0) out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
+  if (marginOf(ctx.state, business) < 100 || payablesOf(ctx.state, business).suppliers > 0) out.push({ id: `suppliers:${business}`, label: say("flow_label_suppliers"), kind: "bill", from: deposit, to: say("party_suppliers"), amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
   // The tax is paid to its region's authority, which the flow names as the account its posting pays.
-  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
+  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false) out.push({ id: `salestax:${business}`, label: say("flow_label_sales_tax"), kind: "tax", from: deposit, to: `tax:sales:${taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)}`, amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
   return out;
 }
 
@@ -304,7 +304,7 @@ function invoiceFlow(ctx: ReadContext, api: FinanceApi, inv: InvoiceRec): Flow |
   const day = dateAt(cal, inv.due).dayIndex;
   return {
     id: `invoice:${inv.id}`,
-    label: `Invoice: ${inv.memo}`,
+    label: say("flow_label_invoice_memo", { memo: inv.memo }),
     kind: "invoice",
     from: inv.party ?? inv.customer,
     to: operatingAccount(api, ctx, inv.business) ?? inv.business,
@@ -581,7 +581,7 @@ function distributionFlow(ctx: ReadContext, api: FinanceApi, business: EntityId)
   if (!f || pct <= 0 || !from || windingUpSince(ctx.state, business) !== null) return null;
   const every = strOf(f.distribution_every, "quarter");
   const schedule: FlowSchedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
-  return { id: `distribute:${business}`, label: "Profit distribution", kind: "distribution", from, to: "Owners", amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };
+  return { id: `distribute:${business}`, label: say("flow_label_profit_distribution"), kind: "distribution", from, to: say("party_owners"), amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };
 }
 
 // ---------------------------------------------------------------- views
@@ -636,7 +636,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const sales: JournalLine[] = (Array.isArray(salesList) ? salesList : [])
     .map((raw, i) => ({ raw: objOf(raw), i }))
     .reverse()
-    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, say("memo_sale")), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "Walk-in customers" : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
+    .map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, say("memo_sale")), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale" as const, category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? say("party_walk_in_customers") : shownName(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" as const }));
   const invoices = allInvoices(ctx)
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
@@ -852,7 +852,7 @@ function noAccountIssues(world: WorldDoc, registry: Registry | undefined): LintI
     if (!company && !trust && !employer) continue;
     let account = `${id}_checking`;
     for (let n = 2; own(world.entities, account); n++) account = `${id}_checking_${n}`;
-    const def: EntityDef = { id: account, kind: "account", name: `${e.name} checking`, tier: "background", fields: { owners: [{ party: id, role: "owner" }], product: DEFAULT_ACCOUNT_PRODUCT[company ? "business" : trust ? "trust" : "group"], opening: 0 }, relations: [] };
+    const def: EntityDef = { id: account, kind: "account", name: say("name_name_checking", { name: e.name }), tier: "background", fields: { owners: [{ party: id, role: "owner" }], product: DEFAULT_ACCOUNT_PRODUCT[company ? "business" : trust ? "trust" : "group"], opening: 0 }, relations: [] };
     const why = company ? "its takings leave the world and its payroll is paid from nowhere" : trust ? "what it holds and pays out has nowhere to be" : "its payroll is paid from nowhere";
     out.push({ severity: "warning", code: NO_ACCOUNT_LINT, path: `entities.${id}`, message: say("lint_name_holds_no_bank_account_so_why", { name: e.name, why: why }), fix: { label: `Open ${def.name}`, ops: [{ op: "add", path: pointerOf(["entities", account]), value: def as unknown as JsonValue }] } });
   }

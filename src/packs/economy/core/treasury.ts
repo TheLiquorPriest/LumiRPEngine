@@ -76,7 +76,7 @@ function duesFlows(ctx: ReadContext, api: FinanceApi): Flow[] {
     if (!dues || into === null) continue;
     for (const who of sharersOf(ctx, org)) {
       if (heldPositions(ctx, who, org).some((h) => h.position.no_dues === true)) continue;
-      out.push({ id: `dues:${org}:${who}`, label: `Dues: ${labelOf(ctx, org)}`, kind: "bill", from: who, to: into, amount: { fixed: dues.cents }, schedule: duesSchedule(dues), shortfall: "defer", category: "dues", link: org, status: "active", source: "dues" });
+      out.push({ id: `dues:${org}:${who}`, label: say("flow_label_dues_org", { org: labelOf(ctx, org) }), kind: "bill", from: who, to: into, amount: { fixed: dues.cents }, schedule: duesSchedule(dues), shortfall: "defer", category: "dues", link: org, status: "active", source: "dues" });
     }
   }
   return out;

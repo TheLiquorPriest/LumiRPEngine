@@ -19,7 +19,6 @@ import { axesOf, bandsOf, regardAxes, regardWords } from "../../packs/relationsh
 import { routeAt } from "../../packs/space/core/travel";
 import { CLASS_TRAITS } from "../../shared/finance";
 import { TRAVEL_MODES } from "../../shared/maps";
-import { POWER_WORDS } from "../../shared/org";
 import { ORG_PARTS, orgPart, type OrgPart } from "../../shared/org-view";
 import type { ThingRow } from "../../shared/thing-view";
 import { formatMoney } from "../../shared/world";
@@ -28,6 +27,7 @@ import { isUnread, textArg } from "../ops";
 import type { Reading } from "../reading";
 import { textOf } from "../texts";
 import { foundIn, readTool } from "./run";
+import { powerWords } from "../../engine/word-tables";
 
 const FAMILY = "reads";
 
@@ -119,7 +119,7 @@ const orgsList = readTool({
       const held = typed ? heldPositions(r.ctx, who.id, p.id)[0] : undefined;
       const since = held?.row.since ?? rows.find((m) => m.since !== undefined)?.since;
       const title = (typed ? orgTitle(r.ctx, who.id, p.id) : null) ?? (rows.some((m) => m.how === "leader") ? "Leader" : HOW_WORDS[rows[0]?.how ?? "member"]);
-      return [{ organization: label(r, p.id), type: p.type, title, position: held ? { id: held.position.id, title: held.position.title } : null, powers: powersAt(r.ctx, p.id, who.id).map(({ power, grant }) => ({ power, basis: grant.basis, words: POWER_WORDS[power] })), since: since === undefined ? null : dateWords(r.ctx, since) }];
+      return [{ organization: label(r, p.id), type: p.type, title, position: held ? { id: held.position.id, title: held.position.title } : null, powers: powersAt(r.ctx, p.id, who.id).map(({ power, grant }) => ({ power, basis: grant.basis, words: powerWords[power] })), since: since === undefined ? null : dateWords(r.ctx, since) }];
     });
     reply.data({ who: label(r, who.id), organizations: orgs as unknown as JsonValue });
     return undefined;

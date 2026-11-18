@@ -12,7 +12,7 @@ import { isRecord, type JsonValue } from "./json";
 import type { OrgPower } from "./org";
 import type { OrgRef } from "./org-view";
 import type { ParamDef } from "./world";
-import { wordedParam } from "../engine/lines";
+import { wordedParam, wordTable } from "../engine/lines";
 
 /** An action's choice to put a decision short of the decider's votes to a vote instead: the economy's `decision` reads it from the action's params. */
 export const VOTE_PARAM: ParamDef = wordedParam({ type: "bool", optional: true }, "param_vote");
@@ -33,7 +33,7 @@ export function isVote(v: unknown): v is Vote {
 }
 
 /** The words of each vote, as a voter's row and the History give them. */
-export const VOTE_WORDS: Readonly<Record<Vote, string>> = { for: "for", against: "against", abstain: "abstains" };
+export const VOTE_WORDS: Readonly<Record<Vote, string>> = wordTable("vote", ["for", "against", "abstain"]);
 
 /** How a vote was cast: the voter's own (on the page, or as they made the decision), by their standing vote, as the story told it, or by the GM. */
 export const VOTE_HOWS = ["own", "rule", "story", "gm"] as const;

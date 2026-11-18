@@ -263,12 +263,12 @@ function costFlows(api: FinanceApi, ctx: ReadContext, id: EntityId): Flow[] {
   const cal = calendarOf(ctx.world);
   const common = { ...side, link: id, status: "active" as const, method: "account", source: "property" };
   const amount = (cost: Cost): Flow["amount"] => ({ provider: PROPERTY_COST_PROVIDER, args: { property: id, cost } });
-  const tax: Flow = { ...common, id: `property_tax:${id}`, label: `Property tax, ${name}`, kind: "tax", to: `tax:property:${regionOf(ctx, id)}`, amount: amount("tax"), schedule: { every: "year", months: paymentMonths(numOf(f.tax_installments, 2), cal.system.months, cal.system.months), days: [1], roll: "after" }, shortfall: "defer", category: "property_tax" };
+  const tax: Flow = { ...common, id: `property_tax:${id}`, label: say("flow_label_property_tax_name", { name }), kind: "tax", to: `tax:property:${regionOf(ctx, id)}`, amount: amount("tax"), schedule: { every: "year", months: paymentMonths(numOf(f.tax_installments, 2), cal.system.months, cal.system.months), days: [1], roll: "after" }, shortfall: "defer", category: "property_tax" };
   if (isMineral(ctx.state, id)) return [tax];
   return [
     tax,
-    { ...common, id: `property_insurance:${id}`, label: `Insurance, ${name}`, kind: "premium", to: "insurance:property", amount: amount("insurance"), schedule: { every: "month", days: [1], roll: "after" }, shortfall: "retry", retry_days: 7, retries: 2, category: "insurance" },
-    { ...common, id: `property_upkeep:${id}`, label: `Upkeep, ${name}`, kind: "bill", to: "upkeep:property", amount: amount("upkeep"), schedule: { every: "month", days: [15], roll: "after" }, shortfall: "skip", category: "home_maintenance" },
+    { ...common, id: `property_insurance:${id}`, label: say("flow_label_insurance_name", { name }), kind: "premium", to: "insurance:property", amount: amount("insurance"), schedule: { every: "month", days: [1], roll: "after" }, shortfall: "retry", retry_days: 7, retries: 2, category: "insurance" },
+    { ...common, id: `property_upkeep:${id}`, label: say("flow_label_upkeep_name", { name }), kind: "bill", to: "upkeep:property", amount: amount("upkeep"), schedule: { every: "month", days: [15], roll: "after" }, shortfall: "skip", category: "home_maintenance" },
   ];
 }
 
@@ -378,7 +378,7 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
   const name = labelOf(ctx, id);
   return {
     id: `lease:${id}:${l.unit}:${l.n}`,
-    label: units > 1 ? `Rent, ${name}, unit ${l.unit}` : `Rent, ${name}`,
+    label: units > 1 ? say("flow_label_rent_name_unit_unit", { name, unit: l.unit }) : say("flow_label_rent_name", { name }),
     kind: "rent",
     from: `tenant:${id}:${l.unit}`,
     ...side,
@@ -505,7 +505,7 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
     mortgage = `${x.property}:mortgage`;
     for (let i = 2; own(ctx.state.entities, mortgage); i++) mortgage = `${x.property}:mortgage:${i}`;
     // The lender decides, at the buyer's credit (`applyCredit`): the rate, and whether it lends this much against the property at all.
-    const opened = api.applyCredit(ctx, x.party, { product: "mortgage", cents: financed, term_months: term, secured_by: x.property, into: api.outside(`closing:${x.property}`), id: mortgage, name: `Mortgage, ${e.name}` });
+    const opened = api.applyCredit(ctx, x.party, { product: "mortgage", cents: financed, term_months: term, secured_by: x.property, into: api.outside(`closing:${x.property}`), id: mortgage, name: say("name_mortgage_name", { name: e.name }) });
     if (isRejection(opened)) return opened;
     events.push(...opened);
   }
@@ -805,7 +805,7 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
     link: x.property,
     status: "active",
   };
-  return [{ type: "spawn", entity: { id, kind: "flow", name: `Lease: ${labelOf(ctx, x.tenant)}, ${x.unit ? `${x.unit}, ` : ""}${e.name}`, tier: "background", fields, relations: [] } }];
+  return [{ type: "spawn", entity: { id, kind: "flow", name: say("name_lease", { tenant: labelOf(ctx, x.tenant), unit: x.unit || undefined, name: e.name }), tier: "background", fields, relations: [] } }];
 }
 
 /** Ending a lease (`lease_end`), by its landlord or its tenant: its last day is the one given, today at the earliest. */

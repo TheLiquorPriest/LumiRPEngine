@@ -485,8 +485,8 @@ export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void
       for (const id of Object.keys(objOf(sliceOf(ctx.state, "economy").year_close)).sort()) {
         if (!own(ctx.state.entities, id) || isGone(ctx.state, id)) continue;
         const payer = payerOf(api, ctx, id);
-        if (foundationTerms(ctx, id) !== null) out.push({ id: `foundation_tax:${id}`, label: "Foundation excise tax", kind: "tax", from: payer ?? id, to: "tax:federal", amount: { provider: "foundation_tax", args: { org: id } }, schedule: returnSchedule(5), shortfall: "defer", category: "excise_tax", link: id, status: "active", source: "year_close" });
-        else if (penalties && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND)) out.push({ id: `penalty_tax:${id}`, label: "Tax on kept earnings", kind: "tax", from: payer ?? id, to: "tax:federal", amount: { provider: "penalty_tax", args: { party: id } }, schedule: returnSchedule(4), shortfall: "defer", category: "business_tax", link: id, status: "active", source: "year_close" });
+        if (foundationTerms(ctx, id) !== null) out.push({ id: `foundation_tax:${id}`, label: say("flow_label_foundation_excise_tax"), kind: "tax", from: payer ?? id, to: "tax:federal", amount: { provider: "foundation_tax", args: { org: id } }, schedule: returnSchedule(5), shortfall: "defer", category: "excise_tax", link: id, status: "active", source: "year_close" });
+        else if (penalties && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", COMPANY_KIND)) out.push({ id: `penalty_tax:${id}`, label: say("flow_label_tax_on_kept_earnings"), kind: "tax", from: payer ?? id, to: "tax:federal", amount: { provider: "penalty_tax", args: { party: id } }, schedule: returnSchedule(4), shortfall: "defer", category: "business_tax", link: id, status: "active", source: "year_close" });
       }
       return out;
     },

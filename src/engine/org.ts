@@ -11,7 +11,7 @@
 import { classesIn, OWNER_ROLE_LABELS, ownersIn, ROLE_RIGHTS, votePcts, worthShares, type OwnerRole } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
-import { ACTS_FOR, CONTROL_DEPTH, CONTROL_KEEPS, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, POWER_WORDS, trusteesDecideIn, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
+import { ACTS_FOR, CONTROL_DEPTH, CONTROL_KEEPS, DISSOLVED_FIELD, isAudience, limitsIn, ORG_POWERS, overLimit, positionsIn, powerCovers, powersIn, trusteesDecideIn, WINDING_FIELD, type Audience, type Delegation, type OrgGrant, type OrgLimits, type OrgMember, type OrgPower, type OrgType, type Position } from "../shared/org";
 import { PARTY_KIND, PARTY_RELATION, partyTierOf } from "../shared/party";
 import { calendarOf, dateAt, dayIndexOfText, holidaysOn, monthName, parseHHMM, placeOffset } from "./calendar";
 import { calendarIn } from "./holidays";
@@ -22,7 +22,8 @@ import type { ReadContext } from "./registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { siteOf, together } from "./presence";
 import { COMPANY_KIND, GROUP_KIND, isMemberOf, linkedMemberOf, providersOf, type MembershipContext } from "./selector";
-import { say } from "./lines";
+import { say, wordTable } from "./lines";
+import { powerWords } from "./word-tables";
 
 type OrgContext = MembershipContext;
 
@@ -213,9 +214,9 @@ export function heldPositions(ctx: OrgContext, who: EntityId, org: EntityId): He
   const type = orgTypeOf(ctx, org);
   const all = (id: string, title: string): Position => ({ id, title, powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" });
   const member = rows.find((r) => r.how === "member");
-  if (type === "household" && member && !defined.some((d) => d.id === HEAD) && headOf(ctx, org) === who) out.push({ position: all(HEAD, "Head"), row: member });
+  if (type === "household" && member && !defined.some((d) => d.id === HEAD) && headOf(ctx, org) === who) out.push({ position: all(HEAD, say("title_head")), row: member });
   const leader = rows.find((r) => r.how === "leader");
-  if (type === "party" && leader && !defined.some((d) => d.id === LEADER)) out.push({ position: all(LEADER, "Leader"), row: leader });
+  if (type === "party" && leader && !defined.some((d) => d.id === LEADER)) out.push({ position: all(LEADER, say("title_leader")), row: leader });
   return out;
 }
 
@@ -225,7 +226,7 @@ export function seatFilled(ctx: OrgContext, who: EntityId): boolean {
 }
 
 /** The type's word for how someone belongs, when nothing else titles them (§3.3). */
-export const HOW_WORDS: Readonly<Record<OrgMember["how"], string>> = { member: "Member", owner: "Owner", staff: "Staff", leader: "Leader", core: "Core", companion: "Companion", hired: "Hired", ally: "Ally" };
+export const HOW_WORDS: Readonly<Record<OrgMember["how"], string>> = wordTable("how", ["member", "owner", "staff", "leader", "core", "companion", "hired", "ally"]);
 
 /**
  * The title `who` goes by in `org` (§3.3), the first that answers: their own (`member_of.role`),
@@ -546,7 +547,7 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   const ended = endedRefusal(ctx, org, power);
   if (ended !== null) return { ok: false, reason: ended };
   const grant = orgPower(ctx, who, org, power);
-  if (!grant) return { ok: false, reason: `${name}: you may not ${POWER_WORDS[power]}` };
+  if (!grant) return { ok: false, reason: `${name}: you may not ${powerWords[power]}` };
   const checks: LimitCheck[] = [];
   const scopes: { position: Position; at: EntityId }[] = [];
   // The trustee acting for a trust: themselves by their own role, or the organization whose trustee role it flows down through.
@@ -564,7 +565,7 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   };
   if (grant.basis === "control") {
     const path = controlPathOf(ctx, who, org, power);
-    if (!path) return { ok: false, reason: `${name}: you may not ${POWER_WORDS[power]}` };
+    if (!path) return { ok: false, reason: `${name}: you may not ${powerWords[power]}` };
     const chain = [path.top, ...path.steps.map((s) => s.org)];
     rests(path.root, path.top, chain);
     for (const step of path.steps) {

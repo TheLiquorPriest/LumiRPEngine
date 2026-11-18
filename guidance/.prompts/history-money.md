@@ -2,6 +2,9 @@
 description: The sentences the money writes into the chat's history and the world's notices - a credit decision, a card's statement and each stage of a late payment, a standing payment that went out, came in or did not go through, a loan paid off, a payday and its payslip, a late invoice, a bond or an option at its end, a project's step that waits for its money, and the lines of the money summary and the books (accounts, prices, taxes, dividends, a business's sales and draws, an asset's depreciation). One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
+  name_*: the name the economy gives an account, a loan, a lease, a holding or a job it makes (name_symbol_in_account, name_lease and the rest)
+  flow_label_*: the label of a standing payment or a bill the economy sets up (an autopay, a tax, rent, dues, living costs, a payroll, an invoice)
+  party_*: the name of an outside party a posting names (walk-in customers, suppliers, owners, a purchaser)
   memo_*: the memo written into the books with a posting (a deposit, a fee, a bill paid, a sale, a tax, a share out, an opening balance, a reversal) - each is filled with what it names
   credit_approved: an application for credit that was approved - product, apr (absent where no rate), limit (absent where none)
   credit_declined: an application for credit that was declined - product, reason (one of the credit_why lines)
@@ -201,3 +204,41 @@ memo_gave_part_away: Gave {{part}} away
 memo_penalty_year: {{tax}}, {{year}}
 memo_invoice: Invoice
 memo_sale: Sale
+name_name_card: {{name}} card
+name_name_checking: {{name}} checking
+name_worker_at_employer: {{worker}} at {{employer}}
+name_car_loan_name: Car loan, {{name}}
+name_loan_to_borrowername: Loan to {{borrowerName}}
+name_loan_from_lendername: Loan from {{lenderName}}
+name_name_income: {{name}}: income
+name_mortgage_name: Mortgage, {{name}}
+name_name_s_work: {{name}}'s work
+flow_label_walk_in_takings: Walk-in takings
+flow_label_sales_tax: Sales tax
+flow_label_profit_distribution: Profit distribution
+flow_label_suppliers: Suppliers
+flow_label_invoice_memo: Invoice: {{memo}}
+flow_label_pay_title: Pay: {{title}}
+flow_label_payroll: Payroll
+flow_label_living_costs: Living costs
+flow_label_name_autopay: {{name}} autopay
+flow_label_loan: Loan
+flow_label_payment: Payment
+flow_label_tax_on_investment_income: Tax on investment income
+flow_label_property_tax_name: Property tax, {{name}}
+flow_label_insurance_name: Insurance, {{name}}
+flow_label_upkeep_name: Upkeep, {{name}}
+flow_label_rent_name_unit_unit: Rent, {{name}}, unit {{unit}}
+flow_label_rent_name: Rent, {{name}}
+flow_label_tax_saved_by_donations: Tax saved by donations
+flow_label_dues_org: Dues: {{org}}
+flow_label_foundation_excise_tax: Foundation excise tax
+flow_label_tax_on_kept_earnings: Tax on kept earnings
+party_walk_in_customers: Walk-in customers
+party_purchaser: Purchaser
+name_symbol_in_account: {{symbol}}{{#account}} in {{account}}{{/account}}
+name_lease: Lease: {{tenant}}, {{#unit}}{{unit}}, {{/unit}}{{name}}
+flow_label_name_interest: {{name}} interest
+flow_label_name_dividend: {{name}} dividend
+party_suppliers: Suppliers
+party_owners: Owners

@@ -17,7 +17,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { CLASS_TRAITS, classesIn, FINANCE_EVENTS, listingIn, ROLE_RIGHTS, STRUCTURE_WORDS, type AccountClass } from "../../../shared/finance";
+import { CLASS_TRAITS, classesIn, FINANCE_EVENTS, listingIn, ROLE_RIGHTS, type AccountClass } from "../../../shared/finance";
 import { DIRECTOR, NONPROFIT_STRUCTURE, ORG_ACTIONS, ORG_POWERS, type Position } from "../../../shared/org";
 import { VOTE_PARAM } from "../../../shared/org-motions";
 import type { OrgStartView } from "../../../shared/org-view";
@@ -35,6 +35,7 @@ import { orgLog, ORGS_SPENT } from "./log";
 import { putToVote } from "./motions";
 import { dateWords } from "./view";
 import { say } from "../../../engine/lines";
+import { structureWords } from "../../../engine/word-tables";
 
 /** The Money level a company, a trust or a nonprofit needs (payroll, books and property, §4.7). */
 const COMPANY_LEVEL = 3;
@@ -317,7 +318,7 @@ function nonprofitEvents(ctx: EffectContext, f: Founding): LedgerEvent[] | Rejec
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const id = freshId(ctx, f.name, "_org");
   const founder = own(ctx.state.entities, f.founder);
-  const director: Position = { id: DIRECTOR, title: "Director", powers: [...ORG_POWERS], seats: 0, scope: "org", successor: "vacant" };
+  const director: Position = { id: DIRECTOR, title: say("title_director"), powers: [...ORG_POWERS], seats: 0, scope: "org", successor: "vacant" };
   const fields: JsonObject = { owners: [], structure: NONPROFIT_STRUCTURE, positions: [director as unknown as JsonObject] };
   const spawned = applyAll(w, [{ type: "spawn", entity: { id, kind: COMPANY_KIND, name: f.name, tier: founder?.tier ?? "background", fields, relations: [] } }]);
   if (spawned) return spawned;
@@ -342,7 +343,7 @@ function groupEvents(ctx: EffectContext, by: EntityId, name: string, kind: strin
   if (!of) return refuse("bad_kind", kinds.length === 0 ? say("why_this_world_has_no_kinds_of_group") : say("why_a_group_is_one_of_kinds", { kinds: kinds.map((k) => k.label).join(", ") }));
   const id = freshId(ctx, name, "");
   const founder = own(ctx.state.entities, by);
-  const leader: Position = { id: LEADER, title: "Leader", powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" };
+  const leader: Position = { id: LEADER, title: say("title_leader"), powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" };
   const spawn: LedgerEvent = { type: "spawn", entity: { id, kind, name, tier: founder?.tier ?? "background", fields: { positions: [leader as unknown as JsonObject] }, relations: [] } };
   const w = new Working(ctx.registry, ctx.world, ctx.state);
   const failed = w.apply(spawn);
@@ -407,14 +408,14 @@ function restructureEvents(ctx: EffectContext, a: Record<string, JsonValue>): Le
     const may = mayAct(ctx, party, org, "org.govern");
     if (!may.ok) return refuse("not_allowed", may.reason);
     const votes = optionalQuery(ctx, "economy.decide")?.(ctx, org, party, say("org_log_changing_the_structure_of")) ?? null;
-    if (votes !== null) return putToVote(ctx, { org, by, party, text: say("org_log_make_org_structure", { org: labelOf(ctx, org), structure: STRUCTURE_WORDS[structure] ?? structure }), why: votes }) ?? refuse("votes", votes);
+    if (votes !== null) return putToVote(ctx, { org, by, party, text: say("org_log_make_org_structure", { org: labelOf(ctx, org), structure: structureWords[structure] ?? structure }), why: votes }) ?? refuse("votes", votes);
   }
   const change = optionalService(ctx, "economy.restructure");
   if (!change) return refuse("no_money", say("why_a_companys_structure_needs_the_economy"));
   const events = change(ctx, org, structure);
   if (!Array.isArray(events) || events.length === 0) return events;
   const from = events.flatMap((e) => (e.type === "set" && e.field === "structure_from" && typeof e.value === "string" ? [e.value] : []))[0] ?? "";
-  const text = say("org_log_became_structure_taxed_as_one_from_from", { structure: STRUCTURE_WORDS[structure] ?? structure, from: dateWords(ctx, from), if_from: from !== "" });
+  const text = say("org_log_became_structure_taxed_as_one_from_from", { structure: structureWords[structure] ?? structure, from: dateWords(ctx, from), if_from: from !== "" });
   return [...events, orgLog(ctx, org, text, by !== "" ? { by } : {}), ...(party !== by && party !== org ? [orgLog(ctx, party, `${labelOf(ctx, org)}: ${text}`, { by, names: [org] })] : [])];
 }
 

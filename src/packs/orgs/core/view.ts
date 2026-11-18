@@ -11,7 +11,7 @@ import { opaqueId } from "../../../shared/hash";
 import { STRUCTURE_LABELS } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonValue } from "../../../shared/json";
-import { DUES_EVERY, MERGED_INTO_FIELD, NONPROFIT_STRUCTURE, ORG_POWER_FAMILIES, ORG_POWERS, POWER_WORDS, trusteesDecideIn, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
+import { DUES_EVERY, MERGED_INTO_FIELD, NONPROFIT_STRUCTURE, ORG_POWER_FAMILIES, ORG_POWERS, trusteesDecideIn, type Delegation, type MemberHow, type OrgGrant, type OrgMember, type OrgPower, type OrgType, type Position } from "../../../shared/org";
 import type { OrgDelegationView, OrgDuesView, OrgEndedView, OrgHistoryLineView, OrgLinkView, OrgListView, OrgPersonView, OrgPositionView, OrgPowerView, OrgRef, OrgRowView, OrgTrustView, OrgView, PartyMemberView } from "../../../shared/org-view";
 import { isPartyTier, PARTY_KIND, PARTY_SECTION } from "../../../shared/party";
 import { formatMoney } from "../../../shared/world";
@@ -27,6 +27,8 @@ import { isMemberOf, membersOf } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import { startOptions } from "./found";
 import { orgHistory } from "./log";
+import { say } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 /** The order the home groups where one belongs, and the order its rows' ways of belonging read. */
 const TYPE_ORDER: readonly OrgType[] = ["household", "company", "group", "trust", "party"];
@@ -97,7 +99,7 @@ class Page {
     if (!out) {
       const { subject } = this;
       const leader = subject.rows.find((r) => r.how === "leader" && r.who === who);
-      out = subject.exists ? heldPositions(this.ctx, who, subject.id) : leader ? [{ position: { id: LEADER, title: "Leader", powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" }, row: leader }] : [];
+      out = subject.exists ? heldPositions(this.ctx, who, subject.id) : leader ? [{ position: { id: LEADER, title: say("title_leader"), powers: [...ORG_POWERS], seats: 1, scope: "org", successor: "vacant" }, row: leader }] : [];
       this.held.set(who, out);
     }
     return out;
@@ -152,7 +154,7 @@ class Page {
       share: owner ? rows.filter((r) => r.how === "owner").reduce((a, r) => a + (r.share ?? 0), 0) : null,
       via: via === undefined ? null : this.ref(via),
       // A delegation's granter, and the organization a power flows down from, stand under their opaque id for a reader who can't see them.
-      powers: this.powersOf(who).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id === undefined ? null : grant.basis === "delegate" || grant.basis === "control" ? this.ref(grant.id).id : grant.id, words: POWER_WORDS[power] })),
+      powers: this.powersOf(who).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id === undefined ? null : grant.basis === "delegate" || grant.basis === "control" ? this.ref(grant.id).id : grant.id, words: powerWords[power] })),
       you: who === this.viewer,
       org: orgTypeOf(this.ctx, who),
     };
@@ -318,7 +320,7 @@ export function buildOrgView(ctx: ReadContext, id: EntityId, viewer: EntityId | 
   const held = viewer === null ? undefined : page.positionsHeld(viewer)[0];
   const reports = held?.position.reports_to;
   const delegations = subject.exists ? delegationsOf(ctx, subject.id) : [];
-  const powers: OrgPowerView[] = viewer === null ? [] : page.powersOf(viewer).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id ?? null, words: POWER_WORDS[power] }));
+  const powers: OrgPowerView[] = viewer === null ? [] : page.powersOf(viewer).map(({ power, grant }) => ({ power, basis: grant.basis, id: grant.id ?? null, words: powerWords[power] }));
   // The organizations holding it and those it holds (§29.3 Control): a secret one below it counted, never named.
   const above = subject.exists ? linksOf(page, holdersOf(ctx, subject.id), (h) => h.holder) : { links: [], hidden: 0 };
   const below = subject.exists ? linksOf(page, holdsOf(ctx, subject.id), (h) => h.org) : { links: [], hidden: 0 };

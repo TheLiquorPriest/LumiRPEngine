@@ -85,7 +85,7 @@ function incomeFlow(api: FinanceApi, ctx: ReadContext, holding: EntityId): Flow 
   const months = paymentMonths(a.pays, due ? due.month : cal.system.months, cal.system.months);
   return {
     id: `income:${holding}`,
-    label: `${name} ${interest ? "interest" : "dividend"}`,
+    label: say(interest ? "flow_label_name_interest" : "flow_label_name_dividend", { name }),
     kind: "distribution",
     from: a.label,
     to: route.to ?? account ?? (owners[0] ? owners[0].party : ""),

@@ -12,7 +12,7 @@ import { ownersIn, ROLE_RIGHTS } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { ACTS_FOR, isOrgPower, ORG_ACTIONS, positionIdOf, positionIn, POWER_WORDS, type OrgLimits, type OrgPower, type Position } from "../../../shared/org";
+import { ACTS_FOR, isOrgPower, ORG_ACTIONS, positionIdOf, positionIn, type OrgLimits, type OrgPower, type Position } from "../../../shared/org";
 import type { ParamDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOfText } from "../../../engine/calendar";
@@ -25,6 +25,7 @@ import { MEMBER_OF } from "../../../engine/selector";
 import { orgLog } from "./log";
 import { dateWords } from "./view";
 import { say, wordedParam } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 /** Every organization: a group of any kind (a company, a household, the party) or a trust. */
 const ORG_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: ["business", "household", "group", "trust"] } }, "param_org");
@@ -320,9 +321,9 @@ function delegatePowers(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection 
     const may = mayAct(ctx, by, org, "delegate");
     if (!may.ok) return refuse("not_allowed", may.reason);
     for (const power of powers) {
-      if (orgPower(ctx, by, org, power) === null) return refuse("not_allowed", say("why_by_may_not_power_for_org_so", { by: labelOf(ctx, by), power: POWER_WORDS[power], org: labelOf(ctx, org) }));
+      if (orgPower(ctx, by, org, power) === null) return refuse("not_allowed", say("why_by_may_not_power_for_org_so", { by: labelOf(ctx, by), power: powerWords[power], org: labelOf(ctx, org) }));
       const mine = heldLimits(ctx, by, org, power);
-      if (mine.below && SCOPED.includes(power)) return refuse("not_allowed", say("why_by_may_power_only_for_those_below", { by: labelOf(ctx, by), power: POWER_WORDS[power], title: mine.below.title, org: labelOf(ctx, org) }));
+      if (mine.below && SCOPED.includes(power)) return refuse("not_allowed", say("why_by_may_power_only_for_those_below", { by: labelOf(ctx, by), power: powerWords[power], title: mine.below.title, org: labelOf(ctx, org) }));
       const theirs = mine.limits;
       if (theirs?.payment !== undefined && (limits.payment === undefined || limits.payment > theirs.payment)) limits.payment = theirs.payment;
       if (theirs?.month !== undefined && (limits.month === undefined || limits.month > theirs.month)) limits.month = theirs.month;
@@ -336,7 +337,7 @@ function delegatePowers(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection 
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: ACTS_FOR, from: to, to: org, fields, ...(until !== undefined ? { until } : {}) });
   if (isRejection(linked)) return linked;
   const when = typeof a.until === "string" && a.until.trim() !== "" ? say("org_log_until_until", { until: dateWords(ctx, a.until.trim().slice(0, 10)) }) : "";
-  return [...linked, orgLog(ctx, org, say("org_log_let_to_powers_limits_when", { to: labelOf(ctx, to), powers: powers.map((p) => POWER_WORDS[p]).join(", "), limits: limitWords(ctx, limits), when: when }), { ...actedBy(by, "delegate"), names: [to] })];
+  return [...linked, orgLog(ctx, org, say("org_log_let_to_powers_limits_when", { to: labelOf(ctx, to), powers: powers.map((p) => powerWords[p]).join(", "), limits: limitWords(ctx, limits), when: when }), { ...actedBy(by, "delegate"), names: [to] })];
 }
 
 /** A delegation ended (§3.5): by its granter, or by a holder of `delegate` whose own powers cover it. */
@@ -353,7 +354,7 @@ function revokeDelegation(ctx: EffectContext, a: Args): LedgerEvent[] | Rejectio
     if (!may.ok) return refuse("not_allowed", may.reason);
     const given = Array.isArray(f.powers) ? f.powers.filter(isOrgPower) : [];
     const beyond = given.find((p) => orgPower(ctx, by, org, p) === null);
-    if (beyond !== undefined) return refuse("not_allowed", say("why_by_may_not_beyond_for_org_so", { by: labelOf(ctx, by), beyond: POWER_WORDS[beyond], org: labelOf(ctx, org) }));
+    if (beyond !== undefined) return refuse("not_allowed", say("why_by_may_not_beyond_for_org_so", { by: labelOf(ctx, by), beyond: powerWords[beyond], org: labelOf(ctx, org) }));
   }
   return [{ type: "unlink", rel: ACTS_FOR, from: to, to: org }, orgLog(ctx, org, say("org_log_to_no_longer_acts_for_it", { to: labelOf(ctx, to) }), { ...actedBy(by, by === strOf(f.by) ? null : "delegate"), names: [to] })];
 }

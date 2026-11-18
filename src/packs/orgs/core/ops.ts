@@ -9,7 +9,7 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import { listingIn, ownersIn, unitsOf } from "../../../shared/finance";
-import { ACTS_FOR, AS_THE_WORLD, DUES_EVERY, ORGS_ENTRY, POWER_WORDS, type OrgPower } from "../../../shared/org";
+import { ACTS_FOR, AS_THE_WORLD, DUES_EVERY, ORGS_ENTRY, type OrgPower } from "../../../shared/org";
 import { DECISION_EFFECTS } from "../../../shared/org-motions";
 import type { OrgOp } from "../../../shared/org-ops";
 import { PARTY_OUT } from "../../../shared/party";
@@ -21,6 +21,7 @@ import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
 import { say } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -62,7 +63,7 @@ export function withWhy(text: string, why: string | undefined): string {
  */
 export function flagged(ctx: ReadContext, by: EntityId | undefined, org: EntityId, power: OrgPower, did: string): EffectSpec[] {
   if (by === undefined || by === "" || by === org || orgTypeOf(ctx, org) === null || orgPower(ctx, by, org, power) !== null) return [];
-  const text = plainWords(say("org_log_who_did_though_who_may_not_power", { who: labelOf(ctx, by), did: did, power: POWER_WORDS[power], org: labelOf(ctx, org) }));
+  const text = plainWords(say("org_log_who_did_though_who_may_not_power", { who: labelOf(ctx, by), did: did, power: powerWords[power], org: labelOf(ctx, org) }));
   return text === "" ? [] : [{ type: "note", args: { text, visibility: "secret" } }];
 }
 
@@ -208,13 +209,13 @@ export function compileOrgOp(ctx: ReadContext, op: OrgOp): EffectSpec[] | Reject
       if (typeof until === "object") return until;
       const fields: JsonObject = { powers: op.powers, ...(op.payment !== undefined && op.payment > 0 ? { payment: Math.round(op.payment) } : {}), ...(op.month !== undefined && op.month > 0 ? { month: Math.round(op.month) } : {}), ...(op.accounts !== undefined ? { accounts: op.accounts } : {}), by: op.by };
       const limits = [...(op.payment !== undefined && op.payment > 0 ? [say("org_log_currency_a_payment", { currency: money(ctx, op.payment) })] : []), ...(op.month !== undefined && op.month > 0 ? [say("org_log_currency_a_month", { currency: money(ctx, op.month) })] : [])];
-      const text = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => POWER_WORDS[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
+      const text = `${name(op.by)} let ${name(op.to)} ${op.powers.map((p) => powerWords[p]).join(", ")}${limits.length > 0 ? `, up to ${limits.join(" and ")}` : ""}${op.until !== undefined ? `, until ${op.until.slice(0, 10)}` : ""}`;
       const lacking = op.powers.find((p) => orgPower(ctx, op.by, op.org, p) === null);
       return [
         { type: "link", args: { rel: ACTS_FOR, from: op.to, to: op.org, fields, ...(until !== undefined ? { until } : {}) } },
         historyLine(op.org, text, { by: op.by, names: [op.by, op.to] }),
         ...flagged(ctx, op.by, op.org, "delegate", say("org_log_let_name_act_for_org", { name: name(op.to), org: name(op.org) })),
-        ...(lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, say("org_log_let_name_lacking", { name: name(op.to), lacking: POWER_WORDS[lacking] })) : []),
+        ...(lacking !== undefined && orgPower(ctx, op.by, op.org, "delegate") !== null ? flagged(ctx, op.by, op.org, lacking, say("org_log_let_name_lacking", { name: name(op.to), lacking: powerWords[lacking] })) : []),
       ];
     }
     case "revoke": {

@@ -796,7 +796,7 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
   const settle = end === null ? undefined : cycleDays(ctx, api, job, end - 62, end + 400).find((d) => roll(d) > end);
   return {
     id: `pay:${job.id}`,
-    label: `Pay: ${job.title}`,
+    label: say("flow_label_pay_title", { title: job.title }),
     kind: "payroll",
     // An outside employer pays as an outside payer named as the job names it, so the flow reads as its name; its pay posts from `payerOf`'s account.
     from: job.party ? payerOf(ctx, api, job) : `employer:${job.employer}`,
@@ -957,7 +957,7 @@ function hire(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectConte
     if (peer.custom.days) fields.pay_days = peer.custom.days;
   }
   const id = `job:${hashParts(ctx.rng.seed, "hire", employer, worker, String(ctx.state.clock)).slice(0, 10)}`;
-  const entity: EntityDef = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, employer)}`, tier: "background", fields, relations: [] };
+  const entity: EntityDef = { id, kind: JOB_KIND, name: say("name_worker_at_employer", { worker: labelOf(ctx, worker), employer: labelOf(ctx, employer) }), tier: "background", fields, relations: [] };
   const as = strOf(fields.title) || into?.title || "";
   return [{ type: "spawn", entity }, ...acted(ctx, employer, by, "staff.hire", say("org_log_hired_worker_as_as", { worker: labelOf(ctx, worker), as: as, if_as: !!(as) }), [worker])];
 }
@@ -1245,7 +1245,7 @@ export function registerEmployment(r: FinanceRegistry): void {
   // An employer's payroll on its organization's page (ORG-SPEC §4.4), behind `money.view`, from Money 3: a company's always; anyone else's once it employs someone or sets its pay schedule or account.
   core.orgSection({
     id: "payroll",
-    label: "Payroll",
+    label: say("flow_label_payroll"),
     power: "money.view",
     build: (ctx, org, viewer) => {
       if (moneyLevel(ctx, org) < 3) return null;

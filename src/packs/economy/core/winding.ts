@@ -26,7 +26,7 @@ import { isRecord, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import { opaqueId } from "../../../shared/hash";
 import { countsUnits, listingIn, moveUnits, ownersIn, ownersJson, ROLE_RIGHTS, unitsOf, withUnitShares, worthShares, type MergeOption, type MergeView, type Owner, type WindAsset, type WindingView, type WindLine, type WindPayout } from "../../../shared/finance";
-import { DISSOLVED_FIELD, MERGED_INTO_FIELD, POWER_WORDS, WINDING_FIELD, type OrgPower, type WindProperty } from "../../../shared/org";
+import { DISSOLVED_FIELD, MERGED_INTO_FIELD, WINDING_FIELD, type OrgPower, type WindProperty } from "../../../shared/org";
 import type { FieldDef } from "../../../shared/world";
 import { calendarOf, clockAt, dayIndexOfText } from "../../../engine/calendar";
 import { dayWords, dissolvedOn, mayAct, orgTypeOf, placesOf, windingUpSince } from "../../../engine/org";
@@ -52,6 +52,7 @@ import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
 import { sCorpRefusal, structureOf, taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
 import { say } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 /** What a step said, for the History the orgs pack writes: its words, and the people they name. */
 export interface WindSaid {
@@ -262,7 +263,7 @@ export function deciderFor(ctx: ReadContext, by: EntityId, business: EntityId, p
     if (why === null) return { party };
     first ??= reject("votes", why);
   }
-  return first ?? reject("not_allowed", say("why_business_you_may_not_power", { business: labelOf(ctx, business), power: POWER_WORDS[power] }));
+  return first ?? reject("not_allowed", say("why_business_you_may_not_power", { business: labelOf(ctx, business), power: powerWords[power] }));
 }
 
 // ---------------------------------------------------------------- winding up: begin

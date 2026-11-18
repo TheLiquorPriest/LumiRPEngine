@@ -13,7 +13,7 @@ import type { FinanceView, FlowView } from "../../../shared/finance";
 import { opaqueId } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
-import { ORG_POWERS, POWER_WORDS, type OrgLimits, type OrgPower, type OrgType } from "../../../shared/org";
+import { ORG_POWERS, type OrgLimits, type OrgPower, type OrgType } from "../../../shared/org";
 import { ALERTS_SECTION, COMING_SECTION, type OrgAlertView, type OrgComingView } from "../../../shared/org-feed";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, formatClock } from "../../../engine/calendar";
@@ -30,6 +30,7 @@ import { decisionAlerts, decisionMindLines } from "./decisions";
 import { orgsSetting } from "./seats";
 import { partyIdOf, powersAt, rowsAt } from "./view";
 import { listOf, say } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -368,10 +369,10 @@ function orgMindLine(ctx: ReadContext, who: EntityId, org: EntityId): string | n
   const powers = orgPowers(ctx, who, org).filter((p) => p.grant.basis !== "delegate");
   const limits = held ? limitWords(ctx, held.position.limits) : [];
   if (powers.length === ORG_POWERS.length) parts.push(say("feed_you_may_do_anything_for_it"));
-  else if (powers.length > 0) parts.push(say("feed_you_may_power_limits", { power: andList(powers.map((p) => POWER_WORDS[p.power])), limits: andList(limits), if_limits: limits.length > 0 }));
+  else if (powers.length > 0) parts.push(say("feed_you_may_power_limits", { power: andList(powers.map((p) => powerWords[p.power])), limits: andList(limits), if_limits: limits.length > 0 }));
   const lines = [say("feed_org_type_parts_you_belong_to_it", { org: name(org), type: typeWords(type), parts: parts.join("; "), if_parts: parts.length > 0 })];
   for (const d of delegationsOf(ctx, org).filter((x) => x.who === who)) {
-    const words = d.powers.map((p) => POWER_WORDS[p]);
+    const words = d.powers.map((p) => powerWords[p]);
     const extra = limitWords(ctx, d.limits);
     lines.push(say("feed_you_act_for_org_by_d_s", { org: name(org), d: d.by ? name(d.by) : undefined, words: andList(words), extra: andList(extra), until: d.until !== undefined ? formatClock(calendarOf(ctx.world), d.until) : undefined, if_d: !!(d.by), if_extra: extra.length > 0, if_until: d.until !== undefined }));
   }

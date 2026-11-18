@@ -61,3 +61,15 @@ export function wordedParam<T extends ParamDef>(def: T, line: string): T {
   Object.defineProperty(def, "label", { enumerable: true, configurable: true, get: () => say(line) || undefined });
   return def;
 }
+
+/** The line `word_<table>_<key>`: the word a table of words (one line a key) gives for `key`, whose characters outside letters, digits, `_` and `-` read as `_`. */
+export function wordOf(table: string, key: string): string {
+  return say(`word_${table}_${key.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+}
+
+/** A record over `keys` whose every value is the line `word_<table>_<key>`'s, read each time it is asked for (so it is the lines in force then). */
+export function wordTable<K extends string>(table: string, keys: readonly K[]): Readonly<Record<K, string>> {
+  const out = {} as Record<K, string>;
+  for (const key of keys) Object.defineProperty(out, key, { enumerable: true, get: () => wordOf(table, key) });
+  return out;
+}

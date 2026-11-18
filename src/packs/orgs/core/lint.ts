@@ -14,7 +14,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import { pointerOf } from "../../../shared/json-patch";
 import { objOf, own } from "../../../engine/pack-kit";
-import { ACTS_FOR, isOrgPower, ORG_POWERS, positionIn, positionsIn, POWER_WORDS, type OrgPower } from "../../../shared/org";
+import { ACTS_FOR, isOrgPower, ORG_POWERS, positionIn, positionsIn, type OrgPower } from "../../../shared/org";
 import type { LintFix, LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
 import { headOf, HEAD, jobsAt, orgPower, orgTypeOf, placesOf, positionsOf } from "../../../engine/org";
@@ -26,6 +26,7 @@ import { kindIs } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
 import { initialState } from "../../../engine/world-state";
 import { say } from "../../../engine/lines";
+import { powerWords } from "../../../engine/word-tables";
 
 /** A fix replacing (or adding) one value of the document. */
 function setFix(label: string, tokens: readonly string[], value: JsonValue): LintFix {
@@ -137,7 +138,7 @@ function delegationIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
       const lacking = known.filter((p) => orgPower(ctx, by, r.to, p) === null);
       const kept = known.filter((p) => !lacking.includes(p));
       const fix = kept.length > 0 ? setFix(`Give only what ${nameOf(world, by)} may`, ["entities", id, "relations", String(i), "fields", "powers"], kept) : dropFix(`End the delegation: ${nameOf(world, by)} may give none of it`, ["entities", id, "relations", String(i)]);
-      if (lacking.length > 0) out.push({ severity: "warning", code: ORG_LINT.delegateEscalation, path, message: say("lint_by_lets_id_lacking_for_r_which", { by: nameOf(world, by), id: nameOf(world, id), lacking: lacking.map((p) => POWER_WORDS[p]).join(", "), r: nameOf(world, r.to) }), fix });
+      if (lacking.length > 0) out.push({ severity: "warning", code: ORG_LINT.delegateEscalation, path, message: say("lint_by_lets_id_lacking_for_r_which", { by: nameOf(world, by), id: nameOf(world, id), lacking: lacking.map((p) => powerWords[p]).join(", "), r: nameOf(world, r.to) }), fix });
     });
   }
   return out;
@@ -235,7 +236,7 @@ function kindIssues(world: WorldDoc, ctx: ReadContext): LintIssue[] {
       const link = head === null ? -1 : (own(world.entities, head)?.relations.findIndex((r) => r.type === MEMBER_OF && r.to === id) ?? -1);
       const listed = Array.isArray(e.fields.positions);
       // The Head every household has, written out: every power, one seat, held by the member titled head, so nothing changes in play.
-      const position = { id: HEAD, title: "Head", powers: [...ORG_POWERS], seats: 1 };
+      const position = { id: HEAD, title: say("title_head"), powers: [...ORG_POWERS], seats: 1 };
       const fix: LintFix | undefined =
         head !== null && link >= 0 ? { label: `Add a Head position, held by ${nameOf(world, head)}`, ops: [{ op: "add", path: pointerOf(listed ? ["entities", id, "fields", "positions", "-"] : ["entities", id, "fields", "positions"]), value: listed ? position : [position] }, { op: "add", path: pointerOf(["entities", head, "relations", String(link), "fields"]), value: { ...objOf(own(world.entities, head)?.relations[link]?.fields), position: HEAD } }] } : undefined;
       if (head !== null) out.push({ severity: "info", code: ORG_LINT.headTitle, path: `entities.${id}.fields.positions`, message: say("lint_head_heads_name_by_the_title_head", { head: nameOf(world, head), name: e.name }), ...(fix ? { fix } : {}) });

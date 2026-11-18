@@ -42,7 +42,7 @@ import type { PlayerBlock, RoutineAwareness, RoutineEditOp, RoutineMode, Routine
 import { BASIC_BLOCKS, blockShapeProblems, isOff, ROUTINE_AWARENESS, ROUTINE_EVENTS, ROUTINE_MODES, ROUTINE_ROLES, routineSettingsOf, SKIP_LIVES } from "../../../shared/routines";
 import { partyTierIn } from "../../../shared/party";
 import type { NeedId, NeedTuning } from "../../../shared/needs";
-import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, NEED_WORDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
+import { CONVERSATION, isNeedId, NEED_DEFAULTS, NEED_IDS, needsOn, needsSettingsOf, needsSettingsProblems, STATED_MINUTES } from "../../../shared/needs";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
@@ -66,6 +66,7 @@ import { bedPlace, homeOf, placeOfType } from "./places";
 import { activeBlocks, blockOnDay, blockPlace, chatRoles, chatScheduleDefs, followOf, ROUTINE_OPTION, routineDay, routineLived, routineRole, routinesLint, routineYields, scheduleOff, schedulesLint, skipLifeOf, skipPlanOf, withPov, worldRoutines } from "./routines";
 import { ROUTINE_EFFECT, routineChannel, storyEvents } from "./story";
 import { usualRoutineHints } from "./usual";
+import { needWords } from "../../../engine/word-tables";
 
 export { commitments, type CommitmentBlock, type CommitmentKind } from "./commitments";
 
@@ -73,7 +74,7 @@ export { commitments, type CommitmentBlock, type CommitmentKind } from "./commit
 
 /**
  * The needs (DESIGN §8, §24.8; 0 = met, 100 = urgent): the activities that meet each and the times of
- * day (minutes) a routine meets it. Their names and words are `NEED_WORDS`, shared with every surface.
+ * day (minutes) a routine meets it. Their names and words are `needWords`, shared with every surface.
  * Whether each is on, how fast it grows and the points it is told and alerts at are the world's
  * (`world.needs`, `needsSettingsOf`). Only the POV's needs, and one a rule or an action set for
  * someone, are recorded; an NPC's follow what their day's plan has them do, and the routine's times
@@ -227,7 +228,7 @@ export function buildNeedsView(ctx: ReadContext): NeedsView | null {
     needs: on.map((need) => {
       // Pressing from the value itself, as the narrator's line reads it: the gauge only shows it rounded.
       const raw = needValue(ctx, pov, need);
-      const words = NEED_WORDS[need];
+      const words = needWords[need];
       return { need, name: words.name, label: words.word, value: Math.round(raw), pressing: raw >= tuning[need].tell, tell: tuning[need].tell, metBy: words.metBy };
     }),
   };
@@ -240,7 +241,7 @@ function needsIssues(world: WorldDoc): LintIssue[] {
   if (problems.length > 0) return problems.map((message) => ({ severity: "error", code: "castlife.needs", message: say("lint_needs_settings_message_the_engine_reads_it", { message: message }), path: "needs" }));
   const tuning = needsSettingsOf(world);
   return NEED_IDS.flatMap((need): LintIssue[] =>
-    tuning[need].on && tuning[need].alert < tuning[need].tell ? [{ severity: "warning", code: "castlife.needs", message: say("lint_name_s_alert_alert_is_below_the", { name: NEED_WORDS[need].name, alert: tuning[need].alert, tell: tuning[need].tell }), path: `needs.${need}` }] : [],
+    tuning[need].on && tuning[need].alert < tuning[need].tell ? [{ severity: "warning", code: "castlife.needs", message: say("lint_name_s_alert_alert_is_below_the", { name: needWords[need].name, alert: tuning[need].alert, tell: tuning[need].tell }), path: `needs.${need}` }] : [],
   );
 }
 
@@ -1050,7 +1051,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     const tuning = tuningOf(ctx);
     for (const need of needsOn(ctx.world)) {
       const alert = tuning[need].alert;
-      if (!met.has(need) && needValue(ctx, who, need, slot.end) >= alert && needValue(ctx, who, need, slot.start) < alert) out.push(...signalOf("needs", "need_alert", { word: NEED_WORDS[need].word }, { entity: pov }));
+      if (!met.has(need) && needValue(ctx, who, need, slot.end) >= alert && needValue(ctx, who, need, slot.start) < alert) out.push(...signalOf("needs", "need_alert", { word: needWords[need].word }, { entity: pov }));
     }
     return out;
   }
@@ -1700,7 +1701,7 @@ export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it: each the
   // world has on, from the point the world tells it at.
   const tuning = tuningOf(ctx);
-  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => NEED_WORDS[n].word) : [];
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => needWords[n].word) : [];
   const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
   const lines: FeedLine[] = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
   const here = placeOfEntity(ctx.state, pov);

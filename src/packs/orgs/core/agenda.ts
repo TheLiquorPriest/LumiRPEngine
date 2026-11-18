@@ -15,7 +15,7 @@ import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { isPlanStatus, isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_SOURCES, PLAN_STATUS_WORDS, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoal, type PlanGoalView, type PlanNote, type PlanOrder, type PlanOrderView, type PlanSource, type PlanStatus } from "../../../shared/org-feed";
+import { isPlanStatus, isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_SOURCES, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoal, type PlanGoalView, type PlanNote, type PlanOrder, type PlanOrderView, type PlanSource, type PlanStatus } from "../../../shared/org-feed";
 import type { OrgRef } from "../../../shared/org-view";
 import { partyTierIn, type PartyTier } from "../../../shared/party";
 import type { ParamDef, WorldDoc } from "../../../shared/world";
@@ -27,6 +27,7 @@ import type { CoreRegistry, EffectContext, EventTypeDef, ProposalChannelDef, Rea
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
 import { partyIdOf, powersAt, rowsAt } from "./view";
+import { planStatusWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -190,7 +191,7 @@ export const PLAN_EVENTS: EventTypeDef<PackEvent>[] = [
       };
       writePlan(state, org, { goals: plan.goals.map(move), orders: plan.orders.map(order) });
     },
-    describe: (e) => say("plan_status", { id: strOf(e.data.id), status: PLAN_STATUS_WORDS[isPlanStatus(e.data.status) ? e.data.status : "open"].toLowerCase() }),
+    describe: (e) => say("plan_status", { id: strOf(e.data.id), status: planStatusWords[isPlanStatus(e.data.status) ? e.data.status : "open"].toLowerCase() }),
   },
   {
     // The day planner's marker (`orgs.orders`): every block it laid for an order has ended, at `at`. It closes nothing.
@@ -355,7 +356,7 @@ export function statusEvents(ctx: ReadContext, a: Args): LedgerEvent[] | Rejecti
   const by = strOf(a.by);
   const id = strOf(a.id);
   const status = a.status;
-  if (!isPlanStatus(status)) return { code: "bad_args", reason: say("why_a_status_is_one_of_keys", { keys: Object.keys(PLAN_STATUS_WORDS).join(", ") }) };
+  if (!isPlanStatus(status)) return { code: "bad_args", reason: say("why_a_status_is_one_of_keys", { keys: Object.keys(planStatusWords).join(", ") }) };
   const plan = planOf(ctx.state, org);
   const order = plan.orders.find((o) => o.id === id);
   const item = order ?? plan.goals.find((g) => g.id === id);
@@ -524,7 +525,7 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
         team !== "" ? `(${team})` : "",
         o.where !== undefined ? `at ${labelOf(ctx, o.where)}` : "",
         o.when !== undefined ? `by ${formatClock(cal, o.when)}` : "standing",
-        say("feed_status_and_late", { status: PLAN_STATUS_WORDS[o.status].toLowerCase(), if_o: !!(lateOf(ctx, o)) }),
+        say("feed_status_and_late", { status: planStatusWords[o.status].toLowerCase(), if_o: !!(lateOf(ctx, o)) }),
         goal ? say("feed_it_serves_the_goal_text", { text: goal.text }) : "",
         tier ? tierFrame(tier) : say("feed_carry_it_out_as_part_of_your"),
       ];
@@ -532,7 +533,7 @@ export function planMindLines(ctx: ReadContext, who: EntityId): string[] {
     }
     if (tier === "core") {
       const rest = planOf(ctx.state, org).orders.filter((o) => isPlanStatusLive(o.status) && !orders.includes(o));
-      for (const o of rest) out.push(`- The rest of the plan: ${o.to.map((id) => (id === ctx.world.pov ? "the player character" : (own(ctx.state.entities, id)?.name ?? id))).join(", ")}: ${o.text} (${PLAN_STATUS_WORDS[o.status].toLowerCase()}).`);
+      for (const o of rest) out.push(`- The rest of the plan: ${o.to.map((id) => (id === ctx.world.pov ? "the player character" : (own(ctx.state.entities, id)?.name ?? id))).join(", ")}: ${o.text} (${planStatusWords[o.status].toLowerCase()}).`);
     }
   }
   return out;
@@ -567,9 +568,9 @@ export function planNarratorLines(ctx: ReadContext): string[] {
     const set = (x: PlanGoal | PlanOrder): string => say("feed_set_by_the_gm_by_name_cal", { name: x.by !== undefined ? name(x.by) : undefined, cal: formatClock(cal, x.at), if_by: x.by === undefined, if_lateOf: !!(lateOf(ctx, x)) });
     const latest = (x: PlanGoal | PlanOrder): string => (x.last && x.last.note !== "" ? say("feed_latest_note_last_source", { note: x.last.said ?? x.last.note, last: formatClock(cal, x.last.at), source: sourceWords(x.last.source) }) : "");
     // The planner's marker (`orgs.lived`) says only what the day as laid says, never that it is done.
-    const orderLine = (o: PlanOrder): string => say("feed_o_lead_leads_text_at_where_by", { o: o.to.map(name).join(", "), lead: o.lead ? name(o.lead) : undefined, text: o.text, where: o.where ? labelOf(ctx, o.where) : undefined, when: o.when !== undefined ? formatClock(cal, o.when) : undefined, status: PLAN_STATUS_WORDS[o.status], o2: set(o), o3: latest(o), if_lead: !!(o.lead), if_where: !!(o.where), if_when: o.when !== undefined, if_lived: o.lived !== undefined });
+    const orderLine = (o: PlanOrder): string => say("feed_o_lead_leads_text_at_where_by", { o: o.to.map(name).join(", "), lead: o.lead ? name(o.lead) : undefined, text: o.text, where: o.where ? labelOf(ctx, o.where) : undefined, when: o.when !== undefined ? formatClock(cal, o.when) : undefined, status: planStatusWords[o.status], o2: set(o), o3: latest(o), if_lead: !!(o.lead), if_where: !!(o.where), if_when: o.when !== undefined, if_lived: o.lived !== undefined });
     for (const g of goals) {
-      out.push(say("feed_goal_g_text_todayby_window_status_g2", { g: set(g), text: g.text, window: g.window, status: PLAN_STATUS_WORDS[g.status], g2: latest(g), if_window: !!(g.window), if_today: g.window === "today" }));
+      out.push(say("feed_goal_g_text_todayby_window_status_g2", { g: set(g), text: g.text, window: g.window, status: planStatusWords[g.status], g2: latest(g), if_window: !!(g.window), if_today: g.window === "today" }));
       for (const o of orders.filter((x) => x.goal === g.id)) out.push(orderLine(o));
     }
     for (const o of orders.filter((x) => x.goal === undefined || !goals.some((g) => g.id === x.goal))) out.push(orderLine(o));
@@ -747,7 +748,7 @@ export function agendaLabel(view: Pick<ReadContext, "registry" | "world" | "stat
   const org = itemOrg(state, strOf(p.org), id);
   const plan = org === null ? null : planOf(state, org);
   const text = (plan?.orders.find((o) => o.id === id) ?? plan?.goals.find((g) => g.id === id))?.text ?? id;
-  return `${isPlanStatus(p.status) ? PLAN_STATUS_WORDS[p.status] : "Plan"}: ${text}`;
+  return `${isPlanStatus(p.status) ? planStatusWords[p.status] : "Plan"}: ${text}`;
 }
 
 /**
@@ -763,8 +764,8 @@ export function planExtractLines(ctx: ReadContext): string[] {
     if (!planned(ctx, org) || !peopleIn(ctx, org).includes(pov)) continue;
     const plan = planOf(ctx.state, org);
     const orgName = say("feed_your_party_org_org2", { org: own(ctx.state.entities, org)?.name ?? org, org2: org, if_org: orgTypeOf(ctx, org) === null });
-    for (const g of plan.goals.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_goal_text_status", { id: g.id, orgName: orgName, text: g.text, status: PLAN_STATUS_WORDS[g.status].toLowerCase() }));
-    for (const o of plan.orders.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_order_for_o_text_status", { id: o.id, orgName: orgName, o: o.to.map(name).join(", "), text: o.text, status: PLAN_STATUS_WORDS[o.status].toLowerCase() }));
+    for (const g of plan.goals.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_goal_text_status", { id: g.id, orgName: orgName, text: g.text, status: planStatusWords[g.status].toLowerCase() }));
+    for (const o of plan.orders.filter((x) => isPlanStatusLive(x.status))) out.push(say("feed_id_orgname_order_for_o_text_status", { id: o.id, orgName: orgName, o: o.to.map(name).join(", "), text: o.text, status: planStatusWords[o.status].toLowerCase() }));
   }
   return out;
 }

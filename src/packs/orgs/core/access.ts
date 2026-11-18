@@ -13,7 +13,7 @@ import { listOf, say } from "../../../engine/lines";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { AS_THE_WORLD, AUDIENCES, ENTRY_WORDS, isAudience, NO_KEYS, ORG_ENTRY_ACTION, ORGS_ENTRY } from "../../../shared/org";
+import { AS_THE_WORLD, AUDIENCES, isAudience, NO_KEYS, ORG_ENTRY_ACTION, ORGS_ENTRY } from "../../../shared/org";
 import type { GmPlaceEntry, PremisesView, PremiseView } from "../../../shared/org-view";
 import type { LintIssue } from "../../../shared/lint";
 import type { WorldDoc } from "../../../shared/world";
@@ -27,6 +27,7 @@ import { TYPE_TABLES } from "../../../shared/items-build";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { together } from "../../../engine/presence";
 import { orgLog } from "./log";
+import { audienceWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -67,7 +68,7 @@ function keyWords(ctx: ReadContext, key: string, viewer: EntityId | null): strin
 /** Who may enter a place in the Premises' words: the entry set, else the business's hours rule, else anyone. */
 function entryWords(ctx: ReadContext, place: PlaceId): string {
   const set = setEntryOf(ctx, place);
-  if (set) return ENTRY_WORDS[set.entry];
+  if (set) return audienceWords[set.entry];
   return businessAt(ctx, place) !== null ? say("org_log_customers_while_it_trades_staff_only_after") : say("org_log_anyone");
 }
 
@@ -121,7 +122,7 @@ function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEven
   const data: JsonObject = { place, ...(entry !== undefined ? { entry } : {}), ...(keys !== undefined ? { keys } : {}), ...(actor !== null ? { by: actor } : {}), ...(org !== "" ? { org } : {}), visibility: "secret" };
   const pov = ctx.world.pov;
   const said = [
-    ...(entry === undefined ? [] : [entry === null ? say("org_log_who_may_enter_as_the_world_has") : say("org_log_who_may_enter_entry", { entry: ENTRY_WORDS[entry].toLowerCase() })]),
+    ...(entry === undefined ? [] : [entry === null ? say("org_log_who_may_enter_as_the_world_has") : say("org_log_who_may_enter_entry", { entry: audienceWords[entry].toLowerCase() })]),
     ...(keys === undefined ? [] : [keys === null ? say("org_log_its_keys_as_the_world_has_them") : keys.length === 0 ? say("org_log_no_keys") : say("org_log_keys_pov", { pov: listOf(keys.map((k) => keyWords(ctx, k, pov))) })]),
   ].join("; ");
   const where = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : actor !== null ? say("org_log_a_place") : say("org_log_a_place_2");
@@ -166,7 +167,7 @@ const ENTRY_EVENT: EventTypeDef<PackEvent> = {
   },
   describe: (e, ctx) => {
     const entry = e.data.entry;
-    return say(isAudience(entry) ? "org_entry_audience" : entry === null ? "org_entry_world" : "org_entry_keys", { place: labelOf(ctx, str(e, "place")), ...(isAudience(entry) ? { what: ENTRY_WORDS[entry].toLowerCase() } : {}) });
+    return say(isAudience(entry) ? "org_entry_audience" : entry === null ? "org_entry_world" : "org_entry_keys", { place: labelOf(ctx, str(e, "place")), ...(isAudience(entry) ? { what: audienceWords[entry].toLowerCase() } : {}) });
   },
 };
 
@@ -234,7 +235,7 @@ function premiseOf(ctx: ReadContext, id: PlaceId, viewer: EntityId | null, canCh
     playEntry: inPlay.entry ?? null,
     inPlay: inPlay.entry !== undefined || inPlay.keys !== undefined,
     words: entryWords(ctx, id),
-    now: closed === null ? (placeEntry(ctx, id, ctx.state.clock) === "customers" ? say("org_log_open_to_customers_now") : say("org_log_open_to_anyone_now")) : say("org_log_closed_now", { closed: ENTRY_WORDS[closed] }),
+    now: closed === null ? (placeEntry(ctx, id, ctx.state.clock) === "customers" ? say("org_log_open_to_customers_now") : say("org_log_open_to_anyone_now")) : say("org_log_closed_now", { closed: audienceWords[closed] }),
     hours: business !== null ? hoursWords(ctx, business) : null,
     keys: keysSet.map((k) => keyWords(ctx, k, viewer)),
     keysSet,
