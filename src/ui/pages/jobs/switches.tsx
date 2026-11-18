@@ -14,9 +14,10 @@ import { LevelBar } from "../settings/levelbar";
 import { type ChangeLevel, numberWords, valueWords } from "../settings/model";
 import { SettingRow } from "../settings/row";
 
-/** What is counted of a limit, said beside it: the jobs running now for the jobs at once, else the use over the last 24 hours. */
+/** What is counted of a limit, said beside it: the jobs running now for the jobs at once, the jobs started over the last 24 hours (the count the limit itself holds you to) for the jobs in a day, else the tokens used over the last 24 hours. */
 function usedWords(s: SettingView, used: number): string {
-  return s.key === "jobs.atOnce" ? `${numberWords(used, s.unit)} running now` : `${numberWords(used, s.unit)} used in the last 24 hours`;
+  if (s.key === "jobs.atOnce") return `${numberWords(used, s.unit)} running now`;
+  return s.key === "jobs.perDay" ? `${numberWords(used, s.unit)} started in the last 24 hours` : `${numberWords(used, s.unit)} used in the last 24 hours`;
 }
 
 export function SwitchesSection(props: { chat: string | null; reload: number; onChanged(): void }) {
