@@ -123,6 +123,14 @@ function apply(slice: Readonly<JsonObject>, change: AreaChange): AreaOutcome {
   const v = change.value as unknown as WriteValue;
   const mine = was.items[v.character] ?? {};
   const item = mine[v.item];
+  // Where its turn stands rebased (an earlier reply now shows another swipe, or was deleted): a perception of a turn this path does not
+  // have, and knowledge from a perception that did not apply here for it, are of that swipe; they apply again where it shows.
+  const away = change.away;
+  if (away !== undefined && away.turns.length > 0) {
+    const of = typeof v.value.of === "string" ? v.value.of : null;
+    const from = typeof v.value.from === "string" ? v.value.from : null;
+    if ((of !== null && away.turns.includes(of)) || (from !== null && v.part === "knowledge" && mine[from] === undefined)) return { applied: false, reports: [{ code: "another_swipe", values: { character: v.character, item: v.item } }] };
+  }
   const rows = item?.rows ?? [];
   // A field a turn after this change's own place wrote keeps that turn's value: a job's write placed late.
   const later = (field: string): boolean => (lastPlace(rows, field) ?? Number.NEGATIVE_INFINITY) > change.n;

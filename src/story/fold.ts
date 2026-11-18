@@ -178,6 +178,10 @@ const WRITE: AreaOp = {
   apply(slice, change): AreaOutcome {
     const s = asSlice(slice);
     const v = change.value as unknown as StoryWriteValue;
+    // A write about a reply (a beat or a canon fact it came from) made while that reply showed another swipe, or before it was
+    // deleted, is of that swipe: where its turn stands rebased on another, it does not apply, and it applies again where it shows.
+    const about = typeof v.value.message === "string" ? v.value.message : null;
+    if (about !== null && change.away?.messages.includes(about) === true) return { applied: false, reports: [{ code: "another_swipe", values: { item: v.item, message: about } }] };
     const item = mergeWrite(hasOwn(s.items, v.item) ? s.items[v.item] : undefined, v.part, v.item, v.value, { turn: change.turn, n: change.n, by: change.by, value: v.value });
     return { slice: json({ ...s, items: { ...s.items, [v.item]: item } }) };
   },

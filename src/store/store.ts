@@ -23,7 +23,7 @@ import { setWalkLimits, WALK_DEFAULTS, WALK_SETTINGS, walkLimits } from "../engi
 import type { WorldState } from "../engine/state";
 import { aboutOf, applyChecked, applyOwner, applyUnchecked, foldSteps, initialStoreState, inventedUnchecked, laterWrite, type FoldEnv, type FoldStep, type Item, type JobChange, type Outcome, type OwnerChange, type StoredChange } from "./fold";
 import { baseOf, draft } from "./working";
-import { Areas, type StoreArea } from "./areas";
+import { Areas, type Away, type StoreArea } from "./areas";
 import { readSnapshot, snapshotRows, type SnapshotDoc, type SnapshotRows } from "./snapshot";
 import { reversal, type UndoPlan } from "./undo";
 import { checkChange } from "./input";
@@ -93,7 +93,7 @@ export const STORE_DEFAULTS = Object.freeze({
 });
 
 /** Bumped whenever this fold's output for the same changes would differ: snapshots made before are not used. */
-const FOLD_VERSION = 7;
+const FOLD_VERSION = 8;
 
 export interface StoreOptions {
   /**
@@ -2303,6 +2303,31 @@ export class UserStore {
     return `${this.id}\u0000${node}`;
   }
 
+  /** The turns of the path a stored node ends, its own turn among them. */
+  private turnsTo(key: string): Set<string> {
+    return new Set(
+      this.db
+        .query<{ turn: string }, [string, string]>("WITH RECURSIVE up(key, prev, turn) AS (SELECT key, prev, turn FROM path_node WHERE user = ?1 AND key = ?2 UNION ALL SELECT n.key, n.prev, n.turn FROM path_node n JOIN up ON n.user = ?1 AND n.key = up.prev) SELECT turn FROM up")
+        .all(this.id, key)
+        .map((r) => r.turn),
+    );
+  }
+
+  /**
+   * Where `turn` stands rebased on a path whose turns before it are `before` (plan §6.3): the turns of the path it was made on (`made`,
+   * its own node) that this path does not have, an earlier reply's other swipe or a reply deleted since, with their messages. Its
+   * areas' changes are told it (`AreaChange.away`); undefined where its own node is not known.
+   */
+  private awayOf(turn: string, made: string | undefined, before: ReadonlySet<string>): Away | undefined {
+    if (made === undefined) return undefined;
+    const turns = [...this.turnsTo(made)].filter((t) => t !== turn && !before.has(t));
+    const messages = this.db
+      .query<{ message: string }, [string, string]>("SELECT DISTINCT t.message FROM json_each(?2) j CROSS JOIN turn t ON t.user = ?1 AND t.id = j.value WHERE t.message IS NOT NULL")
+      .all(this.id, JSON.stringify(turns))
+      .map((r) => r.message);
+    return { turns, messages };
+  }
+
   /**
    * Folds the path ending at `node`, from the nearest state on it held in memory under the fold mark of the chat its turn was played
    * in, else stored, else the chat's start. It writes nothing: the snapshots it finds worth storing wait for the user's next write.
@@ -2376,7 +2401,12 @@ export class UserStore {
         .map((t) => [t.id, t]),
     );
     const byTurn = this.changesOf(ids);
-    const stepOf = (c: { key: string; turn: string; depth: number }, changes: StoredChange[]): FoldStep => ({ node: c.key, turn: c.turn, n: c.depth + 1, own: turns.get(c.turn)?.node === c.key, changes });
+    const stepOf = (c: { key: string; prev: string | null; turn: string; depth: number }, changes: StoredChange[]): FoldStep => {
+      const made = turns.get(c.turn)?.node;
+      const own = made === c.key;
+      const away = own ? undefined : this.awayOf(c.turn, made, c.prev === null ? new Set() : this.turnsTo(c.prev));
+      return { node: c.key, turn: c.turn, n: c.depth + 1, own, changes, ...(away === undefined ? {} : { away }) };
+    };
     const placed = this.jobsPlaced(node);
     // His own changes, placed along the steps folded here; those placed at or before the start are in it already.
     const owner = this.ownerIn(own.chat) ? this.placeOwner(from >= 0 ? chain.slice(from) : rest, from >= 0, null).before : new Map<string, OwnerChange[]>();
@@ -2446,7 +2476,15 @@ export class UserStore {
     const placed = this.jobsAlong(nodes.map(([key, , turn, depth]) => ({ key, turn, depth, created: turns.get(turn)?.created ?? 0 }))).placed;
     const run = nodes.map(([key, , turn, depth]) => ({ key, chat: turns.get(turn)?.chat ?? chat, created: turns.get(turn)?.created ?? 0, depth }));
     const owner = this.ownerIn(chat) ? this.placeOwner(deepest >= 0 ? run.slice(deepest) : run, deepest >= 0, null).before : new Map<string, OwnerChange[]>();
-    const steps = rest.map(([key, , turn, depth]): FoldStep => ({ node: key, turn, n: depth + 1, own: turns.get(turn)?.node === key, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [], owner: owner.get(key) ?? [] }));
+    // The turns before each step on this path, which may not all be stored yet: the chain's own, grown as the steps go.
+    const before = new Set(nodes.slice(0, deepest + 1).map(([, , t]) => t));
+    const steps = rest.map(([key, , turn, depth]): FoldStep => {
+      const made = turns.get(turn)?.node;
+      const own = made === key;
+      const away = own ? undefined : this.awayOf(turn, made, before);
+      before.add(turn);
+      return { node: key, turn, n: depth + 1, own, changes: byTurn.get(turn) ?? [], jobs: placed.get(key) ?? [], owner: owner.get(key) ?? [], ...(away === undefined ? {} : { away }) };
+    });
     const every = this.store.snapshotEvery;
     const snaps: [string, number, SnapshotRows, string, string][] = [];
     const result = foldSteps(this.store.envOf(this.id), { state: draft(base.folded.state), upto: base.upto }, steps, (step, state, upto, notApplied, rebased) => {

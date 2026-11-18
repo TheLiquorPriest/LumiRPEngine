@@ -28,7 +28,7 @@ import { BLANK_REVISION, CLOCK_SET, setsClock, unsetsClock } from "./blank";
 import { applyFact } from "./facts";
 import { PRECISIONS, STORE_OPS, type Lane, type NotApplied, type Precision, type Report, type Source, type Standing, type StoreState } from "./types";
 import { claim, knownWrites, thawWorld, tryUnit } from "./working";
-import type { AreaOutcome, AreaPart, Areas } from "./areas";
+import type { AreaOutcome, AreaPart, Areas, Away } from "./areas";
 
 /** A handler that threw while a change applied: the change's turn, and its id once it is kept (null before). */
 export interface FoldFailure {
@@ -94,6 +94,8 @@ export interface FoldStep {
   n: number;
   /** Whether this node is the one the turn was made on. */
   own: boolean;
+  /** Where it stands rebased (`own` false): what of the path it was made on this path does not have, which its areas' changes are told (`AreaChange.away`). */
+  away?: Away;
   changes: readonly StoredChange[];
   /** Jobs' changes that take effect just before this turn: the first on the path to begin after their job ended. */
   jobs?: readonly JobChange[];
@@ -131,6 +133,8 @@ export interface Item extends Provenance {
   cite?: JsonValue | null;
   /** The change's id once it is kept; null (or absent) before. */
   change?: number | null;
+  /** Where its turn stands rebased, as its step says (`FoldStep.away`): an area's change is told it. */
+  away?: Away;
 }
 
 /** The state a chat starts from: the world revision's own, as today's engine builds it, and each area's starting slice. */
@@ -481,7 +485,7 @@ function applyAreaOp(env: FoldEnv, state: StoreState, item: Item): Outcome {
   let outcome: AreaOutcome;
   try {
     parts = def.touches?.(item.value) ?? [];
-    outcome = def.apply(slice, { op: name, value: item.value, turn: item.turn, n: item.n, by: item.by, standing: item.standing ?? null, precision: item.precision ?? null, source: item.source ?? null, cite: item.cite ?? null });
+    outcome = def.apply(slice, { op: name, value: item.value, turn: item.turn, n: item.n, by: item.by, standing: item.standing ?? null, precision: item.precision ?? null, source: item.source ?? null, cite: item.cite ?? null, ...(item.away === undefined ? {} : { away: item.away }) });
   } catch (e) {
     return { applied: false, reports: [failed(env, item.op, e, item)] };
   }
@@ -678,7 +682,7 @@ export function foldSteps(env: FoldEnv, start: { state: StoreState; upto: number
     // Recorded on this very path, after everything before it: it folds as it was recorded.
     const clean = step.own && upto < first;
     const live = step.changes.filter((c) => c.applied);
-    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by, cite: c.cite ?? null, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null }));
+    const items = live.map((c): Item => ({ op: c.op, value: c.value, turn: step.turn, n: step.n, by: c.by, cite: c.cite ?? null, change: c.id, precision: c.precision ?? null, standing: c.standing ?? null, source: c.source ?? null, ...(step.own || step.away === undefined ? {} : { away: step.away }) }));
     const outcomes = clean ? applyUnchecked(env, state, items) : applyChecked(env, state, items, new Set());
     outcomes.forEach((o, k) => {
       const c = live[k];

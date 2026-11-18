@@ -22,6 +22,19 @@ export interface AreaChange {
   precision: Precision | null;
   source: Source | null;
   cite: JsonValue | null;
+  /**
+   * Where its turn stands rebased (plan §6.3: an earlier reply now shows another swipe, or was deleted, and the turns after it are
+   * applied again on what shows): the turns of the path it was made on that this path does not have, with their messages. Absent on
+   * the turn's own path. A change about one of them (a beat of that reply, a perception of that turn) no longer applies here: the
+   * area says so with its reports, and it applies again where that swipe shows again.
+   */
+  away?: Away;
+}
+
+/** The turns, and their messages, of the path a change was made on that the path it is applied on does not have (`AreaChange.away`). */
+export interface Away {
+  turns: readonly string[];
+  messages: readonly string[];
 }
 
 /** A part an operation writes: a name the area gives (`ref`, as a tree ref may be) and the part of it. */
