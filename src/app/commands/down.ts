@@ -43,7 +43,7 @@ async function unmark(ids: readonly string[], paths: DataPaths, config: AppConfi
  * connection, a key to put back, and RPE's own connection where RPE answered on one.
  */
 export async function downCommand(argv: readonly string[], io: CliIO): Promise<number> {
-  const { words, flags } = parseArgs(argv, ["data"]);
+  const { words, flags } = parseArgs(argv, "down");
   if (words.length > 0) throw new UsageError("rpe down takes no words.");
   const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
   const config = await loadConfig(paths, io.env);

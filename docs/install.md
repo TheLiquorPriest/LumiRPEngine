@@ -76,6 +76,8 @@ Every command `rpe` has:
 - `rpe migrate`: carries the previous build's data into RPE. See [Moving from the previous build](migration.md).
 - `rpe check`: whether this build starts on the data folder: it is started, as `rpe serve` starts it, on a scratch copy of the data (a copy of the database, a fresh file tree, no Lumiverse), made under `--into <folder>` (a temporary folder where none is given) and removed when it ends. It passes once the build has mounted every area, laid its shipped files and answered its status with its own build, within `--within <seconds>`. RPE runs it on a new build before it swaps onto it (see [Updating](#updating)).
 
+Every command takes `--help` (or `-h`): given after a command's name, it prints that command's own usage, with each option, what it takes and its default, and one example where this page has one, and runs nothing. Given alone, or as the word `help`, it prints the usage of every command.
+
 Commands that change something are written by the running RPE when it runs, and by the command itself, under the data folder's lock, when it does not: see [The command line](security.md#the-command-line).
 
 ### The data folder

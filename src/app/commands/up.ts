@@ -28,10 +28,6 @@ import { updateSettingsOf } from "./update-settings";
 import { webToken } from "./web-token";
 import { withWriter } from "./writer";
 
-/** The switches `rpe up` takes beside its flags, and its flags. */
-const UP_SWITCHES = ["systemd", "no-runtime", "allow-http"] as const;
-const UP_FLAGS = ["data", "url", "user", "username", "name", "lumiverse", "runtime", "runtime-config", "runtime-data", "identifier", "port", "listen", "bun", "database", "memory"] as const;
-
 /** Whether a Lumiverse address is plain http to another machine, where the password and then the session token would cross the network in clear. */
 function inClear(base: string): boolean {
   const url = new URL(base);
@@ -67,12 +63,7 @@ export type ServeHere = (paths: DataPaths, config: AppConfig) => Promise<number>
 export async function upCommand(argv: readonly string[], io: CliIO, options: CliOptions, serveHere: ServeHere): Promise<number> {
   const version = options.version;
   const host = options.host ?? { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath };
-  const switched = argv.filter((a) => a.startsWith("--") && (UP_SWITCHES as readonly string[]).includes(a.slice(2)));
-  const switches = new Set(switched.map((a) => a.slice(2)));
-  const { words, flags } = parseArgs(
-    argv.filter((a) => !switched.includes(a)),
-    UP_FLAGS,
-  );
+  const { words, flags, switches } = parseArgs(argv, "up");
   if (words.length > 0) throw new UsageError("rpe up takes no words.");
   if (flags.user !== undefined && flags.username !== undefined && flags.user !== flags.username) throw new UsageError("--user and --username are the same flag: give one of them.");
   if (switches.has("no-runtime") && flags.runtime !== undefined) throw new UsageError("--runtime names a runtime to take and --no-runtime says there is none: give one of them.");
