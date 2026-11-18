@@ -113,7 +113,7 @@ const HARNESS_ROWS: Readonly<Record<string, string>> = Object.freeze({
   "compaction.reserveTokens": "Compaction starts",
   "compaction.keepTurns": "Compaction starts",
   "compaction.recordsTokens": "Carried records before folding (records mode)",
-  "calls.retries": "A model call that failed before any answer arrived",
+  "calls.retries": "A model call that failed",
   "calls.silentAfterSeconds": "A model's answer that goes silent",
 });
 
@@ -152,7 +152,10 @@ export const SECTIONS: readonly { readonly title: string; readonly about: string
   { title: "Other", about: "Settings no section names yet." },
 ];
 
-/** Each key's first part: the group the page shows it in, and that group's section; for a key set per agent, `agents.` and its part after the definition. */
+/** The group of every setting of how a failed model call is made again. */
+const RETRY_GROUP = "When a call to the model fails";
+
+/** The group the page shows a key in, and that group's section, by the longest start of the key named here (its first part, or more of it); for a key set per agent, `agents.` and its part after the definition. */
 const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>> = {
   "agents.effort": ["Effort and limits, for each agent", "Agents"],
   "agents.limits": ["Effort and limits, for each agent", "Agents"],
@@ -177,6 +180,12 @@ const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>
   live: ["What you see while a turn runs", "Turns and replies"],
   turns: ["Lists of turns", "Turns and replies"],
   calls: ["Model calls", "Connections and model calls"],
+  "calls.retries": [RETRY_GROUP, "Connections and model calls"],
+  "calls.retryWaitSeconds": [RETRY_GROUP, "Connections and model calls"],
+  "calls.retryWaitGrowth": [RETRY_GROUP, "Connections and model calls"],
+  "calls.maxRetryWaitSeconds": [RETRY_GROUP, "Connections and model calls"],
+  "calls.retryWaitAsAsked": [RETRY_GROUP, "Connections and model calls"],
+  "calls.retryOn": [RETRY_GROUP, "Connections and model calls"],
   throttles: ["Calls at once", "Connections and model calls"],
   tokens: ["Counting tokens", "Connections and model calls"],
   embedding: ["Embeddings", "Connections and model calls"],
@@ -226,13 +235,14 @@ const GROUP_ORDER: readonly string[] = [...new Set([EACH_CONNECTION, ...Object.v
 
 /**
  * The section and group a setting is shown in: one set per connection with every other, as one table; one set per agent by its part after
- * the definition; else by its key's first part. `order` puts the settings in the order of the page's sections and of the groups within
- * each, the registry's order kept within a group.
+ * the definition; else by the longest start of its key `GROUPS` names. `order` puts the settings in the order of the page's sections and of
+ * the groups within each, the registry's order kept within a group.
  */
 export function groupOf(def: Pick<SettingDef, "key" | "perConnection">): { section: string; group: string; order: number } {
   const parts = def.key.split(".");
   const first = parts[1] === DEFINITION_PART ? `${parts[0]}.${parts[2]}` : (parts[0] ?? def.key);
-  const found = GROUPS[first];
+  const starts = parts[1] === DEFINITION_PART ? [first] : parts.map((_, n) => parts.slice(0, parts.length - n).join("."));
+  const found = starts.map((start) => GROUPS[start]).find((named) => named !== undefined);
   const [group, section] = def.perConnection ? [EACH_CONNECTION, "Connections and model calls"] : found === undefined ? [first, "Other"] : found;
   const groupAt = GROUP_ORDER.indexOf(group);
   return { section, group, order: SECTIONS.findIndex((s) => s.title === section) * (GROUP_ORDER.length + 1) + (groupAt < 0 ? GROUP_ORDER.length : groupAt) };

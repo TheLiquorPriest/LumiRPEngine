@@ -260,7 +260,7 @@ describe("the standalone docs", () => {
       "reply.lastText": ["When the Author ends with no reply", false],
       "progress.silenceSeconds": ["Thinking block in the chat", 60],
       "reply.tailSentences": ["Sentences shown again to an agent that goes on after a rule stopped it", 3],
-      "calls.retries": ["A model call that failed before any answer arrived", 2],
+      "calls.retries": ["A model call that failed", 2],
       "calls.silentAfterSeconds": ["A model's answer that goes silent", 300],
       "reply.leadSampling": ["The Author's sampling", "own"],
       "sessions.carry": ["How context is carried in a session", "continuing"],
