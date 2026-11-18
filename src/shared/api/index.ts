@@ -774,13 +774,13 @@ export interface DueReply {
   more: number | null;
 }
 
-/** One thing a turn's time brought due: its kind, what it is, when it fell due as the world prints it, the level it concerns (null where none), and the turn's changes recorded for it (null while none were). */
+/** One thing a turn's time brought due: what kind it is in a person's words, what it is (whose it is by name, what, and where), when it fell due as the world prints it, the level it concerns (null where none), and each change of the turn that concerns it, one to a line in the words the GM view uses for a change (none while there were none). */
 export interface DueShown {
-  kind: string;
+  label: string;
   words: string;
   when: string;
   at: string | null;
-  outcome: string | null;
+  changes: string[];
 }
 
 /** One field of the World page's edit: a value or a fact at a level (world, place:<id>, entity:<id>), set or removed, with how exact and how sure he says a fact is. */

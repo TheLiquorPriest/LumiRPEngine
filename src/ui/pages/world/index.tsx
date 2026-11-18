@@ -24,7 +24,7 @@ import { counted, when } from "../../words";
 import { readTurns } from "../turns";
 import { NodeTree, type WorldSlots } from "./parts";
 import { readDue, readNotApplied, readWorld, type ValuesShown, WORLD_START, type WorldQuery } from "./read";
-import { NodeTools, RowTools } from "./tools";
+import { DueItem, NodeTools, RowTools } from "./tools";
 
 export { readWorld, WORLD_START };
 export type { ValuesShown, WorldQuery, WorldResult } from "./read";
@@ -67,12 +67,7 @@ export function DueSection(props: { read: DueReply | null }) {
       </div>
       <ul class="lre-section-body rpe-plain lre-stack">
         {read.items.map((item, i) => (
-          <li key={i} class="rpe-entry">
-            <p class="rpe-line">
-              <Badge>{item.kind}</Badge> {item.words} <span class="rpe-meta">({item.when})</span>
-            </p>
-            <p class="rpe-meta">{item.outcome === null ? "No outcome recorded yet." : `Outcome: ${item.outcome}`}</p>
-          </li>
+          <DueItem key={i} item={item} />
         ))}
       </ul>
       {read.more === 0 ? null : <p class="rpe-meta lre-section-body">{read.more === null ? "More fell due than this list holds." : `${counted(read.more, "more item")} fell due than this list holds.`}</p>}

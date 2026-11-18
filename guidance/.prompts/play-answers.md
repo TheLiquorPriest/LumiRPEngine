@@ -1,5 +1,5 @@
 ---
-description: The words RPE answers a play page with when it does not do what a panel asked of it, or does it and leaves something as it was. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values, and the keys give the words for what an answer names by a code. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing. A tap that manages keeps the rules its action has in this world as advice. One the rules would turn down (paying someone who is not there, say) is applied all the same, and what does not add up is told with it (applied_advised).
+description: The words RPE answers a play page with when it does not do what a panel asked of it, or does it and leaves something as it was. Each line is the message of one answer, shown to you as it is; the names in double braces are filled with the request's own values, and the keys give the words for what an answer names by a code. Change the words freely. Delete a line and that answer comes with no words. They say what is so; they ask for nothing. A tap that manages keeps the rules its action has in this world as advice. One the rules would turn down (paying someone who is not there, say) is applied all the same, and what does not add up is told with it (applied_advised). The lines that begin with due_ word what a turn's time brought due on the World page, under the kind it is (due_kind_) and then by whose it is, what it is and where.
 lines:
   not_world: "This chat does not play a world in RPE."
   no_revision: "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."
@@ -36,6 +36,22 @@ lines:
   undone_left_changed: "{{parts}}{{#on}} of {{on}}{{/on}} stays as it is, because something has changed it since."
   undone_left_kept: "{{parts}}{{#on}} of {{on}}{{/on}} stays as it is, because this build keeps no undo for it."
   no_request: "There is no request {{request}} waiting in this chat to send now."
+  due_kind_place: "Where"
+  due_kind_activity: "Doing"
+  due_kind_future: "Planned"
+  due_kind_arrival: "Arrival"
+  due_kind_ending: "Ending"
+  due_kind_need: "Need"
+  due_kind_fading: "Regard"
+  due_place: "{{who}} is due at {{place}}"
+  due_activity: "{{who}} is due to start {{#what}}{{what}}{{/what}}{{^what}}the next block of their routine{{/what}}"
+  due_future: "{{what}}"
+  due_arrival: "{{who}} is due to arrive{{#to}} at {{to}}{{/to}}{{#from}} from {{from}}{{/from}}{{#intention}}, {{intention}}{{/intention}}"
+  due_ending: "{{who}}: {{relation}} with {{to}} ends"
+  due_need: "{{who}}'s {{need}} reaches {{line}}"
+  due_fading: "The {{axis}} between {{who}} and {{to}} halves"
+  due_field: "{{who}}: {{kind}}{{#what}}: {{what}}{{/what}}{{^what}} changes{{/what}}"
+  due_process: "{{kind}}{{#what}}: {{what}}{{/what}}{{^what}} changes{{/what}}"
 keys:
   engine.hint: "a hint opened"
   spawn: "something made"

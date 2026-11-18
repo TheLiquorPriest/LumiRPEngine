@@ -263,7 +263,30 @@ function Systems(props: { chat: string; level: string; turn: TurnId | null; onCl
   );
 }
 
-/** What time brought due at a level, with the outcome recorded for each. */
+/** One thing that fell due: its kind, what it is in words and when, and under it each change of the turn that concerns it, one to a line. */
+export function DueItem(props: { item: DueShown }) {
+  const { item } = props;
+  return (
+    <li class="rpe-entry">
+      <p class="rpe-line">
+        <Badge>{item.label}</Badge> {item.words} <span class="rpe-meta">({item.when})</span>
+      </p>
+      {item.changes.length === 0 ? (
+        <p class="rpe-meta">No outcome recorded yet.</p>
+      ) : (
+        <ul class="rpe-plain">
+          {item.changes.map((line, j) => (
+            <li key={j} class="rpe-meta">
+              {line}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** What time brought due at a level, with the changes recorded for each. */
 export function DueLines(props: { items: readonly DueShown[] }) {
   if (props.items.length === 0) return null;
   return (
@@ -271,12 +294,7 @@ export function DueLines(props: { items: readonly DueShown[] }) {
       <span class="rpe-caption">Brought due here</span>
       <ul class="rpe-plain lre-stack">
         {props.items.map((item, i) => (
-          <li key={i} class="rpe-entry">
-            <p class="rpe-line">
-              <Badge>{item.kind}</Badge> {item.words} <span class="rpe-meta">({item.when})</span>
-            </p>
-            <p class="rpe-meta">{item.outcome === null ? "No outcome recorded yet." : `Outcome: ${item.outcome}`}</p>
-          </li>
+          <DueItem key={i} item={item} />
         ))}
       </ul>
     </div>

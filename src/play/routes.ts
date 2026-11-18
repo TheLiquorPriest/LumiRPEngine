@@ -84,8 +84,8 @@ const playedReply = shape.named(
 
 const dueShown = shape.named(
   "DueShown",
-  "One thing a turn's time brought due: its kind, what it is, when it fell due as the world prints it, the level it concerns (null where none), and the turn's changes recorded for it (null while none were).",
-  shape.object({ kind: shape.text(), words: shape.text(), when: shape.text(), at: shape.nullable(shape.text()), outcome: shape.nullable(shape.text()) }),
+  "One thing a turn's time brought due: what kind it is in a person's words, what it is (whose it is by name, what, and where), when it fell due as the world prints it, the level it concerns (null where none), and each change of the turn that concerns it, one to a line in the words the GM view uses for a change (none while there were none).",
+  shape.object({ label: shape.text(), words: shape.text(), when: shape.text(), at: shape.nullable(shape.text()), changes: shape.list(shape.text()) }),
 );
 const dueReply = shape.named(
   "DueReply",

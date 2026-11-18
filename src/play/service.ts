@@ -54,7 +54,7 @@ import { formatMoney, type ParamDef, type WorldDoc } from "../shared/world";
 import { type ChangeRow, factStore, JoinedTurnError, type Part, readPart, type Report, type Store } from "../store";
 import { FACT_ABOUT } from "../store/facts";
 import { STORE_OPS } from "../store/types";
-import { type DueRead, turnDue } from "./due";
+import { type DueRead, type Say, turnDue } from "./due";
 import { RunEnds, stateChanged } from "./live";
 import type { PanelAsk, RequestRecord, Requests, TapFrom } from "../turn/requests";
 import { editId, type Head, headOf, PLAYER, recordOwnerEdit, Refused, type Resolved } from "./owner-edits";
@@ -296,7 +296,9 @@ export class PlayService {
     const row = s.turn(at);
     if (row?.chat !== chat) throw new RouteError(404, `Chat ${chat} has no turn ${at}.`);
     if (row.joined != null) throw new JoinedTurnError(at, row.joined);
-    return turnDue(this.deps.store, user, at, (await this.deps.settings(user, chat)).dueItems);
+    const part = await this.part();
+    const say: Say = (line, fields = {}) => part.lines.get(line)?.render(part.header, fields) ?? "";
+    return turnDue(this.deps.store, user, at, (await this.deps.settings(user, chat)).dueItems, say);
   }
 
   /** A tap on the typed route, recorded as his own edit; a refusal answered in words with nothing changed. */
