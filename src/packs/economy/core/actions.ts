@@ -22,7 +22,7 @@ import { fallsBackOn } from "./flows";
 import { isOpened, reject, spendOf } from "./journal";
 import { availableOf, balance, bankSide, canSpend, classOf, debtorsOf, external, holdersOf, householdOf, managesAccount, managesParty, openerOf, productOf, rightsOf, shownLabel, statusOf, traitsOf, worldProducts } from "./model";
 import { accountFeature, asUnit, cardProblem, cardRoom, cardsOn, cashAccount, cashAdvanceFee, depositAccount, featureFor, isParty, mayUse, payeeAccount, posting, notice } from "./pay";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 function money(ctx: ReadContext, cents: number): string {
   return formatMoney(cents, ctx.world.currency);

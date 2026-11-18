@@ -12,7 +12,7 @@ import type { JobProposal } from "../../shared/jobs";
 import { MAP_SCHEMA, mapProblems, readMap, type MapProblem } from "../../shared/maps";
 import { pathText } from "../../shared/schema-check";
 import type { MapDoc, WorldDoc } from "../../shared/world";
-import { say } from "../../engine/lines";
+import { say } from "../../shared/lines";
 
 const MAP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 

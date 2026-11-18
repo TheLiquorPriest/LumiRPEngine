@@ -9,7 +9,7 @@
 // organization whose status says so, at the time of the gift. The taxes module takes a year's
 // deductible gifts off the donor's ordinary income and, at the top level, refunds what they saved.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

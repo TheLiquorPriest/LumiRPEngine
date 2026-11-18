@@ -7,7 +7,7 @@
 // anchors. The events of chats recorded before the rebuild (`anchor`, `txn`, `note`, `modifier`,
 // `statement`, `card_paid`, `decline`) fold here unchanged.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";

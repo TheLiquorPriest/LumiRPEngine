@@ -19,7 +19,7 @@ import { findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { factsOf, factText, holdingsOf, isSuspicion } from "./knowledge";
 import { worldSecrets } from "./knowledge-section";
 import { readSlice } from "./state";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** Play → What you know, read against the chat's state: suspicions and reveals by the threshold its turns recorded (`knowledgeThreshold`), so the two never disagree. */
 export function buildKnownView(ctx: ReadContext): KnownView {

@@ -4,7 +4,7 @@
 // (tracks.ts); this pack is how they reach effects, formulas, the narrator and the panel. Story has
 // no realism domain: tracks behave the same at every level.
 
-import { say, listOf } from "../../../engine/lines";
+import { say, listOf } from "../../../shared/lines";
 import type { TrackId } from "../../../shared/ids";
 import { hasOwn, isRecord, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

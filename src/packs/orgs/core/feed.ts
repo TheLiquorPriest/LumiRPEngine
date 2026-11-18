@@ -29,7 +29,7 @@ import { planMindLines } from "./agenda";
 import { decisionAlerts, decisionMindLines } from "./decisions";
 import { orgsSetting } from "./seats";
 import { partyIdOf, powersAt, rowsAt } from "./view";
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {

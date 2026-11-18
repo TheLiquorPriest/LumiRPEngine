@@ -13,7 +13,7 @@
 // settled it; an act that can't be carried out then fails it. Every record is bookkeeping in
 // `packs.orgs.motions`, worded to the player character where they put it or vote.
 
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";

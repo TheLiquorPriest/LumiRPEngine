@@ -41,7 +41,7 @@ import type { Provenance } from "./source";
 import { textOf } from "./texts";
 import { moveTo } from "./ops-things";
 import { setClock, timeArg } from "./ops-time";
-import { say } from "../engine/lines";
+import { say } from "../shared/lines";
 
 /** The fact store every `fact` is recorded through: the store's own. */
 const FACTS: FactStore = factStore;

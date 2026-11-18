@@ -17,7 +17,7 @@ import { activeSlot, chatSchedulesIn, ownerRank, scheduleInstants, scheduleOwner
 import { routineSettingsOf } from "../../../shared/routines";
 import { homeOf, workPlace } from "./places";
 import { followOf, scheduleOff } from "./routines";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** What a block of someone's commitments is: routine work or school, an appointment, a trip, one of their own plans, or other routine. */
 export type CommitmentKind = "work" | "school" | "appointment" | "trip" | "plan" | "other";

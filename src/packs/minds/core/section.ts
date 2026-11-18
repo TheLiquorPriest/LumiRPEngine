@@ -20,7 +20,7 @@ import { together } from "../../../engine/presence";
 import { isGone, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { readSlice } from "./state";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** One line of the Minds section, and whose mind it tells: their id, and their name as the line gives it (by name, or "Someone"); `kept` when Smart persistence kept their last thoughts this turn, which the narrator is told are unchanged. */
 export interface MindLine {

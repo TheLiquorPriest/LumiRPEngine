@@ -15,7 +15,7 @@ import { partyPossessive } from "../shared/thing-view";
 import type { Rest, Spot } from "../shared/things";
 import { grantBasisOf, nameTokens, thingsConfigOf } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
-import { say, listOf } from "./lines";
+import { say, listOf } from "../shared/lines";
 import { accessFor, atHome, type AccessAnswer } from "./access";
 import { calendarOf, formatClock } from "./calendar";
 import { orgPlaces, orgTypeOf, placesOf } from "./org";

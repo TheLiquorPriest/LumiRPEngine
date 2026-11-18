@@ -7,7 +7,7 @@
 
 import type { EntityId } from "../shared/ids";
 import type { Rng } from "./rng";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface PlanOption {
   id: string;

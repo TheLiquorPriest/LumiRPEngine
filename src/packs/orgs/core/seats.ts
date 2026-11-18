@@ -18,7 +18,7 @@ import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { belongsTo, directMembers, orgTypeOf, positionsOf, seatFilled } from "../../../engine/org";
 import { objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectDef, EventTypeDef, ProcessDef, ReadContext } from "../../../engine/registry";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { signalOf } from "../../../engine/notices";
 import { linkEvents } from "../../../engine/relations";
 import { isGone } from "../../../engine/scope";

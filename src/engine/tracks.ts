@@ -27,7 +27,7 @@ import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { ownersCue } from "./visibility";
 import type { Working } from "./working";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** Transitions per track per pass: a stage cycle stops here. */
 export const TRANSITION_CAP = 8;

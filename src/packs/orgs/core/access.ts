@@ -9,7 +9,7 @@
 // GM → Places shows the same for every place, with whose it is (`orgs.place_entry`). Who may enter
 // is `engine/entry.ts`'s, pure; this pack keeps the records.
 
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

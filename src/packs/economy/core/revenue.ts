@@ -11,7 +11,7 @@
 // (`economy.revenue_adjust`): a GM op, or what the story says, which asks first. A property with a
 // `valuation` (a mineral interest by default) is worth what its streams are projected to pay.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";

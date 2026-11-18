@@ -24,7 +24,7 @@ import { linkEvents } from "../../../engine/relations";
 import { MEMBER_OF } from "../../../engine/selector";
 import { orgLog } from "./log";
 import { dateWords } from "./view";
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 /** Every organization: a group of any kind (a company, a household, the party) or a trust. */

@@ -14,7 +14,7 @@ import type { EventTypeDef, FeedLine, ReadContext, SectionRenderer } from "./reg
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { engineSlice } from "./scope";
-import { listOf, say } from "./lines";
+import { listOf, say } from "../shared/lines";
 
 /** The engine's state-slice key for the GM's per-chat section overrides. */
 const FEED_KEY = "feed";

@@ -25,7 +25,7 @@ import type { Registry } from "../../../engine/registry-impl";
 import { kindIs } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
 import { initialState } from "../../../engine/world-state";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 /** A fix replacing (or adding) one value of the document. */

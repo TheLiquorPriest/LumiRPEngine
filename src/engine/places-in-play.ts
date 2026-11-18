@@ -24,7 +24,7 @@ import type { Advice, ReadContext, Rejection } from "./registry";
 import { placeOfEntity, placeWithin } from "./scope";
 import type { WorldState } from "./state";
 import { chatDraftOf, draftedWorld, NO_DRAFT } from "./world-draft";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** The event that writes a made place whole, or (`gone`) takes it away (ITEMS-SPEC §3.5, a fixed format). */
 export const PLACE_EVENT = "space.place";

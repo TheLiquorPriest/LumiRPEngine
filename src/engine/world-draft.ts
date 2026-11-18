@@ -19,7 +19,7 @@
 // Only what the engine reads as it plays is carried here, never what a chat's state starts from or
 // folds by: the world's places, paths and maps, and how the maps work. Pure.
 
-import { say } from "./lines";
+import { say } from "../shared/lines";
 import { SIGHT_MAX } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { PlaceVisibility } from "../shared/ids";

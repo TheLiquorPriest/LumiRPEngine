@@ -19,7 +19,7 @@
 // each holder takes their part as that year's dividend and adds it to their basis. A foundation's
 // excise and its 30% tax are paid with its return on 15 May, with an alert before.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

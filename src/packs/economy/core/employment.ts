@@ -19,7 +19,7 @@
 // pay, hours and leave) or the power to appoint, within the position's scope (`mayAct`), and never
 // puts their own on a payroll they only run (`payrollProblem`).
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";

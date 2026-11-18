@@ -27,7 +27,7 @@ import { typeRowOf } from "../../../engine/thing-index";
 import type { Adding } from "../../../engine/thing-ops";
 import { nameMeets, namesThing } from "../../../engine/thing-resolve";
 import { contentsOf, holderOf, holdsOf, sizeOf } from "../../../engine/things";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** Whether a person may carry a thing (ITEMS-SPEC §3.2): its size is the person ceiling's or smaller, or unknown; never a vehicle, a part or a fixture. */
 export function fitsOn(ctx: ReadContext, thing: EntityId): boolean {

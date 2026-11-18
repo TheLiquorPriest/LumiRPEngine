@@ -26,7 +26,7 @@ import type { FinanceApi, FinanceRegistry } from "./module";
 import { asUnit, depositAccount, isParty, posting, notice } from "./pay";
 import { openingEvent } from "./process";
 import type { Run } from "./run";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The note a loan between parties is owed to (its `note` field, naming an account of class `note`), or null for a bank's loan. */
 export function noteOf(ctx: ReadContext, loan: EntityId): EntityId | null {

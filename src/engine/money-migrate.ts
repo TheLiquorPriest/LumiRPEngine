@@ -11,7 +11,7 @@
 import { CLASS_TRAITS, LEGACY_TYPE_CLASS, PAY_EVERY, type AccountClass } from "../shared/finance";
 import { hasOwn, isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { EntityDef, WorldDoc } from "../shared/world";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 const AUTOPAY = /^\s*(minimum|statement|full)?\s*(?:from\s+(\S+))?\s*$/i;
 

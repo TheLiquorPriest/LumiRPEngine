@@ -7,7 +7,7 @@
 // what its customers owe it and what it owes (§27.10). Every money movement here goes through the
 // foundation's flows and postings.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";

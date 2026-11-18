@@ -22,7 +22,7 @@ import type { EffectContext, ReadContext } from "./registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { siteOf, together } from "./presence";
 import { COMPANY_KIND, GROUP_KIND, isMemberOf, linkedMemberOf, providersOf, type MembershipContext } from "./selector";
-import { say, wordTable } from "./lines";
+import { say, wordTable } from "../shared/lines";
 import { powerWords } from "./word-tables";
 
 type OrgContext = MembershipContext;

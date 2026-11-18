@@ -11,7 +11,7 @@ import type { LintRule } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
 import { fieldDef, kindIs } from "../../../engine/scope";
 import { selectorProblems } from "../../../engine/selector";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 const WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"] as const;
 /** Each memory setting: a number in its range (whole or not, and `"none"` allowed where it may have no limit), or a switch. */

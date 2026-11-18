@@ -35,7 +35,7 @@ import { entityVisibility, findLeaks, loreGateReader, namesAny, unrevealedSecret
 import { initialState, minutesBetween } from "../../engine/world-state";
 import { blockOnDay, routineIssues } from "../../packs/castlife/core/routines";
 import { addDrop, type Say, sayOr, snake, type DropCounts } from "./checks";
-import { say as sayLine } from "../../engine/lines";
+import { say as sayLine } from "../../shared/lines";
 
 /** A job's input as the job reads it: whom it proposes for (absent, every one it may read), and where a second pass starts. */
 export interface RoutineJobInput {

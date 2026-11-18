@@ -14,7 +14,7 @@ import type { WorldDoc } from "../shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT } from "../shared/world";
 import { checkWorldDay, isWorldDoc, lintWorld, migrateWorld, newBlankWorld, playtestStart, playtestTurn, shapeIssues, type DayFindings, type PlaytestStep, type PlaytestTurn } from "../engine/authoring";
 import { buildGmWorld, buildGmWorldPart, gmWorldPartCount, type GmPick, type GmWorldPart } from "../engine/gm-view";
-import { withoutLines } from "../engine/lines";
+import { withoutLines } from "../shared/lines";
 import { readPass } from "../engine/read-pass";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import type { WorldState } from "../engine/state";

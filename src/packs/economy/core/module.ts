@@ -10,7 +10,7 @@
 // who sells; every party's dashboard view takes the sections modules fill. `r.api` is the
 // foundation's money surface, the one way a module moves or reads money.
 
-import type { LineFields } from "../../../engine/lines";
+import type { LineFields } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
 import type { AccountClass, AlertLine, ClassTraits, CreditApplication, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine, WorthLine } from "../../../shared/finance";

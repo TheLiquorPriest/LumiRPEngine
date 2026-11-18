@@ -11,7 +11,7 @@
 // flow per person (contract pay, their share of pass-through profit) and per C corporation (its
 // profit). The flat rate below the top level is the occupation's set-aside.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

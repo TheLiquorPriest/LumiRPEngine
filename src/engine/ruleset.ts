@@ -13,7 +13,7 @@ import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { bandOf, evalExpr, fieldDef, kindIs, poolMax, scopeEnv } from "./scope";
 import { own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** Whether a progression applies to entities of a kind: its `kind` (descendants too), else any kind with both its fields. */
 export function progressionApplies(reg: Registry, world: WorldDoc, prog: ProgressionDef, kind: KindId): boolean {

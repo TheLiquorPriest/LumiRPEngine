@@ -20,7 +20,7 @@ import { chatSchedulesIn, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, canSeeField, canSeePlace, findLeaks, unrevealedSecrets } from "../../../engine/visibility";
 import { activeBlocks, blockOnDay, blockPlace, routineRole, scheduleOff } from "./routines";
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 
 /** One clause of someone's usual routine, and what a reader needs to choose and screen it. */
 export interface UsualClause {

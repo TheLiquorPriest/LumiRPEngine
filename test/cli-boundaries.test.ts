@@ -62,7 +62,7 @@ describe("the CLI bundles", () => {
 
   test("the kit bundles the engine on this machine, and the docs and schemas it serves", () => {
     expect(kit.files).toContain("src/cli/local-engine.ts");
-    for (const doc of ["AGENT-GUIDE", "REFERENCE", "EXPRESSIONS", "RECIPES", "DESIGN", "USER-GUIDE", "PRESETS"]) expect(kit.files).toContain(`docs/${doc}.md`);
+    for (const doc of ["AGENT-GUIDE", "REFERENCE", "EXPRESSIONS", "RECIPES", "DESIGN", "USER-GUIDE"]) expect(kit.files).toContain(`docs/${doc}.md`);
     expect(kit.files).toContain("schemas/lre-world-v1.schema.json");
   });
 

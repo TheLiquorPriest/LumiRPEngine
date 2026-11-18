@@ -8,7 +8,7 @@ import type { EntityId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { formatMoney, type FieldDef } from "../shared/world";
 import { fieldNoun, possessive } from "../shared/words";
-import { say, listOf } from "./lines";
+import { say, listOf } from "../shared/lines";
 import { belongsTo, orgTypeOf } from "./org";
 import { optionalQuery, own, rowOf } from "./pack-kit";
 import type { ReadContext } from "./registry";

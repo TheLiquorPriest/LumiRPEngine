@@ -13,7 +13,7 @@
 // and bonds are priced from those marks and the clock, never stored. A month's last close is kept
 // for every asset that moves (`economy.closes`), for the performance a holding's page shows.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

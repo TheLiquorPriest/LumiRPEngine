@@ -34,7 +34,7 @@ import { ORGS_CONFIG_EVENT, SEATS_PROCESS, SUCCESSION_EFFECT } from "./seats";
 import { registerStory } from "./story";
 import { buildOrgList, buildOrgPages } from "./view";
 import { registerWind } from "./wind";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {

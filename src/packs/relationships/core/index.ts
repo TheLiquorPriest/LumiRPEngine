@@ -19,7 +19,7 @@
 //   3  multiple axes plus appraisal rules
 //   4  history, group regard
 
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

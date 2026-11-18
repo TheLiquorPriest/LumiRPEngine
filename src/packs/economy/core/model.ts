@@ -48,7 +48,7 @@ import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf, TRUST_KIND } from "../../../engine/selector";
 import { mayAct } from "../../../engine/org";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
-import { wordTable } from "../../../engine/lines";
+import { wordTable } from "../../../shared/lines";
 
 /** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
 export const CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;

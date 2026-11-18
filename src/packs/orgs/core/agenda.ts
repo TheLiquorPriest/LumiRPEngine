@@ -10,7 +10,7 @@
 // narrator shows only what messages and time cover; core members treat orders as binding and may
 // object in words; companions weigh them; the hired take them as their job; allies as favours.
 
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";

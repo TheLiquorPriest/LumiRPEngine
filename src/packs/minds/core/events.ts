@@ -6,7 +6,7 @@
 // Player lines: none. A mind is private, so every describer words nothing for a viewer and the
 // Journal never shows one; the GM's and the author's lines name what changed, never a monologue.
 
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";

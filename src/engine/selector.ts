@@ -24,7 +24,7 @@ import type { MembershipProvider, ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { isGone, kindDef, kindIs, kindParent } from "./scope";
 import type { WorldState } from "./state";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** What a membership question reads: the registry's kinds and providers, the world and the state. */
 export type MembershipContext = Pick<ReadContext, "registry" | "world" | "state">;

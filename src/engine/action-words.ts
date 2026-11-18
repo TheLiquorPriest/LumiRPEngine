@@ -15,7 +15,7 @@ import type { Registry } from "./registry-impl";
 import { findAction, outsideOf, type Resolution } from "./resolve";
 import type { WorldState } from "./state";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "./visibility";
-import { listOf, say } from "./lines";
+import { listOf, say } from "../shared/lines";
 
 /** A game-time span in words: "45 min", "2.5 hours", "30 days". */
 export function spanText(minutes: number): string {

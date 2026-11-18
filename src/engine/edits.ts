@@ -57,7 +57,7 @@ import { counterpartOf, linkEvents } from "./relations";
 import { householdOf, isThing, mayFixThing, restOf, whoseOf } from "./things";
 import { claimsOf } from "./realism";
 import { canSeeEntity, canSeePlace } from "./visibility";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface EditOptions {
   /** The GM editor writes locked fields too; a player's ✎ fix can't. */

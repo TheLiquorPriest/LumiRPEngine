@@ -27,7 +27,7 @@ import { isMemberOf, membersOf } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import { startOptions } from "./found";
 import { orgHistory } from "./log";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 /** The order the home groups where one belongs, and the order its rows' ways of belonging read. */

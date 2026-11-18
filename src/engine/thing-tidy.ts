@@ -39,7 +39,7 @@ import { flatPath, type PathEvent } from "./thing-gm";
 import { thingIndex } from "./thing-index";
 import { thingVisibility } from "./thing-view";
 import { holderOf, holdersOf, holdsOf, possessorOf, sizeOf } from "./things";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** A head noun shared by more things than this is too common to pair them by (every "key" of a large world). */
 const PAIR_LIMIT = 64;

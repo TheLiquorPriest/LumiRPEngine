@@ -20,7 +20,7 @@ import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { isGone } from "../../../engine/scope";
 import { MEMBER_OF } from "../../../engine/selector";
-import { say, listOf, wordOf } from "../../../engine/lines";
+import { say, listOf, wordOf } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 declare module "../../../engine/registry" {

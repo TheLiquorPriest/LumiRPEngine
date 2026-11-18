@@ -24,7 +24,7 @@ import { kindDef, kindFields, kindParent } from "./scope";
 import { classOf, classProblems, selectorProblems } from "./selector";
 import { own } from "./pack-kit";
 import { knownBySelector } from "./visibility";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** What each literal argument of a track condition's lookups must name: `carries(holder, item)`, `at(entity, place)`, `knows(who, entity or place)`. */
 const TRACK_REF_ARGS: Readonly<Record<string, readonly ("entity" | "place" | "either")[]>> = {

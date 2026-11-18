@@ -13,7 +13,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { formatMoney, formatTemperature } from "../shared/world";
 import { fieldNoun, possessive } from "../shared/words";
-import { listOf, say } from "./lines";
+import { listOf, say } from "../shared/lines";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { passMemo } from "./read-pass";
 import type { Registry } from "./registry-impl";

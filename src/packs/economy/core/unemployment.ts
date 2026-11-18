@@ -18,7 +18,7 @@
 // settles the year before (with the credit reduction); SUTA pays each quarter ended and any unpaid
 // one before it. A company books both as payroll.
 
-import { say, wordTable } from "../../../engine/lines";
+import { say, wordTable } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

@@ -37,7 +37,7 @@
 //     (`opposedDice`) and the joint law of the natural die and the total (`naturalSplit`).
 
 import type { Rng } from "./rng";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export class DiceError extends Error {
   constructor(message: string) {

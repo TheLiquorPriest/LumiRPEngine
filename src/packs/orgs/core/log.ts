@@ -5,7 +5,7 @@
 // makes a History line; `orgsActed` makes what an act for an organization records beside its
 // effects, one unit with them (the `orgs.acted` service the economy calls).
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

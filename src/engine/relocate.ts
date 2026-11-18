@@ -18,7 +18,7 @@ import { together } from "./presence";
 import type { Advice, ReadContext, Rejection } from "./registry";
 import { isGone, placeOfEntity } from "./scope";
 import { carriersOf, holdsOf } from "./things";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface RelocateOptions {
   /**

@@ -13,7 +13,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { KNOWLEDGE_CHANGES, MINDS_EVENTS } from "../../../shared/minds";
 import type { EffectDef, ProposalChannelDef, ReadContext, Rejection } from "../../../engine/registry";
 import { isFact } from "./events";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** Why a knowledge proposal isn't one, or null: its facts whole, and a learning for the player character alone. */
 function knowledgeProblem(p: JsonObject, ctx: ReadContext): Rejection | null {

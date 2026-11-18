@@ -7,7 +7,7 @@
 // a sale's proceeds land where the player says, else in the holding's account, else the seller's
 // deposit account: never simply in the first checking account.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";

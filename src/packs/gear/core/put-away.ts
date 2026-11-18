@@ -25,7 +25,7 @@ import { restOf } from "../../../engine/things";
 import { Working } from "../../../engine/working";
 import { minutesBetween } from "../../../engine/world-state";
 import { fitsOn, grants } from "./model";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** What a put-away move says it was for (`got.why` where one is written). */
 

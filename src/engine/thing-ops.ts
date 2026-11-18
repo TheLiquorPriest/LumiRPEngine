@@ -32,7 +32,7 @@ import { findThings, meets } from "./thing-resolve";
 import { carriersOf, contentsOf, holderOf, holdersOf, holdsOf, isThing, possessorOf, SHARED_SLOTS, sizeOf, sizeOfDef, slotOf, spotOf, supportOf, whoseOf } from "./things";
 import { isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** How an op is resolved: who makes it, whether it was confirmed, and what its made things are salted by. */
 export interface ItemOpOptions {

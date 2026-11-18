@@ -50,7 +50,7 @@ import { visibilityOf } from "./visibility";
 import { carryDraft, chatDraftOf, NO_DRAFT } from "./world-draft";
 import { carrySpace } from "../packs/space/core/grid-play";
 import { clampLevels } from "./world-state";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** What the merge needs from the registry: event types (an account's posting), relation types and read contexts. */
 export interface UpgradeTypes extends EventTypes, RelationTypes {

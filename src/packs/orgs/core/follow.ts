@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { isPlanStatusLive, ORDER_PRIORITY, type OrderPlan, type PlanGoal, type PlanOrder } from "../../../shared/org-feed";
 import { partyTierIn } from "../../../shared/party";
-import { say, listOf } from "../../../engine/lines";
+import { say, listOf } from "../../../shared/lines";
 import { calendarOf, clockAt, dateAt, dayIndexOfText, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { numOf, objOf, optionalQuery, own, sliceOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, ProcessDef, ReadContext, SlotInfo } from "../../../engine/registry";

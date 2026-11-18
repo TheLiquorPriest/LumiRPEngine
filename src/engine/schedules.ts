@@ -31,7 +31,7 @@ import { COMPANY_KIND, GROUP_KIND, membersOf, selectEntities, TRUST_KIND } from 
 import type { WorldState } from "./state";
 import { chatWorld, calendarIn } from "./holidays";
 import { initialState, minutesBetween } from "./world-state";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface ScheduleInstant {
   at: number;

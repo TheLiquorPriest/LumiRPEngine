@@ -24,7 +24,7 @@ import { canSeeField } from "./visibility";
 import { Working } from "./working";
 import { clampScale, clampThreshold, clampTick, clampUnitCap, TIME_LIMITS } from "./time-limits";
 import { fieldNoun, possessive } from "../shared/words";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export const DEFAULT_SCENE_TYPE = "conversation";
 

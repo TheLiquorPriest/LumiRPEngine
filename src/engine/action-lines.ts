@@ -4,7 +4,7 @@
 // reads as the action's id; a description or a param label with no line reads as none.
 
 import type { ActionDef, ParamDef } from "../shared/world";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 import type { PackAction } from "./registry";
 
 /** The action as the registry holds it: `def` with its label, its description and its params' labels read through the lines. */

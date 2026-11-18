@@ -10,7 +10,7 @@ import { hashParts } from "./hash";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, FieldId, MessageId, PlaceId, StageId, TrackId } from "./ids";
 import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
-import { say } from "../engine/lines";
+import { say } from "./lines";
 
 // ---------------------------------------------------------------- fidelity
 

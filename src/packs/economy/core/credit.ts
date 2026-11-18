@@ -8,7 +8,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { CLASS_TRAITS, FINANCE_EVENTS, SCORE_MAX, SCORE_MIN, creditTierOf, isAccountClass, isCredit, scoreBand, type AccountClass, type CreditApplication, type CreditEntry, type CreditReport, type CreditTier, type ScoreFactors } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, clockOfLocal, dateAt, formatClock } from "../../../engine/calendar";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { labelOf, numOf, objOf, optionalQuery, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { cycleOf, reject } from "./journal";

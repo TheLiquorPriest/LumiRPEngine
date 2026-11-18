@@ -14,7 +14,7 @@ import { hashParts } from "../../../shared/hash";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
-import { type LineFields, say } from "../../../engine/lines";
+import { type LineFields, say } from "../../../shared/lines";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { Advice, ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";

@@ -22,7 +22,7 @@ import type { EffectContext, ReadContext, Rejection } from "../../../engine/regi
 import { reject } from "./journal";
 import { holdersOf, traitsOf } from "./model";
 import { namedSource } from "./pay";
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {

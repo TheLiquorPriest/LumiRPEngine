@@ -48,7 +48,7 @@ import { hashParts } from "../../../shared/hash";
 import { allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { fieldDef, isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { povLead, together } from "../../../engine/presence";
-import { listOf, say, wordOf } from "../../../engine/lines";
+import { listOf, say, wordOf } from "../../../shared/lines";
 import { noteOf, signalOf } from "../../../engine/notices";
 import { relocate } from "../../../engine/relocate";
 import { acts as lifeActs, povLife } from "../../../engine/life";

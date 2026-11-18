@@ -16,7 +16,7 @@
 // a chat (`RoutineEditOp`, one `fix` entry with its Undo), and the story changes them too (a new job,
 // a move, a new habit read from a reply), recorded with the turn it came from.
 
-import { say, type Voice } from "../engine/lines";
+import { say, type Voice } from "./lines";
 import type { EntityId, KindId, MessageId, PlaceId, ScheduleId, SceneTypeId } from "./ids";
 import type { JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";

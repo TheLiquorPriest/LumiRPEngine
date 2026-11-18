@@ -20,7 +20,7 @@ import { hashParts } from "../../../shared/hash";
 import { matchVehicleClass, specWords, vehicleDomainOf, vehiclesConfigOf, vehicleSpecsOf, type VehicleDomain, type VehiclePrice, type VehicleSpawn } from "../../../shared/vehicles";
 import type { KindDef } from "../../../shared/world";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { noteOf } from "../../../engine/notices";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";

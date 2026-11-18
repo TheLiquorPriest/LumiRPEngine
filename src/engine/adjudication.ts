@@ -37,7 +37,7 @@ import { placeOfEntity } from "./scope";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
 import { playerTrack } from "./visibility";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** How far up the place tree a marked place counts. */
 const PARENT_DEPTH = 32;

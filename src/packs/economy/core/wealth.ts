@@ -23,7 +23,7 @@ import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, r
 import { gainsIn, incomeIn } from "./records";
 import { businessIds, registerStakes, setStakeRoute, stakeWorth, valuationOf } from "./stakes";
 import { actAs, asParam } from "./acting";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** Where a property's rent lands (`economy.route` with a property): an account of the owner's, or back to the owners' accounts. */
 function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, property: EntityId, to: string): LedgerEvent[] | Rejection {

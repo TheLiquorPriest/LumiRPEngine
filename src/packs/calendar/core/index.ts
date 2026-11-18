@@ -20,7 +20,7 @@ import type { PackDef } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { clockPaused } from "../../../engine/time";
 import { mutableSlice, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 import { buildCalendarView } from "./view";
 import { CALENDAR_PACK, calendarIn, dateRuleOf, holidaysOf } from "../../../engine/holidays";
 import dst from "./tables/modern-us/dst.json";

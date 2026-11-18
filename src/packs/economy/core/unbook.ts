@@ -6,7 +6,7 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { numOf, objOf, own, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef } from "../../../engine/registry";
 import { addToBooks, BOOK_KEYS, type MonthBook, monthOf } from "./books";

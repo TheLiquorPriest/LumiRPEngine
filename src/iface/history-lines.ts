@@ -1,10 +1,10 @@
 // The history lines (`guidance/.prompts/history-*.md`): the words of what the chat's history and the world's notices say, as the engine's
-// pure code asks for them (`say`, `src/engine/lines.ts`). They are kept one file to a family of lines (the money's, an organization's, a
+// pure code asks for them (`say`, `src/shared/lines.ts`). They are kept one file to a family of lines (the money's, an organization's, a
 // vehicle's, the lint's problems, the refusals' reasons, the word tables and so on), each a `format: lines` part of its own, so each can be
 // edited on its own. This reads the parts in force through a chat's guidance files (each from the nearest level that has it, none where it is
 // switched off) and hands them to the engine as one source of lines: a line is said by the first part that holds it.
 
-import { type LineSource, useLines, withLines } from "../engine/lines";
+import { type LineSource, useLines, withLines } from "../shared/lines";
 import { type GuidanceFiles, Lines } from "./texts";
 
 /** The history lines' parts, each the file `.prompts/<part>.md`, in the order a line is looked for in them. */

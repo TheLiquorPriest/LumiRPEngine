@@ -7,8 +7,8 @@
 // say nothing in its place. A thread that was given no lines at all is another matter: it has no words, not a line the user switched off,
 // so `say` there throws, naming the line it was asked for (a page, which has no lines and says its own words, is the one place that stays silent).
 
-import type { JsonValue } from "../shared/json";
-import type { ParamDef } from "../shared/world";
+import type { JsonValue } from "./json";
+import type { ParamDef } from "./world";
 
 /** What a line is filled from: values only, and a field given as undefined is absent. */
 export type LineFields = { readonly [name: string]: JsonValue | undefined };

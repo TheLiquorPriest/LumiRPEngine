@@ -28,7 +28,7 @@ import { Working } from "../../../engine/working";
 import { fundingSources, today } from "./found";
 import { orgLog } from "./log";
 import { partyIdOf } from "./view";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The tiers a share-out pays (§3.8). */
 const SHARES: readonly PartyTier[] = ["core", "companion"];

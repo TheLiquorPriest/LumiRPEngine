@@ -24,7 +24,7 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { evalExpr, scopeEnv } from "./scope";
 import { own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** The outcome when no band covers a roll (lint flags gaps). */
 export const NO_BAND = "none";

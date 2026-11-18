@@ -20,7 +20,7 @@ import { kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
 import { playerKnows } from "./player-events";
 import { canSeePlace } from "./visibility";
-import { listOf, say } from "./lines";
+import { listOf, say } from "../shared/lines";
 
 /** What relation lookups need from the registry; a fold's event types are the registry. */
 export interface RelationTypes {

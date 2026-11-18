@@ -40,7 +40,7 @@ import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working } from "./working";
 import { optionalQuery, optionalService, own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */

@@ -42,7 +42,7 @@ import { Working, type WorkingMark } from "./working";
 import { chatWorld } from "./holidays";
 import { minutesBetween } from "./world-state";
 import { clampUnitCap } from "./time-limits";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 // Agent processes (`ProcessDef.scope === "agent"`) step once per LOD1 agent (and the POV in a
 // timelapse) with that agent as `agent`. During catch-up the state's clock may be past the slot:

@@ -31,7 +31,7 @@ import type { FinanceApi, FinanceRegistry } from "./module";
 import { QTY_EPSILON } from "./pricing";
 import { counted, decided, decision, decisionRefusal, listedVotes, stamped } from "./shares";
 import { bookValuationOf } from "./stakes";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** A sale of a holder's registered units on its company's market: units, or a percent of all its units. */
 export interface MarketSale {

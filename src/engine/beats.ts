@@ -21,7 +21,7 @@ import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 import type { TimelapseOutcome } from "./time";
 import { canSeeEntity, canSeeField, playerTrack, signalVisible } from "./visibility";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface BeatInput {
   /** The turn's actions as played, in order (DESIGN §11 action queue). */

@@ -16,7 +16,7 @@ import type { FeedLine, ReadContext } from "../../../engine/registry";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { propertyIds } from "./property";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** At most this many properties beyond the player character's are told. */
 const OTHERS_CAP = 10;

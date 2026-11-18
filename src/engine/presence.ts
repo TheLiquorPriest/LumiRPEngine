@@ -15,7 +15,7 @@ import type { RouteDef, WorldDoc } from "../shared/world";
 import { placeChain } from "./lore-pins";
 import { placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /**
  * How many levels apart two places may be, one inside the other, and still be together: a floor, a

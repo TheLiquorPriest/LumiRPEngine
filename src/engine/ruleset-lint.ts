@@ -18,7 +18,7 @@ import { rulesetFloor, type Registry } from "./registry-impl";
 import { levelFor, progressionApplies, thresholdsOf } from "./ruleset";
 import { fieldDef, kindFields, objects } from "./scope";
 import { own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** A formula in the world document; `effectArg` when it is a `=` formula in an effect's arguments, the only place `roll()` may go. */
 export interface ExprSite {

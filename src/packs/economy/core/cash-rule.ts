@@ -8,7 +8,7 @@
 // - Cash goes hand to hand: an action done at once, off screen, that pays cash to someone who isn't
 //   where the payer is, is refused (`economy.offstage_refusal`), since nobody walked it over.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";

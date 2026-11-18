@@ -33,7 +33,7 @@ import { nearestOf, type Found, type Want } from "./reading";
 import { PROVENANCE_PROPERTIES } from "./source";
 import { textOf } from "./texts";
 import { timeArg } from "./ops-time";
-import { say } from "../engine/lines";
+import { say } from "../shared/lines";
 
 /** How a thing passed from one person to another, as the skill says it, to today's handover bases. */
 export const HOW_GIVEN: Readonly<Record<string, HandoverBasis>> = { handed: "hold", lent: "loan", returned: "return", given: "gift", sold: "sale", traded: "trade", stolen: "theft" };

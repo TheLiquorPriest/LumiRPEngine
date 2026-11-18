@@ -102,7 +102,7 @@ import regions from "./tables/modern-us/regions.json";
 import shipped from "./tables/modern-us/shipped.json";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
 import { registerCashRule } from "./cash-rule";
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 
 const TABLES: DataTable[] = [catalog, categories, occupations, regions, finance, exempt, history] as unknown as DataTable[];
 /** Every revision each table has shipped as (the table build's record). */

@@ -34,7 +34,7 @@ import { Working } from "../../../engine/working";
 import { orgLog, ORGS_SPENT } from "./log";
 import { putToVote } from "./motions";
 import { dateWords } from "./view";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { structureWords } from "../../../engine/word-tables";
 import { canSeeEntity } from "../../../engine/visibility";
 

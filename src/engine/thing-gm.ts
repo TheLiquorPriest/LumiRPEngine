@@ -16,7 +16,7 @@ import type { GmThingExtras, GmThingsList, HistorySource, KeepResult, LoanChoice
 import type { Spot } from "../shared/things";
 import { gotOf, grantBasisOf, type GotHow } from "../shared/things";
 import type { EntityDef, RelationInstance, WorldDoc } from "../shared/world";
-import { say, listOf } from "./lines";
+import { say, listOf } from "../shared/lines";
 import { calendarOf, formatClock } from "./calendar";
 import { own } from "./pack-kit";
 import { baseWorld, keptPlace, madePlaces, type MadePlace } from "./places-in-play";

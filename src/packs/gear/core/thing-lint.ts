@@ -17,7 +17,7 @@ import type { Registry } from "../../../engine/registry-impl";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { holdsOf, isThing, sizeOf } from "../../../engine/things";
 import { initialState } from "../../../engine/world-state";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The issue codes the rule reports. */
 export const THING_LINT = { tooBig: "gear.too_big", twoPlaces: "gear.two_places", sizeUnknown: "gear.size_unknown" } as const;

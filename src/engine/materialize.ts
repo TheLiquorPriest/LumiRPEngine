@@ -4,7 +4,7 @@
 // pinned tables' revision. Previews (GM view, inspector, Dry Run) use the same seed and record
 // nothing.
 
-import { say } from "./lines";
+import { say } from "../shared/lines";
 import { hashJson, hashParts } from "../shared/hash";
 import type { DomainId, EntityId } from "../shared/ids";
 import type { LedgerEvent, MaterializeEvent, PackEvent } from "../shared/ledger";

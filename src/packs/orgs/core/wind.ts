@@ -24,7 +24,7 @@ import { Working } from "../../../engine/working";
 import { orgLog } from "./log";
 import { putToVote } from "./motions";
 import { plainWords, withWhy } from "./ops";
-import { orOf, say } from "../../../engine/lines";
+import { orOf, say } from "../../../shared/lines";
 
 function refuse(code: string, reason: string): Rejection {
   return { code, reason };

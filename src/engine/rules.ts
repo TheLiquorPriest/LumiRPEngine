@@ -18,7 +18,7 @@ import { createRng } from "./rng";
 import { evalExpr, placeWithin, scopeEnv, toValue, truthy } from "./scope";
 import { optionalQuery, own } from "./pack-kit";
 import type { Working } from "./working";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export const CASCADE_CAP = 8;
 /** Firings per pass, whatever the depth: a runaway set of rules stops here with a note. */

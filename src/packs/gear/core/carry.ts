@@ -18,7 +18,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { thingIndex, typeRowOf } from "../../../engine/thing-index";
 import { namesThing } from "../../../engine/thing-resolve";
 import { carriedBy } from "./model";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The name a thing of a type row is made with: the row's name before its qualifier ("Key set (house, car fob, keyring)" makes a Key set). */
 export function carryName(row: TableRow, type: string): string {

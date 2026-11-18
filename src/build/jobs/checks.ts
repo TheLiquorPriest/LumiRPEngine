@@ -13,7 +13,7 @@ import { spawnTierOf, tierOf, tiersInOrder } from "../../shared/tiers";
 import { overlayKind } from "../../shared/world";
 import type { FieldDef, KindDef, WorldDoc } from "../../shared/world";
 import type { Registry } from "../../engine/registry-impl";
-import { say } from "../../engine/lines";
+import { say } from "../../shared/lines";
 
 export type ProposalMode = "import" | "refine";
 

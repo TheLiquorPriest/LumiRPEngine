@@ -41,7 +41,7 @@ import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
 import { actAs, asParam, mayAs } from "./acting";
 import { incomeValue } from "./revenue";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {

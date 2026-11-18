@@ -27,7 +27,7 @@ import { selectEntities } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { knownBySelector } from "./visibility";
 import { entitiesAt } from "./whereabouts";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 const PACK = "engine";
 const SLICE = "life";

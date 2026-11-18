@@ -10,6 +10,7 @@ import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { buildCastView, commitments, dayPlan, needValue, planFor } from "../../../src/packs/castlife/core/index";
+import { say } from "../../../src/shared/lines";
 import { modernUsWorld } from "../riverton";
 import { fold, startState } from "../support";
 

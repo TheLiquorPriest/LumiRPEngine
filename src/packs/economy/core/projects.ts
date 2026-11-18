@@ -21,7 +21,7 @@
 // sets a step back or adds to its cost (`project_note`, within bounds, with its receipt and Undo).
 // No one marks a step done: only its time does.
 
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";

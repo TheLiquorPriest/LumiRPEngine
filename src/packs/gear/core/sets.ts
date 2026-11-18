@@ -24,7 +24,7 @@ import { applyItemOp, type ItemOpOptions } from "../../../engine/thing-ops";
 import { contentsOf, isThing, possessorOf, restOf, setKindOf, slotOf } from "../../../engine/things";
 import { Working } from "../../../engine/working";
 import type { GearSet, GearSetPiece } from "./view";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };

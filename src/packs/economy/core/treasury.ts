@@ -21,7 +21,7 @@ import { ASK_PARAM } from "../../../shared/org-motions";
 import { approvedWords, heldTo } from "./acting";
 import { orgRecord } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 type DuesEvery = (typeof DUES_EVERY)[number];
 

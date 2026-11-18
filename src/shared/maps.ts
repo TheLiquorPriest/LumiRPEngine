@@ -14,7 +14,7 @@ import { hasOwn, isRecord, safeKey } from "./json";
 import type { LintIssue } from "./lint";
 import { checkSchema, pathText, type JsonPath, type Schema } from "./schema-check";
 import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, TravelTuning, WorldDoc } from "./world";
-import { say } from "../engine/lines";
+import { say } from "./lines";
 
 export const MAP_FORMAT = "lre-map-v1";
 

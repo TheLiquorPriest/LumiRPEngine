@@ -5,7 +5,7 @@
 
 import { hasOwn, isRecord } from "./json";
 import type { ParamDef } from "./world";
-import { say, type Voice, wordedParam } from "../engine/lines";
+import { say, type Voice, wordedParam } from "./lines";
 
 export type NeedId = "hunger" | "fatigue" | "social" | "fun";
 export const NEED_IDS: readonly NeedId[] = ["hunger", "fatigue", "social", "fun"];

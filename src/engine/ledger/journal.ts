@@ -40,7 +40,7 @@ import type { ChainMessage, FoldInput, FoldOutput, SnapshotStore } from "./chain
 import type { FoldKeys, LedgerFold } from "./fold";
 import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
-import { say } from "../lines";
+import { say } from "../../shared/lines";
 
 /** What the core needs to plan a turn and read a reply. Supplied by the engine (and by test packs). */
 export interface TurnModel {

@@ -15,7 +15,7 @@ import type { LintIssue } from "../shared/lint";
 import { markNameIssues, parseSecretMarks } from "../shared/secret-marks";
 import type { WorldDoc } from "../shared/world";
 import { loreHeldBy } from "./lore";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export function lintLore(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];

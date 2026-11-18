@@ -31,7 +31,7 @@ import { chatSchedulesIn, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeePlace } from "../../../engine/visibility";
 import { activeBlocks, blockOnDay, blockPlace, chatBlocks, routineCandidates, scheduleOff } from "./routines";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The proposal type: `routine{entity, change, label, days, start?, end?, minutes?, activity?, place?, with?, replaces?}`. */
 export const ROUTINE_CHANNEL = "routine";

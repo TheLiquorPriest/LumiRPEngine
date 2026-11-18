@@ -35,7 +35,7 @@ import { labelOf, optionalService, own } from "./pack-kit";
 import type { InferredResult } from "./inferred";
 import type { ToldAction } from "./action-words";
 import type { Needs } from "./steps";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;

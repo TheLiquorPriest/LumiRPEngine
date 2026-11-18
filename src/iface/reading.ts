@@ -21,7 +21,7 @@ import type { TreeView } from "../store/view";
 import { JoinedTurnError, type StoreState, type TurnRow } from "../store/types";
 import type { Call, EngineDeps, IfaceSettings, Reply } from "./kit";
 import { type Lines, textOf } from "./texts";
-import { say } from "../engine/lines";
+import { say } from "../shared/lines";
 
 /** What a name is wanted as. */
 export type Want = "entity" | "person" | "thing" | "holder" | "place" | "point" | "track" | "quest" | "party" | "organization";

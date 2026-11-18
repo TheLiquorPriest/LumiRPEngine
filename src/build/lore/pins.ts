@@ -11,7 +11,7 @@ import { parseSecretMarks, wholeEntrySecret } from "../../shared/secret-marks";
 import type { LorePin, WorldDoc } from "../../shared/world";
 import { bookEntryTitle } from "../../secrecy/book-lore";
 import { type BookEntry, type BuildBooks, engineWrote, listBooks } from "./books";
-import { say } from "../../engine/lines";
+import { say } from "../../shared/lines";
 
 /** What a set of pins names in his books, each read once: a book entry by its pin's key (null: gone, or in another book), a whole book's entries by its id (null: unread). */
 interface Read {

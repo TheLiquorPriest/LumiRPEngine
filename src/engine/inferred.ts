@@ -47,7 +47,7 @@ import type { WorldState } from "./state";
 import { canSeeEntity } from "./visibility";
 import { initialState } from "./world-state";
 import type { Working } from "./working";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** The built-in action an inferred check plays as (DESIGN §11): Try something, carrying the check. */
 export const TRY_ACTION = "try";

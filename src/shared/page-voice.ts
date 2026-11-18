@@ -2,7 +2,7 @@
 // itself because a page has no lines to read: the server says the same problems from the shipped files (`fault_*` lines of history-routines).
 // Only the owner reads these, on the Build and the cast's pages.
 
-import type { LineFields, Voice } from "../engine/lines";
+import type { LineFields, Voice } from "./lines";
 
 const FAULTS: Readonly<Record<string, string>> = {
   fault_its_source_isn_t_one: "its source isn't one",

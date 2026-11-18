@@ -30,7 +30,7 @@ import { hiddenFrom } from "./model";
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { marketValueOf, orgValue, ownedOrgIds, stakeRoute, valuationOf } from "./stakes";
 import { deciderFor, mergeView, windingView } from "./winding";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 declare module "../../../engine/registry" {
   interface QueryMap {

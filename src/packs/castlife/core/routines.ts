@@ -55,7 +55,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
 import { occasionOf, type Occasion } from "./occasions";
 import { bedPlace, homeOf, placeOfType, workPlace } from "./places";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** The planner's option id prefix for a routine block: `routine:<block id>`. */
 export const ROUTINE_OPTION = "routine:";

@@ -24,7 +24,7 @@ import type { FinanceHooks, FlowPosting } from "./module";
 import type { MindPlan } from "../../../shared/minds";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { availableOf, balance, canSpend, classOf, holdersOf, ledgerHolders, moneyLevel, outsideAccount, priceOf, productOf, statusOf, traitsOf } from "./model";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, mostPayable, overdraftEvents, overdraftRoom, payeeSide, posting, toggles, type PayMethod, notice } from "./pay";
 import { Run } from "./run";
 

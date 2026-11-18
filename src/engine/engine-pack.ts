@@ -9,7 +9,7 @@
 // `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
 // `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
-import { listOf, say } from "./lines";
+import { listOf, say } from "../shared/lines";
 import { facetsInOrder } from "../shared/classes";
 import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";

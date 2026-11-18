@@ -8,7 +8,7 @@
 // investment tax read. Rent and business profits are their own flows (property.ts, and the work
 // module's distributions, which `economy.stake_route` routes here).
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";

@@ -12,7 +12,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import { formatMoney } from "../../../shared/world";
-import { type LineFields, say } from "../../../engine/lines";
+import { type LineFields, say } from "../../../shared/lines";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { FinanceApi, FinanceRegistry } from "./module";

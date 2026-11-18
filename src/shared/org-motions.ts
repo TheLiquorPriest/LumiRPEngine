@@ -12,7 +12,7 @@ import { isRecord, type JsonValue } from "./json";
 import type { OrgPower } from "./org";
 import type { OrgRef } from "./org-view";
 import type { ParamDef } from "./world";
-import { say, wordedParam, wordTable } from "../engine/lines";
+import { say, wordedParam, wordTable } from "./lines";
 
 /** An action's choice to put a decision short of the decider's votes to a vote instead: the economy's `decision` reads it from the action's params. */
 export const VOTE_PARAM: ParamDef = wordedParam({ type: "bool", optional: true }, "param_vote");

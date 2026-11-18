@@ -16,7 +16,7 @@ import { optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { currentStage } from "../../../engine/tracks";
 import { loreGateReader, namesAny, ownersCue, trackKeepsSecret, visibilityOf } from "../../../engine/visibility";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /**
  * The cues the narrator may play for `who` now, in order: their own, then the current stage's cue of

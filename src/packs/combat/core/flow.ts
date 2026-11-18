@@ -34,7 +34,7 @@ import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fightById, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
-import { orOf, say } from "../../../engine/lines";
+import { orOf, say } from "../../../shared/lines";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;

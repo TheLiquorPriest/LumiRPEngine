@@ -21,7 +21,7 @@ import { refFor } from "./agenda";
 import { answerEvents, approversOf, orgsWithRequests, requestsOf, requestState } from "./approvals";
 import { castsFor, electorateOf, motionsOf, orgsWithMotions, povIn, rulesOf, voteEvents } from "./motions";
 import { entityNamed, personNamed, statesChange } from "./story";
-import { say, orOf } from "../../../engine/lines";
+import { say, orOf } from "../../../shared/lines";
 
 /** The latest closed motions and answered requests the page shows. */
 const RECENT = 10;

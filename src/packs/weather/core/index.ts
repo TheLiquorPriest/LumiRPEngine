@@ -30,7 +30,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { evalExpr, kindIs, placeOfEntity, scopeEnv, truthy } from "../../../engine/scope";
 import { passMemo } from "../../../engine/read-pass";
-import { say, orOf } from "../../../engine/lines";
+import { say, orOf } from "../../../shared/lines";
 
 export type Season = "winter" | "spring" | "summer" | "autumn";
 

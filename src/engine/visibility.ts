@@ -28,7 +28,7 @@ import { selectorMatches } from "./selector";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** Whether `who` knows `subject` (an entity, place or fact id); everyone knows themselves. */
 export function knows(state: Readonly<WorldState>, who: EntityId, subject: string): boolean {

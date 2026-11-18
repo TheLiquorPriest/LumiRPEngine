@@ -10,7 +10,7 @@
 // module gives a party's ordinary income and brackets (`economy.ordinary_income`,
 // `economy.income_tax`), read through the registry.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

@@ -22,7 +22,7 @@ import { contentsOf, holderOf, holdersOf, possessorOf, restOf, whoseOf } from ".
 import { sentence, thingName, thingText, whereWords, whoseWords } from "../../../engine/thing-words";
 import { canSeeEntity } from "../../../engine/visibility";
 import { carriedBy } from "./model";
-import { listOf, say } from "../../../engine/lines";
+import { listOf, say } from "../../../shared/lines";
 
 /** What a holder wears or has equipped. */
 export function wornBy(ctx: ReadContext, who: EntityId): EntityId[] {

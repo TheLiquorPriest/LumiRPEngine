@@ -37,7 +37,7 @@ import { typedIntent } from "./typed-intent";
 import { migrateMoney } from "./money-migrate";
 import { MINDS_SLOT } from "../shared/minds";
 import { sourceOf } from "./feed";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 // ---------------------------------------------------------------- documents
 

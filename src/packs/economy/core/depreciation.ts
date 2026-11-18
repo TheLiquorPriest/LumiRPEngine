@@ -13,7 +13,7 @@
 // own things never depreciate. Nothing posts in a world that never turns it on, so recorded chats
 // fold as they did.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { PackEvent } from "../../../shared/ledger";

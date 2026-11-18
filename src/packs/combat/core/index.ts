@@ -20,7 +20,7 @@
 // relation type the default sides rule reads (symmetric, so both sides hold it).
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import { hashParts } from "../../../shared/hash";

@@ -51,7 +51,7 @@ import { counted, decisionRefusal } from "./shares";
 import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
 import { sCorpRefusal, structureOf, taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
-import { say, listOf } from "../../../engine/lines";
+import { say, listOf } from "../../../shared/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 /** What a step said, for the History the orgs pack writes: its words, and the people they name. */

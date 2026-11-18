@@ -12,7 +12,7 @@ import { loreTerm, topicIdOf } from "../../shared/lore";
 import { neutralizeMacros } from "../../shared/macros";
 import type { WorldDoc } from "../../shared/world";
 import { addDrop, type DropCounts } from "./checks";
-import { say } from "../../engine/lines";
+import { say } from "../../shared/lines";
 
 /** The most an entry written from pasted text keeps. */
 const CONTENT_MAX = 4000;

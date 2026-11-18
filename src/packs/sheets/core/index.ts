@@ -23,7 +23,7 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { buildEntitySheet } from "../../../engine/ruleset";
 import { bandOf, kindIs } from "../../../engine/scope";
 import { povPlace } from "../../../engine/visibility";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 export interface StatDef {
   id: string;

@@ -29,7 +29,7 @@
 // at it in the same unit, so an award, a quest reward, a narrated gain or a correction moves it the
 // same way. Nothing else writes a level (`follows_xp`).
 
-import type { LineFields } from "./lines";
+import type { LineFields } from "../shared/lines";
 import { noteOf } from "./notices";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -55,7 +55,7 @@ import { classOf, classProblems } from "./selector";
 import type { Working } from "./working";
 import { labelOf, optionalService, own } from "./pack-kit";
 import { movedElsewhere, relocate } from "./relocate";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 export interface EffectScope {
   /** Name → entity id (`self`, `actor`, `target`, ref params). */

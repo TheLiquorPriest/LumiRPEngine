@@ -9,7 +9,7 @@
 // in the business, which adds to their stake), and each payout is income for their year. Selling
 // part of a stake moves the share and realises the seller's gain against what they put in.
 
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";

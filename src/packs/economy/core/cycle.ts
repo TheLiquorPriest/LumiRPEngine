@@ -21,10 +21,10 @@ import { depreciateMonth, depreciationDue } from "./depreciation";
 import { accrualOf, averageBalance, cycleOf, journalOf } from "./journal";
 import { balance, bankSide, holdersOf, productOf, statusOf, traitsOf } from "./model";
 import { noteOf, sweepNote } from "./notes";
-import type { LineFields } from "../../../engine/lines";
+import type { LineFields } from "../../../shared/lines";
 import { accountLevel, asUnit, isParty, posting, toggles, notice } from "./pay";
 import type { Run } from "./run";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** Statements close and deposit interest posts in the bank's morning batch; payments are due by the end of the due day. */
 const STATEMENT_MINUTE = 9 * 60 - 30;

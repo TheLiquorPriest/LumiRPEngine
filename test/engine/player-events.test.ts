@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { outline } from "../../src/engine/beats";
-import { say } from "../../src/engine/lines";
+import { say } from "../../src/shared/lines";
 import { metBy, playerDrop, playerLine, playerLines, witnessLines } from "../../src/engine/player-events";
 import { createRng } from "../../src/engine/rng";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";

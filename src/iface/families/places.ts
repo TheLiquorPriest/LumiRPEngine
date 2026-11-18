@@ -17,7 +17,7 @@ import { chatDraftOf, draftEvent } from "../../engine/world-draft";
 import { oneOf, TEXT, TEXTS, YES_NO } from "../kit";
 import { find, isUnread, notAs, notOneOf, type OpContext, refusedAs, textArg, type Unread } from "../ops";
 import { isAlready, notApplicable, type WriteDef, writeTool } from "./run";
-import { say } from "../../engine/lines";
+import { say } from "../../shared/lines";
 
 const FAMILY = "places";
 

@@ -16,7 +16,7 @@ import { accountsOf, availableOf, balance, classOf, openerOf, rightsOf, statusOf
 import { featureFor, overdraftRoom } from "./pay";
 import { wealthOf } from "./worth";
 import { createRng } from "../../../engine/rng";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 const DAY = 1440;
 

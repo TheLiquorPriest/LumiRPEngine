@@ -11,7 +11,7 @@
 // read when asked. Approving and denying play as turns; the GM answers for anyone, and the reply's
 // `approval` fact records an answer the story tells. Bookkeeping in `packs.orgs.asks`.
 
-import { say, wordedParam } from "../../../engine/lines";
+import { say, wordedParam } from "../../../shared/lines";
 import { ownersIn } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";

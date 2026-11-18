@@ -19,7 +19,7 @@ import { kindIs, placeOfEntity } from "./scope";
 import { canSeePlace, loreGateReader, trackShown } from "./visibility";
 import { placeKey } from "./place-names";
 import { labelOf, own } from "./pack-kit";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** The `spawned` field value that marks a character a reply introduced. */
 export const SPAWNED_BY_NARRATION = "narration";

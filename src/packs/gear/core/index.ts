@@ -58,7 +58,7 @@ import items from "./tables/modern-us/items.json";
 import kits from "./tables/modern-us/kits.json";
 import slots from "./tables/modern-us/slots.json";
 import shipped from "./tables/modern-us/shipped.json";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /**
  * The authored effects that move a thing, by the argument naming what they move and the one naming

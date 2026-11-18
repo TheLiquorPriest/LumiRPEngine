@@ -25,7 +25,7 @@ import { isGone, kindIs } from "../../../engine/scope";
 import { isMemberOf, MEMBER_OF, type MembershipContext } from "../../../engine/selector";
 import { canSeeEntity } from "../../../engine/visibility";
 import { compileOrgOp, flagged, historyLine, jobOf, plainWords, positionNamed, withWhy } from "./ops";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 /** What a membership fact says changed: someone joined or left, was appointed to a position, or took a title. */
 export const MEMBERSHIP_CHANGES = ["join", "leave", "appoint", "title"] as const;

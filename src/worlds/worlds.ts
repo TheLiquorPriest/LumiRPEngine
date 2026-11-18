@@ -43,7 +43,7 @@ import type { HostPort } from "../shared/host";
 import { hostBacking, type WorldBacking } from "./backing";
 import { WORLD_LIMIT_DEFAULTS, type WorldLimits } from "./limits";
 import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
-import { say } from "../engine/lines";
+import { say } from "../shared/lines";
 
 interface Draft {
   base: RevisionId | null;

@@ -17,7 +17,7 @@ import type { ReadContext, Rejection } from "../../../engine/registry";
 import { kindIs } from "../../../engine/scope";
 import { holdingOf, isHolding } from "./events";
 import { readCharacter, readKnowledge } from "./state";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 
 function reject(code: string, reason: string): Rejection {
   return { code, reason };

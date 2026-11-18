@@ -11,7 +11,7 @@ import { FINANCE_EVENTS, featureOn } from "../../../shared/finance";
 import { MINDS_EVENTS } from "../../../shared/minds";
 import type { EntityDef } from "../../../shared/world";
 import { chatWorld } from "../../../engine/holidays";
-import { say } from "../../../engine/lines";
+import { say } from "../../../shared/lines";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { numOf, own, strOf } from "../../../engine/pack-kit";
 import { readPass } from "../../../engine/read-pass";

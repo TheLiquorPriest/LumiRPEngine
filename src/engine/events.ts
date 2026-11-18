@@ -4,7 +4,7 @@
 // optimized fold share (DESIGN §14). Validation answers "may this event apply to this state?";
 // a rebased view drops an event whose validation fails. Reducers mutate a working copy.
 
-import { say } from "./lines";
+import { say } from "../shared/lines";
 import type { JsonValue } from "../shared/json";
 import { readAdjudication } from "../shared/adjudication";
 import { readClaims } from "../shared/claims";

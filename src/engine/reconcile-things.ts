@@ -28,7 +28,7 @@ import { findThings, type ThingCandidate, type ThingScope } from "./thing-resolv
 import { holdersOf, holdsOf, isThing, possessorOf, sizeOf, whoseOf } from "./things";
 import { canSeeEntity, isDiscoverable, knows } from "./visibility";
 import type { Working } from "./working";
-import { say } from "./lines";
+import { say } from "../shared/lines";
 
 /** How a fact is settled: whose knowledge marks a candidate secret, what made things' ids are drawn from, and what the read may still make. */
 export interface ReconcileOptions {

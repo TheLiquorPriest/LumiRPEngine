@@ -11,7 +11,7 @@ import { ownersIn } from "../shared/finance";
 import type { EntityId, PlaceId } from "../shared/ids";
 import { admits, type Audience } from "../shared/org";
 import { possessive } from "../shared/words";
-import { say, listOf } from "./lines";
+import { say, listOf } from "../shared/lines";
 import { acts } from "./life";
 import { belongsTo, businessAt, entryInPlay, isStaff, orgPlaces, orgPower, orgTypeOf, placeEntry, placesOf, placesUp, setEntryOf } from "./org";
 import { own } from "./pack-kit";

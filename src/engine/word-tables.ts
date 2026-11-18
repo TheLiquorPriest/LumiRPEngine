@@ -6,7 +6,7 @@ import { AUDIENCES, ORG_POWERS } from "../shared/org";
 import { NEED_IDS, type NeedId } from "../shared/needs";
 import { PLAN_STATUSES } from "../shared/org-feed";
 import { COST_WHEN, PROJECT_STATUSES } from "../shared/projects";
-import { wordOf, wordTable } from "./lines";
+import { wordOf, wordTable } from "../shared/lines";
 
 /** What each power lets its holder do, as "you may …" finishes it. */
 export const powerWords = wordTable("power", ORG_POWERS);

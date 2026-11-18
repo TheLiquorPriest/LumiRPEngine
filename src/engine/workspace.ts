@@ -9,7 +9,7 @@
 // whose knowledge might read one, still folds as it did into a readers index nothing reads, so a
 // recorded chat replays as it was. Pure.
 
-import { say } from "./lines";
+import { say } from "../shared/lines";
 import { isRecord, type JsonObject } from "../shared/json";
 import type { PackEvent } from "../shared/ledger";
 import { isBlobHash, isWorkspacePath } from "../shared/stores";

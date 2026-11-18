@@ -1,4 +1,4 @@
-import { say } from "./lines";
+import { say } from "../shared/lines";
 // A small, safe, deterministic formula language for rules, predicates and derived fields.
 //
 //   20 + skill / 12 - here.security

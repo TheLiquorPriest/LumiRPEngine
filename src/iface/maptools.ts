@@ -49,7 +49,7 @@ import { keepWhere, makeThing, moveTo, noSoft, putOnSupport, putThing } from "./
 import { type Found, isFound, type Reading } from "./reading";
 import { PROVENANCE_PROPERTIES, type Provenance, provenanceData, provenanceOf } from "./source";
 import { textOf } from "./texts";
-import { say as engineSay } from "../engine/lines";
+import { say as engineSay } from "../shared/lines";
 
 const FAMILY = "map";
 
