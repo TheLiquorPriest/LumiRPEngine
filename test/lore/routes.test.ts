@@ -72,12 +72,12 @@ test("a turn's activated lore names each entry's lore id and Lumiverse id, in th
     tagged("entry-slot", CARD.id, "Scene slot", "hybrid"),
   ]);
   expect(await b.ask(turn.id)).toEqual([
-    { id: "e-3", entry: "entry-lamp", book: ATLAS.id, title: "The lamp room", how: "keyword" },
-    { id: "e-2", entry: "entry-shanty", book: SONGS.id, title: "The Lamplighter's Shanty", how: "vector" },
-    { id: "e-1", entry: "entry-tide", book: ATLAS.id, title: "The tide bell", how: "constant" },
-    { id: "e-4", entry: "entry-gull", book: ATLAS.id, title: "Gulls of the wall", how: "sticky" },
-    { id: "e-5", entry: "entry-lamp-twin", book: "", title: "", how: null },
-    { id: "e-6", entry: "entry-slot", book: CARD.id, title: "Scene slot", how: null },
+    { id: "e-3", entry: "entry-lamp", book: ATLAS.id, title: "The lamp room", how: "keyword", receipt: null },
+    { id: "e-2", entry: "entry-shanty", book: SONGS.id, title: "The Lamplighter's Shanty", how: "vector", receipt: null },
+    { id: "e-1", entry: "entry-tide", book: ATLAS.id, title: "The tide bell", how: "constant", receipt: null },
+    { id: "e-4", entry: "entry-gull", book: ATLAS.id, title: "Gulls of the wall", how: "sticky", receipt: null },
+    { id: "e-5", entry: "entry-lamp-twin", book: "", title: "", how: null, receipt: null },
+    { id: "e-6", entry: "entry-slot", book: CARD.id, title: "Scene slot", how: null, receipt: null },
   ]);
   // The same ids as the lore map gives the same entries: asked of the lore itself over the same numbers and tag.
   const shelf = new Shelf(new Map([[USER, { books: [ATLAS, SONGS, CARD], entries: coastEntries(), attached: new Map() }]]));
@@ -120,7 +120,7 @@ test("the exported reader and the route give the same entries for a turn", async
   await b.keep(turn.id, CHAT, [tagged("entry-lamp", ATLAS.id, "The lamp room", "keyword"), tagged("entry-tide", null, "The tide bell", "sticky"), tagged("entry-gull", ATLAS.id, "Gulls", "nonsense")]);
   const read = await activatedLore(b.deps, USER, CHAT, turn.id);
   expect(read).toHaveLength(3);
-  expect(await b.ask(turn.id)).toEqual(read);
+  expect(await b.ask(turn.id)).toEqual(read.map((entry) => ({ ...entry, receipt: null })));
   expect(await activatedLore(b.deps, USER, OTHER_CHAT, turn.id)).toEqual([]);
 });
 
