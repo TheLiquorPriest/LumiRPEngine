@@ -56,7 +56,7 @@ import type { TurnMarks } from "./marks";
 import type { ComposerAsk, PanelAsk, Requests } from "./requests";
 import { writeTurnRecord } from "./record";
 import { leftOutOf, maxTokensOf, prefillOf, promptOf, samplingOf, summarizedOf } from "./request";
-import type { IntakeStep, NotGiven, Run, RunRecord, Runs, Stretch } from "./runs";
+import { CARRIED_SESSION, type IntakeStep, type NotGiven, type Run, type RunRecord, type Runs, type Stretch } from "./runs";
 import { maskWorldInfoScanExclusions, SCAN_SETTING, scannedSteps, scanSettingsOf } from "./scan";
 import type { Approvals } from "./approvals";
 import { type TurnSettings, turnSettings } from "./settings";
@@ -1322,7 +1322,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     this.#deletedTold.delete(chatKey);
     await Promise.all([...gone].filter((turn) => told?.has(turn) !== true).map((turn) => this.#cancel(user, chat, turn)));
     const shown = [report.swiped?.to ?? null, ...report.flipped.map((f) => f.to)].filter((turn): turn is string => turn !== null);
-    for (const turn of shown) await this.#d.harness().turnShown({ user, chat, session: this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
+    // RPH is told of each in the session it played in; a turn a migration carried played in none, and RPH has nothing of it.
+    for (const turn of shown) {
+      const session = this.#d.runs.record(user, turn)?.session;
+      if (session !== undefined && session !== CARRIED_SESSION) await this.#d.harness().turnShown({ user, chat, session, turn });
+    }
   }
 
   /**
@@ -1377,7 +1381,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     if (this.#d.store.user(user).turn(turn)?.chat !== chat) return;
     const run = this.#d.runs.running(user, turn);
     if (run !== undefined) run.stop.abort(new Error(await turnErrorWords(this.#d.files, { user, chat }, "left_path")));
-    await this.#d.harness().turnLeft({ user, chat, session: run?.session ?? this.#d.runs.record(user, turn)?.session ?? NO_SESSION, turn });
+    // RPH is told in the session the turn played in; a turn a migration carried played in none, and RPH has nothing of it.
+    const session = run?.session ?? this.#d.runs.record(user, turn)?.session;
+    if (session !== undefined && session !== CARRIED_SESSION) await this.#d.harness().turnLeft({ user, chat, session, turn });
     await run?.over;
   }
 

@@ -8,6 +8,7 @@
 import type { AgentRef } from "rp-harness/contract";
 import { route, RouteError, shape } from "../app";
 import type { Turns } from "./lane";
+import { CARRIED_SESSION, type RunRecord } from "./runs";
 import { NO_SESSION } from "./turns";
 
 const T = shape.text();
@@ -54,8 +55,16 @@ export function givenRoutes(turns: Turns) {
       handle: async ({ user, params }) => {
         const store = turns.store.user(user);
         if (store.chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat}.`);
-        const turn = store.path(params.chat).findLast((e) => e.turn !== null)?.turn ?? null;
-        const scope = { user, chat: params.chat, session: NO_SESSION, ...(turn !== null ? { turn } : {}) };
+        // The newest turn on the path that RPE ran, read in the session it played in; a turn a migration carried played in none.
+        const path = store.path(params.chat);
+        let run: RunRecord | null = null;
+        for (let at = path.length - 1; at >= 0 && run === null; at--) {
+          const turn = path[at]?.turn ?? null;
+          const record = turn === null ? null : turns.runs.record(user, turn);
+          run = record === null || record.session === CARRIED_SESSION ? null : record;
+        }
+        const turn = run?.turn ?? null;
+        const scope = run === null ? { user, chat: params.chat, session: NO_SESSION } : { user, chat: params.chat, session: run.session, turn: run.turn };
         const definitions = await turns.harness.definitions.list(scope);
         return {
           chat: params.chat,

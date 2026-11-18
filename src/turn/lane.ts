@@ -323,8 +323,10 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   store.onWrite((user, chats) => stateIndex.notify(user, chats));
   // A character's memories found by the words of a cue through the same index file (`cast/search.ts`), fed as they are searched.
   const memorySearch = new MemorySearch(app.index);
+  // The lore's settings and lines are its chat's levels, read at no turn: a lore call that names a turn never carries it under a session it did not play in.
+  const chatLevels = (at: LoreScope): Scope => ({ user: at.user, chat: at.chat, session: NO_SESSION });
   // The lore's settings for a chat, read once for the lore, its index and the secrecy a turn starts with.
-  const config = async (at: LoreScope) => readConfig(await portTexts(files, { ...at, session: NO_SESSION }), app.log, LORE_SETTINGS);
+  const config = async (at: LoreScope) => readConfig(await portTexts(files, chatLevels(at)), app.log, LORE_SETTINGS);
   const loreSettings = loreSettingsFor(config);
   const secretSettings = secretSettingsFor(config);
   // The lore-answers lines in force for the chat word the secrets in an entry's text when an agent reads it.
@@ -340,7 +342,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     turns: prompts.lore,
     numbers: entryNumbers,
     settingsFor: loreSettings,
-    lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+    lines: (at) => loreLines(loadGuidance(files, chatLevels(at))),
     away: (input) => app.workers.run("catalogue", input),
     meaning: {
       find: (at, text, limit) =>
@@ -359,7 +361,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
         const folders = chats.folders(user, chat);
         return folders === null ? null : join(app.paths.files, CHATS_FOLDER, folders.character, folders.chat);
       },
-      lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+      lines: (at) => loreLines(loadGuidance(files, chatLevels(at))),
     },
     now: () => clock.now(),
     // His own index entry heading the index's file (`lore.index.entry`), read for the chat at each write.
@@ -381,7 +383,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     books: options.projectionBooks,
     enabled: async (user, chat) => (await loreSettings({ user, chat })).projection,
     made: madeOf({ store, lore }),
-    lines: (at) => loreLines(loadGuidance(files, { ...at, session: NO_SESSION })),
+    lines: (at) => loreLines(loadGuidance(files, chatLevels(at))),
     now: () => clock.now(),
   });
   const overlay = overlayCheck(worlds);
@@ -591,7 +593,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   for (const user of storeUsers(app.db)) {
     harness.jobs.list({ user, limit: 1 }).catch((error: unknown) => app.log.error("the jobs a restart cut off could not be listed at RPE's start", { user, error: error instanceof Error ? error.message : String(error) }));
   }
-  const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, { ...at, session: NO_SESSION }));
+  const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, chatLevels(at)));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
   return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
 }

@@ -10,6 +10,7 @@ import { type Exactly, type Holds, type Infer, layerLevel, route, RouteError, ru
 import { JoinedTurnError } from "../store";
 import { NO_CHAT } from "../tree/layout";
 import type { Turns } from "./lane";
+import { CARRIED_SESSION } from "./runs";
 import { turnSettings } from "./settings";
 import { NO_SESSION } from "./turns";
 
@@ -162,9 +163,10 @@ export function rulesRoutes(turns: Turns) {
         const row = turns.store.user(user).turn(body.turn);
         if (row === null || row.chat !== params.chat) throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
         if (row.joined !== null) throw new JoinedTurnError(body.turn, row.joined);
-        // The turn is read in the session it played in: its session file and its folder are there.
+        // The turn is read in the session it played in: its session file and its folder are there. A turn a migration carried played in none.
         const run = turns.runs.record(user, body.turn);
         if (run === null) throw new RouteError(404, `Chat ${params.chat} has no turn ${body.turn}.`);
+        if (run.session === CARRIED_SESSION) throw new RouteError(404, `Turn ${body.turn} was carried by the migration and played in no session of RPE's, so no rule can be tested against it.`);
         try {
           return await turns.harness.rules.test({ user, chat: params.chat, session: run.session, turn: body.turn }, params.name, body.turn);
         } catch (error) {
