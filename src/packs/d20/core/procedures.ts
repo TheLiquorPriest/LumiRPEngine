@@ -246,7 +246,7 @@ function settle(s: Scratch, who: EntityId): void {
   const now = lifeOf(s.ctx.state, who);
   let moved: string | null = null;
   if (life !== undefined && now !== life) moved = life;
-  else if (life === undefined && lives.has(now)) moved = ALIVE;
+  else if (life === undefined && now !== ALIVE && lives.has(now)) moved = ALIVE;
   if (moved !== null) s.life(who, moved);
   if (on.length === 0 && off.length === 0 && moved === null) return;
   const label = (id: string): string => labelOfRow(own(rowsOf(s.ctx, rules, "conditions"), id), id);
@@ -567,11 +567,10 @@ export function threatFrom(ctx: ReadContext, rules: D20Def, who: EntityId, w: Pi
   return w.rowId === "" ? own : own - sumOf(stacked(ctx, rules, who, `threat.weapon.${w.rowId}`));
 }
 
-/** Whether a creature is proficient with a weapons row: its classes' or traits' proficiency names the row's or the row itself. */
+/** Whether a creature is proficient with a weapons row: none is needed where the row names no proficiency; else its classes' or traits' proficiency names the row's or the row itself. */
 function proficient(s: Scratch, who: EntityId, w: Weapon): boolean {
-  if (!w.row) return true;
-  const want = [textIn(w.row.proficiency), w.rowId].filter((x) => x !== "");
-  if (want.length === 0) return true;
+  if (!w.row || textIn(w.row.proficiency) === "") return true;
+  const want = [textIn(w.row.proficiency), w.rowId];
   const classes = rowsOf(s.ctx, s.rules, "classes");
   for (const cls of Object.keys(classesOf(s.ctx, who))) if (wordsIn(own(classes, cls)?.proficiency).some((x) => want.includes(x))) return true;
   const traits = rowsOf(s.ctx, s.rules, "traits");
