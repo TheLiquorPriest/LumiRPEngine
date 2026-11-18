@@ -269,16 +269,15 @@ describe("what falls due in the world state", () => {
     expect(worldState(s, { chat: "c", turn: after.id, layout: SHIPPED_LAYOUT, due, charsPerToken: 4 }).sections.passed).toBeUndefined();
   });
 
-  // hardening
-  test.skip("a due span of a century costs no more than a day's: the list stops at what the budget can show, and the rest is counted", () => {
+  test("a due span of a century costs no more than a day's: the list stops at what the budget can show, and the rest is counted", () => {
     const { s, store } = scheduledStore();
     play(s, "c", "m1", "Wren sits by the fire.", 1, []);
     const next = s.beginTurn({ chat: "c", kind: "normal" });
     const state = s.stateAt(next.id).state;
     const now = state.world.clock;
-    // A layout that holds the due section alone, and a budget a day's starts overflow: what it can show is the bound.
+    // A layout that holds the due section alone, and a budget a day's starts overflow in each of its lists (scene, around, beyond: each has its own share, 1c406c3f9) and one line of each fits: what it can show is the bound.
     const layout = `${SHIPPED_LAYOUT.slice(0, SHIPPED_LAYOUT.indexOf("\n---\n") + 5)}{{#due}}\n{{due}}\n{{/due}}\n`;
-    const budget = { budget: 50 };
+    const budget = { budget: 60 };
     const listed = (dueAhead: number) => {
       const due = counted(timeDue(store));
       const block = worldState(s, { chat: "c", turn: next.id, layout, due: due.source, settings: { ...budget, dueAhead }, charsPerToken: 4 });
@@ -289,7 +288,7 @@ describe("what falls due in the world state", () => {
     expect(day.lines.at(-1)?.kind).toBe("left_out");
     expect(century.made).toBeLessThanOrEqual(day.made);
     // The rest is counted from what the store's due list says remains in the span.
-    const shown = century.lines.filter((l) => l.kind === "due").length;
+    const shown = century.lines.filter((l) => l.kind.startsWith("due")).length;
     const all = timeDue(store).due(state, { from: now, to: now + 100 * 365 * DAY }, null, 0).more;
     expect(all).toBeGreaterThan(100 * 365 * 4 - 8);
     expect(shown).toBeGreaterThan(0);
