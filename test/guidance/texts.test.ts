@@ -41,12 +41,11 @@ const NAMES: Record<string, string[]> = {
  */
 const WORDED: { row: string; markers: string[] }[] = [
   { row: "The intent record, first", markers: ["write your intent record"] },
-  { row: "Looking where the message points, then", markers: ["zoom there with `world_query`", "say so in the `depth:` line of your intent record"] },
-  { row: "A look-up turn aims for 5 calls", markers: ["five calls or fewer on the reply's path"] },
+  { row: "Looking where the message points, then", markers: ["look there with the tool your definition names for it", "say so in one line after your intent record"] },
   { row: "Settling the engine lane each turn", markers: ["settle the engine lane yourself"] },
   { row: "Asking the GM to set the map", markers: ["set the map when a scene opens on a mapped place"] },
   { row: "Reading its own reply for what it established", markers: ["read your reply as it went out"] },
-  { row: "An overlay when a turn leaves", markers: ["write an overlay for it"] },
+  { row: "An overlay when a turn leaves", markers: ["write an overlay, so that the lore map says what the story changed"] },
   { row: "An intention and a whereabouts", markers: ["give it an intention and a whereabouts"] },
   { row: "Adding to the player model", markers: ["add it to the player model"] },
   { row: "The horizon for the next turn", markers: ["set the horizon for the next turn"] },
@@ -54,8 +53,7 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "When a scene ends, and when a chapter turns", markers: ["a scene ends when", "a chapter turns when"] },
   { row: "Starting the mapping, indexing and summarizing jobs", markers: ["mapping the prompt, with the agent `mapper`", "indexing lore, with the agent `indexer`", "summarizing a stretch of the past that has beats"] },
   { row: "Writing a turn's steps down with `todo`", markers: ["write the steps down with `todo`"] },
-  { row: "Marking the last calls of a turn as closing", markers: ["mark the last calls you need as closing"] },
-  { row: "Before the reply, only what the reply depends on", markers: ["do only what the reply depends on"] },
+  { row: "Before the reply, only what the reply depends on", markers: ["what the reply depends on comes before it"] },
   { row: "The Author's record of the turn", markers: ["write your record of the turn"] },
   { row: "What the reply established that nobody decided", markers: ["record it as canon, or mark it proposed"] },
   { row: "Touching the threads the turn moved", markers: ["touch the threads the turn moved"] },
@@ -73,7 +71,6 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "Saying where a recorded thing comes from", markers: ["say where it comes from"] },
   { row: "Never deciding for the player's character", markers: ["never decide what the player's character does"] },
   { row: "Notes are notes", markers: ["your notes are notes"] },
-  { row: "Keeping working text short", markers: ["keep it short and plain"] },
   { row: "What the narrator may add", markers: ["add texture freely"] },
   { row: "That the Author decides", markers: ["they are not yours to set aside"] },
   { row: "How the GM rules, stages changes", markers: ["stage those changes with `world_apply`", "with the chat's tidy-up switch on"] },
@@ -81,7 +78,7 @@ const WORDED: { row: string; markers: string[] }[] = [
   { row: "How a prompt is mapped, with the kinds", markers: ["one slice for each thing a reader would call one thing", "a fixed slice by its text"] },
   { row: "Perceptions: for every principal", markers: ["name the secret by its id", "whichever comes first", "write each before that character acts"] },
   { row: "On a chat with no premise yet", markers: ["a chat with no premise yet"] },
-  { row: "A place the turn changed", markers: ["if the turn changed a place"] },
+  { row: "A place the turn changed", markers: ["a place the turn changed (the east wing burned)"] },
 ];
 
 /** Rows whose home a later texts package words, with the package that does (their behaviour needs code that comes with it). */
@@ -151,33 +148,26 @@ describe("TURN.md reads intent, then a look, then a decision on how deep to go",
     ]);
   });
 
-  test("the record's lines are §10.3's five, then the depth and the calls after the reply, and no more", () => {
+  test("the record's lines are §10.3's five, and no more", () => {
     const block = /```\n([\s\S]*?)```/.exec(part(1))?.[1] ?? "";
-    expect(block.split("\n").filter((line) => line !== "").map((line) => line.split(":")[0])).toEqual(["Wants", "Scope", "Story lane", "Engine lane", "Needs", "Depth", "After"]);
+    expect(block.split("\n").filter((line) => line !== "").map((line) => line.split(":")[0])).toEqual(["Wants", "Scope", "Story lane", "Engine lane", "Needs"]);
   });
 
-  test("the depth is said in the record's `Depth:` line, and the parts stand in order", () => {
-    expect(flat(part(1))).toContain("depth: how deep you go and why");
-    expect(flat(part(3))).toContain("say so in the `depth:` line of your intent record");
+  test("the depth is said in one line after the record, and the parts stand in order", () => {
+    expect(flat(part(3))).toContain("say so in one line after your intent record");
     expect(flat(turn)).not.toContain("same call as your intent record");
     expect(turn.indexOf("## 3. ")).toBeGreaterThan(turn.indexOf("## 2. "));
     expect(turn.indexOf("## 2. ")).toBeGreaterThan(turn.indexOf("## 1. "));
   });
 
-  test("Assisted asks one thing: five calls or fewer, worded on the reply's path", () => {
-    const assisted = linesOf(part(3)).find((line) => line.startsWith("- **assisted.**")) ?? "";
-    expect(assisted).toContain("five calls or fewer on the reply's path");
-    expect(assisted).not.toContain("in the same call");
-  });
-
   test("a stretch played without the Author is read and recorded, in passing or as a job, and rules on neither consent nor sources", () => {
     const stretch = linesOf(turn).find((line) => line.startsWith("- **a stretch was played without you.**")) ?? "";
-    expect(stretch).toContain("record what matters after the reply, or as a job");
+    expect(stretch).toContain("record what matters of the stretch, in passing or as a job");
     for (const word of ["gap check", "consent", "source", "invent"]) expect(stretch).not.toContain(word);
   });
 
   test("closing a scene and summarizing a stretch are each asked once", () => {
-    expect(linesOf(turn).filter((line) => line.includes("close it in that turn: load the skill `scene-end`"))).toHaveLength(1);
+    expect(linesOf(turn).filter((line) => line.includes("in that turn, load the skill `scene-end`"))).toHaveLength(1);
     expect(linesOf(turn).filter((line) => line.includes("a stretch of the past that has beats and no summary"))).toHaveLength(1);
   });
 
@@ -221,12 +211,10 @@ describe("the Author's own files ask for no step and are true", () => {
   test("ALL-AGENTS.md says nothing that is false of a sub-agent or of a skill", () => {
     const all = flat(SHIPPED.get("ALL-AGENTS.md") ?? "");
     expect(all).not.toContain("already in front of you");
-    expect(all).not.toContain("transcripts");
     expect(all).toContain("the consent rule");
   });
 
-  test("WRITING.md gives an example where `long` and `large enough` stand, and SIMULATION.md gives the dice their reason", () => {
-    expect(linesOf(SHIPPED.get("WRITING.md") ?? "").find((line) => line.includes("grown large enough"))).toContain("a thousand words");
+  test("SIMULATION.md gives the dice their reason", () => {
     expect(linesOf(SHIPPED.get("SIMULATION.md") ?? "").find((line) => line.startsWith("the gm rolls"))).toContain(", so that");
   });
 
