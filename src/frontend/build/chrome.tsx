@@ -100,7 +100,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   minds: { label: "Minds", hint: "Kept in the file, not used by this build", icon: "sparkle" },
   lorePins: { label: "Pinned lore", hint: "Kept in the file, not used by this build", icon: "pin" },
   routineSettings: { label: "Routines and the story", hint: "What a routine is to people, how firmly it holds against the story, and who invites whom", icon: "route" },
-  needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when the narrator is told and when it alerts`, icon: "sliders" },
+  needs: { label: "Needs", hint: `${NEED_LIST}: each on or off, how fast it grows, when it shows as pressing and when it falls due`, icon: "sliders" },
 };
 
 /** A new item's page held open (`holdNew`): what Build asks before leaving it. */
