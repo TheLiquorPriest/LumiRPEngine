@@ -13,7 +13,7 @@ When the story as told and the recorded game state disagree, the story is what h
 
 ## How binding the rules are
 
-If a sum does not balance or a rule is bent, apply it anyway and let the report stand, so that it can be put right later.
+If a sum does not balance, a rule is bent or an action's requirement does not hold, apply it anyway and let the report stand, so that it can be put right later.
 
 <!-- To make the rules bind, replace that paragraph. For example: "When a report says something does not add up, stop and resolve it before the reply." -->
 
