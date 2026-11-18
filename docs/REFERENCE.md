@@ -1091,7 +1091,7 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 
 ### Events
 
-Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.
+Its own: `orgs.answer`, `orgs.ask`, `orgs.config`, `orgs.entry`, `orgs.goal`, `orgs.lived`, `orgs.log`, `orgs.log_removed`, `orgs.motion`, `orgs.motion_end`, `orgs.order`, `orgs.spent`, `orgs.status`, `orgs.trespass`, `orgs.vote`.
 
 ### Proposals
 

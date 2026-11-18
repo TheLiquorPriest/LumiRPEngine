@@ -30,8 +30,12 @@ lines:
   no_place: "no such place"
   no_undo: "There is no such change to undo in this chat."
   off_path: "Nothing was undone: the turn this change was kept with is no longer part of this chat's story."
-  changed_since: "Nothing was undone: something has changed it since."
+  changed_since: "Nothing was undone: something has changed {{parts}} since."
   no_undo_for: "Nothing was undone: this build keeps no undo for {{parts}}."
+  undo_not_applied: "Nothing was undone: what would take it back does not fit the world as it is now."
+  undone_some: "Undone, but not all of it."
+  undone_left_changed: "{{parts}} stays as it is, because something has changed it since."
+  undone_left_kept: "{{parts}} stays as it is, because this build keeps no undo for it."
   no_request: "There is no request {{request}} waiting in this chat to send now."
 keys:
   engine.hint: "a hint opened"

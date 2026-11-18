@@ -39,7 +39,7 @@ export function dateWords(ctx: ReadContext, text: string): string {
   return dayWords(ctx.world, text);
 }
 
-/** The party the player character leads: its entity when it has one, else the id it will take. */
+/** The party the player character leads: its entity when it has one, else the id it will take (the first free one, a party that was undone being gone and keeping its id). */
 export function partyIdOf(ctx: ReadContext): { id: EntityId; exists: boolean } {
   const pov = ctx.world.pov;
   // The first in id order: whom it leads read first, since few lead anyone and a kind's chain is long to walk.
@@ -47,7 +47,11 @@ export function partyIdOf(ctx: ReadContext): { id: EntityId; exists: boolean } {
   for (const p of Object.keys(ctx.state.entities)) {
     if ((id === undefined || p < id) && own(ctx.state.entities, p)?.fields.leader === pov && !isGone(ctx.state, p) && orgTypeOf(ctx, p) === "party") id = p;
   }
-  return id === undefined ? { id: `${PARTY_KIND}_${pov}`, exists: false } : { id, exists: true };
+  if (id !== undefined) return { id, exists: true };
+  const base = `${PARTY_KIND}_${pov}`;
+  let free = base;
+  for (let n = 2; own(ctx.state.entities, free); n++) free = `${base}_${n}`;
+  return { id: free, exists: false };
 }
 
 /** What a page is read from: an organization's entity, or the party before it has one. */

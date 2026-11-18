@@ -129,6 +129,13 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
    * apply in the touched record, so an Upgrade never takes a revision's value over one play wrote.
    */
   touches?(event: E): Touch[];
+  /**
+   * What takes the event back, for the Undo of a change that wrote it: the events to record after it, read against the world just
+   * before the change's unit and the world now. `"changed_since"` when a later change has written what it wrote, so it is not
+   * this one's to take back; `"not_reversible"` (and an event type with no `reverse`) when it has no reverse, which the Undo
+   * says by name and leaves as it is. An event with nothing to take back gives none (`[]`).
+   */
+  reverse?(event: E, before: Readonly<WorldState>, now: Readonly<WorldState>): readonly JsonObject[] | "changed_since" | "not_reversible";
 }
 
 /** An extra validation on an event type (`CoreRegistry.guard`). */

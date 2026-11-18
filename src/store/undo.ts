@@ -17,6 +17,7 @@ import { jsonEqual } from "../shared/json-patch";
 import { FINANCE_EVENTS } from "../shared/finance";
 import type { LedgerEvent, MaterializeEvent, PostEvent } from "../shared/ledger";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
+import type { EventTypes } from "../engine/events";
 import { numOf, objOf, own, strOf } from "../engine/pack-kit";
 import { GONE_FIELD, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -111,7 +112,7 @@ function reverseAnchor(data: JsonObject, before: StoreState, now: StoreState): R
  * reversed as on its own. Where it made nothing, its detail counts as not sampled, so it is sampled again when next needed; what it
  * made keeps its ids, gone, so it is not made twice.
  */
-function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: StoreState, unlinked: Set<string>): Reversed {
+function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: StoreState, unlinked: Set<string>, registry: EventTypes): Reversed {
   const made = new Set(ev.events.flatMap((e) => (e.type === "spawn" && "entity" in e && isRecord(e.entity) ? [String(e.entity.id)] : [])));
   const posts = ev.events.filter((e): e is PostEvent => e.type === "post");
   const out: JsonObject[] = [];
@@ -123,7 +124,7 @@ function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: Store
     }
     const on = "entity" in inner && typeof inner.entity === "string" ? inner.entity : "from" in inner && typeof inner.from === "string" ? inner.from : null;
     if (inner.type !== "spawn" && on !== null && made.has(on)) continue;
-    const r = reverseEvent(inner, posts, before, now, unlinked);
+    const r = reverseEvent(inner, posts, before, now, unlinked, registry);
     if (typeof r === "string") return r;
     out.push(...r);
   }
@@ -131,16 +132,25 @@ function reverseMaterialize(ev: MaterializeEvent, before: StoreState, now: Store
   return out;
 }
 
-/** The reverse of one event, read against the state just before its unit and the state now; `posts` are the postings of its unit. */
-function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: StoreState, now: StoreState, unlinked: Set<string>): Reversed {
+/**
+ * The reverse of one event, read against the state just before its unit and the state now; `posts` are the postings of its unit. The
+ * core events and the engine's and the economy's own are reversed here; any other event type is reversed by the `reverse` its pack gave it.
+ */
+function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: StoreState, now: StoreState, unlinked: Set<string>, registry: EventTypes): Reversed {
   const related = (state: StoreState, rel: string, from: string, to: string) => own(state.world.entities, from)?.relations.find((r) => r.type === rel && r.to === to);
   // The Undo of a change that set the clock where nothing had set it before takes the setting off again (A155).
   const unset: JsonObject = setsClock(ev as unknown as JsonValue) && before.marks.world?.[CLOCK_SET] === undefined ? { [CLOCK_UNSET]: true } : {};
   switch (ev.type) {
     case "post":
       return [{ type: "post", lines: ev.lines.map((l) => ({ ...l, amount: -l.amount })) as unknown as JsonValue, memo: ev.memo }];
-    case "link":
-      return related(now, ev.rel, ev.from, ev.to) ? [{ type: "unlink", rel: ev.rel, from: ev.from, to: ev.to }] : "changed_since";
+    case "link": {
+      if (!related(now, ev.rel, ev.from, ev.to)) return "changed_since";
+      // Taken off once: the despawn of what it joined takes off the same relation too.
+      const key = JSON.stringify([ev.rel, ev.from, ev.to]);
+      if (unlinked.has(key)) return [];
+      unlinked.add(key);
+      return [{ type: "unlink", rel: ev.rel, from: ev.from, to: ev.to }];
+    }
     case "unlink": {
       const was = related(before, ev.rel, ev.from, ev.to);
       if (!was || related(now, ev.rel, ev.from, ev.to)) return "changed_since";
@@ -152,24 +162,34 @@ function reverseEvent(ev: LedgerEvent, posts: readonly PostEvent[], before: Stor
     case "clock":
       if (ev.minutes > 0) return [{ type: ENGINE_EVENTS.rewind, data: { minutes: ev.minutes }, ...unset }];
       return CLOCK_UNSET in unset ? [{ type: "clock", minutes: 0, cause: "advance", ...unset }] : "not_reversible";
+    case "add": {
+      // A number added goes back to what the field held before; where it held something that is no number, the event left it as it was.
+      const held = own(now.world.entities, ev.entity)?.fields[ev.field];
+      if (held !== undefined && typeof held !== "number") return [];
+      return [{ type: "set", entity: ev.entity, field: ev.field, value: own(before.world.entities, ev.entity)?.fields[ev.field] ?? null }];
+    }
     case "spawn":
       return despawnOf(now.world, ev.entity.id, unlinked) ?? "changed_since";
     case "materialize":
-      return reverseMaterialize(ev, before, now, unlinked);
+      return reverseMaterialize(ev, before, now, unlinked, registry);
     default: {
-      if (!("data" in ev)) return "not_reversible";
-      if (ev.type === ENGINE_EVENTS.rewind) return typeof ev.data.minutes === "number" ? [{ type: "clock", minutes: ev.data.minutes, cause: "advance", ...unset }] : "not_reversible";
-      if (ev.type === ENGINE_EVENTS.hint) return reverseHint(ev.data, before, now);
-      if (ev.type === FINANCE_EVENTS.anchor) return reverseAnchor(ev.data, before, now);
-      if (ev.type !== FINANCE_EVENTS.txn) return "not_reversible";
-      const line = reverseLine(ev.data, posts);
-      return line === null ? "not_reversible" : [line as unknown as JsonObject];
+      if (ev.type === ENGINE_EVENTS.rewind && "data" in ev) return typeof ev.data.minutes === "number" ? [{ type: "clock", minutes: ev.data.minutes, cause: "advance", ...unset }] : "not_reversible";
+      if (ev.type === ENGINE_EVENTS.hint && "data" in ev) return reverseHint(ev.data, before, now);
+      if (ev.type === FINANCE_EVENTS.anchor && "data" in ev) return reverseAnchor(ev.data, before, now);
+      if (ev.type === FINANCE_EVENTS.txn && "data" in ev) {
+        const line = reverseLine(ev.data, posts);
+        return line === null ? "not_reversible" : [line as unknown as JsonObject];
+      }
+      const reverse = registry.get(ev.type)?.reverse;
+      if (reverse === undefined) return "not_reversible";
+      const r = reverse(ev, before.world, now.world);
+      return typeof r === "string" ? r : [...r];
     }
   }
 }
 
 /** The reverse of one change of `unit`, read against the state just before the unit and the state now; or why it has none. */
-function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string, unlinked: Set<string>): ChangeInput[] | Report {
+function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState, now: StoreState, group: string, unlinked: Set<string>, registry: EventTypes): ChangeInput[] | Report {
   const input = (op: string, value: JsonValue): ChangeInput => ({ lane: c.lane, op, value, precision: c.precision, standing: c.standing });
   const ev = eventOf(c.op, c.value);
   if (ev) {
@@ -177,7 +197,7 @@ function reverseOne(c: ChangeRow, unit: readonly ChangeRow[], before: StoreState
       .filter((u) => u.applied)
       .map((u) => eventOf(u.op, u.value))
       .filter((e): e is PostEvent => e?.type === "post");
-    const r = reverseEvent(ev, posts, before, now, unlinked);
+    const r = reverseEvent(ev, posts, before, now, unlinked, registry);
     return typeof r === "string" ? leftOf(r, c) : r.map((e) => input(String(e.type), { ...e, group }));
   }
   const v = isRecord(c.value) ? c.value : {};
@@ -262,7 +282,7 @@ export function reversal(unit: readonly ChangeRow[], before: StoreState, now: St
         ? reverseArea(c, { id: found.area.id, name: found.name, def: found.def, initial: found.area.initial?.() ?? {} }, before, now)
         : c.op === STORE_OPS.fact
           ? reverseFact(c, now)
-          : reverseOne(c, unit, before, now, group, unlinked);
+          : reverseOne(c, unit, before, now, group, unlinked, env.registry);
     if (Array.isArray(r)) out.inputs.push(...r);
     else out.left.push(r);
   }

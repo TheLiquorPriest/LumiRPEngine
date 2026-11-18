@@ -14,8 +14,11 @@ import { formatMoney } from "../../../shared/world";
 import { spendMonth } from "../../../engine/org";
 import { labelOf, numOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext } from "../../../engine/registry";
+import type { WorldState } from "../../../engine/state";
 
 export const ORGS_LOG = "orgs.log";
+/** A History line taken off again (the Undo of one `orgs.log` made): the organization, and the line's words, time and doer as it was made. */
+export const ORGS_LOG_REMOVED = "orgs.log_removed";
 export const ORGS_SPENT = "orgs.spent";
 /** History kept per organization (§9). */
 export const LOG_KEPT = 40;
@@ -76,6 +79,16 @@ function str(e: PackEvent, key: string): string {
   return strOf(e.data[key]);
 }
 
+/** Where the newest line of an organization's History with the words, time (when given) and doer of `data` stands in it; -1 when there is none. */
+function loggedLine(state: Readonly<WorldState>, data: JsonObject): number {
+  const lines = objOf(sliceOf(state, "orgs").log)[strOf(data.org)];
+  if (!Array.isArray(lines) || strOf(data.text) === "") return -1;
+  return lines.findLastIndex((raw) => {
+    const l = objOf(raw);
+    return strOf(l.text) === strOf(data.text) && strOf(l.by) === strOf(data.by) && (typeof data.at !== "number" || l.at === data.at);
+  });
+}
+
 export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
   {
     // A History line, kept with its organization: the last 40. One the history lines have no words for (the line was deleted) is made with no text, and is no line.
@@ -93,6 +106,22 @@ export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
       log[org] = [...(Array.isArray(before) ? before.slice(-(LOG_KEPT - 1)) : []), line];
     },
     describe: (e) => str(e, "text"),
+    // The line is taken off again; where it is gone already (pushed out by newer ones) there is nothing to take back.
+    reverse: (e, _before, now) => (loggedLine(now, e.data) === -1 ? [] : [{ type: ORGS_LOG_REMOVED, data: { org: str(e, "org"), text: str(e, "text"), ...(typeof e.data.at === "number" ? { at: e.data.at } : {}), ...(str(e, "by") !== "" ? { by: str(e, "by") } : {}), visibility: "secret" } }]),
+  },
+  {
+    // A History line taken off, the newest one with these words, time and doer: the Undo of the act that made it.
+    type: ORGS_LOG_REMOVED,
+    validate: (e) => (str(e, "org") !== "" ? null : { code: "bad_event", reason: say("why_a_history_line_needs_an_organization_and") }),
+    apply: (e, state) => {
+      const at = loggedLine(state, e.data);
+      const log = sliceRecord(state, "orgs", "log");
+      const lines = log[str(e, "org")];
+      if (at === -1 || !Array.isArray(lines)) return;
+      lines.splice(at, 1);
+      if (lines.length === 0) delete log[str(e, "org")];
+    },
+    describe: () => "",
   },
   {
     // What someone paid out of an organization's money in a calendar month, added up: the last 13 months.
@@ -109,5 +138,6 @@ export const ORG_EVENTS: EventTypeDef<PackEvent>[] = [
       spent[str(e, "org")] = org;
     },
     describe: (e, ctx) => say("org_spent", { who: labelOf(ctx, str(e, "who")), amount: formatMoney(Math.round(numOf(e.data.cents)), ctx.world.currency), org: labelOf(ctx, str(e, "org")) }),
+    reverse: (e) => [{ type: ORGS_SPENT, data: { ...e.data, cents: -Math.round(numOf(e.data.cents)) } }],
   },
 ];

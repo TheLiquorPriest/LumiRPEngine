@@ -332,9 +332,9 @@ export class PlayService {
   /** The Undo of an edit of his by its own id, on the typed route: at once, whatever runs. */
   async undoEdit(user: string, chat: string, edit: string): Promise<TapAnswer> {
     try {
-      const applied = await this.undone(user, chat, edit);
-      if (applied) stateChanged(this.deps.live, chat);
-      return { applied, reports: [], undo: null, words: "" };
+      const { done, left } = await this.undone(user, chat, edit);
+      if (done) stateChanged(this.deps.live, chat);
+      return { applied: done, reports: [], undo: null, words: left.length > 0 ? await this.leftWords(left) : "" };
     } catch (error) {
       if (!(error instanceof Refused)) throw error;
       return { applied: false, reports: [], undo: null, words: await this.refusalWords(error) };
@@ -607,11 +607,13 @@ export class PlayService {
 
   /**
    * Records the reversal of every change of an edit (his own, and what the world's defaults gave with it), each unit the last first,
-   * in one write: all of it or none, so an Undo never leaves half of what he did. A unit a later change has written a part of since
-   * takes the whole write back, and the answer says so. Whether anything was recorded: nothing, for an edit undone already. It finds
-   * the edit among his own changes of the chat, which keep their place whatever turns left the path since, and waits for no run.
+   * in one write. What is taken back is taken back; a part a later change has written since, and a part the store keeps no reverse
+   * for, are left as they are and said by name (`left`), never the reason to refuse the rest. Only when nothing at all can be
+   * taken back is nothing recorded and the refusal says why. A reversal the world does not take is a fault, and the write fails with
+   * it, taking back what the units before recorded. Whether anything was recorded: nothing, for an edit undone already. It finds the
+   * edit among his own changes of the chat, which keep their place whatever turns left the path since, and waits for no run.
    */
-  private undone(user: string, chat: string, undo: string): Promise<boolean> {
+  private undone(user: string, chat: string, undo: string): Promise<{ done: boolean; left: readonly Report[] }> {
     const s = this.deps.store.user(user);
     const edit = editId(undo);
     return this.deps.writes.run(() => {
@@ -620,17 +622,27 @@ export class PlayService {
       if (all.length === 0) throw new Refused("not_found", { line: "no_undo" });
       // Undone already: a change of his cites one of the edit's as the one it undoes.
       const ids = new Set(all.map((c) => c.id));
-      if (own.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return false;
+      if (own.some((c) => isRecord(c.cite) && typeof c.cite.undoes === "number" && ids.has(c.cite.undoes))) return { done: false, left: [] };
       // The store undoes a change with the rest of its unit: one change of each unit is enough.
       const units = new Map<string, number>();
       for (const c of all) if (!units.has(unitOf(c))) units.set(unitOf(c), c.id);
       const { changes, left } = s.undo([...units.values()].reverse(), PLAYER);
-      // Refused inside the write, which takes back what the units before recorded.
-      if (left.some((l) => l.code === "changed_since")) throw new Refused("conflict", { line: "changed_since" });
-      const unreversed = all.filter((c) => left.some((l) => l.values?.change === c.id));
-      if (unreversed.length > 0) throw new Refused("conflict", { line: "no_undo_for", codes: { parts: unreversed.map((c) => c.op) } });
-      return changes.length > 0;
+      if (changes.some((c) => !c.applied)) throw new Refused("conflict", { line: "undo_not_applied" });
+      if (changes.length === 0 && left.length > 0) {
+        const parts = left.map((l) => String(l.values?.op ?? ""));
+        throw new Refused("conflict", left.some((l) => l.code === "changed_since") ? { line: "changed_since", codes: { parts } } : { line: "no_undo_for", codes: { parts } });
+      }
+      return { done: changes.length > 0, left };
     }, "undoing an edit of yours");
+  }
+
+  /** What an Undo that took back some and left some says: that it did not take back all, and which parts stayed and why (each in this area's words). */
+  private async leftWords(left: readonly Report[]): Promise<string> {
+    const named = (code: string): string[] => left.filter((l) => l.code === code).map((l) => String(l.values?.op ?? ""));
+    const changed = named("changed_since");
+    const kept = named("not_reversible");
+    const lines = [await this.words("undone_some"), ...(changed.length > 0 ? [await this.words("undone_left_changed", {}, { parts: changed })] : []), ...(kept.length > 0 ? [await this.words("undone_left_kept", {}, { parts: kept })] : [])];
+    return lines.filter((line) => line !== "").join(SENTENCES);
   }
 
   private async refusalWords(error: Refused): Promise<string> {

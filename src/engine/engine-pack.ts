@@ -488,6 +488,13 @@ const events: EventTypeDef<PackEvent>[] = [
     },
     // Play's name, so an Upgrade that renames it too keeps the chat's.
     touches: (e) => [{ entity: str(e, "entity"), aspect: "name" }],
+    // Named as it was before; a thing made in the same change has no name before, and goes with it.
+    reverse: (e, before, now) => {
+      const entity = str(e, "entity");
+      if (own(now.entities, entity)?.name !== str(e, "name")) return "changed_since";
+      const was = own(before.entities, entity)?.name;
+      return was === undefined ? [] : [{ type: ENGINE_EVENTS.rename, data: { entity, name: was, was: str(e, "name") } }];
+    },
     describe: (e, ctx) => say("ev_renamed", { was: str(e, "was") || str(e, "entity"), name: str(e, "name") }),
     coarsen: { key: (e) => str(e, "entity"), merge: (earlier, later) => ({ ...later, data: { ...later.data, was: earlier.data.was ?? null } }) },
   },

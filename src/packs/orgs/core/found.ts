@@ -36,6 +36,7 @@ import { putToVote } from "./motions";
 import { dateWords } from "./view";
 import { say } from "../../../engine/lines";
 import { structureWords } from "../../../engine/word-tables";
+import { canSeeEntity } from "../../../engine/visibility";
 
 /** The Money level a company, a trust or a nonprofit needs (payroll, books and property, §4.7). */
 const COMPANY_LEVEL = 3;
@@ -120,6 +121,16 @@ function freshId(ctx: ReadContext, name: string, suffix: string): EntityId {
   let id = base;
   for (let n = 2; own(ctx.state.entities, id) || own(ctx.world.places, id); n++) id = `${base}_${n}`;
   return id;
+}
+
+/** An organization of this name (any case) that is there already and that `who` may know of (the GM's, with no one, knows every one); null when there is none. */
+function sameName(ctx: ReadContext, who: EntityId, name: string): EntityId | null {
+  const key = name.toLowerCase();
+  for (const [id, e] of Object.entries(ctx.state.entities)) {
+    if (e.name.toLowerCase() !== key || isGone(ctx.state, id) || orgTypeOf(ctx, id) === null) continue;
+    if (who === "" || canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id)) return id;
+  }
+  return null;
 }
 
 /** Who founds an organization: a person, or an organization (`founder`) acting through `by`; its name; and what they put in and from where. */
@@ -374,6 +385,9 @@ function foundEvents(ctx: EffectContext, args: Record<string, JsonValue>): Ledge
   }
   const name = strOf(args.name).replace(/\s+/g, " ").trim();
   if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_an_organizations_name_is_1_name_max", { nameMax: NAME_MAX }));
+  // As a thing of the name already there stands for one made again (`exists`), an organization is not started twice under one name.
+  const there = sameName(ctx, by, name);
+  if (there !== null) return refuse("exists", say("why_name_is_there_already", { name: labelOf(ctx, there) }));
   const founding: Founding = { by, founder, name, cents: Math.round(numOf(args.cents)), from: strOf(args.from) };
   if (type === "company") return companyEvents(ctx, { ...founding, structure: strOf(args.structure) || STRUCTURES[0], units: typeof args.units === "number" ? args.units : undefined, classes: args.classes ?? undefined });
   if (type === "trust") return trustEvents(ctx, { ...founding, trustee: strOf(args.trustee) || founder, beneficiary: strOf(args.beneficiary) || founder, revocable: args.revocable === true, purpose: strOf(args.purpose).replace(/\s+/g, " ").trim().slice(0, 300), until: strOf(args.until).trim() });
