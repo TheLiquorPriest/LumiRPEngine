@@ -115,7 +115,7 @@ const importLore: ModelKindDef = {
   agent: "build-import-lore",
   bound(input, limits) {
     const bookIds = stringsOf(input.bookIds).map((id) => idOf(id, limits));
-    if (bookIds.length > limits.books) throw new JobError("bad_request", `pick at most ${limits.books} lore books (Settings: build.import.books)`);
+    if (bookIds.length > limits.books) throw new JobError("bad_request", `pick at most ${limits.books} lore books (Settings: build.import.maxBooks)`);
     return { bookIds };
   },
   async start(from) {
@@ -267,7 +267,7 @@ const proposeRoutines: ModelKindDef = {
   agent: "build-propose-routines",
   bound(input, limits) {
     const owners = Array.isArray(input.owners) ? [...new Set(stringsOf(input.owners).map((id) => idOf(id, limits)))].filter((o) => o !== "") : null;
-    if (owners && owners.length > limits.owners) throw new JobError("bad_request", `name at most ${limits.owners} people and groups (Settings: build.routines.owners)`);
+    if (owners && owners.length > limits.owners) throw new JobError("bad_request", `name at most ${limits.owners} people and groups (Settings: build.routines.maxOwners)`);
     const after = idOf(input.after, limits);
     return { ...(owners ? { owners } : {}), ...(after !== "" ? { after } : {}) };
   },

@@ -62,7 +62,7 @@ export function jobsRoutes(home: JobHome) {
       path: JOBS_PATH,
       access: "page",
       group: "worlds",
-      does: "Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.running` allows.",
+      does: "Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.atOnce` allows.",
       body: shape.object({ world: field(T, "The world to work on."), kind: field(jobKind, "What the job does."), input: field(shape.json(), "The input the kind reads: a Playtest's typed turns, a Check world's days, a model job's request.") }),
       reply: shape.object({ job: field(T, "The id of the job started.") }),
       handle: ({ body, user }) => guarded(async () => ({ job: await home.start(user, body.kind as JobKind, body.world, (body.input !== null && typeof body.input === "object" && !Array.isArray(body.input) ? body.input : {}) as JsonObject) })),

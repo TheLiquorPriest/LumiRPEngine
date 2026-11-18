@@ -57,13 +57,13 @@ export const IFACE_SETTING_DEFS = {
   queryDepth: { key: "engine.queryDepth", default: IFACE_DEFAULTS.queryDepth, takes: { type: "whole", least: 0 }, perConnection: false, name: "Depth of a world query", about: "How many levels below its point world_query shows when it names no depth.", effect: "turn" },
   // A search that may give no hit at all would answer nothing whatever it was asked.
   searchHits: { key: "engine.searchHits", default: IFACE_DEFAULTS.searchHits, takes: { type: "whole", least: 1 }, perConnection: false, name: "Hits a world search gives", about: "The most things one world_search answers with.", effect: "turn" },
-  dueItems: { key: "engine.dueItems", default: IFACE_DEFAULTS.dueItems, takes: { type: "whole", least: 0 }, perConnection: false, name: "Things falling due listed", about: "The most things falling due in a span an answer lists, soonest first; how many more fall in it is said.", effect: "turn" },
+  dueItems: { key: "engine.maxDueItems", default: IFACE_DEFAULTS.dueItems, takes: { type: "whole", least: 0 }, perConnection: false, name: "Things falling due listed", about: "The most things falling due in a span an answer lists, soonest first; how many more fall in it is said.", effect: "turn" },
   creditScoreAssumed: { key: "engine.creditScoreAssumed", default: IFACE_DEFAULTS.creditScoreAssumed, takes: { type: "whole", least: 300, most: 850 }, perConnection: false, name: "Score assumed for someone with none", about: "The credit score the finance tables are read at for someone with no score recorded.", effect: "turn" },
-  editOps: { key: "engine.editOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
-  placeCap: { key: "engine.placeCap", default: IFACE_DEFAULTS.placeCap, takes: { type: "whole", least: 0 }, perConnection: false, name: "Places a chat makes before each further one is reported", about: "The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same.", effect: "turn" },
+  editOps: { key: "engine.maxEditOps", default: IFACE_DEFAULTS.editOps, takes: { type: "whole", least: 1 }, perConnection: false, name: "Operations one GM edit carries", about: "The most operations one GM edit carries; an edit with more is refused naming this setting, and one already recorded is never held to it.", effect: "turn" },
+  placeCap: { key: "engine.placesBeforeReport", default: IFACE_DEFAULTS.placeCap, takes: { type: "whole", least: 0 }, perConnection: false, name: "Places a chat makes before each further one is reported", about: "The places a chat makes in play before each further one is reported, where the world sets no placeCap of its own. A place past it is made all the same.", effect: "turn" },
   carriedChars: { key: "engine.carriedChars", default: IFACE_DEFAULTS.carriedChars, takes: { type: "whole", least: 1 }, perConnection: false, name: "Characters of an old record read at once", about: "The most characters of what an earlier build recorded for a migrated turn that one turn_carried answers with; the rest is read on from where it stops.", effect: "turn" },
   worldChars: { key: "engine.worldChars", default: IFACE_DEFAULTS.worldChars, takes: { type: "whole", least: 1 }, perConnection: false, name: "Characters of a world's document read at once", about: "The most characters of a world's document one world_read answers with; a longer value is answered as an outline to read further into.", effect: "turn" },
-  worldListed: { key: "engine.worldListed", default: IFACE_DEFAULTS.worldListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items of a list about a world listed", about: "The most items of a list about a world's document, such as the issues of its lint or its revisions, that one answer gives; how many more there are is said.", effect: "turn" },
+  worldListed: { key: "engine.worldListItems", default: IFACE_DEFAULTS.worldListed, takes: { type: "whole", least: 1 }, perConnection: false, name: "Items of a list about a world listed", about: "The most items of a list about a world's document, such as the issues of its lint or its revisions, that one answer gives; how many more there are is said.", effect: "turn" },
 } as const satisfies NumberSettings<keyof IfaceSettings>;
 
 /** Every setting the engine's tools read, as a config file writes it. */
@@ -184,7 +184,7 @@ export interface EngineDeps {
   approvals?: ApprovalsPort;
   /** What time brings due, for an answer that lets time pass and for what a span of `world_query` lists. */
   due: DueList;
-  /** Minutes of story time ahead that what `world_query` shows of a level says what falls due in (the user's `worldState.dueAhead`); absent, that setting's default. */
+  /** Minutes of story time ahead that what `world_query` shows of a level says what falls due in (the user's `worldState.dueAheadMinutes`); absent, that setting's default. */
   dueAhead?: number;
   /** Squares on a map, for the operations that name one. */
   grid: GridMoves;

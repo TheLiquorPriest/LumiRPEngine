@@ -128,7 +128,7 @@ function by(body: { base: string | null; version?: number }): { base: string | n
   return { base: body.base, ...(body.version !== undefined ? { version: body.version } : {}) };
 }
 
-/** `bodyBytes` is `worlds.bodyBytes`: the largest body a route that takes one answers. */
+/** `bodyBytes` is `worlds.maxBodyBytes`: the largest body a route that takes one answers. */
 export function worldsRoutes(service: WorldService, bodyBytes: number) {
   return [
     route({ method: "GET", path: WORLDS_PATH, access: "page", group: "worlds", does: "His worlds, by name.", reply: shape.object({ worlds: shape.list(worldIndex) }), handle: async ({ user }) => ({ worlds: await service.list(user) }) }),
@@ -308,7 +308,7 @@ export function worldsRoutes(service: WorldService, bodyBytes: number) {
       path: `${DRAFT_PATH}/patch`,
       access: "page",
       group: "worlds",
-      does: "Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.patchOps` operations bringing in at most `worlds.patchBytes`.",
+      does: "Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.maxPatchOps` operations bringing in at most `worlds.maxPatchChars`.",
       maxBody: bodyBytes,
       body: shape.object({ ops: field(shape.json(), "The operations."), ...writeBase }),
       reply: draftReply,

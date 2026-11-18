@@ -4,7 +4,7 @@
 // move the core event types make re-reads the one entity it moves (`observing` calls `moved`), and anything else that could move
 // someone (a pack's event, a marker) drops it (`forgetWhereabouts`), so the next question reads it afresh. A copy of the state, whose
 // record of entities is another object, reads its own. What it answers is what `placeOfEntity` gives every entity, by the same rule:
-// its own `place`, else the place of what holds it, as many holders up as `engine.holderDepth` says.
+// its own `place`, else the place of what holds it, as many holders up as `engine.maxHolderDepth` says.
 
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { EntityState } from "./state";

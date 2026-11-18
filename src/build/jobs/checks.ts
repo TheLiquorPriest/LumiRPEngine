@@ -220,7 +220,7 @@ function baseKind(world: WorldDoc, registry: Registry): string | null {
 /**
  * Validates and normalizes proposals against the draft and the registry, then dedupes them (same collection and key: the later stands,
  * so the agent's fix replaces what it fixed; same kind and name as another proposal or an existing entity: dropped), at most `max` kept
- * (`build.jobs.proposals`). Import never changes existing ids; Refine may. Fields a kind lacks, or values of the wrong type, are dropped
+ * (`build.jobs.maxProposals`). Import never changes existing ids; Refine may. Fields a kind lacks, or values of the wrong type, are dropped
  * with a note; a proposal whose kind or references don't resolve is dropped. Each kept proposal names its pack for review grouping.
  */
 export function checkProposals(world: WorldDoc, registry: Registry, raw: readonly JobProposal[], mode: ProposalMode, max: number, sources?: ImportSources, drops: DropCounts = new Map()): JobProposal[] {

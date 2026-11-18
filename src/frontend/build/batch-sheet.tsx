@@ -93,7 +93,7 @@ export function DraftBatchSheet(props: { collection: "entities" | "places"; ids:
       if (!current) return;
       const ops = draftPatch(current.doc, props.collection, targets, change);
       if (ops.length === 0) return setOutcome("Nothing to change: everyone selected has it already.");
-      // The size is RPE's setting: `engine.editOps` operations at a time, never more than one patch of a draft may carry (`worlds.patchOps`).
+      // The size is RPE's setting: `engine.maxEditOps` operations at a time, never more than one patch of a draft may carry (`worlds.maxPatchOps`).
       const limits = (await app.request({ type: "lre.world", op: "limits" }))?.limits;
       if (!limits) return;
       const size = Math.min(limits.editOps, limits.patchOps);

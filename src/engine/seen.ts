@@ -106,7 +106,7 @@ export function sightOf(ctx: ReadContext): SightOf {
   return sight === null ? () => [] : (scope, from, radius) => sight(ctx, scope, from, radius);
 }
 
-/** A visit at `at` to a place and every place around it, as many places up as `space.visitDepth` says. */
+/** A visit at `at` to a place and every place around it, as many places up as `places.maxVisitDepth` says. */
 function visit(state: WorldState, world: WorldDoc, place: PlaceId, at: number): void {
   const places = writable(state, "places");
   const limit = walkLimits().visitDepth;

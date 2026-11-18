@@ -125,7 +125,7 @@ export function kindParent(reg: Registry, world: WorldDoc, kind: KindId): KindId
 /**
  * How far the engine's own walks go: up a kind's chain (`kindIs`, `fieldDef`, `kindFields`), up a thing's holders to find its place
  * (`placeOfEntity`), and up the place tree as far as a visit of the POV counts (`seen.ts`). Settings read once when RPE starts
- * (`engine.kindChain`, `engine.holderDepth`, `space.visitDepth`), 32 each by default, for every fold of every chat alike.
+ * (`engine.maxKindChain`, `engine.maxHolderDepth`, `places.maxVisitDepth`), 32 each by default, for every fold of every chat alike.
  */
 export interface WalkLimits {
   kindChain: number;
@@ -136,7 +136,7 @@ export interface WalkLimits {
 export const WALK_DEFAULTS: Readonly<WalkLimits> = Object.freeze({ kindChain: 32, holderDepth: 32, visitDepth: 32 });
 
 /** The setting each walk is read from. */
-export const WALK_SETTINGS: Readonly<Record<keyof WalkLimits, string>> = Object.freeze({ kindChain: "engine.kindChain", holderDepth: "engine.holderDepth", visitDepth: "space.visitDepth" });
+export const WALK_SETTINGS: Readonly<Record<keyof WalkLimits, string>> = Object.freeze({ kindChain: "engine.maxKindChain", holderDepth: "engine.maxHolderDepth", visitDepth: "places.maxVisitDepth" });
 
 /** A walk cut short by its setting: which walk, where it began, the last step it took, and the setting. */
 export interface WalkCut {
@@ -274,7 +274,7 @@ function num(v: Value | undefined): number {
   return 0;
 }
 
-/** The place an entity is at: its `place` field, else the place of what holds it (`in`) or what it is on (`on`), as many up as `engine.holderDepth` says. */
+/** The place an entity is at: its `place` field, else the place of what holds it (`in`) or what it is on (`on`), as many up as `engine.maxHolderDepth` says. */
 export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }, id: EntityId): string | null {
   let cur: EntityId | undefined = id;
   for (let guard = 0; cur; guard++) {

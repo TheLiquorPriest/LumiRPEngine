@@ -120,7 +120,7 @@ export class JobHome {
     const limits = await this.deps.limits();
     if (world.length > limits.idChars) throw new JobError("bad_request", `an id is at most ${limits.idChars} characters`);
     const live = (this.deps.db.query("SELECT COUNT(*) AS n FROM build_job WHERE user = ? AND status = 'running'").get(user) as { n: number }).n;
-    if (live >= limits.running) throw new JobError("unavailable", `at most ${limits.running} jobs run at once (Settings: build.jobs.running); wait for one to finish or cancel it`);
+    if (live >= limits.running) throw new JobError("unavailable", `at most ${limits.running} jobs run at once (Settings: build.jobs.atOnce); wait for one to finish or cancel it`);
     const bounded = runner.bound(input, limits);
     const id = `job${this.now().toString(36)}${(++this.seq).toString(36)}`;
     const controller = new AbortController();

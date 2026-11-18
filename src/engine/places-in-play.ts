@@ -310,7 +310,7 @@ export interface PlaceOpOptions {
   salt: string;
   /** A caller that takes advice: a place of the name already there, or past the chat's cap, is made all the same and the answer says so. */
   advise?: boolean;
-  /** The places a chat makes before each further one is advised, where the world sets no `placeCap` (the setting `engine.placeCap`). */
+  /** The places a chat makes before each further one is advised, where the world sets no `placeCap` (the setting `engine.placesBeforeReport`). */
   cap?: number;
 }
 

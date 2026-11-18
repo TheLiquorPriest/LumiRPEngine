@@ -479,7 +479,7 @@ export class WorldStore {
       let what: string;
       if (request.op === "set") {
         if (!hasOwn(WORLD_PARTS, request.part)) throw new WorldError("bad_request", `unknown part ${String(request.part)}`);
-        if (typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 1 }) === "string") throw new WorldError("bad_request", `the ${request.part} part nests deeper than ${limits.depth - 1} levels (worlds.depth)`);
+        if (typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 1 }) === "string") throw new WorldError("bad_request", `the ${request.part} part nests deeper than ${limits.depth - 1} levels (worlds.maxDepth)`);
         what = `the ${request.part} part`;
         setPart(doc, request.part, request.value);
       } else if (request.op === "profile") {
@@ -520,7 +520,7 @@ export class WorldStore {
         const owner = isRecord(current) && typeof current.map === "string" ? current.map : null;
         if (owner !== null) throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
         if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined) throw new WorldError("bad_request", "only a map marks what it draws (map)");
-        if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 2 }) === "string") throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${limits.depth - 2} levels (worlds.depth)`);
+        if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: limits.depth - 2 }) === "string") throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${limits.depth - 2} levels (worlds.maxDepth)`);
         if (request.op === "put" && request.collection === "routines") {
           const problem = routineProblem(request.id, request.value);
           if (problem !== null) throw new WorldError("bad_request", problem);
@@ -562,8 +562,8 @@ export class WorldStore {
 
   /**
    * The draft with an RFC 6902 patch applied to a copy of it (DESIGN §23), all of it or none. It may
-   * carry at most `worlds.patchOps` operations, bring in at most `worlds.patchBytes` characters of JSON, nest
-   * the document no deeper than `worlds.depth`, name no prototype key, give no collection item an id
+   * carry at most `worlds.maxPatchOps` operations, bring in at most `worlds.maxPatchChars` characters of JSON, nest
+   * the document no deeper than `worlds.maxDepth`, name no prototype key, give no collection item an id
    * `safeKey` refuses, change nothing PATCH_PROTECTED names and edit nothing a map draws (as a
    * collection write may not), and it must leave a world the engine can read. Then, as after a
    * collection write, the maps compile and the tables it changed are pinned. A refusal names the
@@ -571,7 +571,7 @@ export class WorldStore {
    */
   private patched(before: WorldDoc, raw: unknown, limits: WorldLimits): { doc: WorldDoc; lint: LintIssue[] } {
     if (!Array.isArray(raw)) throw new WorldError("bad_request", "a patch is a list of operations");
-    if (raw.length > limits.patchOps) throw new WorldError("bad_request", `a patch has at most ${limits.patchOps} operations (worlds.patchOps); this one has ${raw.length}`);
+    if (raw.length > limits.patchOps) throw new WorldError("bad_request", `a patch has at most ${limits.patchOps} operations (worlds.maxPatchOps); this one has ${raw.length}`);
     const ops: JsonPatchOp[] = [];
     let after: JsonValue;
     try {

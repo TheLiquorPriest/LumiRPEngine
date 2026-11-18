@@ -35,7 +35,7 @@ export function readIndexProposals(raw: JsonValue | undefined, source: string): 
 }
 
 /**
- * Pasted text as the job keeps it: whole up to `max` characters (`build.index.chars`); a longer text is read to its last paragraph that
+ * Pasted text as the job keeps it: whole up to `max` characters (`build.index.maxChars`); a longer text is read to its last paragraph that
  * fits (cut at a space where even the first does not), and `cut` says how many characters were not read.
  */
 export function keptText(text: string, max: number): { text: string; cut: number } {
