@@ -1,6 +1,6 @@
 ---
 name: time
-description: The clock and the calendar. How to let time pass, what to do with the list of what it brings due, and how to handle a long skip. Load it when more than a moment passes, or when the date, the hour or the weather matters.
+description: The clock, the calendar and the needs that rise with them. How to let time pass, what to do with the list of what it brings due, how to handle a long skip, and how a meal, a night's sleep or a rest is recorded so that hunger, fatigue and the other needs come down. Load it when more than a moment passes, when the date, the hour or the weather matters, or when someone eats, sleeps or rests.
 ---
 # Keeping the time
 
@@ -21,8 +21,26 @@ The answer to `pass_time` lists what fell due in that span and near the scene: w
 It is a list of things to decide. The tool applied none of it. The GM decides each item when it is asked; on a turn the Author runs alone, the deciding is the Author's. An item nobody decides did not happen: a person listed at school at 8:00 is still at home. This is how it is recorded:
 
 1. For each item, what happened: it happened as scheduled, it happened differently, or it did not happen and why.
-2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`).
+2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`); a need that was met is recorded as the next part says.
 3. The Author is told what the time brought, unless the Author decided it. An arrival or an ending effect may change the scene.
+
+## Needs
+
+Hunger, fatigue, social and fun rise with the clock, and they come down only when the engine records that something met them. Passing the minutes of a meal does not: hunger goes on rising through it. What meets a need is an action of the engine's, carried out with the `world_apply` operation `act`; the time it takes is passed with `pass_time`, and the answer to `act` gives the action's own minutes.
+
+- **Hunger:** `eat`. **Fatigue:** `sleep`, a night's or a nap. **Social:** `chat_with`, a while with someone. **Fun:** `rest`. `get_up` ends a sleep or a rest; `accept_invitation` says yes to an invitation.
+- `who` is the one who eats, sleeps or rests; left out, the player's character. What the action asks for and did not find is told in the answer, and the action is carried out all the same.
+- A thirty-minute meal, paid for apart with `pay`; hunger is met when the meal ends and rises again from there:
+
+```
+world_apply {"operations": [{"op": "act", "action": "eat", "who": "Mara", "params": {"minutes": 30}, "source": {"from": "prose", "message": "m-0412"}}, {"op": "pass_time", "minutes": 30, "source": {"from": "prose", "message": "m-0412"}}]}
+```
+
+- A night's sleep; she goes to her bed if she has one, her activity is sleep until 07:00, and her fatigue is met at 07:00. For a nap or a stated length, give `"params": {"minutes": 480}`:
+
+```
+world_apply {"operations": [{"op": "act", "action": "sleep", "who": "Mara", "source": {"from": "prose", "message": "m-0415"}}, {"op": "pass_time", "until": "07:00", "source": {"from": "prose", "message": "m-0415"}}]}
+```
 
 ## A long skip
 
