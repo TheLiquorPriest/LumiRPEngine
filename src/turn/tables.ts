@@ -570,4 +570,21 @@ ALTER TABLE request ADD COLUMN answered INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE request ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 25,
+    name: "each turn a request was told, and whether that turn answered it",
+    // A request is told to the turn that answers its message and to each swipe of it, and each attempt plays the world afresh: whether
+    // an `act` answered it is kept for each turn told it (`request_told`), not once on the request (24's `answered`, dropped here).
+    sql: `
+CREATE TABLE request_told (
+  user TEXT NOT NULL,
+  request TEXT NOT NULL,
+  turn TEXT NOT NULL,
+  answered INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user, request, turn)
+);
+CREATE INDEX request_told_turn ON request_told (user, turn);
+ALTER TABLE request DROP COLUMN answered;
+`,
+  },
 ];

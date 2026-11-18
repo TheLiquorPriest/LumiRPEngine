@@ -189,29 +189,36 @@ export class Requests {
     return [...told.filter((r) => r.kind !== "swipe"), ...waiting.filter((r) => r.kind === "swipe")];
   }
 
-  /** Keeps what a turn was told with it, inside the caller's write: each request that waits, or whose turn no longer stands, is now its. */
+  /**
+   * Keeps what a turn was told with it, inside the caller's write: each request that waits, or whose turn no longer stands, is now its;
+   * and each request told, one an earlier attempt of the same message holds included, is told to this turn (`request_told`), not yet
+   * answered by it.
+   */
   tell(into: Database, user: string, ids: readonly string[], turn: string): void {
     if (ids.length === 0) return;
     into.run(`UPDATE request SET turn = ? WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.id IN (SELECT value FROM json_each(?)) AND ${WAITS})`, [turn, user, JSON.stringify(ids)]);
+    into.run("INSERT OR IGNORE INTO request_told (user, request, turn) SELECT ?, value, ? FROM json_each(?)", [user, turn, JSON.stringify(ids)]);
   }
 
   /**
    * Keeps, inside the caller's write, that an `act` of one of `actions` (the world's action ids, as a call named them) reached the
-   * engine in `turn`: each panel's press kept with the turn that asked for one of them is answered, carried out or refused with the
-   * world's reason. Ids are compared as the world keeps them, without regard to case.
+   * engine in `turn`: each panel's press of one of them told to the turn is answered by it, carried out or refused with the world's
+   * reason. Ids are compared as the world keeps them, without regard to case.
    */
   answer(into: Database, user: string, turn: string, actions: readonly string[]): void {
     if (actions.length === 0) return;
     into.run(
-      "UPDATE request SET answered = 1 WHERE user = ? AND turn = ? AND kind = 'panel' AND lower(json_extract(asked, '$.action')) IN (SELECT lower(value) FROM json_each(?))",
+      "UPDATE request_told SET answered = 1 WHERE user = ?1 AND turn = ?2 AND request IN (SELECT r.id FROM request r WHERE r.user = ?1 AND r.kind = 'panel' AND lower(json_extract(r.asked, '$.action')) IN (SELECT lower(value) FROM json_each(?3)))",
       [user, turn, JSON.stringify(actions)],
     );
   }
 
-  /** The panel's presses of an action kept with `turn` that no `act` of the turn answered and he did not drop, oldest first. */
+  /** The panel's presses of an action told to `turn` that no `act` of the turn answered and he did not drop, oldest first. */
   unanswered(user: string, turn: string): RequestRecord[] {
     return this.db
-      .query<RequestRow, [string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.turn = ? AND r.kind = 'panel' AND json_extract(r.asked, '$.action') IS NOT NULL AND r.answered = 0 AND r.dropped = 0 ORDER BY r.at, r.rowid")
+      .query<RequestRow, [string, string]>(
+        "SELECT r.* FROM request_told t JOIN request r ON r.user = t.user AND r.id = t.request WHERE t.user = ? AND t.turn = ? AND t.answered = 0 AND r.kind = 'panel' AND json_extract(r.asked, '$.action') IS NOT NULL AND r.dropped = 0 ORDER BY r.at, r.rowid",
+      )
       .all(user, turn)
       .map(recordOf);
   }

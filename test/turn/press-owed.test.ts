@@ -1,8 +1,8 @@
 // A press from a panel kept for the player's next message (plan §10.10 "A panel action", TURN.md "A request from a panel"): the turn
 // told of it carries it out with `act`, or the world refuses it and says why. The shipped reminder `press-owed` says, by what was
 // pressed, each such press that no `act` of its action reached the world for when the run is about to end; an `act` of it, carried out
-// or refused, answers it, and the press is kept as answered. Played through the stand-in Lumiverse on the scripted model, on a starter
-// world. Every name is invented.
+// or refused, answers it for that turn. A swipe is told it again and plays the world afresh, so it owes it again. Played through the
+// stand-in Lumiverse on the scripted model, on a starter world. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { Answer } from "rp-harness/testing/rig";
@@ -25,9 +25,9 @@ async function bed(answers: Answer[]): Promise<TurnBed> {
   return b;
 }
 
-async function play(b: TurnBed, said: string): Promise<string> {
-  b.host.send(CHAT, said);
-  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+async function play(b: TurnBed, said: string | null): Promise<string> {
+  if (said !== null) b.host.send(CHAT, said);
+  const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET, ...(said === null ? { type: "swipe" as const } : {}) });
   expect(out.error).toBeNull();
   return (await settledTurn(b, out.generationId!)).id;
 }
@@ -43,7 +43,9 @@ async function press(b: TurnBed): Promise<string> {
 const acting = (intent?: string): Answer => ({ pieces: [...(intent !== undefined ? [{ text: `<intent>${intent}</intent>` }] : []), { call: "world_apply", args: { operations: [{ op: "act", action: TIMELAPSE_ACTION, params: { label: "Walk here" }, source: "player" }] } }] });
 const fired = (b: TurnBed, turn: string): string[] => toldRows(b.app.db, USER, "rule", { turn }).map((r) => r.body.rule);
 const told = (b: TurnBed, from: number): boolean[] => b.model.requests.slice(from).map((r) => JSON.stringify(r.messages).includes(OWED));
-const answered = (b: TurnBed, id: string): number | undefined => b.app.db.query<{ answered: number }, [string, string]>("SELECT answered FROM request WHERE user = ? AND id = ?").get(USER, id)?.answered;
+/** Whether `turn` answered the press: 1 answered, 0 told and not answered, undefined never told. */
+const answered = (b: TurnBed, id: string, turn: string): number | undefined =>
+  b.app.db.query<{ answered: number }, [string, string, string]>("SELECT answered FROM request_told WHERE user = ? AND request = ? AND turn = ?").get(USER, id, turn)?.answered;
 
 test("a press the run ended without acting on is said by what was pressed, once; the act it then makes answers it", async () => {
   const b = await bed([replying("The square is quiet."), replying("You look about."), acting(), { pieces: [{ text: "Walked." }] }, replying("Evening comes.")]);
@@ -54,7 +56,7 @@ test("a press the run ended without acting on is said by what was pressed, once;
   // The reply went out with no act: at the run's end the reminder is said, and the act that follows answers the press.
   expect(told(b, from)).toEqual([false, true, true]);
   expect(fired(b, turn)).toEqual(["press-owed"]);
-  expect(answered(b, id)).toBe(1);
+  expect(answered(b, id, turn)).toBe(1);
   // The next turn was told no press, and nothing is said.
   from = b.model.requests.length;
   const next = await play(b, "I wait.");
@@ -70,5 +72,18 @@ test("a press the turn acts on before its run ends is answered, and nothing is s
   const turn = await play(b, "I go.");
   expect(told(b, from)).toEqual([false, false]);
   expect(fired(b, turn)).toEqual([]);
-  expect(answered(b, id)).toBe(1);
+  expect(answered(b, id, turn)).toBe(1);
+});
+
+test("a swipe is told the press again and owes it again: the first attempt's act does not answer it for the swipe", async () => {
+  const b = await bed([replying("The square is quiet."), acting("The press is the player's move: walk."), replying("You walk across the square."), replying("You stay a while."), acting(), { pieces: [{ text: "Walked." }] }]);
+  await play(b, "I wait in the square.");
+  const id = await press(b);
+  const first = await play(b, "I go.");
+  expect(answered(b, id, first)).toBe(1);
+  const from = b.model.requests.length;
+  const swipe = await play(b, null);
+  expect(told(b, from)).toEqual([false, true, true]);
+  expect(fired(b, swipe)).toEqual(["press-owed"]);
+  expect([answered(b, id, first), answered(b, id, swipe)]).toEqual([1, 1]);
 });
