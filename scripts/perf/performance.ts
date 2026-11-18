@@ -1,9 +1,10 @@
 // Performance gate with the real packs (DESIGN §18.5): fold at 1k and 5k turns with a level-4
 // ledger, a rebased view over 1k later turns (cold), record size per preset, a coarsened timelapse
-// record, the engine run's section delivery, and chat-open payload growth. Ledgers come from the real ledger core
-// driving the real simulation (planTurn/postTurn, every pack) on the Riverton test world; no model.
-// Main-process assembly cost (extension on versus off) is `bun scripts/perf/assembly.ts` (real host).
-// Usage: bun scripts/perf/performance.ts [fold|presets|timelapse|sections|payload|all]
+// record. Ledgers come from the real ledger core driving the real simulation (planTurn/postTurn, every pack) on the Riverton
+// test world; no model. The old build's two other measures, the engine run's section delivery and the chat-open payload, drove
+// its runtime and message tunnel (`src/backend/`), which the rebuild removed (df8f12f34): nothing of the rebuild answers them, so
+// they are not measured here.
+// Usage: bun scripts/perf/performance.ts [fold|presets|timelapse|all]
 
 import { writeFileSync } from "node:fs";
 import { hashJson } from "../../src/shared/hash";
@@ -11,8 +12,6 @@ import type { DomainId, Level } from "../../src/shared/ids";
 import { DOMAINS } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import type { ChatRun, MessageLedger } from "../../src/shared/ledger";
-import { PROTOCOL_VERSION } from "../../src/shared/protocol";
-import type { FrontendToBackend } from "../../src/shared/protocol";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
@@ -21,14 +20,15 @@ import { resolveFix } from "../../src/engine/edits";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { InterpretOutput } from "../../src/engine/steps";
 import { planTurn, postTurn, timelapseIntent } from "../../src/engine/turn";
-import { Dispatcher } from "../../src/backend/dispatch";
+import { installHistoryLines } from "../../src/iface/history-lines";
+import { shippedTexts } from "../../src/iface/texts";
 import { ChatSnapshots } from "../../src/migrate/today/ledger-io";
-import { JobRunner } from "../../src/backend/jobs";
 import { REALISM_PRESETS } from "../../src/engine/realism";
-import { Runtime } from "../../src/backend/runtime";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../../test/packs/riverton";
-import { FakeHost } from "../../test/support/fake-host";
+
+// The engine says its words from the shipped `.prompts/history-*.md` (as a server does, and every test through its preload).
+await installHistoryLines(shippedTexts());
 
 /** Where the JSON report is written (`LRE_EVIDENCE_DIR`); without it the report only goes to stdout. */
 const EVIDENCE = process.env.LRE_EVIDENCE_DIR;
@@ -183,64 +183,6 @@ if (which === "timelapse" || which === "all") {
     console.error(`timelapse ${preset}: ${JSON.stringify(out[preset])}`);
   }
   report.timelapse = out;
-}
-
-if (which === "sections" || which === "payload" || which === "all") {
-  const host = new FakeHost();
-  const world = withLevels(modernUsWorld("w_bench", "Riverton"), "simulation");
-  const rt = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: { riverton: () => structuredClone(world) } });
-  const dispatch = new Dispatcher(rt, new JobRunner(host, rt.worlds, rt.steps, rt.settings, rt.registry));
-  rt.start();
-  dispatch.start();
-  host.idle = async () => {
-    await rt.ledger.idle();
-    await rt.push.settle();
-  };
-  let req = 0;
-  const send = async (request: Record<string, unknown>): Promise<JsonValue> => {
-    const reqId = `r${++req}`;
-    const before = host.sent.length;
-    await dispatch.handle({ lre: PROTOCOL_VERSION, reqId, ...request } as unknown as FrontendToBackend, host.userId);
-    await host.settle();
-    const reply = host.sent.slice(before).find((m) => m.type === "lre.result" && m.reqId === reqId);
-    return reply && reply.type === "lre.result" ? (JSON.parse(JSON.stringify(reply.body)) as JsonValue) : null;
-  };
-  const created = await send({ type: "lre.world", op: "create", name: "Riverton", template: "riverton" });
-  const worldId = created && typeof created === "object" && !Array.isArray(created) && created.world && typeof created.world === "object" && !Array.isArray(created.world) ? created.world.id : null;
-  if (typeof worldId !== "string") throw new Error("no world");
-  const chatId = host.createChat("Morning in Riverton.");
-  await send({ type: "lre.world", op: "attach", worldId, chatId });
-  const payload: Record<string, JsonValue> = {};
-  const marks = new Set([0, 100, 500, 1000]);
-  const sectionsMs: Record<string, JsonValue> = {};
-  for (let t = 0; t <= 1000; t++) {
-    if (marks.has(t)) {
-      payload[`turns${t}`] = JSON.stringify(await rt.view(chatId, host.userId)).length;
-      // The engine run's last step, rendering the sections and writing them into the book, as a turn of its own.
-      const xs: number[] = [];
-      for (let i = 0; i < 12; i++) {
-        await rt.ledger.with(chatId, host.userId, async (core, observed) => {
-          const id = `bench-${t}-${i}`;
-          core.prepare({ generationId: id, kind: "normal", targetMessageId: null, targetSwipeId: 0 }, observed);
-          const t0 = performance.now();
-          const delivered = await rt.deliver({ chatId, userId: host.userId, core, observed, generationId: id });
-          xs.push(performance.now() - t0);
-          core.take(id);
-          await rt.clear(chatId, host.userId, delivered);
-        });
-      }
-      sectionsMs[`turns${t}`] = { medianMs: r1(median(xs.slice(2))), p95Ms: r1(p95(xs.slice(2))) };
-      console.error(`turn ${t}: payload ${String(payload[`turns${t}`])} B, sections ${JSON.stringify(sectionsMs[`turns${t}`])}`);
-    }
-    if (t === 1000) break;
-    host.sendUser(chatId, TEXTS[t % TEXTS.length] ?? "look around");
-    await host.settle();
-    const g = await host.start(chatId, { type: "normal" });
-    await host.finish(g, `Turn ${t} narration.`);
-  }
-  report.payloadBytes = payload;
-  report.sections = sectionsMs;
-  report.errors = rt.ledger.errors.slice(0, 5);
 }
 
 console.log(JSON.stringify(report, null, 1));
