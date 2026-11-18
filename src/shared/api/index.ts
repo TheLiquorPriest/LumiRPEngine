@@ -3951,8 +3951,8 @@ export interface Usage {
 export interface UserSessionScope {
   user: string;
   session: string;
-  chat?: void;
-  turn?: void;
+  chat?: undefined;
+  turn?: undefined;
 }
 
 /** One change that wrote a value, as the World page lists a value's history: its id, the turn it is of or stands just before and that turn's number, when it was recorded, its lane and the area holding what it wrote, its operation and values, who made it, how exact, how sure and from where, its report codes, what it left there, whether it wrote the typed value or a fact beside it, and for a fact the turn of the later exact record that settled it. */

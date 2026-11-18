@@ -9862,8 +9862,8 @@ Where a job the owner started for no chat runs: the user and the job's own sessi
 export interface UserSessionScope {
   user: string;
   session: string;
-  chat?: void;
-  turn?: void;
+  chat?: undefined;
+  turn?: undefined;
 }
 ```
 

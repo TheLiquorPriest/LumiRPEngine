@@ -120,7 +120,7 @@ class Names {
     return Object.entries(fields)
       .map(([name, f]) => {
         const { of, optional, doc } = fieldOf(f);
-        return `${doc === undefined ? "" : `${indent}/** ${doc} */\n`}${indent}${key(name)}${optional ? "?" : ""}: ${this.ts(of)};\n`;
+        return `${doc === undefined ? "" : `${indent}/** ${doc} */\n`}${indent}${key(name)}${optional ? "?" : ""}: ${of.kind === "nothing" ? "undefined" : this.ts(of)};\n`;
       })
       .join("");
   }
