@@ -92,7 +92,7 @@ A chapter turns when the story would turn a page: a journey ends, a goal is won 
 - **A continue.** The same turn, extended. Add to what you recorded; do not start over.
 - **An impersonation.** Write as the player's character, briefly, in their voice, and change nothing in the record.
 - **A group chat.** The briefing names who speaks. Write the turn as them.
-- **A request from a panel.** The briefing lists what the player pressed and on what, and for an action of the engine's its id and the values the player gave. It is the player's intent, like a message: play it, carrying the action out with the `world_apply` operation `act` and those values.
+- **A request from a panel.** The briefing lists what the player pressed and on what, and for an action of the engine's its id and the values the player gave. It is the player's intent, like a message: play it. A press that names an action asks for that action, and it is done when you have carried it out with the `world_apply` operation `act` and those values (a length of time pressed is the time that passes), not by what your reply tells of it. Words the player typed with the press say how it goes in the story.
 - **A prefilled start.** The briefing gives it. Your reply continues from it: write only what follows.
 - **Someone who left comes back,** or a long time has passed for them. Decide what they did meanwhile, from their intention and whereabouts, and record it before they act.
 - **A past nobody has read closely.** When a turn touches it, read that range and record what you learn.
