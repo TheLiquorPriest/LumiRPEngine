@@ -19,7 +19,8 @@ import { HARNESS_MIGRATIONS } from "../../../../src/turn/tables";
 import { migrateStore } from "../../../../src/store";
 import { Database } from "bun:sqlite";
 import type { Store } from "../../../../src/store";
-import type { WriteQueue } from "../../../../src/app";
+import { WriteQueue } from "../../../../src/app";
+import { Requests } from "../../../../src/turn/requests";
 import { type LiveListener, type RpeClient, RpeError } from "../../../../src/ui/client";
 import { GUIDANCE, jobHomeOn, makeBed, USER, worldsOn } from "../../../build-mode/bed";
 import { asHarnessPasses } from "../../../story/rig";
@@ -56,15 +57,16 @@ export function servedRpe(): ServedRpe {
   const running = new Set<string>();
   const service = worldsOn(bed);
   const worlds = [...worldsRoutes(service, 4 * 1024 * 1024), ...chatsRoutes(service), ...jobsRoutes(jobHomeOn(bed, service))];
-  // This bed holds no asks for the next message and has no Lumiverse to put a message in.
+  // This bed has no Lumiverse to put a message in.
   const noLumiverse = (): never => {
     throw new Error("This bed has no Lumiverse to put a message in.");
   };
-  // The turn lane's own tables, which the panels read beside the store (runs' usage, questions, carried chips), in a database of their own here.
+  // The turn lane's own tables, which the panels read beside the store (runs' usage, questions, carried chips, what waits for the next message), in a database of their own here.
   const lane = new Database(":memory:");
   migrateStore(lane);
   for (const step of HARNESS_MIGRATIONS) lane.run(step.sql);
-  const play = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, db: lane, guidance: GUIDANCE, texts: () => shippedTexts(), turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests: undefined as never, lumiverse: noLumiverse, writeChatSetting: async () => {}, log: bed.log }));
+  const requests = new Requests(lane, new WriteQueue(lane, 10), () => undefined);
+  const play = playRoutes(new PlayService({ store: bed.store, writes: bed.writes, live, db: lane, guidance: GUIDANCE, texts: () => shippedTexts(), turning: (_user, chat) => running.has(chat), settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse: noLumiverse, writeChatSetting: async () => {}, log: bed.log }));
   worlds.push(...(play as unknown as typeof worlds));
 
   const serve = async (key: string, params: Record<string, string>, body: unknown, query: Record<string, string>): Promise<unknown> => {
