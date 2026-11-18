@@ -6,7 +6,6 @@ import { hashJson } from "../../src/shared/hash";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { buildCastView } from "../../src/packs/castlife/core/index";
 import { buildMapView } from "../../src/packs/space/core/view";
-import { proposalKnown } from "../../src/backend/runtime";
 import type { WorldDoc } from "../../src/shared/world";
 import { applyEffects } from "../../src/engine/effects";
 import { ENGINE_EVENTS } from "../../src/engine/engine-pack";
@@ -207,10 +206,6 @@ describe("discoverable places", () => {
     const knows = reg.proposals.get("knows");
     if (!knows) throw new Error("no knows channel");
     const propose = (fact: string): string => knows.validate({ fact }, w.ctx)?.code ?? "ok";
-    // Only a knows proposal may name a place the POV can't see yet, and only one that isn't secret.
-    expect(proposalKnown({ type: "knows", fact: "boathouse" }, reg, w.world, w.state)).toBe(true);
-    expect(proposalKnown({ type: "knows", fact: "vault" }, reg, w.world, w.state)).toBe(false);
-    expect(proposalKnown({ type: "location", entity: "you", place: "boathouse" }, reg, w.world, w.state)).toBe(false);
     // The secret one reads as no place at all, by id or by name, so the refusal doesn't tell it exists.
     expect(knows.validate({ fact: "vault" }, w.ctx)?.reason).toBe("no world fact vault");
     expect(knows.validate({ fact: "The Vault" }, w.ctx)?.reason).toBe("no world fact The Vault");

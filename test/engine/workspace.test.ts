@@ -2,16 +2,12 @@
 // events, and follow swipes, Re-runs and branches as every other event of a turn does.
 
 import { describe, expect, test } from "bun:test";
-import type { ChatId } from "../../src/shared/ids";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { blobHash } from "../../src/shared/stores";
 import { applyEvent, validateEvent } from "../../src/engine/events";
-import type { TurnModel } from "../../src/engine/ledger/journal";
 import type { WorldState } from "../../src/engine/state";
 import { WS_DELETE, WS_PIN, WS_WRITE, workspaceOf, workspacePins, workspaceRefs, wsDelete, wsPin, wsWrite } from "../../src/engine/workspace";
 import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
-import { Harness } from "../support/harness";
-import { testModel } from "../support/test-pack";
 
 const reg = registryOf();
 const world = baseWorld();
@@ -136,71 +132,5 @@ describe("the workspace's events", () => {
     for (const e of [wsPin("notes/dev.md", true), wsDelete("notes/inn.md")]) applyEvent(reg, e, shared, reg.context(world, shared));
     expect(workspacePins(one)).toEqual({ "notes/inn.md": true });
     expect(workspacePins(shared)).toEqual({ "notes/dev.md": true });
-  });
-});
-
-/** The test model, with a note written for each `note:<name>` turn; its body follows the turn's seed, so a Re-run writes it anew. */
-const noteModel: TurnModel = {
-  plan: (input) => {
-    const [verb, name] = (input.userTexts.at(-1) ?? "").split(":");
-    const events = testModel.plan(input);
-    return verb === "note" && name ? [...events, wsWrite(`notes/${name}.md`, blobHash(`${name} ${input.seed}`))] : events;
-  },
-  read: (input) => testModel.read(input),
-};
-
-/** The chat's workspace at its head, after checking every fold agrees on it. */
-async function workspace(h: Harness, chatId: ChatId): Promise<Record<string, string>> {
-  const { reference, optimized, cold } = await h.folds(chatId);
-  expect(workspaceOf(reference.state)).toEqual(workspaceOf(optimized.state));
-  expect(workspaceOf(cold.state)).toEqual(workspaceOf(optimized.state));
-  expect(reference.violations).toEqual([]);
-  expect(h.service.errors).toEqual([]);
-  return workspaceOf(optimized.state);
-}
-
-describe("the workspace in a chat", () => {
-  test("follows turns, GM writes, Re-runs, swipes and branches", async () => {
-    const h = new Harness("fresh", { model: noteModel });
-    const chat = await h.newChat();
-    await h.send(chat, "note:inn");
-    const first = h.host.head(chat)?.id ?? "";
-    await h.send(chat, "note:dev");
-    const head = h.host.head(chat);
-    if (!first || !head) throw new Error("no turns");
-    const planned = await workspace(h, chat);
-    expect(Object.keys(planned).sort()).toEqual(["notes/dev.md", "notes/inn.md"]);
-
-    // A swipe made before the GM's write.
-    await h.host.finish(await h.host.start(chat, { type: "swipe", messageId: head.id }), "Okay.");
-    const plot = blobHash("The vault opens at dusk.");
-    expect((await h.write(chat, { kind: "post", id: "plot", target: "head", entry: { kind: "fix", gm: true, events: [wsWrite("gm/plot.md", plot)] } })).applied).toBe(true);
-    expect((await workspace(h, chat))["gm/plot.md"]).toBe(plot);
-
-    // A Re-run plans its turn's note again and carries the GM's file.
-    await h.host.finish(await h.host.start(chat, { type: "swipe", messageId: head.id }), "Okay.");
-    const rerun = h.host.message(chat, head.id).swipeId;
-    const after = await workspace(h, chat);
-    expect(after["gm/plot.md"]).toBe(plot);
-    expect(after["notes/inn.md"]).toBe(planned["notes/inn.md"]);
-    expect(after["notes/dev.md"]).toBeDefined();
-    expect(after["notes/dev.md"]).not.toBe(planned["notes/dev.md"]);
-
-    // The first swipe, made before the GM's write, never had its file; back on the Re-run, it is there again.
-    h.host.navigate(chat, head.id, 0);
-    await h.host.settle();
-    expect(await workspace(h, chat)).toEqual(planned);
-    h.host.navigate(chat, head.id, rerun);
-    await h.host.settle();
-    expect(await workspace(h, chat)).toEqual(after);
-
-    // A branch at the first turn holds its note and none written after it.
-    const branch = h.host.branch(chat, first);
-    await h.service.open(branch, h.host.userId);
-    await h.host.settle();
-    expect(await workspace(h, branch)).toEqual({ "notes/inn.md": planned["notes/inn.md"] });
-    await h.send(branch, "note:cellar");
-    expect(Object.keys(await workspace(h, branch)).sort()).toEqual(["notes/cellar.md", "notes/inn.md"]);
-    expect(await workspace(h, chat)).toEqual(after);
   });
 });

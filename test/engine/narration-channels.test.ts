@@ -2,7 +2,7 @@
 // settings list, and each is bounded: public facts only; capped, deduplicated spawns with a
 // validated kind and place; quantity steps of any size the story tells, kept in the field's range.
 import { describe, expect, test } from "bun:test";
-import { EXTRACTION_TYPES } from "../../src/shared/settings";
+import { EXTRACTION_TYPES } from "../../src/migrate/today/user-settings";
 import { applyEffects } from "../../src/engine/effects";
 import { DEFAULT_SPAWN_CAP } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";

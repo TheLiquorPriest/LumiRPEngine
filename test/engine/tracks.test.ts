@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { HostPort } from "../../src/shared/host";
-import { seedKnowledge } from "../../src/backend/knowledge-seed";
 import { lintWorld } from "../../src/engine/authoring";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { agendaFor, answerPuzzle, moveTrack, normalizeAnswer, stepTracks } from "../../src/engine/tracks";
@@ -193,9 +191,8 @@ describe("tracks", () => {
     expect(agendaFor(wd, startState(wd), "dev")).toEqual([{ track: "plan", label: "Open a bakery", stage: "save", stageLabel: "Save money", priority: 3 }]);
   });
 
-  test("a track that is the GM's (owner gm): lint takes it, it seeds no one, knowing anyone never shows it, its cue is the world's, and the GM's views say GM", async () => {
+  test("a track that is the GM's (owner gm): lint takes it, knowing anyone never shows it, its cue is the world's, and the GM's views say GM", async () => {
     const reg = registryOf();
-    const host = { books: { entries: async () => [] }, log: () => undefined } as unknown as Pick<HostPort, "books" | "log">;
     const play = async (owner: TrackDef["owner"]) => {
       const wd = world();
       wd.tracks.butler = { ...secret, owner, start: "clue" };
@@ -203,19 +200,17 @@ describe("tracks", () => {
       const w = new Working(reg, wd, startState(wd));
       // The POV knows Dev, so a track Dev owns is known to them.
       expect(w.apply({ type: "link", rel: "knows", from: POV, to: "dev" })).toBeNull();
-      const seeded = await seedKnowledge(host, { reg, world: wd, state: w.state, userId: "u" });
       return {
         lint: lintWorld(wd, reg).filter((i) => i.path.startsWith("tracks.butler.owner")).map((i) => i.code),
-        seeded: JSON.stringify(seeded).includes("butler"),
         known: trackKnown(reg, wd, w.state, POV, wd.tracks.plan!),
         cue: playerTrack(reg, wd, w.state, POV, "butler")?.cue ?? null,
         owner: buildGmWorld(reg, wd, w.state).tracks.find((t) => t.id === "butler")?.owner ?? null,
       };
     };
     // A person's: they hold the truths, knowing them makes the plan known, and the cue is their behaviour (Stance's alone).
-    expect(await play("dev")).toEqual({ lint: [], seeded: true, known: true, cue: null, owner: "Dev" });
+    expect(await play("dev")).toEqual({ lint: [], known: true, cue: null, owner: "Dev" });
     // The GM's: nobody holds it or knows of it, and its cue is what anyone may notice.
-    expect(await play(GM_OWNER)).toEqual({ lint: [], seeded: false, known: false, cue: "Ink stains on a cuff.", owner: "GM" });
+    expect(await play(GM_OWNER)).toEqual({ lint: [], known: false, cue: "Ink stains on a cuff.", owner: "GM" });
     expect((await play("nobody")).lint).toEqual(["refs"]);
     // Port Alder's debt is the GM's.
     const alder = (STARTER_WORLDS["modern_slice_of_life"] as (id: string, name: string) => WorldDoc)("w", "Port Alder");

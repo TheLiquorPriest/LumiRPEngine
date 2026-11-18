@@ -4,7 +4,8 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { outline } from "../../src/engine/beats";
-import { metBy, playerDrop, playerLine, playerLines, UNSEEN_DROP, witnessLines } from "../../src/engine/player-events";
+import { say } from "../../src/engine/lines";
+import { metBy, playerDrop, playerLine, playerLines, witnessLines } from "../../src/engine/player-events";
 import { createRng } from "../../src/engine/rng";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import type { WorldState } from "../../src/engine/state";
@@ -14,6 +15,8 @@ import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
+/** The line the player sees for a change they may not see (`change_unseen` in the shipped lines). */
+const UNSEEN_DROP = say("change_unseen");
 const TRUTH = "Jordan pockets the tips";
 
 function setup(): { world: WorldDoc; state: WorldState } {

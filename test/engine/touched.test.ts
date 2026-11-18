@@ -114,6 +114,9 @@ function everythingWorld(): WorldDoc {
       { id: "kitchen", name: "Kitchen" },
     ],
   };
+  // A yard whose grid is authored with no map: three squares of cobble, for the squares of a grid of its own.
+  w.places.yard = { id: "yard", name: "The yard", grid: "yard_grid", fields: {} };
+  w.grids.yard_grid = { id: "yard_grid", width: 3, height: 1, terrain: ["cobble", "cobble", "cobble"], blocked: [], zones: {} };
   w.start = { ...w.start, place: "taproom" };
   Object.assign(w.entities.you?.fields ?? {}, { place: "taproom" });
   w.entities.dev = { id: "dev", kind: "person", name: "Dev", tier: "principal", fields: { place: "home" }, relations: [], agent: true };

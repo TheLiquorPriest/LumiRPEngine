@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { boundProposal, combineBounds, strictest } from "../../src/engine/bounds";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { isMaterialized, materializeIfNeeded, pinnedVersion, previewMaterialization } from "../../src/engine/materialize";
 import type { PackDef } from "../../src/engine/registry";
@@ -58,28 +57,6 @@ describe("visibility", () => {
     expect(playerTrack(reg, world, s, POV, "storm")?.cue).toBe("The line is dead.");
     s.tracks.storm = { stage: "done", since: 0 };
     expect(playerTrack(reg, world, s, POV, "storm")?.status).toBe("done");
-  });
-});
-
-describe("bounds", () => {
-  test("the most restrictive mode and the smallest max delta win", () => {
-    expect(strictest("auto", "confirm", undefined)).toBe("confirm");
-    expect(strictest("confirm", "never")).toBe("never");
-    expect(combineBounds({ mode: "auto", maxDelta: 20 }, { mode: "confirm", maxDelta: -5 }, undefined)).toEqual({ mode: "confirm", maxDelta: 5 });
-  });
-
-  test("a proposal is capped by the field's own bound and the player's max delta, never by the field's range, which the change keeps as it applies; locked fields are never", () => {
-    const world = baseWorld();
-    world.kinds.person!.fields.stress = { ...world.kinds.person!.fields.stress!, bound: { mode: "auto", maxDelta: 30 } };
-    world.kinds.person!.fields.skill = { type: "number", locked: true };
-    const reg = registryOf();
-    const s = startState(world);
-    const b = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto", typeMaxDelta: 20 });
-    expect([b.mode, b.delta, b.capped]).toEqual(["auto", 20, true]);
-    expect(boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: 50 }, { typeMode: "auto" }).delta).toBe(30);
-    const range = boundProposal(reg, world, s, { type: "condition", entity: POV, field: "stress", delta: -10 }, { typeMode: "confirm" });
-    expect([range.mode, range.delta, range.capped]).toEqual(["confirm", -10, false]);
-    expect(boundProposal(reg, world, s, { type: "quantity", entity: POV, field: "skill", delta: 1 }, { typeMode: "auto" }).mode).toBe("never");
   });
 });
 

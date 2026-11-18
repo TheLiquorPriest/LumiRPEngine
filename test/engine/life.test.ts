@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../src/shared/json";
-import { applyProposals } from "../../src/backend/turn-model";
+import { applyProposals } from "./apply-proposals";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
@@ -31,7 +31,6 @@ import { fightWorld, plan, povFirst, reg as combatReg, started } from "../packs/
 import { modernUsWorld } from "../packs/riverton";
 import { fold, POV, startState, baseWorld } from "../packs/support";
 import { Play, registry as templateReg } from "../packs/templates/play";
-import { agentsActHere } from "../../src/backend/turn-steps";
 import { stanceLines } from "../../src/packs/castlife/core/index";
 import { hashJson } from "../../src/shared/hash";
 import { upgradePreview } from "../../src/worlds/upgrade-preview";
@@ -388,14 +387,6 @@ describe("life states: how a world starts, and who reads as acting", () => {
     const named = (lines: string[]): boolean => lines.some((l) => l.includes("Jordan"));
     expect(named(peopleLines(w))).toBe(true);
     expect(named(stanceLines(w.ctx))).toBe(named(peopleLines(w)));
-  });
-
-  test("a known body here doesn't count as someone present who may act", () => {
-    const w = riverton(1);
-    move(w, "maya", placeOfEntity(w.state, YOU) ?? "");
-    expect(agentsActHere(reg, w.world, w.state)).toBe(true);
-    life(w, { entity: "maya", to: "dead" });
-    expect(agentsActHere(reg, w.world, w.state)).toBe(false);
   });
 
   test("an Upgrade preview names no one with a life change the player hasn't heard of", () => {

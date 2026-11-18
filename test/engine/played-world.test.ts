@@ -25,8 +25,8 @@ import { fold, startState } from "../packs/support";
 
 const SRC = resolve(import.meta.dir, "../../src");
 
-/** The code that reads a world while a chat plays: the engine, the backend and its worker, and the packs' cores. */
-const PLAY_ZONES = ["engine", "backend", "worker", "packs"];
+/** The code that reads a world while a chat plays: the engine, its worker, and the packs' cores (the store and the play service read through `playedWorld` or `registry.context`, as the engine does). */
+const PLAY_ZONES = ["engine", "worker", "packs"];
 
 /** A bare revision lookup: what reads a world document without the state it is played in. */
 const RAW = /\b(?:worldAt|worlds)\s*\(|\.worlds\.(?:get|getMany|cached)\s*\(/;
@@ -45,19 +45,6 @@ const ALLOWED: readonly { file: string; has: string; count: number; why: string 
   { file: "engine/ledger/journal.ts", has: "const world = this.env.worlds(head.state.revision);", count: 2, why: "a Continue's suffix, read through `types.context`" },
   { file: "engine/upgrade.ts", has: "worlds(revision: RevisionId): WorldDoc | undefined;", count: 1, why: "the marker env's lookup, declared" },
   { file: "engine/upgrade.ts", has: "env.worlds(revision)", count: 1, why: "an Upgrade compares revisions as authored; its reads of the state go through `types.context`" },
-  { file: "backend/runtime.ts", has: "this.worlds.get(run.worldId, userId, run.revision)).world;", count: 1, why: "the env's pinned revision" },
-  { file: "backend/runtime.ts", has: "this.worlds.cached(userId, run.worldId, revision)", count: 1, why: "the env's lookup, by revision" },
-  { file: "backend/runtime.ts", has: "await this.worlds.getMany(run.worldId, userId, wanted)", count: 1, why: "the env's pins, read together" },
-  { file: "backend/runtime.ts", has: "sectionsOf((await this.worlds.get(", count: 2, why: "the world's sections, which name no place" },
-  { file: "backend/runtime.ts", has: "world: (r) => core.worldAt(r)", count: 1, why: "`buildView`'s lookup, which it plays over the head state" },
-  { file: "backend/agents/turn-task.ts", has: "worlds: (revision) => d.core.worldAt(revision)", count: 1, why: "the digest's Upgrade lines: the marker env an Upgrade's plan and merge read their revisions through, as authored, as the fold's does" },
-  { file: "backend/agents/turn-task.ts", has: "const was = env.worlds(before.revision);", count: 1, why: "the digest's Upgrade lines: an entity's classes and tags as the revision before the Upgrade authors them, to compare it across the Upgrade as the Upgrade does" },
-  { file: "backend/agents/turn-task.ts", has: "const now = env.worlds(after.revision);", count: 1, why: "the digest's Upgrade lines: an entity's classes and tags as the revision after it authors them" },
-  { file: "backend/dispatch.ts", has: "const { world } = await this.rt.worlds.get(worldId, userId);", count: 1, why: "the world's book follows its head revision as authored" },
-  { file: "backend/upgrade-preview.ts", has: "(await rt.worlds.get(run.worldId, userId, revision)).world", count: 1, why: "an Upgrade preview's revisions, as authored" },
-  { file: "backend/agents/tools/harness-ports.ts", has: "rt.book.ensure((await rt.worlds.get(worldId, userId)).world", count: 1, why: "the world's book follows its head revision as authored, after an agent's commit as after Build's" },
-  { file: "backend/agents/tools/harness-ports.ts", has: "revision: async (revision) => (await rt.worlds.get(worldId, userId, revision)).world", count: 1, why: "the world tools compare a draft with a revision as authored, for the review card; nothing is played from it" },
-  { file: "backend/jobs.ts", has: "await this.worlds.get(worldId, job.userId)", count: 1, why: "a Build job, on the world as authored" },
 ];
 
 function sources(dir: string): string[] {

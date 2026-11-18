@@ -427,7 +427,7 @@ describe("a Gear or Place line the final review took out is a finding (N3)", () 
       [[], null, true],
       [["danny_keys", "pov_keys"], null, true],
     ]);
-    expect(found[1]?.text).toBe('The last turn\'s final review took this line out of the narrator\'s Gear section: "- Truck keys (Danny Okafor\'s), in hand". A line it can\'t use often means the things are wrong: look at what it names.');
+    expect(found[1]?.text).toBe('The last turn\'s final review took this line out of the narrator\'s Gear section: "- Truck keys (Danny Okafor\'s), in hand". A line the review can\'t use often means the things it names are wrong.');
     // Without the head turn's edits, there is none.
     expect(tidyFindings(w.ctx, []).some((f) => f.kind === "final_dropped")).toBe(false);
   });

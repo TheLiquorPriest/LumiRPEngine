@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
-import { applyProposals } from "../../src/backend/turn-model";
+import { applyProposals } from "./apply-proposals";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { applyEffects } from "../../src/engine/effects";
 import { resolveEdit } from "../../src/engine/edits";
