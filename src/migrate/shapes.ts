@@ -29,6 +29,7 @@ const outcome = shape.named(
     "gone from Lumiverse, played on RPE: left alone",
     "gone from Lumiverse, a chat made from it was played on RPE: left alone",
     "not imported",
+    "not asked for",
   ),
 );
 

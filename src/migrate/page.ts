@@ -266,12 +266,13 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
   }
   // The chats the run found off RPE, as Lumiverse and RPE hold them now.
   out.offRpe.push(...offRpeNow(input, report));
-  // The chats whose record of why is kept, while it is kept, named as Lumiverse's database names them (the folder the run read, else the one RPE's config names, as the list of chats reads it), with the line that runs it again over that folder and, where a switch was made, the one that goes back; and those the last run carried that an earlier one could not.
+  // The chats whose record of why is kept, while it is kept, named as Lumiverse's database names them (the folder the run read, else the one RPE's config names, as the list of chats reads it), with the line that runs it again over that folder, the one that carries that chat alone, and, where a switch was made, the one that goes back; and those the last run carried that an earlier one could not. The page runs neither: a real run is refused while RPE answers.
   const lumiverse = sources?.lumiverse ?? (input.database === null ? null : dirname(input.database));
   const stage = new Map(notCarriedOf(report).map((c) => [c.chat, c.stage]));
   const standing = new Set(importedChats(input.db, input.user).map((c) => c.chat));
   const kept: NotCarried[] = failedChats(input.data).map((chat) => ({ chat, stage: readFailure(input.data, chat)?.stage ?? stage.get(chat) ?? "fold", stands: standing.has(chat) }));
-  out.notCarried = notCarriedShown(kept, report, { again: ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user }, input.data);
+  const line = ["rpe", "migrate", "--lumiverse", lumiverse ?? "", "--user", input.user];
+  out.notCarried = notCarriedShown(kept, report, { again: line.map(shellWord).join(" "), one: (chat) => [...line, "--chat", chat].map(shellWord).join(" "), back: lastSwap(input.db, input.user) === null ? null : "rpe down" }, { lumiverse, user: input.user }, input.data);
   if (out.run !== null) out.run.counts.offRpe = out.offRpe.filter((c) => !c.done).length;
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));

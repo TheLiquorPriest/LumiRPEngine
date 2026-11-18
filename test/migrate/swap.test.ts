@@ -638,13 +638,14 @@ describe("the swap, and going back", () => {
     const lines = ran.out.split("\n");
     const at = lines.indexOf(head);
     expect(at).toBeGreaterThanOrEqual(0);
-    expect(lines.slice(at, at + 7)).toEqual([
+    expect(lines.slice(at, at + 8)).toEqual([
       head,
       // Named as Lumiverse's database names it: the chat's name, its character's, and its id after them.
       `  ${say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Fog (harness)", character: CHARACTER.name, chat: CHAT.harness }), why: say("migration_not_carried_fold"), number: record?.message === null || record === null ? null : String(record.message.number), swipe: record?.message === null || record === null ? null : String(record.message.swipe), error: "an invented fault of the previous build's fold", file: failureFile(data, CHAT.harness) })}`,
       `    ${say("migration_not_carried_stands")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again_switched", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}` })}`,
+      `    ${say("migration_not_carried_one", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --chat ${CHAT.harness} --data ${data}` })}`,
       `    ${say("migration_not_carried_back", { line: `rpe down --data ${data}` })}`,
       "",
     ]);

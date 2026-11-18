@@ -202,7 +202,7 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
       mark: (id, on) => markConnection(call, id, on),
       extension: { build: version, registered: () => registeredBuild(paths, current, io) },
       earlier,
-      notCarried: { again: migrateLine, back: runLine(io, paths, "down") },
+      notCarried: { again: migrateLine, one: (chat) => runLine(io, paths, "migrate", "--lumiverse", lumiverse, "--user", user, ...runtimeFlags, "--chat", chat), back: runLine(io, paths, "down") },
     },
     swapIo,
   );

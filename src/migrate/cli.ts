@@ -14,7 +14,8 @@ import { migrate } from "./migrate";
 import type { TreeLayout } from "./own-files";
 import { reportText } from "./report";
 import { dataPaths } from "../app/config";
-import { lastSwap, readRpe } from "./going-back";
+import { lastSwap, readRpe, shellWord } from "./going-back";
+import { say } from "../shared/lines";
 import { notCarriedEnd, notCarriedLines, notCarriedOf } from "./not-carried";
 
 /** The extension's identifier as its manifest names it (`spindle.json`). */
@@ -77,19 +78,25 @@ export async function migrateCli(argv: readonly string[], io: CliIo, tree: TreeL
     io.err(`--runtime names a runtime to take and --no-runtime says there is none: give one of them.\n\n${usage}`);
     return 2;
   }
+  if (switches.has("rehearse") && values.chat !== undefined) {
+    io.err(`${say("migration_chat_rehearse")}\n\n${usage}`);
+    return 2;
+  }
   const found = runtimeFoldersOf(io.env, io.home);
   const folderPair = { configDir: values["runtime-config"] ?? found.configDir, dataDir: values["runtime-data"] ?? found.dataDir };
   const none = switches.has("no-runtime");
   // Told there is none, the run reads none; where it is found all the same, the report says what that leaves out.
   const runtime = none ? null : folderPair;
   try {
-    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}) });
+    const { report, ran } = await migrate({ lumiverse, identifier: values.identifier ?? IDENTIFIER, userId: user, runtime, ...(none ? { ignored: folderPair } : {}), ...(values.runtime !== undefined ? { runtimeName: values.runtime } : {}), ...(Object.keys(folders).length > 0 ? { runtimeFolders: folders } : {}) }, { data, rehearse: switches.has("rehearse"), version: io.env.LRE_BUILD_ID ?? "dev", env: io.env, tree, ...(settings ? { settings } : {}), ...(runs ? { runs } : {}), ...(values.chat !== undefined ? { chat: values.chat } : {}) });
     // A chat that holds records of the previous build and that the run did not carry is named first, ahead of the report, with its cause and where its record of why is kept, and last again; the run then ends with 1. A chat it carried that an earlier run could not is said there too.
     const missing = ran ? notCarriedOf(report) : [];
     const switched = missing.length > 0 && readRpe(dataPaths(data).database, (db) => lastSwap(db, user)) !== null;
     if (switches.has("json")) io.out(`${JSON.stringify(report, null, 2)}\n`);
     else {
-      const first = ran ? notCarriedLines(report, { again: lines?.again ?? "rpe migrate", back: switched ? (lines?.down ?? "rpe down") : null }, { lumiverse, user }, data) : [];
+      // The line that carries one chat alone is the one typed, asked for that chat; a line already asked for one is given as it is.
+      const again = lines?.again ?? "rpe migrate";
+      const first = ran ? notCarriedLines(report, { again, one: values.chat === undefined ? (chat) => `${again} --chat ${shellWord(chat)}` : null, back: switched ? (lines?.down ?? "rpe down") : null }, { lumiverse, user }, data) : [];
       if (first.length > 0) io.out(`${first.join("\n")}\n`);
       io.out(reportText(report));
       if (missing.length > 0) io.out(notCarriedEnd(missing, false));

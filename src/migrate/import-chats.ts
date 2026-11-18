@@ -151,6 +151,21 @@ function sourcesFirst(chats: readonly ChatToImport[]): ChatToImport[] {
   return out;
 }
 
+/** A chat and every chat made from it, at any remove, as Lumiverse's notes on its branches give them: what a run asked for one chat carries (`--chat`). */
+export function withBranches(chats: readonly ChatToImport[], chat: string): Set<string> {
+  const out = new Set([chat]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const c of chats) {
+      if (c.branch !== null && out.has(c.branch.from) && !out.has(c.chatId)) {
+        out.add(c.chatId);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+
 /** A branch's messages that share the turns of the chat it was made from: by the branch's index, with the source's message. */
 interface Link {
   from: string;
@@ -436,9 +451,11 @@ function failureOf(chat: ChatToImport, spot: Spot, error: unknown): FoundFailure
  * imported of it stands. `earlier` lists the chats earlier runs imported; `notOpened` the chats
  * today's reader can't open, with why and what failed; `present` every chat Lumiverse has of the
  * user's: only a chat missing from it is gone. `failed` is given the record of each chat it could
- * not carry, the error with it, for the run to keep (`failures.ts`).
+ * not carry, the error with it, for the run to keep (`failures.ts`). `only`, where given, is the chats
+ * a run asked for one chat carries (`withBranches`): every other chat is left as it stands, "not asked
+ * for", and each chat replacing one of them removes (a branch of it) is imported again with it.
  */
-export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly NotOpenedChat[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string; keepRun?: KeepCarriedRun; failed?: (failure: FoundFailure) => void }): ChatImportReport[] {
+export function importChats(input: { store: Store; s: UserStore; db: Database; registry: Registry; chats: readonly ChatToImport[]; notOpened: readonly NotOpenedChat[]; present: ReadonlySet<string>; earlier: readonly { chat: string; source: string | null }[]; run: string; keepRun?: KeepCarriedRun; failed?: (failure: FoundFailure) => void; only?: ReadonlySet<string> }): ChatImportReport[] {
   const { store, s, db, registry, run } = input;
   const reports: ChatImportReport[] = [];
   const wasImported = new Set(input.earlier.map((e) => e.chat));
@@ -459,10 +476,17 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
   const blank = { turns: 0, placed: { own: 0, shown: 0, lost: 0 }, shares: null, matched: { head: true, swipes: 0, of: 0 }, differences: [], dropped: 0, violations: 0 };
   /** Why a chat was not imported, saying so where what an earlier run imported of it stands. */
   const stands = (chat: string, why: string): string => (s.chat(chat) !== null ? `${why}; what an earlier run imported of it stands` : why);
+  /** The chats this run carries: all of them, or those it was asked for, with each chat a replacing removes. */
+  const asked = input.only === undefined ? null : new Set(input.only);
+  const notAsked = (chat: string): ChatImportReport => ({ chatId: chat, outcome: "not asked for", why: stands(chat, "this run carried only the chat it was asked for and the chats made from it"), ...blank });
   /** His own changes and his jobs' that a replaced chat and its branches held, each waiting for its chat to be imported again (R-79). */
   const keptOwn = new Map<string, KeptOwn[]>();
   for (const chat of sourcesFirst(input.chats)) {
     const id = chat.chatId;
+    if (asked !== null && !asked.has(id)) {
+      reports.push(notAsked(id));
+      continue;
+    }
     const earlier = s.chat(id) !== null;
     const freed: KeptOwn[] = [];
     // Where its import stands, for the record of its failure: replacing an earlier import and linking a branch are the store's work.
@@ -481,6 +505,8 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
           if (forgot.played.length > 0) return { left: forgot.played.includes(id) ? ("played on RPE: left alone" as const) : ("a chat made from it was played on RPE: left alone" as const) };
           forgetChats(db, s.id, forgot.removed);
           freed.push(...forgot.kept);
+          // A chat removed with it (a branch of it) is imported again after it, as every run does.
+          if (asked !== null) for (const removed of forgot.removed) asked.add(removed);
         }
         const source = chat.branch ? byId.get(chat.branch.from) : undefined;
         const link = source && s.chat(source.chatId) ? linkOf(chat, source) : null;
@@ -506,12 +532,16 @@ export function importChats(input: { store: Store; s: UserStore; db: Database; r
     keepChat(db, s.id, id, run, shares?.chat ?? null, replaced ? "replaced" : "imported", done.differences.length > 0);
   }
   for (const n of input.notOpened) {
+    if (asked !== null && !asked.has(n.chatId)) {
+      reports.push(notAsked(n.chatId));
+      continue;
+    }
     reports.push({ chatId: n.chatId, outcome: "not imported", why: stands(n.chatId, n.why), ...blank, notCarried: { stage: "read", stands: s.chat(n.chatId) !== null } });
     input.failed?.(n.failure);
   }
   const unread = new Set(input.notOpened.map((n) => n.chatId));
-  // Chats an earlier run imported that this run didn't read: gone only when Lumiverse no longer has them.
-  for (const gone of input.earlier) {
+  // Chats an earlier run imported that this run didn't read: gone only when Lumiverse no longer has them. A run asked for one chat leaves them as they stand.
+  for (const gone of asked === null ? input.earlier : []) {
     if (byId.has(gone.chat) || unread.has(gone.chat) || !s.chat(gone.chat)) continue;
     if (input.present.has(gone.chat)) {
       reports.push({ chatId: gone.chat, outcome: "not imported", why: stands(gone.chat, "the previous build plays no world in it now"), ...blank });

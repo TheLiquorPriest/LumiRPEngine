@@ -39,11 +39,11 @@ function foldFailsOnAgents(): { restore(): void } {
   return { restore: () => spy.mockRestore() };
 }
 
-/** `rpe migrate` over the fixture into RPE's data folder `data`, its words gathered in `out`: its exit code, and what it printed. */
-async function migrateBy(fixture: Fixture, data: string, out: string[]): Promise<{ code: number; text: string }> {
+/** `rpe migrate` over the fixture into RPE's data folder `data`, with `more` words on its line, its words gathered in `out`: its exit code, and what it printed. */
+async function migrateBy(fixture: Fixture, data: string, out: string[], more: readonly string[] = []): Promise<{ code: number; text: string }> {
   out.length = 0;
   const io: CliIO = { out: (t) => out.push(t), err: (t) => out.push(t), env: fixture.named, home: fixture.root, now: () => Date.parse("2026-11-14T11:00:00.000Z"), secret: async () => null, ask: async () => null, stopped: () => new Promise(() => {}), fetch: async () => Promise.reject(new Error("The migration calls out to nothing.")) };
-  const code = await runCli(["migrate", ...argsOf(fixture, data)], io, { version: "test" });
+  const code = await runCli(["migrate", ...argsOf(fixture, data), ...more], io, { version: "test" });
   return { code, text: out.join("\n") };
 }
 
@@ -54,7 +54,7 @@ describe("a chat the run does not carry", () => {
   let data: string;
   const out: string[] = [];
   const args = (): string[] => argsOf(fixture, data);
-  const rpe = (): Promise<{ code: number; text: string }> => migrateBy(fixture, data, out);
+  const rpe = (more: readonly string[] = []): Promise<{ code: number; text: string }> => migrateBy(fixture, data, out, more);
   const withDb = <T>(read: (db: Database) => T): T => {
     const db = new Database(join(data, "rpe.db"), { readonly: true });
     try {
@@ -118,12 +118,13 @@ describe("a chat the run does not carry", () => {
     expect(line).toContain("at message 2 (swipe 0)");
     expect(line).toContain("RPE has no words loaded on this thread");
     expect(line).toContain(file);
-    expect(first.text.split("\n").slice(0, 7)).toEqual([
+    expect(first.text.split("\n").slice(0, 8)).toEqual([
       head,
       `  ${line}`,
       `    ${say("migration_not_carried_none")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again", { line: ["rpe", "migrate", ...args()].join(" ") })}`,
+      `    ${say("migration_not_carried_one", { line: ["rpe", "migrate", ...args(), "--chat", CHAT.agents].join(" ") })}`,
       "",
       expect.stringMatching(/^Migration real run/),
     ]);
@@ -169,6 +170,42 @@ describe("a chat the run does not carry", () => {
     expect(later.text.split("\n").slice(0, 3)).toEqual([head, `  ${sentence(reKept)}`, `    ${say("migration_not_carried_stands")}`]);
     expect(turnsOfAgents()).toBe(carried);
     expect(page().notCarried?.chats[0]?.lines[0]).toBe(say("migration_not_carried_stands"));
+  });
+
+  test("`--chat` carries that chat alone once it is mended and closes its record, every other chat left as it stands; it is refused with a rehearsal, before any real run, and for a chat that plays no world", async () => {
+    // As the test above left it: the agents chat's record is kept, and the earlier import of it stands.
+    expect(readFailure(data, CHAT.agents)).not.toBeNull();
+    const turnsOf = (chat: string): string[] => withDb((db) => db.query<{ id: string }, [string]>("SELECT id FROM turn WHERE chat = ? ORDER BY id").all(chat).map((t) => t.id));
+    const harness = turnsOf(CHAT.harness);
+    const agents = turnsOf(CHAT.agents);
+    expect(harness.length).toBeGreaterThan(0);
+
+    const rehearsed = await rpe(["--chat", CHAT.agents, "--rehearse"]);
+    expect(rehearsed.code).toBe(2);
+    expect(rehearsed.text).toContain(say("migration_chat_rehearse"));
+    const none = await rpe(["--chat", "c-nowhere"]);
+    expect(none.code).toBe(1);
+    expect(none.text).toContain(`  - ${say("migration_chat_none", { chat: "c-nowhere" })}`);
+    const fresh = join(fixture.root, "rpe-data-fresh");
+    const first = await migrateBy(fixture, fresh, [], ["--chat", CHAT.agents]);
+    expect(first.code).toBe(1);
+    expect(first.text).toContain(`  - ${say("migration_chat_first", { chat: CHAT.agents })}`);
+    expect(existsSync(join(fresh, "rpe.db"))).toBe(false);
+
+    // Mended, carried alone: the record is closed and the run says so; the harness chat is left as the earlier run carried it, turn for turn.
+    const was = readFailure(data, CHAT.agents);
+    const one = await rpe(["--chat", CHAT.agents]);
+    expect(one.code).toBe(0);
+    expect(one.text.split("\n")[0]).toBe(say("migration_carried_now", { label: label(), failed: was?.at ?? null }));
+    expect(readFailure(data, CHAT.agents)).toBeNull();
+    expect(turnsOf(CHAT.agents).length).toBeGreaterThan(0);
+    expect(turnsOf(CHAT.agents)).not.toEqual(agents);
+    expect(turnsOf(CHAT.harness)).toEqual(harness);
+    const report = page().run;
+    expect(report).not.toBeNull();
+    const imports = withDb((db) => JSON.parse(db.query<{ report: string }, [string]>("SELECT report FROM migration_run WHERE user = ? ORDER BY at DESC LIMIT 1").get(USER)?.report ?? "{}") as { imports: { chatId: string; outcome: string; why?: string }[] }).imports;
+    expect(imports.find((c) => c.chatId === CHAT.agents)?.outcome).toBe("replaced");
+    expect(imports.find((c) => c.chatId === CHAT.harness)).toMatchObject({ outcome: "not asked for", why: expect.stringContaining("what an earlier run imported of it stands") });
   });
 });
 

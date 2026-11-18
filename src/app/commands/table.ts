@@ -145,6 +145,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       { name: "mine", takes: "<name>", about: "a runtime folder no config names holds this user's working copy (give it again for each folder)", repeat: true },
       { name: "theirs", takes: "<name>", about: "a runtime folder no config names is not this user's: it is left alone", repeat: true },
       { name: "identifier", takes: "<id>", about: "the extension's identifier in Lumiverse", default: "lumi_rp_engine" },
+      { name: "chat", takes: "<id>", about: "carry this one chat again, with the chats made from it, once the cause an earlier real run could not carry it for is mended; every other chat is left as that run carried it (not with --rehearse)" },
       { name: "json", about: "print the report as JSON instead of words" },
       { ...DATA, about: "RPE's data folder: the only place the real run writes" },
     ],

@@ -1,5 +1,5 @@
 ---
-description: What the migration says of a chat that holds records of the previous build and that a run did not carry - said first, ahead of the report, in what rpe migrate and rpe up print, and at the top of the Migration page while its record of why is kept - with the cause in one plain sentence made from that record, where the records are kept, and what to do; of a chat a later run carried, and when; and the closing line of a command that ends with exit code 1 for them. Each line says what is so and what to do; none asks anything. One line per name, a name, a colon, then its text. A name in double braces puts in what the run knows (a chat's name, its character's and its id, a count, a folder or a file, a command line to run, a time); a block opened with a hash and closed with a slash shows only when that value is there, and one opened with a caret only when it is not. Change the words freely. Delete a line and that is not said at all.
+description: What the migration says of a chat that holds records of the previous build and that a run did not carry - said first, ahead of the report, in what rpe migrate and rpe up print, and at the top of the Migration page while its record of why is kept - with the cause in one plain sentence made from that record, where the records are kept, and what to do; of a chat a later run carried, and when; of the records still kept that a run left; why a run asked for one chat (rpe migrate --chat) is refused; and the closing line of a command that ends with exit code 1 for them. Each line says what is so and what to do; none asks anything. One line per name, a name, a colon, then its text. A name in double braces puts in what the run knows (a chat's name, its character's and its id, a count, a folder or a file, a command line to run, a time); a block opened with a hash and closed with a slash shows only when that value is there, and one opened with a caret only when it is not. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
   migration_not_carried_head, migration_not_carried_page: the head of the notice, in a command's output and at the top of the Migration page - count, folder (where each chat's record of why is kept)
@@ -7,7 +7,9 @@ keys:
   migration_not_carried_label: how a chat is named, in the command's output and on the page - its name in Lumiverse (none where Lumiverse's database cannot be read or names none), its character's name (none for a chat with no character), and its id - name, character, chat
   migration_not_carried_read, migration_not_carried_fold, migration_not_carried_store, migration_not_carried_check: the stage a chat failed in - reading the previous build's records, its fold, RPE's store taking what the fold gave, the check against the previous build's state
   migration_not_carried_stands, migration_not_carried_none, migration_not_carried_kept: what of the chat RPE holds and what it does not, and that the previous build's data holds it all
-  migration_not_carried_again, migration_not_carried_again_switched, migration_not_carried_back: what to do - line, the command to run
+  migration_not_carried_again, migration_not_carried_again_switched, migration_not_carried_one, migration_not_carried_back: what to do - line, the command to run (for migration_not_carried_one, the one that carries that chat alone)
+  migration_still_open: the chats whose record of why is still kept that this run neither carried nor failed on (a run asked for another chat, or a chat left alone) - count, folder, chats (each as migration_not_carried_label names it)
+  migration_chat_rehearse, migration_chat_first, migration_chat_none: why a run asked for one chat is refused - with a rehearsal, before any real run (the gate's line), for a chat that plays no world in the previous build (the gate's line) - chat
   migration_carried_now, migration_carried_page: a chat a run carried that an earlier run could not, in the command's output and on the page - label, at (when the run that carried it read the previous build's data), failed (when the run that could not was; none where its record no longer said)
   migration_not_carried_end, migration_not_carried_end_switch: a command's closing line where it ends with exit code 1 for them - count
 ---
@@ -24,7 +26,12 @@ migration_not_carried_none: RPE holds nothing of it: no run has carried it.
 migration_not_carried_kept: The previous build's data holds all of it, unchanged.
 migration_not_carried_again: Once the cause is mended, run {{line}}: it carries the chat with everything played on it since.
 migration_not_carried_again_switched: Once the cause is mended, run {{line}} while RPE's service is stopped: it carries the chat with everything played on it since.
+migration_not_carried_one: To carry this chat alone, leaving every other chat as it stands, run {{line}}.
 migration_not_carried_back: To go back to the previous build instead, run {{line}} and follow the steps it prints.
+migration_still_open: {{count}} other chat(s) still have a record of why a run could not carry them, kept in {{folder}}: {{chats}}. This run did not try them.
+migration_chat_rehearse: --chat carries one chat in a real run; a rehearsal reads every chat and writes nothing, so it takes no --chat.
+migration_chat_first: --chat {{chat}} carries one chat after a real run carried the rest; no real run has been made in this data folder yet, so run rpe migrate without --chat first.
+migration_chat_none: --chat {{chat}} names no chat of yours that the previous build plays a world in, so there is nothing to carry.
 migration_carried_now: Carried now: {{label}}, which {{#failed}}the run of {{failed}}{{/failed}}{{^failed}}an earlier run{{/failed}} could not carry. Its record of why is closed.
 migration_carried_page: {{label}} was carried by the run of {{at}}, after {{#failed}}the run of {{failed}}{{/failed}}{{^failed}}an earlier run{{/failed}} could not carry it.
 migration_not_carried_end: {{count}} chat(s) that hold records of the previous build were not carried, as said ahead of the report, so this command ends with exit code 1.

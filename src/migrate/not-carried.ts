@@ -8,7 +8,7 @@
 // (`.prompts/history-migration.md`).
 
 import { say } from "../shared/lines";
-import { type ChatFailure, type FailureStage, failureFile, failuresFolder, readFailure } from "./failures";
+import { type ChatFailure, type FailureStage, failedChats, failureFile, failuresFolder, readFailure } from "./failures";
 import { LumiverseDb } from "./lumiverse-db";
 import type { MigrationReport } from "./report";
 
@@ -19,9 +19,14 @@ export interface NotCarried {
   stands: boolean;
 }
 
-/** What to do of them, as the command or the page gives it: the line that runs the migration again; the line that goes back, where a switch was made (null: none was, so the previous build plays on as it did). */
+/**
+ * What to do of them, as the command or the page gives it: the line that runs the migration again; the line that carries one chat alone
+ * (null where the line given was already one); the line that goes back, where a switch was made (null: none was, so the previous build
+ * plays on as it did).
+ */
 export interface NotCarriedSteps {
   again: string;
+  one: ((chat: string) => string) | null;
   back: string | null;
 }
 
@@ -83,22 +88,26 @@ function chatLine(c: NotCarried, names: Names, root: string): string {
 /** What one chat's lines say after its cause: what of it RPE holds and what it does not, that the previous build's data holds it all, and what to do. Lines the user deleted say nothing and are left out. */
 export function notCarriedSteps(c: NotCarried, steps: NotCarriedSteps): string[] {
   const again = steps.back === null ? say("migration_not_carried_again", { line: steps.again }) : say("migration_not_carried_again_switched", { line: steps.again });
+  const one = steps.one === null ? "" : say("migration_not_carried_one", { line: steps.one(c.chat) });
   const back = steps.back === null ? "" : say("migration_not_carried_back", { line: steps.back });
-  return [say(c.stands ? "migration_not_carried_stands" : "migration_not_carried_none"), say("migration_not_carried_kept"), again, back].filter((line) => line !== "");
+  return [say(c.stands ? "migration_not_carried_stands" : "migration_not_carried_none"), say("migration_not_carried_kept"), again, one, back].filter((line) => line !== "");
 }
 
 /**
  * What a command prints first, ahead of the report: the chats it carried that an earlier run could not, each once; then the head, with where
- * the records are kept (RPE's data folder `root`), and each chat it did not carry with its cause, its steps under it. None where neither is.
+ * the records are kept (RPE's data folder `root`), and each chat it did not carry with its cause, its steps under it; then how many other
+ * chats' records of why are still kept there (a run asked for one chat, or a chat left alone, leaves them). None where none of these is.
  */
 export function notCarriedLines(report: MigrationReport, steps: NotCarriedSteps, from: NamesFrom, root: string): string[] {
   const list = notCarriedOf(report);
   const closed = report.closed ?? [];
-  if (list.length === 0 && closed.length === 0) return [];
+  const open = failedChats(root).filter((chat) => !list.some((c) => c.chat === chat));
+  if (list.length === 0 && closed.length === 0 && open.length === 0) return [];
   const names = chatNames(from);
   const carried = closed.map((c) => say("migration_carried_now", { label: label(c.chat, names), failed: c.failed }));
   const failed = list.length === 0 ? [] : [say("migration_not_carried_head", { count: list.length, folder: failuresFolder(root) }), ...list.flatMap((c) => [`  ${chatLine(c, names, root)}`, ...notCarriedSteps(c, steps).map((line) => `    ${line}`)])];
-  return [...carried.filter((line) => line !== ""), ...failed, ""];
+  const still = open.length === 0 ? "" : say("migration_still_open", { count: open.length, folder: failuresFolder(root), chats: open.map((chat) => label(chat, names)).join(", ") });
+  return [...carried, ...failed, still, ""].filter((line, i, all) => line !== "" || i === all.length - 1);
 }
 
 /** A command's closing line where it ends with exit code 1 for them: the switch's says it went through all the same. */

@@ -30,8 +30,10 @@ import { chatCarried } from "./briefing";
 import { carry, placesOf } from "./carry";
 import { checkConnectionsSteady } from "./connections";
 import { closeFailure, type FoundFailure, keepFailure } from "./failures";
-import { type CarriedRuns, chatsToImport, importChats } from "./import-chats";
 import { type ChatNames, type TreeLayout } from "./own-files";
+import { type CarriedRuns, chatsToImport, importChats, withBranches } from "./import-chats";
+import { readRun } from "./today/run";
+import { say } from "../shared/lines";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, chatEndOf, insideEnds, type MigrationReport, recountRows, refusalsOf } from "./report";
@@ -62,6 +64,12 @@ export interface MigrateOptions {
   settings?: readonly Setting[];
   /** The turn lane's writer of a carried turn's run record (`keepCarriedRun`) and its tables, which the migration may not import: each imported turn's reply as released and its departures. Absent: no run record is kept. */
   runs?: CarriedRuns;
+  /**
+   * The one chat a run carries again (`rpe migrate --chat`), with every chat made from it: once its cause is mended, a chat an earlier run
+   * could not carry. Every other chat is left as an earlier run carried it; all the rest of the run (the gate, the backup, the worlds, the
+   * files, the settings and the connections) is as every real run's. Refused for the first real run, and for a chat that plays no world.
+   */
+  chat?: string;
 }
 
 export interface MigrateResult {
@@ -148,6 +156,10 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
     today.reader.useAnswers(answers);
     const rows = await rowsGiven(paths);
     const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, jobs: options.runs?.keepJob !== undefined, given: rows.given, refused: rows.refused, ...(previous ? { previous } : {}) });
+    // A run asked for one chat follows a real run that carried the rest, and carries a chat that plays a world.
+    const asked = options.chat;
+    if (asked !== undefined && previous === null) report.refusals.push(say("migration_chat_first", { chat: asked }));
+    else if (asked !== undefined && !today.chats.some((c) => c.id === asked && readRun(c.metadata) !== null)) report.refusals.push(say("migration_chat_none", { chat: asked }));
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
     const owner = config.lumiverse.user;
@@ -194,7 +206,7 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const s = store.user(sources.userId);
       const run = crypto.randomUUID();
       const failures = new Map<string, FoundFailure>();
-      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run, ...(options.runs ? { keepRun: options.runs.keep } : {}), failed: (f) => failures.set(f.chat, f) });
+      report.imports = importChats({ store, s, db, registry, chats, notOpened, present: new Set(today.chats.map((c) => c.id)), earlier: importedChats(db, sources.userId), run, ...(options.runs ? { keepRun: options.runs.keep } : {}), failed: (f) => failures.set(f.chat, f), ...(asked === undefined ? {} : { only: withBranches(chats, asked) }) });
       // Each chat it could not carry has its record of why in RPE's data folder, his alone; one it carried that an earlier run could not has that record closed.
       step = "keeping the record of each chat not carried";
       for (const c of report.imports) {
