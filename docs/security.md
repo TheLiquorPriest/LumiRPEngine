@@ -4,7 +4,7 @@
 
 RPE listens on `127.0.0.1`, and on `server.address` as well where you set it in `files/RPE-global.yml`. It checks every request before any route runs: the `Host` it was sent to (its own address, or a name in `server.hosts`), a page's origin (its own, Lumiverse's, or one in `server.origins`), the key or token it carries, and its size.
 
-One route answers anyone who reaches RPE: its status, `/api/v1/status`, which says only that RPE answers and which build it runs. Which builds run and what RPE will do about a new one (`/api/v1/status/builds`) is told only with a page token or a web key.
+One route answers anyone who reaches RPE: its status, `/api/v1/status`, which says only that RPE answers, which build it runs and the address of the Lumiverse it belongs to. Which builds run and what RPE will do about a new one (`/api/v1/status/builds`) is told only with a page token or a web key.
 
 ## Keys and tokens
 
@@ -25,7 +25,7 @@ The web app (`/ui/`) takes two ways in, and the browser keeps only a session, wh
 - **The printed token.** `rpe up` prints the web key once, at the first install (`rpe key web` makes a new one). The web app trades it, once, for a session; the browser keeps the session and never the key. The session ends `auth.webSessionMinutes` after it was made unless a page that is open renews it. A key that has been replaced opens no session.
 - **Your Lumiverse account.** The web app takes your Lumiverse username and password, or a Lumiverse sign-in the command line already holds, and RPE checks it against Lumiverse and accepts it only for the Lumiverse user this RPE belongs to. RPE keeps no password. It sends Lumiverse no more than `auth.signInTries` wrong passwords (4, below the 5 after which Lumiverse locks an address out) and then none for `auth.signInPauseMinutes` (15), so that RPE's own address is never locked out. A sign-in by password makes a Lumiverse session, which RPE hands back (the command line keeps it as its own; the web app keeps none) and holds for that sign-in's session in its secrets file, across a restart too: signing out ends the session and that Lumiverse session through the door. One whose RPE session ran out without a sign-out is let go and ends at Lumiverse's own time.
 
-A session says which client asked for it: the web app, the command line or the MCP server. A route reads that from the session it was called with: a commit made with the command line's or the MCP server's session is the agent's, and one made from a page is Build's.
+A session says which client asked for it: the web app, or the command line or the MCP server for outside harnesses (which come with a later build). A route reads that from the session it was called with: a commit made with the command line's or the MCP server's session is the agent's, and one made from a page is Build's.
 
 Before a page sends RPE a token, it asks RPE to prove that it is RPE: the page sends the first characters of the hash of its token and a nonce of its own, and RPE answers with the nonce's keyed hash, which only something that holds RPE's table of tokens can make. The page offers its token only to an address whose answer matches. RPE answers a nonce once within `auth.nonceSeconds` (60), and only for a page token still in time.
 
@@ -53,13 +53,13 @@ Each provider key, and each header value a connection sends, is kept with the pl
 
 - **Lumiverse's database** is opened read-only, and only your user's rows are read. RPE cannot write to it.
 - **The previous build's data** is opened read-only by the migration. The backup it takes holds your content and stays in RPE's data folder, readable only by you.
-- **In Lumiverse**, RPE makes and updates its own connection when you run `rpe up`. It does not write to your lore books, presets or regex scripts.
+- **In Lumiverse**, RPE writes through Lumiverse's own routes, as you, and only this: its own connection when you run `rpe up` (and a mark in the metadata of each connection the switch took over, which `rpe down` takes off); a lore entry in your own books when you approve a proposal or press a write in Build, each with a check that the entry is as it was read and a copy of what it was, so it can be put back; where you switch `lore.projection` on, a book of RPE's own attached to one chat, which it rewrites and removes; a line of yours put in a chat as your message when you tap something that plays now; and the generations it starts. It never writes your presets or your regex scripts, and writes nothing into a message's or a chat's metadata beyond the one key that attaches that projection book.
 
 ## What the agents can do
 
 - They have no shell of their own. What runs a command or calls out is only a command tool, an HTTP tool, an MCP server or a hook that you wrote or added, and each waits until you switch it on (below).
 - They see the chat's folder, with the other levels of files read-only. Paths cannot leave it, and links are not followed.
-- They write only their notes (`persistent-workspace/`) and their working files in the turn's folder. Your instruction files, rules, skills and definitions they can only read. To change one, they file a suggestion, and you decide.
+- They write only their notes (`persistent-workspace/`) and their working files in the turn's folder. Your instruction files, rules, skills and definitions they can only read. To change one, they file a suggestion, and you decide. Through their tools they change RPE's own records (the world, the cast, the story) as the turn's changes, which you can see and take back, and they propose lore entries, which wait for your approval.
 - Lore and chat text are data to them, not instructions to act outside RPE.
 
 ## What RPE never does by itself
