@@ -27,7 +27,6 @@ import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
 import { findAction, missedPlainRequirement, playsAsRoleplay, resolveAction, unmetNeeds, type Brought, type Resolution } from "./resolve";
 import { IDLE_OPTION } from "./plan-day";
-import { resolveTry, TRY_ACTION } from "./inferred";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { acts } from "./life";
@@ -280,8 +279,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
         // A receiver paid in another's place reads as the player's own words for it (`said`, DESIGN §9.4 typed money).
         before.picks = def ? actionWords(reg, w.world, w.state, def, params, "", heard, step.said ?? {}) : "";
         const acting = w.mark();
-        // An inferred check plays as Try something, carrying the world's own check (DESIGN §11).
-        resolution = step.action === TRY_ACTION ? resolveTry(reg, w, params, draws, { runSeed: input.runSeed, judgement: step.judgement, heard }) : resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...(step.needs ? { needs: step.needs } : {}) });
+        resolution = resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement, ...(step.needs ? { needs: step.needs } : {}) });
         // A typed action whose plain requirement doesn't hold plays as plain roleplay; hard locks hold it.
         if (typed && missedPlainRequirement(resolution)) resolution = { ...resolution, roleplay: true };
         // So does one whose payment the money can't make, uncovered or unpriced: what money covers and

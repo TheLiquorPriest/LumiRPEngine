@@ -6781,7 +6781,7 @@ export interface ApiRoutes {
     params: { world: string };
     query: Record<string, never>;
     body: { ruleset: JsonValue; entity?: string };
-    reply: { sheet: JsonValue; skills: JsonValue };
+    reply: { sheet: JsonValue };
     paged: false;
     long: false;
     joined: false;

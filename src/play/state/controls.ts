@@ -1,9 +1,8 @@
-// The controls the player sets: the chat's realism, adjudication, inferred checks, sections' feed,
+// The controls the player sets: the chat's realism, adjudication, sections' feed,
 // time, knowledge, things and cash. Pure, over a world and its state.
 
 import { policyOf } from "../../engine/adjudication";
 import { chatFeed, sourceOf, worldFeed } from "../../engine/feed";
-import { inferredOf, worldSkills } from "../../engine/inferred";
 import { claimsOf, presetOf } from "../../engine/realism";
 import { levelFloors, type Registry } from "../../engine/registry-impl";
 import type { WorldState } from "../../engine/state";
@@ -35,8 +34,6 @@ export function controls(world: WorldDoc, state: WorldState, sceneType: string, 
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
     realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world), claims: claimsOf(world, state) },
     adjudication: policyOf(world, state),
-    inferred: inferredOf(world, state),
-    skills: worldSkills(registry, world, state),
     sections: sectionsOf(world).map((s) => ({ id: s.id, label: s.label, world: worldFeed(s), chat: chatFeed(state)[s.id] ?? null })),
     // One row per source, as `include` names them; a source with no words of its own reads as its name.
     sources: [...new Map(registry.renderers.map((r) => [sourceOf(r), { id: sourceOf(r), slot: r.slot, label: r.label ?? sourceOf(r).replace(/_/g, " ") }])).values()],

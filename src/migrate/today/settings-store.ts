@@ -8,7 +8,6 @@
 
 import { defaultAdjudication, readAdjudication } from "../../shared/adjudication";
 import { CLAIM_PRESETS, readClaims } from "../../shared/claims";
-import { readInferred } from "../../shared/inferred";
 import type { DomainId, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, UserId } from "../../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../shared/ids";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -296,8 +295,6 @@ export function defaultSettings(): UserSettings {
     // A world without a policy plays as every check always has; this fills in only for such worlds.
     adjudication: defaultAdjudication(),
     overrideWorldAdjudication: false,
-    // New chats play inferred checks by their realism preset and Sheets level until the user picks a policy.
-    inferred: null,
     extraction: {},
     thingReads: { ...THING_READ_DEFAULTS },
     // A swipe tells the same turn again, asking nothing first (the head reply's chip re-runs it with the
@@ -654,8 +651,6 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     // Read as a world's policy is: values that differ from its named preset make it Custom.
     adjudication: readAdjudication(v.adjudication) ?? d.adjudication,
     overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
-    // A policy that names no mode (or none at all) leaves new chats to their realism preset.
-    inferred: readInferred(v.inferred),
     extraction,
     thingReads: thingReadsOf(v.thingReads, d.thingReads),
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,

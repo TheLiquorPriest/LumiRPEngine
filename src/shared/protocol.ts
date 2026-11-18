@@ -8,7 +8,6 @@
 import type { JsonObject, JsonValue } from "./json";
 import type { AgentsView, HelloClient, KitReport } from "./agents";
 import type { ClaimsPolicy } from "./claims";
-import type { InferredChecks, SheetSkill } from "./inferred";
 import type { BookFieldsEdit, BookLoreFields } from "./lore";
 import type { Limit, MindsRunView } from "./minds";
 import type { RoutineRead, RoutineReadResult } from "./routines";
@@ -318,7 +317,6 @@ export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: 
     | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
     | { kind: "claims"; to: ClaimsPolicy }
     | { kind: "adjudicate"; to: AdjudicationDef }
-    | { kind: "infer"; to: InferredChecks }
     | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );
 
@@ -919,12 +917,11 @@ export interface ResultBodies {
    * field forms (a world kind or relation type with the same id wins); and `functions`: every
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
-   * sections, or null when the ruleset designs no sheet; `skills` beside it, the skills the draft's
-   * sheet has as a chat starts (what an inferred check may roll, DESIGN §11). `templates`, `chats` and `updates` answer their ops.
+   * sections, or null when the ruleset designs no sheet. `templates`, `chats` and `updates` answer their ops.
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; skills?: SheetSkill[]; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */

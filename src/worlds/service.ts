@@ -9,7 +9,7 @@
 import type { Log } from "rp-harness/contract";
 import type { WriteQueue } from "../app";
 import { calendarOf } from "../engine/calendar";
-import { lintWorld, previewSheet, previewSkills } from "../engine/authoring";
+import { lintWorld, previewSheet } from "../engine/authoring";
 import { buildCharacter } from "../engine/character";
 import type { Registry } from "../engine/registry-impl";
 import { sheetRulesetProblem } from "../engine/ruleset";
@@ -172,13 +172,13 @@ export class WorldService {
   }
 
   /** The Sheet Designer's live preview: the draft with the unsaved ruleset, as a chat would start; nothing is saved. */
-  async sheet(user: UserId, world: WorldId, ruleset: JsonValue, entity?: string): Promise<Pick<ResultBodies["lre.world"], "sheet" | "skills">> {
+  async sheet(user: UserId, world: WorldId, ruleset: JsonValue, entity?: string): Promise<Pick<ResultBodies["lre.world"], "sheet">> {
     const problem = isRecord(ruleset) ? sheetRulesetProblem(ruleset) : null;
     if (problem) throw new WorldError("bad_request", problem);
     const draft = await this.worlds.working(world, user);
     const doc = { ...draft, ruleset: isRecord(ruleset) ? (ruleset as unknown as RulesetDef) : undefined };
     const shown = typeof entity === "string" && hasOwn(doc.entities, entity) ? entity : doc.pov;
-    return { sheet: previewSheet(this.registry, doc, shown), skills: previewSkills(this.registry, doc) };
+    return { sheet: previewSheet(this.registry, doc, shown) };
   }
 
   /** The shipped data tables newer than the world's copies, the draft's or a revision's. */

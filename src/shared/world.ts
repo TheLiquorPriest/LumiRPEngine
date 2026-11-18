@@ -57,7 +57,6 @@ import type {
   RevisionId,
 } from "./ids";
 import type { ClaimPlace, ClaimsPolicy } from "./claims";
-import type { InferredChecks } from "./inferred";
 import type { DataTable } from "./tables";
 import type { WorldMindsConfig } from "./minds";
 import type { RoutineDef, RoutineId, RoutineSettings, WorldRoutineSource } from "./routines";
@@ -1208,8 +1207,8 @@ export interface RulesetDef {
   minLevels?: Partial<Record<DomainId, Level>>;
   /** How the world's checks are decided: when they roll, what the player's words weigh, who settles them (DESIGN §11). */
   adjudication?: AdjudicationDef;
-  /** The world's default for inferred checks: how a typed attempt no catalog action with its own check covers is read as a check of its sheet (DESIGN §11). */
-  inferred?: InferredChecks;
+  /** Kept in the file, not used by this build: how an earlier build read a typed attempt as a check of the world's sheet. Carried as it is; nothing reads it. */
+  inferred?: JsonObject;
   /** What the world's distances on a grid are told in (plan §8.2): feet or metres. Absent: the chat's setting (`map.distances`). */
   distances?: "feet" | "metres";
   /** How a diagonal step counts on the world's grids: as one square, or every second one in a row as two. Absent: the chat's setting (`map.diagonal`). */

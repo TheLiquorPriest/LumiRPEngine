@@ -62,7 +62,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   const lines: string[] = [];
   for (const r of input.resolutions ?? []) {
     // The action as the narrator is told it: its picks in words, where it started, its time and what it changed (`toldAction`).
-    const what = r.told?.what ?? r.inferred?.label ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
+    const what = r.told?.what ?? own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     const took = r.told && r.told.minutes > 0 ? say("eng_taking_minutes", { minutes: spanText(r.told.minutes) }) : "";
     const changed = r.told && r.told.changes.length > 0 ? say("eng_what_changed_changes", { changes: r.told.changes.join("; ") }) : "";
     // The player's action that plays as plain roleplay is theirs to tell: no beat says it failed (DESIGN §11).

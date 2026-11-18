@@ -8,7 +8,6 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { ClaimsPolicy } from "./claims";
-import type { InferredChecks } from "./inferred";
 import type { AdjudicationDef } from "./world";
 import type {
   ActionId,
@@ -362,8 +361,8 @@ export type MarkerBody =
   | { kind: "adjudicate"; to: AdjudicationDef | null }
   /** What something you add that the world doesn't have becomes in this chat from now on (DESIGN §9.4 player claims); `null`: the chat follows its world's again. */
   | { kind: "claims"; to: ClaimsPolicy | null }
-  /** How typed attempts are read as checks in this chat from now on (DESIGN §11 inferred checks). */
-  | { kind: "infer"; to: InferredChecks };
+  /** Retired (how typed attempts were read as checks, DESIGN §11): it parses and folds to nothing, so a ledger that holds one still reads. */
+  | { kind: "infer"; to: JsonValue };
 
 /** A message-level intent marker: a pure intent with no values (DESIGN §4.3). */
 export type Marker = MarkerBody & {

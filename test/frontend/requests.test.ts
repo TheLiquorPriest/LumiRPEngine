@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { adjustOp, bringOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, partyOf, placesMatching, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest, upgradeRequest, whereFixTarget } from "../../src/frontend/requests";
+import { adjustOp, bringOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, partyOf, placesMatching, relationFields, timelapseRequest, timeMarker, travelRequest, upgradeRequest, whereFixTarget } from "../../src/frontend/requests";
 import type { UpgradePreview } from "../../src/shared/upgrade";
 import type { Chip, GmEntity, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
@@ -148,10 +148,9 @@ describe("fixes and markers", () => {
     expect(fixRequest({ entity: "pov", field: "cash", type: "money", value: 4600 }, 3900, "c1")).toEqual({ type: "lre.fix", chatId: "c1", entity: "pov", field: "cash", value: 3900 });
   });
 
-  test("time and resolve markers carry preview only when asked", () => {
+  test("a time marker carries preview only when asked", () => {
     expect(timeMarker("c1", "pause", { all: true }, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "time", control: "pause", scope: { all: true }, to: true });
-    expect(resolveMarker("c1", "money", { all: true }, 3, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { all: true }, to: 3, preview: true });
-    expect(resolveMarker("c1", "money", { tier: "background" }, 1)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { tier: "background" }, to: 1 });
+    expect(timeMarker("c1", "pause", { all: true }, true, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "time", control: "pause", scope: { all: true }, to: true, preview: true });
   });
 });
 

@@ -226,7 +226,7 @@ export interface BeforeAction {
  * that it set and set back (travel while walking, idle on arrival) didn't change.
  */
 export function toldAction(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, res: Resolution, before: BeforeAction): ToldAction {
-  const label = res.inferred?.label ?? findAction(registry, world, res.action)?.label ?? res.action;
+  const label = findAction(registry, world, res.action)?.label ?? res.action;
   const parts = before.picks === "" ? [] : [before.picks];
   // A move says where it started, as the POV knew the place; where it went is among its picks and changes.
   const moved = res.events.findLast((e) => e.type === "set" && e.entity === res.actor && e.field === "place");

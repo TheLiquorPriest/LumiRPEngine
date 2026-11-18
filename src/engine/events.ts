@@ -8,7 +8,6 @@ import { say } from "../shared/lines";
 import type { JsonValue } from "../shared/json";
 import { readAdjudication } from "../shared/adjudication";
 import { readClaims } from "../shared/claims";
-import { readInferred } from "../shared/inferred";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
@@ -535,10 +534,9 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       const to = readClaims(raw.to);
       return to ? { kind: "claims", to } : null;
     }
-    case "infer": {
-      const to = readInferred(raw.to);
-      return to ? { kind: "infer", to } : null;
-    }
+    // Retired: how typed attempts were read as checks. It parses so a ledger that holds one still folds, and carries nothing.
+    case "infer":
+      return { kind: "infer", to: null };
     default:
       return null;
   }
@@ -624,7 +622,7 @@ export function applyMarker(state: WorldState, raw: MarkerBody, env?: MarkerEnv)
       else state.claims = body.to;
       return [];
     case "infer":
-      state.inferred = body.to;
+      // Retired: nothing reads it.
       return [];
   }
 }

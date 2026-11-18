@@ -3121,7 +3121,7 @@ The Sheet Designer's live preview: the draft with an unsaved ruleset in place of
 | Params | `world` |
 | Query | none |
 | Body | `{ ruleset: JsonValue; entity?: string }` |
-| Reply | `{ sheet: JsonValue; skills: JsonValue }` |
+| Reply | `{ sheet: JsonValue }` |
 
 ### `GET /api/v1/worlds/:world/things`
 

@@ -247,11 +247,11 @@ export function worldsRoutes(service: WorldService, bodyBytes: number) {
       does: "The Sheet Designer's live preview: the draft with an unsaved ruleset in place of its own, read on an entity (the point of view by default) as a new chat would start; nothing is saved.",
       maxBody: bodyBytes,
       body: shape.object({ ruleset: field(shape.json(), "The unsaved ruleset."), entity: opt(T, "The entity to read the sheet on.") }),
-      reply: shape.object({ sheet: field(shape.json(), "The sheet's sections; null where the world has none."), skills: field(shape.json(), "The skills it shows.") }),
+      reply: shape.object({ sheet: field(shape.json(), "The sheet's sections; null where the world has none.") }),
       handle: ({ params, body, user }) =>
         guarded(async () => {
           const previewed = await service.sheet(user, params.world, body.ruleset, body.entity);
-          return { sheet: (previewed.sheet ?? null) as never, skills: (previewed.skills ?? []) as never };
+          return { sheet: (previewed.sheet ?? null) as never };
         }),
     }),
     route({

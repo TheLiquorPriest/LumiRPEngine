@@ -32,8 +32,8 @@ function holdsToType(view: StateView): void {
   expect(isObject(hud.fixes)).toBe(true);
   expect({ sceneType: typeof scene.sceneType, elapsed: typeof scene.elapsed, present: Array.isArray(scene.present) }).toEqual({ sceneType: "string", elapsed: "number", present: true });
   expect(Array.isArray(palette.entries)).toBe(true);
-  for (const part of ["realism", "time", "adjudication", "inferred", "knowledge", "things", "offstage"]) expect(isObject(controls[part])).toBe(true);
-  for (const part of ["skills", "sections", "sources"]) expect(Array.isArray(controls[part])).toBe(true);
+  for (const part of ["realism", "time", "adjudication", "knowledge", "things", "offstage"]) expect(isObject(controls[part])).toBe(true);
+  for (const part of ["sections", "sources"]) expect(Array.isArray(controls[part])).toBe(true);
   expect(typeof currency.decimals).toBe("number");
 }
 

@@ -8,7 +8,6 @@
 
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "../../shared/ids";
 import type { ClaimsPolicy } from "../../shared/claims";
-import type { InferredChecks } from "../../shared/inferred";
 import type { AdjudicationDef, StepPurpose } from "../../shared/world";
 import type { Limit, MindsSettings } from "../../shared/minds";
 import { isMindPurpose, limitIn } from "../../shared/minds";
@@ -557,12 +556,6 @@ export interface UserSettings {
   adjudication: AdjudicationDef;
   /** New chats use `adjudication` even where the world's ruleset sets a policy of its own. */
   overrideWorldAdjudication: boolean;
-  /**
-   * How typed attempts are read as checks in new chats (DESIGN §11 inferred checks): it fills in for a
-   * world whose ruleset sets none, or replaces it with `overrideWorldAdjudication` on (one switch for
-   * the user's check rules). Null: each new chat plays by its realism preset and Sheets level.
-   */
-  inferred: InferredChecks | null;
   extraction: ExtractionBounds;
   /** What the reply's read tells and keeps of things (Settings → Changes from the reply, ITEMS-SPEC §11). */
   thingReads: ThingReadSettings;

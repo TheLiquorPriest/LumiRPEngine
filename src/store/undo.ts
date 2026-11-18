@@ -308,8 +308,9 @@ function markerValue(world: Readonly<WorldState>, body: Exclude<MarkerBody, { ki
       return (world.adjudication ?? null) as unknown as JsonValue;
     case "claims":
       return (world.claims ?? null) as unknown as JsonValue;
+    // Retired: nothing reads it, so there is nothing to put back.
     case "infer":
-      return world.inferred as unknown as JsonValue | undefined;
+      return undefined;
   }
 }
 

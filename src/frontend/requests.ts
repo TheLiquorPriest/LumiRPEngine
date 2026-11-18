@@ -1,11 +1,9 @@
 // Every user interaction becomes exactly one of these protocol requests (ARCHITECTURE §4).
 // Kept pure so the mapping from a tap to its message is tested directly.
 
-import type { ClaimsPolicy } from "../shared/claims";
-import type { InferredChecks } from "../shared/inferred";
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
-import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
+import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, TierId, WorldId } from "../shared/ids";
+import type { EntityUpgradePick, KeepLine, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp } from "../shared/edit-ops";
 import type { GenerateAs } from "../shared/state-view";
@@ -13,7 +11,7 @@ import type { GmThingsRead, ThingsRead } from "../shared/thing-view";
 import type { UpgradePreview } from "../shared/upgrade";
 import type { Chip, FieldFixTarget, GmEntity, GmView, HudView, PaletteEntry, PaletteOption, StateView, TimelapseView } from "../shared/state-view";
 import { chipStarts } from "../shared/state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
+import type { FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import { PARTY_RELATION, partyTierOf, type PartyTier } from "../shared/party";
 import type { RequestBody } from "./registry";
 
@@ -242,26 +240,6 @@ export function placesMatching<P extends { name: string }>(places: readonly P[],
 /** A `time` marker on the running chat (Play → Calendar, HUD ⏸, palette Pause/Resume). */
 export function timeMarker(chatId: ChatId, control: TimeControl, scope: TimeScope, to: JsonValue, preview = false): Req<"lre.marker"> {
   return preview ? { type: "lre.marker", chatId, kind: "time", control, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "time", control, scope, to };
-}
-
-/** A `resolve` marker: promote or demote a domain on the running chat, optionally as a preview. */
-export function resolveMarker(chatId: ChatId, domain: DomainId, scope: ResolveScope, to: Level, preview = false): Req<"lre.marker"> {
-  return preview ? { type: "lre.marker", chatId, kind: "resolve", domain, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "resolve", domain, scope, to };
-}
-
-/** An `adjudicate` marker: how checks are decided in the running chat from the next turn (Settings → Checks → This chat). */
-export function adjudicateMarker(chatId: ChatId, to: AdjudicationDef): Req<"lre.marker"> {
-  return { type: "lre.marker", chatId, kind: "adjudicate", to };
-}
-
-/** A `claims` marker: what a typed action's thing the world doesn't have becomes in the running chat from the next turn (GM → This chat → Realism). */
-export function claimsMarker(chatId: ChatId, to: ClaimsPolicy): Req<"lre.marker"> {
-  return { type: "lre.marker", chatId, kind: "claims", to };
-}
-
-/** An `infer` marker: how typed attempts are read as checks in the running chat from the next turn (GM → This chat → Checks). */
-export function inferMarker(chatId: ChatId, to: InferredChecks): Req<"lre.marker"> {
-  return { type: "lre.marker", chatId, kind: "infer", to };
 }
 
 /**

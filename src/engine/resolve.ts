@@ -32,7 +32,6 @@ import { povMayKnow } from "./player-events";
 import { acts } from "./life";
 import { together } from "./presence";
 import { labelOf, optionalService, own } from "./pack-kit";
-import type { InferredResult } from "./inferred";
 import type { ToldAction } from "./action-words";
 import type { Needs } from "./steps";
 import { say } from "../shared/lines";
@@ -42,8 +41,6 @@ export interface ActionRequest {
   /** Defaults to the POV. */
   actor?: EntityId;
   params?: JsonObject;
-  /** What the check and outcomes read beside the params, and outside the key a retry rule knows the attempt by: an inferred check's difficulty, which an opponent's new roll sets (DESIGN §11). */
-  vars?: EnvVars;
 }
 
 export interface CheckResult extends CheckRoll {
@@ -93,8 +90,6 @@ export interface Resolution {
    * elsewhere rather than being made (ITEMS-SPEC §4.5).
    */
   claimed?: { entity: EntityId; name: string; events: LedgerEvent[]; cents?: number; brought?: Brought };
-  /** An inferred check's people and wording (DESIGN §11), when the action was Try something: the plan's, never recorded. */
-  inferred?: InferredResult;
   /** The action as the narrator is told it (`toldAction`): set by the turn's plan once the turn has played, never recorded. */
   told?: ToldAction;
   /**
@@ -196,9 +191,7 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
   // tell "not given" from a given 0.
   const scalars = Object.fromEntries(Object.entries(params).filter(([name]) => !Object.prototype.hasOwnProperty.call(bindings, name)));
   const absent = Object.fromEntries(Object.keys(action.params).filter((name) => !(name in params)).map((name): [string, Value] => [name, null]));
-  const extra = req.vars ?? {};
-  const more = typeof extra.params === "object" && extra.params !== null ? extra.params : {};
-  const vars: Record<string, Value | EnvVars> = { ...scalars, ...extra, params: { ...absent, ...params, ...more } };
+  const vars: Record<string, Value | EnvVars> = { ...scalars, params: { ...absent, ...params } };
   return { action, actor, bindings, vars, params };
 }
 
@@ -319,8 +312,6 @@ export interface ResolveOptions {
   runSeed?: string;
   /** The turn's recorded `judge` answer (DESIGN §11): the approach's rating, and the story's odds under narrative authority. */
   judgement?: Judgement | null;
-  /** The turn's own messages, which the narrator reads anyway: an inferred check's attempt names nothing hidden by words they say too (DESIGN §7). */
-  heard?: string;
   /** The action the player's words named, when this one plays in its place: its needs hold this one too (`unmetNeeds`). */
   needs?: Needs;
   /**
