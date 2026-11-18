@@ -62,96 +62,90 @@ function salesTax(w: Working): number {
 }
 
 describe("a vehicle bought on a loan", () => {
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("a new pickup with $5,000 down: the down payment is charged, the rest a car loan the pickup secures over 60 months, and the pickup is worth its new price", () => {
+  test("a new pickup with $5,000 down: the down payment is charged, the rest a car loan the pickup secures over 60 months, and the pickup is worth its new price", () => {
     const w = riverton();
-    expect(buy(w, { item: "a new pickup truck", finance: { down: 500_000, term: 60 } })).toBeNull();
+    expect(buy(w, { item: "pickup truck", new: true, finance: { down: 500_000, term: 60 } })).toBeNull();
     const [truck] = bought(w);
     expect(truck).toBeDefined();
-    expect(w.state.entities[truck ?? ""]?.fields).toMatchObject({ class: "pickup_fullsize", owner: "you", value: 5_800_000, condition: 100, odometer_mi: 10 });
-    expect(charges(w).map((c) => [c.account, c.memo])).toEqual([["checking", "Bought Pickup truck, $5,000.00 down"]]);
+    expect(w.state.entities[truck ?? ""]?.fields).toMatchObject({ class: "pickup_fullsize", owner: "you", value: 5_800_000 });
+    expect(charges(w).map((c) => [c.account, c.memo])).toEqual([["checking", "Bought Full-size pickup (F-150 / Silverado class), $5,000.00 down"]]);
     // The car loan: the rest of the new price, secured by the pickup, over the term asked.
     const loan = w.state.entities[`${truck}:loan`];
-    expect(loan?.name).toBe("Car loan, Pickup truck");
+    expect(loan?.name).toBe("Car loan, Full-size pickup (F-150 / Silverado class)");
     expect(loan?.fields).toMatchObject({ product: "loan", secured_by: truck, term_months: 60 });
-    const paidOut = w.events.find((e) => e.type === "post" && e.memo === "Car loan, Pickup truck: loan paid out");
+    const paidOut = w.events.find((e) => e.type === "post" && e.memo === "Car loan, Full-size pickup (F-150 / Silverado class): loan paid out");
     expect(paidOut?.type === "post" ? paidOut.lines.find((l) => l.account === `${truck}:loan`)?.amount : null).toBe(-5_300_000);
     expect(trialBalance(w.state)).toBe(0);
   });
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("no down payment said is the finance table's typical share; a term no lender offers is refused, and nothing is bought", () => {
+  test("no down payment said is the finance table's typical share; a term no lender offers is refused, and nothing is bought", () => {
     const w = riverton();
-    expect(buy(w, { item: "a used pickup", finance: { term: 48 } })).toBeNull();
+    expect(buy(w, { item: "pickup", finance: { term: 48 } })).toBeNull();
     // 12% of the used pickup's $38,000.
-    expect(charges(w).map((c) => c.memo)).toEqual(["Bought Pickup, $4,560.00 down"]);
+    expect(charges(w).map((c) => c.memo)).toEqual(["Bought Full-size pickup (F-150 / Silverado class), $4,560.00 down"]);
     const [truck] = bought(w);
     expect(w.state.entities[`${truck}:loan`]?.fields).toMatchObject({ product: "loan", secured_by: truck, term_months: 48 });
     const other = riverton();
-    expect(buy(other, { item: "a used pickup", finance: { down: 500_000, term: 7 } })).toEqual({ code: "bad_term", reason: "car loans run 36 to 84 months" });
+    expect(buy(other, { item: "pickup", finance: { down: 500_000, term: 7 } })).toEqual({ code: "bad_term", reason: "car loans run 36 to 84 months" });
     expect(bought(other)).toEqual([]);
     expect(charges(other)).toEqual([]);
   });
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("paid whole, there is no loan; the purchase's `down` and `term_months` finance it as `finance` does", () => {
+  test("paid whole, there is no loan; the purchase's `down` and `term_months` finance it as `finance` does", () => {
     const w = riverton();
-    expect(buy(w, { item: "a used sedan" })).toBeNull();
+    expect(buy(w, { item: "sedan" })).toBeNull();
     const [sedan] = bought(w);
     expect(w.state.entities[`${sedan}:loan`]).toBeUndefined();
-    expect(charges(w).map((c) => c.memo)).toEqual(["Bought Sedan"]);
+    expect(charges(w).map((c) => c.memo)).toEqual(["Bought Midsize sedan (Camry / Accord class)"]);
     const loaned = riverton();
-    expect(buy(loaned, { item: "a used sedan", down: 300_000, term_months: 36 })).toBeNull();
+    expect(buy(loaned, { item: "sedan", down: 300_000, term_months: 36 })).toBeNull();
     const [car] = bought(loaned);
     expect(loaned.state.entities[`${car}:loan`]?.fields).toMatchObject({ secured_by: car, term_months: 36 });
   });
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("the sales tax is on the whole price: paid with the down payment, or alone with nothing down, as much as paid whole", () => {
+  test("the sales tax is on the whole price: paid with the down payment, or alone with nothing down, as much as paid whole", () => {
     // Riverton names no tax region: the national rate, 7%, of the new pickup's $58,000, not of the $5,000 down.
     const w = riverton();
-    expect(buy(w, { item: "a new pickup truck", finance: { down: 500_000, term: 60 } })).toBeNull();
+    expect(buy(w, { item: "pickup truck", new: true, finance: { down: 500_000, term: 60 } })).toBeNull();
     expect(salesTax(w)).toBe(406_000);
-    expect(charges(w)).toEqual([{ account: "checking", memo: "Bought Pickup truck, $5,000.00 down", cents: 500_000 + 406_000 }]);
+    expect(charges(w)).toEqual([{ account: "checking", memo: "Bought Full-size pickup (F-150 / Silverado class), $5,000.00 down", cents: 500_000 + 406_000 }]);
     expect(trialBalance(w.state)).toBe(0);
     // Nothing down: the tax on the used sedan's $21,000 alone now, the whole price lent.
     const none = riverton();
-    expect(buy(none, { item: "a used sedan", finance: { down: 0, term: 60 } })).toBeNull();
-    expect(charges(none).map((c) => [c.memo, c.cents])).toEqual([["Bought Sedan, nothing down", 147_000]]);
+    expect(buy(none, { item: "sedan", finance: { down: 0, term: 60 } })).toBeNull();
+    expect(charges(none).map((c) => [c.memo, c.cents])).toEqual([["Bought Midsize sedan (Camry / Accord class), nothing down", 147_000]]);
     const [sedan] = bought(none);
-    const paidOut = none.events.find((e) => e.type === "post" && e.memo === "Car loan, Sedan: loan paid out");
+    const paidOut = none.events.find((e) => e.type === "post" && e.memo === "Car loan, Midsize sedan (Camry / Accord class): loan paid out");
     expect(paidOut?.type === "post" ? paidOut.lines.find((l) => l.account === `${sedan}:loan`)?.amount : null).toBe(-2_100_000);
     expect(trialBalance(none.state)).toBe(0);
     // Paid whole, the same sedan pays the same tax.
     const whole = riverton();
-    expect(buy(whole, { item: "a used sedan" })).toBeNull();
+    expect(buy(whole, { item: "sedan" })).toBeNull();
     expect([salesTax(whole), salesTax(none)]).toEqual([147_000, 147_000]);
   });
 });
 
 describe("a purchase's method names what pays", () => {
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("an account of the payer's named by id pays, though it is no account by words", () => {
+  test("an account of the payer's named by id pays, though it is no account by words", () => {
     const w = riverton();
-    expect(buy(w, { item: "a used sedan", method: "rainy" })).toBeNull();
+    expect(buy(w, { item: "sedan", method: "rainy" })).toBeNull();
     expect(charges(w).map((c) => c.account)).toEqual(["rainy"]);
   });
 
   test("another's account by id is refused, naming what the payer may pay from; an id that names nothing too; nothing is bought", () => {
     const w = riverton();
     const choices = "Cash (cash), Checking (checking), Rainy day fund (rainy), Savings (savings), Visa card (card)";
-    expect(buy(w, { item: "a used pickup", method: "maya_checking" })).toEqual({ code: "bad_method", reason: `Alex Rivera can't pay from Maya's checking; they can pay from ${choices}` });
-    expect(buy(w, { item: "a used pickup", method: "acct_nobody" })).toEqual({ code: "bad_method", reason: `no account or card acct_nobody; Alex Rivera can pay from ${choices}` });
+    expect(buy(w, { item: "pickup", method: "maya_checking" })).toEqual({ code: "bad_method", reason: `Alex Rivera can't pay from Maya's checking; they can pay from ${choices}` });
+    expect(buy(w, { item: "pickup", method: "acct_nobody" })).toEqual({ code: "bad_method", reason: `no account or card acct_nobody; Alex Rivera can pay from ${choices}` });
     expect(bought(w)).toEqual([]);
     expect(charges(w)).toEqual([]);
   });
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("words that say a way of paying go as before: the debit card pays from checking", () => {
+  test("words that say a way of paying go as before: the debit card pays from checking", () => {
     const w = riverton((world) => {
       world.entities.debit = { id: "debit", kind: "card", name: "Debit card", tier: "background", fields: { account: "checking", holder: "you", network: "debit", state: "active" }, relations: [] };
     });
-    expect(buy(w, { item: "a used sedan", method: "debit card" })).toBeNull();
+    expect(buy(w, { item: "sedan", method: "debit card" })).toBeNull();
     expect(charges(w).map((c) => c.account)).toEqual(["checking"]);
   });
 });
@@ -167,13 +161,14 @@ describe("what a purchase's words buy", () => {
     return { unpriced, vehicles: made.map((e) => e.fields.class), cents: charges(w).map((c) => c.cents) };
   }
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("a class name that ends the item's main noun is a vehicle of that class, the longest name that does: a flatbed truck, a jet ski, a truck for work, a Cessna 172", () => {
+  // A class is read from the words by its own id, name or alias only (9ba8b02dd): words that only contain one name none.
+  test("words that are a class's own name (its id, name or alias) buy a vehicle of that class, and words that only contain one buy none: a flatbed truck, a jet ski, a truck for work, a Cessna, not a Cessna 172", () => {
     // The used price of each, and the national 7% sales tax on it.
     expect(bought("flatbed truck")).toEqual({ unpriced: false, vehicles: ["pickup_heavy_duty_diesel"], cents: [5_350_000] });
     expect(bought("jet ski")).toEqual({ unpriced: false, vehicles: ["jet_ski_pwc"], cents: [909_500] });
+    expect(bought("Cessna").vehicles).toEqual(["small_plane"]);
     expect(bought("a truck for work")).toEqual({ unpriced: false, vehicles: ["pickup_fullsize"], cents: [4_066_000] });
-    expect(bought("Cessna 172").vehicles).toEqual(["small_plane"]);
+    expect(bought("Cessna 172").vehicles).toEqual([]);
   });
 
   test("a class word that only says what another thing is of or for buys no vehicle: a plane ticket, a bus pass, car insurance, groceries for the boat are priced as themselves", () => {
@@ -185,10 +180,9 @@ describe("what a purchase's words buy", () => {
     }
   });
 
-  // hardening: a class is read from the words only by its exact name now, and a spawned vehicle carries only what the call gives.
-  test.skip("another category the world prices is never a vehicle by its words: a toy truck bought as a gift is a gift", () => {
-    expect(bought("toy truck", { category: "gifts", price: 3_000 })).toEqual({ unpriced: false, vehicles: [], cents: [3_210] });
-    // Its words alone would make it a truck: the category given is what keeps it a toy.
-    expect(bought("toy truck").vehicles).toEqual(["pickup_fullsize"]);
+  test("another category the world prices is never a vehicle by its words: a truck bought as a gift is a gift", () => {
+    expect(bought("truck", { category: "gifts", price: 3_000 })).toEqual({ unpriced: false, vehicles: [], cents: [3_210] });
+    // Its words alone name a class (an alias): the category given is what keeps it a toy.
+    expect(bought("truck").vehicles).toEqual(["pickup_fullsize"]);
   });
 });
