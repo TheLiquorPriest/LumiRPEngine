@@ -33,18 +33,12 @@ export class People {
     private readonly now: number,
   ) {}
 
-  /** The world as a chat's head plays it; null where its state can't be folded or its world read. */
+  /** The world as a chat's head plays it; null where its world is not known. A state the store cannot fold is RPE's own fault, which stops the run. */
   private head(chat: string): ReadContext | null {
     if (!this.heads.has(chat)) {
-      let ctx: ReadContext | null = null;
-      try {
-        const state = this.s.headState(chat).state.world;
-        const doc = this.store.env.worlds(state.revision);
-        ctx = doc === undefined ? null : this.store.env.registry.context(doc, state);
-      } catch {
-        ctx = null;
-      }
-      this.heads.set(chat, ctx);
+      const state = this.s.headState(chat).state.world;
+      const doc = this.store.env.worlds(state.revision);
+      this.heads.set(chat, doc === undefined ? null : this.store.env.registry.context(doc, state));
     }
     return this.heads.get(chat) ?? null;
   }
@@ -59,13 +53,7 @@ export class People {
 
   /** The name the world gives a person in `chat`: at the chat's head, else at the turn it is met at; null where it gives none, or gives it to another person as well. */
   private said(chat: string, turn: TurnRow, entity: string): string | null {
-    const named = People.nameIn(this.head(chat), entity);
-    if (named !== null) return named;
-    try {
-      return People.nameIn(worldAt(this.store, this.s.id, turn.id), entity);
-    } catch {
-      return null;
-    }
+    return People.nameIn(this.head(chat), entity) ?? People.nameIn(worldAt(this.store, this.s.id, turn.id), entity);
   }
 
   /** The character `entity` is in the chat of `turn`, made in that chat the first time any run meets it on the chat's line. Inside the caller's write. */

@@ -35,7 +35,7 @@ export function storageFolders(sources: Pick<Sources, "lumiverse" | "identifier"
   return { user: join(sources.lumiverse, "users", sources.userId, "extensions", sources.identifier), extension: join(sources.lumiverse, "extensions", sources.identifier, "storage") };
 }
 
-const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], archived: [], undecided: null };
+const EMPTY_RUNTIME: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], archived: [], undecided: null, damaged: new Map() };
 
 export interface Today {
   sources: Sources;

@@ -81,14 +81,8 @@ function storageFile(today: Today, path: string): { store: FailureFile["store"];
   return { store: "user-storage", path: today.user === null ? path : join(today.user, path) };
 }
 
-/** The chats LumiAH's own `harness/chats.json` says the engine is switched on for; null where it keeps no such file. */
-function switchedOn(text: string | null): Set<string> | null {
-  let doc: unknown = null;
-  try {
-    doc = text === null ? null : (JSON.parse(text) as unknown);
-  } catch {
-    return null;
-  }
+/** The chats LumiAH's own `harness/chats.json` (read as JSON) says the engine is switched on for; null where it keeps no such file, or one that does not read. */
+function switchedOn(doc: unknown): Set<string> | null {
   return isRecord(doc) && isRecord(doc.on) ? new Set(Object.keys(doc.on)) : null;
 }
 
@@ -97,7 +91,7 @@ export async function chatsToImport(today: Today): Promise<{ chats: ChatToImport
   const user = today.sources.userId as UserId;
   const chats: ChatToImport[] = [];
   const notOpened: NotOpenedChat[] = [];
-  const switched = switchedOn(await today.userView.read("harness/chats.json"));
+  const switched = switchedOn(await today.userView.json("harness/chats.json"));
   const database = join(today.sources.lumiverse, DATABASE_FILE);
   for (const row of today.chats) {
     const run = readRun(row.metadata);

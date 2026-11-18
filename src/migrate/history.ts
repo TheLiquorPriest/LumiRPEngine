@@ -53,15 +53,6 @@ export interface AreaFile {
   pins: string[];
 }
 
-function json(text: string | null): unknown {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 const blob = (hash: string): string => `harness/blobs/${hash.slice(0, 2)}/${hash}`;
 
 /** An area as it was read: its head (null: it held no file) and each file. */
@@ -73,7 +64,7 @@ export interface Area {
 /** The files the index `head` names, each with its text: none where the area holds none (null); null where the index is gone or doesn't read. A body that is gone is left out. */
 async function indexFiles(today: Today, head: string | null): Promise<AreaFile[] | null> {
   if (head === null) return [];
-  const index = areaFiles(await today.userView.read(blob(head)));
+  const index = areaFiles(await today.userView.json(blob(head)));
   if (index === null) return null;
   const files: AreaFile[] = [];
   for (const f of index) {
@@ -85,10 +76,9 @@ async function indexFiles(today: Today, head: string | null): Promise<AreaFile[]
 
 /** An area as its head holds it: when it was written, its head and each file; null where it doesn't read, or names an index today's clean-up removed. A body that is gone is left out. */
 export async function areaOf(today: Today, doc: string): Promise<(Area & { at: number }) | null> {
-  const text = await today.userView.read(doc);
-  const head = areaHead(text);
+  const raw = await today.userView.json(doc);
+  const head = areaHead(raw);
   if (head === undefined) return null;
-  const raw = json(text);
   const files = await indexFiles(today, head);
   return files === null ? null : { at: isRecord(raw) && typeof raw.at === "number" ? raw.at : 0, head, files };
 }
@@ -204,9 +194,9 @@ export class TurnAreas {
 
   /** Each file an area document's index names, by path and the hash of its body, whether its body is still there or not; null where the document or its index doesn't read. As the rehearsal counts them. */
   async index(path: string): Promise<{ path: string; hash: string }[] | null> {
-    const head = areaHead(await this.today.userView.read(path));
+    const head = areaHead(await this.today.userView.json(path));
     if (head === undefined) return null;
-    return head === null ? [] : areaFiles(await this.today.userView.read(blob(head)));
+    return head === null ? [] : areaFiles(await this.today.userView.json(blob(head)));
   }
 
   /** A turn's own area, by path: what it ended with; null where no generation played it, or its area isn't carried or doesn't read. */

@@ -114,18 +114,13 @@ interface Names {
   place(id: string): string;
 }
 
+/** The names a beat's record is told with, at `turn`: a state the store cannot fold there is RPE's own fault, which stops the run. */
 function namesAt(store: Store, s: UserStore, turn: TurnRow): Names {
-  let world: WorldState | null = null;
-  let played: ReadContext | null = null;
-  try {
-    world = s.stateAt(turn.id).state.world;
-    const doc = store.env.worlds(world.revision);
-    // The world as play has it (`registry.context`, as the cast's `worldAt` reads it): the chat's own draft and the places made in play over the revision.
-    played = doc === undefined ? null : store.env.registry.context(doc, world);
-  } catch {
-    played = null;
-  }
-  const entity = (id: string): string => world?.entities[id]?.name ?? id;
+  const world: WorldState = s.stateAt(turn.id).state.world;
+  const doc = store.env.worlds(world.revision);
+  // The world as play has it (`registry.context`, as the cast's `worldAt` reads it): the chat's own draft and the places made in play over the revision.
+  const played: ReadContext | null = doc === undefined ? null : store.env.registry.context(doc, world);
+  const entity = (id: string): string => world.entities[id]?.name ?? id;
   return {
     person: (id) => (id === "world" ? null : id === "player" ? (played === null ? "player" : entity(played.world.pov)) : entity(id)),
     entity: (id) => (id === "world" ? null : id === "player" ? (played === null ? null : played.world.pov) : id),
@@ -191,12 +186,7 @@ export function carryStory(input: { db: Database; store: Store; s: UserStore; ch
       out.leftOut += stored(record) - kept;
       if (kept === 0) continue;
       const names = namesAt(store, s, turn);
-      let clock: StoryClock | null = null;
-      try {
-        if (part.beats.length > 0) clock = storyClock(store, s.id, chat, turn.id);
-      } catch {
-        // A state that can't be folded shows no time, as it names nobody by name (`namesAt`).
-      }
+      const clock: StoryClock | null = part.beats.length > 0 ? storyClock(store, s.id, chat, turn.id) : null;
       const story: StoryWrite[] = [
         ...part.beats.map((b): StoryWrite => ({ part: "beat", item: beatItem(b.id), value: beatValue(b, names, clock) })),
         ...part.struck.map((x): StoryWrite => ({ part: "beat", item: beatItem(x.beat), value: { drop: true, why: x.why } })),

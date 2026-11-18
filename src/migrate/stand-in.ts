@@ -40,6 +40,8 @@ type Layer = ReadonlyMap<string, string | null>;
  */
 export class StorageView {
   private readonly written = new Map<string, string | null>();
+  /** Each file the migration read as JSON that does not read as JSON, by storage path, with the parser's error: nothing in it is carried, and the run says so (`json`). */
+  readonly damaged = new Map<string, unknown>();
 
   constructor(
     private readonly store: Store,
@@ -70,6 +72,23 @@ export class StorageView {
     if (this.pending.has(key)) return this.pending.get(key) ?? null;
     if (this.root === null || (this.only !== null && !this.only.includes(key))) return null;
     return readText(this.file(key));
+  }
+
+  /** A file read as JSON: null where there is no file, and where its text does not read as JSON (noted in `damaged`, with the parser's error). */
+  async json(path: string): Promise<unknown> {
+    const text = await this.read(path);
+    if (text === null) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch (error) {
+      this.damaged.set(StorageView.clean(path), error);
+      return null;
+    }
+  }
+
+  /** The name of the storage this is a view of, as the report names it ("user storage", "extension storage"). */
+  get where(): string {
+    return this.store;
   }
 
   write(path: string, data: string): void {

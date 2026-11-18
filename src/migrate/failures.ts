@@ -9,8 +9,10 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ownerOnlyFolder, writeWhole } from "../app/disk";
+import type { Unreadable } from "./inside";
+import type { StorageView } from "./stand-in";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { isRecord, type JsonValue } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
@@ -96,6 +98,48 @@ export async function closeFailure(root: string, chat: string): Promise<{ at: st
   const was = readFailure(root, chat);
   await rm(file, { force: true });
   return { at: was?.at ?? null };
+}
+
+/** What a real run could not read of the previous build's files (`MigrationReport.unreadable`), kept with the error each met where one was met: nothing in them was carried. */
+export interface UnreadFiles {
+  format: 1;
+  /** When the run read the previous build's data. */
+  at: string;
+  files: { path: string; why: string; error: ChatFailure["error"] | null }[];
+}
+
+/** The record of what the last real run could not read, in RPE's data folder `root`: beside the chats' records, in a folder of its own. */
+export function unreadFile(root: string): string {
+  return join(failuresFolder(root), "files", "unread.json");
+}
+
+/** Keeps what a run could not read, over what an earlier run kept; where it read everything, removes the record. */
+export async function keepUnread(root: string, unread: UnreadFiles): Promise<void> {
+  const file = unreadFile(root);
+  if (unread.files.length === 0) {
+    await rm(file, { force: true });
+    return;
+  }
+  await ownerOnlyFolder(failuresFolder(root));
+  await ownerOnlyFolder(dirname(file));
+  await writeWhole(file, `${JSON.stringify(unread, null, 2)}\n`);
+}
+
+/**
+ * Every file this run read as JSON that does not read, by its path as the report names it, with the parser's error: in the user's and the
+ * extension's storage (`StorageView.json`), and in the runtime's folders (`RuntimeRead.damaged`).
+ */
+export function damagedOf(today: { userView: StorageView; extensionView: StorageView; runtime: { damaged: ReadonlyMap<string, unknown> } }): Map<string, unknown> {
+  const out = new Map<string, unknown>();
+  for (const view of new Set([today.userView, today.extensionView])) for (const [path, error] of view.damaged) out.set(`${view.where}: ${path}`, error);
+  for (const [path, error] of today.runtime.damaged) out.set(path, error);
+  return out;
+}
+
+/** The files of `damaged` (`damagedOf`) not already among `listed`, each in fixed words: the parser's own words can quote the file, and the report holds no content. */
+export function notReadAsJson(damaged: ReadonlyMap<string, unknown>, listed: readonly Unreadable[]): Unreadable[] {
+  const named = new Set(listed.map((u) => u.path));
+  return [...damaged.keys()].filter((path) => !named.has(path)).map((path) => ({ path, why: "it does not read as JSON, so nothing in it is carried" }));
 }
 
 /** An error's own name, message and stack. */

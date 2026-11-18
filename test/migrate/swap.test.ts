@@ -19,7 +19,7 @@ import { type App, lineLog, openApp, rawRoute } from "../../src/app";
 import { type CliIO, runCli } from "../../src/app/cli";
 import { dataPaths, loadConfig } from "../../src/app/config";
 import { CapturingFold } from "../../src/migrate/capture";
-import { failureFile, failuresFolder, readFailure } from "../../src/migrate/failures";
+import { failureFile, failuresFolder, readFailure, unreadFile } from "../../src/migrate/failures";
 import { sha256 } from "../../src/migrate/files";
 import { PREVIOUS_PERMISSIONS } from "../../src/migrate/going-back";
 import { isRecord } from "../../src/shared/json";
@@ -638,7 +638,11 @@ describe("the swap, and going back", () => {
     const lines = ran.out.split("\n");
     const at = lines.indexOf(head);
     expect(at).toBeGreaterThanOrEqual(0);
-    expect(lines.slice(at, at + 8)).toEqual([
+    // Then what the run could not read, as many files as its report names, and the record that keeps them.
+    const db = new Database(join(data, "rpe.db"), { readonly: true });
+    const unreadable = (JSON.parse(db.query<{ report: string }, [string]>("SELECT report FROM migration_run WHERE user = ? ORDER BY at DESC LIMIT 1").get(USER)?.report ?? "{}") as { unreadable: unknown[] }).unreadable.length;
+    db.close();
+    const expected = [
       head,
       // Named as Lumiverse's database names it: the chat's name, its character's, and its id after them.
       `  ${say("migration_not_carried_chat", { label: say("migration_not_carried_label", { name: "Fog (harness)", character: CHARACTER.name, chat: CHAT.harness }), why: say("migration_not_carried_fold"), number: record?.message === null || record === null ? null : String(record.message.number), swipe: record?.message === null || record === null ? null : String(record.message.swipe), error: "an invented fault of the previous build's fold", file: failureFile(data, CHAT.harness) })}`,
@@ -647,8 +651,10 @@ describe("the swap, and going back", () => {
       `    ${say("migration_not_carried_again_switched", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --data ${data}` })}`,
       `    ${say("migration_not_carried_one", { line: `rpe migrate --lumiverse ${fixture.sources.lumiverse} --user ${USER} --chat ${CHAT.harness} --data ${data}` })}`,
       `    ${say("migration_not_carried_back", { line: `rpe down --data ${data}` })}`,
+      ...(unreadable === 0 ? [] : [say("migration_unread", { count: unreadable, file: unreadFile(data) })]),
       "",
-    ]);
+    ];
+    expect(lines.slice(at, at + expected.length)).toEqual(expected);
     expect(lines[at + 1]).toStartWith(`  Fog (harness), with ${CHARACTER.name} (${CHAT.harness}): `);
     expect(lines[at + 1]).toContain(`See ${failureFile(data, CHAT.harness)}.`);
     expect(at).toBeLessThan(lines.findIndex((l) => l.startsWith("Migration real run")));

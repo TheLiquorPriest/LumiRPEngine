@@ -159,15 +159,6 @@ export interface OwnFilesCarried {
   byChat: { chat: string; notes: number; versions: number; learned: number }[];
 }
 
-function json(text: string | null): unknown {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 /** What a run's import holds of each chat, for its notes and their earlier versions: RPE's database, the user's store, each turn's area, and the chats this run's import carried. */
 export interface NoteHistory {
   db: Database;
@@ -196,7 +187,7 @@ interface NoteChange {
  * pinned, and, by turn, what the turn wrote or removed (the turn's `engine.ws.write` and `engine.ws.delete` changes, against the
  * workspace the turn started from), with the texts of the blobs they name. A text today's clean-up had removed leaves its file out.
  */
-async function agentsWorkspace(today: Today, history: NoteHistory, chat: string): Promise<{ files: { path: string; text: string; pinned: boolean }[]; changes: Map<string, NoteChange[]> }> {
+async function agentsWorkspace(today: Today, history: NoteHistory, chat: string): Promise<{ files: { path: string; text: string; pinned: boolean; blob: string }[]; changes: Map<string, NoteChange[]> }> {
   const text = async (hash: string | undefined): Promise<string | null> => (hash === undefined ? null : today.userView.read(`agents/blobs/${hash}`));
   const changes = new Map<string, NoteChange[]>();
   for (const { turn } of pathTurns(history.db, history.s, chat)) {
@@ -221,22 +212,16 @@ async function agentsWorkspace(today: Today, history: NoteHistory, chat: string)
   }
   const head = history.s.headState(chat).state.world;
   const pinned = workspacePins(head);
-  const files: { path: string; text: string; pinned: boolean }[] = [];
+  const files: { path: string; text: string; pinned: boolean; blob: string }[] = [];
   for (const [path, hash] of Object.entries(workspaceOf(head)).sort(([a], [b]) => (a < b ? -1 : 1))) {
     const body = await text(hash);
-    if (body !== null) files.push({ path, text: body, pinned: pinned[path] === true });
+    if (body !== null) files.push({ path, text: body, pinned: pinned[path] === true, blob: `agents/blobs/${hash}` });
   }
   return { files, changes };
 }
 
-/** The files each role's entry of a workspace's pins manifest (`.pins.json`) lists, as today's reader takes them: a role's list of paths, or its `files`; a file that does not read lists none. */
-function pinsManifest(text: string | null): Record<string, string[]> {
-  let raw: unknown = null;
-  try {
-    raw = text === null ? null : (JSON.parse(text) as unknown);
-  } catch {
-    raw = null;
-  }
+/** The files each role's entry of a workspace's pins manifest (`.pins.json`, read as JSON) lists, as today's reader takes them: a role's list of paths, or its `files`; a file that does not read lists none. */
+function pinsManifest(raw: unknown): Record<string, string[]> {
   if (!isRecord(raw)) return {};
   const out: Record<string, string[]> = {};
   for (const [role, value] of Object.entries(raw)) {
@@ -378,7 +363,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
   };
 
   // The user's own agents and skills, under imported/agents and imported/skills in the new header format with the original beside each; and their texts, sorted by today's own reader.
-  const harness = json(await today.userView.read("harness/settings.json"));
+  const harness = await today.userView.json("harness/settings.json");
   const definitions = isRecord(harness) && isRecord(harness.definitions) ? harness.definitions : {};
   const ownAgents = isRecord(definitions.agents) ? definitions.agents : {};
   const settings = await lumiahSettings(today);
@@ -402,7 +387,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     await put("", IMPORTED, `${IMPORTED_SKILLS}/${id}/original.json`, `${JSON.stringify(def, null, 2)}\n`);
   }
   // His edited texts of the engine: his edit as it is under imported/, one today's build would not send and one no build had set apart each under its reason, the shipped text word for word counted and listed. LumiAH's own texts as they are, each named for what it was.
-  const engine = json(await today.userView.read("settings.json"));
+  const engine = await today.userView.json("settings.json");
   const sorted = sortPromptTexts(isRecord(engine) && isRecord(engine.prompts) ? engine.prompts.texts : undefined);
   for (const t of sorted.edits) if (await put("", IMPORTED, `${places.prompts}/${t.id}.md`, t.text)) out.texts++;
   for (const t of sorted.setApart) {
@@ -450,7 +435,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
   // A chat RPE's store holds that this run did not import keeps what an earlier run wrote for it: it was played on RPE, or its earlier import stands.
   const keeps = (chat: string): boolean => chat !== "" && !history.carried.has(chat) && history.s.chat(chat) !== null;
   // The agents engine's global workspace, into the global notes folder with his own `~/` files, which every chat's agents read and none writes; a file pinned in GM → Workspace is the Author's pin.
-  const global = json(await today.userView.read("agents/global.json"));
+  const global = await today.userView.json("agents/global.json");
   for (const [path, f] of Object.entries(isRecord(global) && isRecord(global.files) ? global.files : {})) {
     const body = isRecord(f) && typeof f.hash === "string" ? await today.userView.read(`agents/blobs/${f.hash}`) : null;
     if (body !== null && (await put("", places.notes, path, body))) {
@@ -459,7 +444,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     }
   }
   // Settings → Agents → Context's pins, by role, which today's build hands each role in every chat before the workspace's own.
-  const engineSettings = json(await today.userView.read("settings.json"));
+  const engineSettings = await today.userView.json("settings.json");
   const context = isRecord(engineSettings) && isRecord(engineSettings.agents) ? engineSettings.agents.context : null;
   const roles = isRecord(context) && isRecord(context.roles) ? context.roles : {};
   const contextPins = Object.entries(roles).flatMap(([role, c]): [string, string[]][] => (isRecord(c) && Array.isArray(c.pins) ? [[role, c.pins.filter((p): p is string => typeof p === "string" && p.trim() !== "").map((p) => p.trim())]] : []));
@@ -496,7 +481,8 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
       if (f.pinned) pin(config, `${places.notes}/${f.path}`, ["main"]);
     }
     // Settings → Agents → Context's pins and the workspace's pins manifest (`.pins.json`): each role's files, a chat's or a global `~/` one, pinned for that role.
-    for (const [role, files] of [...contextPins, ...Object.entries(pinsManifest(heads?.files.find((f) => f.path === PINS_PATH)?.text ?? null))]) {
+    const manifest = heads?.files.find((f) => f.path === PINS_PATH);
+    for (const [role, files] of [...contextPins, ...Object.entries(pinsManifest(manifest === undefined ? null : await today.userView.json(manifest.blob)))]) {
       for (const path of files) {
         if (path.startsWith(GLOBAL_PREFIX)) pin(null, `@global/${places.notes}/${path}`, [role]);
         else if (inWorkspace.has(path)) pin(config, `${places.notes}/${path}`, [role]);
@@ -578,7 +564,7 @@ export async function latestAreas(today: Today, items: readonly Item[]): Promise
     const key = AREA_DOC.exec(item.path)?.[1];
     const chat = key === undefined ? null : chatOfKey(key);
     if (chat === null) continue;
-    const raw = json(await today.userView.read(item.path));
+    const raw = await today.userView.json(item.path);
     const at = isRecord(raw) && typeof raw.at === "number" ? raw.at : 0;
     const was = latest.get(chat);
     if (was === undefined || at > was.at || (at === was.at && item.path > was.doc)) latest.set(chat, { at, doc: item.path });

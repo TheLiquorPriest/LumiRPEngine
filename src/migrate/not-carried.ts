@@ -8,7 +8,8 @@
 // (`.prompts/history-migration.md`).
 
 import { say } from "../shared/lines";
-import { type ChatFailure, type FailureStage, failedChats, failureFile, failuresFolder, readFailure } from "./failures";
+import { existsSync } from "node:fs";
+import { type ChatFailure, type FailureStage, failedChats, failureFile, failuresFolder, readFailure, unreadFile } from "./failures";
 import { LumiverseDb } from "./lumiverse-db";
 import type { MigrationReport } from "./report";
 
@@ -96,18 +97,22 @@ export function notCarriedSteps(c: NotCarried, steps: NotCarriedSteps): string[]
 /**
  * What a command prints first, ahead of the report: the chats it carried that an earlier run could not, each once; then the head, with where
  * the records are kept (RPE's data folder `root`), and each chat it did not carry with its cause, its steps under it; then how many other
- * chats' records of why are still kept there (a run asked for one chat, or a chat left alone, leaves them). None where none of these is.
+ * chats' records of why are still kept there (a run asked for one chat, or a chat left alone, leaves them); then how many of the previous
+ * build's files a real run could not read, so that nothing in them is carried, with the record that keeps the error each met. None where
+ * none of these is.
  */
 export function notCarriedLines(report: MigrationReport, steps: NotCarriedSteps, from: NamesFrom, root: string): string[] {
   const list = notCarriedOf(report);
   const closed = report.closed ?? [];
   const open = failedChats(root).filter((chat) => !list.some((c) => c.chat === chat));
-  if (list.length === 0 && closed.length === 0 && open.length === 0) return [];
+  const unreadable = report.mode === "real run" ? report.unreadable.length : 0;
+  if (list.length === 0 && closed.length === 0 && open.length === 0 && unreadable === 0) return [];
   const names = chatNames(from);
   const carried = closed.map((c) => say("migration_carried_now", { label: label(c.chat, names), failed: c.failed }));
   const failed = list.length === 0 ? [] : [say("migration_not_carried_head", { count: list.length, folder: failuresFolder(root) }), ...list.flatMap((c) => [`  ${chatLine(c, names, root)}`, ...notCarriedSteps(c, steps).map((line) => `    ${line}`)])];
   const still = open.length === 0 ? "" : say("migration_still_open", { count: open.length, folder: failuresFolder(root), chats: open.map((chat) => label(chat, names)).join(", ") });
-  return [...carried, ...failed, still, ""].filter((line, i, all) => line !== "" || i === all.length - 1);
+  const unread = unreadable === 0 ? "" : say("migration_unread", { count: unreadable, file: existsSync(unreadFile(root)) ? unreadFile(root) : null });
+  return [...carried, ...failed, still, unread, ""].filter((line, i, all) => line !== "" || i === all.length - 1);
 }
 
 /** A command's closing line where it ends with exit code 1 for them: the switch's says it went through all the same. */

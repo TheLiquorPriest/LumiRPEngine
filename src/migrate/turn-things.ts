@@ -37,15 +37,6 @@ const FROM = ["palette", "map", "panel", "chip", "send-now", "command"] as const
 
 const text = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
 
-function json(body: string | null): unknown {
-  if (body === null) return null;
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 const tableThere = (db: Database, name: string): boolean => db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
 
 /**
@@ -103,7 +94,7 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
     }
 
     // Each stored chip and review card, on the turn its message and swipe were played as, with what it held: its items and their statuses.
-    const chips = json(await today.userView.read(`runs/${chat}/chips.json`));
+    const chips = await today.userView.json(`runs/${chat}/chips.json`);
     for (const chip of Array.isArray(chips) ? chips : []) {
       if (!isRecord(chip) || text(chip.id) === null || text(chip.kind) === null || text(chip.messageId) === null) continue;
       const message = chip.messageId as string;
@@ -119,7 +110,7 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
     }
 
     // A change staged for the next message waits as a held request that goes with it.
-    const staged = json(await today.userView.read(`runs/${chat}/staged.json`));
+    const staged = await today.userView.json(`runs/${chat}/staged.json`);
     if (isRecord(staged) && text(staged.action) !== null) {
       const source = text(staged.source);
       const asked = { action: staged.action as string, values: isRecord(staged.request) ? staged.request : {}, from: FROM.find((f) => f === source) ?? "panel", what: text(staged.label) ?? (staged.action as string), on: null };
@@ -128,7 +119,7 @@ export async function carryTurnThings(input: { today: Today; db: Database; s: Us
     }
 
     // The tools he approved for this chat, each on the turn that was running when he said so: the last whose reply is dated by then, else the first.
-    const kept = json(await today.userView.read(`harness/docs/chats/${docKey(chat)}/approvals.json`));
+    const kept = await today.userView.json(`harness/docs/chats/${docKey(chat)}/approvals.json`);
     if (isRecord(kept) && Array.isArray(kept.tools)) {
       const turns = pathTurns(db, s, chat).map((p) => p.turn);
       const times = isRecord(kept.at) ? kept.at : {};

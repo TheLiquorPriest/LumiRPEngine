@@ -146,28 +146,15 @@ export function countWorldDoc(doc: unknown, current: boolean, tally: Tally): voi
   tally.add("second-copies", entries.filter((e) => isRecord(e) && isRecord(e.source) && e.source.kind === "book").length);
 }
 
-/** An area's index as LumiAH keeps it in a blob (`AreaIndex`, `H/core/workspace.ts:41-45`): each file's path, the hash of its body and the definitions it is pinned for. */
-export function areaFiles(text: string | null): { path: string; hash: string; pins: string[] }[] | null {
-  if (text === null) return null;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return null;
-  }
+/** An area's index as LumiAH keeps it in a blob (`AreaIndex`, `H/core/workspace.ts:41-45`), read as JSON (`StorageView.json`): each file's path, the hash of its body and the definitions it is pinned for. */
+export function areaFiles(raw: unknown): { path: string; hash: string; pins: string[] }[] | null {
   if (!isRecord(raw) || raw.v !== 1 || raw.kind !== "index" || !isRecord(raw.files)) return null;
   return Object.entries(raw.files).flatMap(([path, entry]) => (isRecord(entry) && typeof entry.hash === "string" ? [{ path, hash: entry.hash, pins: Array.isArray(entry.pins) ? entry.pins.filter((p): p is string => typeof p === "string") : [] }] : []));
 }
 
-/** The head of an area as its document holds it (`AreaDoc`, `H/core/workspace.ts:48-53`): the hash of its index, or null while it holds no file. */
-export function areaHead(text: string | null): string | null | undefined {
-  if (text === null) return undefined;
-  try {
-    const raw = JSON.parse(text) as unknown;
-    return isRecord(raw) && raw.v === 1 && raw.kind === "area" && (raw.head === null || typeof raw.head === "string") ? raw.head : undefined;
-  } catch {
-    return undefined;
-  }
+/** The head of an area as its document holds it (`AreaDoc`, `H/core/workspace.ts:48-53`), read as JSON (`StorageView.json`): the hash of its index, or null while it holds no file. */
+export function areaHead(raw: unknown): string | null | undefined {
+  return isRecord(raw) && raw.v === 1 && raw.kind === "area" && (raw.head === null || typeof raw.head === "string") ? raw.head : undefined;
 }
 
 /** A mind file's path in a chat's area (`backend/story/minds.ts:38-52`). */

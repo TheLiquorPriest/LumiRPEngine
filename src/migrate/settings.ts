@@ -48,15 +48,6 @@ export interface SettingsCarried {
   lumiverseConnections: { setting: string; connection: string }[];
 }
 
-function json(text: string | null): unknown {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 /** LumiAH's settings as the user set them: each value they put whole at a path (`Own`), the nearer the root first, so a deeper one stands over it (`valuesOf`). */
 export function lumiahOwn(raw: unknown): Record<string, JsonValue> {
   const values: Record<string, JsonValue> = {};
@@ -74,7 +65,7 @@ export function lumiahOwn(raw: unknown): Record<string, JsonValue> {
 
 /** LumiAH's settings in the user's storage, as the user set them. */
 export async function lumiahSettings(today: Today): Promise<Record<string, JsonValue>> {
-  return lumiahOwn(json(await today.userView.read("harness/settings.json")));
+  return lumiahOwn(await today.userView.json("harness/settings.json"));
 }
 
 /** Every leaf of a value by its dotted path, with its value: a list counts as one setting. */
@@ -148,7 +139,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     else if ("archived" in fate) archived.push({ from, why: fate.archived });
     else out.noHome.push(from);
   };
-  const engine = json(await today.userView.read("settings.json"));
+  const engine = await today.userView.json("settings.json");
   let readSome = engine !== null;
   if (isRecord(engine)) {
     for (const [key, value] of Object.entries(engine)) {
@@ -172,7 +163,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
   }
 
   const history: { from: string[]; keep: unknown; count: unknown } = { from: [], keep: LUMIAH_HISTORY.keep, count: LUMIAH_HISTORY.count };
-  const harness = json(await today.userView.read("harness/settings.json"));
+  const harness = await today.userView.json("harness/settings.json");
   if (harness !== null) readSome = true;
   for (const [path, value] of leaves(lumiahOwn(harness), "", [])) {
     const from = `harness/settings.json: ${path}`;
@@ -205,7 +196,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
   const withChat: Readonly<Record<string, true>> = { mapDisplay: true, tidyLeft: true, knowledge: true, narrator: true, tidy: true, engine: true };
   for (const item of items) {
     if (item.where === "user storage" && item.row === "settings" && item.fate === "carried" && /^(runs\/[^/]+\/prefs|harness\/story)\.json$/.test(item.path)) {
-      const doc = json(await today.userView.read(item.path));
+      const doc = await today.userView.json(item.path);
       if (isRecord(doc)) for (const key of Object.keys(doc)) if (key !== "v" && !(item.path.startsWith("runs/") && Object.hasOwn(withChat, key))) out.noHome.push(`${item.path}: ${key}`);
     }
     const pref = item.where === "Lumiverse database" && item.row === "settings" ? new RegExp(`^chats/([^/]+)/${LEDGER_NAMESPACE}/prefs/([^/]+)$`).exec(item.path) : null;
@@ -216,7 +207,9 @@ export async function carrySettings(today: Today, items: readonly Item[], global
   for (const f of today.runtime.files) {
     const name = /^config\/([^/]+)\.json$/.exec(f.path)?.[1];
     if (name === undefined || !today.runtime.runtimes.some((r) => r.name === name)) continue;
-    const doc = json(await readFile(f.disk));
+    // Its config read whole as the runtime was found (`readRuntimeFolders`): one that no longer reads was changed under the run, which stops it.
+    const text = await readFile(f.disk);
+    const doc = text === null ? null : (JSON.parse(text) as unknown);
     const runtime = isRecord(doc) ? doc.runtime : undefined;
     if (!isRecord(runtime)) continue;
     readSome = true;

@@ -133,6 +133,8 @@ export interface RuntimeRead {
   undecided: string | null;
   /** The runtime folders no config names that are this user's, by name, with why: their working copies' files are in `files`, archived, and what they hadn't sent is in `unsent`, not taken. */
   archived: { name: string; why: string }[];
+  /** Each file it read as JSON that does not read, by its path as the report names it, with the parser's error: what is in it is not carried (`notReadAsJson`). */
+  damaged: Map<string, unknown>;
 }
 
 /** A working copy found in a runtime's folder, and what its identity file says it is for: an extension, a user and a Lumiverse (`keepIdentity`, `H/runtime/store/index.ts:532`), and its own id, which a mark names. */
@@ -146,14 +148,14 @@ interface FoundCopy {
   copy: string | null;
 }
 
-/** Every working copy under the runtimes' folder whose identity file reads as one of an extension's. */
-async function copiesIn(dataDir: string): Promise<FoundCopy[]> {
+/** Every working copy under the runtimes' folder whose identity file reads as one of an extension's; an identity file that does not read is noted in `damaged`. */
+async function copiesIn(dataDir: string, damaged: Map<string, unknown>): Promise<FoundCopy[]> {
   const out: FoundCopy[] = [];
   for (const runtime of await names(join(dataDir, "runtimes"))) {
     if (!RUNTIME_NAME.test(runtime)) continue;
     for (const folder of await names(join(dataDir, "runtimes", runtime, "store"))) {
       const dir = join(dataDir, "runtimes", runtime, "store", folder);
-      const identity = parse(await readText(join(dir, "identity.json")));
+      const identity = await parseFile(join(dir, "identity.json"), damaged);
       if (!isRecord(identity) || typeof identity.extension !== "string") continue;
       out.push({ runtime, folder, dir, extension: identity.extension, user: typeof identity.user === "string" ? identity.user : null, lumiverse: typeof identity.lumiverse === "string" ? identity.lumiverse : null, copy: typeof identity.copy === "string" ? identity.copy : null });
     }
@@ -178,36 +180,45 @@ function markOf(raw: unknown): { copy: string; count: number } | null {
   return { copy: raw.copy, count: typeof raw.count === "number" && Number.isSafeInteger(raw.count) && raw.count >= 0 ? raw.count : 0 };
 }
 
-function parse(text: string | null): unknown {
+/** The name a file of the runtime's folders has where the report says it could not be read. */
+const runtimePath = (file: string): string => `runtime data: ${file}`;
+
+/** A text read as JSON: null where there is none, and where it does not read, which is noted in `damaged` under `at` (as the report names the file) with the parser's error. */
+function parse(text: string | null, at: string, damaged: Map<string, unknown>): unknown {
   if (text === null) return null;
   try {
     return JSON.parse(text) as unknown;
-  } catch {
+  } catch (error) {
+    damaged.set(at, error);
     return null;
   }
 }
 
+/** A file of the runtime's folders read as JSON (`parse`). */
+async function parseFile(file: string, damaged: Map<string, unknown>): Promise<unknown> {
+  return parse(await readText(file), runtimePath(file), damaged);
+}
+
 /**
- * The runtimes a user has registered with this Lumiverse, as today's extension reads its registry
- * (`registryOf`, LumiAH `extension/backend/registry.ts:53-65`): each registration's id, its runtime's name and the
- * SHA-256 of its secret. Null where there is no registry, or none that today's extension reads.
+ * The runtimes a user has registered with this Lumiverse, as today's extension reads its registry (`registryOf`, LumiAH
+ * `extension/backend/registry.ts:53-65`), read as JSON: each registration's id, its runtime's name and the SHA-256 of its secret.
+ * Null where there is no registry, or none that today's extension reads.
  */
-function relaysOf(text: string | null): { id: string; name: string; secret: string }[] | null {
-  const raw = parse(text);
+function relaysOf(raw: unknown): { id: string; name: string; secret: string }[] | null {
   if (!isRecord(raw) || raw.v !== 1) return null;
   if (!isRecord(raw.relays)) return [];
   return Object.entries(raw.relays).flatMap(([id, r]) => (isRecord(r) && typeof r.name === "string" && typeof r.secret === "string" && typeof r.port === "number" && Number.isInteger(r.port) && r.port >= 1 && r.port <= 65535 ? [{ id, name: r.name, secret: r.secret }] : []));
 }
 
 /** Each registration's id and the SHA-256 of its secret; null where there is no registry the previous build reads. */
-function registrations(text: string | null): Map<string, string> | null {
-  const relays = relaysOf(text);
+function registrations(raw: unknown): Map<string, string> | null {
+  const relays = relaysOf(raw);
   return relays === null ? null : new Map(relays.map((r) => [r.id, r.secret]));
 }
 
-/** The names of the runtimes this user's registry registers with this Lumiverse; none where it holds none. */
-export function registeredNames(text: string | null): string[] {
-  return (relaysOf(text) ?? []).map((r) => r.name);
+/** The names of the runtimes this user's registry (read as JSON) registers with this Lumiverse; none where it holds none. */
+export function registeredNames(raw: unknown): string[] {
+  return (relaysOf(raw) ?? []).map((r) => r.name);
 }
 
 async function names(dir: string): Promise<string[]> {
@@ -228,9 +239,9 @@ async function beside(dir: string, name: string, label: string): Promise<Runtime
  * What a working copy hasn't sent (`load`, `H/runtime/store/index.ts:565-591`): each journal entry
  * names a document (`d.<sha256 of its path>`, holding the path) or a blob (`b.<hash>`); one whose
  * file isn't on the disk is a write cut off before it happened, and is no change. A document's empty
- * file is a removal.
+ * file is a removal. An entry that does not read is noted in `damaged`, and left out as the runtime leaves it out.
  */
-async function unsentOf(copyDir: string): Promise<Map<string, string | null>> {
+async function unsentOf(copyDir: string, damaged: Map<string, unknown>): Promise<Map<string, string | null>> {
   const files = new Map<string, string | null>();
   for (const name of await names(join(copyDir, "journal"))) {
     if (name.startsWith("b.") && BLOB_HASH.test(name.slice(2))) {
@@ -239,7 +250,7 @@ async function unsentOf(copyDir: string): Promise<Map<string, string | null>> {
       if (text !== null) files.set(`harness/blobs/${hash.slice(0, 2)}/${hash}`, text);
       continue;
     }
-    const held = parse(await readText(join(copyDir, "journal", name)));
+    const held = await parseFile(join(copyDir, "journal", name), damaged);
     if (!isRecord(held) || typeof held.path !== "string" || !DOC_PATH.test(held.path) || held.path === MARK_PATH || name !== `d.${sha256(held.path)}`) continue;
     const text = await readText(join(copyDir, "docs", held.path));
     if (text !== null) files.set(`harness/docs/${held.path}`, text === "" ? null : text);
@@ -253,7 +264,7 @@ async function unsentOf(copyDir: string): Promise<Map<string, string | null>> {
  * mark in the extension's storage (`harness/docs/mirror.json`), null when there is none.
  */
 export async function readRuntimeFolders(folders: RuntimeFolders, identifier: string, owner: RuntimeOwner, mirrorMark: string | null): Promise<RuntimeRead> {
-  const out: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], archived: [], undecided: null };
+  const out: RuntimeRead = { runtimes: [], files: [], unsent: [], leftAlone: [], archived: [], undecided: null, damaged: new Map() };
   // Every config here is read to tell whose runtime it is: it names its extension, the user it signs in as, and its registration.
   const ours: { name: string; config: SavedRuntime; file: string }[] = [];
   const unreadable: string[] = [];
@@ -271,13 +282,13 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
     configured.add(config.name);
     if (config.extension === identifier) ours.push({ name: config.name, config, file: f.path });
   }
-  const regs = registrations(owner.registry);
+  const regs = registrations(parse(owner.registry, "user storage: harness/registry.json", out.damaged));
   const sameUser = (c: { config: SavedRuntime }): boolean => owner.username !== null && c.config.session.username === owner.username;
   // Its registration (`register`, LumiAH `extension/backend/relays.ts:185-220`) is kept in this user's storage of this Lumiverse, under the id its config holds, with its secret's hash.
   const registered = (c: { config: SavedRuntime }): boolean => regs?.get(c.config.relay) === sha256(c.config.secret);
   // This Lumiverse's address as the data shows it: where the runtimes registered with it reach it, and where the working copy its storage's mark names does.
-  const copies = await copiesIn(folders.dataDir);
-  const mark = markOf(parse(mirrorMark));
+  const copies = await copiesIn(folders.dataDir, out.damaged);
+  const mark = markOf(parse(mirrorMark, "user storage: harness/docs/mirror.json", out.damaged));
   const known = new Map<string, string>();
   for (const c of ours) if (registered(c)) known.set(addressKey(c.config.base), c.config.base);
   for (const c of copies) if (mark !== null && c.copy === mark.copy && c.extension === identifier && c.lumiverse !== null) known.set(addressKey(c.lumiverse), c.lumiverse);
@@ -325,7 +336,7 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
       const apart = here.filter((c) => !ofThis.includes(c) || (c.user !== null && c.user !== owner.username)).map((c) => `store/${c.folder}/`);
       out.files.push(...(await walk(root)).filter((f) => !apart.some((p) => f.path.startsWith(p))).map((f) => ({ ...f, path: `runtimes/${name}/${f.path}`, disk: join(root, f.path), working: note })));
       for (const c of ofThis) {
-        const files = await unsentOf(c.dir);
+        const files = await unsentOf(c.dir, out.damaged);
         if (files.size > 0) out.unsent.push({ runtime: name, files, kept: false, why: "no config names this runtime, so the previous runtime never runs it and never sends what its working copy hadn't sent" });
       }
       out.archived.push({ name, why: answer === "mine" ? "no config names it; you said its working copy is this user's" : "no config names it; its working copy's identity says it is this user's" });
@@ -359,11 +370,11 @@ export async function readRuntimeFolders(folders: RuntimeFolders, identifier: st
   // What its working copy of this user's data hasn't sent, and whether today's runtime would send it. The copy is the runtime's own for its Lumiverse, the user it signs in as, and the extension (`H/runtime/runtime.ts:224`).
   if (taken !== null) {
     const { name, config } = taken;
-    const mark = markOf(parse(mirrorMark));
+    const mark = markOf(parse(mirrorMark, "user storage: harness/docs/mirror.json", out.damaged));
     const copyDir = join(folders.dataDir, "runtimes", name, "store", copyFolderOf(config.base, config.session.username, identifier));
-    const files = await unsentOf(copyDir);
+    const files = await unsentOf(copyDir, out.damaged);
     if (files.size > 0) {
-      const identity = parse(await readText(join(copyDir, "identity.json")));
+      const identity = await parseFile(join(copyDir, "identity.json"), out.damaged);
       const copy = isRecord(identity) && identity.v === 1 && identity.kind === "working-copy" && typeof identity.copy === "string" ? identity.copy : null;
       const count = isRecord(identity) && typeof identity.count === "number" && Number.isSafeInteger(identity.count) && identity.count >= 0 ? identity.count : 0;
       // `claim` (`H/runtime/store/index.ts:682-720`): the copy carries on under its own mark when it

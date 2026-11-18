@@ -8,13 +8,13 @@
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, statSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CliIO, runCli } from "../../src/app/cli";
 import { configOf, dataPaths } from "../../src/app/config";
 import { CapturingFold } from "../../src/migrate/capture";
-import { type ChatFailure, failureFile, failuresFolder, readFailure } from "../../src/migrate/failures";
+import { type ChatFailure, failureFile, failuresFolder, readFailure, unreadFile } from "../../src/migrate/failures";
 import { type MigrationPage, migrationPage } from "../../src/migrate/page";
 import { migrateRoutes } from "../../src/migrate/routes";
 import { say, withLines } from "../../src/shared/lines";
@@ -69,6 +69,11 @@ describe("a chat the run does not carry", () => {
   /** The chat's sentence, as its record of why makes it. */
   const sentence = (record: ChatFailure): string =>
     say("migration_not_carried_chat", { label: label(), why: say("migration_not_carried_fold"), number: String(record.message?.number), swipe: String(record.message?.swipe), error: record.error.message.split("\n")[0] ?? "", file: failureFile(data, CHAT.agents) });
+  /** The line that says what the last real run could not read, as many files as its report names; none where it read everything. */
+  const unread = (): string[] => {
+    const count = withDb((db) => (JSON.parse(db.query<{ report: string }, [string]>("SELECT report FROM migration_run WHERE user = ? ORDER BY at DESC LIMIT 1").get(USER)?.report ?? "{}") as { unreadable: unknown[] }).unreadable.length);
+    return count === 0 ? [] : [say("migration_unread", { count, file: unreadFile(data) })];
+  };
 
   beforeAll(async () => {
     fixture = await buildFixture("operator");
@@ -118,16 +123,18 @@ describe("a chat the run does not carry", () => {
     expect(line).toContain("at message 2 (swipe 0)");
     expect(line).toContain("RPE has no words loaded on this thread");
     expect(line).toContain(file);
-    expect(first.text.split("\n").slice(0, 8)).toEqual([
+    const expected = [
       head,
       `  ${line}`,
       `    ${say("migration_not_carried_none")}`,
       `    ${say("migration_not_carried_kept")}`,
       `    ${say("migration_not_carried_again", { line: ["rpe", "migrate", ...args()].join(" ") })}`,
       `    ${say("migration_not_carried_one", { line: ["rpe", "migrate", ...args(), "--chat", CHAT.agents].join(" ") })}`,
+      ...unread(),
       "",
       expect.stringMatching(/^Migration real run/),
-    ]);
+    ];
+    expect(first.text.split("\n").slice(0, expected.length)).toEqual(expected);
     expect(out.at(-1)).toBe(say("migration_not_carried_end", { count: 1 }));
     // The report holds the stage, never the error's words.
     expect(withDb((db) => db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM migration_run WHERE report LIKE ?").get("%no words loaded%")?.n ?? 0)).toBe(0);
@@ -240,6 +247,37 @@ describe("a chat the previous build's reader cannot open", () => {
       expect(line).not.toContain("at message");
       expect(line).toContain(record.error.message.split("\n")[0] ?? "");
       expect(line).toEndWith(`See ${failureFile(data, CHAT.harness)}.`);
+    } finally {
+      await fixture.remove();
+    }
+  });
+});
+
+describe("a file of the previous build the run reads as JSON and cannot read", () => {
+  test("is named under what could not be read in fixed words, kept with the parser's error for him alone, and said ahead of the report", async () => {
+    const fixture = await buildFixture("operator");
+    try {
+      await rm(join(fixture.userFolder, STRAY));
+      const data = join(fixture.root, "rpe-data");
+      // LumiAH's list of the chats the engine is on, damaged: the run read it as absent before, and said nothing.
+      await writeFile(join(fixture.userFolder, "harness", "chats.json"), "{ Ostrichfeather");
+      const out: string[] = [];
+      const ran = await migrateBy(fixture, data, out);
+      expect(ran.code).toBe(0);
+      expect(ran.text).toContain("  user storage: harness/chats.json: it does not read as JSON, so nothing in it is carried");
+      const kept = JSON.parse(readFileSync(unreadFile(data), "utf8")) as { files: { path: string; error: { message: string } | null }[] };
+      expect(statSync(unreadFile(data)).mode & 0o777).toBe(0o600);
+      expect(kept.files.find((f) => f.path === "user storage: harness/chats.json")?.error?.message).toBeString();
+      const count = kept.files.length;
+      expect(ran.text.split("\n")).toContain(say("migration_unread", { count, file: unreadFile(data) }));
+      // The report holds no word of the file.
+      const db = new Database(join(data, "rpe.db"), { readonly: true });
+      try {
+        expect(db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM migration_run WHERE report LIKE ?").get("%Ostrichfeather%")?.n ?? 0).toBe(0);
+      } finally {
+        db.close();
+      }
+      expect(ran.text).not.toContain("Ostrichfeather");
     } finally {
       await fixture.remove();
     }

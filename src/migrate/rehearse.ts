@@ -24,6 +24,7 @@ import { backupSize, backupSources, makeBackup, type BackupChat, type BackupResu
 import { classifyRuntime, classifyStorage, EXTENSION_WIDE, type Classified, type ClassifyContext } from "./classify";
 import { namedFiles, readBytes, sha256 } from "./files";
 import { areaFiles, areaHead, countLedgers, countLink, countSettings, countWorldDoc, INSIDE_UNIT, MIND_FILE, recordBlobs, Tally, type Unreadable } from "./inside";
+import { damagedOf, notReadAsJson } from "./failures";
 import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { CHAT_HELD, chatEndOf, changesSince, countRow, insideEnds, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
 import { placesOf, type Place } from "./carry";
@@ -52,15 +53,6 @@ export interface RehearseOptions {
   /** Whether the real run is given the turn lane's writer of his jobs and approvals, so they land (`rpe migrate` gives it). */
   jobs?: boolean;
   now?: () => Date;
-}
-
-function json(text: string | null): unknown {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 /** The bytes and checksum of a JSON value as text: how a database entry is measured. */
@@ -180,8 +172,7 @@ function measuredText(text: string): { bytes: number; sha256: string } {
 }
 
 /** The chats LumiAH's list of chats to forget names (`{v:1, chats{chatId→ms}}`, `H/extension/backend/forget.ts:52`). */
-function forgottenOf(text: string | null): Set<string> {
-  const raw = json(text);
+function forgottenOf(raw: unknown): Set<string> {
   return new Set(isRecord(raw) && isRecord(raw.chats) ? Object.keys(raw.chats) : []);
 }
 
@@ -241,7 +232,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
   {
     const userId = sources.userId as UserId;
     const chatRows = today.chats;
-    const context: ClassifyContext = { chats: new Set(chatRows.map((c) => c.id)), forgotten: forgottenOf(await userView.read("harness/forget.json")) };
+    const context: ClassifyContext = { chats: new Set(chatRows.map((c) => c.id)), forgotten: forgottenOf(await userView.json("harness/forget.json")) };
 
     const unreadable: Unreadable[] = [];
     const items: Item[] = [];
@@ -306,7 +297,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     }
 
     // The agents engine's global workspace: its files, by the blobs they name.
-    const global = json(await userView.read("agents/global.json"));
+    const global = await userView.json("agents/global.json");
     if (isRecord(global) && isRecord(global.files)) {
       tally.add("agents-workspace", Object.keys(global.files).length);
       for (const f of Object.values(global.files)) {
@@ -344,7 +335,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
           if (tidyOf !== null && tidyOf.auto !== undefined) tidyWorlds.push(id);
         }
         await reader.worldStore.history(id as WorldId, userId);
-        const draft = json(await userView.read(`worlds/${id}/draft.json`));
+        const draft = await userView.json(`worlds/${id}/draft.json`);
         if (isRecord(draft)) countWorldDoc(draft.doc, false, tally);
       } catch {
         // A fixed reason: the store's own words can quote the file's text, and the report holds no content.
@@ -358,7 +349,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       if (item.where !== "user storage" || item.fate === null) continue;
       const area = /^harness\/docs\/(chats\/([^/]+)\/(area\/[^/]+|learned)\.json|workspace\/user\.json)$/.exec(item.path);
       if (!area) continue;
-      const head = areaHead(await userView.read(item.path));
+      const head = areaHead(await userView.json(item.path));
       if (head === undefined) {
         unreadable.push({ path: `user storage: ${item.path}`, why: "an area head that doesn't read" });
         continue;
@@ -366,7 +357,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       if (head === null) continue;
       const indexPath = `harness/blobs/${head.slice(0, 2)}/${head}`;
       nameBlob(indexPath, item.row ?? "learned-and-home", `the index of the area ${item.path} names`);
-      const files = areaFiles(await userView.read(indexPath));
+      const files = areaFiles(await userView.json(indexPath));
       if (files === null) {
         unreadable.push({ path: `user storage: ${indexPath}`, why: `the index ${item.path} names; the previous build's clean-up had removed it, or it doesn't read` });
         continue;
@@ -392,8 +383,8 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     tally.add("learned-and-home", versions.home.size);
     tally.add("guidance", versions.guidance.size);
 
-    const settingsDoc = json(await userView.read("settings.json"));
-    countSettings(settingsDoc, json(await userView.read("harness/settings.json")), tally);
+    const settingsDoc = await userView.json("settings.json");
+    countSettings(settingsDoc, await userView.json("harness/settings.json"), tally);
     // Where the tidy-up's settings are found (R-201): a chat's switch (its own choice) and leave-alone list (its prefs), the world's switch, and a user-level `tidy` read as today's own reader reads it.
     const tidyChats = new Set<string>();
     for (const item of items) {
@@ -401,13 +392,13 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       if (pref !== undefined) tidyChats.add(pref);
       const run = item.where === "user storage" ? /^runs\/([^/]+)\/prefs\.json$/.exec(item.path)?.[1] : undefined;
       if (run === undefined) continue;
-      const prefs = json(await userView.read(item.path));
+      const prefs = await userView.json(item.path);
       if (isRecord(prefs) && (prefs.tidy !== undefined || prefs.tidyLeft !== undefined)) tidyChats.add(run);
     }
     const tidy = { chats: [...tidyChats].sort(), worlds: tidyWorlds, user: isRecord(settingsDoc) && settingsDoc.tidy !== undefined ? tidySettingsOf(settingsDoc.tidy).findings : null };
-    countLink(found.runtime.runtimes.length, json(await userView.read("harness/registry.json")), tally);
+    countLink(found.runtime.runtimes.length, await userView.json("harness/registry.json"), tally);
     // Where today's build keeps two copies of the acceptance connections, the file of the acceptance runs is the authority (today's guard reads its list first, `agents/provider.ts:711`), and the settings' copy is counted as attached.
-    const guarded = json(await userView.read("agent-acceptance.json"));
+    const guarded = await userView.json("agent-acceptance.json");
     const copy = isRecord(settingsDoc) && isRecord(settingsDoc.agents) && isRecord(settingsDoc.agents.acceptance) && Array.isArray(settingsDoc.agents.acceptance.connections) ? settingsDoc.agents.acceptance.connections.length : 0;
     if (isRecord(guarded) && Array.isArray(guarded.connections)) {
       tally.add("second-copies", copy);
@@ -417,6 +408,8 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
 
     // A damaged file today's readers set aside, as the stand-in kept it.
     for (const w of writes) if (w.op === "move" && w.to !== undefined && /\.corrupt-\d+$/.test(w.to)) unreadable.push({ path: `${w.store}: ${w.path}`, why: "damaged: the previous build's reader sets it aside and starts afresh" });
+    // Every other file read as JSON here that does not read, in the storage or the runtime's folders.
+    unreadable.push(...notReadAsJson(damagedOf(today), unreadable));
 
     // The blobs a thing names count where that thing goes (a mind file's text with the mind files, a note's with the notes), and the sessions row holds the session, summary and transcript texts: the row of what names each blob is its row, and a blob nothing names stays with the sessions, where both blob stores are kept whole.
     for (const p of fromRecords) nameBlob(p, "sessions", "a session, summary or transcript text a record names");
@@ -483,7 +476,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
     const away = found.disowned?.runtimes[0] ?? null;
     const awayBase = away === null ? null : runtimeBase(away.config.listen, away.config.port);
     const awayConnections = new Set(awayBase === null ? [] : db.connectionProfiles().flatMap((c) => (loopsBack(c, model, [awayBase]) ? [c.id] : [])));
-    const disowned = found.disowned === null || sources.ignored === undefined ? null : disownedOf(sources.ignored, found.disowned, registeredNames(await userView.read("harness/registry.json")), offRpe.filter((c) => c.pinned !== null && awayConnections.has(c.pinned)).length);
+    const disowned = found.disowned === null || sources.ignored === undefined ? null : disownedOf(sources.ignored, found.disowned, registeredNames(await userView.json("harness/registry.json")), offRpe.filter((c) => c.pinned !== null && awayConnections.has(c.pinned)).length);
     const report: MigrationReport = {
       format: REPORT_FORMAT,
       at,

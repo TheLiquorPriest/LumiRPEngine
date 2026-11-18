@@ -29,7 +29,7 @@ import { STORY_MIGRATIONS, STORY_STORE_AREA } from "../story";
 import { chatCarried } from "./briefing";
 import { carry, placesOf } from "./carry";
 import { checkConnectionsSteady } from "./connections";
-import { closeFailure, type FoundFailure, keepFailure } from "./failures";
+import { closeFailure, damagedOf, errorOf, type FoundFailure, keepFailure, keepUnread, notReadAsJson } from "./failures";
 import { type ChatNames, type TreeLayout } from "./own-files";
 import { type CarriedRuns, chatsToImport, importChats, withBranches } from "./import-chats";
 import { readRun } from "./today/run";
@@ -247,6 +247,11 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
       const kept = followWorlds(db, s.worlds, sources.userId);
       report.worldsInStore = { added: kept.added, held: kept.held, unreadable: kept.unreadable.length, copied: kept.copied, followed: kept.followed, kept: kept.kept, removed: kept.removed };
       for (const u of kept.unreadable) report.unreadable.push({ path: `RPE's database: world_file ${u.world}/rev/${u.revision}.json`, why: "a world revision the run carried that doesn't read as a world document, so RPE's store doesn't keep it" });
+      // What the carrying read as JSON and could not read is named with the rest, in fixed words; the record of what could not be read keeps each with the error it met, his alone, and the notice says where.
+      const met = damagedOf(today);
+      report.unreadable.push(...notReadAsJson(met, report.unreadable));
+      step = "keeping the record of what could not be read";
+      await keepUnread(paths.root, { format: 1, at: report.at, files: report.unreadable.map((u) => ({ path: u.path, why: u.why, error: met.has(u.path) ? errorOf(met.get(u.path)) : null })) });
       // Each row counted again from what the run did (R-320, R-321): what of a chat it did not carry is not carried, and is named; what then does not balance is said, and the swap reads it.
       step = "counting what the run did";
       const placeOf = await placesOf(today, report.items, layout !== undefined, options.runs?.keepJob !== undefined);

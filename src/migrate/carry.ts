@@ -138,14 +138,7 @@ export async function carry(input: CarryInput): Promise<{ landed: Partial<Record
   const matcher = matcherOf(today.db.connectionProfiles(), connectionsOf(await port.loadConnections({ user })));
   const carriedSettings = await carrySettings(today, report.items, paths.globalConfig, earlier, input.settings, (id) => matcher({ where: id, connection: id, model: null, to: null }).carried?.id ?? null);
   keepPutPrints(db, user, carriedSettings.put, carriedSettings.drop);
-  const readJson = async (path: string): Promise<unknown> => {
-    try {
-      return JSON.parse((await today.userView.read(path)) ?? "null") as unknown;
-    } catch {
-      return null;
-    }
-  };
-  const choices = findChoices(await readJson("settings.json"), await readJson("harness/settings.json")).map(matcher);
+  const choices = findChoices(await today.userView.json("settings.json"), await today.userView.json("harness/settings.json")).map(matcher);
   const listed = choices.filter((c) => c.carried === null);
   const settings = { ...carriedSettings.carried, lumiverseConnections: listed.map((c) => ({ setting: c.where, connection: c.connection })) };
   // Each chat the import carried; and each chat's area as each turn left it, read once for its notes and its characters' mind files.

@@ -76,12 +76,7 @@ export async function carryJobs(input: { today: Today; items: readonly Item[]; d
   const generations = new Map<string, Map<string, string>>();
   const blob = async (hash: unknown): Promise<string | null> => (typeof hash === "string" && hash !== "" ? today.userView.read(blobPath("harness", hash)) : null);
   for (const item of docs) {
-    let doc: unknown = null;
-    try {
-      doc = JSON.parse((await today.userView.read(item.path)) ?? "null");
-    } catch {
-      doc = null;
-    }
+    const doc = await today.userView.json(item.path);
     const job = isRecord(doc) && doc.kind === "job" && isRecord(doc.job) ? doc.job : null;
     const task = isRecord(doc) && typeof doc.task === "string" ? doc.task : null;
     if (job === null || task === null || typeof job.id !== "string" || typeof job.chatId !== "string" || !input.chats.has(job.chatId)) {

@@ -9,6 +9,7 @@ keys:
   migration_not_carried_stands, migration_not_carried_none, migration_not_carried_kept: what of the chat RPE holds and what it does not, and that the previous build's data holds it all
   migration_not_carried_again, migration_not_carried_again_switched, migration_not_carried_one, migration_not_carried_back: what to do - line, the command to run (for migration_not_carried_one, the one that carries that chat alone)
   migration_still_open: the chats whose record of why is still kept that this run neither carried nor failed on (a run asked for another chat, or a chat left alone) - count, folder, chats (each as migration_not_carried_label names it)
+  migration_unread: the previous build's files a real run could not read, so that nothing in them is carried (each is named under "Could not be read" in the report) - count, file (the record that keeps each with the error it met; none where it was not kept)
   migration_chat_rehearse, migration_chat_first, migration_chat_none: why a run asked for one chat is refused - with a rehearsal, before any real run (the gate's line), for a chat that plays no world in the previous build (the gate's line) - chat
   migration_carried_now, migration_carried_page: a chat a run carried that an earlier run could not, in the command's output and on the page - label, at (when the run that carried it read the previous build's data), failed (when the run that could not was; none where its record no longer said)
   migration_not_carried_end, migration_not_carried_end_switch: a command's closing line where it ends with exit code 1 for them - count
@@ -29,6 +30,7 @@ migration_not_carried_again_switched: Once the cause is mended, run {{line}} whi
 migration_not_carried_one: To carry this chat alone, leaving every other chat as it stands, run {{line}}.
 migration_not_carried_back: To go back to the previous build instead, run {{line}} and follow the steps it prints.
 migration_still_open: {{count}} other chat(s) still have a record of why a run could not carry them, kept in {{folder}}: {{chats}}. This run did not try them.
+migration_unread: {{count}} file(s) of the previous build could not be read, so nothing in them is carried: each is named under "Could not be read" in the report below{{#file}}, and kept with the error it met in {{file}}{{/file}}.
 migration_chat_rehearse: --chat carries one chat in a real run; a rehearsal reads every chat and writes nothing, so it takes no --chat.
 migration_chat_first: --chat {{chat}} carries one chat after a real run carried the rest; no real run has been made in this data folder yet, so run rpe migrate without --chat first.
 migration_chat_none: --chat {{chat}} names no chat of yours that the previous build plays a world in, so there is nothing to carry.

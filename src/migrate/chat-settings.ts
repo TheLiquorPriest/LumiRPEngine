@@ -69,15 +69,6 @@ function storyChoices(doc: unknown, chat: string): Wanted[] {
   return out;
 }
 
-function json(text: string | null): unknown {
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Carries the own choices of `chats` (the chats this run imported) into their `RPE.yml`. `globalConfig` is where the user's own cap of the
  * leave-alone list (`things.maxTidyLeft`) is read; `registry` the app's settings; `earlier` what earlier runs put.
@@ -87,7 +78,7 @@ export async function carryChatSettings(input: { today: Today; chats: readonly s
   const out: ChatSettingsCarried = { carried: [], keptInRpe: [], notCarried: [], followed: [], tidyCut: [] };
   const put = new Map<string, string>();
   const drop = new Set<string>();
-  const lumiah = json(await today.userView.read("harness/chats.json"));
+  const lumiah = await today.userView.json("harness/chats.json");
   const globalText = (await readText(input.globalConfig)) ?? "";
   const mostDeclared = registry?.find((d) => d.key === "things.maxTidyLeft");
   const globalMost = ((): unknown => {
@@ -102,7 +93,7 @@ export async function carryChatSettings(input: { today: Today; chats: readonly s
     const character = row.character === null ? null : today.db.character(row.character);
     const config = join(places.root, await places.chat(chat, { character, chat: { name: row.name ?? "" } }), "RPE.yml");
     const wanted: Wanted[] = [...metadataChoices(row.metadata), ...storyChoices(lumiah, chat)];
-    const prefs = json(await today.userView.read(`runs/${chat}/prefs.json`));
+    const prefs = await today.userView.json(`runs/${chat}/prefs.json`);
     if (isRecord(prefs)) {
       const left = Array.isArray(prefs.tidyLeft) ? prefs.tidyLeft.filter((k): k is string => typeof k === "string") : [];
       if (left.length > 0) {
