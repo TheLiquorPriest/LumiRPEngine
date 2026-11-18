@@ -14,10 +14,10 @@ There are four levels, from far to near:
 |---|---|---|
 | Shipped | `files/defaults/` | Every file RPE ships. Read-only, and laid out again at every start, so an update's defaults arrive by themselves. Read and copy from it. |
 | Yours | `files/` | Your own files for every chat. |
-| A character's | `files/chats/<character>/` | Your files for every chat with one character or group: `AGENTS.md`, `agents/`, `rules/`, `skills/`. |
-| A chat's | `files/chats/<character>/<chat>/` | Your files for one chat, and its config file `RPE.yml`. |
+| A character's | `files/chats/<character>-<id>/` | Your files for every chat with one character or group: `AGENTS.md`, `agents/`, `rules/`, `skills/`. The folder is named for the character in lower-case letters, digits and hyphens, then a dash and the first eight letters and digits of its id; a character renamed later keeps its folder. |
+| A chat's | `files/chats/<character>-<id>/<chat>-<id>/` | Your files for one chat, and its config file `RPE.yml`. Named the same way, for the chat. |
 
-The shipped files come from this repository's `guidance/` folder. The instruction files in `guidance/chat-defaults/` are laid at the root of `files/defaults/`, beside `ALL-AGENTS.md`.
+The shipped files come from this repository's `guidance/` folder and from the harness's own. The instruction files in `guidance/chat-defaults/` are laid at the root of `files/defaults/`, beside `ALL-AGENTS.md`.
 
 **A file at a nearer level replaces the file of the same name at a farther one.** Your `files/.rules/consent.md` replaces the shipped one, and a chat's `rules/consent.md` replaces yours for that chat. The one exception is `AGENTS.md`: a character's and a chat's both apply (the `stack.layered` list in `guidance/RPE-global.yml`).
 
@@ -46,7 +46,7 @@ The turn's process is written in `TURN.md` ([shipped](../guidance/chat-defaults/
 A rule is a file in `.rules/` (yours and the shipped ones) or `rules/` (a character's or a chat's), with a header and a text. A rule is one of two kinds:
 
 - **Always on.** Its text is part of the instructions of the agents its header names (`agents:`). The shipped `guidance/.rules/consent.md` and `guidance/.rules/perceptions.md` are of this kind.
-- **Triggered.** Its header adds a condition. It costs nothing until the condition holds; then its text is put in front of the agent. A condition is a moment (`at:`, such as the end of a run), alone or with a fact drawn from the records (`fact:`); a pattern in what the agent writes (`condition:`); a yes-or-no question a small model answers (`question:`); or a count of turns (`every:`). `repeat:` says how often it may fire, once per turn unless it says otherwise. `needs:` ties it to another file: while that file is off, so is the rule.
+- **Triggered.** Its header adds a condition. It costs nothing until the condition holds; then its text is put in front of the agent. A condition is a moment (`at:`: `turn-start`, `run-end`, `before-compaction`, or `after-message`, which is after each message of the agent that made tool calls), alone or with a fact drawn from the records (`fact:`); a pattern in what the agent writes (`condition:`); a yes-or-no question a small model answers (`question:`); or a count of turns (`every:`). `repeat:` says how often it may fire, once per turn unless it says otherwise. `needs:` ties it to another file: while that file is off, so is the rule. The example `rule-fields.md` in `.rules/examples/` names every field a rule's header takes.
 
 A fact is a plain count from the records, such as who was on stage this turn and has no perception recorded. It takes no side. The rule's header says what counts.
 
@@ -64,7 +64,7 @@ Shipped rules in force:
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
 | `guidance/.rules/save-before-compaction.md` | Gives the Author the chance to save what matters before a session's earlier turns are summarized. |
 
-Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and three the build added, `intent-missing` (the last reply went out with no intent record before it), `turn-unrecorded` (a turn is about to end with nothing recorded) and `limits-left` (the Author has two or fewer calls or tool rounds left, a limit the player set; it is told so with its next call, and the rule names the fact `limits.left`). `TURN.md` is the one home of the first two behaviours.
+Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and three the build added, `intent-missing` (the last reply went out with no intent record before it), `turn-unrecorded` (a turn is about to end with nothing recorded) and `limits-left` (the Author has two or fewer calls or tool rounds left, a limit the player set; it is told so with its next call, and the rule names the fact `limits.left`). `TURN.md` is the one home of what `intent-missing` and `turn-unrecorded` remind of.
 
 ### Skills
 
@@ -75,7 +75,7 @@ A skill is a folder in `.skills/` with a `SKILL.md`: a name, a description, and 
 Each agent is a file in `.agents/` (yours and the shipped ones) or `agents/` (a character's or a chat's). Its header says:
 
 - `model`: the connection it uses, by name, or `default`;
-- `effort`: how hard its model thinks;
+- `effort`: how hard its model thinks, from `off` to `max`; a level its model does not have is the nearest it has. The shipped Author is at `max`; the other shipped agents' efforts are in their files;
 - `tools`: the tools it holds; with `tool_search` and `tool_use` it can reach the rest;
 - `reads`: which instruction files it reads;
 - `given`: what it is handed at the start of a run (the prompt or parts of it, the briefing, ranges of the chat, views of the world and of its character). The lead's names are found the same way a sub-agent's are, and laid out after its briefing by `files/defaults/.prompts/given.md`; a name nothing could be found for gets one line saying so;
@@ -106,6 +106,8 @@ The files in `.prompts/` lay out what the agents are given, and word what RPE an
 | `guidance/.prompts/turn-errors.md` | The words a turn gives when it cannot be played, when it is stopped, when an agent's read of Lumiverse cannot be made, and when a Settle now is refused. |
 | `guidance/.prompts/play-answers.md` | What the Play page's panels are told when RPE does not do what they asked, or leaves something as it was. |
 | `guidance/.prompts/build-jobs.md` | The words of Build's model jobs: the brief each job's agent is started with, what it is told of each proposal it makes, and how a job that was refused, stopped at a limit, failed or was cancelled is said. |
+| `guidance/.prompts/request-answers.md` | What the panels show when a request from a panel cannot be kept or taken back. |
+| `guidance/.prompts/history-*.md` | The sentences the engine itself writes into what the agents and you read: why a change was refused (`history-refusals.md`), what a check of a world or a map finds wrong (`history-lint.md`), the player's journal (`history-journal.md`), the money's notices and what its books record (`history-money.md`), an organization's History (`history-orgs.md`), the narrator's own sections (`history-narrator.md`), a fight's lines, the names and descriptions of actions, and the single words the other lines are filled with. Each file is one family. A line is a name, a colon and its text, with `{{field}}` where the engine puts in what it knows; delete a line and the engine says nothing in its place. |
 
 A chat with no world plays on a blank world. Its clock starts at a date nobody set, so no date is shown (in the briefing, the world state, the engine's answers, the cast's views and the story record) until a change in the story sets the clock to a date and a time. A span or a time of day only moves the clock, and until it is set the engine's answers give a time as how long from now. Memories are still timed, and fade all the same. The time skill tells the agents how a date is set.
 
@@ -121,7 +123,7 @@ As shipped, the Author writes the reply itself, and hands the prose to the narra
 
 To have the narrator write every reply of one chat:
 
-1. Copy `files/defaults/WRITING.md` into the chat's folder, `files/chats/<character>/<chat>/WRITING.md`.
+1. Copy `files/defaults/WRITING.md` into the chat's folder, `files/chats/<character>-<id>/<chat>-<id>/WRITING.md`.
 2. Under "This chat's notes on writing", write: "Use a separate voice for the prose: hand every reply to the narrator."
 
 For every chat, put the copy in `files/` instead, or change the list under "When to hand it to the narrator" itself.
