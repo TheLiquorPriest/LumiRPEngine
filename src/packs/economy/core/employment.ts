@@ -31,7 +31,7 @@ import { calendarOf, clockAt, dateAt, dayIndexOf, dayIndexOfText, formatClock, M
 import { labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "../../../engine/scope";
-import { businessAt, jobsAt, mayAct, orgPlaces, orgTypeOf, placesOf, positionsBelow, positionsOf } from "../../../engine/org";
+import { businessAt, isRuled, jobsAt, mayAct, orgPlaces, orgTypeOf, placesOf, positionsBelow, positionsOf } from "../../../engine/org";
 import { COMPANY_KIND, GROUP_KIND, type MembershipContext } from "../../../engine/selector";
 import { placeVisit } from "../../../engine/seen";
 import type { WorldState } from "../../../engine/state";
@@ -889,8 +889,8 @@ function staffRefusal(ctx: ReadContext, by: EntityId, employer: EntityId, power:
   const may = mayAct(ctx, by, employer, power, reach !== "all" && reach.worker !== undefined ? { target: reach.worker } : {});
   if (!may.ok) return may.reason;
   const positions = positionsOf(ctx, employer);
-  const mine = may.grant.basis === "position" ? positions.find((p) => p.id === may.grant.id) : undefined;
-  if (mine?.scope !== "below") return null;
+  const mine = "grant" in may && may.grant.basis === "position" ? positions.find((p) => p.id === may.grant.id) : undefined;
+  if (mine?.scope !== "below" || isRuled(ctx)) return null;
   const name = labelOf(ctx, employer);
   if (reach === "all") return say("org_log_title_reaches_only_the_positions_below_it", { title: mine.title, name: name });
   if (reach.position === undefined || positionsBelow(positions, mine.id).includes(reach.position)) return null;

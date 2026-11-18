@@ -81,6 +81,8 @@ export interface EffectScope {
    * is refused with the world's tiers as choices, and a tier left out is the world's spawn tier, handed back as filled in (`EffectOutcome.filled`).
    */
   asGiven?: true;
+  /** The action is carried out as ruled: its effects run with `EffectContext.ruled`, so what its doer may do is told, not enforced again. */
+  ruled?: true;
 }
 
 /** A level the experience reached, with the effects the world writes for it, offered for an agent to apply or roll (`EffectScope.offers`). `from` is the level before the gain. */
@@ -355,7 +357,7 @@ export function resolveEffect(reg: Registry, w: Working, spec: EffectSpec, scope
   if (core) return core;
   const def = reg.effects.get(spec.type);
   if (!def) return reject("unknown_effect", say("why_unknown_effect_type", { type: spec.type }));
-  return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {}, effect: { type: spec.type, args } });
+  return def.resolve(args, { ...w.ctx, rng: scope.rng, params: scope.params ?? {}, effect: { type: spec.type, args }, ...(scope.ruled === true ? { ruled: true as const } : {}) });
 }
 
 /** Effect lists carried in arguments (a check's outcomes), read defensively: they are authored JSON. */

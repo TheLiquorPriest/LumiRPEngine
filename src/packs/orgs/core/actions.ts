@@ -17,7 +17,7 @@ import type { ParamDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOfText } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
-import { delegationsOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsBelow, positionsOf, seatFilled } from "../../../engine/org";
+import { delegationsOf, directMembers, heldPositions, isRuled, mayAct, orgPower, orgTypeOf, positionsBelow, positionsOf, seatFilled } from "../../../engine/org";
 import { labelOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { CoreRegistry, EffectContext, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import { linkEvents } from "../../../engine/relations";
@@ -65,9 +65,9 @@ function relink(ctx: ReadContext, who: EntityId, org: EntityId, change: Readonly
 function mayReach(ctx: ReadContext, by: EntityId, org: EntityId, power: OrgPower, who: EntityId, position?: string): Rejection | null {
   const may = mayAct(ctx, by, org, power);
   if (!may.ok) return refuse("not_allowed", may.reason);
-  if (may.grant.basis !== "position") return null;
+  if (!("grant" in may) || may.grant.basis !== "position") return null;
   const mine = heldPositions(ctx, by, org).find((h) => h.position.id === may.grant.id)?.position;
-  if (mine?.scope !== "below") return null;
+  if (mine?.scope !== "below" || isRuled(ctx)) return null;
   const below = positionsBelow(positionsOf(ctx, org), mine.id);
   const reached = [...heldPositions(ctx, who, org).map((h) => h.position.id), ...(position !== undefined ? [position] : [])];
   return reached.length > 0 && reached.every((p) => below.includes(p)) ? null : refuse("not_allowed", say("why_who_isnt_below_title_at_org", { who: labelOf(ctx, who), title: mine.title, org: labelOf(ctx, org) }));

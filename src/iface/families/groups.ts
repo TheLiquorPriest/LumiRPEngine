@@ -145,7 +145,7 @@ const whoMay = readTool({
     const who = foundIn(r, "who", args.who, "person");
     if (isUnread(who)) return who;
     const may = mayAct(r.ctx, who.id, group.id, power);
-    reply.data({ org, power, who: `${who.name} [${who.id}]`, may: may.ok, ...(may.ok ? { basis: may.grant.basis } : {}), holders });
+    reply.data({ org, power, who: `${who.name} [${who.id}]`, may: may.ok, ...("grant" in may ? { basis: may.grant.basis } : {}), holders });
     return undefined;
   },
 });

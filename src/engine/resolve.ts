@@ -325,9 +325,15 @@ export interface ResolveOptions {
   needs?: Needs;
   /**
    * The world's rules advise rather than refuse (plan §6.1; his own tap, PlanTurnKinds-21): each requirement the action does not meet
-   * is given back in `advised`, and the action is applied all the same.
+   * is given back in `advised`, and the action is applied all the same; so is a combat action that is not its doer's to take now (it
+   * spends nothing), and its effects run as ruled (`EffectScope.ruled`), so a power its doer lacks is not enforced again by them.
    */
   advise?: true;
+  /**
+   * The outcome the GM ruled (plan §6.5: the world's actions are what the GM rules by): taken as it is, so the check is not rolled and
+   * no attempt is recorded for it; the outcome's effects read `roll` as a check that did not roll.
+   */
+  outcome?: string;
 }
 
 /**
@@ -377,16 +383,22 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
 
   const checkDef = checkOf(w.world, p.action.check);
   const ready = checkDef ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars) : null;
-  if (ready && "code" in ready) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
-  // A combat action spends its cost before it rolls, so a miss uses it up too.
+  // An outcome ruled is not rolled for, so a check that cannot be read keeps nothing from it.
+  if (ready && "code" in ready && opts.outcome === undefined) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
+  // A combat action spends its cost before it rolls, so a miss uses it up too. Advised, one not its doer's to take now is told and spends nothing.
   const spend = combatSpend(w.ctx, p.actor, p.action);
-  const refused = Array.isArray(spend) ? (spend.map((ev) => w.apply(ev)).find((r) => r !== null) ?? null) : spend;
+  if (!Array.isArray(spend) && opts.advise === true) advised.push({ code: spend.code, reason: spend.reason });
+  const refused = Array.isArray(spend) ? (spend.map((ev) => w.apply(ev)).find((r) => r !== null) ?? null) : opts.advise === true ? null : spend;
   if (refused) return { ...base, actor: p.actor, failed: refused, events: w.events.slice(start) };
   let check: CheckResult | null = null;
   let outcome: string;
   let vars = p.vars;
   let adjudged: Adjudged | null = null;
-  if (checkDef && ready) {
+  if (opts.outcome !== undefined) {
+    outcome = opts.outcome;
+    const read = ready && !("code" in ready) ? ready : null;
+    vars = { ...p.vars, roll: { natural: null, total: null, modifier: read?.modifier ?? 0, dc: read?.dc ?? null, margin: null, outcome } };
+  } else if (checkDef && ready && !("code" in ready)) {
     const counts = checkCounts(ready);
     const odds = oddsOf(counts);
     const policy = policyFor(w.world, w.state, p.action, p.actor);
@@ -441,7 +453,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   }
 
   const effects = own(p.action.outcomes, outcome) ?? [];
-  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars, params: p.params, rng: rng.fork("effects") });
+  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars, params: p.params, rng: rng.fork("effects"), ...(opts.advise === true ? { ruled: true as const } : {}) });
 
   if (activity) {
     w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });

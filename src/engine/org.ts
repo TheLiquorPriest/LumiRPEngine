@@ -18,7 +18,7 @@ import { calendarIn } from "./holidays";
 import { acts } from "./life";
 import { labelOf, numOf, objOf, optionalQuery, own, sliceOf } from "./pack-kit";
 import { passMemo } from "./read-pass";
-import type { ReadContext } from "./registry";
+import type { EffectContext, ReadContext } from "./registry";
 import { isGone, kindIs, placeOfEntity, placeWithin } from "./scope";
 import { siteOf, together } from "./presence";
 import { COMPANY_KIND, GROUP_KIND, isMemberOf, linkedMemberOf, providersOf, type MembershipContext } from "./selector";
@@ -491,8 +491,12 @@ export function actsFor(ctx: OrgContext, who: EntityId, power: OrgPower): Entity
     .filter((org) => org !== who && !isGone(ctx.state, org) && orgTypeOf(ctx, org) !== null && orgPower(ctx, who, org, power) !== null);
 }
 
-/** Whether someone may use a power now, or why not, in words; `limit` marks a refusal for a limit of the position or delegation the power rests on (each payment, the month, the accounts), which a request for approval may lift. */
-export type MayAct = { ok: true; grant: OrgGrant } | { ok: false; reason: string; limit?: true };
+/**
+ * Whether someone may use a power now, or why not, in words; `limit` marks a refusal for a limit of the position or delegation the power
+ * rests on (each payment, the month, the accounts), which a request for approval may lift. `ruled`: they may not (its words are why), but
+ * the act is carried out as ruled (`EffectContext.ruled`), so it goes ahead with no power of theirs to rest on.
+ */
+export type MayAct = { ok: true; grant: OrgGrant } | { ok: true; ruled: string } | { ok: false; reason: string; limit?: true };
 
 /** What an act asks of a power: the amount it pays, the account it pays from, the person it is done to. */
 export interface ActAsk {
@@ -543,6 +547,17 @@ interface LimitCheck {
  * deals in its property only with a co-trustee's approval (a limit a request may lift). A refusal says why.
  */
 export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: OrgPower, ask: ActAsk = {}): MayAct {
+  const may = heldAct(ctx, who, org, power, ask);
+  return !may.ok && isRuled(ctx) ? { ok: true, ruled: may.reason } : may;
+}
+
+/** Whether an effect runs for an action carried out as ruled (`EffectContext.ruled`): a power its doer lacks, or the scope of the one they hold, is not enforced. */
+export function isRuled(ctx: ReadContext): boolean {
+  return (ctx as Partial<EffectContext>).ruled === true;
+}
+
+/** `mayAct` as the powers held answer it. */
+function heldAct(ctx: ReadContext, who: EntityId, org: EntityId, power: OrgPower, ask: ActAsk): MayAct {
   const name = labelOf(ctx, org);
   const ended = endedRefusal(ctx, org, power);
   if (ended !== null) return { ok: false, reason: ended };

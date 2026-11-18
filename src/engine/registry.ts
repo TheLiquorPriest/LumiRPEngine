@@ -161,6 +161,11 @@ export interface EffectContext extends ReadContext {
    * request that `by` approved. The decision's votes, or the act's limit, are answered by it.
    */
   carried?: { org: EntityId; motion?: string; approval?: string; by?: EntityId; cents?: number };
+  /**
+   * Set while an action is carried out as ruled (`ResolveOptions.advise`: the GM's `act`, a press that plays at once): what its doer
+   * may do is told by the action's own requirements and is not enforced again by its effects (`mayAct`), plan §6.5.
+   */
+  ruled?: true;
 }
 
 /** Turns a validated effect proposal into concrete events. */
