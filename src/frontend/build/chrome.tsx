@@ -66,6 +66,8 @@ export const UNREAD_PARTS: Readonly<Partial<Record<WorldPart, true>>> = { lorePi
  * The fields of a part Build still draws, which nothing RPE runs reads: not drawn, kept in the file as it has them, and named once in
  * a closed line at the part's foot (`KeptUnused`). Time: the previous build's turn ran on these (a turn's tick by kind of scene, what
  * stopped a time skip, Speed through, the montage); now only an agent's `pass_time` moves the clock, and it lists what falls due.
+ * World: what the previous build read of a reply (a re-run's rolls, the people and places a reply made); an agent now adds people and
+ * places by a call, and only the chat's place cap holds the places.
  */
 export const KEPT_UNUSED: Readonly<Partial<Record<WorldPart, readonly { key: string; label: string }[]>>> = {
   time: [
@@ -73,6 +75,11 @@ export const KEPT_UNUSED: Readonly<Partial<Record<WorldPart, readonly { key: str
     { key: "interrupts", label: "What stops a time skip" },
     { key: "speedThrough", label: "Speed through: when a long activity is offered as a skip or runs on its own" },
     { key: "montage", label: "How a time skip is summed up (the montage)" },
+  ],
+  meta: [
+    { key: "seedMode", label: "Whether a re-run of an action rolls fresh or the same" },
+    { key: "spawnCap", label: "How many people a reply may introduce in a chat" },
+    { key: "placesPerTurn", label: "How many places one reply may make" },
   ],
 };
 

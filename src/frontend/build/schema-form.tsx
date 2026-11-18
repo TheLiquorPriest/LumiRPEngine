@@ -1325,9 +1325,8 @@ function BandCapsInput(props: { label: string; value: JsonValue | undefined; iss
 }
 
 /**
- * The world's player-claims default (DESIGN §9.4), with the control Settings and GM mode use. Off, the
- * world sets none and a new chat takes the player's own; switched on, it starts from what the world's
- * realism preset plays claims by, so a Simulation world starts at Ask first.
+ * The world's player-claims default (DESIGN §9.4). Off, the world sets none and a chat plays claims by its realism preset; switched
+ * on, it starts from what the world's realism preset plays claims by, so a Simulation world starts at Ask first.
  */
 export function ClaimsInput(props: { label: string; value: JsonValue | undefined; preset: JsonValue | undefined; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const policy = readClaims(props.value);
@@ -1335,11 +1334,11 @@ export function ClaimsInput(props: { label: string; value: JsonValue | undefined
   return (
     <div class="lre-field" data-lre-claims="world">
       <span class="label">{props.label}</span>
-      <HostSwitch label="This world sets what new chats make of them" checked={props.value !== undefined} onChange={(on) => props.onChange(on ? { mode: seed.mode, capped: seed.capped } : undefined)} />
+      <HostSwitch label="This world sets what the Add on a panel does with them" checked={props.value !== undefined} onChange={(on) => props.onChange(on ? { mode: seed.mode, capped: seed.capped } : undefined)} />
       {policy ? (
         <ClaimsControl value={policy} onChange={(next) => props.onChange({ mode: next.mode, capped: next.capped })} />
       ) : props.value === undefined ? (
-        <span class="lre-field-help">Not set: a new chat takes the player's own setting (Settings → Realism).</span>
+        <span class="lre-field-help">Not set: a chat plays this by its realism preset. Story makes it real at any price, Grounded makes it real up to the claim cap, and Simulation asks first.</span>
       ) : null}
       <Issues issues={props.issues} />
     </div>
@@ -1347,9 +1346,8 @@ export function ClaimsInput(props: { label: string; value: JsonValue | undefined
 }
 
 /**
- * The world's default for the narrator's knowledge (DESIGN §6.11), with the control Settings and GM
- * mode use. Switched on, it starts from the shipped default; off sends null, so the world's meta
- * setter removes it and each chat follows its own choice, else the player's.
+ * What the world's secrecy answer gives the narrator of the secrets in your lore (DESIGN §6.11). Switched on, it starts from the
+ * shipped choice; off sends null, so the world's meta setter removes it and each chat follows its own setting, else yours.
  */
 export function NarratorInput(props: { label: string; value: JsonValue | undefined; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
   const view = narratorViewOf(props.value);
@@ -1357,8 +1355,8 @@ export function NarratorInput(props: { label: string; value: JsonValue | undefin
   return (
     <div class="lre-field" data-lre-narrator="world">
       <span class="label">{props.label}</span>
-      <HostSwitch label="This world sets what the narrator knows" checked={set} onChange={(on) => props.onChange(on ? { ...NARRATOR_DEFAULTS } : null)} />
-      {view ? <NarratorViewControl value={view} onChange={(next) => props.onChange({ knowledge: next.knowledge, secrets: next.secrets })} /> : !set ? <span class="lre-field-help">Not set: each chat follows its own choice (GM → This chat → Knowledge), else the player's Settings → Narrator.</span> : null}
+      <HostSwitch label="This world sets what the narrator is given of secrets" checked={set} onChange={(on) => props.onChange(on ? { ...NARRATOR_DEFAULTS } : null)} />
+      {view ? <NarratorViewControl value={view} onChange={(next) => props.onChange({ knowledge: next.knowledge, secrets: next.secrets })} /> : !set ? <span class="lre-field-help">Not set: each chat follows its own Narrator's knowledge and Narrator's secrets settings, else yours.</span> : null}
       <Issues issues={props.issues} />
     </div>
   );

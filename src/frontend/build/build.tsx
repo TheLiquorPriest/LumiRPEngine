@@ -16,7 +16,7 @@ import { mapSettingsForEdit } from "../../shared/map-settings";
 import type { JobKind } from "../../shared/jobs";
 import type { LintIssue } from "../../shared/lint";
 import type { WorldCollection, WorldPart } from "../../shared/world";
-import { placeCapsOf, playedKinds, spawnCapOf, type KindDef, type WorldDoc, type WorldIndex } from "../../shared/world";
+import { placeCapsOf, playedKinds, type KindDef, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { BuildRoute, EntityGroup } from "../app";
 import { LorePinsSection } from "./lore-pins";
 import { useApp, useUi, useView } from "../app";
@@ -875,9 +875,16 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
     case "time":
       return doc.time as unknown as JsonObject;
     case "meta":
-      // Map settings and the spawn and place caps show as the world plays them: a world without them, with the defaults.
-      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), placeCap: placeCapsOf(doc).chat, placesPerTurn: placeCapsOf(doc).turn, lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsForEdit(doc)) as unknown as JsonObject };
+      // Map settings and the place cap show as the world plays them: a world without them, with the defaults.
+      return { name: doc.name, pov: doc.pov, narrator: doc.narrator ? { ...doc.narrator } : null, start: { ...doc.start }, lenientPricing: doc.lenientPricing, placeCap: placeCapsOf(doc).chat, lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsForEdit(doc)) as unknown as JsonObject };
   }
+}
+
+/** What the world's file holds of the part's fields that nothing RPE runs reads (`KEPT_UNUSED`), under the keys it names; unset where the file holds the default. */
+function unusedOf(doc: WorldDoc, part: WorldPart): Record<string, unknown> {
+  if (part === "time") return { ...doc.time };
+  if (part === "meta") return { seedMode: doc.seedMode !== "fresh" ? doc.seedMode : undefined, spawnCap: doc.spawnCap, placesPerTurn: doc.placesPerTurn };
+  return {};
 }
 
 function PartView(props: { part: WorldPart }) {
@@ -910,7 +917,7 @@ function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" 
       <PageHeader title={PART_INFO[props.part].label} subtitle={PART_INFO[props.part].hint} />
       {props.part === "meta" ? <DataUpdatesSection /> : null}
       <SchemaFields specs={PART_SPECS[props.part]} value={value} ctx={{ doc: draft.doc, lint: draft.lint, path: props.part, identifiers, functions: draft.functions }} onChange={setValue} />
-      <KeptUnused fields={KEPT_UNUSED[props.part] ?? []} held={value} />
+      <KeptUnused fields={KEPT_UNUSED[props.part] ?? []} held={unusedOf(draft.doc, props.part)} />
       <SaveBar>
         <Button
           variant="primary"

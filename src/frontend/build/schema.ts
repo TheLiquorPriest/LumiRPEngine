@@ -63,9 +63,9 @@ export type FieldSpec =
   | { kind: "life"; key: string; label: string }
   /** A cap per domain for each detail band, keyed by band id. */
   | { kind: "bandCaps"; key: string; label: string }
-  /** A player-claims policy (`shared/claims.ts`), or none: unset, a new chat takes the player's own. */
+  /** A player-claims policy (`shared/claims.ts`), or none: unset, a chat plays claims by its realism preset. */
   | { kind: "claims"; key: string; label: string }
-  /** The narrator's knowledge (`shared/settings.ts` `NarratorView`), or none: unset, each chat follows its own choice, else the player's Settings → Narrator. */
+  /** What the narrator is given of the secrets in your lore (`shared/narrator-view.ts` `NarratorView`), or none: unset, each chat follows its own setting, else yours. */
   | { kind: "narrator"; key: string; label: string }
   /** Game minutes, typed as a span ("1 h 30 min"). */
   | { kind: "duration"; key: string; label: string; optional?: boolean; hint?: string }
@@ -297,7 +297,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
         key: "",
         label: "Cue",
         fields: [
-          { kind: "text", key: "text", label: "What the narrator sees them do (never the secret itself)" },
+          { kind: "text", key: "text", label: "What others can see them do (never the secret itself)" },
           { kind: "ref", key: "lore", label: "While this secret lore stays gated", collection: "lore", optional: true },
           { kind: "ref", key: "track", label: "While this track keeps something hidden", collection: "tracks", optional: true },
           { kind: "text", key: "flag", label: "Until this story flag is set", optional: true, hint: "Pick one of the three: the secret the cue stands for" },
@@ -487,9 +487,9 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "label", label: "Label" },
     { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
-    // The section's feed (DESIGN §6.11): the world's defaults, which the GM can set per chat.
+    // A section's feed (DESIGN §6.11), kept in the file: nothing RPE runs reads it (`UNREAD_COLLECTIONS`).
     { kind: "bool", key: "enabled", label: "In the prompt", hint: "Off leaves the section out", reads: (v) => v !== false },
-    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Unset, it follows the narrator's knowledge: a chat's own choice, else the world's (World → The narrator's knowledge), else the player's Settings → Narrator. Set, it reads what your character knows, also what the people with your character know or plainly see, or everything, marking what your character doesn't know." },
+    { kind: "enum", key: "scope", label: "Whose knowledge", values: FEED_SCOPES, labels: SCOPE_LABEL, optional: true, hint: "Kept in the file, not used by this build." },
     { kind: "number", key: "maxLines", label: "At most lines", min: 1, step: 1, optional: true },
     { kind: "number", key: "maxTokens", label: "At most tokens", min: 1, step: 1, optional: true, hint: "Lines past it are cut from the end" },
     { kind: "tags", key: "include", label: "Sources (none: its own slot's renderers)", noun: "source" },
@@ -521,7 +521,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   classifications: [
     { kind: "text", key: "label", label: "Label" },
     { kind: "bool", key: "multiple", label: "Several values per entity", hint: "Off: one value each, like a story role. On: any number, like allegiances" },
-    { kind: "bool", key: "shown", label: "Players can see this classification", hint: "Off: only Build and GM mode see it; Play → People never groups or filters by it" },
+    { kind: "bool", key: "shown", label: "Players can see this classification", hint: "Off: only Build and the World page see it; Play → People never groups or filters by it" },
     { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
     { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
     { kind: "facetValues", key: "values", label: "Values" },
@@ -576,9 +576,9 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
   ],
   realism: [
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
-    { kind: "levels", key: "levels", label: "Domain levels", floored: true },
-    { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
-    { kind: "claims", key: "claims", label: "Player claims" },
+    { kind: "levels", key: "levels", label: "Level of each part of life", floored: true },
+    { kind: "bandCaps", key: "tierCaps", label: "Caps for each kind of person" },
+    { kind: "claims", key: "claims", label: "What you add that the world doesn't have" },
   ],
   // What a look-ahead through time stops at (`time_totals`, and Check world's day): the ceilings are `TIME_LIMITS.unitCap`. The ticks, the
   // interrupt policy, speed through and the montage of the previous build's turn are kept in the file and not drawn (`KEPT_UNUSED`).
@@ -596,7 +596,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
   meta: [
     { kind: "text", key: "name", label: "World name" },
     { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
-    { kind: "narrator", key: "narrator", label: "The narrator's knowledge" },
+    { kind: "narrator", key: "narrator", label: "What the narrator is given of secrets in your lore" },
     {
       kind: "object",
       key: "start",
@@ -606,10 +606,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
         { kind: "localTime", key: "at", label: "At" },
       ],
     },
-    { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
-    { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
-    { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
-    { kind: "number", key: "placesPerTurn", label: "Places one reply may make (a room, a booth, a new bar; 0 for none)", min: 0, max: 500, step: 1 },
+    { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept a price that is said, inside the item's price band)" },
     { kind: "number", key: "placeCap", label: "Places a chat may make in play, in total (0 for none)", min: 0, max: 500, step: 1 },
     {
       kind: "record",
@@ -623,7 +620,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
         fields: [
           { kind: "text", key: "label", label: "Label" },
           { kind: "bool", key: "acts", label: "Still acts (follows schedules and plans, chooses, takes combat turns)" },
-          { kind: "text", key: "reads", label: "Reads to the narrator as", hint: "lies unconscious · is missing · walks again" },
+          { kind: "text", key: "reads", label: "Written in the Journal as", hint: "lies unconscious · is missing · walks again" },
         ],
       },
     },

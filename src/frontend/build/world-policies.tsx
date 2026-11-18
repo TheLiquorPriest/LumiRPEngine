@@ -1,6 +1,7 @@
-// The world's policies as Build's forms set them: the narrator's knowledge (DESIGN §6.11), player
-// claims (DESIGN §9.4) and the ruleset's realism floors in words. Each control is the one place its
-// policy is drawn, so every form that sets it reads the same.
+// The world's policies as Build's forms set them: what the narrator is given of secrets in your lore (the secrecy answer, DESIGN §6.11),
+// what the Add on a panel does with something the world doesn't have (player claims, DESIGN §9.4, also set for one chat on its World
+// page) and the ruleset's realism floors in words. Each control is the one place its policy is drawn, so every form that sets it reads
+// the same.
 
 import type { ClaimsPolicy } from "../../shared/claims";
 import { CLAIM_MODE_LABEL, CLAIM_MODES } from "../../shared/claims";
@@ -23,20 +24,26 @@ export function floorNote(floors: Partial<Record<DomainId, Level>>): string | nu
 
 const CLAIM_CHOICES = CLAIM_MODES.map((mode) => ({ value: mode, label: CLAIM_MODE_LABEL[mode] }));
 
+/** What the Add on a panel does under each way of holding to the world: made at once (a key, a weapon or a document, and with the cap on a dear thing, ask first), asked about, or not offered. */
+export function claimsWords(policy: ClaimsPolicy): string {
+  if (policy.mode === "real") return policy.capped ? "Add makes it at once. A key, a weapon or a document, or anything that costs more than this world's claim cap, asks you first." : "Add makes it at once. A key, a weapon or a document asks you first.";
+  if (policy.mode === "ask") return "Add asks you before it makes it real.";
+  return "Add isn't offered, and a change of yours that would make something the world doesn't have is turned down.";
+}
+
 /**
- * Player claims (DESIGN §9.4): what a typed action's thing the world doesn't have becomes, and
- * whether Make it real asks first above the world's claim cap. The cap switch keeps its value under
- * the other modes, where it does nothing, so switching back to Make it real finds it as it was.
+ * Player claims (DESIGN §9.4): what the Add on a panel does when you say you have something the world doesn't, and whether Make it
+ * real asks first above the world's claim cap. The cap switch keeps its value under the other modes, where it does nothing, so
+ * switching back to Make it real finds it as it was.
  */
 export function ClaimsControl(props: { value: ClaimsPolicy; disabled?: boolean; onChange(next: ClaimsPolicy): void }) {
   const { mode, capped } = props.value;
-  const help = mode === "real" ? (capped ? "It's added where your action needs it, unless it costs more than the world's claim cap: then you're asked first." : "It's added where your action needs it, at any price.") : mode === "ask" ? "The turn waits for your answer: Add, or Not an action." : "The action plays as plain roleplay, and a receipt says why.";
   return (
     <div class="lre-stack" data-lre-claims>
       <div class="lre-field">
-        <span class="label">When you say you have something the world doesn't</span>
-        <Seg<ClaimsPolicy["mode"]> label="When you say you have something the world doesn't" value={mode} options={CLAIM_CHOICES} disabled={props.disabled} onChange={(next) => props.onChange({ mode: next, capped })} />
-        <span class="lre-field-help">{help} Cash you carry is just handed over; money you say you have and don't is always asked about first, except under Hold me to the world.</span>
+        <span class="label">When you add something the world doesn't have</span>
+        <Seg<ClaimsPolicy["mode"]> label="When you add something the world doesn't have" value={mode} options={CLAIM_CHOICES} disabled={props.disabled} onChange={(next) => props.onChange({ mode: next, capped })} />
+        <span class="lre-field-help">{claimsWords(props.value)}</span>
       </div>
       <div class="lre-field">
         <HostSwitch label="Ask first above the world's claim cap" checked={capped} disabled={props.disabled || mode !== "real"} onChange={(next) => props.onChange({ mode, capped: next })} />
@@ -53,16 +60,16 @@ const KNOWLEDGE_CHOICES = NARRATOR_KNOWLEDGE.map((value) => ({ value, label: KNO
 const SECRETS_CHOICES = NARRATOR_SECRETS.map((value) => ({ value, label: SECRETS_LABEL[value] }));
 
 const KNOWLEDGE_HELP: Record<NarratorKnowledge, string> = {
-  scene: "What every person in the scene knows, with what your character doesn't know marked for the narrator.",
-  pov: "Only what your character knows.",
+  scene: "A secret your character doesn't know may go into the prompt, marked as a secret, so the narrator can play those who hold it.",
+  pov: "Only what your character knows goes into the prompt: a secret kept from your character stays out.",
 };
 
 const SECRETS_HELP: Record<NarratorSecrets, string> = {
-  marked: "A line carrying a secret's words goes in marked as a secret, with whom it is known to or kept from.",
-  omit: "A line carrying a secret's words is left out.",
+  marked: "A secret kept from your character goes in marked as one, with whom it is known to or kept from.",
+  omit: "A secret kept from your character is left out.",
 };
 
-/** The narrator's knowledge (DESIGN §6.11): whose knowledge it gets and what of a secret. */
+/** What the narrator is given of the secrets in your lore: whose knowledge counts and what of a secret goes into the prompt. A secret goes in only when both say so. */
 export function NarratorViewControl(props: { value: NarratorView; disabled?: boolean; onChange(next: NarratorView): void }) {
   const { knowledge, secrets } = props.value;
   return (
@@ -77,6 +84,7 @@ export function NarratorViewControl(props: { value: NarratorView; disabled?: boo
         <Seg<NarratorSecrets> label="Secrets" value={secrets} options={SECRETS_CHOICES} disabled={props.disabled} onChange={(next) => props.onChange({ knowledge, secrets: next })} />
         <span class="lre-field-help">{SECRETS_HELP[secrets]}</span>
       </div>
+      <span class="lre-field-help">A secret goes in only when both say so: everyone in the scene, and marked.</span>
     </div>
   );
 }

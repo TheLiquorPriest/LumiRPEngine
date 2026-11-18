@@ -5,11 +5,11 @@
 
 import { useState } from "preact/hooks";
 import type { OwnAnswer, OwnAsk, OwnValues } from "../../../shared/api";
-import { CLAIM_MODE_LABEL, CLAIM_MODES, type ClaimMode } from "../../../shared/claims";
 import { BANDS, DOMAIN_LABEL, DOMAINS, LEVEL_LABEL, type Level } from "../../../shared/ids";
 import { BAND_LABEL } from "../../../shared/tiers";
 import { type CheckRules, CheckRulesForm } from "../../../frontend/adjudication-form";
-import { Banner, Button, Disclosure, HostSwitch, Seg } from "../../../frontend/components";
+import { Banner, Button, Disclosure } from "../../../frontend/components";
+import { ClaimsControl } from "../../../frontend/build/world-policies";
 import { useApp } from "../../app";
 import { useRead } from "../../reading";
 import { errorWords } from "../../words";
@@ -18,15 +18,6 @@ import { readOwn, sendOwn, sendUndo } from "./read";
 const LEVELS: readonly Level[] = [0, 1, 2, 3, 4];
 
 const PRESET_WORDS: Readonly<Record<OwnValues["realism"]["preset"], string>> = { story: "the Story preset", grounded: "the Grounded preset", simulation: "the Simulation preset", custom: "a mix of your own" };
-
-const CLAIM_CHOICES = CLAIM_MODES.map((value) => ({ value, label: CLAIM_MODE_LABEL[value] }));
-
-/** What the Add on a panel does under each way of holding to the world, said for what RPE does. */
-function claimsWords(mode: ClaimMode, capped: boolean): string {
-  if (mode === "real") return capped ? "Add makes it at once. A key, a weapon or a document, or anything that costs more than this world's claim cap, asks you first." : "Add makes it at once. A key, a weapon or a document asks you first.";
-  if (mode === "ask") return "Add asks you before it makes it real.";
-  return "Add isn't offered, and a change of yours that would make something the world doesn't have is turned down.";
-}
 
 /** The ask a change of the check rules' controls comes to. */
 function checksAsk(patch: Partial<CheckRules>): OwnAsk {
@@ -117,9 +108,7 @@ function Claims(props: { values: OwnValues["claims"]; disabled: boolean; onAsk(a
     <div class="lre-stack" data-own="claims">
       <h4 class="rpe-caption">When you add something the world doesn't have</h4>
       <p class="rpe-meta">This is what the Add on a panel does when you say you have something this world doesn't. It changes only what you add from now on: what you added before stays.</p>
-      <Seg<ClaimMode> label="When you add something the world doesn't have" value={mode} options={CLAIM_CHOICES} disabled={props.disabled} onChange={(next) => props.onAsk({ kind: "claims", mode: next })} />
-      <p class="rpe-meta">{claimsWords(mode, capped)}</p>
-      {mode === "real" ? <HostSwitch label="Ask first above the world's claim cap" checked={capped} disabled={props.disabled} onChange={(next) => props.onAsk({ kind: "claims", capped: next })} /> : null}
+      <ClaimsControl value={{ mode, capped }} disabled={props.disabled} onChange={(next) => props.onAsk({ kind: "claims", mode: next.mode, capped: next.capped })} />
       <p class="rpe-meta">{own ? "This chat sets this for itself." : "This chat follows its world."}</p>
       {own ? (
         <div class="lre-inline">
