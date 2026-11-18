@@ -8,6 +8,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CreateHarnessOptions } from "rp-harness";
 import type { JsonValue, Log, Scope, TurnRequest } from "rp-harness/contract";
 import { type Answer, scriptedModel, type ScriptedModel } from "rp-harness/testing/rig";
 import { dataPaths, openApp, SecretsFile, type App, type Area, type RunningServer } from "../../src/app";
@@ -83,6 +84,8 @@ export interface TurnBedOptions {
   areas?: (composition: Composition) => readonly Area[];
   /** The scripted model's context window in tokens: 64,000 when not given. */
   contextWindow?: number;
+  /** What the agents run on: the one scripted model (the default), or RPH's own model layer, on the connections made through RPE's routes. */
+  models?: "scripted" | "layer";
 }
 
 /** The Author's answer in one call: its intent record, then its reply. */
@@ -167,7 +170,8 @@ export async function openTurnBed(options: TurnBedOptions): Promise<TurnBed> {
     /** An RPE on the bed's data folder: listening, registered with the extension, and the connection in Lumiverse pointing at it. */
     const startRpe = async () => {
       // Each agent starts on the effort its definition names, as the model layer gives it: `auto` and `inherit` are the connection's own, which the one scripted model has none of.
-      const composition = compose({ fetch: server.fetch, open: server.open, harness: { models: { agentModel: async (choice) => model.agentModel(choice.effort === undefined || choice.effort === "inherit" || choice.effort === "auto" ? "off" : choice.effort) } } });
+      const scripted: Pick<CreateHarnessOptions, "models"> = { models: { agentModel: async (choice) => model.agentModel(choice.effort === undefined || choice.effort === "inherit" || choice.effort === "auto" ? "off" : choice.effort) } };
+      const composition = compose({ fetch: server.fetch, open: server.open, ...(options.models === "layer" ? {} : { harness: scripted }) });
       const app = await openApp({ paths, config, version: "build-9", areas: [...composition.areas, ...(options.areas?.(composition) ?? [])], ui: null, log: recordingLog(logged) });
       cleanups.push(() => app.close());
       const turns = composition.turns();
