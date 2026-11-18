@@ -4,10 +4,10 @@
 // Every kind of record has its own words here; a kind this build does not know is drawn as it came.
 
 import type { ComponentChildren } from "preact";
-import type { LimitHit, ReleaseForm, ReplyError, RunOutcome, RunStatus } from "rp-harness/contract";
+import type { ReleaseForm, ReplyError, RunStatus } from "rp-harness/contract";
 import { Icon, type IconName } from "./icons";
 import { markdown, Written } from "./markdown";
-import type { PromptNotice, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
+import type { LimitHit, PromptNotice, RunOutcome, ToolResult, TraceRecord, TurnRunKind } from "../shared/api";
 import { Badge, Disclosure, Pre, type Tone } from "../frontend/components";
 import { type AgentNode, type AgentState, agentState, agentUsage, type CallStep, type EventOf, type NoteStep, type RunNode, runTotals, type Step, type ToolStep } from "./live-model";
 import { type NoticeLines, NO_NOTICES, noticeLine } from "./notice-words";
