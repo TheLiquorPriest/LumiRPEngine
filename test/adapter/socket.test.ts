@@ -179,7 +179,7 @@ describe("the event socket", () => {
 describe("the sockets' limits as settings", () => {
   test("a ping set to 5 s pings at 5 s", async () => {
     const clock = new FakeClock();
-    const b = await openDoor({ clock, lumiverse: { sockets: { ping: 5 } } });
+    const b = await openDoor({ clock, lumiverse: { sockets: { pingSeconds: 5 } } });
     try {
       const events = b.server.socketsOf(USER).find((s) => s.session !== b.registration.relay)!;
       const opened = events.stats.framesIn;

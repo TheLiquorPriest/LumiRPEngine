@@ -44,7 +44,7 @@ interface Run {
 
 async function busyTurn(flush?: number): Promise<Run> {
   const clock = new FakeClock();
-  const b = await openDoor({ clock, handlerMs: HANDLER_MS, ...(flush !== undefined ? { lumiverse: { relay: { flush } } } : {}) });
+  const b = await openDoor({ clock, handlerMs: HANDLER_MS, ...(flush !== undefined ? { lumiverse: { relay: { flushSeconds: flush } } } : {}) });
   beds.push(b);
   const page = b.server.page(USER, PAGE, b.extension, PAGE_BYTES_PER_SECOND);
   const road = pageRoad(page.channel, { timers: clock });
@@ -128,7 +128,7 @@ describe("the relay under the load of a busy turn", () => {
 describe("the relay's limits as settings", () => {
   test("a relay flush set to 100 ms flushes at 100 ms", async () => {
     const clock = new FakeClock();
-    const b = await openDoor({ clock, lumiverse: { relay: { flush: 0.1 } } });
+    const b = await openDoor({ clock, lumiverse: { relay: { flushSeconds: 0.1 } } });
     beds.push(b);
     const page = b.server.page(USER, PAGE, b.extension, PAGE_BYTES_PER_SECOND);
     const road = pageRoad(page.channel, { timers: clock });

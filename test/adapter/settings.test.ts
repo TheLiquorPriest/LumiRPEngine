@@ -83,7 +83,7 @@ describe("the door's settings", () => {
     for (const [path, value] of defaults) expect({ path, moved: set.get(path) !== value }).toEqual({ path, moved: true });
 
     // The door as composed reads the file: a question larger than the size set there is refused at the door.
-    const b = await openDoor({ clock: REAL_CLOCK, lumiverse: { question: { body: 1 } } });
+    const b = await openDoor({ clock: REAL_CLOCK, lumiverse: { question: { maxKiB: 1 } } });
     beds.push(b);
     const ask = (question: Question): Promise<Response> =>
       fetch(`${b.listening.url}${QUESTION_PATH}`, { method: "POST", headers: { authorization: `Bearer ${b.registration.key}`, [USER_HEADER]: USER }, body: JSON.stringify(question) });
