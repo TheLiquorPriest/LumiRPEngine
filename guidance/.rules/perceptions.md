@@ -22,6 +22,10 @@ A character's whole inner life is built from what it perceives. Its memories, it
 
 You write what reached them. You do not write what they make of it. Their own agent does that, in their own voice.
 
+## What is kept from a character
+
+A secret whose mark keeps it from a character reaches that character only when the story gives it (told, found out, shown), and then you record it with `perceive`. Until then nothing you write for that character names the secret or a detail of it: no perception, no brief to its agent, no `agent_message`, nothing attached. That holds when the line only says the character does not know: "He has heard nothing about a lead-lined box" tells him about the box. An agent has only what it is written, and nothing takes a line back out of it. Write what it perceives, remembers and was told; leave the secret out whole.
+
 ## When
 
 - A character acting in a sandbox needs its perception before it acts. Write it then.

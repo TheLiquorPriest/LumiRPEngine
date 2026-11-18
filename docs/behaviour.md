@@ -55,7 +55,7 @@ Shipped rules in force:
 | Rule | What it does |
 |---|---|
 | `guidance/.rules/consent.md` | No agent improvises without the Author's consent, and only where no lore or continuity covers the gap. |
-| `guidance/.rules/perceptions.md` | Why perceptions matter, who gets one, what goes in it, and when it is written. |
+| `guidance/.rules/perceptions.md` | Why perceptions matter, who gets one, what goes in it, what is kept from a character even when the line only says it does not know, and when it is written. |
 | `guidance/.rules/perceptions-owed.md` | Reminds the Author when someone on stage has no perception for this turn. |
 | `guidance/.rules/perceptions-missing.md` | Tells the Author at a turn's start when someone on stage in an earlier turn has no perception for it. |
 | `guidance/.rules/engine-silent.md` | Notices when nothing has been recorded in the engine lane for a while. |
