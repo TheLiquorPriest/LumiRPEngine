@@ -127,6 +127,6 @@ describe("overlays", () => {
       giveWorldNumbers(db, USER, "world-reed-coast", ["tithe_law"]);
       return ["w-1", "w-2", "The harbor tithe", "cove route", "w-tithe_law"].map((entry) => check(db, input(entry)));
     });
-    expect(answers.map((a) => (a === null ? "known" : (a.near ?? [])))).toEqual(["known", [], ["w-1"], ["w-2"], []]);
+    expect(answers.map((a) => (a === null ? "known" : "near" in a ? (a.near ?? []) : []))).toEqual(["known", [], ["w-1"], ["w-2"], []]);
   });
 });

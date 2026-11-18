@@ -5,7 +5,8 @@
 import { afterEach, expect, test } from "bun:test";
 import type { RawLayout } from "rp-harness/contract";
 import { type App, type Area, RouteTable } from "../../src/app";
-import { activatedLore, type ActivatedEntry, type ActivatedLoreEntry, EntryNumbers, Lore } from "../../src/lore/index";
+import { activatedLore, type ActivatedEntry, EntryNumbers, Lore } from "../../src/lore/index";
+import type { TurnLoreRow } from "../../src/shared/api";
 import { loreArea } from "../../src/lore/area";
 import { loreRoutes, type LoreRoutesDeps, TURN_LORE_PATH } from "../../src/lore/routes";
 import { JoinedTurnError } from "../../src/store";
@@ -26,7 +27,7 @@ interface Bed {
   /** The turn's tag is kept, as its request's arrival keeps it. */
   keep(turn: string, chat: string, lore: ActivatedEntry[], user?: string): Promise<void>;
   /** The route as the page asks it. */
-  ask(turn: string, chat?: string, user?: string): Promise<ActivatedLoreEntry[]>;
+  ask(turn: string, chat?: string, user?: string): Promise<TurnLoreRow[]>;
   deps: LoreRoutesDeps;
 }
 

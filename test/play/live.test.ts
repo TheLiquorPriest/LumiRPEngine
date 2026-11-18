@@ -12,7 +12,7 @@ function traced(event: TraceEvent): LivePublish<"trace"> {
 }
 
 const RUN_ENDED: TraceEvent = { kind: "run_ended", outcome: { status: "released", released: true, usage: { calls: 1, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 } } };
-const TOOL_STARTED: TraceEvent = { kind: "tool_started", callId: "call-1", tool: "roll", args: { dice: "1d20" }, closing: false };
+const TOOL_STARTED: TraceEvent = { kind: "tool_started", callId: "call-1", tool: "roll", args: { dice: "1d20" } };
 
 /** Lets what the hub was handed run its course. */
 function settled(): Promise<void> {

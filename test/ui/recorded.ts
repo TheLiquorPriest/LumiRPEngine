@@ -113,11 +113,11 @@ function record(): LiveEvent[] {
   const gmTask = { id: "call-gm-1", name: "delegate", args: { agent: "gm", task: "Ash asks Moira why the lamp went dark. Does her story (a cracked chimney glass) hold against what Ash saw? Rule it, and roll if it is contested." } };
   const moiraTask = { id: "call-moira-1", name: "delegate", args: { agent: "character", plays: "char-moira", task: "Ash asks you why the lamp went dark last night. Answer in your own words." } };
   trace(30, AUTHOR, { kind: "call_ended", call: 1, model: "deepseek-v4-flash", text: call1Text, thinking: THINKING_1, toolCalls: [todo1, gmTask, moiraTask], stop: "toolUse", usage: A1_CALL_1, ms: 3820 });
-  trace(3, AUTHOR, { kind: "tool_started", callId: todo1.id, tool: "todo", args: todo1.args, closing: false });
+  trace(3, AUTHOR, { kind: "tool_started", callId: todo1.id, tool: "todo", args: todo1.args });
   trace(2, AUTHOR, { kind: "todo", items: todo1.args.items.map((text) => ({ text, done: false })) });
   trace(2, AUTHOR, { kind: "tool_ended", callId: todo1.id, tool: "todo", result: { content: [{ type: "text", text: "3 open, 0 done." }] }, clean: true, endedRun: false, ms: 4 });
-  trace(2, AUTHOR, { kind: "tool_started", callId: gmTask.id, tool: "delegate", args: gmTask.args, closing: false });
-  trace(1, AUTHOR, { kind: "tool_started", callId: moiraTask.id, tool: "delegate", args: moiraTask.args, closing: false });
+  trace(2, AUTHOR, { kind: "tool_started", callId: gmTask.id, tool: "delegate", args: gmTask.args });
+  trace(1, AUTHOR, { kind: "tool_started", callId: moiraTask.id, tool: "delegate", args: moiraTask.args });
   reply(5, { line: 1, progress: PROGRESS[1] as string });
 
   // The GM and Moira work at once.
@@ -134,7 +134,7 @@ function record(): LiveEvent[] {
   }
   const roll = { id: "call-roll-1", name: "roll", args: { dice: "2d6", against: 8, why: "Moira's story holds" } };
   trace(80, GM, { kind: "call_ended", call: 1, model: "deepseek-v4-flash", text: gmText1, toolCalls: [roll], stop: "toolUse", usage: A2_CALL_1, ms: 1460 }, gmTask.id);
-  trace(2, GM, { kind: "tool_started", callId: roll.id, tool: "roll", args: roll.args, closing: false }, gmTask.id);
+  trace(2, GM, { kind: "tool_started", callId: roll.id, tool: "roll", args: roll.args }, gmTask.id);
   trace(2, GM, { kind: "tool_ended", callId: roll.id, tool: "roll", result: { content: [{ type: "text", text: "2d6 = 4 + 1 = 5 against 8: it does not hold." }], details: { dice: [4, 1], total: 5, against: 8 } }, clean: true, endedRun: false, ms: 2 }, gmTask.id);
   trace(1, GM, { kind: "rule_fired", firing: { rule: "rolls-say-why", path: "rules/rolls-say-why.md", level: "shipped", moment: "tool-result", watched: "result", agent: GM, callId: roll.id, tool: "roll", matched: "does not hold", action: "remind" } }, gmTask.id);
   trace(260, MOIRA, { kind: "call_ended", call: 1, model: "deepseek-v4-flash", text: MOIRA_LINE, toolCalls: [], stop: "stop", usage: A3_CALL_1, ms: 1890 }, moiraTask.id);
@@ -159,10 +159,10 @@ function record(): LiveEvent[] {
   const story = { id: "call-story-1", name: "story_record", args: { beat: "Moira's account of the lamp cracks under Ash's question.", closing: true } };
   trace(40, AUTHOR, { kind: "call_ended", call: 2, model: "deepseek-v4-flash", text: `<reply>\n${REPLY}\n</reply>`, toolCalls: [todo2, story], stop: "toolUse", usage: A1_CALL_2, ms: 5210 });
   trace(2, AUTHOR, { kind: "released", release: { by: AUTHOR, form: "tags", length: REPLY.length } });
-  trace(3, AUTHOR, { kind: "tool_started", callId: todo2.id, tool: "todo", args: { done: todo2.args.done }, closing: true });
+  trace(3, AUTHOR, { kind: "tool_started", callId: todo2.id, tool: "todo", args: { done: todo2.args.done } });
   trace(1, AUTHOR, { kind: "todo", items: todo1.args.items.map((text) => ({ text, done: true })) });
   trace(1, AUTHOR, { kind: "tool_ended", callId: todo2.id, tool: "todo", result: { content: [{ type: "text", text: "0 open, 3 done." }] }, clean: true, endedRun: false, ms: 2 });
-  trace(2, AUTHOR, { kind: "tool_started", callId: story.id, tool: "story_record", args: { beat: story.args.beat }, closing: true });
+  trace(2, AUTHOR, { kind: "tool_started", callId: story.id, tool: "story_record", args: { beat: story.args.beat } });
   trace(14, AUTHOR, { kind: "tool_ended", callId: story.id, tool: "story_record", result: { content: [{ type: "text", text: "Recorded the beat: Moira's account of the lamp cracks under Ash's question." }] }, clean: true, endedRun: true, ms: 12 });
   trace(2, AUTHOR, { kind: "agent_ended", status: "done", usage: A1_USAGE });
   trace(1, AUTHOR, { kind: "run_ended", outcome: { status: "released", released: true, usage: TOTAL } });
@@ -254,12 +254,12 @@ export function turnOf(seen: readonly LiveEvent[], options: { run: string; chat:
     id: `${options.run}.1`,
     run: records[0]?.run ?? options.run,
     nth: 1,
+    intentRecord: null,
     kind: "new",
     status,
     timings,
     usage: outcome?.usage ?? sum,
     reply: { text, progress },
-    emptyReply: null,
     error: outcome?.error ?? null,
     stoppedBy: null,
     lastText: false,
@@ -329,8 +329,8 @@ export function earlierTurn(id: string, chat = CHAT): TurnReply | null {
   const error = summary.status === "stopped" ? { code: "stopped" as const } : null;
   const reply = { text: words.reply, progress: [] };
   // The recording names a run by its turn, as RPH did before each run had an id of its own.
-  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, saved: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
-  return { ...summary, chat, intent: words.intent, reply, error, trace: [], lore: { activated: [], map: [] }, runs: [run], ...NOTHING_MORE };
+  const run: RunShown = { id: `${id}.1`, run: id, nth: 1, intentRecord: null, stoppedBy: null, lastText: false, notGiven: [], target: null, held: null, saved: null, kind: summary.kind, status: summary.status, timings: summary.timings, usage: summary.usage, reply, error, trace: [], requests: [] };
+  return { ...summary, chat, intent: words.intent, reply, emptyReply: null, error, trace: [], lore: { activated: [], map: [] }, runs: [run], ...NOTHING_MORE };
 }
 
 /** A chat's list of turns, newest first: the recorded one as it stands after `count` events, then the earlier ones. */

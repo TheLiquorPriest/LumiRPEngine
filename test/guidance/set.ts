@@ -54,11 +54,22 @@ export function placeOf(rpePath: string): string {
   return rpePath.startsWith("chat-defaults/") ? rpePath.slice("chat-defaults/".length) : rpePath;
 }
 
+/**
+ * What RPH's own loader gave beside the parts (its problems, rules, definitions and stack) and RPE's host reads no more (`src/app/guidance.ts`
+ * reads parts only): the tests marked `test.skip` for hardening still read them, and come back when the set is laid under a harness.
+ */
+export interface LoaderGuidance extends Guidance {
+  problems(): Promise<{ path: string; message: string }[]>;
+  rules(): Promise<{ name: string; path: string; inForce: boolean; why?: string }[]>;
+  definition(name: string): Promise<{ model?: string; effort?: string; tools: string[]; reads: string[]; outOfReach: string[]; writer?: string } | undefined>;
+  stack(agent: string): Promise<{ entries: { where: string; left?: unknown; text?: string }[] }>;
+}
+
 export interface OpenSet {
   host: FolderHost;
   scope: Scope;
   /** The guidance of the chat, as RPH loads it now. */
-  guidance(): Guidance;
+  guidance(): LoaderGuidance;
   /** Puts a file in a level of the tree, over what is there. */
   put(level: LayerLevel, path: string, text: string): void;
   /** The host's facts' values for the chat, from now on. */
@@ -98,7 +109,7 @@ export async function openSet(texts: ReadonlyMap<string, string>, options: SetOp
   return {
     host,
     scope: SCOPE,
-    guidance: () => loadGuidance(host.files, SCOPE),
+    guidance: () => loadGuidance(host.files, SCOPE) as LoaderGuidance,
     put,
     facts,
     close: async () => {

@@ -44,6 +44,8 @@ export interface Installed extends ExtSpindle {
   /** Its worker stopped: every registration of it goes, as Lumiverse drops them (`spindle/worker-host.ts:1563-1576`), and so does all it held in memory. */
   stop(): void;
   readonly logs: string[];
+  /** Each time it asked Lumiverse's drawer to close (`spindle.ui.closeDrawer`), for which user (null: none named). */
+  readonly drawersClosed: (string | null)[];
   /** Lumiverse's id for it. */
   readonly id: string;
   /** Where it was installed for: one user's alone (`install_scope: "user"`, with who installed it), or the operator's, for every user (`worker-host.ts:getScopedUserId`). */
@@ -112,6 +114,7 @@ export interface Ext {
   forwarded: Set<string>;
   frontend: Set<(payload: unknown, userId: string, session?: string) => void>;
   logs: string[];
+  drawersClosed: (string | null)[];
   /** The manifest's own limit for its prompt interceptor (`manifest.interceptorTimeoutMs`, `spindle/worker-host.ts:3159-3163`); it wins over the user's Spindle setting. */
   interceptorTimeoutMs: number | undefined;
   /** The calls the host has posted to the worker and not had an answer to, each rejected where the worker stops (`spindle/worker-host.ts:1572-1576`). */
@@ -300,7 +303,7 @@ export class ExtensionHost {
   install(granted: readonly string[], identifier?: string, options: { id?: string; scope?: "user" | "operator"; installedBy?: string | null; interceptorTimeoutMs?: number } = {}): Installed {
     const id = options.id ?? `ext-${this.nextId++}`;
     const scope = options.scope ?? "operator";
-    const ext: Ext = { id, identifier: identifier ?? id, scope, installedBy: options.installedBy ?? null, stopped: false, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [], interceptorTimeoutMs: options.interceptorTimeoutMs, pending: new Set(), interceptor: null };
+    const ext: Ext = { id, identifier: identifier ?? id, scope, installedBy: options.installedBy ?? null, stopped: false, granted: new Set(granted), changed: new Set(), handlers: new Map(), forwarded: new Set(), frontend: new Set(), logs: [], drawersClosed: [], interceptorTimeoutMs: options.interceptorTimeoutMs, pending: new Set(), interceptor: null };
     const modals = new Map<string, { title: string; items: unknown[] }>();
     const host = this;
     const change = (permission: string, granted: boolean): void => {
@@ -344,6 +347,7 @@ export class ExtensionHost {
     };
     const api: Installed = {
       logs: ext.logs,
+      drawersClosed: ext.drawersClosed,
       id: ext.id,
       identifier: ext.identifier,
       modals,
@@ -529,6 +533,9 @@ export class ExtensionHost {
           ext.changed.add(handler);
           return () => ext.changed.delete(handler);
         },
+      },
+      ui: {
+        closeDrawer: async (options) => void ext.drawersClosed.push(options?.userId ?? null),
       },
       log: {
         info: (message) => ext.logs.push(message),

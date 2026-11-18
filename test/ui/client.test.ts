@@ -77,6 +77,9 @@ class Channel implements RelayChannel {
     this.followed.push(chat);
   }
   async unfollow(): Promise<void> {}
+  async closeDrawer(): Promise<boolean> {
+    return true;
+  }
   onUpdates(handler: (updates: unknown[], reset: boolean) => void): () => void {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);

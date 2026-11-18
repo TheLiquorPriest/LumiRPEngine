@@ -10,8 +10,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { basename } from "node:path";
-import type { Guidance } from "../../src/app/guidance";
-import { changed, openSet, type OpenSet, shippedTexts, split } from "./set";
+import { changed, type LoaderGuidance, openSet, type OpenSet, shippedTexts, split } from "./set";
 import { DREAM, REFLECT, RECALL, REMEMBER } from "../../src/cast/memories";
 import { MIND_SET, RELATE } from "../../src/cast/own";
 import { LORE_INDEX_WRITE } from "../../src/lore/tools";
@@ -103,7 +102,7 @@ async function departures(texts: ReadonlyMap<string, string>): Promise<string[]>
 }
 
 /** The rules in force are those of E.1 to E.3; a rule that needs a file names one in force. */
-async function inForce(guidance: Guidance): Promise<string[]> {
+async function inForce(guidance: LoaderGuidance): Promise<string[]> {
   const out: string[] = [];
   const rules = await guidance.rules();
   const now = rules.filter((rule) => rule.inForce).map((rule) => rule.name).sort();
@@ -113,7 +112,7 @@ async function inForce(guidance: Guidance): Promise<string[]> {
 }
 
 /** Every definition names its model and effort; who holds a tool reads the file for every agent and the rules, and who holds none reads neither. */
-async function reads(guidance: Guidance, texts: ReadonlyMap<string, string>): Promise<string[]> {
+async function reads(guidance: LoaderGuidance, texts: ReadonlyMap<string, string>): Promise<string[]> {
   const out: string[] = [];
   for (const name of AGENTS) {
     const path = `.agents/${name}.md`;
@@ -170,7 +169,7 @@ function tags(texts: ReadonlyMap<string, string>): string[] {
 const SHIPPED = shippedTexts();
 
 let set: OpenSet;
-let guidance: Guidance;
+let guidance: LoaderGuidance;
 beforeAll(async () => {
   set = await openSet(SHIPPED);
   guidance = set.guidance();
