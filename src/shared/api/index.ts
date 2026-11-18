@@ -1435,7 +1435,7 @@ export interface LevelValue {
   mark?: LevelMark;
 }
 
-/** A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle. */
+/** A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle; and, where the limit was not passed but too little was left under it for an answer, the least room an answer is given. */
 export interface LimitHit {
   limit: "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs" | "callTokensIn" | "callTokensOut" | "callTime" | "toolRounds" | "repeats" | "tokensPerMinute";
   per: "turn" | "agent" | "job" | "day" | "connection";
@@ -1443,6 +1443,8 @@ export interface LimitHit {
   value: number;
   agent?: AgentRef;
   connection?: string;
+  /** Set where what was left under the limit, max less value (value counting the next call's prompt, for tokens), was under the least room an answer is given (limits.minAnswerTokens), so the next call was not made: that least room, in tokens. */
+  floor?: number;
 }
 
 /** What a page sends on the live socket: to follow a chat's events from its next one, or to stop; in `chat`, a chat's id, or ~jobs for the user's jobs, ~user for his own events, or ~to: and an address RPE gave the caller. */

@@ -6137,7 +6137,7 @@ export interface LevelValue {
 
 ### `LimitHit`
 
-A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle.
+A limit reached: which, over what, the limit and the count; whose, for a limit per agent; which connection, for a day's count of its jobs or its throttle; and, where the limit was not passed but too little was left under it for an answer, the least room an answer is given.
 
 ```ts
 export interface LimitHit {
@@ -6147,6 +6147,8 @@ export interface LimitHit {
   value: number;
   agent?: AgentRef;
   connection?: string;
+  /** Set where what was left under the limit, max less value (value counting the next call's prompt, for tokens), was under the least room an answer is given (limits.minAnswerTokens), so the next call was not made: that least room, in tokens. */
+  floor?: number;
 }
 ```
 

@@ -340,6 +340,14 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(replyErrorWords({ code: "provider", detail: "401: invalid x-api-key", broke: { failure: "key", tries: 1 } }, part)).toBe("The model's provider failed before a reply was written: 401: invalid x-api-key");
   });
 
+  test("reply-errors.md tells a turn stopped with too little left under a limit for an answer by what was left, the least room, and that the call was not made; a limit reached as it was", async () => {
+    const part = await lines("reply-errors");
+    const floor = { code: "limit" as const, limit: { limit: "tokens" as const, per: "turn" as const, max: 300, value: 279, floor: 256 } };
+    expect(replyErrorWords(floor, part)).toBe('The turn stopped before a reply was written: 21 was left of your limit of 300 on tokens per turn, counting the next call\'s prompt, which is less than the 256 tokens your setting "Least room for an answer" keeps for an answer, so the next call was not made.');
+    expect(replyErrorWords(floor, part, true)).toStartWith("The turn stopped after its reply began to go out, so its record of what the reply says was not finished: 21 was left of your limit of 300");
+    expect(replyErrorWords({ code: "limit", limit: { limit: "calls", per: "turn", max: 40, value: 40 } }, part)).toBe("The turn reached its limit of 40 on calls before a reply was written.");
+  });
+
   test("tag-check.md has the ask that wants an intent record and a reply, and simple messages of the player's to play", async () => {
     const part = await lines("tag-check");
     const ask = part.line("ask", {}) ?? "";

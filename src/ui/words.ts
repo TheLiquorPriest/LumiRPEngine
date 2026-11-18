@@ -82,8 +82,12 @@ export function limitName(hit: Pick<LimitHit, "limit" | "per" | "connection">): 
   return `${LIMIT_OF[hit.limit]} ${over}`;
 }
 
-/** The count against a limit reached: "6 of 5", a time as its length. */
-export function limitCount(hit: Pick<LimitHit, "limit" | "max" | "value">): string {
+/**
+ * The count against a limit reached: "6 of 5", a time as its length; where the limit was not passed but too little was left under it
+ * for an answer, what was left, the least room an answer is given, and that the next call was not made for it.
+ */
+export function limitCount(hit: Pick<LimitHit, "limit" | "max" | "value" | "floor">): string {
+  if (hit.floor !== undefined) return `${num(hit.max - hit.value)} of ${num(hit.max)} left, less than the ${num(hit.floor)} tokens your setting "Least room for an answer" keeps for an answer, so the next call was not made`;
   const say = hit.limit === "time" || hit.limit === "callTime" ? duration : num;
   return `${say(hit.value)} of ${say(hit.max)}`;
 }

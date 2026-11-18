@@ -21,7 +21,7 @@
 
 import type { Database } from "bun:sqlite";
 import { type Fields, type Guidance, type LinesPart, loadGuidance, type TemplatePart } from "../app/guidance";
-import type { AgentRef, Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, ThinkingPiece, TurnRequest, Usage } from "rp-harness/contract";
+import type { AgentRef, Clock, ContextBlock, DefinitionsApi, FilesPort, Harness, JobState, JsonObject, LimitHit, Log, ModelLimits, ReplyError, ReplySink, Scope, SinceItem, ThinkingPiece, TurnRequest, Usage } from "rp-harness/contract";
 import { reconcile, type ChatChange, type ChatChanges, type ShownSwipe } from "../adapter/lumiverse/events";
 import type { Feedback } from "../adapter/lumiverse/feedback";
 import type { TaggedTurn, TurnPlayer } from "../adapter/lumiverse/provider";
@@ -193,15 +193,25 @@ export async function turnErrorWords(files: FilesPort, at: { user: string; chat:
 }
 
 /**
+ * A limit reached, as the fields of a line that tells it: which (`limit`, and `is.<limit>`), over what, the limit and the count; and,
+ * where the limit was not passed but too little was left under it for an answer, the least room an answer is given (`floor`) and what
+ * was left (`left`), for a line of its own.
+ */
+export function limitFields(hit: LimitHit): Fields {
+  return { limit: hit.limit, is: { [hit.limit]: true }, per: hit.per, max: hit.max, value: hit.value, ...(hit.floor !== undefined ? { floor: hit.floor, left: hit.max - hit.value } : {}) };
+}
+
+/**
  * How a turn's run ended, in the words of the reply-errors part: why it ended with no reply; or, `after` its reply began to go out, why
  * the turn's record of that reply was not finished (the part's line of the same name ending `-after`). A provider that failed after its
- * call was made more than once gives the line `tries` and what broke the last (`is.<kind>`, `too-long` as `tooLong`). "" where the part
- * has no such line.
+ * call was made more than once gives the line `tries` and what broke the last (`is.<kind>`, `too-long` as `tooLong`). A limit with too
+ * little left under it for an answer is told by its own line, `limit-floor`. "" where the part has no such line.
  */
 export function replyErrorWords(e: ReplyError, errors: LinesPart | undefined, after = false): string {
   const broke = e.broke !== undefined && e.broke.tries > 1 ? { tries: e.broke.tries, is: { [e.broke.failure === "too-long" ? "tooLong" : e.broke.failure]: true } } : {};
-  const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? { limit: e.limit.limit, per: e.limit.per, max: e.limit.max, value: e.limit.value } : {}), ...broke };
-  return errors?.line(after ? `${e.code}-after` : e.code, fields) ?? "";
+  const fields = { ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.limit !== undefined ? limitFields(e.limit) : {}), ...broke };
+  const code = e.code === "limit" && e.limit?.floor !== undefined ? "limit-floor" : e.code;
+  return errors?.line(after ? `${code}-after` : code, fields) ?? "";
 }
 
 /** The connection the harness runs a lead's definition on for the scope (`definitions.list`'s `runsOn`), by its id: null for his default, or where none resolves. */

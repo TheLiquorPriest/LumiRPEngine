@@ -476,7 +476,9 @@ export function turnEvents(deps: EventsDeps): TurnEvents {
             job.state === "failed"
               ? "its agent could not go on; the harness's line with this job's id, just before this one, says why"
               : hit !== undefined
-                ? `it reached the limit ${hit.limit} per ${hit.per}: ${hit.value} against ${hit.max}`
+                ? hit.floor !== undefined
+                  ? `too little was left under its limit ${hit.limit} per ${hit.per} for an answer: ${hit.max - hit.value} of ${hit.max}, under limits.minAnswerTokens (${hit.floor}), so its next call was not made`
+                  : `it reached the limit ${hit.limit} per ${hit.per}: ${hit.value} against ${hit.max}`
                 : job.state === "cancelled"
                   ? "it was cancelled"
                   : job.state === "off-path"
