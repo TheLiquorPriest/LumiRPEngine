@@ -49,9 +49,9 @@ export function refusalWords(refusal: JobRefusal): string {
       return `job ${refusal.id} did not stop at one of its limits, so more of one would not let it go on.`;
     // The hook's reason is said in its own words.
     case "hook":
-      return `his hook ${refusal.hook} kept it from starting: ${refusal.reason}`;
+      return `your hook ${refusal.hook} kept it from starting: ${refusal.reason}`;
     case "connection":
-      return `there is no connection ${refusal.connection} of his to check.`;
+      return `there is no connection ${refusal.connection} of yours to check.`;
     case "part":
       return `the part ${refusal.part} is missing, switched off, or not as a tag check needs it.`;
   }

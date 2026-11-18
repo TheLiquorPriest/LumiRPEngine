@@ -93,7 +93,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
     entry: (user, id) => booksNow().entry(user, id),
     list: async (user, chat) => {
       const now = booksNow();
-      if (now.list === undefined) throw new Error("The door's books give no list of the user's books.");
+      if (now.list === undefined) throw new Error("The door's books give no list of your books.");
       return await now.list(user, chat);
     },
     found: async (user, ids, words, limit) => {

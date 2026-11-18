@@ -61,7 +61,7 @@ ALTER TABLE turn_prompt ADD COLUMN persona TEXT;
   },
   {
     version: 3,
-    name: "the player's message each turn answered, as it was sent it",
+    name: "your message each turn answered, as it was sent it",
     // Kept with the turn's request record and let go with it (plan §4.2, §5.5): an edit of his message is told with this text.
     sql: `
 ALTER TABLE turn_prompt ADD COLUMN answered TEXT;
@@ -188,7 +188,7 @@ ALTER TABLE turn_run ADD COLUMN story_mark INTEGER;
   },
   {
     version: 5,
-    name: "the player's messages as RPE read them, and what the player asked for through a panel",
+    name: "your messages as RPE read them, and what you asked for through a panel",
     // `player_text`: a message's text by the hash it had, so an edit of it can be told with the text it had before.
     // `panel_request`: a tap that is part of the player's next message (plan §10.10 "A panel action"), held for every turn that
     // follows the turn whose reply was the chat's newest when it was made (`after`; null before the chat's first turn).
@@ -434,7 +434,7 @@ DELETE FROM turn_told WHERE kind IN ('consent', 'gap-check', 'rule') AND json_va
   },
   {
     version: 17,
-    name: "what the player asks for beside his words, kept with the turn that answered it",
+    name: "what you ask for beside your words, kept with the turn that answered it",
     // `request` (App. B, `requests.ts`): what was asked as JSON (`asked`), whether it was played now and as which message, the turn it
     // is kept with (null while it waits). Today's panel requests come over as panel taps for the next message: one some turn was told,
     // kept with the first turn still standing that was told it; the rest wait. The old table, and the request rows of `since_told`, go.
@@ -482,7 +482,7 @@ INSERT OR IGNORE INTO turn_mark (user, turn, kind, message, at)
   },
   {
     version: 19,
-    name: "no copy of the player's messages",
+    name: "no copy of your messages",
     // `player_text` goes (plan §4.2, Y15): the text of a message he edits is the one kept with the request of the turn that answered it.
     sql: `
 DROP TABLE player_text;
@@ -503,7 +503,7 @@ DROP TABLE turn_job;
   },
   {
     version: 21,
-    name: "the questions he is asked before a write goes ahead, and the cards of the turns carried in",
+    name: "the questions you are asked before a write goes ahead, and the cards of the turns carried in",
     // `approval`: a call held for his word under a lane set to Confirm (plan §6.8): who asked, which call of which tool, the lane and its
     // arguments, when it was asked, and where it stands (`waiting`, `answered`, or `taken_down` when the turn stopped or RPE restarted);
     // his answer is kept as he gave it. Of a turn or of a job (one of the two is set).

@@ -246,13 +246,13 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
         const turn = newestTurn(s, params.chat);
         if (turn === null) throw new RouteError(409, `Chat ${params.chat} has played no turn, so a close has no turn to hang after.`);
         if (s.turn(turn)?.chat !== params.chat) throw new RouteError(409, `The newest turn on chat ${params.chat}'s path is another chat's, which a close would change as well: play a turn here first.`);
-        const closed = await writes.run(() => closeOpenScene(turns.store, user, params.chat), "his close of a scene");
+        const closed = await writes.run(() => closeOpenScene(turns.store, user, params.chat), "your close of a scene");
         let after: SessionView;
         try {
           after = await asked(() => sessions.close({ user, chat: params.chat, session: view.id, turn }, { by: "user" }));
         } catch (error) {
           // The session could not be closed: the record's close is taken back, so the two stand together.
-          if (closed !== null) await writes.run(() => turns.store.user(user).undo(closed.change, "player"), "taking back his close of a scene");
+          if (closed !== null) await writes.run(() => turns.store.user(user).undo(closed.change, "player"), "taking back your close of a scene");
           throw error;
         }
         return { session: shown(user, after), scene: closed?.scene ?? null, change: closed?.change ?? null };
@@ -271,7 +271,7 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
         if (view.state !== "closed") throw new RouteError(409, `Session ${view.id} is open.`);
         if (turns.runs.chatsGoing().includes(params.chat)) throw new RouteError(409, `A turn of chat ${params.chat} is running: take the close back when it has ended.`);
         const change = body.change;
-        if (change !== undefined) await writes.run(() => turns.store.user(user).undo(change, "player"), "taking back his close of a scene");
+        if (change !== undefined) await writes.run(() => turns.store.user(user).undo(change, "player"), "taking back your close of a scene");
         return { session: shown(user, await asked(() => sessions.reopen({ user, chat: params.chat, session: view.id }))) };
       },
     }),

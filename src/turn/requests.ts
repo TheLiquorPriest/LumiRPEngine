@@ -137,7 +137,7 @@ export class Requests {
     await this.writes.run((db) => {
       if (!request.played) db.run(`DELETE FROM request WHERE user = ? AND chat = ? AND kind = ? AND played = 0 AND rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND ${WAITS})`, [user, chat, ask.kind, user, chat]);
       db.run("INSERT INTO request (user, id, chat, kind, asked, played, message, turn, at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)", [user, request.id, chat, request.kind, JSON.stringify(request.asked), request.played ? 1 : 0, request.message, at]);
-    }, "holding what the player asked for");
+    }, "holding what you asked for");
     this.changed(user, chat);
     return request;
   }
@@ -147,7 +147,7 @@ export class Requests {
     const sent = await this.writes.run((db) => {
       db.run(`UPDATE request SET played = 1, message = ?, turn = NULL WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 0 AND ${WAITS})`, [message, user, chat, id]);
       return db.query<RequestRow, [string, string, string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.chat = ? AND r.id = ? AND r.played = 1 AND r.message IS ?").get(user, chat, id, message);
-    }, "sending what the player asked for as his message");
+    }, "sending what you asked for as your message");
     if (sent === null) return null;
     this.changed(user, chat);
     return recordOf(sent);
@@ -161,7 +161,7 @@ export class Requests {
       if (row.waits !== 1 && row.turn !== null) return { kept: row.turn };
       db.run("DELETE FROM request WHERE user = ? AND id = ?", [user, id]);
       return { withdrawn: true };
-    }, "withdrawing what the player asked for");
+    }, "withdrawing what you asked for");
     if (out !== null && "withdrawn" in out) this.changed(user, chat);
     return out;
   }

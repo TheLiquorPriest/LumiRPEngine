@@ -95,7 +95,7 @@ export class Approvals implements ApprovalsPort {
     this.waiting.set(key, { chat, turn, resolve, reject });
     await this.deps.writes.run(
       (db) => db.run("INSERT INTO approval (user, id, chat, turn, job, agent, call, tool, lane, args, asked, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')", [scope.user, id, chat, turn, ask.agent.job ?? null, JSON.stringify(ask.agent), ask.callId, ask.tool, ask.lane, JSON.stringify(ask.args), ask.at]),
-      "keeping a question for his word",
+      "keeping a question for your word",
     );
     this.deps.changed?.(chat, turn);
     const takeDown = (): void => {
@@ -126,7 +126,7 @@ export class Approvals implements ApprovalsPort {
       return { ok: false, why: row === null ? "unknown" : "settled" };
     }
     this.waiting.delete(key);
-    await this.deps.writes.run((db) => db.run("UPDATE approval SET state = 'answered', answer = ?, answered = ? WHERE user = ? AND id = ? AND state = 'waiting'", [JSON.stringify(answer), this.deps.now(), user, id]), "keeping his word on a question");
+    await this.deps.writes.run((db) => db.run("UPDATE approval SET state = 'answered', answer = ?, answered = ? WHERE user = ? AND id = ? AND state = 'waiting'", [JSON.stringify(answer), this.deps.now(), user, id]), "keeping your word on a question");
     held.resolve(answer);
     this.deps.changed?.(held.chat, held.turn);
     return { ok: true };

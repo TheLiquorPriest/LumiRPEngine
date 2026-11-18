@@ -156,7 +156,7 @@ export function reviewRoutes(turns: Turns) {
       handle: async ({ user, params, body }) => {
         if (turns.store.user(user).chat(params.chat) === null) throw new RouteError(404, `RPE holds no chat ${params.chat} of yours.`);
         const word = answerOf(body);
-        if (word === null) throw new RouteError(400, "His word is go, true or false, and with false a reason.");
+        if (word === null) throw new RouteError(400, "Your word is go, true or false, and with false a reason.");
         const done = await turns.approvals.answer(user, params.approval, word);
         return done.ok ? { answered: true, state: "answered" as const } : { answered: false, state: done.why };
       },
