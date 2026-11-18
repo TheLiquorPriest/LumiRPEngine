@@ -209,16 +209,18 @@ describe("the lore index", () => {
     rmSync(join(own, "lore_index_write.md"));
   });
 
-  test("the owner's edit of an entry's kind is held to the list of kinds, his line may not be empty, and a related entry must be one of the chat's", async () => {
+  test("the owner's edit of an entry takes any one line as its kind, trimmed and as written, his line may not be empty, and a related entry must be one of the chat's", async () => {
     await fresh(20);
     const [first, second] = (await index.entries(AT)).map((e) => e.id);
     const put = loreIndexRoutes({ index, jobs: { start: async () => ({ refused: "off" }) } as never, definitions: { list: async () => [] }, scope: () => ({}) as never }).find((r) => r.method === "PUT");
     if (put === undefined || first === undefined || second === undefined) throw new Error("no edit route or no entries");
     const ask = (body: object) => callRoute(put, { params: { chat: CHAT, entry: first }, user: USER, body });
-    await expect(ask({ kind: "bogus kind" })).rejects.toThrow("character, place, item, faction, rule, event, concept or style");
+    await expect(ask({ kind: "   " })).rejects.toThrow("one line of text and cannot be empty");
+    await expect(ask({ kind: "two\nlines" })).rejects.toThrow("one line of text and cannot be empty");
     await expect(ask({ line: "   " })).rejects.toThrow("cannot be empty");
     await expect(ask({ related: ["e-999"] })).rejects.toThrow("e-999 is not an entry of this chat's lore");
-    const done = await ask({ kind: " Faction ", line: " The harbor's wardens. ", related: [second] });
-    expect([done.kind, done.line, done.related, done.edited]).toEqual(["faction", "The harbor's wardens.", [second], ["kind", "line", "related"]]);
+    const done = (await ask({ kind: " Wandering Guild ", line: " The harbor's wardens. ", related: [second] })) as { kind: string | null; line: string | null; related: string[]; edited: string[] };
+    expect([done.kind, done.line, done.related, done.edited]).toEqual(["Wandering Guild", "The harbor's wardens.", [second], ["kind", "line", "related"]]);
+    expect((await index.counts(AT)).kinds).toContain("Wandering Guild");
   });
 });

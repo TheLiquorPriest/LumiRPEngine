@@ -169,6 +169,7 @@ export interface LoreCounts {
   indexed: number;
   stale: number;
   unindexed: number;
+  kinds: string[];
 }
 
 /** The next entries an indexing run is handed, and the counts the answer tells: `left` still to be handed to a run, `held` those another job has now. */
@@ -460,13 +461,15 @@ export class LoreIndex {
 
   /**
    * How the chat's lore stands, from one reading of its entries: how many there are, how many a run has written lines for as they
-   * stand now, how many have lines of an earlier revision only (changed since, shown marked), and how many are not indexed as they
-   * stand now (those, and those no run has indexed at all), those another job holds included.
+   * stand now, how many have lines of an earlier revision only (changed since, shown marked), how many are not indexed as they
+   * stand now (those, and those no run has indexed at all), those another job holds included; and the kinds its entries are given
+   * now, each once, in the order they are first met.
    */
   async counts(at: LoreAt): Promise<LoreCounts> {
     const entries = await this.entries(at);
     const indexed = entries.filter((e) => e.indexed).length;
-    return { entries: entries.length, indexed, stale: entries.filter((e) => e.stale).length, unindexed: entries.length - indexed };
+    const kinds = [...new Set(entries.flatMap((e) => (e.kind === null ? [] : [e.kind])))];
+    return { entries: entries.length, indexed, stale: entries.filter((e) => e.stale).length, unindexed: entries.length - indexed, kinds };
   }
 
   /** How many entries of the chat's lore no run has indexed as they stand now, those another job holds included. */

@@ -231,14 +231,17 @@ export function LorePage(props: { chat: string }) {
   const titles = new Map(index.items.map((row) => [row.id, row.title]));
   const status = useRead(() => readIndexStatus(app.client, chat), [chat, indexing.job]);
   const overlays = useRead(() => readOverlays(app.client, chat), [chat]);
+  // The rows as the page shows them (an entry just changed by hand over the row read), and the kinds the chat's index holds: the whole index's by the status, and those of the rows shown.
+  const shown = index.items.map((row) => edited.get(row.id) ?? row);
+  const kinds = [...new Set([...(status.value?.kinds ?? []), ...shown.flatMap((row) => (row.kind === null ? [] : [row.kind]))])];
   // A search looks across every entry, so while one is typed the pages not yet read are read on.
   useEffect(() => {
     if (query.trim() !== "" && index.more && !index.loading && index.problem === null) index.older();
   }, [query, index.more, index.loading, index.items.length]);
   return (
     <LoreView
-      index={{ ...index, items: index.items.map((row) => edited.get(row.id) ?? row) }}
-      edit={(row) => <EntryLines chat={chat} row={row} titles={titles} onChanged={changed} />}
+      index={{ ...index, items: shown }}
+      edit={(row) => <EntryLines chat={chat} row={row} titles={titles} kinds={kinds} onChanged={changed} />}
       bindings={(row) => <EntryBindings chat={chat} row={row} onChanged={changed} />}
       query={query}
       status={status.value}

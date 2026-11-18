@@ -9,7 +9,7 @@
 
 import type { DefinitionsApi, JobRefusal, JobsApi, Scope } from "rp-harness/contract";
 import { RouteError, route, shape } from "../app";
-import { LORE_KINDS, loreKindOf, loreKindsWords } from "../shared/lore-kinds";
+import { loreKindOf } from "../shared/lore-kinds";
 import { BINDING_BYS } from "./bindings";
 import { type IndexedEntry, LORE_INDEX_FIELDS, type LoreIndex, type LoreIndexEdit } from "./indexing";
 import type { LoreAt } from "./lore";
@@ -68,6 +68,7 @@ const statusReply = shape.named(
     entries: field(shape.whole({ least: 0 }), "Entries in the chat's lore."),
     unindexed: field(shape.whole({ least: 0 }), "Entries no run has written lines for as they stand now: those never indexed, and those indexed at an earlier revision."),
     stale: field(shape.whole({ least: 0 }), "Of those, the entries a run indexed at an earlier revision and that have changed since: their lines still show, marked as out of date, until a run redoes them."),
+    kinds: field(shape.list(T), "The kinds the chat's entries are given now, each once: the page offers them as choices beside the shipped indexer's own."),
     agent: field(T, "The definition indexing runs as."),
     connection: field(shape.nullable(shape.object({ id: field(T, "The connection's id."), name: field(T, "Its name.") })), "The connection the definition runs on: the one it names, else his default; null where none is there."),
     model: field(shape.nullable(T), "That connection's model; null where none resolves."),
@@ -118,10 +119,10 @@ const booksReply = shape.named(
 );
 
 const editBody = shape.object({
-  kind: shape.optional(shape.nullable(T), `What kind of thing it is: one of ${LORE_KINDS.join(", ")}; null takes his own off.`),
-  line: shape.optional(shape.nullable(T), "One line saying what it is, not empty; null takes his own off."),
-  defines: shape.optional(shape.nullable(shape.list(binding)), "What it defines, each by a record's id, its name or as written; null takes his own off, and the run's show again."),
-  related: shape.optional(shape.nullable(shape.list(T)), "Related entries, by id, each an entry of the chat's lore; null takes his own off."),
+  kind: shape.optional(shape.nullable(T), "What kind of thing it is: any one line of text, not empty; null takes yours off."),
+  line: shape.optional(shape.nullable(T), "One line saying what it is, not empty; null takes yours off."),
+  defines: shape.optional(shape.nullable(shape.list(binding)), "What it defines, each by a record's id, its name or as written; null takes yours off, and the run's show again."),
+  related: shape.optional(shape.nullable(shape.list(T)), "Related entries, by id, each an entry of the chat's lore; null takes yours off."),
 });
 
 function rowOf(e: IndexedEntry) {
@@ -192,7 +193,7 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
         const at: LoreAt = { user, chat: params.chat };
         const [counts, listed] = await Promise.all([deps.index.counts(at), deps.definitions.list(deps.scope(user, params.chat))]);
         const runsOn = listed.find((d) => d.name === LORE_INDEXER)?.runsOn;
-        return { entries: counts.entries, unindexed: counts.unindexed, stale: counts.stale, agent: LORE_INDEXER, connection: runsOn?.connection ?? null, model: runsOn?.model ?? null };
+        return { entries: counts.entries, unindexed: counts.unindexed, stale: counts.stale, kinds: counts.kinds, agent: LORE_INDEXER, connection: runsOn?.connection ?? null, model: runsOn?.model ?? null };
       },
     }),
     route({
@@ -234,7 +235,7 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
       path: LORE_INDEX_ENTRY_PATH,
       access: "page",
       group: "lore",
-      does: "The owner's own lines for one entry of a chat's lore: its kind (one of the fixed list of kinds: any other is refused, naming the list), its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.",
+      does: "Your own lines for one entry of a chat's lore: its kind (any one line of text, not empty), its line (not empty), what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What you set stands over an indexing run's and outlives a run that redoes the entry; null takes yours off, and the run's shows again. Answers the entry as it now stands.",
       body: editBody,
       reply: indexRow,
       handle: async ({ user, params, body }) => {
@@ -242,7 +243,7 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
         const edit: LoreIndexEdit = {};
         if (body.kind !== undefined) {
           const kind = body.kind === null ? null : loreKindOf(body.kind);
-          if (body.kind !== null && kind === null) throw new RouteError(400, `"${body.kind}" is not a kind an entry can have: its kind is one of ${loreKindsWords()}.`);
+          if (body.kind !== null && kind === null) throw new RouteError(400, "A kind is one line of text and cannot be empty; to go back to the indexing run's kind, take yours off.");
           edit.kind = kind;
         }
         if (body.line !== undefined) {

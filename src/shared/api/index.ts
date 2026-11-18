@@ -1509,6 +1509,8 @@ export interface LoreIndexStatus {
   unindexed: number;
   /** Of those, the entries a run indexed at an earlier revision and that have changed since: their lines still show, marked as out of date, until a run redoes them. */
   stale: number;
+  /** The kinds the chat's entries are given now, each once: the page offers them as choices beside the shipped indexer's own. */
+  kinds: string[];
   /** The definition indexing runs as. */
   agent: string;
   /** The connection the definition runs on: the one it names, else his default; null where none is there. */

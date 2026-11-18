@@ -1,18 +1,26 @@
-// What an entry is, edited from the Lore page (plan §9.1): its kind, which is one of the fixed list, its one line, and its related
-// entries. Each is yours once you set it: it stands over an indexing run's and outlives a run that indexes the entry again, and
-// each has a way back to the run's. RPE answers the entry as it now stands, or refuses in its words.
+// What an entry is, edited from the Lore page (plan §9.1): its kind, which is any one line (the shipped indexer's kinds and those the chat
+// already holds are offered as choices, and another can be typed), its one line, and its related entries. Each is yours once you set it:
+// it stands over an indexing run's and outlives a run that indexes the entry again, and each has a way back to the run's. RPE answers the
+// entry as it now stands, or refuses in its words.
 
 import { useState } from "preact/hooks";
 import { Banner, Button } from "../../../frontend/components";
 import type { LoreIndexRow } from "../../../shared/api";
-import { LORE_KINDS } from "../../../shared/lore-kinds";
+import { SUGGESTED_LORE_KINDS } from "../../../shared/lore-kinds";
 import { useApp } from "../../app";
 import { errorWords } from "../../words";
 import { type EntryLinesEdit, editEntryLines } from "./read";
 
+/** The choices of a kind: the shipped indexer's own kinds first, as suggestions, then every other kind the chat's index holds, then the entry's own where it is none of those. Nothing holds an entry to them: another can be typed. */
+export function kindChoices(held: readonly string[], current: string | null): string[] {
+  return [...new Set<string>([...SUGGESTED_LORE_KINDS, ...held, ...(current === null ? [] : [current])])];
+}
+
 export interface EntryLinesProps {
   chat: string;
   row: LoreIndexRow;
+  /** The kinds the chat's index holds now, to offer beside the suggested ones. */
+  kinds: readonly string[];
   /** The titles of the entries the page has read, by id, to say which entry a related id is. */
   titles: ReadonlyMap<string, string>;
   /** Called with the entry as it now stands, after a change. */
@@ -27,6 +35,7 @@ export function EntryLines(props: EntryLinesProps) {
   const [said, setSaid] = useState<string | null>(null);
   const [line, setLine] = useState(row.line ?? "");
   const [relate, setRelate] = useState("");
+  const [another, setAnother] = useState("");
   const yours = (field: "kind" | "line" | "related"): boolean => row.edited.includes(field);
   const send = (what: string, edit: EntryLinesEdit, words: string, then?: (next: LoreIndexRow) => void): void => {
     if (busy !== null) return;
@@ -46,8 +55,7 @@ export function EntryLines(props: EntryLinesProps) {
       },
     );
   };
-  // A kind a run wrote that is not in the list still shows as the entry's, beside the list.
-  const kinds: readonly string[] = row.kind === null || (LORE_KINDS as readonly string[]).includes(row.kind) ? LORE_KINDS : [row.kind, ...LORE_KINDS];
+  const choices = kindChoices(props.kinds, row.kind);
   return (
     <div class="lre-stack" data-entry-lines={row.id}>
       <div class="lre-inline rpe-wrap" data-kind>
@@ -59,17 +67,24 @@ export function EntryLines(props: EntryLinesProps) {
             disabled={busy !== null}
             onChange={(event) => {
               const kind = event.currentTarget.value;
-              if (kind !== "" && kind !== row.kind) send("kind", { kind }, `${row.title} is now a ${kind}; it is yours and a run that indexes the entry again leaves it.`);
+              if (kind !== "" && kind !== row.kind) send("kind", { kind }, `The kind of ${row.title} is now ${kind}; it is yours and a run that indexes the entry again leaves it.`);
             }}
           >
             {row.kind === null ? <option value="">None yet</option> : null}
-            {kinds.map((kind) => (
+            {choices.map((kind) => (
               <option key={kind} value={kind}>
                 {kind}
               </option>
             ))}
           </select>
         </label>
+        <label class="lre-field">
+          <span class="label">Or another kind</span>
+          <input class="lre-input" value={another} placeholder="one line, as you would name it" onInput={(event) => setAnother(event.currentTarget.value)} />
+        </label>
+        <Button size="sm" busy={busy === "kind another"} disabled={busy !== null || another.trim() === "" || another.trim() === row.kind} onClick={() => send("kind another", { kind: another.trim() }, `The kind of ${row.title} is now ${another.trim()}; it is yours and a run that indexes the entry again leaves it.`, () => setAnother(""))}>
+          Use it
+        </Button>
         {yours("kind") ? (
           <Button size="sm" variant="ghost" busy={busy === "kind off"} disabled={busy !== null} onClick={() => send("kind off", { kind: null }, `${row.title} has the indexing run's kind again.`)}>
             Use the indexing run's kind

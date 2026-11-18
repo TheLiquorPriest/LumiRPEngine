@@ -1,16 +1,10 @@
-// The kinds an entry of a chat's lore may be given (plan §9.1): a short fixed list, which the Lore page offers in its choice and the
-// lore index's route holds an edit to.
+// The kinds the shipped indexer's file lists for an entry of a chat's lore (plan §9.1). They are suggestions, offered first in the Lore
+// page's choice of a kind: a kind is any one line of text, and nothing holds an entry to these.
 
-export const LORE_KINDS = ["character", "place", "item", "faction", "rule", "event", "concept", "style"] as const;
-export type LoreKind = (typeof LORE_KINDS)[number];
+export const SUGGESTED_LORE_KINDS = ["character", "place", "item", "faction", "rule", "event", "concept", "style"] as const;
 
-/** The kind that `text` names, as written or in other letters or with spaces round it; null where it names none of the list. */
-export function loreKindOf(text: string): LoreKind | null {
-  const key = text.trim().toLowerCase();
-  return LORE_KINDS.find((kind) => kind === key) ?? null;
-}
-
-/** The list in words: `character, place, … or style`. */
-export function loreKindsWords(): string {
-  return `${LORE_KINDS.slice(0, -1).join(", ")} or ${LORE_KINDS[LORE_KINDS.length - 1]}`;
+/** The kind that `text` names: its one line, trimmed; null where it is empty or runs over more than one line. */
+export function loreKindOf(text: string): string | null {
+  const kind = text.trim();
+  return kind === "" || /[\r\n]/.test(kind) ? null : kind;
 }

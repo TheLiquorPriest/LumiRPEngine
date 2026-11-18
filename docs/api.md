@@ -1341,7 +1341,7 @@ The lore index of a chat, a page at a time in the order of the lore map's catalo
 
 ### `PUT /api/v1/chats/:chat/lore/index/:entry`
 
-The owner's own lines for one entry of a chat's lore: its kind (one of the fixed list of kinds: any other is refused, naming the list), its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.
+Your own lines for one entry of a chat's lore: its kind (any one line of text, not empty), its line (not empty), what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What you set stands over an indexing run's and outlives a run that redoes the entry; null takes yours off, and the run's shows again. Answers the entry as it now stands.
 
 | | |
 |---|---|
@@ -6036,6 +6036,8 @@ export interface LoreIndexStatus {
   unindexed: number;
   /** Of those, the entries a run indexed at an earlier revision and that have changed since: their lines still show, marked as out of date, until a run redoes them. */
   stale: number;
+  /** The kinds the chat's entries are given now, each once: the page offers them as choices beside the shipped indexer's own. */
+  kinds: string[];
   /** The definition indexing runs as. */
   agent: string;
   /** The connection the definition runs on: the one it names, else his default; null where none is there. */
