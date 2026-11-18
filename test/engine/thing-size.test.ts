@@ -2,15 +2,12 @@
 // written, on Port Alder: its own installed relay is Built-in, its truck bed a part and its toolbox
 // Armful (the Modern US containers row); a home_furnishings refrigerator is Furniture, by its row or
 // by its category alone; a misc thing is unknown. A thing's own `size` wins, and the world's things
-// config moves the ceiling and the bounds. Sizes by name (N3): a catalog with no size column, as an
-// older build copied it, sizes its fridge Furniture and its TV Heavy by name, a TV remote staying a
-// remote; the world's entry overrides a name, null takes one out, and storage furniture holds things.
+// config moves the ceiling and the bounds; storage furniture holds things. No size is read from a name (0a56eeeec).
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { DataTable } from "../../src/shared/tables";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
-import { thingsConfigOf } from "../../src/shared/things";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { holdsOf, sizeOf } from "../../src/engine/things";
 import { Working } from "../../src/engine/working";
@@ -100,41 +97,12 @@ describe("a thing's size (ITEMS-SPEC §4.1)", () => {
 });
 
 describe("sizes by name (ITEMS-SPEC §4.1)", () => {
-  // hardening: a size is no longer read from a name (`sizeOfDef` takes no `sizes.byName`), so what these lock in is to be rewritten for the world's size map as the person's advice.
-  test.skip("a catalog with no size column: its refrigerator reads Furniture and its TV Heavy by name, its TV remote Hand by its category", () => {
-    const w = portAlder([thing("fridge", "Refrigerator", { catalog: "pa_fridge" }), thing("tv", "Flat-screen television, 55 in", { catalog: "pa_tv" }), thing("tvs", "TVs", { catalog: "pa_tv" }), thing("remote", "TV remote", { catalog: "pa_remote" })], sizeless);
-    expect(sizeOf(w.ctx, "fridge")).toEqual({ size: "furniture", from: "name" });
-    expect(sizeOf(w.ctx, "tv")).toEqual({ size: "heavy", from: "name" });
-    expect(sizeOf(w.ctx, "tvs")).toEqual({ size: "heavy", from: "name" });
-    // The head-noun rule: a TV remote is a remote.
-    expect(sizeOf(w.ctx, "remote")).toEqual({ size: "hand", from: "category" });
-    // Its row's name sizes a thing named otherwise, and so do its aliases; a longer phrase wins.
-    const named = portAlder([thing("gift", "Birthday present", { catalog: "pa_fridge" }), thing("aliased", "Big box", { aliases: ["water heater"] }), thing("mini", "Mini-fridge", {}), thing("micro", "Microwave oven", {})], sizeless);
-    expect(sizeOf(named.ctx, "gift")).toEqual({ size: "furniture", from: "name" });
-    expect(sizeOf(named.ctx, "aliased")).toEqual({ size: "furniture", from: "name" });
-    expect(sizeOf(named.ctx, "mini")).toEqual({ size: "heavy", from: "name" });
-    expect(sizeOf(named.ctx, "micro")).toEqual({ size: "armful", from: "name" });
-  });
-
   test("its own size, its row's and its volume still win over its name", () => {
     const w = portAlder([thing("own", "Refrigerator", { catalog: "pa_fridge", size: "heavy" }), thing("row", "Refrigerator", { catalog: "refrigerator" }), thing("litres", "Refrigerator", { volume_l: 30 })], sizeless);
     expect(sizeOf(w.ctx, "own")).toEqual({ size: "heavy", from: "size" });
     expect(sizeOf(w.ctx, "litres")).toEqual({ size: "armful", from: "volume" });
     const shipped = portAlder([thing("row", "Refrigerator", { catalog: "refrigerator" })]);
     expect(sizeOf(shipped.ctx, "row")).toEqual({ size: "furniture", from: "row" });
-  });
-
-  // hardening: a size is no longer read from a name (`sizeOfDef` takes no `sizes.byName`), so what these lock in is to be rewritten for the world's size map as the person's advice.
-  test.skip("the world's entry overrides a shipped name, keeping what it leaves out; null takes one out; a new name sizes too", () => {
-    const w = portAlder([thing("fridge", "Refrigerator", { catalog: "pa_fridge" }), thing("tv", "Television", {}), thing("piano", "Upright piano", {})], (world) => {
-      sizeless(world);
-      world.packs.gear = { version: 1, config: { sizes: { byName: { tv: "armful", fridge: null, Piano: { size: "furniture" } } } } };
-    });
-    expect(sizeOf(w.ctx, "tv")).toEqual({ size: "armful", from: "name" });
-    expect(thingsConfigOf(w.world).sizes.byName.tv).toEqual({ size: "armful", also: ["television"] });
-    // Without its entry, a household good is Hand by its category.
-    expect(sizeOf(w.ctx, "fridge")).toEqual({ size: "hand", from: "category" });
-    expect(sizeOf(w.ctx, "piano")).toEqual({ size: "furniture", from: "name" });
   });
 
   test("storage furniture holds things by its name, as a plain thing; a row's holds hold too; a plain thing else holds nothing", () => {

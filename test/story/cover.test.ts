@@ -110,7 +110,4 @@ describe("what the story record covers", () => {
     expect(historyWindow(path, capped, covered).first).toEqual({ id: "m2", index: 2 });
     expect((await factsAt(t, capped))["history.leaving.uncovered"]).toEqual({ count: 1, fields: range(2, 2) });
   });
-
-  // hardening: a rule run is RPH's loader's, which RPE's guidance reader does not give; the shipped rule `history-leaving` fires at a turn's start with the count and the range, and not when nothing leaves uncovered.
-  test.skip("the shipped rule history-leaving fires at a turn's start with the count and the range", () => {});
 });
