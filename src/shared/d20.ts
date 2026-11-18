@@ -376,10 +376,10 @@ export function totalLabel(rules: Pick<D20Def, "labels">, name: string): string 
   return label !== undefined && label !== "" ? label : name;
 }
 
-/** A save in words, by its id (`fort`), as the rules label its total (`save.fort`); the id where they label none. */
+/** A save in words, by its id (`fort`), as the rules label its total (`save.fort`); where they label none, the id with its first letter raised (a rule set of a user's own may give no labels). */
 export function saveLabel(rules: Pick<D20Def, "labels">, save: string): string {
   const label = totalLabel(rules, `save.${save}`);
-  return label === `save.${save}` ? save : label;
+  return label === `save.${save}` ? save.charAt(0).toUpperCase() + save.slice(1) : label;
 }
 
 /** A table's role by its schema (`d20Schema`), or null for a table that is none of the layer's. */
