@@ -544,7 +544,7 @@ action_effect_param_save: Save that ends it (each time it is tried)
 action_effect_param_difficulty: Difficulty of that save (one of the ruleset's by name, or a number the effect sets)
 action_effect_param_why: Why
 action_d20_rest_label: Rest the night
-action_d20_rest_description: Rest for the night. It takes who (and others who rest with them) and the hours, left out: the ruleset's night; those hours pass. What comes back is the ruleset's, read from each sheet: hit points by level, nonlethal harm by the hour, and each daily gauge filled. Recorded for each.
+action_d20_rest_description: Rest for the night. It takes who (and others who rest with them) and the hours, left out: the ruleset's night; the hours are told in the answer, and the clock is moved by pass_time. What comes back is the ruleset's, read from each sheet: hit points by level, nonlethal harm by the hour, and each daily gauge filled. Recorded for each.
 action_d20_rest_param_hours: Hours (left out: the ruleset's night)
 action_d20_rest_param_also: Others who rest
 action_reload_label: Reload
