@@ -1,3 +1,5 @@
 [test]
 # The suite lives in test/; nothing outside it (such as a local reference copy) is part of it.
 root = "test"
+# Every test file starts with the engine's lines of words installed, as a server's threads have them.
+preload = ["./test/preload.ts"]

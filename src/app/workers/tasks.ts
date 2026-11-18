@@ -9,6 +9,8 @@
 // and, since the lanes import the application, which starts these threads, would close an import cycle
 // through this file.
 
+import { historyTexts, type HistoryTexts, installHistoryTexts } from "../../iface/history-lines";
+import { shippedTexts } from "../../iface/texts";
 import type { CatalogueInput } from "../../lore/lore";
 import type { WorldDoc } from "../../shared/world";
 import type { FoldDone, FoldJob, StoreBrief } from "../../store/away";
@@ -40,6 +42,23 @@ export const TASKS = {
   labLint: async (world: WorldDoc) => (await import("../../worker/background-lane")).labLint(world),
   ...INDEX_TASKS,
 } as const;
+
+/**
+ * What a pool tells every thread it runs (`Workers.share`): the thing each needs to run a task as the main thread does, each a function
+ * from the value to what the thread does with it. The engine's lines of words: the texts of `.prompts/history-*.md` as the main thread
+ * has them in force, made into lines by the one loader (`iface/history-lines.ts`), so a thread says what the main thread says.
+ */
+export const SHARED = {
+  lines: async (texts: HistoryTexts): Promise<void> => installHistoryTexts(texts),
+} as const;
+
+export type SharedName = keyof typeof SHARED;
+export type SharedValue<N extends SharedName> = Parameters<(typeof SHARED)[N]>[0];
+
+/** What a thread holds of each shared thing when its pool shared none: the shipped files' own, read by the same loaders the main thread reads its files with. */
+export const SHARED_SHIPPED: { readonly [N in SharedName]: () => Promise<SharedValue<N>> } = {
+  lines: async () => await historyTexts(shippedTexts()),
+};
 
 export type TaskName = keyof typeof TASKS;
 export type TaskInput<N extends TaskName> = Parameters<(typeof TASKS)[N]>[0];

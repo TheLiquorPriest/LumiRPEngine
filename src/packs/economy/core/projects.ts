@@ -1077,13 +1077,15 @@ const TABLE = projectsTable as unknown as DataTable;
 const SHIPPED = shipped as unknown as Readonly<Record<string, readonly ShippedRevision[]>>;
 
 const PROJECT_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: [PROJECT_KIND] } }, "param_project");
+/** The same param, left out when the player gives none: made as its own worded param, since a spread of one would copy the label it has when this module loads, before any lines are installed. */
+const PROJECT_PARAM_OPTIONAL: ParamDef = wordedParam({ type: "ref", of: { kind: [PROJECT_KIND] }, optional: true }, "param_project");
 const AT_ONCE = { duration: "2", observable: "does the paperwork", mechanical: true } as const;
 
 const ACTIONS: readonly PackAction[] = [
   {
     id: PROJECT_ACTIONS.start,
     pack: "economy",
-    params: { org: { type: "ref" }, template: { type: "text", optional: true }, project: { ...PROJECT_PARAM, optional: true }, name: { type: "text", optional: true }, account: { type: "ref", ref: "account", optional: true } },
+    params: { org: { type: "ref" }, template: { type: "text", optional: true }, project: PROJECT_PARAM_OPTIONAL, name: { type: "text", optional: true }, account: { type: "ref", ref: "account", optional: true } },
     requires: ["level.money >= 3"],
     outcomes: { default: [{ type: PROJECT_EFFECTS.start, args: { org: "org", template: "=params.template", project: "=params.project", name: "=params.name", account: "=params.account", by: "self" } }] },
     ...AT_ONCE,

@@ -291,8 +291,8 @@ function lowerFirst(text: string): string {
 /** At most this many titles on one person's line. */
 const TITLES_KEPT = 2;
 
-/** The bare words for how someone belongs (Member, Staff, Owner), an owner's role among them ("Trustee", "Beneficiary", as `orgTitle` gives it), lowered. */
-const BARE_TITLES: ReadonlySet<string> = new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
+/** The bare words for how someone belongs (Member, Staff, Owner), an owner's role among them ("Trustee", "Beneficiary", as `orgTitle` gives it), lowered: read when asked, since the words are the lines in force then, not those of the module's load. */
+const bareTitles = (): ReadonlySet<string> => new Set([...Object.values(HOW_WORDS), ...Object.values(OWNER_ROLE_LABELS).map((l) => l.one)].map((word) => word.toLowerCase()));
 
 /**
  * Someone's titles where an organization relates to the player character (§3.15): each one the
@@ -316,7 +316,7 @@ export function personTitles(ctx: ReadContext, who: EntityId): string[] {
     const given = orgTitle(ctx, who, org);
     if (given === null || given.trim() === "") continue;
     // A bare word for how they belong (Owner, Member, Staff, an owner's role) tells something only where the player character belongs too; an owner's is their role there.
-    const bare = BARE_TITLES.has(given.trim().toLowerCase());
+    const bare = bareTitles().has(given.trim().toLowerCase());
     if (bare && mine.length === 0) continue;
     const role = given === HOW_WORDS.owner ? theirs.find((r) => r.how === "owner")?.role : undefined;
     const title = role !== undefined && role !== "owner" ? role.replace(/_/g, " ") : given;

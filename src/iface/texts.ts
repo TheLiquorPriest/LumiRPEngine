@@ -11,10 +11,11 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type renderTemplate, type TemplateRender, templateOf } from "rp-harness/helpers";
 
-/** The folder the shipped guidance lives in, in this repository: the lowest level of every chat's files. */
-export const SHIPPED_GUIDANCE = join(import.meta.dir, "..", "..", "guidance");
+/** The folder the shipped guidance lives in: the repository's `guidance/`, or where the build put it beside the bundle (`scripts/build.ts` stamps `RPE_GUIDANCE_DIR`, as `src/tree/shipped.ts` reads it). The lowest level of every chat's files, and all a thread with no file tree reads. */
+export const SHIPPED_GUIDANCE = fileURLToPath(new URL(process.env.RPE_GUIDANCE_DIR ?? "../../guidance/", import.meta.url));
 
 /** The kinds of guidance file the engine's tools read. */
 export type TextKind = "tools" | "prompts";

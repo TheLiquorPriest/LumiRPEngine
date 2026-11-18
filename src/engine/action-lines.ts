@@ -13,7 +13,8 @@ export function spoken(def: PackAction): ActionDef {
   const id = def.id;
   const params: Record<string, ParamDef> = {};
   for (const [name, written] of Object.entries(def.params)) {
-    const param: ParamDef = { ...written };
+    // Copied as it is defined, not as it reads now: a worded param's label is read when asked for (a spread would say it here, while the registry is made, before it is certain any lines are in force).
+    const param = Object.defineProperties({}, Object.getOwnPropertyDescriptors(written)) as ParamDef;
     Object.defineProperty(param, "label", { enumerable: true, configurable: true, get: () => say(`action_${id}_param_${name}`, words) || written.label });
     params[name] = param;
   }

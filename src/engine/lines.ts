@@ -4,7 +4,8 @@
 // files are read where the application lays out its texts and handed in here as a source of lines (`useLines`); a caller that has the
 // chat's own copy of the files (each the one nearer the chat than the shipped one) wraps its work in `withLines`, so the lines it words
 // are the chat's. A line the files do not have, or the user deleted, is a line that is not said: `say` gives the empty text and the callers
-// say nothing in its place.
+// say nothing in its place. A thread that was given no lines at all is another matter: it has no words, not a line the user switched off,
+// so `say` there throws, naming the line it was asked for (a page, which has no lines and says its own words, is the one place that stays silent).
 
 import type { JsonValue } from "../shared/json";
 import type { ParamDef } from "../shared/world";
@@ -18,11 +19,12 @@ export interface LineSource {
   line(name: string, fields?: LineFields): string | undefined;
 }
 
-let installed: LineSource | null = null;
+/** The source the application's lines come from: undefined until a thread is given one (`useLines`), null when none is in force (every part switched off). */
+let installed: LineSource | null | undefined;
 /** The chat's own source while `withLines` runs (null there: the chat's copy is off, and nothing is said); undefined outside it. */
 let current: LineSource | null | undefined;
 
-/** The source the application's lines come from, until another is given (null: none, and nothing is said). */
+/** The source the application's lines come from, until another is given (null: none in force, and nothing is said). */
 export function useLines(source: LineSource | null): void {
   installed = source;
   current = undefined;
@@ -42,9 +44,20 @@ export function withLines<T>(source: LineSource | null, work: () => T): T {
 /** What says a line: `say` says the lines in force; a page, which has no lines, says its own. */
 export type Voice = (name: string, fields?: LineFields) => string;
 
-/** The line `name` filled with `fields`; the empty text where there is none. */
+/**
+ * The line `name` filled with `fields`; the empty text where the lines in force have none (a line the user deleted says nothing). Where no lines
+ * were ever given to this thread it throws, naming the line: a thread with no words must not pass for one whose user switched them off. A page
+ * (a browser) has no lines and says its own words, so there the empty text stays.
+ */
 export function say(name: string, fields?: LineFields): string {
-  return (current === undefined ? installed : current)?.line(name, fields) ?? "";
+  const source = current === undefined ? installed : current;
+  if (source === undefined) return unloaded(name);
+  return source?.line(name, fields) ?? "";
+}
+
+function unloaded(name: string): string {
+  if (typeof document !== "undefined") return "";
+  throw new Error(`RPE has no words loaded on this thread, so it cannot say the line "${name}": the lines of guidance/.prompts/history-*.md were never given to it.`);
 }
 
 /** Words joined as a list is read ("a", "a and b", "a, b and c"): the one connecting word is the line `list_and`'s, the commas are the code's. */

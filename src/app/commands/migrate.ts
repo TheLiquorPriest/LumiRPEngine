@@ -1,6 +1,7 @@
 // `rpe migrate`: the migration's own command line, into RPE's data folder.
 
 import { resolve } from "node:path";
+import { installHistoryLines, shippedTexts } from "../../iface";
 import { migrateCli } from "../../migrate/cli";
 import { carryJob, HARNESS_MIGRATIONS, keepCarriedRun } from "../../turn";
 import type { CliIO } from "../cli";
@@ -31,8 +32,12 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
     throw new Error("The migration reaches no Lumiverse, and an area asked for it while its settings were listed.");
   };
   const registry = () => gatherSettings(compose({ fetch: async () => noLumiverse(), open: noLumiverse, sleep: async () => noLumiverse() }).areas);
-  // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
-  const migrate = (): Promise<number> => migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
+  // The migration runs the engine here, on this process's one thread, with no server to read the user's files through: it says the shipped lines, which the main thread and each worker read by the same loader.
+  const migrate = async (): Promise<number> => {
+    await installHistoryLines(shippedTexts());
+    // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
+    return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
+  };
   if (rest.includes("--rehearse") || folder === undefined || folder.startsWith("--")) return await migrate();
   const paths = dataPaths(folder);
   const config = await loadConfig(paths, io.env);

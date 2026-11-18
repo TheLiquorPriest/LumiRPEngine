@@ -34,15 +34,18 @@ export function isHistoryFile(path: string): boolean {
   return HISTORY_PARTS.some((part) => name === `${part}.md`);
 }
 
-/** The lines in force through `files`, each part from the nearest level that has it; null where no part is in force, which says nothing. */
-export async function historyLines(files: Pick<GuidanceFiles, "read">): Promise<LineSource | null> {
-  const read = await Promise.all(
-    HISTORY_PARTS.map(async (part) => {
-      const text = await files.read("prompts", part);
-      return text === undefined ? null : Lines.parse(text, `.prompts/${part}.md`);
-    }),
-  );
-  const parts = read.filter((part): part is Lines => part !== null);
+/** The text of each history part in force, by the part's name: what a thread that cannot read the files is handed (`linesOf` makes the lines of it). A part that is not in force is not in it. */
+export type HistoryTexts = Readonly<Record<string, string>>;
+
+/** The text of each history part in force through `files`, each from the nearest level that has it, none where it is switched off. */
+export async function historyTexts(files: Pick<GuidanceFiles, "read">): Promise<HistoryTexts> {
+  const read = await Promise.all(HISTORY_PARTS.map(async (part) => [part, await files.read("prompts", part)] as const));
+  return Object.fromEntries(read.filter((part): part is readonly [(typeof HISTORY_PARTS)[number], string] => part[1] !== undefined));
+}
+
+/** The lines the parts' texts hold, a line said by the first part that holds it; null where no part is in force, which says nothing. The one place the texts become lines, on every thread. */
+export function linesOf(texts: HistoryTexts): LineSource | null {
+  const parts = HISTORY_PARTS.flatMap((part) => (texts[part] === undefined ? [] : [Lines.parse(texts[part], `.prompts/${part}.md`)]));
   if (parts.length === 0) return null;
   return {
     line(name, fields) {
@@ -52,9 +55,21 @@ export async function historyLines(files: Pick<GuidanceFiles, "read">): Promise<
   };
 }
 
-/** Makes the lines in force through `files` the ones the engine says (the application's, until another is installed). */
-export async function installHistoryLines(files: Pick<GuidanceFiles, "read">): Promise<void> {
-  useLines(await historyLines(files));
+/** The lines in force through `files`; null where no part is in force, which says nothing. */
+export async function historyLines(files: Pick<GuidanceFiles, "read">): Promise<LineSource | null> {
+  return linesOf(await historyTexts(files));
+}
+
+/** Makes the texts the lines the engine says on this thread (the application's, until others are installed). */
+export function installHistoryTexts(texts: HistoryTexts): void {
+  useLines(linesOf(texts));
+}
+
+/** Makes the lines in force through `files` the ones the engine says on this thread, and gives back their texts, for the other threads to be handed. */
+export async function installHistoryLines(files: Pick<GuidanceFiles, "read">): Promise<HistoryTexts> {
+  const texts = await historyTexts(files);
+  installHistoryTexts(texts);
+  return texts;
 }
 
 /**

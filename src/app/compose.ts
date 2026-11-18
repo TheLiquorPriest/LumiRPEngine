@@ -27,7 +27,7 @@ import { buildArea } from "../build/area";
 import { worldsArea } from "../worlds/area";
 import type { WorldService } from "../worlds/service";
 import { castArea } from "../cast/area";
-import { installHistoryLines, isHistoryFile } from "../iface";
+import { installHistoryLines, isHistoryFile, shippedTexts } from "../iface";
 import { ifaceArea } from "../iface/area";
 import { loreArea } from "../lore/area";
 import { EntryNumbers, type LoreBooks, loreLines, LoreProposals, type LoreWorldWrites, worldEntryWrites } from "../lore";
@@ -191,8 +191,9 @@ export function compose(options: ComposeOptions = {}): Composition {
   const scope = (user: string, chat: string) => ({ user, chat, session: NO_SESSION });
   const turning = (user: string, chat: string): boolean => made().runs.ofChat(user, chat).length > 0;
   const files = (user: string, chat: string) => guidanceTexts(made().files, scope(user, chat), made().env.log);
-  // The engine's history lines (`.prompts/history-*.md`, one file to a family) as his shared levels hold them, which every chat's history and notices are said in.
-  const installLines = (): Promise<void> => installHistoryLines(files(app().config.lumiverse.user ?? "", NO_CHAT));
+  // The engine's history lines (`.prompts/history-*.md`, one file to a family) as his shared levels hold them, which every chat's history and notices are said in:
+  // installed here, and handed to every worker thread, so a job on a thread says what the main thread says.
+  const installLines = async (): Promise<void> => app().workers.share("lines", await installHistoryLines(files(app().config.lumiverse.user ?? "", NO_CHAT)));
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
   // What the files name that runs a command or calls out is listed as waiting whenever something looks: when RPE starts, before the list is read, and after a file written through the Files routes.
   const listing = switchesListing({
@@ -240,6 +241,8 @@ export function compose(options: ComposeOptions = {}): Composition {
   const openSessions = async (user: string, chat: string): Promise<string[]> => (await sessionsOf(user, chat)).filter((s) => s.state === "open").map((s) => s.id);
 
   const areas: Area[] = [
+    // The engine's lines of words, first of all: the shipped ones as the area mounts, before any other runs the engine, and the user's own in force once the turn lane can read the files.
+    { name: "history-lines", mount: async () => void (await installHistoryLines(shippedTexts())), mounted: () => installLines() },
     appArea({
       opened: (at) => {
         opened = at;
@@ -346,8 +349,6 @@ export function compose(options: ComposeOptions = {}): Composition {
       },
     })),
     turn.area,
-    // The engine's history lines in force from the start, once the turn lane can read the files.
-    { name: "history-lines", mounted: () => installLines() },
     // The Agents page: his definitions with what each runs on, and the tools an agent's requests declare, as the harness gives them.
     agentsArea(() => ({ definitions: made().harness.definitions, scope: (user, chat) => scope(user, chat ?? NO_CHAT) })),
     bootstrapArea({

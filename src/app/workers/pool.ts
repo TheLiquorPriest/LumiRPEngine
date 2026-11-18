@@ -10,12 +10,16 @@
 // its answer, or its failure, goes back to its caller. A failure is in the log too, and the pool goes on;
 // a thread that died is let go and its task failed, and the next task starts another. A thread takes one
 // task at a time; threads are started as tasks come, up to the pool's number, and stopped with the app.
+//
+// What a thread must hold to run a task as the main thread would (the engine's lines of words, `SHARED` in `tasks.ts`) is shared with it:
+// `share` tells every thread now running and each one started after, in order before its first task; a thread whose pool shared nothing
+// begins its first task with the shipped files' own, so no thread says its words from nothing.
 
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import { isMainThread, parentPort, type Transferable, Worker, workerData } from "node:worker_threads";
 import type { Log } from "rp-harness/contract";
-import { TASKS, type TaskInput, type TaskName, type TaskOutput } from "./tasks";
+import { SHARED, SHARED_SHIPPED, type SharedName, type SharedValue, TASKS, type TaskInput, type TaskName, type TaskOutput } from "./tasks";
 
 /** What marks a thread as one of RPE's, in the data it is started with. */
 const THREAD_MARK = "rpeWorker";
@@ -84,6 +88,7 @@ export class Workers {
   readonly #all = new Set<Thread>();
   readonly #idle: Thread[] = [];
   readonly #queue: Job[] = [];
+  readonly #shared = new Map<SharedName, unknown>();
   #closed = false;
 
   constructor(options: WorkersOptions) {
@@ -103,6 +108,12 @@ export class Workers {
     this.#queue.push({ task, input, transfer, ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }), resolve: done.resolve as (output: unknown) => void, reject: done.reject });
     this.#next();
     return done.promise;
+  }
+
+  /** Tells every thread, those running now and each started after, what it needs to run a task as the main thread would (`SHARED`): the last value given for `name` is the one a thread holds. */
+  share<N extends SharedName>(name: N, value: SharedValue<N>): void {
+    this.#shared.set(name, value);
+    for (const thread of this.#all) thread.worker.postMessage({ share: name, value });
   }
 
   /** Stops every thread; a task under way or waiting fails. */
@@ -156,6 +167,8 @@ export class Workers {
     const worker = new Worker(THREAD_FILE, { workerData: { [THREAD_MARK]: true } });
     const thread: Thread = { worker, job: null };
     this.#all.add(thread);
+    // What the pool shares comes first, so a thread holds it before its first task.
+    for (const [name, value] of this.#shared) worker.postMessage({ share: name, value });
     worker.on("message", (answer: Answer) => {
       const job = thread.job;
       thread.job = null;
@@ -191,20 +204,44 @@ export class Workers {
   }
 }
 
-/** On a thread RPE started: each message is a task of the list, answered with its output or its failure. */
+/** What a thread is told or asked: a value to hold (`Workers.share`), or a task of the list. */
+type Asked = { share: SharedName; value: unknown } | { task: TaskName; input: unknown };
+
+/** On a thread RPE started: a message is a shared value to hold, or a task of the list, answered with its output or its failure. They are served one at a time, in the order they came. */
 function serveTasks(): void {
   const port = parentPort;
   if (port === null) return;
-  port.on("message", async (asked: { task: TaskName; input: unknown }) => {
+  const held = new Set<SharedName>();
+  /** What a shared value that could not be held did: the next task fails with it, and says what it is. */
+  let broken: unknown = null;
+  const hold = async (name: SharedName, value: unknown): Promise<void> => {
+    try {
+      await (SHARED[name] as (value: unknown) => unknown)(value);
+      held.add(name);
+      broken = null;
+    } catch (error) {
+      broken = error;
+    }
+  };
+  const serve = async (asked: Asked): Promise<void> => {
+    if ("share" in asked) return await hold(asked.share, asked.value);
     let answer: Answer;
     try {
       const run = TASKS[asked.task] as ((input: unknown) => unknown) | undefined;
       if (run === undefined) throw new Error(`There is no task ${String(asked.task)}.`);
+      if (broken !== null) throw broken;
+      // A pool that shared nothing leaves a thread the shipped files' values, the same loaders' as the main thread's.
+      for (const name of Object.keys(SHARED) as SharedName[]) if (!held.has(name)) await hold(name, await SHARED_SHIPPED[name]());
+      if (broken !== null) throw broken;
       answer = { ok: true, output: await run(asked.input) };
     } catch (error) {
       answer = { ok: false, name: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : String(error) };
     }
     port.postMessage(answer);
+  };
+  let served: Promise<void> = Promise.resolve();
+  port.on("message", (asked: Asked) => {
+    served = served.then(() => serve(asked));
   });
 }
 

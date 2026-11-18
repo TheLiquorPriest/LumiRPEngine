@@ -1245,7 +1245,9 @@ export function registerEmployment(r: FinanceRegistry): void {
   // An employer's payroll on its organization's page (ORG-SPEC §4.4), behind `money.view`, from Money 3: a company's always; anyone else's once it employs someone or sets its pay schedule or account.
   core.orgSection({
     id: "payroll",
-    label: say("flow_label_payroll"),
+    get label() {
+      return say("flow_label_payroll");
+    },
     power: "money.view",
     build: (ctx, org, viewer) => {
       if (moneyLevel(ctx, org) < 3) return null;

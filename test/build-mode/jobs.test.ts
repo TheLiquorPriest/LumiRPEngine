@@ -40,6 +40,10 @@ describe("Build's job home and the kept worker", () => {
     expect(job).toMatchObject({ jobId: id, kind: "check_world", status: "done", progress: 1 });
     expect(job?.result && "turns" in job.result ? job.result.turns.map((t) => t.user) : []).toEqual(["Day 1", "Day 2", "Day 3"]);
     expect(job?.result && "lint" in job.result).toBe(true);
+    // The issues it ends with are the world's own, each with its sentence: a worker thread says what the main thread says.
+    const lint = job?.result && "lint" in job.result ? job.result.lint : [];
+    expect(lint.length).toBeGreaterThan(0);
+    expect(lint.filter((issue) => issue.message === "")).toEqual([]);
     // Told: running, one report per day, then done.
     expect(told.map((j) => j.status)).toEqual(["running", "running", "running", "running", "done"]);
     expect(told.slice(0, 4).map((j) => j.progress)).toEqual([0, 1 / 3, 2 / 3, 1]);
