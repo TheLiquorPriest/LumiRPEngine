@@ -526,10 +526,12 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       return interrupt ? { kind: "time", control, scope: { interrupt }, to } : null;
     }
     case "adjudicate": {
+      if (raw.to === null) return { kind: "adjudicate", to: null };
       const to = readAdjudication(raw.to);
       return to ? { kind: "adjudicate", to } : null;
     }
     case "claims": {
+      if (raw.to === null) return { kind: "claims", to: null };
       const to = readClaims(raw.to);
       return to ? { kind: "claims", to } : null;
     }
@@ -614,10 +616,12 @@ export function applyMarker(state: WorldState, raw: MarkerBody, env?: MarkerEnv)
       setTimeControl(state, body);
       return [];
     case "adjudicate":
-      state.adjudication = body.to;
+      if (body.to === null) delete state.adjudication;
+      else state.adjudication = body.to;
       return [];
     case "claims":
-      state.claims = body.to;
+      if (body.to === null) delete state.claims;
+      else state.claims = body.to;
       return [];
     case "infer":
       state.inferred = body.to;

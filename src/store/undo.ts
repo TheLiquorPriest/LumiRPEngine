@@ -303,10 +303,11 @@ function markerValue(world: Readonly<WorldState>, body: Exclude<MarkerBody, { ki
       const s = body.scope;
       return "all" in s ? world.realism.levels[body.domain] : "tier" in s ? own(world.realism.tierCaps, s.tier)?.[body.domain] : own(world.entities, s.entity)?.levels[body.domain];
     }
+    // A policy the chat never set follows its world's: it goes back to that, as `null`.
     case "adjudicate":
-      return world.adjudication as unknown as JsonValue | undefined;
+      return (world.adjudication ?? null) as unknown as JsonValue;
     case "claims":
-      return world.claims as unknown as JsonValue | undefined;
+      return (world.claims ?? null) as unknown as JsonValue;
     case "infer":
       return world.inferred as unknown as JsonValue | undefined;
   }

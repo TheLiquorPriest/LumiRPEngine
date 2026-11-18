@@ -358,9 +358,10 @@ export type MarkerBody =
   | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
   | { kind: "time"; control: TimeControl | RetiredTimeControl; scope: TimeScope; to: JsonValue }
-  | { kind: "adjudicate"; to: AdjudicationDef }
-  /** What a typed action's thing the world doesn't have becomes in this chat from now on (DESIGN §9.4 player claims). */
-  | { kind: "claims"; to: ClaimsPolicy }
+  /** How checks are decided in this chat from now on (DESIGN §11); `null`: the chat follows its world's again. */
+  | { kind: "adjudicate"; to: AdjudicationDef | null }
+  /** What something you add that the world doesn't have becomes in this chat from now on (DESIGN §9.4 player claims); `null`: the chat follows its world's again. */
+  | { kind: "claims"; to: ClaimsPolicy | null }
   /** How typed attempts are read as checks in this chat from now on (DESIGN §11 inferred checks). */
   | { kind: "infer"; to: InferredChecks };
 
