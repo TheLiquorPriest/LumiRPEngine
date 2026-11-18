@@ -193,7 +193,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
       story: { from: { ".": 1, names: ["replies"] }, newest: { ".": 1, names: ["leave_out"] } },
       previous: { run: { stopped: { ".": 1 } } },
       lore: { unindexed: { ".": 4 } },
-      cast: { base: { older: { ".": 1, names: ["Wren"], sources: [{ who: "Wren", kind: "lore", id: "e-12", title: "Wren the ferrywoman", defines: "background" }, { who: "Wren", kind: "card", id: "c-1", gone: true }] } }, growth: { proposed: { ".": 2 } } },
+      cast: { base: { older: { ".": 1, names: ["Wren"], sources: [{ who: "Wren", kind: "lore", id: "e-12", title: "Wren the ferrywoman", defines: "background" }, { who: "Wren", kind: "card", id: "c-1", gone: true }] } }, growth: { proposed: { ".": 2, names: ["Wren", "Bram"] } } },
       history: { unsummarized: { ".": 3, range: { ".": [4, 9], from: 4, to: 9 } } },
     };
     const text = part.render(facts as never).text;
@@ -201,7 +201,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(text).toContain("- The last turn's work was still going when this one began, and was stopped where it stood. What it had recorded is kept.");
     expect(text).toContain("- Lore entries no indexing run has written lines for yet: 4.");
     expect(text).toContain("- A principal's base is older than a source bound to it:\n  - Wren: lore e-12 (\"Wren the ferrywoman\"), which defines their background\n  - Wren: card c-1, gone");
-    expect(text).toContain("- 2 character(s) have growth a reflection proposed that you have not accepted.");
+    expect(text).toContain("- Growth that a character's own reflection proposed waits for your decision, for Wren, Bram. See `TURN.md`, \"A character's reflection proposed growth\".");
     expect(text).toContain("- 3 message(s), 4 to 9, are out of the prompt with beats recorded and lie in no scene with a summary.");
     const none = part.render({ turn: { kind: "reply" }, story: facts.story, previous: { run: { stopped: { ".": 0 } } }, lore: { unindexed: { ".": 0 } }, cast: { growth: { proposed: { ".": 0 } } } } as never).text;
     expect(none).toContain("story.from is replies");
