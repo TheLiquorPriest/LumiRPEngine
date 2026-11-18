@@ -46,7 +46,7 @@ test("the chat's lower limit ends it first: a turn's time of one second under a 
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
 
   expect(Date.now() - asked).toBeLessThan(10_000);
-  expect(out.error).toStartWith("The turn reached its limit of ");
+  expect(out.error).toStartWith("The turn reached your limit of ");
   await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
   const run = b.turns.runs.byGeneration(USER, out.generationId!);
   expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "time", per: "turn" } }, reply: "" });

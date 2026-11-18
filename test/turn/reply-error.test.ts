@@ -78,7 +78,7 @@ test("a run stopped at its call limit ends with what it has: no reply written, t
   b.host.send(CHAT, "I climb the stairs.");
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
 
-  expect(out.error).toBe("The turn reached its limit of 1 on calls before a reply was written.");
+  expect(out.error).toBe("The turn reached your limit of 1 on calls before a reply was written.");
   await b.until("the run to be over", () => b.turns.runs.ofChat(USER, CHAT).length === 0);
   const run = b.turns.runs.byGeneration(USER, out.generationId!);
   expect(run).toMatchObject({ status: "limit", stoppedBy: { limit: { limit: "calls", per: "turn", max: 1 } }, reply: "" });

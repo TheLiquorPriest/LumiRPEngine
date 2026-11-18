@@ -27,7 +27,7 @@ test("a turn that reaches a limit after its reply went out names the limit and i
   expect(out.error).toBeNull();
   const turn = await settledTurn(b, out.generationId!);
 
-  const why = "The turn reached its limit of 1 on calls after its reply began to go out, so its record of what the reply says was not finished.";
+  const why = "The turn reached your limit of 1 on calls after its reply began to go out, so its record of what the reply says was not finished.";
   expect((await lineOf(b, turn.message!)).map((l) => l.unfinished?.why)).toEqual([why]);
   expect(b.turns.runs.record(USER, turn.id)).toMatchObject({ status: "limit", error: { code: "limit", limit: { limit: "calls", per: "turn", max: 1 } } });
   expect(b.logged.filter((l) => l.fields?.turn === turn.id && l.level === "warn").map((l) => l.message)).toEqual([`A turn's run ended stopped where it stood: ${why}`]);

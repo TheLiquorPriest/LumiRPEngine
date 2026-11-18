@@ -77,5 +77,5 @@ test("a Settle now run that reaches a limit ends at it, as itself: the turn keep
     listed: "released",
   });
   const warned = b.logged.filter((l) => l.fields?.run === settle && l.level === "warn").map((l) => l.message);
-  expect(warned).toEqual(["A turn's run ended stopped where it stood: The turn reached its limit of 2 on calls after its reply began to go out, so its record of what the reply says was not finished."]);
+  expect(warned).toEqual(["A turn's run ended stopped where it stood: The turn reached your limit of 2 on calls after its reply began to go out, so its record of what the reply says was not finished."]);
 });
