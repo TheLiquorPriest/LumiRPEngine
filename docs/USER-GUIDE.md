@@ -494,6 +494,65 @@ The page also says when the preset still holds the previous build's engine block
 
 **What each agent is given** of the prompt is a line in its definition (`given:`). As shipped, the Author is given the whole prompt; the GM, the lore in it; a character, its style parts; the narrator, the prompt exactly as Lumiverse sent it. A turn's page shows **What the Author was given**, the prompt by part with its lore, behind the gate.
 
+## Files, agents, rules and skills
+
+Everything that decides how RPE's agents behave is written in plain files: how a turn is run, who writes the reply, when a reminder is owed, what a tool is said to do. To change what the agents do, change a file; the next turn reads it. [How behaviour lives in files](behaviour.md) says what each file does, with four worked examples.
+
+**The four levels.** The files are under `files/` in RPE's data folder, at four levels, from far to near:
+
+| Level | Folder | What it is |
+|---|---|---|
+| Shipped | `files/defaults/` | Every file RPE ships. Read-only, and laid out again at every start. |
+| Yours | `files/` | Your own files, for every chat. |
+| A character's | `files/chats/<character>-<id>/` | Your files for every chat with one character or group. |
+| A chat's | `files/chats/<character>-<id>/<chat>-<id>/` | Your files for one chat, with its config file `RPE.yml`. |
+
+A file at a nearer level replaces the file of the same name at a farther one (only `AGENTS.md` adds up, the character's and the chat's both). A shipped file can be switched off without replacing it. When an update changes a shipped file you replaced, your file is kept, and the Files page says the default changed.
+
+**The kinds of file.** Instruction files (`TURN.md`, `SWIPE.md`, `WRITING.md`, `WORLD.md`, `SIMULATION.md`, `PRESET.md`, `ALL-AGENTS.md`, and an `AGENTS.md` of yours); **agent definitions** (`.agents/`); **rules** (`.rules/`); **skills** (`.skills/`, each a folder with a `SKILL.md`); **tool descriptions** (`.tools/`); and **prompt parts** (`.prompts/`), which lay out what the agents are given and word what RPE answers you, the play views' refusals among them.
+
+### The Files page
+
+**Files** shows the agents' files as a folder, level by level (**This chat's top** and up), a folder and a page at a time, with a search across every level by name and by text. Each file says what RPE does with it: in force, switched off (and which lists name it), replaced by a nearer one, held out and why, an example, or read by no agent.
+
+- Open a file and edit it: **Save it as** yours at a level. A shipped file is edited as yours. **Delete it**, on a file of yours in place of a shipped one, puts the shipped one back. **Switch off** and **Switch on** a file, for this chat or every chat. **Compare with the default**, and with each change an update made to it.
+- **New** makes a file of any kind at a level that holds it, blank or from the shipped file of its name, or a folder; and renames, moves or copies one of yours.
+- **Pin it for** an agent: a pinned file is handed to that agent whole at the start of each of its runs.
+- A prompt part shows, as you type, what it renders to with the values of its last use in the chat.
+- **The agents' suggestions.** The agents read your files and never write them. When an agent thinks one should change, it files a suggestion: what it would change and why. **Accept**, **Edit, then accept**, or **Dismiss**.
+- **An agent's stack**: every part an agent is given, in order, each with its file. **Apply now** starts the open session's opening block afresh, so a change to an agent's tools or what it is given holds at once; otherwise it holds from the next session.
+
+The agents keep their own notes in the chat's `persistent-workspace/` folder, and their working files in the turn's folder. Notes follow the turn: a swipe or a deleted turn takes back that turn's notes.
+
+### The Agents page
+
+**Agents** lists every agent definition in force for the open chat, or as a new chat takes them with none open. One opened shows **What it runs on** (the connection, model and effort it will really run with, or why no connection resolves for it), its effort, limits and sampling as settings (for every chat or this chat, with what its header says beside each and a way back to it), **Its tools**, **What it reads** (its stack, part by part), and **What it is given**. **Change it** edits its header as fields (its model from your connections, its tools, what it reads, what it is given) and its text: **Save as mine** at a level, reset a shipped one to its default, or **Make a copy** as a new agent. **Open its file on Files** goes to its file.
+
+The shipped agents and their efforts are in [How RPE works](#how-rpe-works) and [Models and connections](#models-and-connections). Which agent leads a chat's turns is **The Author** (`turn.lead`).
+
+### The Rules page
+
+A **rule** is a file with a header and a text. **Always on**, its text is part of the instructions of the agents its header names. **Triggered**, it costs nothing until its condition holds: a moment of the turn, a fact drawn from the records, a pattern in what the agent writes, a yes-or-no question a small model answers, or a count of turns; then its text is put in front of the agent.
+
+**Rules** lists every rule of the chat's stack, in force or not and why, whom it is for and what triggers it in words, with the examples marked as examples. One opened can be edited and saved as yours at a level, reset, deleted, switched off or on for this chat or every chat, or, for an example, copied into force; **Try it on a turn already played** runs it as its file stands against a past turn, writing nothing. **Facts a trigger can use** lists each fact with its value for the open chat (`todo.open > 0`). **What fired** is the log: which rule, in which run, on what, and what the agent did next (behind the gate).
+
+**Hooks**, on the same page, are commands of yours that run at a moment of a turn: each with its moment, its command and its timeout, whether it runs and why not.
+
+### Skills
+
+A skill is a folder in `.skills/` with a `SKILL.md`: a name, a description and a body. An agent that holds `skill_load` is shown the list of skills in force, each by its name and description, and loads a skill's body when it needs it. The shipped skills include `time`, `places-and-maps`, `combat`, `economy`, `quests`, `casting`, `sandbox`, `scene-end`, `chapter-pass`, `bootstrap` and `lore-proposals`. Write one of your own, or replace or switch off a shipped one, as any file.
+
+### What runs a command or calls out
+
+The agents have no shell of their own. What runs a command or calls out is only a hook, a command a rule runs, a command tool, an HTTP tool or an MCP server that you wrote or added, or a connection's key at a new address. Each is listed as waiting until you switch it on, from the server's own command line:
+
+```sh
+rpe allow <name>
+rpe deny <name>
+```
+
+No page can switch one on: the Rules, Files and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls, with the line to run. A thing whose command or address changes waits again. See [What RPE never does by itself](security.md#what-rpe-never-does-by-itself).
+
 ## Model use
 
 LumiRPEngine does most of its work without the AI. When it does ask a model, it uses small, focused calls, each with its own job. **Model use** presets set which steps may call a model, when, and how many calls a phase may spend. **Settings → Model use** shows them as four cards, **Lean**, **Standard**, **Full** and **Custom**, each saying in plain words what the preset does and then its limits; tap a card to use that preset, and the one in use is marked **In use**.
