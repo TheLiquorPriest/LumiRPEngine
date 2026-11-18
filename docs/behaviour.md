@@ -132,7 +132,7 @@ To give the narrator another model, copy `files/defaults/.agents/narrator.md` to
 
 ### Change when perceptions are owed
 
-After a turn, the Author is reminded of each principal and supporting character who was on stage and has no perception recorded. The reminder is the rule `perceptions-owed` ([shipped](../guidance/.rules/perceptions-owed.md)). Its header holds the condition:
+As a turn's run ends, the Author is reminded of each principal and supporting character who was on stage and has no perception recorded, so that it can write them before the turn is over. The reminder is the rule `perceptions-owed` ([shipped](../guidance/.rules/perceptions-owed.md)). Its header holds the condition:
 
 ```
 fact: stage.unperceived(principal, supporting) > 0

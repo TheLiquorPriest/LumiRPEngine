@@ -55,7 +55,7 @@ RPE played the turn, and it ended with no reply. The chat shows one plain line, 
 
 What happens to that empty reply depends on the setting `lumiverse.reply.removeEmpty` ("Take away an empty reply a failed or stopped turn left"):
 
-- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting, and so does the HUD's line where the chat plays a world and its page was open when the turn ended. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
+- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
 - **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
 
 The **Turns** page and the turn's own page show what each agent did.
@@ -90,7 +90,7 @@ Its words come from `guidance/.prompts/play-answers.md` and `request-answers.md`
 
 **"This chat does not play a world in RPE." / "The revision of the world this chat plays is not in RPE, so nothing can be changed in it."** The chat has no world (**Attach** gives it one on the Play page) or the world's revision is gone from RPE.
 
-**"Nothing was undone: …"** An Undo is whole or not at all. "the turn this change was kept with is no longer part of this chat's story" (a swipe or a rewind took that turn away), "something has changed it since", or "this build keeps no undo for …" (the end of the line names what): nothing is undone, and the line says why.
+**"Nothing was undone: …" or "Undone, but not all of it."** An Undo takes back what it still can of a change. Nothing is undone where "the turn this change was kept with is no longer part of this chat's story" (a swipe or a rewind took that turn away), or where what would take it back no longer fits the world. Each part that stays is named, with why: "something has changed it since", "this build keeps no undo for it", you have seen how its roll fell, or the turn has not finished yet.
 
 **"… isn't anyone you know", "… isn't a place you know", "… it needs someone"** and the like. An action names a person, a place or a thing the player's character does not know of or the action does not take. Name one that is known.
 

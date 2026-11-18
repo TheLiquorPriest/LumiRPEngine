@@ -535,7 +535,7 @@ rpe allow <name>
 rpe deny <name>
 ```
 
-No page can switch one on: the Rules, Files and Runtime pages show each thing, whether it waits, is on or is off, and what it runs or calls, with the line to run. A thing whose command or address changes waits again. See [What RPE never does by itself](security.md#what-rpe-never-does-by-itself).
+No page can switch one on: the Rules page, and the Settings page under **Server and service**, show each thing, whether it waits, is on or is off, and what it runs or calls, with the line to run; the Files page shows what waits in the file you have open. A thing whose command or address changes waits again. See [What RPE never does by itself](security.md#what-rpe-never-does-by-itself).
 
 ## Models and connections
 
