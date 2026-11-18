@@ -659,7 +659,7 @@ function worldQuest(o: OpContext): Unread | undefined {
   if (stage !== undefined) {
     if (stage === current) o.reply.line("already_so", { n: o.n, op: o.op, what });
     else {
-      // The reason and how it went are kept with the move, and as the stage's call in the quests' record; the engine's move holds only where the quest stands now.
+      // The reason and how it went are the stage it leaves: kept with the move, and as that stage's call in the quests' record; the engine's move holds only where the quest stands now.
       events.push({ type: "stage", track: track.id, to: stage, from: current, ...(why !== undefined ? { why } : {}), ...(outcome !== undefined ? { outcome } : {}) } as LedgerEvent);
       const paths = own(def.stages, current)?.next.map((n) => n.to) ?? [];
       if (!paths.includes(stage)) o.reply.report("off_path", { n: o.n, op: o.op, quest: what, from: own(def.stages, current)?.label ?? current, to: own(def.stages, stage)?.label ?? stage });
@@ -669,7 +669,8 @@ function worldQuest(o: OpContext): Unread | undefined {
   const bad = o.draft.applyAll(events);
   if (bad) return { line: "not_applicable", fields: { n: o.n, op: o.op, code: bad.code } };
   o.draft.record(o.n, o.op, "engine", o.prov, from);
-  if (stage !== undefined && outcome !== undefined) writeQuest(o, "call", { quest: track.id, stage, state: outcome, ...(why !== undefined ? { why } : {}) });
+  // A call that moves the quest calls the stage it leaves; one that names the stage it stands on calls that one.
+  if (stage !== undefined && outcome !== undefined) writeQuest(o, "call", { quest: track.id, stage: current, state: outcome, ...(why !== undefined ? { why } : {}) });
   if (shown !== undefined) writeQuest(o, "show", { quest: track.id, shown });
   if (closing !== undefined) writeQuest(o, "close", { quest: track.id, outcome: closing === "reopen" ? null : closing, ...(why !== undefined ? { why } : {}) });
   // (S17Story, quests) What the world authored for the stage reached and the stage left (effects, rewards, a truth, a cue), named so an agent lands them as ordinary operations; none is applied here.

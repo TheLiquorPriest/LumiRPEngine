@@ -38,10 +38,11 @@ describe("the quest operation", () => {
     const view = questViews({}, slice())[0];
     expect(view?.stages[0]?.call).toMatchObject({ state: "failed", why: "The ferrywoman will not talk." });
 
-    // The world's own quest: its stage move keeps its reason and outcome as the stage's call.
+    // The world's own quest: its stage move keeps its reason and outcome as the call of the stage it leaves.
     const world = await t.call("world_apply", { operations: [{ op: "quest", quest: "errand", stage: "done", outcome: "met", why: "delivered", source: src }] });
     expect(world.error).toBeUndefined();
-    expect(slice().marks.errand?.calls.done).toMatchObject({ state: "met", why: "delivered" });
+    expect(slice().marks.errand?.calls.asked).toMatchObject({ state: "met", why: "delivered" });
+    expect(slice().marks.errand?.calls.done).toBeUndefined();
     expect(texts(world).join("\n")).not.toBe("");
     expect(dataOf(world)).toBeDefined();
   });

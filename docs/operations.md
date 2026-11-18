@@ -423,8 +423,8 @@ Lane: engine. Needs: `quest`. Takes its provenance.
 |---|---|---|
 | `quest` | text | quest: the quest, secret, puzzle or agenda. |
 | `open` | any value |  |
-| `stage` | text | quest: the stage it moves to. |
-| `outcome` | text | quest: met or failed. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
+| `stage` | text | quest: the stage a quest the world built moves to (the one it stands on, to call that one); the stage called, for a quest opened in play. |
+| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
 | `why` | text | move, place, give, store, quest, relate: the reason, kept with the change. |
 | `reveal` | true or false | quest: true to show the player. |
 | `show` | any value |  |
@@ -587,7 +587,7 @@ Lane: engine. Needs: `action`. Takes its provenance.
 | `action` | text | act: the action, by its id. |
 | `who` | text | move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. act: who takes the action; left out, the player's character. |
 | `params` | object | act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is. |
-| `outcome` | text | quest: met or failed. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
+| `outcome` | text | quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules. |
 
 Worked example:
 

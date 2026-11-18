@@ -71,11 +71,14 @@ export function writesOf(env: Pick<FoldEnv, "registry" | "areas">, op: string, v
 /**
  * Every change along `chat`'s path, up to `turn` (its head when none is given), that wrote `part` of the level `ref`, oldest first
  * (`ValueWrite`). A turn of another chat on the path (a branch's shared history) is read as the path holds it; a turn begun and not yet
- * tied to its reply is read after the path's last turn.
+ * tied to its reply is read after the turn it follows (its parent: the path's last turn for a new reply, the one before the reply it
+ * swipes for a swipe), with the path up to there.
  */
 export function valueHistory(store: UserStore, env: Pick<FoldEnv, "registry" | "areas">, chat: string, ref: string, part: string, turn?: string): ValueWrite[] {
   const path = store.path(chat).flatMap((e) => (e.turn === null ? [] : [e.turn]));
-  const end = turn === undefined ? path.length : path.indexOf(turn) + 1;
+  const open = turn !== undefined && !path.includes(turn) && store.turn(turn)?.status === "open" ? store.turn(turn) : undefined;
+  const parent = open?.parent ?? null;
+  const end = turn === undefined ? path.length : open !== undefined ? (parent === null ? 0 : path.includes(parent) ? path.indexOf(parent) + 1 : path.length) : path.indexOf(turn) + 1;
   const out: ValueWrite[] = [];
   const seen = new Set<number>();
   const take = (c: ChangeRow, at: string | null, n: number, applied: boolean): void => {
@@ -87,10 +90,10 @@ export function valueHistory(store: UserStore, env: Pick<FoldEnv, "registry" | "
     // A job's write on a turn counts where it takes effect, among what is placed before a later turn.
     for (const c of store.changes(t)) if (c.job === null) take(c, t, i + 1, c.applied);
   }
-  // A turn begun and not yet tied to its reply stands after the path's last turn: what was placed before it and its own changes count there.
-  if (turn !== undefined && !path.includes(turn) && store.turn(turn)?.status === "open") {
-    for (const placed of store.changesBefore(turn)) take(placed.change, turn, path.length + 1, placed.applied);
-    for (const c of store.changes(turn)) if (c.job === null) take(c, turn, path.length + 1, c.applied);
+  // A turn begun and not yet tied to its reply stands after the turn it follows: what was placed before it and its own changes count there.
+  if (open !== undefined && turn !== undefined) {
+    for (const placed of store.changesBefore(turn)) take(placed.change, turn, end + 1, placed.applied);
+    for (const c of store.changes(turn)) if (c.job === null) take(c, turn, end + 1, c.applied);
   }
   // At the head, his own edits after the path's last turn.
   if (turn === undefined) for (const c of store.ownerChanges(chat)) if (!seen.has(c.id) && c.job === null) take(c, null, path.length + 1, c.applied);
