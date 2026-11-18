@@ -62,6 +62,20 @@ export const COLLECTION_INFO: Readonly<Record<WorldCollection, CollectionInfo>> 
 export const UNREAD_COLLECTIONS: Readonly<Partial<Record<WorldCollection, true>>> = { sections: true, steps: true };
 export const UNREAD_PARTS: Readonly<Partial<Record<WorldPart, true>>> = { lorePins: true, minds: true };
 
+/**
+ * The fields of a part Build still draws, which nothing RPE runs reads: not drawn, kept in the file as it has them, and named once in
+ * a closed line at the part's foot (`KeptUnused`). Time: the previous build's turn ran on these (a turn's tick by kind of scene, what
+ * stopped a time skip, Speed through, the montage); now only an agent's `pass_time` moves the clock, and it lists what falls due.
+ */
+export const KEPT_UNUSED: Readonly<Partial<Record<WorldPart, readonly { key: string; label: string }[]>>> = {
+  time: [
+    { key: "sceneTicks", label: "How many minutes a turn takes, by kind of scene" },
+    { key: "interrupts", label: "What stops a time skip" },
+    { key: "speedThrough", label: "Speed through: when a long activity is offered as a skip or runs on its own" },
+    { key: "montage", label: "How a time skip is summed up (the montage)" },
+  ],
+};
+
 /** The needs by their one name, as a list ("Hunger, fatigue, social and fun"), so the hint names them as the page does. */
 const NEED_LIST = NEED_IDS.map((need, i) => (i === 0 ? NEED_WORDS[need].name : NEED_WORDS[need].name.toLowerCase()))
   .join(", ")
@@ -73,7 +87,7 @@ export const PART_INFO: Readonly<Record<WorldPart, { label: string; hint: string
   calendar: { label: "Calendar", hint: "Dates, months and holidays", icon: "calendar" },
   realism: { label: "Realism defaults", hint: "How closely new chats simulate each part of life", icon: "sliders" },
   tiers: { label: "Tiers", hint: "How deeply each person is simulated", icon: "layers" },
-  time: { label: "Time defaults", hint: "How time passes in new chats", icon: "clock" },
+  time: { label: "Time limits", hint: "How far one look-ahead through time may go", icon: "clock" },
   ruleset: { label: "Ruleset", hint: "Character fields, checks, levels, the sheet and combat", icon: "shield" },
   loreIndex: { label: "Lore lookup table", hint: "Terms and topics that lead to lore entries", icon: "search" },
   minds: { label: "Minds", hint: "Kept in the file, not used by this build", icon: "sparkle" },

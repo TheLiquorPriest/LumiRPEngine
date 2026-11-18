@@ -580,18 +580,16 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
     { kind: "claims", key: "claims", label: "Player claims" },
   ],
+  // What a look-ahead through time stops at (`time_totals`, and Check world's day): the ceilings are `TIME_LIMITS.unitCap`. The ticks, the
+  // interrupt policy, speed through and the montage of the previous build's turn are kept in the file and not drawn (`KEPT_UNUSED`).
   time: [
-    { kind: "record", key: "sceneTicks", label: "Default tick per scene type", keyLabel: "Scene type", item: { kind: "duration", key: "", label: "Tick" } },
-    { kind: "json", key: "interrupts", label: "Interrupt policy" },
-    { kind: "json", key: "speedThrough", label: "Speed through" },
-    { kind: "enum", key: "montage", label: "Montage", values: ["key", "day", "week"] },
     {
       kind: "object",
       key: "unitCap",
-      label: "Unit cap",
+      label: "How much one look-ahead works through",
       fields: [
-        { kind: "number", key: "agentDays", label: "Agent-days", min: 1, step: 1 },
-        { kind: "number", key: "events", label: "Events", min: 1, step: 1 },
+        { kind: "number", key: "agentDays", label: "People-days", min: 1, max: 600, step: 1, hint: "A look-ahead steps each person who lives their own day through every day it covers. It stops, and says it was cut short, once it has stepped this many person-days." },
+        { kind: "number", key: "events", label: "Changes", min: 1, max: 5000, step: 1, hint: "It also stops once it has made this many changes to the world." },
       ],
     },
   ],

@@ -30,7 +30,7 @@ import { tierGroups } from "../batch";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
-import { COLLECTION_INFO, type CollectionInfo, deleteItem, go, holdNew, ItemHeader, itemLabel, NewItem, newItemName, OverflowMenu, PART_INFO, UNREAD_COLLECTIONS, UNREAD_PARTS } from "./chrome";
+import { COLLECTION_INFO, type CollectionInfo, deleteItem, go, holdNew, ItemHeader, itemLabel, KEPT_UNUSED, NewItem, newItemName, OverflowMenu, PART_INFO, UNREAD_COLLECTIONS, UNREAD_PARTS } from "./chrome";
 import { CharacterPage } from "./character";
 import { entityFormSpecs, isCharacter, opensCharacterPage } from "./character-model";
 import { RevealItem } from "./contents";
@@ -48,6 +48,7 @@ import { RoutineEditor, RoutineList } from "./routine-editor";
 import { RoutineSettingsEditor } from "./routine-settings";
 import { RulesetEditor } from "./ruleset-editor";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
+import { KeptUnused } from "./form-kit";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
@@ -909,6 +910,7 @@ function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" 
       <PageHeader title={PART_INFO[props.part].label} subtitle={PART_INFO[props.part].hint} />
       {props.part === "meta" ? <DataUpdatesSection /> : null}
       <SchemaFields specs={PART_SPECS[props.part]} value={value} ctx={{ doc: draft.doc, lint: draft.lint, path: props.part, identifiers, functions: draft.functions }} onChange={setValue} />
+      <KeptUnused fields={KEPT_UNUSED[props.part] ?? []} held={value} />
       <SaveBar>
         <Button
           variant="primary"
