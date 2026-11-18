@@ -77,6 +77,33 @@ const MONEY = "money";
 /** What one answer says in more than one line of this area's words, those lines joined by this. */
 const SENTENCES = " ";
 
+/** This area's words as the guidance folder `guidance` holds them now (`.prompts/play-answers.md`). */
+export async function playAnswers(guidance: string): Promise<Part> {
+  return readPart(await readFile(join(guidance, ".prompts", `${PLAY_ANSWERS}.md`), "utf8"), `.prompts/${PLAY_ANSWERS}.md`);
+}
+
+/** A line of this area's words, filled with `fields` and with `codes` in the file's words for them (`keys`), each once; none when the user deleted the line. */
+function answerWords(part: Part, line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): string {
+  const said = Object.fromEntries(Object.entries(codes).map(([name, list]) => [name, [...new Set(list.map((code) => own(part.keys, code) ?? code))]]));
+  return part.lines.get(line)?.render(part.header, { ...fields, ...said }) ?? "";
+}
+
+/**
+ * Each part an Undo left as it was, one sentence in this area's words: by its kind and what it was done to, with why (something changed
+ * it since, no undo is kept for it, or its kind's nature, as a roll's), each sentence once. The play page and the turn's card both say it so.
+ */
+export function leftLines(part: Part, left: readonly Report[]): string[] {
+  const lines: string[] = [];
+  for (const l of left) {
+    // A kind that cannot be taken back by its nature says why, in the words of its own line; one that only lacks an undo, or whose thing changed since, says that.
+    const nature = typeof l.values?.why === "string" ? answerWords(part, `nature_${l.values.why}`) : "";
+    const line = nature !== "" ? "undone_left_nature" : l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept";
+    const said = answerWords(part, line, { ...(typeof l.values?.on === "string" ? { on: l.values.on } : {}), ...(nature !== "" ? { why: nature } : {}) }, { parts: [String(l.values?.op ?? "")] });
+    lines.push(said.charAt(0).toUpperCase() + said.slice(1));
+  }
+  return [...new Set(lines)].filter((line) => line !== "");
+}
+
 /** The settings a chat's taps read, as the chat's levels set them. */
 export interface PlaySettings {
   /** The most things falling due a list gives (`engine.maxDueItems`). */
@@ -661,15 +688,8 @@ export class PlayService {
    * was done to, with why (each in this area's words).
    */
   private async leftWords(left: readonly Report[], took: boolean): Promise<string> {
-    const lines = [await this.words(took ? "undone_some" : "undone_none")];
-    for (const l of left) {
-      // A kind that cannot be taken back by its nature says why, in the words of its own line; one that only lacks an undo, or whose thing changed since, says that.
-      const nature = typeof l.values?.why === "string" ? await this.words(`nature_${l.values.why}`) : "";
-      const line = nature !== "" ? "undone_left_nature" : l.code === "changed_since" ? "undone_left_changed" : "undone_left_kept";
-      const said = await this.words(line, { ...(typeof l.values?.on === "string" ? { on: l.values.on } : {}), ...(nature !== "" ? { why: nature } : {}) }, { parts: [String(l.values?.op ?? "")] });
-      lines.push(said.charAt(0).toUpperCase() + said.slice(1));
-    }
-    return [...new Set(lines)].filter((line) => line !== "").join(SENTENCES);
+    const part = await this.part();
+    return [...new Set([answerWords(part, took ? "undone_some" : "undone_none"), ...leftLines(part, left)])].filter((line) => line !== "").join(SENTENCES);
   }
 
   private async refusalWords(error: Refused): Promise<string> {
@@ -678,13 +698,11 @@ export class PlayService {
 
   /** This area's words as the guidance folder holds them now (`.prompts/play-answers.md`). */
   private async part(): Promise<Part> {
-    return readPart(await readFile(join(this.deps.guidance, ".prompts", `${PLAY_ANSWERS}.md`), "utf8"), `.prompts/${PLAY_ANSWERS}.md`);
+    return playAnswers(this.deps.guidance);
   }
 
-  /** A line of this area's words, filled with `fields` and with `codes` in the file's words for them (`keys`), each once; none when the user deleted the line. */
+  /** A line of this area's words (`answerWords`). */
   private async words(line: string, fields: Record<string, unknown> = {}, codes: Readonly<Record<string, readonly string[]>> = {}): Promise<string> {
-    const part = await this.part();
-    const said = Object.fromEntries(Object.entries(codes).map(([name, list]) => [name, [...new Set(list.map((code) => own(part.keys, code) ?? code))]]));
-    return part.lines.get(line)?.render(part.header, { ...fields, ...said }) ?? "";
+    return answerWords(await this.part(), line, fields, codes);
   }
 }

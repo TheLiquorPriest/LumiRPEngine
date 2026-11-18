@@ -13,7 +13,7 @@ import { route, RouteError, shape } from "../app";
 import type { ChangeRow } from "../store";
 import { toldRows } from "./events";
 import type { Turns } from "./lane";
-import { report, undoReply } from "./review";
+import { report, undoAnswer, undoReply } from "./review";
 import { toldShown } from "./shapes";
 
 const T = shape.text();
@@ -121,7 +121,7 @@ export function ownerJobRoutes(turns: Turns) {
       path: "/api/v1/jobs/:job/changes/:change/undo",
       access: "page",
       group: "jobs",
-      does: "Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes.",
+      does: "Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes and in the play answers' words.",
       reply: undoReply,
       handle: async ({ user, params }) => {
         const job = await jobOf(user, params.job);
@@ -129,7 +129,7 @@ export function ownerJobRoutes(turns: Turns) {
         if (!Number.isInteger(id) || !recorded(user, job).some((c) => c.id === id)) throw new RouteError(404, `Job ${job.id} recorded no change ${params.change}.`);
         const s = turns.store.user(user);
         const undone = await turns.writes.run(() => s.undo(id), "undoing a change a job recorded");
-        return { recorded: undone.changes.map((c) => String(c.id)), left: undone.left };
+        return await undoAnswer(undone);
       },
     }),
     route({
@@ -137,7 +137,7 @@ export function ownerJobRoutes(turns: Turns) {
       path: "/api/v1/jobs/:job/undo",
       access: "page",
       group: "jobs",
-      does: "Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes.",
+      does: "Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes and in the play answers' words.",
       reply: undoReply,
       handle: async ({ user, params }) => {
         const job = await jobOf(user, params.job);
@@ -152,7 +152,7 @@ export function ownerJobRoutes(turns: Turns) {
           .reverse();
         const s = turns.store.user(user);
         const done = await turns.writes.run(() => s.undo(ids), "undoing all a job recorded");
-        return { recorded: done.changes.map((c) => String(c.id)), left: done.left };
+        return await undoAnswer(done);
       },
     }),
   ] as const;

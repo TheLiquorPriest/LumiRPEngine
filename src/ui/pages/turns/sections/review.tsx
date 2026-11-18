@@ -46,7 +46,7 @@ function CardChangeLine(props: { change: CardChange; dropped: boolean; busy: str
           </Button>
           <span class="rpe-meta" data-undo>
             {change.undo.ops.length === 0 ? "It has no reversal." : `Reverses it with: ${change.undo.ops.join(", ")}.`}
-            {change.undo.left.length === 0 ? "" : ` Left as it is: ${change.undo.left.map((r) => r.code).join(", ")}.`}
+            {change.undo.leftWords.length === 0 ? "" : ` ${change.undo.leftWords.join(" ")}`}
           </span>
         </div>
       )}

@@ -302,7 +302,7 @@ export interface CallPermission {
 /** Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, a permission or rule that could not be asked, or a hook of his that blocked it with its reason. */
 export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: number } | { by: "switch"; thing: { kind: "hook" | "rule-command" | "command-tool" | "mcp-server" | "http-tool" | "connection"; name: string; target: string }; state: "on" | "waiting" | "off" } | { by: "never"; lane: string } | { by: "declined"; lane: string; reason?: string } | { by: "hold"; rule: string } | { by: "unasked"; error: string } | { by: "hook"; hook: string; reason: string };
 
-/** One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes) and the changes that already undid it. */
+/** One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays) and the changes that already undid it. */
 export interface CardChange {
   id: string;
   op: string;
@@ -312,7 +312,7 @@ export interface CardChange {
   standing: string | null;
   value: JsonValue;
   reports: ReportShown[];
-  undo: { ops: string[]; left: ReportShown[] };
+  undo: { ops: string[]; left: ReportShown[]; leftWords: string[] };
   undoneBy: string[];
 }
 
@@ -3910,10 +3910,11 @@ export interface TurnTold {
   dropped: { agent: AgentRef; at: number }[];
 }
 
-/** What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal. */
+/** What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes (a part a later change has written since, or one with no reversal) and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays. */
 export interface UndoReply {
   recorded: string[];
   left: ReportShown[];
+  leftWords: string[];
 }
 
 /** The newest update this process heard of, stage by stage from its arrival to the restart onto it. */
@@ -5361,7 +5362,7 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
-  /** Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal). */
+  /** Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal) and in the play answers' words. */
   "POST /api/v1/chats/:chat/turns/:turn/changes/:change/undo": {
     params: { chat: string; turn: string; change: string };
     query: Record<string, never>;
@@ -5911,7 +5912,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes. */
+  /** Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes and in the play answers' words. */
   "POST /api/v1/jobs/:job/changes/:change/undo": {
     params: { job: string; change: string };
     query: Record<string, never>;
@@ -5991,7 +5992,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes. */
+  /** Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes and in the play answers' words. */
   "POST /api/v1/jobs/:job/undo": {
     params: { job: string };
     query: Record<string, never>;

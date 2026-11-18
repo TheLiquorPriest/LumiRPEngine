@@ -54,7 +54,7 @@ export function useReview(chat: string, turn: string, carried: boolean, gateOpen
       setBusy(change);
       setSaid(null);
       app.client.call("POST /api/v1/chats/:chat/turns/:turn/changes/:change/undo", { chat, turn, change }).then(replyOf).then(
-        (answer) => done(answer.recorded.length === 0 ? "Nothing was recorded to undo it." : `Undone: ${answer.recorded.length} ${answer.recorded.length === 1 ? "change was" : "changes were"} recorded to reverse it${answer.left.length === 0 ? "." : `; ${answer.left.length} could not be reversed: ${answer.left.map((r) => r.code).join(", ")}.`}`),
+        (answer) => done(`${answer.recorded.length === 0 ? "Nothing was recorded to undo it." : `Undone: ${answer.recorded.length} ${answer.recorded.length === 1 ? "change was" : "changes were"} recorded to reverse it.`}${answer.leftWords.length === 0 ? "" : ` ${answer.leftWords.join(" ")}`}`),
         failed,
       );
     },

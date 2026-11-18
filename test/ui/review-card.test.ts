@@ -2,12 +2,14 @@
 
 import { describe, expect, test } from "bun:test";
 import { h } from "preact";
-import type { CardChange, CarriedTurnReply, ReviewCardReply } from "../../src/shared/api";
+import { leftLines, playAnswers } from "../../src/play/service";
+import type { CardChange, CarriedTurnReply, ReportShown, ReviewCardReply } from "../../src/shared/api";
+import { RPE_GUIDANCE } from "../../src/tree";
 import { CarriedRecord } from "../../src/ui/pages/turns/sections/carried";
 import { questionWords, ReviewCard } from "../../src/ui/pages/turns/sections/review";
 import { elements, expand, press, textOf } from "./vnodes";
 
-const change = (id: string, over: Partial<CardChange> = {}): CardChange => ({ id, op: "set", applied: true, by: "author", source: "stated", standing: "exact", value: { gold: 4 }, reports: [], undo: { ops: ["set"], left: [] }, undoneBy: [], ...over });
+const change = (id: string, over: Partial<CardChange> = {}): CardChange => ({ id, op: "set", applied: true, by: "author", source: "stated", standing: "exact", value: { gold: 4 }, reports: [], undo: { ops: ["set"], left: [], leftWords: [] }, undoneBy: [], ...over });
 const card: ReviewCardReply = {
   turn: "t5",
   dropped: false,
@@ -34,10 +36,21 @@ describe("the review card", () => {
     expect(questionWords({ ...(card.questions[0] as ReviewCardReply["questions"][number]), state: "answered", answer: { go: false, reason: "not yet" } })).toBe("did not go ahead: not yet");
   });
 
-  test("an undone change offers no second undo; a carried reply shows the engine, why no turn was played and each text word for word", () => {
+  test("an undone change offers no second undo; what an undo would leave is said in words; a carried reply shows the engine, why no turn was played and each text word for word", async () => {
     const undone = expand(h(ReviewCard, { card: { ...card, lanes: [{ lane: "engine", changes: [change("c1", { undoneBy: ["c9"] })] }], questions: [] }, review: { busy: null, said: null, onUndo: () => undefined, onAnswer: () => undefined } }));
     expect(elements(undone).some((e) => e.type === "button")).toBe(false);
     expect(textOf(undone)).toContain("reversed by c9");
+    // What an undo would leave is said in the play answers' words, as the card's route gives them, never as its report codes.
+    const reports: ReportShown[] = [
+      { code: "not_reversible", values: { op: "engine.check", why: "roll" } },
+      { code: "changed_since", values: { op: "set", on: "Wren" } },
+    ];
+    const leftWords = leftLines(await playAnswers(RPE_GUIDANCE), reports);
+    expect(leftWords).toEqual(["A roll stays as it is, because you have seen how the roll fell.", "A value of Wren stays as it is, because something has changed it since."]);
+    const leaving = textOf(expand(h(ReviewCard, { card: { ...card, lanes: [{ lane: "engine", changes: [change("c1", { undo: { ops: ["set"], left: reports, leftWords } })] }], questions: [] }, review: { busy: null, said: null, onUndo: () => undefined, onAnswer: () => undefined } })));
+    for (const said of leftWords) expect(leaving).toContain(said);
+    expect(leaving).not.toContain("not_reversible");
+    expect(leaving).not.toContain("changed_since");
     const carried: CarriedTurnReply = { turn: "t5", chat: "c", message: "m1", swipe: 0, engine: "agents", fields: [{ name: "session", value: { id: "s1" } }], texts: [{ part: "prompts", path: "a.md", text: "Old words." }, { part: "prompts", path: "b.md", text: null }], unplayed: "it was stopped", departures: ["The reply names a door the turn kept shut."] };
     const shown = textOf(expand(h(CarriedRecord, { carried })));
     expect(shown).toContain("the agents engine");

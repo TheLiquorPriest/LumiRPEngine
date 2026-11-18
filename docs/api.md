@@ -296,7 +296,7 @@ A turn's one review card: whether the turn was dropped with nothing saved, so th
 
 ### `POST /api/v1/chats/:chat/turns/:turn/changes/:change/undo`
 
-Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal).
+Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal) and in the play answers' words.
 
 | | |
 |---|---|
@@ -2233,7 +2233,7 @@ What a job recorded, change by change, with its source, what it cites, whether i
 
 ### `POST /api/v1/jobs/:job/changes/:change/undo`
 
-Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes.
+Undoes one change a job recorded, as his own: the changes reversing it are recorded at the chat's head, citing it. Says what was recorded and what is left, as report codes and in the play answers' words.
 
 | | |
 |---|---|
@@ -2337,7 +2337,7 @@ What a job he started (which belongs to no turn) was told as it went: its gap ch
 
 ### `POST /api/v1/jobs/:job/undo`
 
-Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes.
+Undoes all a job recorded that no change of his undid yet, the newest first, as his own. Says what was recorded and what is left, as report codes and in the play answers' words.
 
 | | |
 |---|---|
@@ -4336,7 +4336,7 @@ export type CallRefusal = { by: "limit"; hit: LimitHit } | { by: "answer"; max: 
 
 ### `CardChange`
 
-One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes) and the changes that already undid it.
+One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays) and the changes that already undid it.
 
 ```ts
 export interface CardChange {
@@ -4348,7 +4348,7 @@ export interface CardChange {
   standing: string | null;
   value: JsonValue;
   reports: ReportShown[];
-  undo: { ops: string[]; left: ReportShown[] };
+  undo: { ops: string[]; left: ReportShown[]; leftWords: string[] };
   undoneBy: string[];
 }
 ```
@@ -9799,12 +9799,13 @@ export interface TurnTold {
 
 ### `UndoReply`
 
-What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal.
+What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes (a part a later change has written since, or one with no reversal) and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays.
 
 ```ts
 export interface UndoReply {
   recorded: string[];
   left: ReportShown[];
+  leftWords: string[];
 }
 ```
 

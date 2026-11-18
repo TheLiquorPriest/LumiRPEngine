@@ -4,8 +4,10 @@
 // card as it was. The routes read the store's own `reviewCard` and call its `undo`; his word on a question is the approvals port's
 // `answer`. Every route is a page's.
 
-import { route, RouteError, shape } from "../app";
-import { JoinedTurnError, type UserStore } from "../store";
+import { type Infer, route, RouteError, shape } from "../app";
+import { leftLines, playAnswers } from "../play/service";
+import { JoinedTurnError, type Report, type UserStore } from "../store";
+import { RPE_GUIDANCE } from "../tree";
 import { answerOf, type ApprovalRow } from "./approvals";
 import type { Turns } from "./lane";
 
@@ -22,7 +24,7 @@ export const report = shape.named(
 
 const changeShown = shape.named(
   "CardChange",
-  "One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes) and the changes that already undid it.",
+  "One change of a turn on its card: its id, its operation, whether it applied, who decided it, where it came from, how sure it is, its reports, its undo (the operations undoing it would record, and what would be left, as report codes and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays) and the changes that already undid it.",
   shape.object({
     id: T,
     op: T,
@@ -32,7 +34,7 @@ const changeShown = shape.named(
     standing: nullable(T),
     value: shape.json(),
     reports: shape.list(report),
-    undo: shape.object({ ops: shape.list(T), left: shape.list(report) }),
+    undo: shape.object({ ops: shape.list(T), left: shape.list(report), leftWords: shape.list(T) }),
     undoneBy: shape.list(T),
   }),
 );
@@ -66,9 +68,14 @@ const cardReply = shape.named(
 
 export const undoReply = shape.named(
   "UndoReply",
-  "What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes: a part a later change has written since, or one with no reversal.",
-  shape.object({ recorded: shape.list(T), left: shape.list(report) }),
+  "What undoing a change of a turn recorded (the ids of the changes that reverse it, his own, citing it) and what is left, as report codes (a part a later change has written since, or one with no reversal) and, each part one sentence, in the play answers' words: its kind, what it was done to and why it stays.",
+  shape.object({ recorded: shape.list(T), left: shape.list(report), leftWords: shape.list(T) }),
 );
+
+/** An undo's answer (`UndoReply`): the changes it recorded, and what it left, as report codes and in the play answers' words. */
+export async function undoAnswer(undone: { changes: readonly { id: number }[]; left: readonly Report[] }): Promise<Infer<typeof undoReply>> {
+  return { recorded: undone.changes.map((c) => String(c.id)), left: [...undone.left], leftWords: leftLines(await playAnswers(RPE_GUIDANCE), undone.left) };
+}
 
 const answerBody = shape.named("ApprovalAnswerBody", "His word on a question: go ahead, or not, with a reason the agent is given.", shape.object({ go: shape.yesNo(), reason: opt(T) }));
 
@@ -112,6 +119,8 @@ export function reviewRoutes(turns: Turns) {
         const s = held(user, params.chat, params.turn);
         // A turn dropped with nothing saved took its staged changes with it (plan §6.3): the card says that none stands, and offers no undo.
         const dropped = s.turn(params.turn)?.status === "dropped";
+        // What an undo would leave is said in the play answers' words, as the play page says it.
+        const words = await playAnswers(RPE_GUIDANCE);
         const lanes = s.reviewCard(params.turn).map((l) => ({
           lane: l.lane,
           changes: l.changes.map(({ change, undo, undoneBy }) => ({
@@ -123,7 +132,7 @@ export function reviewRoutes(turns: Turns) {
             standing: change.standing,
             value: change.value,
             reports: change.reports,
-            undo: dropped ? { ops: [], left: [] } : undo,
+            undo: dropped ? { ops: [], left: [], leftWords: [] } : { ...undo, leftWords: leftLines(words, undo.left) },
             undoneBy: undoneBy.map(String),
           })),
         }));
@@ -136,7 +145,7 @@ export function reviewRoutes(turns: Turns) {
       path: "/api/v1/chats/:chat/turns/:turn/changes/:change/undo",
       access: "page",
       group: "turns",
-      does: "Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal).",
+      does: "Undoes one change of a turn as his own (source player): records the changes that reverse it, citing it, at the chat's head; nothing recorded is taken away. Says what was recorded and what is left, as report codes (a part a later change wrote since, a change with no reversal) and in the play answers' words.",
       reply: undoReply,
       joined: true,
       handle: async ({ user, params }) => {
@@ -145,7 +154,7 @@ export function reviewRoutes(turns: Turns) {
         if (!Number.isInteger(id) || !s.reviewCard(params.turn).some((l) => l.changes.some((c) => c.change.id === id))) throw new RouteError(404, `Turn ${params.turn} has no change ${params.change}.`);
         if (s.turn(params.turn)?.status === "dropped") throw new RouteError(409, "This turn was dropped with nothing saved, so none of its changes stands, and there is nothing of it to undo.");
         const undone = await turns.writes.run(() => s.undo(id), "undoing a change from the turn's card");
-        return { recorded: undone.changes.map((c) => String(c.id)), left: undone.left };
+        return await undoAnswer(undone);
       },
     }),
     route({
