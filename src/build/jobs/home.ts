@@ -139,7 +139,13 @@ export class JobHome {
       .run(job)
       .then(
         (done) => (controller.signal.aborted ? undefined : this.change(user, id, { status: "done", progress: 1, result: done.result, ...(done.message === undefined ? {} : { message: done.message }) })),
-        (error: unknown) => (controller.signal.aborted ? undefined : this.change(user, id, { status: "failed", progress: 1, message: error instanceof Error ? error.message : String(error) })),
+        (error: unknown) => {
+          if (controller.signal.aborted) return undefined;
+          const message = error instanceof Error ? error.message : String(error);
+          // Told once, as it ends, as a turn's run or an RPH job that failed is: at warn, in the words Build shows.
+          this.deps.log.warn(`A Build job ended failed: ${message}`, { job: id, kind, world });
+          return this.change(user, id, { status: "failed", progress: 1, message });
+        },
       )
       .then(() => undefined)
       .catch((error: unknown) => this.deps.log.warn(`[LumiRPEngine] a job's end was not kept (${error instanceof Error ? error.message : String(error)})`))

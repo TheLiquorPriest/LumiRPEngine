@@ -29,7 +29,7 @@ export interface Proposed {
 
 /** One model job's work while it runs. */
 export interface KindRun {
-  /** What its agent is given by name (`build:job`), as data. */
+  /** What its agent is given by name (`build:job:<job>`), as data. */
   given: JsonObject;
   /** The fields its brief's line is filled with, beside the world's id and name. */
   fields: Record<string, string | number>;

@@ -1,7 +1,7 @@
 // Build's model jobs run as RPH jobs (plan §13.5, §14; PlanChatUI-B5; C-23): a job he starts from Build is kept in the job home and runs
 // as a job of RPH's under a scope naming only him, no chat and no turn, so its agent reads no turn's state. Its agent runs as the kind's
 // definition (`guidance/.agents/build-*.md`: the model, the tools) with its brief (`guidance/.prompts/build-jobs.md`, the kind's line),
-// both his to edit at the global level; it is given its input by name (`build:job`, through the areas' `views` hook) and proposes
+// both his to edit at the global level; it is given its input by name (`build:job:` and the Build job's id, through the areas' `views` hook) and proposes
 // through `world_propose`, beside the world family's reads, which are Build's tools for a job of no chat (the `jobTools` hook). Each call
 // of `world_propose` is checked by the kind and kept with the job at once, and the job ends with what its agent proposed when RPH's job
 // ends, done or at one of its limits. A cancel in Build cancels RPH's job. Nothing here writes to a world: he reviews and applies.
@@ -22,7 +22,7 @@ import type { JobRun, JobRunner } from "./home";
 import { type KindRun, MODEL_KINDS, type ModelKind } from "./kinds";
 import type { JobLimits } from "./limits";
 
-/** The name a model job's agent is given its input by. */
+/** What a model job's agent is given its input by: this, then `:` and the Build job's id (`build:job:<job>`). */
 export const BUILD_GIVEN = "build:job";
 /** The prompt part of Build's jobs: each kind's brief, `world_propose`'s answers and the words of RPH's refusals (`format: lines`). */
 export const BUILD_JOBS_PART = "build-jobs";
@@ -44,7 +44,7 @@ export interface ModelJobsDeps {
   pollMs?: number;
 }
 
-/** A model job that runs now, by its RPH job's id. */
+/** A model job that runs now, by its RPH job's id, and by its own while RPH's start of it is under way. */
 interface Live {
   job: JobRun;
   run: KindRun;
@@ -82,6 +82,8 @@ function objectOf(args: JsonValue): JsonObject {
 
 export class ModelJobs {
   readonly #live = new Map<string, Live>();
+  /** Each job that runs now, by its Build job's id, from before RPH is asked: RPH's start reads what its agent is given by name as it makes the agent, before it has answered with its own id. */
+  readonly #building = new Map<string, Live>();
   /** Starts in flight, by user: a call of the job's agent may come before RPH's start has answered. */
   readonly #starting = new Map<string, Set<Promise<unknown>>>();
 
@@ -94,11 +96,10 @@ export class ModelJobs {
     return out;
   }
 
-  /** What a model job's agent is given by name: its input, as data. Null for any other name, or an agent of no Build job. */
-  readonly views: ViewHook = async (scope, agent, ref) => {
-    if (ref !== BUILD_GIVEN) return null;
-    const live = await this.liveOf(scope.user, agent);
-    return live === null ? null : JSON.stringify(live.run.given);
+  /** What a model job's agent is given by name (`build:job:<job>`): its input, as data. Null for any other name, or a job that does not run now. */
+  readonly views: ViewHook = async (scope, _agent, ref) => {
+    const live = ref.startsWith(`${BUILD_GIVEN}:`) ? this.#building.get(ref.slice(BUILD_GIVEN.length + 1)) : undefined;
+    return live === undefined || live.job.user !== scope.user ? null : JSON.stringify(live.run.given);
   };
 
   /** Build's tools for a job of no chat: the world family's reads and `world_propose`, each worded by its file in force at his levels. */
@@ -187,43 +188,52 @@ export class ModelJobs {
     const lines = linesOf(await userGuidance(rph.files, job.user).part(BUILD_JOBS_PART));
     const draft = await worlds.worlds.working(job.world, job.user);
     const brief = lines?.line(`brief_${kind}`, { world: job.world, name: draft.name, ...run.fields }) ?? "";
-    // Held as starting before RPH is asked: its agent may ask for its input or call a tool before the start has answered.
-    const { promise: ready, resolve } = Promise.withResolvers<void>();
-    const pending = this.#starting.get(job.user) ?? new Set<Promise<unknown>>();
-    pending.add(ready);
-    this.#starting.set(job.user, pending);
-    let started: JobView | JobRefusal;
+    const live: Live = { job, run, calls: 0 };
+    this.#building.set(job.id, live);
     try {
-      started = await rph.jobs.start({ user: job.user }, { agent: MODEL_KINDS[kind].agent, brief, attach: [BUILD_GIVEN] });
-      if (!("refused" in started)) this.#live.set(started.id, { job, run, calls: 0 });
-    } finally {
-      resolve();
-      pending.delete(ready);
-      if (pending.size === 0) this.#starting.delete(job.user);
-    }
-    if ("refused" in started) throw new Error(refusedWords(lines, started));
-    const id = started.id;
-    try {
-      let now: JobView | undefined = started;
-      while (now !== undefined && !ENDED.includes(now.state)) {
-        await Bun.sleep(this.deps.pollMs ?? 1000);
-        if (job.signal.aborted) {
-          await rph.jobs.cancel(job.user, id).catch((error: unknown) => log.warn("A Build job's RPH job could not be cancelled.", { job: id, error: error instanceof Error ? error.message : String(error) }));
-          return { result: { proposals: run.proposals((line, fields) => lines?.line(line, fields)) } };
-        }
-        now = await rph.jobs.get(job.user, id);
+      // Held as starting before RPH is asked: its agent may call a tool before the start has answered.
+      const { promise: ready, resolve } = Promise.withResolvers<void>();
+      const pending = this.#starting.get(job.user) ?? new Set<Promise<unknown>>();
+      pending.add(ready);
+      this.#starting.set(job.user, pending);
+      let started: JobView | JobRefusal;
+      try {
+        started = await rph.jobs.start({ user: job.user }, { agent: MODEL_KINDS[kind].agent, brief, attach: [`${BUILD_GIVEN}:${job.id}`] });
+        if (!("refused" in started)) this.#live.set(started.id, live);
+      } catch (error) {
+        const words = error instanceof Error ? error.message : String(error);
+        throw new Error(lines?.line("job_not_started", { error: words }) ?? words);
+      } finally {
+        resolve();
+        pending.delete(ready);
+        if (pending.size === 0) this.#starting.delete(job.user);
       }
-      if (now === undefined) throw new Error(lines?.line("job_gone") ?? "RPH no longer has the job");
-      const cut = now.limit !== undefined;
-      const { result, notes } = run.end(cut, (line, fields) => lines?.line(line, fields));
-      const proposed = "proposals" in result ? result.proposals.length : 0;
-      // A job that ended otherwise than done, with nothing proposed, failed with RPH's last word of it.
-      if (now.state !== "done" && !cut && proposed === 0) throw new Error(lines?.line(`job_${now.state.replace("-", "_")}`, { report: now.report ?? "" }) ?? now.report ?? now.state);
-      const limit = now.limit === undefined ? undefined : lines?.line("job_limit", { limit: now.limit.limit, max: now.limit.max, value: now.limit.value });
-      const message = [...(limit === undefined ? [] : [limit]), ...notes].join(" ");
-      return { result, ...(message === "" ? {} : { message }) };
+      if ("refused" in started) throw new Error(refusedWords(lines, started));
+      const id = started.id;
+      try {
+        let now: JobView | undefined = started;
+        while (now !== undefined && !ENDED.includes(now.state)) {
+          await Bun.sleep(this.deps.pollMs ?? 1000);
+          if (job.signal.aborted) {
+            await rph.jobs.cancel(job.user, id).catch((error: unknown) => log.warn("A Build job's RPH job could not be cancelled.", { job: id, error: error instanceof Error ? error.message : String(error) }));
+            return { result: { proposals: run.proposals((line, fields) => lines?.line(line, fields)) } };
+          }
+          now = await rph.jobs.get(job.user, id);
+        }
+        if (now === undefined) throw new Error(lines?.line("job_gone") ?? "RPH no longer has the job");
+        const cut = now.limit !== undefined;
+        const { result, notes } = run.end(cut, (line, fields) => lines?.line(line, fields));
+        const proposed = "proposals" in result ? result.proposals.length : 0;
+        // A job that ended otherwise than done, with nothing proposed, failed with RPH's last word of it.
+        if (now.state !== "done" && !cut && proposed === 0) throw new Error(lines?.line(`job_${now.state.replace("-", "_")}`, { report: now.report ?? "" }) ?? now.report ?? now.state);
+        const limit = now.limit === undefined ? undefined : lines?.line("job_limit", { limit: now.limit.limit, max: now.limit.max, value: now.limit.value });
+        const message = [...(limit === undefined ? [] : [limit]), ...notes].join(" ");
+        return { result, ...(message === "" ? {} : { message }) };
+      } finally {
+        this.#live.delete(id);
+      }
     } finally {
-      this.#live.delete(id);
+      this.#building.delete(job.id);
     }
   }
 }

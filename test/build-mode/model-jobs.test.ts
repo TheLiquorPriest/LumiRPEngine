@@ -39,12 +39,13 @@ test("a Refine runs as an RPH job of no chat: its agent is given the request by 
     async start(scope: Scope | UserScope, start: JobStart) {
       started.push({ scope, start });
       const agent = { id: "a1", definition: start.agent, job: "rph-1" };
-      // The agent's run: what a model would do with the given input and the tool.
+      // As RPH's start does, it gives the agent its input by name while it makes the agent, before it answers.
+      const given = JSON.parse((await models?.views({ user: USER, session: "s1" }, agent, start.attach?.[0] ?? "")) ?? "{}") as { request?: string };
+      answers.push(given.request);
+      // The agent's run: what a model would do with the tool.
       void (async () => {
-        const given = JSON.parse((await models?.views({ user: USER, session: "s1" }, agent, BUILD_GIVEN)) ?? "{}") as { request?: string };
         const tool = (await models?.tools({ user: USER, session: "s1" }))?.find((t) => t.name === WORLD_PROPOSE);
         const ctx = { scope: { user: USER, session: "s1" }, agent, run: "r1", callId: "c1", signal: new AbortController().signal, onUpdate: () => undefined };
-        answers.push(given.request);
         answers.push(await tool?.run({ proposals: [{ collection: "places", key: "old_mill", value: { name: "Old mill" }, confidence: 0.8 }, { collection: "entities", key: "ghost", value: { kind: "no_such_kind", name: "Ghost" }, confidence: 0.5 }] }, ctx));
         state = "done";
       })();
@@ -58,7 +59,7 @@ test("a Refine runs as an RPH job of no chat: its agent is given the request by 
   await home.start(USER, "refine", made.world.id, { instructions: "Add the old mill by the river." });
   await home.idle();
   // A scope naming the user and no chat or turn; the agent is the kind's definition, given its input by name.
-  expect(started.map((s) => [s.scope, s.start.agent, s.start.attach])).toEqual([[{ user: USER }, "build-refine", [BUILD_GIVEN]]]);
+  expect(started.map((s) => [s.scope, s.start.agent, s.start.attach])).toEqual([[{ user: USER }, "build-refine", [expect.stringMatching(new RegExp(`^${BUILD_GIVEN}:job`))]]]);
   expect(answers[0]).toBe("Add the old mill by the river.");
   expect(JSON.stringify(answers[1])).toContain("used a kind this world doesn't have (no_such_kind)");
   const [job] = home.list(USER, made.world.id);
