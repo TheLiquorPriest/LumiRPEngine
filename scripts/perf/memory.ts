@@ -4,12 +4,13 @@
 // `--prompt` tokens (the preset's text and a full window of history), and the Author makes `--calls` calls in it: a look
 // at the world, a delegate to the character, a note written and read again, a job started every `--job-every` turns, then
 // its reply. After every `--every` turns, and once at rest before the first, it collects garbage and prints the resident
-// size and the heap, and again `--rest` seconds after the last turn; at the turns `--at` names it writes the heap's objects
-// by kind (and, with `--snapshots`, a heap snapshot Chrome's tools read) into `--out`. `--global` is added to the user's
-// RPE-global.yml, to measure under other settings. What the bed and the stand-in record of each turn for tests is let go
-// after each turn, so what grows is RPE's own; the stand-in Lumiverse's chats and database are in the same process and in
-// the figures. Run from source, each worker thread RPE starts holds about 20 MB; run from the built file, more (the whole
-// file is read on each thread): add the difference for each thread a server runs.
+// size, the heap and the worker threads running, and again `--rest` seconds after the last turn; at the turns `--at` names
+// it writes the heap's objects by kind (and, with `--snapshots`, a heap snapshot Chrome's tools read) into `--out`.
+// `--global` is added to the user's RPE-global.yml, to measure under other settings a turn reads (the bed gives the server
+// its own settings' defaults, worker threads' included). What the bed and the stand-in record of each turn for tests is let
+// go after each turn, so what grows is RPE's own; the stand-in Lumiverse's chats and database are in the same process and
+// in the figures. Run from source, each worker thread RPE starts holds about 20 MB; run from the built file about 40 (the
+// whole file is read on each thread): add the difference for each thread a server runs.
 // Usage: bun scripts/perf/memory.ts [--turns 100] [--chats 1] [--every 10] [--calls 6] [--prompt 50000] [--job-every 5] [--rest 0] [--global yaml] [--at 10,100] [--out folder] [--snapshots]
 
 import { heapStats, memoryUsage } from "bun:jsc";
@@ -103,7 +104,8 @@ function measure(turn: number): void {
   const m = memoryUsage();
   const h = heapStats();
   // The resident size now and at its highest, and what the allocator outside the heap holds from the system: what a freed object leaves held shows there, not in the heap.
-  console.log(`turn ${String(turn).padStart(4)}  rss ${mb(m.current)} MB (peak ${mb(m.peak)} MB)  heap ${mb(h.heapSize)} MB of ${mb(h.heapCapacity)} MB  extra ${mb(h.extraMemorySize)} MB  allocator ${mb(m.currentCommit)} MB  objects ${h.objectCount}  calls ${calls}`);
+  const threads = bed === null ? 0 : bed.app.workers.running + bed.app.index.threads;
+  console.log(`turn ${String(turn).padStart(4)}  rss ${mb(m.current)} MB (peak ${mb(m.peak)} MB)  heap ${mb(h.heapSize)} MB of ${mb(h.heapCapacity)} MB  extra ${mb(h.extraMemorySize)} MB  allocator ${mb(m.currentCommit)} MB  threads ${threads}  objects ${h.objectCount}  calls ${calls}`);
   if (!AT.has(turn)) return;
   const counts = Object.entries(h.objectTypeCounts).sort((a, b) => b[1] - a[1]);
   writeFileSync(join(args.out!, `counts-${turn}.json`), JSON.stringify(Object.fromEntries(counts), null, 1));
