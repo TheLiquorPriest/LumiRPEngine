@@ -12,7 +12,7 @@ import { h } from "preact";
 import type { JobsApi, JobView } from "rp-harness/contract";
 import { type App, dataPaths, lineLog, openApp } from "../../src/app";
 import { configOf } from "../../src/app/config";
-import { turnRoutes } from "../../src/turn/routes";
+import { jobRoutes } from "../../src/turn/job-routes";
 import { createClient, type RpeClient, webConnector } from "../../src/ui/client";
 import { type JobsShown, JobsView, readJobs } from "../../src/ui/pages/jobs";
 import { TurnsView } from "../../src/ui/pages/turns";
@@ -69,17 +69,18 @@ const clients: RpeClient[] = [];
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "rpe-ui-jobs-"));
-  // The job routes reach only the harness's jobs.
-  const turns = {
-    get harness() {
-      return { jobs };
-    },
+  // The job routes take the harness's jobs once, as they are mounted, and reach only them: each test keeps its own list, which this hands the calls to.
+  const harnessJobs = {
+    list: (filter: Parameters<JobsApi["list"]>[0]) => jobs?.list(filter),
+    get: (user: string, id: string) => jobs?.get(user, id),
+    cancel: (user: string, id: string) => jobs?.cancel(user, id),
   };
+  const turns = { harness: { jobs: harnessJobs } };
   app = await openApp({
     paths: dataPaths(join(root, "data")),
     config: configOf({ port: 0, lumiverse: { url: "http://127.0.0.1:7860", user: USER } }, {}, "the test's config"),
     version: "1.0.0",
-    areas: [{ name: "turns", mount: (at) => at.routes.add("turns", turnRoutes({ turns: turns as never, chatName: async () => null })) }],
+    areas: [{ name: "jobs", mount: (at) => at.routes.add("jobs", jobRoutes({ turns: turns as never, shared: () => { throw new Error("The jobs read here are listed and cancelled; the shared levels are for the switches, which are read nowhere here."); } })) }],
     log: lineLog(() => undefined),
   });
   base = (await app.start()).url;
@@ -128,8 +129,8 @@ const view = (shown: JobsShown, everyChat = false) => {
 };
 const buttons = (node: unknown): string[] => elements(node).filter((e) => e.type === "button").map((e) => textOf(e.props.children));
 
-// hardening: the job routes read RPE's own job table now (the row each job is), not RPH's list kept in memory here; this stand-in is to be rebuilt on that table.
-describe.skip("the jobs, on RPE's own job routes", () => {
+// The routes read the harness's jobs, kept in memory here, through the job routes the turn lane's area mounts (`jobRoutes`, as `turnRoutes` no longer carries them).
+describe("the jobs, on RPE's own job routes", () => {
   test("a chat's jobs on its Turns page, newest started first, each as RPH keeps it; Cancel only on one that has not ended", async () => {
     jobs = keptJobs();
     const read = await reading(CHAT, (s) => s.jobs !== null);
@@ -140,7 +141,8 @@ describe.skip("the jobs, on RPE's own job routes", () => {
     expect(buttons(row("job-run"))).toEqual(["Cancel"]);
     expect(buttons(row("job-old"))).toEqual([]);
     expect(textOf(row("job-old")?.props.children)).toContain("started by the author");
-    expect(elements(row("job-old")).find((e) => e.type === "pre")?.props.children).toBe("Chapter one, summarized.");
+    // The report is written as markdown now, not a block of preformatted text.
+    expect(textOf(row("job-old")?.props.children)).toContain("Chapter one, summarized.");
     expect(textOf(tree)).toContain("This chat's jobs");
     // On the Turns page, below its turns.
     const page = expand(h(TurnsView, { turns: [], more: false, loading: false, problem: null, jobs: { shown: read.shown(), onCancel: () => undefined }, onOpen: () => undefined, onMore: () => undefined }));
