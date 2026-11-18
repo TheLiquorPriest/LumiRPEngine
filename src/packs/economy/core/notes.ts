@@ -15,7 +15,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import { FINANCE_ACTIONS, FINANCE_EVENTS, PARTY_KINDS } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { calendarOf, dateAt } from "../../../engine/calendar";
-import { orgTypeOf } from "../../../engine/org";
+import { isRuled, orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { Working } from "../../../engine/working";
@@ -101,7 +101,8 @@ function lendNow(api: FinanceApi, ctx: ReadContext, a: Record<string, JsonValue>
   const into = strOf(a.into) || api.depositAccount(ctx, borrower) || "";
   if (into === "" || api.mayUse(ctx, borrower, into, "into") !== null || api.traitsOf(ctx, into)?.pays !== true || api.traitsOf(ctx, into)?.liability) return reject("no_account", say("why_borrower_has_no_bank_account_to_take", { borrower: labelOf(ctx, borrower) }));
   const borrows = by !== "" && by !== borrower && own(ctx.state.entities, by) !== undefined;
-  if (borrows && orgTypeOf(ctx, borrower) === null) return reject("not_allowed", say("why_borrower_has_to_agree_to_borrow_it", { borrower: labelOf(ctx, borrower) }));
+  // Someone else's agreement to borrow is the story's: a loan carried out as ruled (`isRuled`) has it, and the action's requirement tells it.
+  if (borrows && orgTypeOf(ctx, borrower) === null && !isRuled(ctx)) return reject("not_allowed", say("why_borrower_has_to_agree_to_borrow_it", { borrower: labelOf(ctx, borrower) }));
   const d = dateAt(calendarOf(ctx.world), ctx.state.clock);
   const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
   const dueDay = typeof a.due_day === "number" && a.due_day >= 1 ? Math.min(28, Math.round(a.due_day)) : Math.min(28, d.day);
@@ -168,7 +169,8 @@ export function registerNotes(r: FinanceRegistry): void {
       from: { type: "ref", ref: "account", optional: true },
       as: asParam("money.spend", "param_lending_as"),
     },
-    requires: ["amount > 0", "level.money >= 3", mayAs("money.spend")],
+    // The borrower agrees: whoever acts borrows for them, as themselves or holding the borrowing power of the organization that borrows.
+    requires: ["amount > 0", "level.money >= 3", mayAs("money.spend"), "to == actor or may(actor, to, 'money.borrow')"],
     outcomes: { default: [{ type: "economy.lend", args: { to: "to", cents: "=amount", apr: "=params.apr", months: "=params.months", from: "=params.from", who: "self", by: "actor" } }] },
     duration: "10",
     observable: "arranges a loan",

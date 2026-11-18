@@ -176,6 +176,19 @@ describe("act: the actions a play view's press did not reach", () => {
     expect(ownersIn(bought?.fields ?? {}).some((o) => o.party === POV)).toBe(true);
   });
 
+  test("lend_money: a loan to Bram the story agreed is his debt and Wren's note; his agreement is told, not asked", async () => {
+    const { t } = await rigOf(dealings);
+    const r = await apply(t, { op: "act", action: "lend_money", params: { to: "Bram", amount: 50, apr: 5, months: 6 } });
+    expect((r.reports ?? []).some((x) => x.includes("money.borrow"))).toBe(true);
+    const accounts = Object.entries(stateOf(t).entities).filter(([, e]) => e.kind === "account");
+    const loan = accounts.find(([, e]) => e.fields.product === "loan" && ownersIn(e.fields).some((o) => o.party === "bram"));
+    const note = accounts.find(([, e]) => e.fields.product === "note" && ownersIn(e.fields).some((o) => o.party === POV));
+    expect(loan?.[1].fields).toMatchObject({ apr_pct: 5, term_months: 6 });
+    expect(stateOf(t).accounts[loan?.[0] ?? ""]).toBe(-5000);
+    expect(stateOf(t).accounts[note?.[0] ?? ""]).toBe(5000);
+    expect(stateOf(t).accounts.acct_bram).toBe(15000);
+  });
+
   test("withdraw_cash and deposit_cash: cash out of the bank and some of it back", async () => {
     const { t } = await rigOf(dealings);
     await apply(t, { op: "act", action: "withdraw_cash", params: { account: "Wren's bank", amount: 20 } });
