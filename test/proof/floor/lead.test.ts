@@ -14,13 +14,13 @@ import { factsOf, LEADS, partOf, playReplay, recordOf, SERVED } from "./replay";
 
 /** RPE's `turn.lead` setting as its settings route shows it. */
 function leadSetting(value: string, from: SettingView["from"], fallback = "author"): SettingView {
-  return { key: "turn.lead", name: "turn.lead", about: "Who leads each turn.", effect: "turn", effectWords: "from the next turn", row: null, set: [], joined: false, value, default: fallback, from, file: from === null ? null : `@${from}/RPE.yml`, takes: { type: "text" }, takesWords: "a line of text that is not blank", none: null, orNone: false, levels: ["global", "character", "chat"], passed: null };
+  return { key: "turn.lead", pattern: "turn.lead", section: "", group: "", unit: null, unset: null, advice: [], name: "turn.lead", about: "Who leads each turn.", effect: "turn", effectWords: "from the next turn", row: null, set: [], joined: false, value, default: fallback, from, file: from === null ? null : `@${from}/RPE.yml`, takes: { type: "text" }, takesWords: "a line of text that is not blank", none: null, orNone: false, levels: ["global", "character", "chat"], passed: null };
 }
 
 /** The recorded run with every record of every RPE turn's trace made by another definition: the check's case. */
 function ledBy(definition: string): FloorRun {
   const run = recordedRun({ form: "tag" });
-  for (const t of run.turns) if (t.rpe !== null) t.rpe.trace = t.rpe.trace.map((r) => ({ ...r, agent: { ...r.agent, definition } }));
+  for (const t of run.turns) if (t.rpe !== null) t.rpe.trace = t.rpe.trace.map((r) => (r.agent === undefined ? r : { ...r, agent: { ...r.agent, definition } }));
   return run;
 }
 

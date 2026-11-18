@@ -18,7 +18,7 @@ const call = (n: number, at: number): [number, TraceEvent] => [at, { kind: "call
 const ended = (n: number, at: number, text: string, toolCalls: ToolCallView[] = []): [number, TraceEvent] => [at, { kind: "call_ended", call: n, model: "m", text, toolCalls, stop: "stop", usage: { calls: 1, input: 1, cacheRead: 0, cacheWrite: 0, output: 1 }, ms: 1 }];
 const released = (at: number, form: "tags" | "message"): [number, TraceEvent] => [at, { kind: "released", release: { by: { id: "lead", definition: "author" }, form, length: 10 } }];
 const head: [number, TraceEvent][] = [[1, { kind: "run_started", run: "turn", turn: "new", lead: "author" }]];
-const tool = (callId: string, name: string, args: Record<string, string>, at: number): [number, TraceEvent] => [at, { kind: "tool_started", callId, tool: name, args, closing: false }];
+const tool = (callId: string, name: string, args: Record<string, string>, at: number): [number, TraceEvent] => [at, { kind: "tool_started", callId, tool: name, args }];
 const toolEnded = (callId: string, name: string, at: number, error = false): [number, TraceEvent] => [at, { kind: "tool_ended", callId, tool: name, result: { content: [{ type: "text", text: "x" }], ...(error ? { error: true as const } : {}) }, clean: !error, endedRun: false, ms: 1 }];
 
 const IN = "<intent>wants: shelter</intent>";
@@ -115,9 +115,9 @@ describe("eight agents at once", () => {
     const wrong = { ...run, deltas: [{ ...first, agent: "agent-2" }, ...run.deltas.slice(1)] };
     expect(crossing(wrong).crossed.join("\n")).toContain("filed under agent-2 in run-1 call 1: no model call of that run, agent and call began");
     expect(crossing(wrong).crossed.join("\n")).toContain("holds agent-1's marker");
-    const tools = { ...run, trace: run.trace.map((r) => (r.event.kind === "tool_ended" && r.agent.id === "agent-3" ? { ...r, run: "run-4" } : r)) };
+    const tools = { ...run, trace: run.trace.map((r) => (r.event.kind === "tool_ended" && r.agent?.id === "agent-3" ? { ...r, run: "run-4" } : r)) };
     expect(crossing(tools).crossed.join("\n")).toContain("tool call t-2 began in run-3 by agent-3");
-    const lost = { ...run, trace: run.trace.filter((r) => !(r.agent.id === "agent-5" && r.event.kind === "agent_ended")), transcripts: run.transcripts.map((t) => (t.agent === "agent-6" ? { ...t, roles: ["user"] } : t.agent === "agent-7" ? { ...t, texts: ["No result provided"] } : t)) };
+    const lost = { ...run, trace: run.trace.filter((r) => !(r.agent?.id === "agent-5" && r.event.kind === "agent_ended")), transcripts: run.transcripts.map((t) => (t.agent === "agent-6" ? { ...t, roles: ["user"] } : t.agent === "agent-7" ? { ...t, texts: ["No result provided"] } : t)) };
     expect(crossing(lost).unfinished).toEqual(["agent-5: it never ended", "agent-6: its transcript is not whole (1 message(s), ending on user)", "agent-7: its transcript holds a placeholder for work that was cut off"]);
   });
 });

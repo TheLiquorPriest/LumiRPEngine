@@ -82,7 +82,7 @@ export function factsOf(run: FloorRun, edit?: (facts: RunFacts) => void): RunFac
     lumiverse: { version: "0.0.0-invented" },
     browser: { name: "fake", version: "1" },
     agents: [{ agent: "author", connection: "rpe-floor", model: MODEL, replyForm: run.form === "two-step" ? "two-step" : "tags", effort: "low", streams: run.streams }],
-    settings: { chat: null, files: [], settings: [], facts: [] },
+    settings: { chat: null, sections: [], files: [], settings: [], facts: [] },
     guidance: { served: SERVED, build: BUILD, layers: [], names: { off: [], layered: [], added: [] } },
   };
   edit?.(facts);

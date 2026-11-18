@@ -19,19 +19,21 @@ const rpeOf = (run: FloorRun, pair: number): FloorTurn => {
 function continued(turn: FloorTurn): { runs: string[] } {
   const rpe = turn.rpe;
   if (rpe === null) throw new Error("no RPE side");
-  const first = rpe.trace[0];
-  if (first === undefined) throw new Error("no trace");
+  // The first record of an agent's run: a record of the host's own word (a session opened) names no agent.
+  const first = rpe.trace.find((r) => r.agent !== undefined);
+  const agent = first?.agent;
+  if (first === undefined || agent === undefined) throw new Error("no trace");
   const run = `${first.run}-continue`;
   const base = (rpe.trace.at(-1)?.at ?? 0) + 60_000;
-  const record = (seq: number, at: number, event: TraceRecord["event"]): TraceRecord => ({ seq, run, scope: first.scope, at, agent: first.agent, event });
+  const record = (seq: number, at: number, event: TraceRecord["event"]): TraceRecord => ({ seq, run, scope: first.scope, at, agent, event });
   rpe.trace = [
     ...rpe.trace,
     record(1, base, { kind: "run_started", run: "turn", turn: "continue", lead: "author" }),
     record(2, base + 5, { kind: "agent_started", definition: "author", connection: "rpe-floor", model: "deepseek-v4-flash", effort: "low", session: "s-floor", given: [] }),
     record(3, base + 10, { kind: "call_started", call: 1, connection: "rpe-floor", model: "deepseek-v4-flash", messages: 14, tools: 30 }),
-    record(4, base + 3000, { kind: "released", release: { by: first.agent, form: "tags", length: 90 } }),
+    record(4, base + 3000, { kind: "released", release: { by: agent, form: "tags", length: 90 } }),
   ];
-  const pieces: TraceDelta[] = [0, 500, 1000, 1500].map((offset) => ({ run, agent: first.agent.id, call: 1, text: " later", at: base + 100 + offset }));
+  const pieces: TraceDelta[] = [0, 500, 1000, 1500].map((offset) => ({ run, agent: agent.id, call: 1, text: " later", at: base + 100 + offset }));
   rpe.deltas = [...rpe.deltas, ...pieces];
   return { runs: [first.run, run] };
 }

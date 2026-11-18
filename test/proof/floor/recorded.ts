@@ -151,7 +151,7 @@ function rpeTurn(pair: number, shape: Shape): FloorTurn {
     rpe: {
       turn,
       status: "done",
-      timings: { received: r, started: r + 50, firstWord, released, ended, intent: record === "not served" ? null : record.intent, thinking: record === "not served" ? [] : record.thinking },
+      timings: { received: r, started: r + 50, firstWord, released, ended, intent: record === "not served" ? null : record.intent, thinking: record === "not served" ? [] : record.thinking, finished: null, intake: null, wait: null },
       record,
       trace: records,
       deltas,

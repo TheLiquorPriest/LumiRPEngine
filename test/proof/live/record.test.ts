@@ -127,14 +127,14 @@ class Agents extends RpeReader {
     return this.definitions[path.replace(/^@shipped\/\.agents\//, "").replace(/\.md$/, "")] ?? "";
   }
   override async settings(): Promise<SettingsReply> {
-    return { chat: null, files: [], settings: this.views, facts: [] };
+    return { chat: null, sections: [], files: [], settings: this.views, facts: [] };
   }
   override async connections(): Promise<ConnectionsShown> {
     return this.shown;
   }
 }
 
-const view = (key: string, value: SettingView["value"], connection?: { id: string; name: string }): SettingView => ({ key, pattern: connection ? key.replace(`.${connection.name}.`, ".<connection>.") : key, name: key, about: "", effect: "use", effectWords: "at its next use", row: null, value, default: null, from: null, file: null, set: [], joined: false, takes: { type: "text" }, takesWords: "", none: null, orNone: false, levels: [], passed: null, ...(connection ? { setFor: { kind: "connection" as const, key: connection.id, name: connection.name, known: true } } : {}) });
+const view = (key: string, value: SettingView["value"], connection?: { id: string; name: string }): SettingView => ({ key, pattern: connection ? key.replace(`.${connection.name}.`, ".<connection>.") : key, name: key, about: "", section: "", group: "", unit: null, unset: null, advice: [], effect: "use", effectWords: "at its next use", row: null, value, default: null, from: null, file: null, set: [], joined: false, takes: { type: "text" }, takesWords: "", none: null, orNone: false, levels: [], passed: null, ...(connection ? { setFor: { kind: "connection" as const, key: connection.id, name: connection.name, known: true } } : {}) });
 
 test("each agent's connection, model, reply form, effort and streaming come from RPE's routes", async () => {
   const shown: ConnectionsShown = {
