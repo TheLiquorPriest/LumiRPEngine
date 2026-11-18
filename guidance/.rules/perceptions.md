@@ -37,3 +37,5 @@ When the player covers hours in one message, write perceptions per moment, in or
 ## If one is missing
 
 If you are told that characters were on stage in an earlier turn and have nothing recorded for it, those are owed like this turn's. Write each before that character acts. A character acts when it does anything in the story, through its own agent or voiced in your reply.
+
+A turn carried over from the earlier build owes none. That build played it, and what its characters took from it came with them: the old mind files on their records, given to them whole until they are filed. Filing them is the bootstrap job's work, which the player starts, not a turn's.
