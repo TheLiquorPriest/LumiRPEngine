@@ -52,12 +52,13 @@ export function FiringLine(props: { firing: RuleFiring; placed?: FiringShown; ga
     <li class="rpe-entry lre-stack" data-firing={placed?.id ?? f.rule}>
       <p class="rpe-line">
         {props.onRule === undefined ? (
-          <strong>{f.rule}</strong>
+          <strong>{f.title ?? f.rule}</strong>
         ) : (
           <button type="button" class="lre-btn ghost small" onClick={() => props.onRule?.(f.rule)}>
-            {f.rule}
+            {f.title ?? f.rule}
           </button>
-        )}{" "}
+        )}
+        {f.title === undefined ? null : <span class="rpe-meta"> {f.rule}</span>}{" "}
         <Badge>{f.level}</Badge> <span class="rpe-meta">{MOMENT_WORDS[f.moment]}{f.watched === undefined ? "" : `, in ${WATCHED_WORDS[f.watched]}`}{f.tool === undefined ? "" : `, of ${f.tool}`}</span>
       </p>
       <p class="rpe-meta">

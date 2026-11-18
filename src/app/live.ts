@@ -70,6 +70,7 @@ export const ruleFiring = shape.named(
   "A rule that fired: which, from where, at what moment, on what, what it did, and what the agent did next.",
   shape.object({
     rule: T,
+    title: opt(T, "What the rule is called in a person's words, its file's title; absent where its file gives none, and it goes by its name."),
     path: T,
     level: layerLevel,
     moment: shape.oneOf("stream", "tool-call", "tool-result", "after-message", "run-end", "turn-start", "before-compaction", "interval"),

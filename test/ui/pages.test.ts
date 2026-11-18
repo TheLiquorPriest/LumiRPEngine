@@ -119,7 +119,7 @@ describe("the Turn page", () => {
     expect(agents).toEqual(["a1", "a2", "a3"]);
     expect(text).toContain("Tokens by agent");
     expect(text).toContain("character, playing char-moira");
-    expect(text).toContain("Rule rolls-say-why fired");
+    expect(text).toContain("Rule fired: rolls-say-why");
   });
 
   test("a section a later lane adds as a spoiler stays behind the gate", () => {

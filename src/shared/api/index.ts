@@ -2740,6 +2740,8 @@ export interface ReviewCardReply {
 /** A rule that fired: which, from where, at what moment, on what, what it did, and what the agent did next. */
 export interface RuleFiring {
   rule: string;
+  /** What the rule is called in a person's words, its file's title; absent where its file gives none, and it goes by its name. */
+  title?: string;
   path: string;
   level: LayerLevel;
   moment: "stream" | "tool-call" | "tool-result" | "after-message" | "run-end" | "turn-start" | "before-compaction" | "interval";
@@ -2789,6 +2791,8 @@ export interface RuleTestAsk {
 /** A rule as the Rules page lists it: where it is, whom it is for, how it is triggered, a command rule's command and where its switch stands, whether it is in force and why not, and the farther files it replaces. */
 export interface RuleView {
   name: string;
+  /** What the rule is called in a person's words, its file's title; absent where its file gives none. */
+  title?: string;
   path: string;
   level: LayerLevel;
   description: string;

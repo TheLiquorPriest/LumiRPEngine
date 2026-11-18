@@ -38,7 +38,10 @@ function RuleLine(props: { rule: RuleView; open: boolean; onOpen(): void }) {
       <button type="button" class="lre-listrow-hit" onClick={props.onOpen} data-rule-line={rule.name} aria-current={props.open ? "page" : undefined}>
         <span class="lre-listrow-content">
           <span class="lre-listrow-text">
-            <span class="lre-listrow-title">{rule.name}</span>
+            <span class="lre-listrow-title">
+              {rule.title ?? rule.name}
+              {rule.title === undefined ? null : <span class="rpe-meta"> {rule.name}</span>}
+            </span>
             <span class="lre-listrow-sub">
               {rule.description === "" ? "its header gives no description" : rule.description}
               {" · "}

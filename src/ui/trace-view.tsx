@@ -464,7 +464,7 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
       const f = event.firing;
       return (
         <div class="lre-stack">
-          <NoteHead icon="bolt" title={`Rule ${f.rule} fired`}>
+          <NoteHead icon="bolt" title={`Rule fired: ${f.title === undefined ? f.rule : `${f.title} (${f.rule})`}`}>
             <Badge tone="gm">{f.action}</Badge>
             <span class="rpe-meta">at {f.moment}</span>
           </NoteHead>

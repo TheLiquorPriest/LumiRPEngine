@@ -93,7 +93,7 @@ export function RuleBox(props: { firing: RuleFiring }) {
   return (
     <li class="rpe-entry" data-rule={firing.rule}>
       <p class="rpe-line">
-        <span class="rpe-strong">{firing.rule}</span> <span class="rpe-meta">({firing.level}, {firing.path})</span> <Badge>{firing.action}</Badge>
+        <span class="rpe-strong">{firing.title ?? firing.rule}</span> <span class="rpe-meta">({firing.title === undefined ? "" : `${firing.rule}, `}{firing.level}, {firing.path})</span> <Badge>{firing.action}</Badge>
       </p>
       <p class="rpe-meta">
         {agentWords(firing.agent)}, at {firing.moment}
