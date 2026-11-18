@@ -17,7 +17,8 @@ import type { DataTable } from "../shared/tables";
 import { builtInSectionsOf, DEFAULT_SECTIONS, sectionTemplateProblem } from "../shared/sections";
 import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, isHardLock, readSectionFeed, requirementExpr, SECTION_FEED_KEYS, WORLD_FORMAT } from "../shared/world";
-import { timeZoneExists } from "./calendar";
+import { timeZoneExists } from "../shared/clock-zones";
+import { knownZone } from "./calendar";
 import { applyEvent, validateEvent } from "./events";
 import { identifiers } from "./expr";
 import type { Registry } from "./registry-impl";
@@ -315,6 +316,14 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   const warn = (path: string, code: string, message: string): void => {
     issues.push({ severity: "warning", path, code, message });
   };
+  // A real zone the clock holds no rules for is told as the world's own time (`placeOffset`), which nothing else shows: said here. A custom calendar has no zones.
+  if (world.calendar.system === "gregorian") {
+    const unheld = (path: string, zone: unknown): void => {
+      if (typeof zone === "string" && zone !== "" && timeZoneExists(zone) && !knownZone(zone)) warn(path, "time_zone_unheld", say("lint_the_clock_holds_no_rules_for_the_time_zone", { zone }));
+    };
+    unheld("calendar.timeZone", world.calendar.timeZone);
+    for (const [id, p] of Object.entries(world.places)) unheld(`places.${id}.timeZone`, p.timeZone);
+  }
   for (const [id, a] of Object.entries(world.actions)) {
     if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default")) warn(`actions.${id}.check`, "no_check", say("lint_label_has_outcomes_other_than_default_but", { label: a.label }));
     issues.push(...softLocks(id, a));

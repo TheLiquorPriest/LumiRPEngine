@@ -829,6 +829,8 @@ Every turn has an **elapsed time**. It is one of: the length of a Timelapse, the
 
 Every text that tells a model the time of your turn tells the same clock as the Scene: your character's local time where the world shows time zones (Calendar 3), else the world's own. That holds for the narrator's Scene, a Timelapse's "Time passed" line in the Outcome, the facts the helper steps read, a step's `{{clock}}`, and an agent turn's director and read.
 
+The clock holds rules for 28 time zones (the Calendar part's time zone field lists them). A name that is no time zone at all is refused when you save it, and the world's checks list it as an error. A real zone the clock does not hold (Asia/Dubai, say) saves, with a warning on the field and in the checks: times there read as the world's own time until the clock holds it.
+
 ### Ticks, scale and pause
 
 - **Tick per scene type.** The time a turn takes when nothing else sets it, before the time scale. The defaults are **conversation 2 minutes**, **action 1 minute**, **exploration 10 minutes** and **downtime 30 minutes**. Worlds can add scene types. A tick is a whole number of minutes: a fractional one, such as a world's half minute, plays as the nearest whole minute, and one under half a minute as no time at all (with **Use my settings** on, a world's own scene type that your settings don't list keeps the world's tick as written). The time scale can still make a turn's time a fraction of a minute ("This turn took 0.5 min."). The scene type is set by actions and by places, or by a ✎ fix.

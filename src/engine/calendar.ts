@@ -6,6 +6,7 @@
 // offsets from home, never the home clock itself, so the clock never skips or repeats an hour.
 // Gregorian and custom calendars share one interface. Everything is integer arithmetic: no Date, no Intl.
 
+import type { ClockZone } from "../shared/clock-zones";
 import type { CalendarDef, DateRule, DayPart, HolidayDef, Recurrence, WorldDoc } from "../shared/world";
 import { own } from "./pack-kit";
 
@@ -541,8 +542,8 @@ interface ZoneRule {
   dst: "us" | "eu" | "south" | null;
 }
 
-/** Standard UTC offsets (minutes) and DST rules for the zones the Modern US data uses, plus a few others. */
-const ZONES: Record<string, ZoneRule> = {
+/** Standard UTC offsets (minutes) and DST rules for the zones the Modern US data uses, plus a few others: typed by `CLOCK_ZONES`, the list Build shows and the checks warn by. */
+const ZONES: Record<ClockZone, ZoneRule> = {
   UTC: { standard: 0, dst: null },
   "Etc/UTC": { standard: 0, dst: null },
   "America/New_York": { standard: -300, dst: "us" },
@@ -573,18 +574,9 @@ const ZONES: Record<string, ZoneRule> = {
   "Australia/Sydney": { standard: 600, dst: "south" },
 };
 
+/** Whether the clock holds rules for `zone` (`CLOCK_ZONES`): any other, real or not, is told as the world's own time. */
 export function knownZone(zone: string): boolean {
   return Object.prototype.hasOwnProperty.call(ZONES, zone);
-}
-
-/** Whether the runtime knows `zone` as an IANA time zone name ("America/New_York"), which "Mars/Olympus" and the empty text are not. */
-export function timeZoneExists(zone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: zone });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** UTC offset of a zone on a gregorian date at a local minute (unknown zones: 0). */

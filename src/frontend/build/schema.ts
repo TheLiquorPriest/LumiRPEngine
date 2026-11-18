@@ -2,6 +2,7 @@
 // editors (DESIGN §13). One descriptor per collection; packs override a collection's editor through
 // `UiRegistry.editor`, and the descriptors stay the default.
 
+import { CLOCK_ZONES } from "../../shared/clock-zones";
 import { safeKey, type JsonObject, type JsonValue } from "../../shared/json";
 import { loreIsSecret } from "../../shared/lore";
 import { DOMAINS } from "../../shared/ids";
@@ -307,7 +308,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   places: [
     { kind: "text", key: "name", label: "Name" },
     { kind: "ref", key: "parent", label: "Inside", collection: "places", optional: true },
-    { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty" },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty. The Calendar part lists the zones the clock holds; any other real zone saves with a warning, and times there read as the world's own." },
     { kind: "text", key: "sceneType", label: "Default scene type", optional: true },
     { kind: "bool", key: "adjudicate", label: "Checks roll here", hint: "Marked for a world whose checks roll only where marked: here and in the places inside it" },
     { kind: "ref", key: "grid", label: "Grid", collection: "grids", optional: true },
@@ -537,7 +538,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "localTime", key: "epoch", label: "Clock starts at (the epoch)", hint: "Minute 0 of the world's clock, in its own calendar" },
-    { kind: "text", key: "timeZone", label: "Time zone (IANA)" },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)", hint: `The clock holds rules for ${CLOCK_ZONES.join(", ")}. Any other real zone saves with a warning, and times there read as the world's own.` },
     {
       kind: "list",
       key: "dayParts",

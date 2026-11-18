@@ -33,7 +33,7 @@ import { DEFAULT_ROUTINE_SETTINGS, routineSettingsOf, routineSettingsProblems, r
 import { needsSettingsOf, needsSettingsProblems, storedNeedsSettings } from "../shared/needs";
 import { sectionTemplatesProblem } from "../shared/sections";
 import { currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, newBlankWorld, shapeIssues, stamped } from "../engine/authoring";
-import { timeZoneExists } from "../engine/calendar";
+import { timeZoneExists } from "../shared/clock-zones";
 import { compileMaps } from "../shared/maps";
 import { storedMapSettings } from "../shared/map-settings";
 import type { Registry } from "../engine/registry-impl";

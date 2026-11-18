@@ -66,3 +66,27 @@ describe("a time zone that does not exist", () => {
     expect(issue?.message).toContain("Mars/Olympus");
   });
 });
+
+describe("a real time zone the world's clock holds no rules for", () => {
+  test("saves, and the checks warn at the field that its times read as the world's own; a zone the clock holds is not warned about", async () => {
+    const bed = makeBed();
+    const service = new WorldService({ store: bed.store, writes: bed.writes, log: bed.log });
+    const made = await service.create(USER, "Riverton", "modern_slice_of_life");
+    const id = made.world.id;
+    const draft = (await service.draft(USER, id, { op: "get" })).draft as unknown as WorldDoc;
+    const unheld = <T extends { code: string }>(lint: readonly T[]): T[] => lint.filter((i) => i.code === "time_zone_unheld");
+    expect(unheld((await service.draft(USER, id, { op: "get" })).lint)).toEqual([]);
+    // It still saves; the warning comes back with the save, at the Calendar's time zone, in words that name it.
+    const saved = await service.draft(USER, id, { op: "set", part: "calendar", value: { ...structuredClone(draft.calendar), timeZone: "Asia/Dubai" } as never });
+    expect(unheld(saved.lint)).toMatchObject([{ severity: "warning", path: "calendar.timeZone" }]);
+    expect(saved.lint.find((i) => i.code === "time_zone_unheld")?.message).toContain("Asia/Dubai");
+    // A place's zone the clock holds nothing for is warned about too; one it holds (America/Chicago) is not.
+    const [placeId, place] = Object.entries(draft.places)[0] ?? ["", draft.places.x];
+    const placed = await service.draft(USER, id, { op: "put", collection: "places", id: placeId, value: { ...structuredClone(place), timeZone: "America/Chicago" } as never });
+    expect(unheld(placed.lint).map((i) => i.path)).toEqual(["calendar.timeZone"]);
+    // A custom calendar has no zones, so nothing is said.
+    const custom: WorldDoc = { ...starter("fantasy_town", "Fernwick") };
+    custom.calendar = { ...custom.calendar, timeZone: "Asia/Dubai" };
+    expect(unheld(lintWorld(custom, registry()))).toEqual([]);
+  });
+});

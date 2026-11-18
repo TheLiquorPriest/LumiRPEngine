@@ -52,6 +52,7 @@ lint_the_start_place_place_does_not_exist: the start place "{{place}}" does not 
 lint_decimals_must_be_a_whole_number_from: decimals must be a whole number from 0 to 6
 lint_the_currency_needs_a_display_format: the currency needs a display format
 lint_the_time_zone_zone_is_not_a_time_zone: {{#zone}}The time zone "{{zone}}" is not a time zone{{/zone}}{{^zone}}There is no time zone{{/zone}}: write its IANA name, such as America/New_York or Europe/Paris.
+lint_the_clock_holds_no_rules_for_the_time_zone: The world's clock holds no rules for the time zone "{{zone}}", so times there read as the world's own time. Use a zone it holds, such as America/New_York, Europe/Paris or Asia/Tokyo: the time zone field of the Calendar part lists them all.
 lint_unknown_kind_kind: unknown kind "{{kind}}"
 lint_unknown_parent_place_parent: unknown parent place "{{parent}}"
 lint_unknown_place_from: unknown place "{{from}}"
