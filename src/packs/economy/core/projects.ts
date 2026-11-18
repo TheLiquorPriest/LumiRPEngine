@@ -673,7 +673,7 @@ function startEffect(api: FinanceApi, args: Args, ctx: EffectContext): LedgerEve
   }
   if (ctx.levelOf(def.org, "money") < 3) return { code: "level", reason: say("why_projects_run_from_money_3") };
   const open = projectIds(ctx.state, def.org).filter((x) => x !== id && isLive(projectOf(ctx, x)?.status ?? "done")).length;
-  if (open >= OPEN_MAX) return { code: "too_many", reason: say("why_org_runs_open_max_projects_at_most", { org: labelOf(ctx, def.org), oPEN_MAX: OPEN_MAX }) };
+  if (open >= OPEN_MAX) return { code: "too_many", reason: say("why_org_runs_open_max_projects_at_most", { org: labelOf(ctx, def.org), openMax: OPEN_MAX }) };
   const biggest = Math.max(0, ...def.steps.map((s) => Math.max(costParts(s).start, costParts(s).end)));
   const no = refusal(ctx, by, def.org, biggest);
   if (no) return no;

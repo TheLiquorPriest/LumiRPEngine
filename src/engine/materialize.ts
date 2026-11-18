@@ -85,7 +85,7 @@ export const UNMATERIALIZED = "engine.unmaterialized";
 /** `engine.unmaterialized {entity, domain}`: the detail recorded for it is taken off the record of what was sampled, so it is sampled again when next needed; where none is recorded, nothing changes. */
 export const unmaterializedEvent: EventTypeDef<PackEvent> = {
   type: UNMATERIALIZED,
-  validate: (e) => (typeof e.data.entity === "string" && typeof e.data.domain === "string" ? null : { code: "bad_event", reason: say("why_unmaterialized_needs_entity_and_domain", { uNMATERIALIZED: UNMATERIALIZED }) }),
+  validate: (e) => (typeof e.data.entity === "string" && typeof e.data.domain === "string" ? null : { code: "bad_event", reason: say("why_unmaterialized_needs_entity_and_domain", { unmaterialized: UNMATERIALIZED }) }),
   apply: (e, state) => {
     if (typeof e.data.entity === "string" && typeof e.data.domain === "string") delete state.materialized[`${e.data.entity}:${e.data.domain}`];
   },

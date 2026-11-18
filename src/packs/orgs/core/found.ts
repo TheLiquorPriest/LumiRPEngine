@@ -91,7 +91,7 @@ export function groupKinds(ctx: Pick<ReadContext, "registry" | "world">): { id: 
 
 /** Why `who` may not start `what` now (Money 3), or null when they may. */
 function startRefusal(ctx: ReadContext, who: EntityId, what: string): string | null {
-  return ctx.levelOf(who, "money") < COMPANY_LEVEL ? say("org_log_what_needs_payroll_and_books_in_play", { what: what, cOMPANY_LEVEL: COMPANY_LEVEL }) : null;
+  return ctx.levelOf(who, "money") < COMPANY_LEVEL ? say("org_log_what_needs_payroll_and_books_in_play", { what: what, companyLevel: COMPANY_LEVEL }) : null;
 }
 
 /** What Orgs' Start something… offers `who` (§4.2): a company, a trust and a nonprofit, each with the accounts what goes into it may come from, and a group of one of the world's group kinds (null when it has none). */
@@ -373,7 +373,7 @@ function foundEvents(ctx: EffectContext, args: Record<string, JsonValue>): Ledge
     if (may && !may.ok) return refuse("not_allowed", may.reason);
   }
   const name = strOf(args.name).replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_an_organizations_name_is_1_name_max", { nAME_MAX: NAME_MAX }));
+  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_an_organizations_name_is_1_name_max", { nameMax: NAME_MAX }));
   const founding: Founding = { by, founder, name, cents: Math.round(numOf(args.cents)), from: strOf(args.from) };
   if (type === "company") return companyEvents(ctx, { ...founding, structure: strOf(args.structure) || STRUCTURES[0], units: typeof args.units === "number" ? args.units : undefined, classes: args.classes ?? undefined });
   if (type === "trust") return trustEvents(ctx, { ...founding, trustee: strOf(args.trustee) || founder, beneficiary: strOf(args.beneficiary) || founder, revocable: args.revocable === true, purpose: strOf(args.purpose).replace(/\s+/g, " ").trim().slice(0, 300), until: strOf(args.until).trim() });

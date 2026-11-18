@@ -149,7 +149,7 @@ export function shapeIssues(doc: unknown): LintIssue[] {
     if (!isRecord(value)) return err(key, say("lint_key_must_be_an_object", { key: key }));
     for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, say("lint_each_of_key_must_be_an_object", { key: key }));
   };
-  if (doc.format !== WORLD_FORMAT) err("format", say("lint_format_must_be_world_format", { wORLD_FORMAT: WORLD_FORMAT }));
+  if (doc.format !== WORLD_FORMAT) err("format", say("lint_format_must_be_world_format", { worldFormat: WORLD_FORMAT }));
   if (typeof doc.id !== "string" || doc.id === "") err("id", say("lint_the_world_needs_an_id"));
   if (typeof doc.name !== "string") err("name", say("lint_the_world_needs_a_name"));
   if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", say("lint_engineversion_must_be_text"));
@@ -285,7 +285,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   const err = (path: string, code: string, message: string): void => {
     issues.push({ severity: "error", path, code, message });
   };
-  if (world.format !== WORLD_FORMAT) err("format", "format", say("lint_format_must_be_world_format", { wORLD_FORMAT: WORLD_FORMAT }));
+  if (world.format !== WORLD_FORMAT) err("format", "format", say("lint_format_must_be_world_format", { worldFormat: WORLD_FORMAT }));
   if (!world.entities[world.pov]) err("pov", "missing_pov", say("lint_the_pov_entity_pov_does_not_exist", { pov: world.pov }));
   if (!world.places[world.start.place]) err("start.place", "missing_place", say("lint_the_start_place_place_does_not_exist", { place: world.start.place }));
   const c = world.currency;

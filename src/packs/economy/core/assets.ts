@@ -602,7 +602,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     validate: (e) => {
       const closes = e.data.closes;
       if (!safeKey(str(e, "asset"))) return reject("bad_event", say("why_closes_name_their_asset"));
-      if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT) return reject("bad_event", say("why_closes_are_one_to_closes_kept_months", { cLOSES_KEPT: CLOSES_KEPT }));
+      if (!Array.isArray(closes) || closes.length === 0 || closes.length > CLOSES_KEPT) return reject("bad_event", say("why_closes_are_one_to_closes_kept_months", { closesKept: CLOSES_KEPT }));
       const each = closes.every((c) => Array.isArray(c) && c.length === 2 && typeof c[0] === "string" && /^-?\d{4,}-\d{2}$/.test(c[0]) && typeof c[1] === "number" && Number.isFinite(c[1]) && c[1] > 0);
       return each ? null : reject("bad_event", say("why_a_close_is_a_month_yyyy_mm"));
     },
@@ -673,7 +673,7 @@ export function registerMarkets(r: FinanceRegistry): void {
         const path = `packs.economy.config.assets.${id}`;
         const def = readAssetDef(raw);
         if (!def) {
-          issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_asset_id_needs_a_class_asset_classes", { id: id, aSSET_CLASSES: ASSET_CLASSES.join(", ") }), path });
+          issues.push({ severity: "error" as const, code: "economy.assets", message: say("lint_asset_id_needs_a_class_asset_classes", { id: id, assetClasses: ASSET_CLASSES.join(", ") }), path });
           continue;
         }
         if (def.class === "option") {

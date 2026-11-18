@@ -108,7 +108,7 @@ function entryChange(ctx: ReadContext, a: Record<string, JsonValue>): LedgerEven
   if (!own(ctx.world.places, place)) return { code: "missing_place", reason: say("why_no_place_place", { place: labelOf(ctx, place) }) };
   const raw = a.entry;
   const entry = raw === undefined || raw === null ? undefined : raw === AS_THE_WORLD ? null : isAudience(raw) ? raw : false;
-  if (entry === false) return { code: "bad_args", reason: say("why_who_may_enter_is_one_of_join", { join: AUDIENCES.join(", "), aS_THE_WORLD: AS_THE_WORLD }) };
+  if (entry === false) return { code: "bad_args", reason: say("why_who_may_enter_is_one_of_join", { join: AUDIENCES.join(", "), asTheWorld: AS_THE_WORLD }) };
   const keys = keysArg(a.keys);
   if (keys !== null && keys !== undefined && !Array.isArray(keys)) return keys;
   if (entry === undefined && keys === undefined) return { code: "bad_args", reason: say("why_an_entry_change_needs_who_may_enter") };
@@ -269,7 +269,7 @@ function entryLint(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
   for (const [id, p] of Object.entries(world.places)) {
     const entry = p.fields.entry;
-    if (entry !== undefined && !isAudience(entry)) issues.push({ severity: "warning", code: "entry_unknown", message: say("lint_name_s_entry_is_entry_not_one", { name: p.name, entry: JSON.stringify(entry), aUDIENCES: AUDIENCES.join(", ") }), path: `places.${id}.fields.entry` });
+    if (entry !== undefined && !isAudience(entry)) issues.push({ severity: "warning", code: "entry_unknown", message: say("lint_name_s_entry_is_entry_not_one", { name: p.name, entry: JSON.stringify(entry), audiences: AUDIENCES.join(", ") }), path: `places.${id}.fields.entry` });
     const keys = p.fields.keys;
     if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === "string" && k.trim() !== ""))) issues.push({ severity: "warning", code: "keys_shape", message: say("lint_name_s_keys_arent_a_list_of", { name: p.name }), path: `places.${id}.fields.keys` });
   }

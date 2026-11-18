@@ -256,7 +256,7 @@ function placeProblem(id: string, v: JsonObject): string | null {
   if (typeof v.name !== "string" || v.name.trim() === "") return say("eng_a_place_needs_a_name");
   if (v.parent !== undefined && (typeof v.parent !== "string" || v.parent === "")) return say("eng_a_places_parent_is_the_id_of");
   if (!isRecord(v.fields)) return say("eng_a_places_fields_are_an_object");
-  if (v.visibility !== undefined && !VISIBILITIES.some((s) => s === v.visibility)) return say("eng_a_places_visibility_is_one_of_visibilities", { vISIBILITIES: VISIBILITIES.join(", ") });
+  if (v.visibility !== undefined && !VISIBILITIES.some((s) => s === v.visibility)) return say("eng_a_places_visibility_is_one_of_visibilities", { visibilities: VISIBILITIES.join(", ") });
   for (const key of ["timeZone", "sceneType", "grid"] as const) if (v[key] !== undefined && typeof v[key] !== "string") return say("eng_a_places_key_is_text", { key: key });
   for (const key of ["cell", "layoutPos"] as const) {
     const at = v[key];
@@ -278,7 +278,7 @@ function routeProblem(id: string, v: JsonObject): string | null {
   if (typeof v.bidirectional !== "boolean") return say("eng_a_path_goes_both_ways_or_one");
   if (!isRecord(v.modes) || Object.keys(v.modes).length === 0) return say("eng_a_path_has_at_least_one_way");
   for (const [mode, leg] of Object.entries(v.modes)) {
-    if (!TRAVEL_MODES.some((m) => m === mode)) return say("eng_mode_is_no_way_of_travelling_travel", { mode: mode, tRAVEL_MODES: TRAVEL_MODES.join(", ") });
+    if (!TRAVEL_MODES.some((m) => m === mode)) return say("eng_mode_is_no_way_of_travelling_travel", { mode: mode, travelModes: TRAVEL_MODES.join(", ") });
     if (!isRecord(leg) || typeof leg.minutes !== "number" || !Number.isFinite(leg.minutes) || leg.minutes <= 0) return say("eng_the_mode_way_takes_some_minutes_above", { mode: mode });
     if (leg.distanceKm !== undefined && !(typeof leg.distanceKm === "number" && Number.isFinite(leg.distanceKm) && leg.distanceKm > 0)) return say("eng_the_mode_ways_distance_is_kilometres_above", { mode: mode });
     if (leg.terrain !== undefined && typeof leg.terrain !== "string") return say("eng_the_mode_ways_terrain_is_text", { mode: mode });
@@ -304,7 +304,7 @@ function settingsProblem(v: JsonObject): string | null {
     if (!isRecord(grid)) return say("eng_the_grid_systems_settings_are_an_object");
     if (grid.movement !== undefined && typeof grid.movement !== "boolean") return say("eng_grid_movement_is_true_or_false");
     const r = grid.sightRadius;
-    if (r !== undefined && !(typeof r === "number" && Number.isInteger(r) && r >= 0 && r <= SIGHT_MAX)) return say("eng_the_sight_radius_is_a_whole_number", { sIGHT_MAX: SIGHT_MAX });
+    if (r !== undefined && !(typeof r === "number" && Number.isInteger(r) && r >= 0 && r <= SIGHT_MAX)) return say("eng_the_sight_radius_is_a_whole_number", { sightMax: SIGHT_MAX });
   }
   if (v.travelSimulation !== undefined && typeof v.travelSimulation !== "boolean") return say("eng_the_travel_simulation_is_true_or_false");
   if (v.travel !== undefined && !isRecord(v.travel)) return say("eng_travel_times_are_an_object");

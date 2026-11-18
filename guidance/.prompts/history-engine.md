@@ -41,7 +41,7 @@ eng_names_an_unknown_kind_kind: names an unknown kind "{{kind}}"
 eng_names_tier_tier_which_isnt_one_of: names tier "{{tier}}", which isn't one of the world's tiers
 eng_names_the_group_group_which_isnt_in: names the group "{{group}}", which isn't in the world
 eng_names_name_as_a_group_but_it: names {{name}} as a group, but it isn't an organization
-eng_names_the_party_tier_tier_which_isnt: names the party tier "{{tier}}", which isn't one of {{pARTY_TIERS}}
+eng_names_the_party_tier_tier_which_isnt: names the party tier "{{tier}}", which isn't one of {{partyTiers}}
 eng_names_the_position_position_which_no_organization: names the position "{{position}}", which no organization{{#if_groups}} it names{{/if_groups}} defines
 eng_has_a_class_that_isnt_a_facet: has a class that isn't a facet → values map
 eng_names_an_unknown_classification_facet: names an unknown classification "{{facet}}"
@@ -90,7 +90,7 @@ eng_a_places_id_is_its_key_id: a place's id is its key, {{id}}
 eng_a_place_needs_a_name: a place needs a name
 eng_a_places_parent_is_the_id_of: a place's parent is the id of a place
 eng_a_places_fields_are_an_object: a place's fields are an object
-eng_a_places_visibility_is_one_of_visibilities: a place's visibility is one of {{vISIBILITIES}}
+eng_a_places_visibility_is_one_of_visibilities: a place's visibility is one of {{visibilities}}
 eng_a_places_key_is_text: a place's {{key}} is text
 eng_a_places_key_is_x_y: a place's {{key}} is {x, y}
 eng_a_places_knownby_is_a_selector: a place's knownBy is a selector
@@ -103,7 +103,7 @@ eng_a_path_joins_two_places_from_and: a path joins two places, from and to
 eng_a_path_joins_two_different_places: a path joins two different places
 eng_a_path_goes_both_ways_or_one: a path goes both ways or one way (bidirectional is true or false)
 eng_a_path_has_at_least_one_way: a path has at least one way of travelling it
-eng_mode_is_no_way_of_travelling_travel: {{mode}} is no way of travelling: {{tRAVEL_MODES}}
+eng_mode_is_no_way_of_travelling_travel: {{mode}} is no way of travelling: {{travelModes}}
 eng_the_mode_way_takes_some_minutes_above: the {{mode}} way takes some minutes, above 0
 eng_the_mode_ways_distance_is_kilometres_above: the {{mode}} way's distance is kilometres, above 0
 eng_the_mode_ways_terrain_is_text: the {{mode}} way's terrain is text
@@ -112,7 +112,7 @@ eng_a_maps_id_is_its_key_id: a map's id is its key, {{id}}
 eng_the_map_shows_knowledge_or_fog: the map shows "knowledge" or "fog"
 eng_the_grid_systems_settings_are_an_object: the grid system's settings are an object: movement and sightRadius
 eng_grid_movement_is_true_or_false: grid movement is true or false
-eng_the_sight_radius_is_a_whole_number: the sight radius is a whole number of cells from 0 to {{sIGHT_MAX}}
+eng_the_sight_radius_is_a_whole_number: the sight radius is a whole number of cells from 0 to {{sightMax}}
 eng_the_travel_simulation_is_true_or_false: the travel simulation is true or false
 eng_travel_times_are_an_object: travel times are an object
 eng_it_would_take_away_place_where_the: it would take away {{place}}, where the world starts

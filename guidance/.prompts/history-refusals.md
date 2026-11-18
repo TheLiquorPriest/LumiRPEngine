@@ -114,7 +114,7 @@ why_no_check_rolls_skill: no check rolls {{skill}}
 why_skill_the_attempt_isnt_a_skill_here: {{#skill}}{{skill}}{{/skill}}{{^skill}}the attempt{{/skill}} isn't a skill here
 why_no_materializer_for_domain: no materializer for {{domain}}
 why_domain_is_pinned_to_generator_v_pin: {{domain}} is pinned to generator v{{pin}}; this build has v{{carried}}
-why_unmaterialized_needs_entity_and_domain: {{uNMATERIALIZED}} needs entity and domain
+why_unmaterialized_needs_entity_and_domain: {{unmaterialized}} needs entity and domain
 why_no_such_place: no such place
 why_no_such_holder: no such holder
 why_name_isnt_yours_to_put_things_on: {{name}} isn't yours to put things on
@@ -246,7 +246,7 @@ why_post_needs_lines: post needs lines
 why_unknown_interrupt_class_cls: unknown interrupt class {{cls}}
 why_a_check_applies_its_outcomes_run_it: a check applies its outcomes; run it through applyEffects
 why_unknown_effect_type: unknown effect {{type}}
-why_effects_nested_past_nesting_cap_levels: effects nested past {{nESTING_CAP}} levels
+why_effects_nested_past_nesting_cap_levels: effects nested past {{nestingCap}} levels
 why_no_check_check_given: no check {{#string}}{{check}}{{/string}}{{^string}}given{{/string}}
 why_calendar_time_is_off: Calendar & time is off
 why_no_day_part_daypart: no day part {{dayPart}}
@@ -322,7 +322,7 @@ why_a_project_needs_at_least_one_step: a project needs at least one step
 why_its_steps_wait_on_each_other_in: its steps wait on each other in a ring
 why_account_isnt_org_s_to_spend: {{account}} isn't {{org}}'s to spend
 why_projects_run_from_money_3: projects run from Money 3
-why_org_runs_open_max_projects_at_most: {{org}} runs {{oPEN_MAX}} projects at most at once
+why_org_runs_open_max_projects_at_most: {{org}} runs {{openMax}} projects at most at once
 why_name_cant_be_set_up: {{name}} can't be set up
 why_name_cant_start: {{name}} can't start
 why_name_cant_be_paused: {{name}} can't be paused
@@ -455,7 +455,7 @@ why_a_quote_carries_a_price_or_a: a quote carries a price or a yield
 why_a_price_is_above_zero: a price is above zero
 why_a_yield_is_a_percentage: a yield is a percentage
 why_closes_name_their_asset: closes name their asset
-why_closes_are_one_to_closes_kept_months: closes are one to {{cLOSES_KEPT}} months
+why_closes_are_one_to_closes_kept_months: closes are one to {{closesKept}} months
 why_a_close_is_a_month_yyyy_mm: a close is a month (YYYY-MM) and a price above zero
 why_a_minted_asset_is_an_option_contract: a minted asset is an option contract
 why_id_is_an_authored_asset: {{id}} is an authored asset
@@ -845,10 +845,10 @@ why_a_motion_ends_carried_failed_or_withdrawn: a motion ends carried, failed or 
 why_only_the_partys_leader_changes_who_is: Only the party's leader changes who is in it
 why_you_lead_the_party: You lead the party
 why_name_isnt_in_your_party: {{name}} isn't in your party
-why_a_tier_is_one_of_join_or: a tier is one of {{join}}, or {{pARTY_OUT}}
+why_a_tier_is_one_of_join_or: a tier is one of {{join}}, or {{partyOut}}
 why_name_is_already_tier_of_the_party: {{name}} is already {{tier}} of the party
 why_only_the_partys_leader_names_it: Only the party's leader names it
-why_a_partys_name_is_1_name_max: a party's name is 1–{{nAME_MAX}} characters
+why_a_partys_name_is_1_name_max: a party's name is 1–{{nameMax}} characters
 why_the_party_is_already_called_name: the party is already called {{name}}
 why_only_the_partys_leader_starts_its_purse: Only the party's leader starts its purse
 why_a_purse_starts_with_a_deposit_above: a purse starts with a deposit above nothing
@@ -876,7 +876,7 @@ why_a_group_is_one_of_kinds: a group is one of {{kinds}}
 why_only_a_person_founds_an_organization_for: Only a person founds an organization, for themselves or for one they govern
 why_founder_isnt_an_organization: {{founder}} isn't an organization
 why_founder_founds_companies_settles_trusts_and_starts: {{founder}} founds companies, settles trusts and starts nonprofits; a group is founded by its people
-why_an_organizations_name_is_1_name_max: an organization's name is 1–{{nAME_MAX}} characters
+why_an_organizations_name_is_1_name_max: an organization's name is 1–{{nameMax}} characters
 why_an_organization_founded_is_a_company_a: an organization founded is a company, a trust, a nonprofit or a group
 why_org_becomes_a_nonprofitstops_being_a_nonprofit: {{org}} {{#structure}}becomes a nonprofit{{/structure}}{{^structure}}stops being a nonprofit{{/structure}} only by changing what it is in Build
 why_org_is_on_a_market_take_it: {{org}} is on a market: take it off the market before it stops being a C corporation
@@ -912,7 +912,7 @@ why_name_isnt_winding_up: {{name}} isn't winding up
 why_winding_up_a_company_needs_the_economy: winding up a company needs the economy
 why_merging_companies_needs_the_economy: merging companies needs the economy
 why_keys_are_item_ids_or_item_types: keys are item ids or item types
-why_who_may_enter_is_one_of_join: who may enter is one of {{join}}, or {{aS_THE_WORLD}}
+why_who_may_enter_is_one_of_join: who may enter is one of {{join}}, or {{asTheWorld}}
 why_an_entry_change_needs_who_may_enter: an entry change needs who may enter or its keys
 why_an_entry_is_an_audience: an entry is an audience
 why_an_entry_change_changes_who_may_enter: an entry change changes who may enter or the keys

@@ -236,7 +236,7 @@ export function selectorProblems(reg: Registry, world: WorldDoc, selector: unkno
     if (!e) out.push(say("eng_names_the_group_group_which_isnt_in", { group: group }));
     else if (providersOf(reg, world, e.kind).length === 0) out.push(say("eng_names_name_as_a_group_but_it", { name: e.name }));
   }
-  for (const tier of list("party")) if (!isPartyTier(tier)) out.push(say("eng_names_the_party_tier_tier_which_isnt", { tier: tier, pARTY_TIERS: PARTY_TIERS.join(", ") }));
+  for (const tier of list("party")) if (!isPartyTier(tier)) out.push(say("eng_names_the_party_tier_tier_which_isnt", { tier: tier, partyTiers: PARTY_TIERS.join(", ") }));
   for (const position of list("position")) {
     const where = groups.length > 0 ? groups : Object.keys(world.entities);
     if (!where.some((org) => positionsIn((hasOwn(world.entities, org) ? world.entities[org] : undefined)?.fields.positions).some((p) => p.id === position))) out.push(say("eng_names_the_position_position_which_no_organization", { position: position, if_groups: groups.length > 0 }));

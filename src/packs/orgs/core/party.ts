@@ -75,7 +75,7 @@ function tierEvents(ctx: EffectContext, by: EntityId, who: EntityId, tier: strin
     if (now === null) return refuse("not_in_party", say("why_name_isnt_in_your_party", { name: e.name }));
     return [...unlinkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov }), orgLog(ctx, party, say("org_log_by_took_name_out_of_the_party", { by: labelOf(ctx, by), name: e.name }), { by, names: [by, who] })];
   }
-  if (!isPartyTier(tier)) return refuse("bad_tier", say("why_a_tier_is_one_of_join_or", { join: PARTY_TIERS.join(", "), pARTY_OUT: PARTY_OUT }));
+  if (!isPartyTier(tier)) return refuse("bad_tier", say("why_a_tier_is_one_of_join_or", { join: PARTY_TIERS.join(", "), partyOut: PARTY_OUT }));
   if (now === tier) return refuse("unchanged", say("why_name_is_already_tier_of_the_party", { name: e.name, tier: aTier(tier) }));
   const linked = linkEvents(ctx.registry, ctx.world, ctx.state, { rel: PARTY_RELATION, from: who, to: pov, fields: { tier, since: sinceOf(ctx, who) } });
   if (!Array.isArray(linked)) return linked;
@@ -101,7 +101,7 @@ function spawnParty(ctx: ReadContext, id: EntityId, name?: string): LedgerEvent 
 function nameEvents(ctx: EffectContext, by: EntityId, raw: string): LedgerEvent[] | Rejection {
   if (notLeader(ctx, by)) return refuse("not_leader", say("why_only_the_partys_leader_names_it"));
   const name = raw.replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_a_partys_name_is_1_name_max", { nAME_MAX: NAME_MAX }));
+  if (name === "" || name.length > NAME_MAX) return refuse("bad_name", say("why_a_partys_name_is_1_name_max", { nameMax: NAME_MAX }));
   const party = partyIdOf(ctx);
   const was = own(ctx.state.entities, party.id)?.name;
   if (party.exists && was === name) return refuse("unchanged", say("why_the_party_is_already_called_name", { name: name }));

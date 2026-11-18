@@ -373,7 +373,7 @@ function effectList(v: JsonValue | undefined): EffectSpec[] {
  */
 function applyCheck(reg: Registry, w: Working, spec: EffectSpec, scope: EffectScope): EffectOutcome | Rejection {
   const depth = scope.depth ?? 0;
-  if (depth >= NESTING_CAP) return reject("too_deep", say("why_effects_nested_past_nesting_cap_levels", { nESTING_CAP: NESTING_CAP }));
+  if (depth >= NESTING_CAP) return reject("too_deep", say("why_effects_nested_past_nesting_cap_levels", { nestingCap: NESTING_CAP }));
   const a = spec.args ?? {};
   const bindings = { self: w.world.pov, ...scope.bindings };
   const env = scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars });

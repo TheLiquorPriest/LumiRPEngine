@@ -221,11 +221,11 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   }
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", say("lint_new_people_would_join_tier_spawntier_which", { spawnTier: world.spawnTier }));
   const cap: unknown = world.spawnCap;
-  if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP)) err("spawnCap", "spawn_cap", say("lint_the_number_of_people_replies_may_introduce", { mAX_SPAWN_CAP: MAX_SPAWN_CAP }));
+  if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP)) err("spawnCap", "spawn_cap", say("lint_the_number_of_people_replies_may_introduce", { maxSpawnCap: MAX_SPAWN_CAP }));
   // Places made in play (ITEMS-SPEC §6.2, §11): per chat and per reply.
   for (const [key, what] of [["placeCap", "a chat"], ["placesPerTurn", "one reply"]] as const) {
     const v: unknown = world[key];
-    if (v !== undefined && !(typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_PLACE_CAP)) err(key, "place_cap", say("lint_the_number_of_places_what_may_make", { what: what, mAX_PLACE_CAP: MAX_PLACE_CAP }));
+    if (v !== undefined && !(typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_PLACE_CAP)) err(key, "place_cap", say("lint_the_number_of_places_what_may_make", { what: what, maxPlaceCap: MAX_PLACE_CAP }));
   }
   // The narrator's knowledge in the world's chats (DESIGN §6.11): a whole view, or none at all.
   const narrator: unknown = world.narrator;

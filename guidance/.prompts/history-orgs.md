@@ -64,7 +64,7 @@ org_log_the_gm: the GM
 org_log_ask_asked_first_to_approve_text_why: {{ask}} asked {{first}} to approve: {{text}} ({{why}})
 org_log_r_withdrew_the_request_text: {{r}} withdrew the request: {{text}}
 org_log_who_the_gm_denied_r_s_request: {{#if_who}}{{who}}{{/if_who}}{{^if_who}}The GM{{/if_who}} denied {{r}}'s request: {{text}}{{#if_why}}: {{why}}{{/if_why}}
-org_log_what_needs_payroll_and_books_in_play: {{what}} needs payroll and books in play (Money {{cOMPANY_LEVEL}})
+org_log_what_needs_payroll_and_books_in_play: {{what}} needs payroll and books in play (Money {{companyLevel}})
 org_log_starting_a_company: Starting a company
 org_log_settling_a_trust: Settling a trust
 org_log_starting_a_nonprofit: Starting a nonprofit

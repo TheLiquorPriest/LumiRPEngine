@@ -46,7 +46,7 @@ lint_title_was_written_by_an_indexing_job: "{{title}}" was written by an indexin
 lint_title_is_a_secret_that_isnt_name: "{{title}}" is a secret that isn't {{name}}'s own, so their mind never reads it; name them among its holders, or pin something else.
 lint_not_a_json_object: not a JSON object
 lint_action_reads_like_a_lock_but_this: "{{action}}" reads like a lock, but this requirement isn't marked hard: a typed attempt that misses it plays as plain roleplay, and the reply can tell it working. Mark it a hard lock if the attempt should fail instead.
-lint_format_must_be_world_format: format must be {{wORLD_FORMAT}}
+lint_format_must_be_world_format: format must be {{worldFormat}}
 lint_the_pov_entity_pov_does_not_exist: the POV entity "{{pov}}" does not exist
 lint_the_start_place_place_does_not_exist: the start place "{{place}}" does not exist
 lint_decimals_must_be_a_whole_number_from: decimals must be a whole number from 0 to 6
@@ -92,8 +92,8 @@ lint_tier_id_needs_a_band_principal_leads: Tier {{id}} needs a band: principal (
 lint_tier_id_has_no_label_so_players: Tier {{id}} has no label, so players see its id.
 lint_name_s_tier_tier_isnt_one_of: {{name}}'s tier "{{tier}}" isn't one of the world's tiers.
 lint_new_people_would_join_tier_spawntier_which: New people would join tier "{{spawnTier}}", which isn't one of the world's tiers.
-lint_the_number_of_people_replies_may_introduce: The number of people replies may introduce must be a whole number from 0 to {{mAX_SPAWN_CAP}}.
-lint_the_number_of_places_what_may_make: The number of places {{what}} may make in play must be a whole number from 0 to {{mAX_PLACE_CAP}}.
+lint_the_number_of_people_replies_may_introduce: The number of people replies may introduce must be a whole number from 0 to {{maxSpawnCap}}.
+lint_the_number_of_places_what_may_make: The number of places {{what}} may make in play must be a whole number from 0 to {{maxPlaceCap}}.
 lint_the_narrators_knowledge_needs_both_parts_knowledge: The narrator's knowledge needs both parts: knowledge "scene" or "pov", and secrets "marked" or "omit". As it is, the world's chats follow each player's Settings.
 lint_the_narrators_knowledge_has_no_part_key: The narrator's knowledge has no part "{{key}}", only knowledge and secrets; it is ignored.
 lint_a_spawn_in_path_names_tier_tier: A spawn in {{path}} names tier "{{tier}}", which isn't one of the world's tiers; it gets the spawn tier instead.
@@ -218,7 +218,7 @@ lint_holding_name_s_lots_are_a_list: Holding {{name}}'s lots are a list of {qty,
 lint_holding_name_routes_its_payouts_to_route: Holding {{name}} routes its payouts to {{route}}, which isn't an account; they go to its account instead.
 lint_name_is_an_s_corporation_but_name2: {{name}} is an S corporation, but {{name2}} can't hold its shares: an S corporation's shareholders are people, eligible trusts (a grantor trust, or one whose beneficiaries are all people) and charities (501(c)(3) organizations). Make it a C corporation, or move {{name2}}'s share to someone who may hold it.
 lint_name_is_an_s_corporation_with_holderscount: {{name}} is an S corporation with {{holdersCount}} shareholders: it may have at most {{max}}.
-lint_asset_id_needs_a_class_asset_classes: Asset {{id}} needs a class ({{aSSET_CLASSES}}).
+lint_asset_id_needs_a_class_asset_classes: Asset {{id}} needs a class ({{assetClasses}}).
 lint_option_id_names_no_underlying_asset_the: Option {{id}} names no underlying asset the world lists.
 lint_option_id_needs_a_strike_above_zero: Option {{id}} needs a strike above zero.
 lint_option_id_needs_an_expiry_date_yyyy: Option {{id}} needs an expiry date (YYYY-MM-DD).
@@ -368,7 +368,7 @@ lint_name_is_exempt_as_string_but_owners: {{name}} is exempt as {{string}}, but 
 lint_name_is_a_company_group_with_owners: {{name}} is a company group with owners or staff: make it a business, so its money, payroll and ownership run.
 lint_head_heads_name_by_the_title_head: {{head}} heads {{name}} by the title "head"; a Head position would say what that lets them do.
 lint_id_trades_at_name_which_takes_in: {{id}} trades at {{name}}, which takes in other buildings ({{others}}{{others2}}): a purchase counts as its sale only in its own building or site. Name the buildings it trades in.
-lint_name_s_entry_is_entry_not_one: {{name}}'s entry is {{entry}}, not one of {{aUDIENCES}}: it is read as unset.
+lint_name_s_entry_is_entry_not_one: {{name}}'s entry is {{entry}}, not one of {{audiences}}: it is read as unset.
 lint_name_s_keys_arent_a_list_of: {{name}}'s keys aren't a list of item ids or item types, so no one carries one.
 lint_name_has_no_known_vehicle_class_fuel: {{name}} has no known vehicle class; fuel and range can't be computed.
 lint_climate_key_month_m_is_covered_coveredcount: Climate {{key}}: month {{m}} is covered {{coveredCount}} times.
