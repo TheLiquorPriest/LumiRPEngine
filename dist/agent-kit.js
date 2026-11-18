@@ -48697,7 +48697,7 @@ function totalLabel(rules, name) {
 }
 function saveLabel(rules, save) {
   const label2 = totalLabel(rules, `save.${save}`);
-  return label2 === `save.${save}` ? save : label2;
+  return label2 === `save.${save}` ? save.charAt(0).toUpperCase() + save.slice(1) : label2;
 }
 var D20_ACTIONS = ["check", "save", "attack", "harm", "heal", "condition", "effect", "d20_rest", "reload", "award", "advance", "trait", "ranks", "stat_as"];
 var D20_EVENTS = {
@@ -103768,7 +103768,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "443fe133";
+var BUILD = "3fa1ba7d";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

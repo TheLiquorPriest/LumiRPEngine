@@ -54584,7 +54584,7 @@ function totalLabel(rules, name) {
 }
 function saveLabel(rules, save) {
   const label2 = totalLabel(rules, `save.${save}`);
-  return label2 === `save.${save}` ? save : label2;
+  return label2 === `save.${save}` ? save.charAt(0).toUpperCase() + save.slice(1) : label2;
 }
 var D20_PACK = "d20", D20_FIELDS, D20_TABLE_ROLES, text5 = (optional2 = false, doc) => ({ type: "text", ...optional2 ? { optional: optional2 } : {}, ...doc !== undefined ? { doc } : {} }), int = (optional2 = false, doc) => ({ type: "int", ...optional2 ? { optional: optional2 } : {}, ...doc !== undefined ? { doc } : {} }), json = (optional2 = false, doc) => ({ type: "json", ...optional2 ? { optional: optional2 } : {}, ...doc !== undefined ? { doc } : {} }), texts = (optional2 = false, doc) => ({ type: "list", of: "text", ...optional2 ? { optional: optional2 } : {}, ...doc !== undefined ? { doc } : {} }), bool = (optional2 = false, doc) => ({ type: "bool", ...optional2 ? { optional: optional2 } : {}, ...doc !== undefined ? { doc } : {} }), D20_COLUMNS, D20_ACTIONS, D20_EVENTS;
 var init_d20 = __esm(() => {
@@ -280261,5 +280261,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "443fe133", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "3fa1ba7d", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
