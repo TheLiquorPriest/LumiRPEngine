@@ -46,7 +46,7 @@ bun <Lumiverse's data folder>/extensions/lumi_rp_engine/repo/dist/rpe.js up --ur
 - Where RPE's service already exists for this data folder, `rpe up` keeps it, with or without `--systemd`: it makes the copy again, writes the unit and starts the service on what this run wrote, in place of serving in the foreground.
 - With no service, and without `--systemd`, after the list of what is left for you to do it serves RPE in the foreground until you stop it (Ctrl-C). With `--systemd`, it installs and starts RPE as a service of your account, named `rpe-<name>.service`. `--name <name>` chooses the name; without it, the name comes from your username. This needs Linux with systemd. Where RPE already answers, it says so and starts none; where something else holds RPE's port, it says so and names `--port`.
 
-Its other options are the previous build's install line's:
+Its other options:
 
 - `--port <port>`: the port RPE's connection in Lumiverse points at, on loopback; 7871 until you give another. Where the port is taken, a first install takes the first free one after it, up to the setting `service.lastPort` (7899).
 - `--listen <address>`: also listen on that address, so that other machines reach RPE. RPE says what that means (plain http off loopback) and still answers on loopback, where Lumiverse's extension reaches it.
