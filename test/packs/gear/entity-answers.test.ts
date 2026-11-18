@@ -17,7 +17,7 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { findAction, paramCandidates, resolveOn } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { initialState } from "../../../src/engine/world-state";
-import { checkProposals } from "../../../src/backend/proposals";
+import { checkProposals } from "../../../src/build/jobs/checks";
 import { searchThings } from "../../../src/frontend/character/places";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { placeLines } from "../../../src/packs/space/core/feed";
@@ -231,7 +231,7 @@ describe("import reads a truck bed as the part the gear tables declare", () => {
   test("a Truck bed from lore gets a pickup bed row, never the price catalog's bed sheet set", () => {
     const world = newBlankWorld("w_bed", "Beds", reg);
     const raw: JobProposal[] = [{ id: "entities:truck_bed", collection: "entities", key: "truck_bed", value: { kind: "container", name: "Truck bed", fields: {} }, source: "test", confidence: 0.8 }];
-    const [kept] = checkProposals(world, reg, raw, "import");
+    const [kept] = checkProposals(world, reg, raw, "import", 1000);
     const value = kept?.value;
     const catalog = value && typeof value === "object" && !Array.isArray(value) && value.fields && typeof value.fields === "object" && !Array.isArray(value.fields) ? value.fields.catalog : undefined;
     expect(catalog).not.toBe("bedding_sheet_set");

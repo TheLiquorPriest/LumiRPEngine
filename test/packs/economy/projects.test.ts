@@ -383,6 +383,6 @@ describe("projects: the narrator", () => {
     const renderer = reg.renderers.find((r) => r.source === "projects");
     const lines = renderer?.render(w.ctx) ?? [];
     expect(lines[0]).toContain("Depot: Digging: day 12 of 30");
-    expect(lines.at(-1)).toContain("never say a step is done before its day");
+    expect(lines.at(-1)).toContain("a step is done on its day");
   });
 });

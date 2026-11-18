@@ -275,7 +275,7 @@ describe("gear: Put in (N3)", () => {
     };
     item("shirt", "Flannel shirt", { owner: "pov", category: "clothing", slot: "torso_base" }, "pov");
     item("wardrobe", "Wardrobe", { owner: "pov" });
-    item("fridge", "Refrigerator", { owner: "pov" });
+    item("fridge", "Refrigerator", { owner: "pov", catalog: "refrigerator" });
     item("dresser", "Dresser", { owner: "danny_okafor" });
     item("far_wardrobe", "Wardrobe", { owner: "pov", place: "alder_market" });
     return new Working(reg, world, startState(world, reg));

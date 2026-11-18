@@ -9,8 +9,7 @@ import type { EditOp } from "../../../src/shared/edit-ops";
 import { resolveEdit } from "../../../src/engine/edits";
 import { applyMarker } from "../../../src/engine/events";
 import { palette } from "../../../src/play/state/palette";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, KNOWLEDGE_DEFAULTS } from "../../../src/shared/minds";
-import { mindContext } from "../../../src/backend/minds-context";
+import { KNOWLEDGE_DEFAULTS } from "../../../src/shared/minds";
 import { buildCharacter } from "../../../src/engine/character";
 import { buildGmWorld } from "../../../src/engine/gm-view";
 import { calendarOf, clockAt, dateAt, formatClock } from "../../../src/engine/calendar";
@@ -503,25 +502,7 @@ describe("needs an ordinary turn lives", () => {
       expect(gm?.fields.map((f) => f.id).filter((f) => records.includes(f))).toEqual([]);
       const page = buildCharacter(reg, w.world, who, w.state);
       expect(page?.character.sections.flatMap((s) => s.fields.map((f) => f.id)).filter((f) => records.includes(f))).toEqual([]);
-      const mind = mindContext({ reg, world: w.world, state: w.state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads: DEFAULT_MIND_READS, moment: { kind: "turn", at: w.state.clock, reason: "", user: "", reply: "" } });
-      for (const f of records) expect(mind).not.toContain(f.replace(/_/g, " ").trim());
     }
-  });
-
-  test("a mind reads when what it's doing ends as the world's day and time, and nothing once that end has gone by", () => {
-    const w = hall();
-    to(w, todayAt(w, 13 * 60));
-    expect(resolveAction(reg, w, { actor: "rosa", action: "rest", params: {} }, createRng("rosa")).ok).toBe(true);
-    const end = w.state.entities.rosa?.fields.activity_until;
-    if (typeof end !== "number") throw new Error("Rosa's rest gave her no span");
-    const rosa = (): string => mindContext({ reg, world: w.world, state: w.state, who: "rosa", memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads: DEFAULT_MIND_READS, moment: { kind: "turn", at: w.state.clock, reason: "", user: "", reply: "" } });
-    const minutes = new RegExp(`\\b${end}\\b`);
-    const words = formatClock(calendarOf(w.world), end);
-    expect(rosa()).toContain(words);
-    expect(rosa()).not.toMatch(minutes);
-    to(w, end + 1);
-    expect(rosa()).not.toContain(words);
-    expect(rosa()).not.toMatch(minutes);
   });
 
   test("the record alone, folded on a fresh start, gives the needs the turns played", () => {

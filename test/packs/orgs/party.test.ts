@@ -12,8 +12,6 @@ import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { OrgListView, OrgView } from "../../../src/shared/org-view";
 import { PARTY_SECTION, type PartySectionView } from "../../../src/shared/party";
 import type { WorldDoc } from "../../../src/shared/world";
-import { interpretScene } from "../../../src/backend/interpret-context";
-import { DEFAULT_RECENT } from "../../../src/shared/settings";
 import { applyValidUnits } from "../../../src/engine/events";
 import { membersOfOrg, partyRoster } from "../../../src/engine/org";
 import { optionalQuery } from "../../../src/engine/pack-kit";
@@ -110,19 +108,13 @@ describe("the party's roster and tiers", () => {
     expect(["pov", "maddie_kowalczyk", "danny_okafor", "jess_kowalczyk", "helen_kowalczyk"].map((id) => w.state.entities[id]?.fields.place)).toEqual(["rusty_anchor", "rusty_anchor", HOME, HOME, HOME]);
   });
 
-  test('"we" is the party that comes along, and the People section marks each tier', () => {
+  test('the People section marks each tier of the party that comes along', () => {
     const w = portAlder({ danny_okafor: "companion", jess_kowalczyk: "hired" });
-    const scene = interpretScene(reg, w.world, w.state, { mayKnow: () => true, named: [], earlier: [], recent: DEFAULT_RECENT, hideJson: false }).lines;
-    expect(scene.find((l) => l.startsWith("Here with you"))).toContain("Danny Okafor (danny_okafor, party companion)");
-    expect(scene).toContain('Your party here, whom "we" means: Danny Okafor (danny_okafor).');
     const people = peopleLines(w.ctx, "player").map((l) => l.text);
     // The tier leads the mark, then their titles where an organization ties them to the player character (ORG-SPEC §3.15).
     expect(people.some((l) => l.startsWith("Danny Okafor (party companion; mechanic at Alder Automotive, where you work) is here"))).toBe(true);
     expect(people.some((l) => l.startsWith("Jess Kowalczyk (hired hand) is here"))).toBe(true);
     expect(people.some((l) => l.startsWith("Helen Kowalczyk (head of The Kowalczyks) is here"))).toBe(true);
-    // With no one in the party, "we" names only whom the input names.
-    const alone = interpretScene(reg, portAlder().world, portAlder().state, { mayKnow: () => true, named: [], earlier: [], recent: DEFAULT_RECENT, hideJson: false }).lines;
-    expect(alone).toContain('Your party here, whom "we" means: no one, so "we" is only whom the input names.');
   });
 
   test("Add someone you know in a tier, change it keeping since when, take them out: each at once, as the leader's own", () => {

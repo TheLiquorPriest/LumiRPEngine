@@ -2,7 +2,7 @@
 // and a thing used up record how much the count moved, never the total it came to on the head.
 
 import { describe, expect, test } from "bun:test";
-import { applyProposals } from "../../../src/backend/turn-model";
+import { applyProposals } from "../../engine/apply-proposals";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { WorldDoc } from "../../../src/shared/world";
 import { applyEffects } from "../../../src/engine/effects";

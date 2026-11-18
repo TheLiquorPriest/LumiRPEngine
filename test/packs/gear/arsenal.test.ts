@@ -66,8 +66,8 @@ describe("the arsenal's rows", () => {
     for (const [id, r] of weapons) if (typeof r.ammo === "string") expect([id, rows[r.ammo]?.category]).toEqual([id, "ammo"]);
     expect(ARSENAL_CATEGORIES.map((c) => Object.values(rows).some((r) => r.category === c))).toEqual([true, true, true]);
     expect(ARSENAL_SLOTS.map((s) => rowOf(w.ctx, "gear.slots", s) !== undefined)).toEqual([true, true, true]);
-    // An old revolver of no row is Hand by its category; the gun safe, by its name, is furniture that holds arms.
-    expect([sizeOf(w.ctx, "revolver").size, sizeOf(w.ctx, "gun_safe").size, holdsOf(w.ctx, "gun_safe")]).toEqual(["hand", "furniture", "armful"]);
+    // An old revolver of no row is Hand by its category; the gun safe's size is read from nothing in its name (it is unknown), and it holds arms by its name.
+    expect([sizeOf(w.ctx, "revolver").size, sizeOf(w.ctx, "gun_safe").size, holdsOf(w.ctx, "gun_safe")]).toEqual(["hand", "unknown", "armful"]);
     // A pistol bought in play rests in the gun safe at home, as a shirt rests in a wardrobe.
     w.state.entities.new_pistol = { kind: "item", name: "Pistol", tier: "background", fields: { owner: YOU, catalog: "pistol_45", got: { how: "bought", at: w.state.clock } }, relations: [{ type: "in", to: YOU }], levels: {}, agent: false };
     expect(restOf(w.ctx, "new_pistol")).toEqual({ rest: { in: "gun_safe" }, from: "stored" });

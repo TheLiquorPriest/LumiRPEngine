@@ -3,12 +3,9 @@
 // character's day; and a mind reads its own plans by default, within their own limit.
 
 import { describe, expect, test } from "bun:test";
-import { plansFrom } from "../../../src/backend/minds";
-import { sectionTokens } from "../../../src/backend/book";
-import { mindContext, type MindContextReport } from "../../../src/backend/minds-context";
 import type { JsonObject } from "../../../src/shared/json";
 import type { LedgerEvent } from "../../../src/shared/ledger";
-import { DEFAULT_MIND_READS, DEFAULT_MINDS_MEMORY, MIND_LENGTH_DEFAULTS, MINDS_EVENTS, type MindPlan, type MindsReads } from "../../../src/shared/minds";
+import { MINDS_EVENTS, PLAN_PRIORITY, sharedPlanId, type MindPlan } from "../../../src/shared/minds";
 import { calendarOf, formatStamp } from "../../../src/engine/calendar";
 import { resolveEdit } from "../../../src/engine/edits";
 import { resolveAction } from "../../../src/engine/resolve";
@@ -29,10 +26,12 @@ function riverton(): Working {
   return w;
 }
 
-/** What Maya's memory of the turn takes from it: drinks at the Anchor tonight, 19:00 to 21:00, with `others` (names, as the model writes them). */
+/** What Maya's memory of the turn takes from it: drinks at the Anchor tonight, 19:00 to 21:00, with `others` (names, as the model writes them), as one plan shared by everyone in it. */
 function drinks(w: Working, others: string[]): MindPlan[] {
-  const cal = calendarOf(w.world);
-  return plansFrom(reg, w.world, w.state, "maya", [{ what: "Drinks at the Anchor after work", kind: "meet", when: { from: formatStamp(cal, at(w, 0, "19:00")), to: formatStamp(cal, at(w, 0, "21:00")) }, where: "The Anchor", with: others }], MIND_LENGTH_DEFAULTS);
+  const withIds = others.map((name) => Object.keys(w.state.entities).find((id) => w.state.entities[id]?.name === name)).filter((id): id is string => id !== undefined && id !== "maya");
+  const from = at(w, 0, "19:00");
+  const where = Object.values(w.world.places).find((p) => p.name === "The Anchor")?.id ?? null;
+  return [{ id: sharedPlanId(["maya", ...withIds], from), what: "Drinks at the Anchor after work", kind: "meet", when: { from, to: at(w, 0, "21:00") }, where, with: withIds, priority: PLAN_PRIORITY.normal, status: "open", made: w.state.clock, source: "memory", closed: null, reason: null, shared: true, by: "maya" }];
 }
 
 /** The `minds.memory` event a memory of the turn records for `who`, with `plans`. */
@@ -130,33 +129,5 @@ describe("accepting an invitation", () => {
     expect(dayPlan(w.ctx, YOU, 0).blocks.some((b) => b.start === meet && b.end === meet + 120 && b.place === "pub")).toBe(true);
     accept();
     expect((w.state.entities[YOU]?.fields.appointments as JsonObject[]).length).toBe(1);
-  });
-});
-
-describe("a mind reads its own plans", () => {
-  const context = (w: Working, reads: MindsReads = DEFAULT_MIND_READS, report?: MindContextReport, who = "maya"): string =>
-    mindContext({ reg, world: w.world, state: w.state, who, memory: DEFAULT_MINDS_MEMORY, messages: [], hideJson: true, reads, moment: { kind: "turn", at: w.state.clock, reason: "", user: "", reply: "" } }, report);
-  const plansOf = (text: string): string[] => (/## Your plans\n((?:- .*\n?)*)/.exec(text)?.[1] ?? "").trim().split("\n").filter((l) => l !== "");
-
-  test("by default, soonest first, within their own limit, and none while it's off", () => {
-    const w = riverton();
-    record(w, [
-      gmPlan(w, "maya", { id: "late", what: "Return Jordan's ladder", kind: "errand", where: "bank", when: { from: at(w, 0, "16:00"), to: at(w, 0, "17:00") } }),
-      gmPlan(w, "maya", { id: "soon", what: "Lunch with Rosa", kind: "meet", where: "pub", with: ["rosa"], when: { from: at(w, 0, "12:00"), to: at(w, 0, "13:00") } }),
-    ]);
-    const all = plansOf(context(w));
-    expect([all.length, all[0]?.includes("Lunch with Rosa"), all[1]?.includes("Return Jordan's ladder")]).toEqual([2, true, true]);
-    const report: MindContextReport = { pinned: [], activated: [] };
-    // Room for the soonest line alone: lines are kept whole, one that doesn't fit left out.
-    const cut = plansOf(context(w, { ...DEFAULT_MIND_READS, plans: { on: true, tokens: sectionTokens(all[0] ?? "") } }, report));
-    expect([cut, report.plans]).toEqual([[all[0]], { given: 1, left: 1 }]);
-    expect(plansOf(context(w, { ...DEFAULT_MIND_READS, plans: { on: false, tokens: 400 } }))).toEqual([]);
-  });
-
-  test("a shared plan another's memory recorded reaches their mind by its kind, time, place and people, never that memory's words", () => {
-    const w = riverton();
-    record(w, [memory(w, "maya", drinks(w, ["Jordan Price"]))]);
-    const [maya, jordan] = [plansOf(context(w)), plansOf(context(w, DEFAULT_MIND_READS, undefined, "jordan"))];
-    expect([maya[0]?.includes("Drinks at the Anchor after work"), jordan.length, jordan[0]?.includes("Drinks at the Anchor"), jordan[0]?.includes("The Anchor"), jordan[0]?.includes("Maya Chen")]).toEqual([true, 1, false, true, true]);
   });
 });

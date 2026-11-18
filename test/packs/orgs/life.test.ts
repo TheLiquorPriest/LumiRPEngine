@@ -225,7 +225,7 @@ describe("the Plan (assess-party §6.2)", () => {
     const orderId = plan?.goals[0]?.orders[0]?.id ?? "";
     // The narrator, Danny's mind (a companion weighs it) and his memory step.
     expect(planNarratorLines(w.ctx).join("\n")).toContain("Danny Okafor: Sweep the bays and stack the tyres.");
-    expect(planNarratorLines(w.ctx).at(-1)).toContain("never mark anything done");
+    expect(planNarratorLines(w.ctx).at(-1)).toContain("an order is marked done, a task handed out or who does what changed by an action");
     expect(planMindLines(w.ctx, DANNY)[0]).toContain("Sweep the bays and stack the tyres");
     expect(planMindLines(w.ctx, DANNY)[0]).toContain("you may take it on or refuse");
     expect(planMemoryLines(w.ctx, DANNY)).toEqual([`- [${orderId}] Sweep the bays and stack the tyres`]);

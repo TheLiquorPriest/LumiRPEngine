@@ -11,7 +11,7 @@ import type { JsonObject, JsonValue } from "../../../src/shared/json";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { OrgView, PremisesView } from "../../../src/shared/org-view";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
-import { applyProposals } from "../../../src/backend/turn-model";
+import { applyProposals } from "../../engine/apply-proposals";
 import { palette } from "../../../src/play/state/palette";
 import { entryFor, entryRefusal, withoutLeave } from "../../../src/engine/entry";
 import { createRng } from "../../../src/engine/rng";

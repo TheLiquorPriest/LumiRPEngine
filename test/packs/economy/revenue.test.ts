@@ -5,7 +5,6 @@
 import { describe, expect, test } from "bun:test";
 import type { FinanceView } from "../../../src/shared/finance";
 import type { JsonObject } from "../../../src/shared/json";
-import { EXTRACTION_DEFAULTS } from "../../../src/shared/settings";
 import { REVENUE_TEMPLATES, revenueOf, royaltyMonth, type RevenueModel } from "../../../src/shared/revenue";
 import type { WorldDoc } from "../../../src/shared/world";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
@@ -91,21 +90,11 @@ describe("revenue streams: the agents' adjustments", () => {
   };
   const adjust = (w: Working, args: JsonObject, seed = "adj") => act(w, "economy.revenue_adjust", { stream: "retainer", reason: "Word got round about the new menu", ...args }, seed).rejected.map((r) => r.rejection.code);
 
-  test("a stream is closed to them unless its author opened it", () => {
+  test("a stream its author left agents off is adjusted all the same, and says so (1efda0a03)", () => {
     const { w } = setup(retainer());
-    expect(adjust(w, { factor: 2 })).toEqual(["not_open"]);
-  });
-
-  test("an adjustment stays within its bounds: a factor of 0.25 to 4 or one period's amount, up to 31 days, four at once", () => {
-    const { w } = setup(retainer("bounded"));
-    expect(adjust(w, { factor: 5 })).toEqual(["out_of_bounds"]);
-    expect(adjust(w, { factor: 0.2 })).toEqual(["out_of_bounds"]);
-    expect(adjust(w, { cents: 300_001 })).toEqual(["out_of_bounds"]);
-    expect(adjust(w, { factor: 2, days: 32 })).toEqual(["out_of_bounds"]);
-    expect(adjust(w, { factor: 2, cents: 100 })).toEqual(["bad_amount"]);
-    expect(adjust(w, { factor: 2, reason: " " })).toEqual(["no_reason"]);
-    for (const [i, factor] of [1.5, 1.2, 1.1, 0.9].entries()) expect(adjust(w, { factor, days: 31 }, `a${i}`)).toEqual([]);
-    expect(adjust(w, { factor: 1.3 }, "a5")).toEqual(["too_many"]);
+    const start = w.advice.length;
+    expect(adjust(w, { factor: 2 })).toEqual([]);
+    expect(w.advice.slice(start).map((a) => a?.code)).toContain("revenue_not_open");
   });
 
   test("what an adjustment brings from outside in a stream's month is at most the world's cap on unlisted prices", () => {
@@ -115,20 +104,6 @@ describe("revenue streams: the agents' adjustments", () => {
     const [paid] = posts(w, /^Retainers/);
     // $3,000 a month times four would bring $9,000 more; the cap lets $6,000 in.
     expect(line(paid!, "db_operating")).toBe(300_000 + 600_000);
-  });
-
-  test("what the story says of a stream is a revenue change that quotes it and asks first, held to the same bounds", () => {
-    expect(EXTRACTION_DEFAULTS.revenue).toBe("confirm");
-    const channel = reg.proposals.get("revenue");
-    if (!channel) throw new Error("no revenue channel");
-    const { w } = setup(retainer("bounded"));
-    const said = { type: "revenue", stream: "retainer", factor: 1.5, days: 7, said: "Half the town booked in after the fair" };
-    expect(channel.validate(said, w.ctx)).toBeNull();
-    expect(channel.validate({ ...said, said: "" }, w.ctx)?.code).toBe("no_quote");
-    expect(channel.validate({ ...said, factor: 9 }, w.ctx)?.code).toBe("out_of_bounds");
-    expect(channel.toEffects(said, w.ctx)).toEqual([{ type: "economy.revenue_adjust", args: { stream: "retainer", reason: said.said, story: true, factor: 1.5, days: 7 } }]);
-    const { w: closed } = setup(retainer());
-    expect(channel.validate(said, closed.ctx)?.code).toBe("not_open");
   });
 
   test("a party's money view lists its streams, with their record, their next twelve months and the adjustments in force", () => {

@@ -169,7 +169,8 @@ describe("what each person knows", () => {
     expect(code("nobody", cash.id, devs)).not.toBe("ok");
     expect(code("dev", cash.id, { ...devs, confidence: 2 })).toBe("bad_value");
     expect(code("dev", cash.id, { ...devs, by: null })).toBe("bad_value");
-    expect(code("dev", cash.id, { ...devs, by: "dev" })).toBe("bad_value");
+    // Told by themselves is first hand: recorded as witnessed with no teller, not refused (073afdda0).
+    expect(code("dev", cash.id, { ...devs, by: "dev" })).toBe("ok");
     expect(code("dev", cash.id, { ...devs, evidence: ["field:dev:mood"] })).toBe("missing_fact");
     expect(code("dev", cash.id, { ...devs, evidence: [cash.id] })).toBe("missing_fact");
     expect(code("dev", cash.id, { ...devs, keptFrom: ["nobody"] })).toBe("missing_entity");

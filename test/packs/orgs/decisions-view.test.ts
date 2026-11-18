@@ -93,7 +93,7 @@ describe("a motion as each reader reads it", () => {
     const told = decisionNarratorLines(ctx);
     expect(told[0]).toContain("To a vote at Ellis Mobile Repair: Issue 100 units");
     expect(told[0]).toContain("40% for, 0% against");
-    expect(told.at(-1)).toContain("never decide one for anyone");
+    expect(told.at(-1)).toContain("no one's is decided for them");
   });
 });
 

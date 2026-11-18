@@ -26,7 +26,6 @@ import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { commitments } from "../../../src/packs/castlife/core/commitments";
 import { routineYields, skipLifeOf } from "../../../src/packs/castlife/core/routines";
-import { skipPlanBrief } from "../../../src/packs/castlife/core/skip-plan";
 import { fidelityOf, involved } from "../../../src/packs/minds/core/fidelity";
 import { planNarratorLines, planOf } from "../../../src/packs/orgs/core/agenda";
 import { orderPlans, PLAN_DAYS, stepOrders } from "../../../src/packs/orgs/core/follow";
@@ -207,17 +206,6 @@ describe("travel, the skip, the Montage and attention (assess-party §6.2)", () 
     expect(partyAt(w.ctx, HOME, "rusty_anchor")).not.toContain(PRIYA);
     act(w, "org_order", { org: PARTY, to: `${PRIYA},pov`, text: "Come with me to the Anchor" });
     expect(partyAt(w.ctx, HOME, "rusty_anchor")).toContain(PRIYA);
-  });
-
-  test("the skip brief lists the order in the player's words in place of its laid block, and the model plans his skip while he's on it", () => {
-    const w = alder();
-    follow(w, DANNY, "informative");
-    order(w, "Check the boat's moorings", { where: MARINA, when: "2026-09-14 11:00" });
-    expect(skipLifeOf(w.ctx, DANNY)).toBe("model");
-    const brief = skipPlanBrief(w.ctx, [DANNY], at(w, "06:15"), at(w, "18:00"));
-    const story = brief.people[0]?.story ?? [];
-    expect(story).toEqual([`Order from ${w.state.entities.pov?.name} (the player character): Check the boat's moorings, at Alder Harbor Marina (${MARINA}), by ${formatStamp(calendarOf(w.world), at(w, "11:00"))}; open`]);
-    expect(story.join("\n")).not.toContain("On an order");
   });
 
   test("the Montage of a skip says who worked on what", () => {

@@ -14,6 +14,9 @@ import { say } from "../../../src/shared/lines";
 import { modernUsWorld } from "../riverton";
 import { fold, startState } from "../support";
 
+/** The reason a chosen block gives for its score, as the shipped lines word it (`plan_reason_utility`). */
+const SCORED = /^it scored \d/;
+
 function objOfTrip(v: unknown): { from: number; until: number } | null {
   const t: unknown = Array.isArray(v) ? v[0] : null;
   if (!t || typeof t !== "object") return null;
@@ -58,9 +61,9 @@ describe("castlife: commitments and the day planner", () => {
     expect(plan.blocks.some((b) => b.activity === "dinner")).toBe(true);
     // Utility reasons: chosen blocks say why they're there and with what utility; commitments say what they are.
     const dinner = plan.blocks.find((b) => b.activity === "dinner");
-    expect(dinner?.reasons.filter((r) => /^utility \d/.test(r))).toHaveLength(1);
-    expect(dinner?.reasons.some((r) => !r.startsWith("utility"))).toBe(true);
-    expect(shift?.reasons.some((r) => r.startsWith("utility"))).toBe(false);
+    expect(dinner?.reasons.filter((r) => SCORED.test(r))).toHaveLength(1);
+    expect(dinner?.reasons.some((r) => !SCORED.test(r))).toBe(true);
+    expect(shift?.reasons.some((r) => SCORED.test(r))).toBe(false);
     expect(planFor(w.ctx, "maya", day, createRng("p"))).toEqual(plan);
   });
 
@@ -241,7 +244,7 @@ describe("castlife: needs, encounters and invitations (level 4)", () => {
       for (let day = 0; day < 7 && !found; day++) {
         const plan = planFor(w.ctx, who, day, createRng(`t:${who}:${day}`));
         const tie = plan.ties.find((t) => t.via === "seed");
-        const block = tie ? plan.blocks.find((b) => b.reasons.includes("close call")) : undefined;
+        const block = tie ? plan.blocks.find((b) => b.reasons.includes(say("plan_reason_close_call"))) : undefined;
         if (tie && block) found = { who, day, key: tie.key, options: tie.options, at: block.start };
       }
     }
@@ -250,7 +253,7 @@ describe("castlife: needs, encounters and invitations (level 4)", () => {
     w.apply({ type: "castlife.decision", data: { key: found.key, choice: found.options[1] ?? found.options[0] ?? "" } });
     const after = planFor(w.ctx, found.who, found.day, createRng(`t:${found.who}:${found.day}`));
     const first = w.state.entities[found.who]?.name.split(" ")[0];
-    expect(after.blocks.some((b) => b.reasons.includes(`close call, ${first} chose`))).toBe(true);
+    expect(after.blocks.some((b) => b.reasons.includes(say("plan_reason_close_call_chose", { name: first ?? "" })))).toBe(true);
   });
 
   test("Accept invitation is offered only for a host whose invitation is still open", () => {
