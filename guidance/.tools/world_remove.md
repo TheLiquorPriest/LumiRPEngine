@@ -1,5 +1,6 @@
 ---
 description: world_remove as the model is told it - what the tool does, and what each of its arguments is.
+doing: taking an item out of the world's draft
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   collection: "The collection the item is in."

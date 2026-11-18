@@ -1,5 +1,6 @@
 ---
 description: world_keep as the model is told it - what the tool does, and what each of its arguments is.
+doing: keeping this chat's maps in the world's draft
 arguments:
   maps: "The maps to keep, each by id or title: a map laid in play, or one the world draws that this chat drew squares on (the squares are laid on it)."
   places: "The places of the world's own that this chat changed, each by id or name."

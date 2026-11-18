@@ -1,5 +1,6 @@
 ---
 description: world_upgrade as the model is told it - what the tool does, and what each of its arguments is.
+doing: moving the chat on to another revision of the world
 arguments:
   revision: "The revision of the world this chat plays to move it to, by its id; left out, the world's head."
 ---

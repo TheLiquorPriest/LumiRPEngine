@@ -1,5 +1,6 @@
 ---
 description: world_shape as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking at how part of the world is shaped
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   collection: "A collection of the document (entities, places, maps, rules and so on): the members its items carry, how many carry each, and three examples."

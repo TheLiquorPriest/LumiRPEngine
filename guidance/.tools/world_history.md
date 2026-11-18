@@ -1,5 +1,6 @@
 ---
 description: world_history as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking over the world's revisions
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   limit: "How many revisions to list, newest first."

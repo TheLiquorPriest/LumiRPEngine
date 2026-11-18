@@ -1,5 +1,6 @@
 ---
 description: world_map_settings as the model is told it - what the tool does, and what each of its arguments is.
+doing: changing how the world's maps work
 arguments:
   display: "What the player's map shows: knowledge (the places the player character knows, those only heard of drawn dashed) or fog (fog over what it has not seen)."
   grid_movement: "true: the grid system is on, so walls and doors steer people across grid maps, things lie on squares, and squares and zones can trigger rules. false: grid maps are drawn, not walked."

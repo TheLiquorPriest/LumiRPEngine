@@ -1,5 +1,6 @@
 ---
 description: world_map_link as the model is told it - what the tool does, and what each of its arguments is.
+doing: linking places on a map
 arguments:
   map: "The map: its id or its title, as this chat plays it."
   from: "One end of the link: a place, by its name or id."

@@ -1,5 +1,6 @@
 ---
 description: world_set as the model is told it - what the tool does, and what each of its arguments is.
+doing: setting a part of the world's draft
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   part: "The part: calendar, realism, time, meta, tiers, ruleset, loreIndex, minds, lorePins, routineSettings or needs."

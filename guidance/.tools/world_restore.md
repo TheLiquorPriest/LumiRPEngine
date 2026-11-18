@@ -1,5 +1,6 @@
 ---
 description: world_restore as the model is told it - what the tool does, and what each of its arguments is.
+doing: bringing a kept revision back into the world's draft
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   revision: "The revision to bring back, by its id: world_history lists them."
