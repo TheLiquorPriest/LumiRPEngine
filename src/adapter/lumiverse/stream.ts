@@ -37,8 +37,9 @@ export interface ReplyStream {
   finish(end?: { reason?: string; usage?: Usage }): void;
   /**
    * Ends the reply with `message`, which the player's notice shows. Once thinking has gone out, Lumiverse keeps the empty message after
-   * the notice is gone, and `kept` goes into its thinking, where the message shows why: a line with no error's or provider's words in
-   * it, since what is kept in the thinking can reach a later prompt. Without `kept`, nothing more goes into the thinking.
+   * the notice is gone (the turn lane then takes it away where no word of the reply was saved), and `kept` goes into its thinking, where
+   * the message shows why while it stands: a line with no error's or provider's words in it, since what is kept in the thinking can
+   * reach a later prompt. Without `kept`, nothing more goes into the thinking.
    */
   error(message: string, kept?: string): void;
 }

@@ -211,7 +211,7 @@ Each turn's prompt notices and front, newest first, with its number on the chat'
 
 ### `GET /api/v1/chats/:chat/replies`
 
-The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.
+The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads), the turn's marks, and why the turn's record of the reply was not finished where it was not, with whether Settle now settles it; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.
 
 | | |
 |---|---|
@@ -7585,7 +7585,7 @@ export interface RepliesReply {
 
 ### `ReplyLine`
 
-The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, and the turn's marks.
+The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on).
 
 ```ts
 export interface ReplyLine {
@@ -7598,6 +7598,7 @@ export interface ReplyLine {
   place: string | null;
   lanes: LaneShown[];
   marks: { kind: string }[];
+  unfinished: { why: string; settle: boolean } | null;
 }
 ```
 

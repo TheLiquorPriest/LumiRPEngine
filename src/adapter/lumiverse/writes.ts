@@ -1,8 +1,10 @@
 // What RPE writes to Lumiverse, and nothing else (STANDALONE-PLAN §4.2, the write table l.260-273): a lore entry written, made or removed with a
 // revision check (an approved proposal, Build's own actions); the projection book, made for one chat, attached to that chat alone by the one key
 // `chat_world_book_ids` of its metadata with every other key as it was, rewritten, detached and removed; a line of his appended to a chat as his
-// message, text only; and a generation started. Each is Lumiverse's own HTTP route asked as the signed-in user, so Lumiverse's own checks and its
-// events (`MESSAGE_SENT`, the generation's) go with it. Nothing is written into a message's or a chat's metadata but that one key.
+// message, text only; a generation started; and the empty reply a turn of RPE's left when it failed or was stopped before a word of its reply
+// went out, taken away as Lumiverse takes its own away (plan §10.10). Each is Lumiverse's own HTTP route asked as the signed-in user, so
+// Lumiverse's own checks and its events (`MESSAGE_SENT`, `MESSAGE_DELETED`, the generation's) go with it. Nothing is written into a message's or
+// a chat's metadata but that one key.
 //
 // The shapes the lore matches (`LoreBookWrites`, `ProjectionBooks`, `src/lore/`) are matched here: the adapter does not import lore.
 
@@ -58,6 +60,14 @@ export interface Writes {
   appendMessage(user: string, chat: string, text: string): Promise<LvMessage>;
   /** A generation started in the chat; Lumiverse's id of it. Its reply comes on the connection the chat uses, tagged as any other. */
   startGeneration(user: string, chat: string, how: { type?: StartType; message?: string | null; speaker?: string | null; connection?: string | null }): Promise<string>;
+  /**
+   * The reply a turn's generation staged in the chat, taken away where it still holds no text: the whole message (`swipe` null, a message
+   * of one swipe), or that swipe of a message that has others. Lumiverse takes it away itself when a generation fails or is stopped before
+   * its first word, but keeps it once thinking went out (`services/generate.service.ts:3608-3615`; a swipe's, `:3590-3606`, and its page's
+   * `ws/useWebSocket.ts:258-266`), and RPE's progress lines are thinking. False where nothing was taken away (it holds text now, it is
+   * his, or it is gone).
+   */
+  dropEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean>;
 }
 
 const enc = encodeURIComponent;
@@ -206,6 +216,14 @@ export function createWrites(deps: WriteDeps): Writes {
       const id = isRecord(a.body) && typeof a.body.generationId === "string" ? a.body.generationId : null;
       if (id === null) throw new LumiverseError("protocol", "Lumiverse answered a generation's start with no id.");
       return id;
+    },
+    async dropEmptyReply(user, chat, message, swipe) {
+      own(user);
+      const now = (await deps.reads.messagesById(chat, [message]))[0];
+      if (now === undefined || now.role === "user") return false;
+      if (swipe === null ? now.saves.length !== 1 || now.saves[0]?.text !== "" : now.saves.length < 2 || now.saves[swipe]?.text !== "") return false;
+      const path = `/api/v1/chats/${enc(chat)}/messages/${enc(message)}${swipe === null ? "" : `/swipe/${swipe}`}`;
+      return (await expect("DELETE", path, undefined, [200, 404])).status === 200;
     },
   };
 }

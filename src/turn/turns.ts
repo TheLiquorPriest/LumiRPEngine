@@ -236,6 +236,11 @@ export interface TurnLaneDeps {
   reads(): LumiverseReads | null;
   /** Stops a generation of the user's in Lumiverse, as the user's own Stop does; false when it was not going on. */
   stopGeneration(generation: string): Promise<boolean>;
+  /**
+   * Takes away the reply a turn's generation staged in the chat, where it still holds no text (the whole message, `swipe` null, or that
+   * swipe), as the user's own delete does; false where nothing was taken away, or RPE cannot reach Lumiverse.
+   */
+  dropEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean>;
   /** The harness, once built. */
   harness(): Harness;
   /** The Lumiverse user this RPE plays for; null before one is set. */
@@ -2072,7 +2077,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * A generation ended (plan §10.8): its turn tied to what Lumiverse saved in the swipe the generation wrote, whichever one the player
    * looks at now, or, saving nothing, left an attempt with no state. A reply not released whole (stopped, failed, or RPE stopped during
    * it) is tied as cut short. Where which swipe it wrote cannot be told, the turn is left open, and the next intake looks again. A
-   * continue's run that held its changes on a turn of its own is tied where its end names the message (`#continued`).
+   * continue's run that held its changes on a turn of its own is tied where its end names the message (`#continued`). An attempt
+   * dropped with no text saved leaves the chat as a provider that failed, or a generation stopped, before its first word leaves it: the
+   * reply Lumiverse staged for it, which it kept only for the progress lines in its thinking, is taken away (plan §10.10).
    */
   async #ended(user: string, change: Ended): Promise<void> {
     const run: RunRecord | null = this.#d.runs.byGeneration(user, change.generation);
@@ -2117,6 +2124,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       }, "dropping an attempt that saved nothing");
       this.#stateChanged(run.chat);
       if (dropped) await this.#d.harness().turnLeft({ user, chat: run.chat, session: run.session, turn: run.turn });
+      if (dropped && saved !== undefined && written !== undefined && written.text === "") await this.#dropEmpty(user, run, saved, written);
       return;
     }
     const record = settle({ saved: written.text === run.base + run.reply ? null : written.text });
@@ -2129,6 +2137,22 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     this.#stateChanged(run.chat);
     await this.#recordMessage(record, record.turn, { id: saved.id, hash: textHash(written.text), date: written.date });
     await this.#keepRecord(record);
+  }
+
+  /**
+   * The reply a dropped attempt's generation staged and saved nothing in, taken away (plan §10.10 "Stop", "RPE restarted mid-turn"):
+   * Lumiverse takes away its staged message, and its page a staged swipe, when a generation fails or is stopped before its first word,
+   * but keeps either once thinking went out (`services/generate.service.ts:3590-3615`, `ws/useWebSocket.ts:258-266`), and the turn's
+   * progress lines are thinking. A message of one swipe goes whole; a swipe of a message that has others goes alone. One that could not
+   * be taken away is logged and stays, as an empty reply he can delete.
+   */
+  async #dropEmpty(user: string, run: RunRecord, saved: LvMessage, written: LvMessage["saves"][number]): Promise<void> {
+    const swipe = saved.saves.length === 1 ? null : saved.saves.indexOf(written);
+    if (swipe === -1) return;
+    await this.#d.dropEmptyReply(user, run.chat, saved.id, swipe).catch((error: unknown) => {
+      this.#d.log.warn("The empty reply a turn left in the chat when it ended before a word of it went out could not be taken away; it stays until it is deleted in the chat.", { turn: run.turn, chat: run.chat, message: saved.id, error: words(error) });
+      return false;
+    });
   }
 
   /**

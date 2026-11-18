@@ -2,12 +2,16 @@
 // mounted), by the swipe Lumiverse shows, the turn tied to it, the world's date and time at the turn's end and where his character
 // was, what each lane of the turn did (how many changes took effect, and the lines a person reads: the engine's worded as his
 // character knows them, in the chat's own copy of the history lines; the story's, each beat the turn wrote), and the
-// turn's marks. A reply no turn is tied to was made without RPE (§6.3); a carried one names the engine that played it (§15.2). A
-// continue's held turn joined to the turn it extended is answered in the joined form the store's refusal names, with the line of the
-// turn it joined. His own messages, and ids the chat's path does not hold, are left out. A read only. It lives with the turn rather
-// than in `src/play/` as PlanChatUI-3 names it: the turn's marks are the turn lane's, which the panels' zone may not import.
+// turn's marks; and, where the turn's record of the reply was not finished (its run failed, reached a limit or was stopped once the reply
+// had begun to go out, plan §10.10), why, with whether Settle now settles it. A reply no turn is tied to was made without RPE (§6.3); a
+// carried one names the engine that played it (§15.2). A continue's held turn joined to the turn it extended is answered in the joined
+// form the store's refusal names, with the line of the turn it joined. His own messages, and ids the chat's path does not hold, are left
+// out. A read only. It lives with the turn rather than in `src/play/` as PlanChatUI-3 names it: the turn's marks are the turn lane's,
+// which the panels' zone may not import.
 
+import type { ReplyError } from "rp-harness/contract";
 import { type Infer, route, shape } from "../app";
+import { type LinesPart, loadGuidance } from "../app/guidance";
 import { playerLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
 import { isRecord } from "../shared/json";
@@ -17,7 +21,7 @@ import { STORY_OPS } from "../story/fold";
 import { withHistoryLines } from "../iface";
 import type { Turns } from "./lane";
 import { guidanceTexts } from "./texts";
-import { NO_SESSION } from "./turns";
+import { NO_SESSION, PARTS, replyErrorWords } from "./turns";
 
 const T = shape.text();
 
@@ -29,7 +33,7 @@ const laneShown = shape.named(
 
 const replyLine = shape.named(
   "ReplyLine",
-  "The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, and the turn's marks.",
+  "The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on).",
   shape.object({
     message: T,
     played: shape.yesNo(),
@@ -40,6 +44,7 @@ const replyLine = shape.named(
     place: shape.nullable(T),
     lanes: shape.list(laneShown),
     marks: shape.list(shape.object({ kind: T })),
+    unfinished: shape.nullable(shape.object({ why: T, settle: shape.yesNo() })),
   }),
 );
 
@@ -67,18 +72,34 @@ function linesOf(store: UserStore, registry: Registry, turn: string): Lanes {
   };
 }
 
-/** The line under each reply of the chat that `ids` names, in the order asked. */
-export function replyLines(turns: Pick<Turns, "store" | "marks">, user: string, chat: string, ids: readonly string[]): Line[] {
+/**
+ * Where a turn's record of its reply was not finished: its newest run (a Settle now run's included) failed, reached a limit or was stopped
+ * once its reply had begun to go out, or, a Settle now run, at all; why, in the reply-errors part's words (its `-after` lines), or the
+ * error's own where the part has none. Null where the newest run is going on or ended well.
+ */
+function unfinishedWhy(turns: Pick<Turns, "runs">, user: string, turn: string, errors: LinesPart | undefined): string | null {
+  const last = turns.runs.record(user, turn);
+  if (last === null || last.status === "running" || last.status === "released" || last.status === "no-reply") return null;
+  if (last.kind !== "settle" && last.released === null) return null;
+  const e: ReplyError = last.error ?? { code: last.status === "limit" ? "limit" : last.status === "stopped" ? "stopped" : "failed" };
+  return replyErrorWords(e, errors, true) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+}
+
+/** The line under each reply of the chat that `ids` names, in the order asked; `errors` words a turn whose record was not finished. */
+export function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user: string, chat: string, ids: readonly string[], errors: LinesPart | undefined): Line[] {
   const store = turns.store.user(user);
   const row = store.chat(chat);
   if (row === null) return [];
-  const path = new Map(store.path(chat).map((entry) => [entry.message, entry]));
+  const steps = store.path(chat);
+  const path = new Map(steps.map((entry) => [entry.message, entry]));
+  // Settle now settles the newest turn of the chat's own on its path, while no run of the chat goes on.
+  const settles = turns.runs.ofChat(user, chat).length > 0 ? null : (steps.findLast((e) => e.turn !== null && store.turn(e.turn)?.chat === chat)?.turn ?? null);
   const out: Line[] = [];
   for (const message of ids) {
     const entry = path.get(message);
     if (entry === undefined || entry.user) continue;
     if (entry.turn === null) {
-      out.push({ message, played: false, engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [] });
+      out.push({ message, played: false, engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null });
       continue;
     }
     let turn = entry.turn;
@@ -93,26 +114,40 @@ export function replyLines(turns: Pick<Turns, "store" | "marks">, user: string, 
       lines = linesOf(store, turns.store.env.registry, turn);
     }
     const imported = store.turn(turn)?.imported === true;
-    out.push({ message, played: true, engine: imported ? row.engine : null, turn: joined?.turn ?? turn, joined, ...lines, marks: turns.marks.ofTurn(user, turn).map((m) => ({ kind: m.kind })) });
+    const why = unfinishedWhy(turns, user, turn, errors);
+    out.push({
+      message,
+      played: true,
+      engine: imported ? row.engine : null,
+      turn: joined?.turn ?? turn,
+      joined,
+      ...lines,
+      marks: turns.marks.ofTurn(user, turn).map((m) => ({ kind: m.kind })),
+      unfinished: why === null ? null : { why, settle: settles === turn },
+    });
   }
   return out;
 }
 
-export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "files" | "env">) {
+export function replyRoutes(turns: Pick<Turns, "store" | "marks" | "runs" | "files" | "env">) {
   return [
     route({
       method: "GET",
       path: "/api/v1/chats/:chat/replies",
       access: "page",
       group: "turns",
-      does: "The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads) and the turn's marks; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.",
+      does: "The line under each reply asked for, by the swipe Lumiverse shows: its turn, the world's date and time at the turn's end and his character's place, each lane's changes (a count and the lines a person reads), the turn's marks, and why the turn's record of the reply was not finished where it was not, with whether Settle now settles it; a reply made without RPE says so, a carried one names the engine that played it, and a continue's held turn joined to another is answered in the joined form with the line of the turn it joined.",
       query: { ids: shape.field(T, "The messages' ids, comma-separated: the rows the page has mounted.") },
       reply: repliesReply,
-      // The engine's lines are worded in the chat's own copy of the history lines, the nearest level's.
-      handle: ({ user, params, query }) =>
-        withHistoryLines(guidanceTexts(turns.files, { user, chat: params.chat, session: NO_SESSION }, turns.env.log), () => ({
-          replies: replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== "")),
-        })),
+      // The engine's lines are worded in the chat's own copy of the history lines, the nearest level's; a record not finished, in its reply-errors part.
+      handle: async ({ user, params, query }) => {
+        const scope = { user, chat: params.chat, session: NO_SESSION };
+        const part = await loadGuidance(turns.files, scope).part(PARTS.errors);
+        const errors = part?.format === "lines" ? part : undefined;
+        return await withHistoryLines(guidanceTexts(turns.files, scope, turns.env.log), () => ({
+          replies: replyLines(turns, user, params.chat, query.ids.split(",").filter((id) => id !== ""), errors),
+        }));
+      },
     }),
   ] as const;
 }

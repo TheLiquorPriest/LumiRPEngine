@@ -1,7 +1,9 @@
 // The line under each reply (plan §14, PlanChatUI-3 item 2): when and where it happened, what the turn did in
 // each lane (story, engine, each opening its short list), and a link to its Turn page. It follows the swipe
 // shown, is asked for only the rows Lumiverse has mounted (`../replies.ts`), and draws once per message in
-// either display mode. A reply made without RPE says so; a migrated reply names the engine that played it.
+// either display mode. A reply made without RPE says so; a migrated reply names the engine that played it. A
+// reply whose turn's record was not finished (its run failed or was stopped once the reply had begun to go out)
+// says why, with Settle now where that settles it (plan §10.10).
 
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -11,6 +13,7 @@ import type { Readable } from "../../store";
 import { chatPlay } from "../chat-play";
 import { type LaneShown, type ReplyLine, type RepliesState, repliesOf } from "../replies";
 import type { FrameEnv, SurfaceDef } from "../surface";
+import { errorWords } from "../../words";
 import { messageOfScope } from "./working";
 
 const LANE_NAME: Record<LaneShown["lane"], string> = { story: "Story", engine: "Engine" };
@@ -46,6 +49,36 @@ function Lane(props: { lane: LaneShown }) {
   );
 }
 
+/** A turn whose record of this reply was not finished: why, and Settle now where it settles this turn; what came of the press, in RPE's words. */
+function Unfinished(props: { env: FrameEnv; chat: string; why: string; settle: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const press = (): void => {
+    setBusy(true);
+    props.env.client.call("POST /api/v1/chats/:chat/settle", { chat: props.chat }).then(
+      () => {
+        setBusy(false);
+        setSaid("The Author is finishing the record of this reply now. Nothing is written to your chat.");
+      },
+      (error: unknown) => {
+        setBusy(false);
+        setSaid(errorWords(error));
+      },
+    );
+  };
+  return (
+    <span class="rpe-chat-line-unfinished" role="status">
+      <span class="rpe-chat-line-fact">{props.why}</span>
+      {props.settle ? (
+        <button type="button" class="rpe-chat-line-btn" disabled={busy} title="The Author finishes this turn's record of the reply now; nothing is written to your chat." onClick={press}>
+          Settle now
+        </button>
+      ) : null}
+      {said === null ? null : <span class="rpe-chat-line-fact">{said}</span>}
+    </span>
+  );
+}
+
 function Line(props: { env: FrameEnv; message: string }) {
   const { line } = useReplies(props.env, props.message);
   const chat = props.env.chat.get();
@@ -64,6 +97,7 @@ function Line(props: { env: FrameEnv; message: string }) {
       {line.lanes.map((lane) => (
         <Lane key={lane.lane} lane={lane} />
       ))}
+      {chat === null || line.unfinished === null ? null : <Unfinished env={props.env} chat={chat} why={line.unfinished.why} settle={line.unfinished.settle} />}
       {chat === null || turn === null ? null : (
         <button type="button" class="rpe-chat-line-btn rpe-chat-line-turn" onClick={() => props.env.open({ page: "turns", chat, at: [turn] })}>
           Turn
