@@ -358,9 +358,10 @@ export class PlayService {
             return this.ops(head, ask.ops, settings);
         }
       };
-      // What a tap of one of the world's actions did, in the words its press is shown in (`pressedLine`), read before it is recorded.
+      // What a tap of one of the world's actions did, in the words its press is shown in (`pressedLine`), read before it is recorded; kept
+      // with the edit, so that the next turn is told what was pressed by those words (`ownerEditsBefore`).
       const did = ask.kind === "action" ? pressedLine(await this.pressed(user, chat, { action: ask.action, values: ask.params, from: tapFrom(ask.source) }, ask.text ?? "")) : null;
-      const { undo, advised } = await recordOwnerEdit(this.deps, user, chat, request as unknown as JsonObject, tell, resolve);
+      const { undo, advised } = await recordOwnerEdit(this.deps, user, chat, { ...request, ...(did !== null ? { pressed: did } : {}) } as unknown as JsonObject, tell, resolve);
       const reports = adviceWords(advised);
       const words = undo === null ? await this.words("changes_nothing") : reports.length > 0 ? await this.words("applied_advised", { reports: reports.join(SENTENCES) }) : did === null ? "" : await this.words("did_action", { what: did });
       return { applied: undo !== null, reports, undo, words };

@@ -2758,10 +2758,16 @@ export class UserStore {
 
   // ------------------------------------------------------------ undo and the review card
 
-  private changeOrThrow(id: number): ChangeRow {
+  /** A change by its id, his own or a turn's; null where he has none of that id. */
+  change(id: number): ChangeRow | null {
     const r = this.db.query<ChangeDb, [string, number]>("SELECT * FROM change WHERE user = ? AND id = ?").get(this.id, id);
-    if (!r) throw new StoreInputError(`no change ${id}`);
-    return changeOf(r);
+    return r ? changeOf(r) : null;
+  }
+
+  private changeOrThrow(id: number): ChangeRow {
+    const c = this.change(id);
+    if (c === null) throw new StoreInputError(`no change ${id}`);
+    return c;
   }
 
   /**

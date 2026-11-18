@@ -38,7 +38,7 @@ const NOTICES: Record<string, Record<string, unknown>> = {
   job_interrupted: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   job_off_path: { job: "j-1", agent: "mapper", brief: "Map the harbour." },
   panel_request: { what: "Add a quay", on: "the harbour", from: "palette", values: "name: Quay", action: "add-place", sent: true },
-  player_edit: { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal: it is older than the turn"] },
+  player_edit: { is: { action: true }, what: "Pay, on Wren, 5 coin", changes: ["Wren's coin went from 3 to 5."], not_applied: ["A fact sealed."], unworded: 1 },
   player_inserted: { message: 7, new: "Wren walks in." },
   depth_asked: { depth: "full", words: "Keep it short." },
   swipe_asked: { mode: "afresh", words: "Start from the quay." },
@@ -383,10 +383,20 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(notices.line("panel_request", { what: "Add a quay" } as never)).toBe("From a panel: Add a quay");
   });
 
-  test("notices.md tells an edit the player made before the turn with what took effect and what did not, and the undoing of one", async () => {
+  test("notices.md tells an edit the player made before the turn by what was pressed, with what took effect and what did not, and the undoing of one", async () => {
     const notices = await lines("notices");
-    expect(notices.line("player_edit", { what: "Wren's coin, from 3 to 5", request: "{\"edit\":\"coin\"}", changes: ["set coin 5"], not_applied: ["fact seal"] } as never)).toBe("The player made an edit to the record before this turn: Wren's coin, from 3 to 5. Recorded: set coin 5. Not applied: fact seal. What was pressed: {\"edit\":\"coin\"}");
-    expect(notices.line("player_edit", { undo: true, of: "Wren's coin, from 3 to 5", request: "{\"undo\":\"u-1\"}", changes: [], not_applied: [] } as never)).toBe("The player undid an earlier edit: Wren's coin, from 3 to 5. What was pressed: {\"undo\":\"u-1\"}");
+    expect(notices.line("player_edit", { is: { action: true }, what: "Pay, on Wren, 5 coin", changes: ["Wren's coin went from 3 to 5."], not_applied: ["A fact sealed."] } as never)).toBe(
+      "Before this turn, the player pressed Pay, on Wren, 5 coin. Recorded: Wren's coin went from 3 to 5. Not applied: A fact sealed.",
+    );
+    expect(notices.line("player_edit", { is: { fix: true }, changes: ["The clock was set back 15 minutes."], not_applied: [], unworded: 2 } as never)).toBe(
+      "Before this turn, the player corrected the record. Recorded: The clock was set back 15 minutes. 2 more of its changes have no words to tell them by.",
+    );
+    expect(notices.line("player_edit", { undo: true, is: { action: true }, what: "Pay, on Wren, 5 coin", of: ["Wren's coin went from 3 to 5."], changes: ["Wren's coin went from 5 to 3."], not_applied: [] } as never)).toBe(
+      "Before this turn, the player pressed Undo on an edit of their own (Pay, on Wren, 5 coin). It had recorded: Wren's coin went from 3 to 5. Recorded: Wren's coin went from 5 to 3.",
+    );
+    expect(notices.line("player_edit", { undo: true, by_turn: true, is: { other: true }, of: ["The clock moved on 15 minutes."], changes: ["The clock was set back 15 minutes."], not_applied: [] } as never)).toBe(
+      "Before this turn, the player pressed Undo on a change an earlier turn made. It had recorded: The clock moved on 15 minutes. Recorded: The clock was set back 15 minutes.",
+    );
   });
 
   test("notices.md tells a message the player inserted before a played turn with its number and, where agents may read it, its text", async () => {

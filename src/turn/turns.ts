@@ -1897,12 +1897,12 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (last.saved !== null) add("saved-differs", notices?.line("saved_differs", { message: tied.message, released: last.base + last.reply, saved: last.saved }), { turn: last.turn });
     }
     if (!again) for (const job of this.#jobsEnded(user, turn, { keys, place, tokens: found.tokens, budget: found.jobBudget })) add("job", notices?.line(job.line, job.fields), job.turn === null ? {} : { turn: job.turn });
-    // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed and what it changed; a swipe of
-    // the turn told them is told them again, a continue is not.
+    // His own edits placed before this turn (plan §6.3 l.632): each once, as his, with what he pressed by its name and what it changed,
+    // in words; a swipe of the turn told them is told them again, a continue is not.
     if (!again) {
       const revision = store.chat(chat)?.revision ?? null;
       const world = revision === null ? undefined : this.#d.store.env.worlds(revision);
-      for (const e of ownerEditsBefore(store, chat, turn.id, found.tell, world)) add("player-edit", notices?.line("player_edit", e.fields));
+      for (const e of await ownerEditsBefore(store, chat, turn.id, found.tell, world, this.#d.store.env.registry)) add("player-edit", notices?.line("player_edit", e.fields));
     }
     // A question that waits for his word (a lane set to Confirm) is told at each turn's start while it waits, in the notices part's words.
     for (const q of this.#d.approvals.waitingIn(user, chat)) add("awaiting", notices?.line("approval_waiting", { tool: q.tool, lane: q.lane, ...(q.turn !== null ? { turn: q.turn } : {}) }), q.turn === null ? {} : { turn: q.turn });

@@ -6,22 +6,27 @@
 // chose not to tell (`cite.tell` false) is left out, applied and shown all the same; one he made no choice
 // on follows the chat's out-of-play settings for its group (`taps.tell.*`): a payment to someone else from
 // the amount they set, a fix of things as hand-overs or things, every other correction told. An Undo is
-// told as the undo of what it undid, when that was told. The words are the notices part's.
+// told as the undo of what it undid: an edit of his, when that edit was told; a change a turn made, always.
+// The words are the notices part's; each change is said as the turn's card says it: in the GM view's words
+// (`changeLine`), else by its kind in the play answers' words, and never as it is written.
 
+import { own } from "../engine/pack-kit";
+import type { Registry } from "../engine/registry-impl";
+import type { WorldState } from "../engine/state";
+import { changeLine } from "../play/due";
+import { playAnswers } from "../play/service";
 import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import { fixGroupOf, type OffstageSettings, toldByDefault } from "../shared/offstage";
 import { parseItemFix, type ItemFix } from "../shared/things";
 import type { WorldDoc } from "../shared/world";
-import type { ChangeRow, UserStore } from "../store";
+import type { ChangeRow, Part, UserStore } from "../store";
+import { RPE_GUIDANCE } from "../tree";
 
 /** An edit of his placed before a turn, as its `player_edit` line's fields. */
 export interface OwnerEditTold {
   edit: string;
   fields: JsonObject;
 }
-
-/** A value as a line shows it. */
-const textOf = (value: JsonValue): string => (typeof value === "string" ? value : JSON.stringify(value));
 
 /** Whether an edit he made no choice on is told, by its group's out-of-play setting; every correction that is not a tap is. */
 function toldByGroup(request: JsonValue | undefined, tell: OffstageSettings, decimals: number): boolean {
@@ -35,61 +40,104 @@ function toldByGroup(request: JsonValue | undefined, tell: OffstageSettings, dec
   return true;
 }
 
-/** What he pressed, in words: a tap by its action's label and values, any other edit by what it asked. */
-function whatOf(request: JsonValue | undefined, world: WorldDoc | undefined): string {
-  if (!isRecord(request)) return "";
-  if (typeof request.action === "string") {
-    const label = world?.actions[request.action]?.label ?? request.action;
-    return isRecord(request.params) && Object.keys(request.params).length > 0 ? `${label} ${JSON.stringify(request.params)}` : label;
+/**
+ * The kind of edit `request` asked for, by where he made it, as the line's `is.<kind>`: a tap of one of the world's actions (`action`),
+ * a ✎ correction (`fix`), an edit on a play view (`edit`), this chat's own settings on the World page (`own`), the HUD's time controls
+ * (`time`), the map (`map`), the chat moved to another revision of its world (`migrate`); `other` where nothing says.
+ */
+function kindOf(request: JsonValue | undefined): string {
+  if (!isRecord(request)) return "other";
+  if (typeof request.action === "string") return "action";
+  if (request.fix !== undefined) return "fix";
+  if (request.kind === "own" || request.kind === "time" || request.kind === "map" || request.kind === "migrate") return request.kind;
+  return Array.isArray(request.ops) ? "edit" : "other";
+}
+
+/**
+ * What he pressed, by its name: a tap by the words its press was shown in, kept with it (`pressed`), else by its action's label; a
+ * correction of things by the label it was made under. Null where it has none.
+ */
+function pressedOf(request: JsonValue | undefined, registry: Registry, world: WorldDoc | undefined): string | null {
+  if (!isRecord(request)) return null;
+  if (typeof request.pressed === "string" && request.pressed !== "") return request.pressed;
+  if (typeof request.action === "string") return (world === undefined ? undefined : own(world.actions, request.action)?.label) ?? registry.actions.get(request.action)?.label ?? request.action;
+  return isRecord(request.fix) && typeof request.fix.label === "string" && request.fix.label !== "" ? request.fix.label : null;
+}
+
+/** Words as a sentence of a line: its first letter a capital, and its end a stop. */
+const sentence = (words: string): string => {
+  const said = words.charAt(0).toUpperCase() + words.slice(1);
+  return /[.!?…]$/.test(said) ? said : `${said}.`;
+};
+
+/** Changes in words (see the head of this file), each once; with how many of them have no words of either kind. */
+function saidOf(changes: readonly ChangeRow[], answers: Part, registry: Registry, world: WorldDoc | undefined, state: WorldState): { words: string[]; unworded: number } {
+  const words = new Set<string>();
+  let unworded = 0;
+  for (const c of changes) {
+    const said = (world === undefined ? undefined : changeLine(registry, world, state, c.op, c.value)) ?? own(answers.keys, c.op);
+    if (said === undefined) unworded += 1;
+    else words.add(sentence(said));
   }
-  const { type: _type, kind: _kind, ...asked } = request;
-  return JSON.stringify(asked);
+  return { words: [...words], unworded };
 }
 
 /**
  * The edits of his placed before `turn`, oldest first, that the turn is told: each with its line's fields. `tell` is the chat's
- * out-of-play settings, `world` the world his edits were made on (for an action's label and its money's decimals).
+ * out-of-play settings, `world` the world his edits were made on (for an action's label, its money's decimals and the names its changes
+ * are said with, as they stand where the turn begins).
  */
-export function ownerEditsBefore(store: UserStore, chat: string, turn: string, tell: OffstageSettings, world: WorldDoc | undefined): OwnerEditTold[] {
+export async function ownerEditsBefore(store: UserStore, chat: string, turn: string, tell: OffstageSettings, world: WorldDoc | undefined, registry: Registry): Promise<OwnerEditTold[]> {
   const placed = store.changesBefore(turn).filter((p) => p.change.chat !== null && p.change.job === null);
   if (placed.length === 0) return [];
-  const own = new Map(store.ownerChanges(chat).map((c) => [c.id, c]));
+  const mine = store.ownerChanges(chat);
   const editOf = (c: ChangeRow): string | null => (isRecord(c.cite) && typeof c.cite.tap === "string" ? c.cite.tap : null);
   const decimals = world?.currency.decimals ?? 0;
-  const edits = new Map<string, { undo: boolean; of: string | null; request: JsonValue | undefined; choice: boolean | null; applied: string[]; notApplied: string[] }>();
+  // Each edit by its key: his edit's own id; an Undo by what it undid, his edit's id or the change of a turn it took back.
+  const edits = new Map<string, { undid: ChangeRow | null; of: string | null; request: JsonValue | undefined; choice: boolean | null; applied: ChangeRow[]; notApplied: ChangeRow[] }>();
   for (const { change, applied } of placed) {
     const cite = isRecord(change.cite) ? change.cite : {};
-    const undid = typeof cite.undoes === "number" ? own.get(cite.undoes) : undefined;
-    const of = undid === undefined ? null : editOf(undid);
-    const key = editOf(change) ?? (of !== null ? `undo:${of}` : `change:${change.id}`);
-    const entry = edits.get(key) ?? { undo: of !== null, of, request: undefined, choice: null, applied: [], notApplied: [] };
+    const undid = typeof cite.undoes === "number" ? store.change(cite.undoes) : null;
+    const of = undid === null ? null : editOf(undid);
+    const key = editOf(change) ?? (of !== null ? `undo:${of}` : undid !== null ? `undoes:${undid.id}` : `change:${change.id}`);
+    const entry = edits.get(key) ?? { undid, of, request: undefined, choice: null, applied: [], notApplied: [] };
     if (cite.request !== undefined) entry.request = cite.request;
     if (typeof cite.tell === "boolean") entry.choice = cite.tell;
-    (applied ? entry.applied : entry.notApplied).push(`${change.op} ${textOf(change.value)}`);
+    (applied ? entry.applied : entry.notApplied).push(change);
     edits.set(key, entry);
   }
-  // An Undo is told when what it undid was: its edit's choice, else that edit's group.
+  // An Undo of his edit is told when the edit was: its choice, else its group.
+  const changesOf = (edit: string): ChangeRow[] => mine.filter((c) => editOf(c) === edit);
+  const requestOf = (edit: string): JsonValue | undefined => changesOf(edit).map((c) => (isRecord(c.cite) ? c.cite : {})).find((c) => c.request !== undefined)?.request;
   const toldOf = (edit: string): boolean => {
-    const changes = [...own.values()].filter((c) => editOf(c) === edit);
-    const cite = changes.map((c) => (isRecord(c.cite) ? c.cite : {})).find((c) => c.request !== undefined);
+    const cite = changesOf(edit).map((c) => (isRecord(c.cite) ? c.cite : {})).find((c) => c.request !== undefined);
     return typeof cite?.tell === "boolean" ? cite.tell : toldByGroup(cite?.request, tell, decimals);
   };
-  const out: OwnerEditTold[] = [];
-  for (const [edit, e] of edits) {
-    const told = e.undo && e.of !== null ? toldOf(e.of) : (e.choice ?? toldByGroup(e.request, tell, decimals));
-    if (!told) continue;
-    const undone = e.undo && e.of !== null ? [...own.values()].find((c) => editOf(c) === e.of && isRecord(c.cite) && c.cite.request !== undefined) : undefined;
-    const request = e.undo ? (isRecord(undone?.cite) ? undone.cite.request : undefined) : e.request;
-    out.push({
+  const told = [...edits].filter(([, e]) => (e.of !== null ? toldOf(e.of) : e.undid !== null || (e.choice ?? toldByGroup(e.request, tell, decimals))));
+  if (told.length === 0) return [];
+  const answers = await playAnswers(RPE_GUIDANCE);
+  const state = store.startOf(turn).state.world;
+  const said = (changes: readonly ChangeRow[]) => saidOf(changes, answers, registry, world, state);
+  return told.map(([edit, e]) => {
+    const undo = e.undid !== null;
+    // What was pressed: his edit's own request, or for an Undo of an edit of his, that edit's.
+    const request = e.of !== null ? requestOf(e.of) : undo ? undefined : e.request;
+    const what = pressedOf(request, registry, world);
+    const recorded = said(e.applied);
+    const refused = said(e.notApplied);
+    // What an Undo took back: what that edit of his had recorded, or the change of a turn.
+    const undone = e.of !== null ? said(changesOf(e.of).filter((c) => c.applied)).words : e.undid !== null ? said([e.undid]).words : [];
+    const unworded = recorded.unworded + refused.unworded;
+    return {
       edit,
       fields: {
-        what: whatOf(request, world),
-        ...(request !== undefined ? { request: JSON.stringify(request) } : {}),
-        changes: e.applied,
-        not_applied: e.notApplied,
-        ...(e.undo ? { undo: true, of: e.of ?? "" } : {}),
+        is: { [kindOf(request)]: true },
+        ...(what !== null ? { what } : {}),
+        changes: recorded.words,
+        not_applied: refused.words,
+        ...(unworded > 0 ? { unworded } : {}),
+        ...(undo ? { undo: true, of: undone, ...(e.of === null ? { by_turn: true } : {}) } : {}),
       },
-    });
-  }
-  return out;
+    };
+  });
 }
