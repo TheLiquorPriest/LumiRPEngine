@@ -703,6 +703,8 @@ describe("a call's path", () => {
   test("its params go in their places, encoded, and its query after", () => {
     expect(pathOf("/api/v1/chats/:chat/turns/:turn", { chat: "chat a/b", turn: "t#1" }, { from: 4, before: undefined })).toBe("/api/v1/chats/chat%20a%2Fb/turns/t%231?from=4");
     expect(() => pathOf("/api/v1/chats/:chat/turns", {})).toThrow("needs its chat");
+    // A yes-or-no value goes as the words the routes read.
+    expect(pathOf("/api/v1/files/*", { "*": "skills/walk" }, { chat: "c1", contents: true })).toBe("/api/v1/files/skills/walk?chat=c1&contents=true");
   });
 
   test("the rest of a path goes in segment by segment, each encoded, its slashes kept", () => {

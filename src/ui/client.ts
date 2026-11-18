@@ -138,8 +138,8 @@ export interface Connector {
   close(): void;
 }
 
-/** `pattern` with its params put in, each encoded, and the query after it. The rest of the path (`*`) is put in segment by segment, its slashes kept. */
-export function pathOf(pattern: string, params: Readonly<Record<string, string>>, query?: Readonly<Record<string, string | number | undefined>>): string {
+/** `pattern` with its params put in, each encoded, and the query after it (a yes-or-no value as `true` or `false`, which the routes read). The rest of the path (`*`) is put in segment by segment, its slashes kept. */
+export function pathOf(pattern: string, params: Readonly<Record<string, string>>, query?: Readonly<Record<string, string | number | boolean | undefined>>): string {
   const path = pattern
     .split("/")
     .map((segment) => {
