@@ -10,4 +10,4 @@ These characters hold perceptions of earlier turns their own agent has not taken
 {{#path.untaken.held}}
 - {{name}} ({{casting}}): {{perceptions}} waiting, the oldest of message {{since}}, {{turns}} turn(s) ago.
 {{/path.untaken.held}}
-For one who acted in those turns, they are late: have its agent take them in before it acts again, with `delegate` to the `character` definition and `plays` naming it, or as a job. For one who was only present, they wait for the scene's end or for when it next acts; if it acts first, its agent is given them in full at the start of that run. See the perceptions rule, "When".
+For one who acted in those turns, they are late: have its agent take them in now, with `delegate` to the `character` definition, `plays` naming it and a brief that asks it to take in what it perceived, or with `job_start` and the same `agent`, `plays` and `brief`. For one who was only present, they wait for the scene's end or for when it next acts; if it acts first, its agent is given them in full at the start of that run. See the perceptions rule, "When".
