@@ -19,26 +19,42 @@
 
 This guide is for two kinds of people: players, who want to chat in a world that remembers, and authors, who build those worlds. If you only want to play, read the first part and dip into the rest when you need it. If you are installing for the first time, start with the [README](../README.md).
 
-- [How it works in one page](#how-it-works-in-one-page)
+- [How RPE works](#how-rpe-works)
 - **Playing:** [Play](#play) · [GM mode](#gm-mode) · [Swipes, edits and branches](#swipes-edits-and-branches) · [Time controls](#time-controls) · [Realism](#realism)
 - **Tuning:** [Model use](#model-use) · [Character minds](#character-minds) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
 - **Building:** [Authoring](#authoring)
 - [Troubleshooting](#troubleshooting)
 
-## How it works in one page
+## How RPE works
 
-A **world** is a description of a place and the things in it: people, belongings, money, vehicles, locations, schedules, rules and quests. RPE keeps it in its own database, and **Build** edits it. You attach a world to a chat, and the chat becomes a **world chat**. What RPE knows about the story so far is kept in its own records, turn by turn: the world's state as one tree, each character's record, the story record and the Author's notes. Your lore stays in your World Books, which Lumiverse and RPE both read; RPE writes into your own entries only when you approve a proposal or press a write in Build.
+You chat in Lumiverse as you always do. A chat whose connection is "RPE" is played by RPE's agents, and RPE keeps a record of the story and of the world beside the chat, turn by turn.
 
-A turn in RPE goes like this:
+**The agents.** A turn is run by a team, each member an agent with its own instructions:
 
-1. **You act.** You write a message in a chat that uses RPE's connection, or swipe, regenerate or continue a reply, or tap something in the play panels.
-2. **Lumiverse builds the prompt** from your preset, character, lore and history. RPE's extension marks the reply as RPE's and leaves history beyond your window out of it.
-3. **The Author is given what it needs.** RPE's lead agent starts from the whole prompt, a briefing of what changed since its last turn, the world's state, the story brief and a map of the lore. It weighs what you want first, then decides how to run the turn.
-4. **The Author works as an agent.** It looks things up with its tools, brings in the GM and the characters as sub-agents, and changes the world only through the engine's operations. The engine keeps the numbers (prices, balances, rolls, the clock), so they stay consistent however many times you swipe, edit or branch. Nothing cuts its work short unless you set a limit, and it thinks at its highest effort unless you set another.
-5. **The reply.** The Author writes the reply, or hands the prose to the narrator, and releases it. It reaches the chat as Lumiverse's own reply, streamed.
-6. **After the reply**, in the same run, the Author records what happened: the story record, what each character perceived, the changes to the world. What can wait runs as a job in the background.
+- **The Author** leads every turn. It is the story's author: it decides what happens, brings in the others when the turn needs them, and writes the reply.
+- **The game master (GM)** keeps the game side: it rules, rolls, stages the consequences and keeps the map. The Author asks it when something is contested, costly or risky, or when real time passes.
+- **The characters.** A principal character can be run as an agent of its own, in its own mind and voice, one run per character.
+- **The narrator** writes the prose from the Author's brief, when the Author hands it over. As shipped, the Author writes the reply itself, and hands it over when this chat's notes on writing ask for a separate voice, or when the turn's working has grown large.
+- **The keeper, the historian, the indexer and the mapper** do work that can wait: bookkeeping after the reply, reading a stretch of the chat's past, indexing your lore, and mapping the preset's prompt. The Author starts them as jobs.
 
-A swipe, an edit, a deleted message or a branch rewinds RPE's records with the story: each change belongs to the turn that made it. If a turn ends without a reply, the chat shows one plain line saying why, and the Turns page shows what each agent did (see [Troubleshooting](troubleshooting.md)).
+How each agent behaves is written in plain files you can read and change, not fixed in code (see [Files, agents, rules and skills](#files-agents-rules-and-skills)).
+
+**A turn.**
+
+1. **You act.** You send a message, swipe, regenerate or continue a reply, or press something in the play views that plays at once.
+2. **Lumiverse builds the prompt** from your preset, character, lore and history, as it does for any chat. RPE's extension leaves the history beyond your window out of it: the latest 40 messages stay (**History window**, `history.window`).
+3. **The Author is briefed.** It starts from that whole prompt and a briefing: what kind of turn this is, what changed since its last turn (a reply you edited, turns you deleted, a stretch played without RPE), what you asked for beside your words, the world state, who is on stage, a map of the lore, the story so far beyond the window and the story brief.
+4. **Intent first.** The Author weighs what you want before it decides anything, and writes a short intent record. Then it decides how to run the turn, and works as an agent: it looks things up with its tools, asks the GM and the characters, and changes the world only through the engine's operations. The engine keeps the numbers: the clock, prices and balances, rolls. Nothing cuts the Author's work short unless you set a limit, and it thinks at its highest effort unless you set another.
+5. **The reply** reaches the chat as Lumiverse's own reply, streamed.
+6. **Right after the reply**, in the same run, the Author settles the turn against the reply as it went out: who moved where, what changed hands, the story's beats, threads and scene, what each character on stage perceived, and its own record of the turn. What can wait runs as a job.
+
+**Two lanes.** Every change RPE records is marked with its lane. The **story** lane holds beats, threads, arcs, the scene, perceptions and what characters remember and feel. The **engine** lane holds time, places and positions, what people wear, carry and own, money, stats and conditions, quests' stages, rolls and rulings. When the two disagree, the story is what happened, and the record is brought in line with it.
+
+**The world's rules advise.** The engine applies what an agent records and reports anything that does not add up: a sum that does not balance, a thing in two places, a requirement not met. The report goes to the agent, stays listed as unsettled, and shows on the turn's page. How binding the rules are is written in `SIMULATION.md`, which you can change. RPE refuses only what it cannot use: a name that is nothing it knows, or input it cannot read.
+
+**The record follows the chat.** Each change belongs to the turn that made it, so a swipe, an edit, a deleted message or a branch takes RPE's record with the story (see [Swipes, edits, deletes and branches](#swipes-edits-deletes-and-branches)).
+
+**A world is optional.** A world is a setting RPE keeps in its own database: places, people, belongings, money, rules and a calendar ([Worlds in RPE](world.md)). Attach one to a chat and RPE settles what rules should settle. A chat with no world plays on a blank world, which the agents fill as the story goes.
 
 ## Play
 
