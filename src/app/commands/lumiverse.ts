@@ -16,12 +16,13 @@ import { oneUser, signInTo } from "./sign-in";
 /** Which Lumiverse this RPE belongs to, and its sign-in: never the token. */
 export async function showLumiverse(paths: DataPaths, config: AppConfig, io: CliIO): Promise<void> {
   const { url, user, database, connections } = config.lumiverse;
+  // Read first: a secrets file that cannot be read stops the command before it prints half of what it says.
+  const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
   const fromEnv = (name: string): string => (io.env[name]?.trim() ? ` (from ${name}, which wins over the config file)` : "");
   io.out(`Lumiverse: ${url ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUrl)}`);
   io.out(`User: ${user ?? "not set"}${fromEnv(CONFIG_ENV.lumiverseUser)}`);
   io.out(`Database: ${database ?? "not set, so Lumiverse is read over HTTP"}`);
   io.out(`RPE's connections in Lumiverse: ${connections.length === 0 ? "not set" : connections.join(", ")}`);
-  const kept = await new SecretsFile(paths.secrets).read(SIGN_IN_PART);
   if (!isRecord(kept) || typeof kept.username !== "string" || typeof kept.user !== "string") {
     io.out("Signed in: no");
     return;

@@ -15,9 +15,10 @@ import { migrateCommand } from "./commands/migrate";
 import { serveCommand } from "./commands/serve";
 import { statusCommand } from "./commands/status";
 import { listSwitchesCommand, switchCommand } from "./commands/switch";
+import { plainError } from "./commands/system-errors";
 import { upCommand } from "./commands/up";
 import { versionCommand } from "./commands/version";
-import type { Env } from "./config";
+import type { DataPaths, Env } from "./config";
 import { dataPaths, defaultDataFolder, loadConfig } from "./config";
 
 export interface CliIO {
@@ -137,6 +138,8 @@ function withinOf(given: string | undefined): number | undefined {
 /** Runs one command; returns the exit code. */
 export async function runCli(argv: readonly string[], io: CliIO, options: CliOptions): Promise<number> {
   const [command, ...rest] = argv;
+  // The data folder once the line named it, so that an error of the machine can name its files.
+  let dataFolder: DataPaths | undefined;
   try {
     if (command === undefined || command === "help" || command === "--help") {
       io.out(USAGE);
@@ -151,6 +154,7 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
     if (allowed === undefined) throw new UsageError(`rpe has no command "${command}".`);
     const { words, flags } = parseArgs(rest, allowed);
     const paths = dataPaths(flags.data ?? defaultDataFolder(io.env, io.home));
+    dataFolder = paths;
     const config = await loadConfig(paths, io.env);
     if ((command === "serve" || command === "status" || command === "backup" || command === "lumiverse" || command === "check") && words.length > 0) throw new UsageError(`rpe ${command} takes no words.`);
     switch (command) {
@@ -181,7 +185,7 @@ export async function runCli(argv: readonly string[], io: CliIO, options: CliOpt
       io.err(USAGE);
       return 2;
     }
-    io.err(error instanceof Error ? error.message : String(error));
+    io.err(plainError(error, dataFolder));
     return 1;
   }
 }
