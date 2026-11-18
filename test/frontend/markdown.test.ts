@@ -1,10 +1,11 @@
 // The safe Markdown subset a model's answer is shown in (GM → Assistant): every character reaches the
-// page as text, never as markup, and only paragraphs, lists, bold, italics and inline code become
-// elements; a link is its words and address, an image its description.
+// page as text, never as markup, and only paragraphs, lists, tables, rules, bold, italics and inline
+// code become elements; a link is its words and address, an image its description.
 
 import { describe, expect, test } from "bun:test";
 import type { VNode } from "preact";
 import { markdown, markdownBlocks } from "../../src/ui/markdown";
+import { COMPONENTS_CSS } from "../../src/ui/styles/components";
 import { propsOf, type Props } from "../support/tree";
 
 function textOf(node: unknown): string {
@@ -22,7 +23,7 @@ function elements(node: unknown): { type: unknown; props: string[] }[] {
   return [{ type: v.type, props: Object.keys(v.props) }, ...elements(v.props.children)];
 }
 
-const ALLOWED = ["div", "p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote"];
+const ALLOWED = ["div", "p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote", "table", "thead", "tbody", "tr", "th", "td", "hr"];
 
 describe("an answer's Markdown", () => {
   test("HTML in it stays text: no script, tag or image becomes an element, and nothing is set as raw HTML", () => {
@@ -63,8 +64,76 @@ describe("an answer's Markdown", () => {
     expect(propsOf(tree, "ul").flatMap((u) => propsOf(u.children, "li")).map((li) => textOf(li.children))).toEqual(["Danny Okafor: saw it", "Priya Nair\nheard it later", "Marcus"]);
     expect(propsOf(tree, "ol").map((o) => o.start)).toEqual([3]);
     expect(propsOf(tree, "ol").flatMap((o) => propsOf(o.children, "li")).map((li) => textOf(li.children))).toEqual(["First", "Then"]);
-    // A bold line isn't a bullet, and a table or a rule stays as written.
-    expect(markdownBlocks("**Note** this\n| a | b |\n---")).toEqual([{ kind: "p", lines: ["**Note** this", "| a | b |", "---"] }]);
+    // A bold line isn't a bullet, and a pipe with no separator row under it is no table.
+    expect(markdownBlocks("**Note** this\n| a | b |\n---")).toEqual([{ kind: "p", lines: ["**Note** this", "| a | b |"] }, { kind: "rule" }]);
+  });
+
+  test("a pipe table is a table of elements: its header, its rows, its cells read for marks, an escaped pipe a pipe, and no markup from its text", () => {
+    const text = [
+      "| slice | kind | behaviour | what it is |",
+      "|---|---|---|---|",
+      "| preset.instructions | instructions | fixed | The app's core block … |",
+      "| scenario | world | turn | **Bold**, *it*, `a \\| b`, a \\| pipe and <b>x</b> |",
+    ].join("\n");
+    const head = ["slice", "kind", "behaviour", "what it is"];
+    const rows = [
+      ["preset.instructions", "instructions", "fixed", "The app's core block …"],
+      ["scenario", "world", "turn", "**Bold**, *it*, `a | b`, a | pipe and <b>x</b>"],
+    ];
+    expect(markdownBlocks(text)).toEqual([{ kind: "table", align: [null, null, null, null], head, rows }]);
+    const tree = markdown(text, "answer");
+    const all = elements(tree);
+    expect(all.every((e) => ALLOWED.includes(String(e.type)))).toBe(true);
+    expect(all.some((e) => e.props.includes("dangerouslySetInnerHTML"))).toBe(false);
+    expect(propsOf(tree, "div").map((p) => p.class)).toEqual(["lre-md answer", "lre-md-table"]);
+    expect(propsOf(tree, "table")).toHaveLength(1);
+    expect(propsOf(tree, "th").map((p) => textOf(p.children))).toEqual(head);
+    expect(propsOf(tree, "tr")).toHaveLength(3);
+    expect(propsOf(tree, "td").map((p) => textOf(p.children))).toEqual(["preset.instructions", "instructions", "fixed", "The app's core block …", "scenario", "world", "turn", "Bold, it, a | b, a | pipe and <b>x</b>"]);
+    expect(propsOf(tree, "strong").map((p) => textOf(p.children))).toEqual(["Bold"]);
+    expect(propsOf(tree, "em").map((p) => textOf(p.children))).toEqual(["it"]);
+    expect(propsOf(tree, "code").map((p) => textOf(p.children))).toEqual(["a | b"]);
+    expect(propsOf(tree, "b")).toEqual([]);
+  });
+
+  test("a table's edges and shapes: pipes at the ends optional, colons align, a short row padded and a long one kept, and it may follow a line of text and be followed by blocks", () => {
+    const text = "Intro line\nName | Qty | Note\n:--|--:|:-:\nbolt | 4\n| nut | 12 | ok | extra |\n\nAfter.";
+    expect(markdownBlocks(text)).toEqual([
+      { kind: "p", lines: ["Intro line"] },
+      { kind: "table", align: ["left", "right", "center"], head: ["Name", "Qty", "Note"], rows: [["bolt", "4", ""], ["nut", "12", "ok", "extra"]] },
+      { kind: "p", lines: ["After."] },
+    ]);
+    const tree = markdown(text, "answer");
+    // The header is drawn as wide as the widest row; alignment is the attribute the styles read, none where none was written.
+    expect(propsOf(tree, "th").map((p) => [textOf(p.children), p["data-align"]])).toEqual([["Name", "left"], ["Qty", "right"], ["Note", "center"], ["", undefined]]);
+    expect(propsOf(tree, "tr").map((r) => propsOf(r.children, "td").map((p) => textOf(p.children)))).toEqual([[], ["bolt", "4", "", ""], ["nut", "12", "ok", "extra"]]);
+    // A line with no pipe, a heading, a bullet, a rule or a fence ends its rows; a blank line does too.
+    const t = "| a |\n|---|\n| 1 |\n";
+    expect(markdownBlocks(`${t}words`).map((b) => b.kind)).toEqual(["table", "p"]);
+    expect(markdownBlocks(`${t}# H`).map((b) => b.kind)).toEqual(["table", "h"]);
+    expect(markdownBlocks(`${t}- item`).map((b) => b.kind)).toEqual(["table", "ul"]);
+    expect(markdownBlocks(`${t}---`).map((b) => b.kind)).toEqual(["table", "rule"]);
+    expect(markdownBlocks(`${t}\n| 2 |`).map((b) => b.kind)).toEqual(["table", "p"]);
+    // Inside a quote, a table is the quote's own block.
+    expect(markdownBlocks("> | a | b |\n> |---|---|\n> | 1 | 2 |")).toEqual([{ kind: "quote", blocks: [{ kind: "table", align: [null, null], head: ["a", "b"], rows: [["1", "2"]] }] }]);
+    // No separator row of the header's width, or a separator alone, is no table.
+    expect(markdownBlocks("| a | b |\n|---|")).toEqual([{ kind: "p", lines: ["| a | b |", "|---|"] }]);
+    expect(markdownBlocks("a | b\nno separator")).toEqual([{ kind: "p", lines: ["a | b", "no separator"] }]);
+    expect(markdownBlocks("|---|---|")).toEqual([{ kind: "p", lines: ["|---|---|"] }]);
+  });
+
+  test("a rule is three or more of - * _ alone on a line; a table's separator, a shorter run and a mark among words are none; = under a line is text", () => {
+    const text = "Above\n---\nBelow\n***\n___\n- - -\n* * *\n  ---\n----------";
+    expect(markdownBlocks(text).map((b) => b.kind)).toEqual(["p", "rule", "p", "rule", "rule", "rule", "rule", "rule", "rule"]);
+    expect(propsOf(markdown(text, "answer"), "hr")).toHaveLength(7);
+    expect(markdownBlocks("--\n-*-\nx---\n**bold**")).toEqual([{ kind: "p", lines: ["--", "-*-", "x---", "**bold**"] }]);
+    expect(markdownBlocks("Title\n===")).toEqual([{ kind: "p", lines: ["Title", "==="] }]);
+  });
+
+  test("the page's styles keep a paragraph's line break as written, and a table scrolls sideways in its own box", () => {
+    expect(COMPONENTS_CSS).toContain(".lre-md p,.lre-md li{white-space:pre-line}");
+    expect(COMPONENTS_CSS).toContain(".lre-md-table{max-width:100%;overflow-x:auto");
+    expect(textOf(markdown("one\ntwo", "rpe-written-text"))).toBe("one\ntwo");
   });
 
   test("a heading, whatever its level, is one modest heading style with its level kept and its marks read; seven #s, or none with words after it, is no heading", () => {
