@@ -53,6 +53,20 @@ describe("calendar pack", () => {
     expect(formula(w, "is_day_off()")).toBe(false);
   });
 
+  test("what is coming up stands in the order it comes, across a year's end", () => {
+    const w = setup(4);
+    const cal = calendarOf(w.world);
+    w.apply({ type: "clock", minutes: clockOfLocal(cal, "2026-12-20T10:00") - w.state.clock, cause: "advance" });
+    const names = buildCalendarView(w.ctx).upcoming.filter((u) => u.kind === "holiday").map((u) => u.label);
+    const christmas = names.findIndex((n) => /christmas/i.test(n));
+    const newYear = names.findIndex((n) => /new year/i.test(n));
+    expect(christmas).toBeGreaterThanOrEqual(0);
+    expect(newYear).toBeGreaterThan(christmas);
+    // On the last day of the year the first day of the next is still coming.
+    w.apply({ type: "clock", minutes: clockOfLocal(cal, "2026-12-31T20:00") - w.state.clock, cause: "advance" });
+    expect(buildCalendarView(w.ctx).upcoming.some((u) => u.kind === "holiday" && /new year/i.test(u.label))).toBe(true);
+  });
+
   test("lints: bad schedule times and weekdays, a unit cap below one slot", () => {
     const world = modernUsWorld("w", "R");
     world.schedules.bad = { id: "bad", owner: "you", target: "activity", recurrence: { every: "week", weekdays: [7] }, slots: [{ start: "9am", end: "17:00", value: "x" }] };

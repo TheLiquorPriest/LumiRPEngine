@@ -3,7 +3,7 @@
 // what is coming up for the POV.
 
 import type { ReadContext } from "../../../engine/registry";
-import { dateAt, dayPartAt, formatClock, holidayDay, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
+import { dateAt, dayPartAt, formatClock, holidaysOn, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
 import { allSchedules, nextStartFor, scheduleOwners } from "../../../engine/schedules";
 import { placeOfEntity } from "../../../engine/scope";
 import { calendarIn } from "../../../engine/holidays";
@@ -18,7 +18,10 @@ export interface CalendarView {
   upcoming: { at: string; label: string; kind: "holiday" | "commitment" }[];
 }
 
-/** Holidays within the next 30 days and the POV's commitments within the next 2 days. */
+/** How many days ahead the panel looks for a holiday. */
+const UPCOMING_HOLIDAY_DAYS = 30;
+
+/** Holidays within the next 30 days and the POV's commitments within the next 2 days, in the order they come. */
 export function buildCalendarView(ctx: ReadContext): CalendarView {
   const reg = ctx.registry;
   const cal = calendarIn(ctx);
@@ -26,15 +29,17 @@ export function buildCalendarView(ctx: ReadContext): CalendarView {
   const offset = level >= 3 ? placeOffset(ctx.world, ctx.state.clock, placeOfEntity(ctx.state, ctx.world.pov)) : 0;
   const now = ctx.state.clock + offset;
   const d = dateAt(cal, now);
-  const upcoming: CalendarView["upcoming"] = [];
+  // Each with the minute it comes at (the world's own clock), so the two kinds stand in one order, nearest first.
+  const coming: { when: number; entry: CalendarView["upcoming"][number] }[] = [];
   const holidays: string[] = [];
   if (level >= 4) {
-    for (const h of cal.def.holidays) {
-      const day = holidayDay(cal, h, d.dayIndex);
-      const next = day !== null && day >= d.dayIndex ? day : holidayDay(cal, h, d.dayIndex + 366);
-      if (next === null) continue;
-      if (next === d.dayIndex) holidays.push(h.label);
-      else if (next > d.dayIndex && next - d.dayIndex <= 30) upcoming.push({ at: formatClock(cal, next * MINUTES_PER_DAY - cal.epochMinute).split(",")[0] ?? "", label: h.label, kind: "holiday" });
+    for (const h of holidaysOn(cal, d.dayIndex)) holidays.push(h.label);
+    // Day by day, so the year's end is no edge: what falls in the new year follows what falls in the old one.
+    for (let day = d.dayIndex + 1; day <= d.dayIndex + UPCOMING_HOLIDAY_DAYS; day++) {
+      for (const h of holidaysOn(cal, day)) {
+        const local = day * MINUTES_PER_DAY - cal.epochMinute;
+        coming.push({ when: local - offset, entry: { at: formatClock(cal, local).split(",")[0] ?? "", label: h.label, kind: "holiday" } });
+      }
     }
   }
   if (level >= 2) {
@@ -42,9 +47,10 @@ export function buildCalendarView(ctx: ReadContext): CalendarView {
       if (s.target !== "activity" || !scheduleOwners(reg, ctx.world, ctx.state, s).includes(ctx.world.pov)) continue;
       const n = nextStartFor(reg, ctx, s, ctx.world.pov, ctx.state.clock, 2);
       const v = n?.slot.value;
-      if (n && typeof v === "string") upcoming.push({ at: formatClock(cal, n.at, offset), label: v.replace(/_/g, " "), kind: "commitment" });
+      if (n && typeof v === "string") coming.push({ when: n.at, entry: { at: formatClock(cal, n.at, offset), label: v.replace(/_/g, " "), kind: "commitment" } });
     }
   }
+  const upcoming = coming.sort((a, b) => a.when - b.when).map((c) => c.entry);
   return {
     level,
     date: level >= 2 ? `${d.day} ${monthName(cal, d.month)} ${d.year}` : "",
