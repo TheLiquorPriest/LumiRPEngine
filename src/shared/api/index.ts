@@ -3907,6 +3907,7 @@ export interface TurnReply {
   onPath: boolean;
   /** The Lumiverse message it is tied to (plan §10.8); null until it is. */
   message: string | null;
+  /** Running while a run of it goes on; else how its reply's run ended (its latest run that is not a Settle now run, which writes nothing to the chat and is listed among its runs with its own end). */
   status: TurnState;
   /** Its marks, in the order they were set; none for a turn that carries none. */
   marks: TurnMark[];
@@ -3920,7 +3921,7 @@ export interface TurnReply {
   reply: ReplySoFar;
   /** The message of the empty reply this turn left in the chat, where it ended before a word of its reply went out and that reply still stands there empty (read from Lumiverse now); null for any other turn. It stays unless the setting lumiverse.reply.removeEmpty takes it away. */
   emptyReply: string | null;
-  /** Why the reply failed, when it did. */
+  /** Why its reply failed, when it did: its reply's run's, never a Settle now run's (that one is among its runs). */
   error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string; broke?: { failure: CallFailureKind; tries: number } } | null;
   /** Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it. */
   trace: TraceRecord[];
@@ -3953,7 +3954,7 @@ export interface TurnReply {
   threads: ({ id: string; text: string | null; state: string | null; stakes: string | null })[];
 }
 
-/** A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its newest run's status, its reply's times, what all its runs spent, and each of its runs in its own words. */
+/** A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its reply's status, its reply's times, what all its runs spent, and each of its runs in its own words. */
 export interface TurnRow {
   id: TurnId;
   kind: TurnRunKind;
@@ -3961,6 +3962,7 @@ export interface TurnRow {
   onPath: boolean;
   /** The Lumiverse message it is tied to (plan §10.8); null until it is. */
   message: string | null;
+  /** Running while a run of it goes on; else how its reply's run ended (its latest run that is not a Settle now run, which writes nothing to the chat and is listed among its runs with its own end). */
   status: TurnState;
   /** Its marks, in the order they were set; none for a turn that carries none. */
   marks: TurnMark[];
@@ -3999,7 +4001,7 @@ export interface TurnsReply {
   more: boolean;
 }
 
-/** Where a turn or a run stands: running, or how it ended. */
+/** Where a turn or a run stands: running, or how it ended. A Settle now run owes no reply, so its ending with none (`no-reply`, and no error) is it settled. */
 export type TurnState = "running" | "released" | "no-reply" | "stopped" | "limit" | "failed";
 
 /** What a turn, or a job he started, was told as it went: each gap check, each consent, each rule that fired with what the agent did next, the attachments each agent was given by name, and each sub-agent's writes the lead dropped, in the order told. */
