@@ -159,6 +159,17 @@ const end: WriteDef = {
       const refused = effectChange(o, { type: "combat.end", args: { fight: ended.id, ...(typeof winner === "string" ? { winner } : {}) } });
       if (refused !== null) return notApplicable(o, refused.code);
     }
+    // Under the tabletop rules, who took part, and the call that gives experience for what was overcome (`act award`): told, never run.
+    if (rulesOn(w.ctx) && fightById(w.state, ended.id) === null) {
+      const party = ended.order.filter((f) => f.side === "party").map((f) => named(o.reading, f.id));
+      const foes = ended.order.filter((f) => f.side === "foes").map((f) => named(o.reading, f.id));
+      const first = ended.order.find((f) => f.side === "party");
+      if (first !== undefined && foes.length > 0) {
+        const others = ended.order.filter((f) => f.side === "party" && f.id !== first.id).map((f) => o.reading.nameOf(f.id));
+        const call = { op: "act", action: "award", who: o.reading.nameOf(first.id), params: { overcame: ended.order.filter((f) => f.side === "foes").map((f) => o.reading.nameOf(f.id)), ...(others.length > 0 ? { also: others } : {}) } };
+        o.reply.line("d20_fight_award", { n: o.n, op: o.op, party: party.join(", "), foes: foes.join(", "), call: JSON.stringify(call) });
+      }
+    }
     heard.push(...hearing(o, from));
     o.draft.record(o.n, o.op, "engine", o.prov, from);
     return undefined;

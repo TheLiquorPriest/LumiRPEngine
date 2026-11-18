@@ -663,7 +663,7 @@ Worked example:
 
 #### roll
 
-Rolls once for someone, by dice or by one of the world's checks, and records the roll with what it was for. A check against someone is rolled against the target, who rolls their side. The answer gives the dice kept, the total, the natural die, the difficulty, the outcome, and the roll's id, which a later write can cite as its source.
+Rolls once for someone, by dice or by one of the world's checks, and records the roll with what it was for. A check against someone is rolled against the target, who rolls their side. Under the world's tabletop rules a skill, an ability or a save is rolled from the sheet, every part of the total said; dice given with a modifier of their own for someone with such a sheet are rolled as given, and the answer says how the sheet's check is made. The answer gives the dice kept, the total, the natural die, the difficulty, the outcome, and the roll's id, which a later write can cite as its source.
 
 Writes the engine lane. Takes no provenance.
 
@@ -672,7 +672,7 @@ Writes the engine lane. Takes no provenance.
 | `who` | text |  | Whose roll it is. |
 | `for` | text |  | What the roll decides, kept with it. |
 | `dice` | text |  | Dice to roll, such as 1d20+3, 2d6 or 4d6kh3. |
-| `check` | text |  | One of the world's checks, rolled with who's sheet. |
+| `check` | text |  | One of the world's checks, rolled with who's sheet; where the world's tabletop rules are on, also one of their skills, abilities or saves, rolled as act check or act save rolls it. |
 | `against` | whole number |  | A difficulty the total must reach. |
 | `target` | text |  | Who a check is rolled against, by name or id: they roll against it from their own sheet. A difficulty given in against is reached instead. |
 | `sum` | text |  | A sum to work out, with + - * / and brackets, such as 12.50 * 3 * 1.08. With dice or check it is kept with the roll; alone it is only answered. |
@@ -1745,7 +1745,7 @@ Worked example:
 
 #### fight_end
 
-Ends a fight, won by a side or broken off, as the world's combat rules end one; no winner is decided unless named. With several fights under way it ends the one named. The answer says what changed and the fights still under way, and lists the world's rules that hear the end without running them.
+Ends a fight, won by a side or broken off, as the world's combat rules end one; no winner is decided unless named. With several fights under way it ends the one named. The answer says what changed and the fights still under way, and lists the world's rules that hear the end without running them. Under the world's tabletop rules it also says who fought whom and gives the call that awards experience for what was overcome; nothing is awarded until that call is made.
 
 Writes the engine lane.
 
@@ -2168,7 +2168,7 @@ Worked example:
 
 #### sheet
 
-Reads someone's sheet under the world's tabletop rules, with every total's parts and where each part comes from: abilities and their modifiers, defence and its touch and flat-footed variants, initiative, each weapon in hand and each attack of their own (the attack, the damage, the threat and what a critical multiplies, the range, the rounds loaded), saves, skills, hit points (temporary hit points, nonlethal harm and the state they put someone in with them), experience and what the next level needs, the conditions and effects on them with what is left of each, daily gauges, classes, and traits with what each is and does. It is the sheet the player sees on the Play page. It changes nothing. A world without such rules has no sheet to read here, and the answer says so.
+Reads someone's sheet under the world's tabletop rules, with every total's parts and where each part comes from: abilities and their modifiers, defence and its touch and flat-footed variants, initiative, each weapon held or carried and each attack of their own (the attack as the attack itself makes it, every part said, the damage, the threat and what a critical multiplies, the range, the rounds loaded), saves, skills, hit points (temporary hit points, nonlethal harm and the state they put someone in with them), experience and what the next level needs, the conditions and effects on them with what is left of each, daily gauges, classes, and traits with what each is and does. A thing in hand that is no weapon of the rules is listed with the one call that makes it one. It is the sheet the player sees on the Play page. It changes nothing. A world without such rules has no sheet to read here, nor a chat that has them off, and the answer says so and where the chat's own sheet is read.
 
 Reads; changes nothing.
 

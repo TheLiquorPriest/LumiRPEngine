@@ -209,4 +209,14 @@ describe("the d20 layer's sums", () => {
     // The area's one roll at +5 against 10: 5 or more, a 1 always missing.
     expect(actionOdds(reg, doc, state, { action: "attack", actor: "wren", params: { target: "bram", shots: "auto" } }).odds?.hit).toBeCloseTo(0.8, 6);
   });
+
+  test("a thing in hand that is no weapon is answered with the call that makes it one; named a weapons row, it is that weapon", () => {
+    const doc = d20World();
+    delete (doc.entities.sword!.fields as Record<string, unknown>).catalog;
+    const reg = registry();
+    const odds = actionOdds(reg, doc, initialState(doc, "t", reg), { action: "attack", actor: "wren", params: { target: "bram" } });
+    expect(odds.missing).toContain('"key":"d20_row","value":"longsword"');
+    doc.entities.sword!.fields.d20_row = "longsword";
+    expect(actionOdds(reg, doc, initialState(doc, "t", reg), { action: "attack", actor: "wren", params: { target: "bram" } }).odds?.hit).toBeCloseTo(0.675, 6);
+  });
 });

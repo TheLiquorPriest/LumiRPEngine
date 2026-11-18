@@ -1423,6 +1423,7 @@ Extends `thing`.
 - `go_minutes(from, to)`
 - `grid_minutes(place, x, y)`
 - `grid_reachable(place, x, y)`
+- `grid_unit(a)`
 - `may_enter(who, place)`
 - `on_grid(thing)`
 - `reach(a, b)`

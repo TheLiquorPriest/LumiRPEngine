@@ -16,9 +16,10 @@ import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import { hpSeen } from "../../combat/core/flow";
 import { encounterOf, rulesOf as combatRulesOf } from "../../combat/core/model";
 import { isClassSkill, levelsOf, modOf, scoreOf } from "./functions";
-import { classesOf, conditionsHeld, effectsHeld, gearOn, isOn, labelOfRow, naturalAttacks, numberIn, ranksOf, rowIdOf, rowsOf, rulesOf, sizeOf, textIn, thingNumber, traitsHeld, wordsIn } from "./model";
-import { explain, partsWords, signed, totalOf } from "./modifiers";
-import { threatFrom, weaponKey } from "./procedures";
+import { classesOf, conditionsHeld, effectsHeld, isOn, labelOfRow, numberIn, ranksOf, rowsOf, rulesOf, sizeOf, textIn, thingNumber, traitsHeld, wordsIn } from "./model";
+import { explain, partsWords, signed } from "./modifiers";
+import { createRng } from "../../../engine/rng";
+import { armedWith, notAWeapon, planWith, Scratch } from "./procedures";
 
 /** A total and where its number comes from, its parts in words. */
 export interface SheetLine {
@@ -37,6 +38,8 @@ export interface SheetWeapon {
   types?: string;
   rounds?: string;
   fire?: string;
+  /** A thing in hand that is no weapon of the rules: why, and the one call that makes it one. */
+  missing?: string;
 }
 
 /** Someone's sheet under the rules. `fix` (a ✎ of a stored value) is only on the sheet of the player's own character, as the page reads it. */
@@ -68,54 +71,34 @@ function line(ctx: ReadContext, who: EntityId, name: string, vars: Record<string
   return e ? { total: e.total, parts: partsWords(e) } : null;
 }
 
-/** Each weapon in hand and each attack of its own: its attack and its parts, its damage, its threat, its range, its rounds. */
+/**
+ * Each weapon held or carried and each attack of its own, each line from the plan the attack itself rolls from (its total with every
+ * part: proficiency, enhancement, its own attack's bonus), its damage, its threat, its range and its rounds; and each thing in hand
+ * that is no weapon of the rules, with the call that makes it one.
+ */
 function weapons(ctx: ReadContext, who: EntityId, name: (id: EntityId) => string): SheetWeapon[] {
   const rules = rulesOf(ctx.world);
   if (!rules) return [];
-  const a = rules.attack;
-  const size = sizeOf(ctx, rules, who);
-  const rows = rowsOf(ctx, rules, "weapons");
-  const out: SheetWeapon[] = [];
-  const strength = (held: string): number => Math.floor((own(a.strengthShare, held) ?? 0) * modOf(ctx, rules, who, a.strength));
-  for (const id of gearOn(ctx, who).readied) {
-    const rid = rowIdOf(ctx, id);
-    const row = own(rows, rid);
-    if (!row) continue;
-    const held = textIn(row.held);
-    const ranged = held === "projectile" || held === "thrown" || held === "ranged";
-    const enh = thingNumber(ctx, id, D20_FIELDS.enhancement);
-    const roll = line(ctx, who, ranged ? a.totals.ranged : a.totals.melee, { weapon: rid, key: rid });
-    const dmg = row.damage;
-    const dice = typeof dmg === "string" ? dmg : dmg !== null && typeof dmg === "object" && !Array.isArray(dmg) ? (typeof dmg[size] === "string" ? dmg[size] : (Object.values(dmg).find((x) => typeof x === "string") ?? "")) : "";
-    const bonus = strength(held) + totalOf(ctx, rules, who, a.totals.damage, { weapon: rid, key: rid }) + enh;
-    const magazine = numberIn(row.magazine ?? null);
-    const range = numberIn(row.range ?? null);
-    out.push({
-      with: name(id),
-      attack: roll === null ? null : { total: roll.total + enh, parts: [roll.parts, enh !== 0 ? say("d20_part_enhancement", { value: signed(enh), from: name(id) }) : ""].filter((x) => x !== "").join(", ") },
-      damage: `${String(dice)}${bonus !== 0 ? signed(bonus) : ""}`,
-      threat: threatFrom(ctx, rules, who, { rowId: rid, row, natural: null }),
-      multiplier: numberIn(row.multiplier ?? null) ?? 1,
+  const s = new Scratch({ ...ctx, rng: createRng("d20.sheet"), params: {} }, rules);
+  const { weapons: held, unarmed } = armedWith(s, who);
+  const out: SheetWeapon[] = held.map((w) => {
+    const plan = planWith(s, who, w, {}, null);
+    const bonus = plan.strength + plan.damageBonus;
+    const magazine = numberIn(w.row?.magazine ?? null);
+    const range = numberIn(w.row?.range ?? null);
+    return {
+      with: w.item !== null ? name(w.item) : w.label,
+      attack: { total: plan.roll.total + plan.extra, parts: plan.rollParts },
+      damage: `${plan.dice}${bonus !== 0 ? signed(bonus) : ""}`,
+      threat: plan.threatFrom,
+      multiplier: plan.multiplier,
       ...(range !== null ? { range } : {}),
-      ...(wordsIn(row.types).length > 0 ? { types: wordsIn(row.types).join(", ") } : {}),
-      ...(magazine !== null ? { rounds: say("d20_sheet_rounds", { loaded: thingNumber(ctx, id, D20_FIELDS.loaded), magazine }) } : {}),
-      ...(wordsIn(row.fire).length > 0 ? { fire: wordsIn(row.fire).join(", ") } : {}),
-    });
-  }
-  for (const nat of naturalAttacks(ctx, who)) {
-    // Its own attack is known by its label in lower case, as the attack binds it (`attack.weapon.bite` reaches it).
-    const key = weaponKey(nat);
-    const roll = line(ctx, who, nat.total ?? a.totals.melee, { weapon: key, key });
-    const bonus = strength(nat.held ?? "one") + totalOf(ctx, rules, who, a.totals.damage, { weapon: key, key });
-    out.push({
-      with: nat.label,
-      attack: roll === null ? null : { total: roll.total + (nat.bonus ?? 0) + (nat.secondary === true ? a.secondary : 0), parts: roll.parts },
-      damage: `${nat.damage}${bonus !== 0 ? signed(bonus) : ""}`,
-      threat: threatFrom(ctx, rules, who, { rowId: key, row: null, natural: nat }),
-      multiplier: nat.multiplier ?? 1,
-      ...(nat.types !== undefined ? { types: nat.types.join(", ") } : {}),
-    });
-  }
+      ...(plan.types.length > 0 ? { types: plan.types.join(", ") } : {}),
+      ...(magazine !== null && w.item !== null ? { rounds: say("d20_sheet_rounds", { loaded: thingNumber(ctx, w.item, D20_FIELDS.loaded), magazine }) } : {}),
+      ...(wordsIn(w.row?.fire).length > 0 ? { fire: wordsIn(w.row?.fire).join(", ") } : {}),
+    };
+  });
+  for (const id of unarmed) out.push({ with: name(id), attack: null, damage: "", threat: 0, multiplier: 0, missing: notAWeapon(s, who, id).reason });
   return out;
 }
 

@@ -3,7 +3,7 @@
 // reads it with each name as the tools say one. It changes nothing; its answer is data.
 
 import type { JsonObject } from "rp-harness/contract";
-import { rulesOf } from "../../packs/d20/core/model";
+import { isOn, rulesOf } from "../../packs/d20/core/model";
 import { sheetOf } from "../../packs/d20/core/sheet";
 import { TEXT, type ToolSpec } from "../kit";
 import { isUnread, named } from "../ops";
@@ -17,6 +17,11 @@ const sheet: ReadDef = {
   example: { who: "Mara" },
   read(r, args, reply) {
     if (rulesOf(r.world) === null) return { line: "no_d20_rules", fields: {} };
+    // Off in this chat, the rules give no sheet: what the chat's sheet holds without them is read at the person.
+    if (!isOn(r.ctx)) {
+      reply.line("d20_sheet_off", {});
+      return undefined;
+    }
     let who = r.doc.pov;
     if (args.who !== undefined && args.who !== null && args.who !== "") {
       const found = foundIn(r, "who", args.who, "entity");

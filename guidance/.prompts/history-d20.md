@@ -50,6 +50,8 @@ d20_part_unskilled: {{value}} not proficient with {{weapon}}
 d20_part_nonlethal: {{value}} to deal nonlethal harm
 d20_part_secondary: {{value}} as a lesser attack
 d20_part_range: {{value}} range ({{distance}} away, {{increments}} increment(s) past the first)
+d20_far_feet: {{amount}} ft
+d20_far_metres: {{amount}} m
 d20_part_shot: {{value}} {{shot}} shot
 d20_untrained: {{skill}} is used only with ranks in it, and was rolled all the same
 d20_aid: {{who}} helped with {{total}} against {{dc}}, {{outcome}}
@@ -94,7 +96,7 @@ d20_condition_on: is now {{condition}}{{#mods}} ({{mods}}){{/mods}} {{length}}{{
 d20_condition_off: is no longer {{condition}}
 d20_effect_on: is under {{label}} ({{mods}}) {{length}}
 d20_effect_off: is no longer under {{label}}
-d20_reloaded: rounds in the magazine {{from}} to {{to}} of {{magazine}}{{#short}}, {{short}} short: no more were carried{{/short}}
+d20_reloaded: rounds in the magazine {{from}} to {{to}} of {{magazine}}{{#short}}, {{short}} short: {{#ammo}}no more {{ammo}} was carried{{/ammo}}{{#no_ammo}}the gear catalog names no round this weapon takes, so none was looked for{{/no_ammo}}{{/short}}
 d20_awarded: experience {{from}} to {{to}}{{#open}}; it reaches level {{level}}, so {{open}} more level(s) can be taken{{/open}}
 d20_advanced: level {{level}} of it, level {{total}} in all; {{kept}} hit points on a d{{die}} ({{way}}); {{points}} skill point(s) to spend{{#feats}}; {{feats}} feat(s) to choose{{/feats}}{{#ability}}; an ability point to place{{/ability}}{{#features}}; it gives {{features}}{{/features}}
 d20_trait_on: has {{trait}} now{{#text}}: {{text}}{{/text}}{{#unmet}} (it requires {{unmet}}, which does not hold: taken all the same){{/unmet}}
@@ -116,7 +118,8 @@ why_d20_no_save: {{said}} is no save of this ruleset. Saves: {{saves}}.
 why_d20_no_difficulty: A save needs a difficulty: a number, or one of the ruleset's difficulties{{#said}} ({{said}} is neither){{/said}}.
 why_d20_no_target: {{#said}}{{said}} is no one in the world to attack.{{/said}}{{^said}}An attack needs a target: whom it is made against, by name or id.{{/said}}
 why_d20_odds_no_difficulty: A check's chance needs a difficulty (a number, or one of the ruleset's difficulties) or someone it is rolled against (vs); without either the check is only rolled.
-why_d20_no_weapon: {{who}} has nothing to attack with{{#said}} by the name {{said}}{{/said}}: no weapon readied and no attack of its own. Name a weapon it carries, one of its own attacks, or a weapons row in with.
+why_d20_no_weapon: {{who}} has nothing to attack with{{#said}} by the name {{said}}{{/said}}: no weapon held or carried and no attack of its own. Name a weapon it carries, one of its own attacks, or a weapons row in with. A thing it carries becomes a weapon of the rules in one call: the operation set, at the thing, key d20_row, value its weapons row.
+why_d20_not_a_weapon: {{thing}} is in {{who}}'s hands but is no weapon of the rules: neither its catalog type nor a row named on it is a weapons row. It becomes one in one call, world_apply {{call}}; the weapons rows nearest its name: {{rows}}.
 why_d20_no_amount: {{said}} is no number and no dice.
 why_d20_no_condition: {{said}} is no condition of this ruleset. Conditions: {{conditions}}.
 why_d20_no_label: An effect needs a label, the name it is put on and taken off by.

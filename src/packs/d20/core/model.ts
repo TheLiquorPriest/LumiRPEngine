@@ -154,9 +154,12 @@ export function sizeOf(ctx: Pick<ReadContext, "state">, rules: D20Def, who: Enti
   return typeof s === "string" && s !== "" ? s : rules.defaultSize;
 }
 
-/** The row a thing reads in a table of rows by catalog id (a weapon, an armour): its catalog's, else its own id's. */
+/** The row a thing reads in a table of rows by catalog id (a weapon, an armour): the one it is said to be (`d20_row`), else its catalog's, else its own id's. */
 export function rowIdOf(ctx: Pick<ReadContext, "state">, thing: EntityId): string {
-  const c = fieldsOf(ctx, thing).catalog;
+  const fields = fieldsOf(ctx, thing);
+  const said = fields[D20_FIELDS.row];
+  if (typeof said === "string" && said !== "") return said;
+  const c = fields.catalog;
   return typeof c === "string" && c !== "" ? c : thing;
 }
 

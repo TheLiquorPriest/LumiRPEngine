@@ -362,6 +362,12 @@ export const spacePack: PackDef = {
       const squares = between(ground.drawn, ground.moving, x, y);
       return squares === null ? null : squares * (ground.drawn.scale.unit === "feet" ? ground.drawn.scale.feet : ground.drawn.scale.metres);
     });
+    // The unit `distance` gives where someone stands on a grid (feet or metres); null where they stand on none.
+    r.formula("grid_unit", (ctx, a) => {
+      const place = placeOfEntity(ctx.state, String(a ?? ""));
+      const ground = place === null ? null : groundAt(ctx, place);
+      return ground === null ? null : ground.drawn.scale.unit;
+    });
     r.formula("on_grid", (ctx, thing) => {
       const e = own(ctx.state.entities, String(thing ?? ""));
       return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;

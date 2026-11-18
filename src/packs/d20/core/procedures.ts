@@ -547,43 +547,81 @@ export interface Weapon {
   natural: NaturalAttack | null;
 }
 
-/** The weapon `with` names: a thing the attacker holds or carries by name, its own attack by label, or a weapons row; else what it has readied, else its own first attack. */
-function weaponOf(s: Scratch, who: EntityId, said: string): Weapon | null {
+/** Everything a creature holds or carries, at any depth, readied things first. */
+function carriedBy(s: Scratch, who: EntityId): EntityId[] {
+  const out: EntityId[] = [...gearOn(s.ctx, who).readied];
+  const walk = (holder: EntityId, depth: number): void => {
+    if (depth > 6) return;
+    for (const id of contentsOf(s.ctx.state, holder)) {
+      if (!out.includes(id)) out.push(id);
+      walk(id, depth + 1);
+    }
+  };
+  walk(who, 0);
+  return out;
+}
+
+/** A thing as the weapon of its row (`d20_row`, else its catalog's), or null where it is none of the weapons table's. */
+function asWeapon(s: Scratch, id: EntityId): Weapon | null {
+  const rid = rowIdOf(s.ctx, id);
+  const row = own(rowsOf(s.ctx, s.rules, "weapons"), rid);
+  return row ? { label: s.name(id), item: id, rowId: rid, row, natural: null } : null;
+}
+
+/**
+ * Why a thing in hand is no weapon of the rules, with the one call that makes it one: its `d20_row` set to a weapons row, the rows whose
+ * names share a word with its name named (or the first of the table).
+ */
+export function notAWeapon(s: Scratch, who: EntityId, thing: EntityId): Rejection {
+  const rows = rowsOf(s.ctx, s.rules, "weapons");
+  const words = new Set(s.name(thing).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((x) => x.length > 1));
+  const near = Object.entries(rows).filter(([id, row]) => `${id} ${labelOfRow(row, id)}`.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((x) => words.has(x)));
+  const named = (near.length > 0 ? near : Object.entries(rows)).slice(0, 8).map(([id, row]) => `${labelOfRow(row, id)} [${id}]`);
+  const call = JSON.stringify({ op: "set", at: s.name(thing), key: D20_FIELDS.row, value: near[0]?.[0] ?? Object.keys(rows)[0] ?? "" });
+  return reject("d20_not_a_weapon", say("why_d20_not_a_weapon", { thing: s.name(thing), who: s.name(who), call, rows: named.join(", ") }));
+}
+
+/**
+ * The weapon `with` names: a thing the attacker holds or carries by name, its own attack by label, or a weapons row. Else what it has
+ * readied, else a weapon it carries, else its own first attack. A thing named or in hand that is no weapon of the rules is answered with
+ * the call that makes it one; nothing at all, with what it could name.
+ */
+function weaponOf(s: Scratch, who: EntityId, said: string): Weapon | Rejection {
   const rules = s.rules;
-  const weapons = rowsOf(s.ctx, rules, "weapons");
-  const carried = (): EntityId[] => {
-    const out: EntityId[] = [];
-    const walk = (holder: EntityId, depth: number): void => {
-      if (depth > 6) return;
-      for (const id of contentsOf(s.ctx.state, holder)) {
-        out.push(id);
-        walk(id, depth + 1);
-      }
-    };
-    walk(who, 0);
-    return out;
-  };
-  const asThing = (id: EntityId): Weapon | null => {
-    const rid = rowIdOf(s.ctx, id);
-    const row = own(weapons, rid);
-    return row ? { label: s.name(id), item: id, rowId: rid, row, natural: null } : null;
-  };
   const naturals = naturalAttacks(s.ctx, who);
+  const nothing = reject("d20_no_weapon", say("why_d20_no_weapon", { who: s.name(who), said }));
   if (said !== "") {
     const lower = said.toLowerCase();
-    const thing = [...gearOn(s.ctx, who).readied, ...carried()].find((id) => s.name(id).toLowerCase() === lower || id === said);
-    if (thing !== undefined) return asThing(thing);
+    const thing = carriedBy(s, who).find((id) => s.name(id).toLowerCase() === lower || id === said);
+    if (thing !== undefined) return asWeapon(s, thing) ?? notAWeapon(s, who, thing);
     const nat = naturals.find((a) => a.label.toLowerCase() === lower);
     if (nat) return { label: nat.label, item: null, rowId: weaponKey(nat), row: null, natural: nat };
     const row = rowOf(s.ctx, rules, "weapons", said);
-    return row ? { label: labelOfRow(row.row, row.id), item: null, rowId: row.id, row: row.row, natural: null } : null;
+    return row ? { label: labelOfRow(row.row, row.id), item: null, rowId: row.id, row: row.row, natural: null } : nothing;
   }
-  for (const id of gearOn(s.ctx, who).readied) {
-    const w = asThing(id);
+  const readied = gearOn(s.ctx, who).readied;
+  for (const id of carriedBy(s, who)) {
+    const w = asWeapon(s, id);
     if (w) return w;
   }
   const first = naturals[0];
-  return first ? { label: first.label, item: null, rowId: weaponKey(first), row: null, natural: first } : null;
+  if (first) return { label: first.label, item: null, rowId: weaponKey(first), row: null, natural: first };
+  const inHand = readied[0];
+  return inHand !== undefined ? notAWeapon(s, who, inHand) : nothing;
+}
+
+/** What a creature could attack with, as its sheet lists it: each weapon it holds or carries, then its own attacks; and each thing in hand that is no weapon of the rules. */
+export function armedWith(s: Scratch, who: EntityId): { weapons: Weapon[]; unarmed: EntityId[] } {
+  const weapons: Weapon[] = [];
+  const unarmed: EntityId[] = [];
+  const readied = gearOn(s.ctx, who).readied;
+  for (const id of carriedBy(s, who)) {
+    const w = asWeapon(s, id);
+    if (w) weapons.push(w);
+    else if (readied.includes(id)) unarmed.push(id);
+  }
+  for (const nat of naturalAttacks(s.ctx, who)) weapons.push({ label: nat.label, item: null, rowId: weaponKey(nat), row: null, natural: nat });
+  return { weapons, unarmed };
 }
 
 /** A weapon's damage dice for a wielder of `size`: its row's notation for that size (or its one notation), or its own attack's. */
@@ -651,11 +689,12 @@ function around(s: Scratch, centre: EntityId, radius: number): EntityId[] {
 
 /** An attack as it stands before a die is rolled: the weapon and how it is held, the attack's total and what it adds, the damage it would do, each attack's offset. The roll and the odds both read it. */
 export interface AttackPlan {
+  /** Whom it is made against; "" for the sheet's line, made against no one. */
   target: EntityId;
   w: Weapon;
   ranged: boolean;
-  /** Who attacks whom and how far apart they stand, as both sides' modifiers read them. */
-  situation: Situation;
+  /** Who attacks whom and how far apart they stand, as both sides' modifiers read them; null against no one. */
+  situation: Situation | null;
   toAc: Modifier[];
   roll: Explained;
   /** What the attack adds beyond its total, each with its words: the weapon's enhancement, an unskilled weapon, range, a shot. */
@@ -687,19 +726,35 @@ export interface AttackPlan {
  * the target and the distance bound. Or why it cannot be worked out.
  */
 export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string, JsonValue>>): AttackPlan | Rejection {
-  const rules = s.rules;
-  const a = rules.attack;
   const target = text(p.target);
   if (!own(s.ctx.state.entities, target)) return reject("d20_no_target", say("why_d20_no_target", { said: target }));
   const w = weaponOf(s, who, text(p.with));
-  if (w === null) return reject("d20_no_weapon", say("why_d20_no_weapon", { who: s.name(who), said: text(p.with) }));
+  if ("code" in w) return w;
+  return planWith(s, who, w, p, target);
+}
+
+/** A distance as a person would say it in the world's unit: whole above ten, to a tenth below, the grid's unit where it was measured on one. */
+function farWords(s: Scratch, who: EntityId, amount: number, measured: boolean): string {
+  const spoken = Math.abs(amount) >= 10 ? Math.round(amount) : Math.round(amount * 10) / 10;
+  const unit = measured ? s.ctx.registry.formulas.get("grid_unit")?.(s.ctx, who) : null;
+  return unit === "feet" || unit === "metres" ? say(`d20_far_${unit}`, { amount: spoken }) : String(spoken);
+}
+
+/**
+ * The plan of an attack with a weapon, against `target` or (for the sheet's line) against no one: everything the attack's roll and
+ * damage read, from the one source the attack, its odds and the sheet all use.
+ */
+export function planWith(s: Scratch, who: EntityId, w: Weapon, p: Readonly<Record<string, JsonValue>>, target: EntityId | null): AttackPlan {
+  const rules = s.rules;
+  const a = rules.attack;
   const notes: string[] = [];
   const distanceFn = s.ctx.registry.formulas.get("distance");
-  const grid = distanceFn ? distanceFn(s.ctx, who, target) : null;
+  const grid = target !== null && distanceFn ? distanceFn(s.ctx, who, target) : null;
   const apart = typeof grid === "number" ? grid : numberIn(p.distance ?? null);
-  const situation: Situation = { who, target, distance: apart };
+  const situation: Situation | null = target !== null ? { who, target, distance: apart } : null;
   let unknown = false;
   const situated = <T>(fn: () => T): T => {
+    if (situation === null) return fn();
     const r = inSituation(s.ctx, situation, fn);
     if (r.unknownDistance) unknown = true;
     return r.value;
@@ -708,7 +763,7 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
   const ranged = held === "projectile" || held === "thrown" || held === "ranged";
   const totalName = w.natural?.total ?? (ranged ? a.totals.ranged : a.totals.melee);
   const vars: EnvVars = { weapon: w.rowId, key: w.rowId, ...(apart !== null ? { distance: apart } : {}) };
-  const bindings = { target };
+  const bindings: Record<string, EntityId> = target !== null ? { target } : {};
   const given = givenMods(p.mods, "attack");
   const toAc = given.filter((m) => m.to === "ac" || m.to.startsWith("ac."));
   const toRoll = given.filter((m) => !toAc.includes(m) && !m.to.startsWith("damage"));
@@ -729,8 +784,8 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
   if (ranged && increment !== null && increment > 0 && apart !== null) {
     const steps = Math.max(0, Math.ceil(apart / increment) - 1);
     const most = held === "thrown" ? a.increments.thrown : a.increments.projectile;
-    if (steps + 1 > most) notes.push(say("d20_out_of_range", { distance: apart, most: most * increment }));
-    if (steps > 0) extras.push({ value: steps * a.incrementPenalty, words: say("d20_part_range", { value: signed(steps * a.incrementPenalty), distance: apart, increments: steps }) });
+    if (steps + 1 > most) notes.push(say("d20_out_of_range", { distance: farWords(s, who, apart, typeof grid === "number"), most: farWords(s, who, most * increment, typeof grid === "number") }));
+    if (steps > 0) extras.push({ value: steps * a.incrementPenalty, words: say("d20_part_range", { value: signed(steps * a.incrementPenalty), distance: farWords(s, who, apart, typeof grid === "number"), increments: steps }) });
   }
   // A shot of a weapon that fires: what it needs of the weapon, what it adds, the rounds it spends, and what holds without its trait.
   const shotName = text(p.shots);
@@ -753,7 +808,7 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
   const damageBonus = situated(() => totalOf(s.ctx, rules, who, a.totals.damage, vars, bindings)) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0);
   if (unknown) notes.push(say("d20_no_distance"));
   return {
-    target,
+    target: target ?? "",
     w,
     ranged,
     situation,
@@ -786,8 +841,10 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
  */
 export function defenceOf(s: Scratch, plan: AttackPlan): { flat: boolean; ac: Explained; defence: number; unknownDistance: boolean } {
   const flat = flatFooted(s, plan.target);
-  const vars: EnvVars = { vs: plan.ranged ? "ranged" : "melee", ...(plan.situation.distance !== null ? { distance: plan.situation.distance } : {}) };
-  const r = inSituation(s.ctx, plan.situation, () => explain(s.ctx, s.rules, plan.target, plan.touch ? "ac.touch" : flat ? "ac.flat" : "ac", vars, { target: plan.situation.who }));
+  const sit = plan.situation;
+  const vars: EnvVars = { vs: plan.ranged ? "ranged" : "melee", ...(sit !== null && sit.distance !== null ? { distance: sit.distance } : {}) };
+  const read = (): Explained | null => explain(s.ctx, s.rules, plan.target, plan.touch ? "ac.touch" : flat ? "ac.flat" : "ac", vars, sit !== null ? { target: sit.who } : {});
+  const r = sit !== null ? inSituation(s.ctx, sit, read) : { value: read(), unknownDistance: false };
   const ac = r.value ?? { total: 0, parts: [] };
   return { flat, ac, defence: ac.total + plan.toAc.reduce((m, g) => m + Number(g.value), 0), unknownDistance: r.unknownDistance };
 }
@@ -1081,33 +1138,44 @@ const rest: Procedure = (s, who, p) => {
   return null;
 };
 
-/** The ammunition a weapon takes, as the gear catalog names it. */
-function ammoOf(s: Scratch, item: EntityId): string | null {
-  const row = own(own(s.ctx.world.tables, "gear.items")?.rows ?? {}, rowIdOf(s.ctx, item));
-  const ammo = row?.ammo;
-  return typeof ammo === "string" && ammo !== "" ? ammo : null;
+/** The round a weapon takes, as the gear catalog names it (its row's `ammo`): its id and its name; null where its row names none. */
+function ammoOf(s: Scratch, item: EntityId): { id: string; name: string } | null {
+  const rows = own(s.ctx.world.tables, "gear.items")?.rows ?? {};
+  const ammo = own(rows, rowIdOf(s.ctx, item))?.ammo;
+  return typeof ammo === "string" && ammo !== "" ? { id: ammo, name: labelOfRow(own(rows, ammo), ammo) } : null;
 }
 
-/** A weapon's magazine filled from the rounds carried, as many as it holds and as there are. */
+/** The weapon a reload fills: the one named, else the first carried that has a magazine; null where there is none. */
+function reloaded(s: Scratch, who: EntityId, said: string): Weapon | null {
+  if (said === "") return armedWith(s, who).weapons.find((x) => x.item !== null && numberIn(x.row?.magazine ?? null) !== null) ?? null;
+  const w = weaponOf(s, who, said);
+  return "code" in w ? null : w;
+}
+
+/** Which of the layer's rolls a name is for `who` where the rules are on: a skill's or an ability's check, or a save; null for neither. */
+export function rollOfName(ctx: ReadContext, who: EntityId, said: string): "check" | "save" | null {
+  const rules = rulesOf(ctx.world);
+  if (rules === null || !isOn(ctx) || said.trim() === "") return null;
+  if (rowOf(ctx, rules, "skills", said) || abilityNamed(ctx, rules, who, said) !== null) return "check";
+  return saveNamed(rules, said) !== null ? "save" : null;
+}
+
+/**
+ * A weapon's magazine filled from the rounds carried, as many as it holds and as there are: the weapon named, else the first it carries
+ * that has a magazine. The rounds are the things of the catalog's round for it (by their type, or the row they are said to be); what
+ * was looked for is said by name where none or too few were carried.
+ */
 const reload: Procedure = (s, who, p) => {
-  const rules = s.rules;
-  const w = weaponOf(s, who, text(p.item));
+  const said = text(p.item);
+  const w = reloaded(s, who, said);
   const magazine = w ? numberIn(w.row?.magazine ?? null) : null;
-  if (!w || !w.item || magazine === null) return reject("d20_no_magazine", say("why_d20_no_magazine", { who: s.name(who), said: text(p.item) }));
+  if (!w || !w.item || magazine === null) return reject("d20_no_magazine", say("why_d20_no_magazine", { who: s.name(who), said }));
   const loaded = thingNumber(s.ctx, w.item, D20_FIELDS.loaded);
   const want = Math.max(0, magazine - loaded);
   const ammo = ammoOf(s, w.item);
   let moved = 0;
   if (ammo !== null) {
-    const stacks: EntityId[] = [];
-    const walk = (holder: EntityId, depth: number): void => {
-      if (depth > 6) return;
-      for (const id of contentsOf(s.ctx.state, holder)) {
-        if (own(s.ctx.state.entities, id)?.fields.catalog === ammo) stacks.push(id);
-        walk(id, depth + 1);
-      }
-    };
-    walk(who, 0);
+    const stacks = carriedBy(s, who).filter((id) => id !== w.item && rowIdOf(s.ctx, id) === ammo.id);
     for (const id of stacks) {
       if (moved >= want) break;
       const qty = numberIn(own(s.ctx.state.entities, id)?.fields.qty ?? null) ?? 1;
@@ -1118,7 +1186,7 @@ const reload: Procedure = (s, who, p) => {
     }
   }
   s.set(w.item, D20_FIELDS.loaded, loaded + moved);
-  s.record(D20_EVENTS.reload, { who, item: w.item, told: say("d20_reloaded", { from: loaded, to: loaded + moved, magazine, ...(moved < want ? { short: want - moved } : {}) }) });
+  s.record(D20_EVENTS.reload, { who, item: w.item, told: say("d20_reloaded", { from: loaded, to: loaded + moved, magazine, ...(moved < want ? { short: want - moved, ...(ammo !== null ? { ammo: `${ammo.name} [${ammo.id}]` } : { no_ammo: true }) } : {}) }) });
   return null;
 };
 
@@ -1130,7 +1198,7 @@ export function costKeys(ctx: ReadContext, action: string, who: EntityId, params
   if (action === "attack" && yes(params.full)) return ["attack.full"];
   const rules = rulesOf(ctx.world);
   if (action === "reload" && rules !== null && own(ctx.state.entities, who)) {
-    const kind = textIn(weaponOf(new Scratch({ ...ctx, rng: createRng("d20.cost"), params: {} }, rules), who, text(params.item))?.row?.magazine_kind);
+    const kind = textIn(reloaded(new Scratch({ ...ctx, rng: createRng("d20.cost"), params: {} }, rules), who, text(params.item))?.row?.magazine_kind);
     if (kind !== "") return [`reload.${kind}`, action];
   }
   return [action];

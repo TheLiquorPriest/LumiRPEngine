@@ -65,6 +65,8 @@ export const D20_FIELDS = {
   enhancement: "enhancement",
   /** On a thing: its own modifiers (`Modifier[]`), counted while it is worn or readied. */
   modifiers: "modifiers",
+  /** On a thing: the weapons or armour row it is, where its catalog type names none (a thing made with no type, a weapon of the rules' own). */
+  row: "d20_row",
 } as const;
 
 /** A trait a creature has: its row, and the choice it was taken with (Weapon Focus's weapon). */

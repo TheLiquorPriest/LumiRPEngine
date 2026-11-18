@@ -355,6 +355,7 @@ export function checkView(a: Availability, retry: RetryRule): Pick<PaletteOption
   const v = a.verdict;
   const rolls = !v || v.roll;
   const verdict = !v || v.roll ? null : v.why === "impossible" ? "Too hard to try" : v.why === "story" ? (v.chance === null ? "The story decides" : `The story decides (odds ${Math.round(v.chance * 100)}%)`) : v.why === "retry" ? (retry === "once" ? "Retry needs a new scene" : "Retry needs a change") : "No roll needed";
-  const parts = [verdict ?? "", c && rolls ? (c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "") : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "");
+  // What the odds need and the call does not give (a difficulty, a target, a weapon), in the pack's words.
+  const parts = [verdict ?? "", c && rolls ? (c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "") : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : "", a.missing ?? ""].filter((p) => p !== "");
   return { ...(parts.length > 0 ? { detail: parts.join(" · ") } : {}), ...(a.odds && (rolls || v?.why === "story") ? { odds: Object.entries(a.odds).map(([outcome, p]) => ({ outcome, p })) } : {}) };
 }

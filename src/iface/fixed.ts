@@ -9,10 +9,13 @@ import { hashParts } from "../shared/hash";
 import { isRecord } from "../shared/json";
 import type { CheckDef } from "../shared/world";
 import { checkOf, readyCheck, rollCheck } from "../engine/checks";
-import { DiceError, rollDice } from "../engine/dice";
+import { DiceError, parseDice, rollDice } from "../engine/dice";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { offeredActions } from "../engine/offered";
 import { createRng } from "../engine/rng";
+import { kindIs } from "../engine/scope";
+import { isOn, rulesOf } from "../packs/d20/core/model";
+import { rollOfName } from "../packs/d20/core/procedures";
 import { WORLD_STATE_DEFAULTS } from "../store/world-state";
 import type { ViewLine } from "../store/words";
 import { rulesetData } from "./bestiary";
@@ -152,6 +155,48 @@ function rollsBefore(call: Call, turn: string, who: string): number {
 /** How a roll is made: dice by their notation, or a check of the world's by the id it was asked by. */
 type RollBy = { dice: string } | { check: string; def: CheckDef };
 
+/**
+ * A roll of one of the tabletop rules' skills, abilities or saves: the layer's own procedure (`d20.check`, `d20.save`), the one `act
+ * check` and `act save` carry out, drawn and drafted as this roll and answered with its record and its words.
+ */
+function layerRoll(call: Call, reading: Reading, who: Found, purpose: string, kind: "check" | "save", said: string, against: number | null, target: Found | null): { out: JsonObject | Reply; draft: Draft | null } {
+  const reply = call.reply();
+  const turn = reading.turn;
+  const type = `d20.${kind}`;
+  // Drawn from the turn, who rolls and how many of the layer's rolls the turn has recorded for them, as any roll is.
+  const before = turn === null ? 0 : call.deps.store.changes(turn.id).filter((c) => c.op === type && isRecord(c.value) && isRecord(c.value.data) && c.value.data.who === who.id).length;
+  const rng = createRng(turn === null ? hashParts("rpe.roll", type, call.agent.job ?? call.scope.session, call.callId, who.id) : hashParts("rpe.roll", type, turn.id, who.id, String(before)));
+  const draft = new Draft(reading, call);
+  const effect = reading.registry.effects.get(type);
+  const params: Record<string, string | number> = kind === "check" ? { skill: said, ...(against !== null ? { difficulty: against } : {}), ...(target !== null ? { vs: target.id } : {}) } : { save: said, ...(against !== null ? { difficulty: against } : {}) };
+  const events = effect?.resolve({ who: who.id }, { ...draft.w.ctx, rng, params });
+  if (!events) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: "d20_off" }).fail(), draft: null };
+  if (!Array.isArray(events)) return { out: reply.line("d20_roll_refused", { why: events.reason }).fail(), draft: null };
+  const bad = draft.applyAll(events);
+  if (bad) return { out: reply.line("not_applicable", { n: 1, op: "roll", code: bad.code }).fail(), draft: null };
+  draft.record(1, "roll", "engine", { source: null, precision: null, standing: null, marks: [] }, 0);
+  const record = events.find((e) => e.type === type);
+  const words = record ? reading.registry.get(type)?.describe(record, draft.w.ctx) : undefined;
+  return { out: { actor: who.id, for: purpose, check: said, ...(record && "data" in record && isRecord(record.data) ? (record.data as JsonObject) : {}), ...(words !== undefined ? { told: words } : {}) }, draft };
+}
+
+/** Whether someone has a sheet of the tabletop rules in this chat: the rules on, and of a kind that carries them. */
+function hasSheet(reading: Reading, who: string): boolean {
+  const rules = rulesOf(reading.world);
+  const kind = reading.state.world.entities[who]?.kind;
+  return rules !== null && kind !== undefined && isOn(reading.ctx) && rules.kinds.some((k) => kindIs(reading.registry, reading.world, kind, k));
+}
+
+/** Whether dice carry a modifier of their own (`1d20+4`). */
+function modified(dice: string): boolean {
+  try {
+    return parseDice(dice).flat !== 0;
+  } catch (error) {
+    if (error instanceof DiceError) return false;
+    throw error;
+  }
+}
+
 /** A roll drawn and drafted on the state as it stands: what it came to, or the reply that says why it could not be made. */
 function drawRoll(call: Call, reading: Reading, who: Found, purpose: string, by: RollBy, against: number | null, sum: { expression: string; total: number } | null, target: Found | null): { out: JsonObject | Reply; draft: Draft | null } {
   const reply = call.reply();
@@ -266,6 +311,21 @@ export const ROLL: ToolSpec = {
     if (said === undefined) return reply.line("unreadable", { field: "against", value: JSON.stringify(args.against), wants: call.lines.line("wants_number") ?? "" }).fail();
     const against = said === null ? null : Math.round(said);
     const def = checkId === undefined ? null : checkOf(reading.doc, checkId);
+    // One of the tabletop rules' skills, abilities or saves, where they are on: rolled by their own procedure, as `act check` rolls it.
+    const layered = def === null && checkId !== undefined ? rollOfName(reading.ctx, who.id, checkId) : null;
+    if (layered !== null && checkId !== undefined) {
+      const t = args.target === undefined || args.target === null || args.target === "" ? null : foundOr(reading, reply, "target", args.target, "entity");
+      if (t === null && args.target !== undefined && args.target !== null && args.target !== "") return reply;
+      const done = await commit(call, () => {
+        const missing = call.reply();
+        const now = readingOr(call, missing);
+        return now === null ? { out: missing, draft: null } : layerRoll(call, now, who, purpose, layered, checkId, against, t);
+      });
+      if (done.gone) return unreadable(call, done.gone);
+      if (done.out instanceof Reply) return done.out;
+      const rowId = done.done?.rows[0]?.id;
+      return reply.data({ roll: { ...(rowId !== undefined ? { id: String(rowId) } : {}), ...done.out, who: `${who.name} [${who.id}]` } });
+    }
     const by: RollBy | null = dice !== undefined ? { dice } : checkId !== undefined && def !== null ? { check: checkId, def } : null;
     if (by === null) {
       const ids = Object.keys(reading.doc.checks);
@@ -285,6 +345,8 @@ export const ROLL: ToolSpec = {
     if (worked.gone) return unreadable(call, worked.gone);
     if (worked.out instanceof Reply) return worked.out;
     const id = worked.done?.rows[0]?.id;
+    // Dice with a modifier for someone with a sheet of the rules: the roll stands, and it is said that a check from the sheet is `act check`.
+    if (dice !== undefined && hasSheet(reading, who.id) && modified(dice)) reply.line("d20_roll_from_sheet", { who: who.name, ...(against !== null ? { dc: against } : {}) });
     return reply.data({ roll: { ...(id !== undefined ? { id: String(id) } : {}), who: `${who.name} [${who.id}]`, ...worked.out } });
   },
 };
