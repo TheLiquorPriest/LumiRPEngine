@@ -42,7 +42,6 @@ test/backend/step-template-checks.test.ts	src/shared/protocol.ts	EDIT_OPS_MAX	Pl
 test/cli/entry.test.ts	src/shared/protocol.ts	AGENT_API	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
 test/cli/fake-lumiverse.ts	src/shared/protocol.ts	AGENT_API, WorldChatInfo	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
 test/frontend/draft-reload.test.ts	src/shared/protocol.ts	FrontendToBackend, PROTOCOL_VERSION	PlanSwap-9	a test of the old frontend (planner's ruling)
-test/loop-sim/chips-journal-leaks.test.ts	src/shared/protocol.ts	BackendToFrontend, FrontendToBackend, PROTOCOL_VERSION	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
 test/play/actions.test.ts	src/shared/protocol.ts	FIX_THINGS_MAX	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
 test/play/bed.ts	src/shared/protocol.ts	ErrorMessage, ResultBodies, ResultMessage	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
 test/support/fake-host.ts	src/shared/protocol.ts	BackendToFrontend	PlanSwap-7	the kept tests outside test/backend (planner's ruling)
