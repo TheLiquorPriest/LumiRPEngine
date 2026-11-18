@@ -92,7 +92,7 @@ export function JobsPage(props: { chat: string | null; at: readonly string[] | u
       <div class="rpe-files-split" data-open={open === null ? "no" : "yes"}>
         <div class="rpe-files-browser lre-stack">
           <StartSection chat={chat} onStarted={(job) => (setChanged((held) => new Map(held).set(job.id, job)), setStamp((n) => n + 1), go(job.id))} />
-          <SwitchesSection reload={stamp} onChanged={() => setStamp((n) => n + 1)} onSetting={(key) => app.go({ page: "settings", chat, at: [key] })} />
+          <SwitchesSection chat={chat} reload={stamp} onChanged={() => setStamp((n) => n + 1)} />
           <BootstrapPart chat={chat} />
           <div class="lre-inline rpe-wrap">
             {chat === null ? null : (

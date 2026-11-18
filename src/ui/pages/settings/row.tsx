@@ -3,6 +3,7 @@
 // value passes; a mark when it differs from what was shipped, and where it is set; what was shipped and the way back to it; and,
 // for one every level of which applies, each level's own part.
 
+import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { Badge, Banner, Button } from "../../../frontend/components";
 import type { LayerLevel, LoreBooks, SettingView } from "../../../shared/api";
@@ -35,6 +36,8 @@ export interface SettingRowProps extends RowActions {
   opened?: boolean;
   /** What holds where nothing of his sets it, said in place of the default where the page knows it better: a definition's own effort or limit. */
   shipped?: string;
+  /** A line under the name, for what the page knows of the setting beside it (a limit's use so far). */
+  aside?: ComponentChildren;
 }
 
 export function SettingRow(props: SettingRowProps) {
@@ -56,6 +59,7 @@ export function SettingRow(props: SettingRowProps) {
         {changed ? <Badge tone="accent">Changed</Badge> : null}
         {s.from !== null && s.from !== "shipped" ? <Badge>{`Set ${SET_AT_WORDS[s.from]}`}</Badge> : null}
       </div>
+      {props.aside === undefined ? null : <p class="rpe-line" data-aside>{props.aside}</p>}
       <p class="rpe-set-about">{s.about}</p>
       {/* A cell of a table keeps its control's state per setting: a change of cell starts afresh. */}
       <div class="rpe-set-control" key={`${s.key}:${level}:${JSON.stringify(start)}`}>

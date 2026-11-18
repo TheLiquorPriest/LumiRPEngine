@@ -5,9 +5,10 @@
 
 import type { DefinitionLimitsView, ListedDefinition } from "rp-harness/contract";
 import { useState } from "preact/hooks";
-import { Banner, Section, Seg } from "../../../frontend/components";
+import { Banner, Section } from "../../../frontend/components";
 import type { SettingView } from "../../../shared/api";
 import type { SettingsShown } from "../settings";
+import { LevelBar } from "../settings/levelbar";
 import { type ChangeLevel, numberWords } from "../settings/model";
 import { type RowActions, SettingRow } from "../settings/row";
 
@@ -54,22 +55,7 @@ export function AgentSettings(props: AgentSettingsProps) {
   const groups = [...new Set(mine.map((s) => s.group))];
   return (
     <Section id="settings" title="Effort and limits">
-      {props.chat === null ? (
-        <p class="rpe-meta">A change here is for every chat; open a chat to make one for it alone.</p>
-      ) : (
-        <div class="rpe-set-levelbar">
-          <span class="rpe-meta">A change here is</span>
-          <Seg
-            value={level}
-            options={[
-              { value: "global", label: "For every chat" },
-              { value: "chat", label: "For this chat only" },
-            ]}
-            label="Where a change goes"
-            onChange={(to: ChangeLevel) => setLevel(to)}
-          />
-        </div>
-      )}
+      {props.chat === null ? <p class="rpe-meta">A change here is for every chat; open a chat to make one for it alone.</p> : <LevelBar level={level} onLevel={setLevel} />}
       {shown.problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Its settings could not be read">
           <span>{shown.problem}</span>

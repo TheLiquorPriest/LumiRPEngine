@@ -6,7 +6,7 @@
 // a row for each. The install's facts, and what waits for the server's command line, are listed under Server and service.
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Banner, Button, Disclosure, PageHeader, SearchField, Seg } from "../../../frontend/components";
+import { Badge, Banner, Button, Disclosure, PageHeader, SearchField } from "../../../frontend/components";
 import type { LayerLevel, LoreBooks, SettingsReply, SettingView, SwitchEntry } from "../../../shared/api";
 import type { JsonValue } from "../../../shared/json";
 import { useApp } from "../../app";
@@ -15,6 +15,7 @@ import type { RpeClient } from "../../client";
 import type { PageEntry } from "../../page-entry";
 import { useUiSettings } from "../../ui-settings";
 import { errorWords, LEVEL_WORDS } from "../../words";
+import { LevelBar } from "./levelbar";
 import { type ChangeLevel, isChanged, type SectionShown, sectionsOf, settingMatches } from "./model";
 import { type RowActions, SettingRow } from "./row";
 import { SettingsTable } from "./table";
@@ -221,20 +222,7 @@ export function SettingsView(props: SettingsViewProps) {
   return (
     <div class="lre-stack rpe-page rpe-set-page" data-page="settings" data-chat={props.chat ?? undefined}>
       <PageHeader title="Settings" subtitle={props.chat === null ? "What RPE and its agents run under. A change here is for every chat; open a chat to make one for it alone." : "What RPE and its agents run under in this chat."} />
-      {props.chat === null ? null : (
-        <div class="rpe-set-levelbar">
-          <span class="rpe-meta">A change here is</span>
-          <Seg
-            value={props.level}
-            options={[
-              { value: "global", label: "For every chat" },
-              { value: "chat", label: "For this chat only" },
-            ]}
-            label="Where a change goes"
-            onChange={props.onLevel}
-          />
-        </div>
-      )}
+      {props.chat === null ? null : <LevelBar level={props.level} onLevel={props.onLevel} />}
       <div class="rpe-set-tools">
         <SearchField value={props.query} label="Find a setting" placeholder="Find a setting by what it does" status={searching ? `${shownSettings.length} found` : undefined} onInput={props.onQuery} />
         <button type="button" class="rpe-set-filter" aria-pressed={props.changedOnly} onClick={() => props.onChangedOnly(!props.changedOnly)}>
