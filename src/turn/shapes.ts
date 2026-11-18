@@ -94,7 +94,24 @@ export const chatsReply = shape.named(
   }),
 );
 
-const turnRow = shape.named("TurnRow", "A turn as a chat's list shows it.", shape.object(rowFields));
+const turnRunRow = shape.named(
+  "TurnRunRow",
+  "One run of a turn as the list gives it: its place among the turn's runs, its kind, where it stands, why its reply failed when it did, when its moments happened (its reply released among them) and what it spent.",
+  shape.object({
+    nth: field(N, "Its place among the turn's runs, from 1."),
+    kind: runKind,
+    status: runState,
+    error: field(nullable(replyError), "Why the reply failed, when it did."),
+    timings: moments,
+    usage: field(usage, "What this run alone spent: model calls and tokens."),
+  }),
+);
+
+const turnRow = shape.named(
+  "TurnRow",
+  "A turn as a chat's list shows it: its newest run's kind and status, its reply's times, what all its runs spent, and each of its runs in its own words.",
+  shape.object({ ...rowFields, runs: field(shape.list(turnRunRow), "Each of its runs, the first first: the run that answered is the latest that is not a Settle now run.") }),
+);
 export const turnsReply = shape.named("TurnsReply", "A chat's turns, newest first.", shape.object({ turns: shape.list(turnRow), more: field(shape.yesNo(), "Older turns remain.") }));
 
 const notGiven = shape.named(

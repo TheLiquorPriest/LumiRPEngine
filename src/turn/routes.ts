@@ -373,7 +373,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       path: "/api/v1/chats/:chat/turns",
       access: "page",
       group: "turns",
-      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.",
+      does: "A chat's turns, newest first, each with what its runs spent together and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.",
       query: {
         limit: shape.optional(shape.whole({ least: 1 }), "How many turns to give: the setting `turns.page` when left out, and at most `turns.maxPage`."),
         before: shape.optional(shape.turnId(), "A turn's id: the turns older than it are given."),
@@ -385,7 +385,12 @@ export function turnRoutes(deps: TurnRoutesDeps) {
         const limit = Math.min(query.limit ?? turnsPage.size, turnsPage.most);
         if (query.before !== undefined) notJoined(user, params.chat, query.before);
         const kept = turns.runs.ofChatKept(user, params.chat, limit + 1, query.before);
-        return { turns: kept.slice(0, limit).map((r) => summary(user, params.chat, r)), more: kept.length > limit };
+        // Each turn with its runs one by one: the list says what a turn is and what became of its reply from the run that answered, and what a later run did beside it.
+        const rowOf = (r: RunRecord) => ({
+          ...summary(user, params.chat, r),
+          runs: turns.runs.ofTurn(user, r.turn).map((run, i) => ({ nth: i + 1, kind: run.kind, status: run.status, error: run.error, timings: momentsOf(run), usage: run.usage ?? NO_USAGE })),
+        });
+        return { turns: kept.slice(0, limit).map(rowOf), more: kept.length > limit };
       },
     }),
     route({

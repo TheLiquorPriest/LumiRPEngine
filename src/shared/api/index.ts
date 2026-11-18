@@ -3759,7 +3759,7 @@ export interface TurnReply {
   threads: ({ id: string; text: string | null; state: string | null; stakes: string | null })[];
 }
 
-/** A turn as a chat's list shows it. */
+/** A turn as a chat's list shows it: its newest run's kind and status, its reply's times, what all its runs spent, and each of its runs in its own words. */
 export interface TurnRow {
   id: TurnId;
   kind: TurnRunKind;
@@ -3773,10 +3773,25 @@ export interface TurnRow {
   timings: TurnMoments;
   /** Every agent of its run together: model calls and tokens. */
   usage: Usage;
+  /** Each of its runs, the first first: the run that answered is the latest that is not a Settle now run. */
+  runs: TurnRunRow[];
 }
 
 /** A run's kind: the kind of turn Lumiverse asked for, or a Settle now run, where the player asked the Author to settle an edit now and nothing is written to the chat. */
 export type TurnRunKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate" | "settle";
+
+/** One run of a turn as the list gives it: its place among the turn's runs, its kind, where it stands, why its reply failed when it did, when its moments happened (its reply released among them) and what it spent. */
+export interface TurnRunRow {
+  /** Its place among the turn's runs, from 1. */
+  nth: number;
+  kind: TurnRunKind;
+  status: TurnState;
+  /** Why the reply failed, when it did. */
+  error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
+  timings: TurnMoments;
+  /** What this run alone spent: model calls and tokens. */
+  usage: Usage;
+}
 
 /** What he says to the Author while the turn runs: it reaches the lead at its next model call, as his words. */
 export interface TurnSay {
@@ -5161,7 +5176,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length. */
+  /** A chat's turns, newest first, each with what its runs spent together and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length. */
   "GET /api/v1/chats/:chat/turns": {
     params: { chat: string };
     query: { limit?: number; before?: TurnId };
