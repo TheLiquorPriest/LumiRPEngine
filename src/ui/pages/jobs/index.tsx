@@ -13,7 +13,7 @@ import { Written } from "../../markdown";
 import { errorWords, limitCount, limitName, tokenWords, when } from "../../words";
 import { BootstrapBrief, BootstrapMark, isBootstrapJob } from "./bootstrap-mark";
 import { JobsPage } from "./page";
-import { cancellable, JOB_STATE_WORDS } from "./words";
+import { cancellable, JOB_STATE_WORDS, stoppedByWords } from "./words";
 
 export { cancellable, JOB_STATE_WORDS } from "./words";
 
@@ -73,6 +73,7 @@ export function readJobs(client: Pick<RpeClient, "call">, chat: string | null, o
 function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onCancel(job: string): void }) {
   const { job, shown } = props;
   const state = JOB_STATE_WORDS[job.state];
+  const stopped = stoppedByWords(job);
   const answered = shown.cancelled?.job === job.id ? shown.cancelled : null;
   return (
     <li class="rpe-entry lre-stack" data-job={job.id}>
@@ -92,6 +93,7 @@ function JobItem(props: { job: JobView; shown: JobsShown; withChat: boolean; onC
         {`${job.id} · started by ${job.startedBy === "user" ? "you" : `the ${job.startedBy.definition}`} ${when(job.started)}${job.ended === undefined ? "" : `, ended ${when(job.ended)}`} · ${tokenWords(job.usage)}`}
       </span>
       {job.limit === undefined ? null : <span class="rpe-meta">{`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}</span>}
+      {stopped === null ? null : <span class="rpe-meta">{stopped}</span>}
       {job.report === undefined ? null : <Written text={job.report} />}
       {answered === null || answered.refused === null ? null : (
         <Banner tone="neg" icon="alert" title="Not cancelled">

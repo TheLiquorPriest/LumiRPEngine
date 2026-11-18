@@ -17,7 +17,7 @@ import { counted, errorWords, limitCount, limitName, num, tokenWords, when } fro
 import { type AgentWindow, CallsLine, WindowGauge } from "../usage";
 import { BootstrapAsk } from "./bootstrap";
 import { BootstrapBrief, isBootstrapJob } from "./bootstrap-mark";
-import { cancellable, JOB_STATE_WORDS } from "./words";
+import { cancellable, JOB_STATE_WORDS, stoppedByWords } from "./words";
 import { LIMIT_FIELDS, limitsOf } from "./start";
 
 /** What he may do with a job at the state it stands in. */
@@ -81,6 +81,7 @@ export function JobOpen(props: JobOpenProps) {
   };
   const post = (key: "restart" | "hold" | "release" | "resume" | "pause"): Promise<JobView> => app.client.call(`POST /api/v1/jobs/:job/${key}`, { job: job.id }).then((a) => a.job);
   const state = JOB_STATE_WORDS[job.state];
+  const stopped = stoppedByWords(job);
   const windows: AgentWindow[] = (run.value?.windows ?? []).map((w) => ({ agent: w.agent.id, definition: w.agent.definition, connection: "", model: "", held: w.gauge.used, window: w.gauge.window, reserve: w.gauge.reserve, calls: 0, running }));
   const callLimit = job.limits?.calls ?? null;
   return (
@@ -103,6 +104,11 @@ export function JobOpen(props: JobOpenProps) {
       {job.limit === undefined ? null : (
         <p class="rpe-line" data-limit>
           {`Ended at its limit on ${limitName(job.limit)}: ${limitCount(job.limit)}.`}
+        </p>
+      )}
+      {stopped === null ? null : (
+        <p class="rpe-line" data-stopped-by>
+          {stopped}
         </p>
       )}
       {job.missing === undefined || job.missing.length === 0 ? null : <p class="rpe-meta">Names it was given that nothing provides: {job.missing.join(", ")}.</p>}

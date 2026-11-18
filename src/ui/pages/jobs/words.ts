@@ -1,6 +1,6 @@
-// How a job stands, in words, and what Cancel can do about it.
+// How a job stands, in words, who ended it, and what Cancel can do about it.
 
-import type { JobRefusal, JobState, JobView } from "../../../shared/api";
+import type { JobRefusal, JobState, JobStopper, JobView } from "../../../shared/api";
 import type { Tone } from "../../../frontend/components";
 
 /** How a job stands, as a badge says it. */
@@ -20,6 +20,28 @@ export const JOB_STATE_WORDS: Readonly<Record<JobState, { words: string; tone?: 
 export function cancellable(job: JobView): boolean {
   return job.state === "queued" || job.state === "held" || job.state === "running" || job.state === "asking";
 }
+
+/** Who ended a job before its agent was done, in words: an agent of yours, you, or RPE and why; null where nobody did, or where its limit's own line says it. */
+export function stoppedByWords(job: Pick<JobView, "stoppedBy" | "state">): string | null {
+  const by = job.stoppedBy;
+  if (by === undefined) return null;
+  switch (by.by) {
+    case "agent":
+      return `The ${by.agent.definition} (${by.agent.id}) cancelled it, in run ${by.run}.`;
+    case "user":
+      return job.state === "cancelled" ? "You cancelled it." : "You ended it.";
+    case "engine":
+      return ENGINE_STOP_WORDS[by.reason];
+  }
+}
+
+/** Why RPE ended a job; at a limit the limit's own line says which, so nothing more is said. */
+const ENGINE_STOP_WORDS: Readonly<Record<Extract<JobStopper, { by: "engine" }>["reason"], string | null>> = {
+  limit: null,
+  "off-path": "RPE ended it: the turn that started it left the chat's path.",
+  stopping: "RPE ended it as RPE stopped. You can resume it.",
+  restart: "RPE found it cut off by a restart. You can resume it.",
+};
 
 const LIMIT_WORDS: Readonly<Record<Extract<JobRefusal, { refused: "limit" }>["limit"], string>> = { calls: "calls", tokensIn: "tokens in", tokensOut: "tokens out", tokens: "tokens in all", time: "seconds", askAt: "the calls it asks at" };
 
