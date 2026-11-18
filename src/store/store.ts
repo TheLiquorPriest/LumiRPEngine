@@ -1042,15 +1042,38 @@ export class UserStore {
     return this.playedOnTurns(chat) || this.db.query<{ id: number }, [string, string]>("SELECT id FROM change WHERE user = ? AND chat = ? LIMIT 1").get(this.id, chat) !== null;
   }
 
-  /** Whether a chat holds a turn RPE began itself or a change RPE recorded on one of its turns; his own changes, of no turn, are not counted. */
+  /** Whether a chat holds a turn RPE played (`playedIn`) or a change RPE recorded on one of its turns; his own changes, of no turn, are not counted. */
   private playedOnTurns(chat: string): boolean {
+    if (this.playedIn(chat)) return true;
     const r = this.db
       .query<{ played: number }, [string, string]>(
-        `SELECT EXISTS(SELECT 1 FROM turn WHERE user = ?1 AND chat = ?2 AND imported = 0)
-             OR EXISTS(SELECT 1 FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND t.chat = ?2 AND (c.source IS NULL OR c.source <> 'import')) AS played`,
+        `SELECT EXISTS(SELECT 1 FROM change c JOIN turn t ON t.user = c.user AND t.id = c.turn WHERE c.user = ?1 AND t.chat = ?2 AND (c.source IS NULL OR c.source <> 'import')) AS played`,
       )
       .get(this.id, chat);
     return r?.played === 1;
+  }
+
+  /**
+   * Of `turns`, the ones RPE played: the one test of whether RPE played a turn, read by everything that asks it of a turn, a path or a
+   * chat (a migrated chat's first briefing, the counts of perceptions owed, the Turn page, the Chats page). A turn RPE began itself (its
+   * row is not a migration's import, `imported`), or a turn a migration carried that a continue RPE played has joined (`joined`, plan
+   * §10.10). A turn a migration carried, with the record of its run the migration keeps, is not among them, nor one only a Settle now
+   * run of RPE's settled: the earlier build played it.
+   */
+  playedOf(turns: readonly string[]): Set<string> {
+    if (turns.length === 0) return new Set();
+    const rows = this.db
+      .query<{ id: string }, [string, string]>(
+        `SELECT id FROM turn WHERE user = ?1 AND id IN (SELECT value FROM json_each(?2))
+           AND (imported = 0 OR id IN (SELECT joined FROM turn WHERE user = ?1 AND joined IS NOT NULL))`,
+      )
+      .all(this.id, JSON.stringify(turns));
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** Whether RPE played a turn in this chat, by the one test (`playedOf`): it began one there, as a continue of a carried reply begins its held turn there. */
+  playedIn(chat: string): boolean {
+    return this.db.query<{ played: number }, [string, string]>("SELECT EXISTS(SELECT 1 FROM turn WHERE user = ? AND chat = ? AND imported = 0) AS played").get(this.id, chat)?.played === 1;
   }
 
   /**

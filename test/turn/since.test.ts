@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { type Gate, gate } from "rp-harness/testing/rig";
 import type { StopReply, TurnsReply } from "../../src/shared/api";
 import { textHash } from "../../src/adapter/lumiverse/wire";
-import { NO_SESSION } from "../../src/turn";
+import { keepCarriedRun, NO_SESSION } from "../../src/turn";
 import type { ChatMessage } from "../standin/lumiverse";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, type TurnBed, type TurnBedOptions, USER } from "./bed";
 
@@ -333,6 +333,23 @@ describe("what has happened in the chat since the last turn", () => {
     expect(sent(b, 0)).toContain(CARRIED);
     expect(sent(b, 0)).toContain("It was played by the earlier build's agents engine; 3 of its turns were carried, each with what it changed.");
     expect(sent(b, 0)).toContain("- Wren Hale: core.md");
+    expect(sent(b, 1)).not.toContain(CARRIED);
+  });
+
+  test("a migrated chat's carried turns, each with the record of its run the migration keeps, do not count as played: its first turn on RPE is told what was carried", async () => {
+    const b = await bed({ answers: [replying("The lamp turns."), replying("Wren looks up.")] });
+    await carriedOver(b);
+    const store = b.turns.store.user(USER);
+    await b.app.writes.run((db) => {
+      store.createChat({ id: CHAT });
+      const carried = store.beginTurn({ chat: CHAT, kind: "new", imported: true });
+      store.tieTurn(carried.id, { message: "m-greeting", hash: textHash(GREETING) });
+      keepCarriedRun(db, { user: USER, chat: CHAT, turn: carried.id, at: 1, released: GREETING, saved: null });
+    });
+
+    await settledTurn(b, await play(b, "normal", "I climb the stairs."));
+    await settledTurn(b, await play(b, "normal", "I wait."));
+    expect(sent(b, 0)).toContain(CARRIED);
     expect(sent(b, 1)).not.toContain(CARRIED);
   });
 

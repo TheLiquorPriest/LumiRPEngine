@@ -1674,9 +1674,10 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     };
     // What a migration carried (plan §12, §15), told to the first run RPE plays on the turn's own line: a swipe of that first turn is
     // told it too, and the turn after a continue of an imported reply, whose run joined the imported turn, is not; nor a second continue.
+    // Played is the store's one test (`playedOf`): the record of a carried turn's run that the migration keeps is no run RPE played.
     const { migrated } = this.#d;
     const before = storyAt(store, chat, turn.id).turns.filter((t) => t !== turn.id);
-    const played = this.#d.runs.countOf(user, before) > 0 || (again && this.#d.runs.countOf(user, [turn.id]) > 0);
+    const played = store.playedOf(before).size > 0 || (again && store.playedOf([turn.id]).size > 0);
     const carried = played ? null : migrated.fields(user, chat);
     const carriedPart = carried === null ? undefined : await guidance.part(migrated.part);
     if (carried !== null && carriedPart?.format === "template") add("migrated", notices?.line(migrated.notice, { carried: carriedPart.render(carried).text.trim() }));
