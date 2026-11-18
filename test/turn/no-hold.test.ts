@@ -121,7 +121,7 @@ const SCOPE = { user: USER, chat: CHAT, session: "session-7", turn: "turn-7" } a
 /** RPE's run of the turn, as the times write to it: no record, no thinking, no release yet. */
 function freshRun(): Run {
   // The times read and write these fields alone; the rest of a run is the turn lane's.
-  const fields: Pick<Run, "traceRun" | "released" | "intent" | "thinking"> = { traceRun: null, released: null, intent: null, thinking: [] };
+  const fields: Pick<Run, "traceRun" | "released" | "intent" | "thinking" | "leadCall"> = { traceRun: null, released: null, intent: null, thinking: [], leadCall: { open: null, failed: null } };
   return fields as Run;
 }
 
