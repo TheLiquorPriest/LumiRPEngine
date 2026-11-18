@@ -21,7 +21,7 @@ const nullable = shape.nullable;
 const runKind = shape.named("TurnRunKind", "A run's kind: the kind of turn Lumiverse asked for, or a Settle now run, where the player asked the Author to settle an edit now and nothing is written to the chat.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate", "settle"));
 type RunKindMirrored = Holds<Exactly<Infer<typeof runKind>, RunKind>>;
 
-const runState = shape.named("TurnState", "Where a turn or a run stands: running, or how it ended.", shape.oneOf("running", "released", "no-reply", "stopped", "limit", "failed"));
+const runState = shape.named("TurnState", "Where a turn or a run stands: running, or how it ended. A Settle now run owes no reply, so its ending with none (`no-reply`, and no error) is it settled.", shape.oneOf("running", "released", "no-reply", "stopped", "limit", "failed"));
 type RunStateMirrored = Holds<Exactly<Infer<typeof runState>, RunState>>;
 
 const span = shape.named("Span", "A stretch of a model's own writing, in milliseconds since 1970: from its first token to its last; `to` null while it began and has not ended (a run stopped inside it).", shape.object({ from: N, to: nullable(N) }));
@@ -67,7 +67,7 @@ const rowFields = {
   kind: runKind,
   onPath: field(shape.yesNo(), "On the chat's path; false once a swipe or a regenerate put a sibling in its place, or its message was deleted."),
   message: field(nullable(T), "The Lumiverse message it is tied to (plan §10.8); null until it is."),
-  status: runState,
+  status: field(runState, "Running while a run of it goes on; else how its reply's run ended (its latest run that is not a Settle now run, which writes nothing to the chat and is listed among its runs with its own end)."),
   marks: field(shape.list(turnMark), "Its marks, in the order they were set; none for a turn that carries none."),
   timings: moments,
   usage: field(usage, "Every agent of its run together: model calls and tokens."),
@@ -109,7 +109,7 @@ const turnRunRow = shape.named(
 
 const turnRow = shape.named(
   "TurnRow",
-  "A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its newest run's status, its reply's times, what all its runs spent, and each of its runs in its own words.",
+  "A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its reply's status, its reply's times, what all its runs spent, and each of its runs in its own words.",
   shape.object({ ...rowFields, runs: field(shape.list(turnRunRow), "Each of its runs, the first first: the run that answered is the latest that is not a Settle now run.") }),
 );
 export const turnsReply = shape.named("TurnsReply", "A chat's turns, newest first.", shape.object({ turns: shape.list(turnRow), more: field(shape.yesNo(), "Older turns remain.") }));
@@ -352,7 +352,7 @@ export const turnReply = shape.named(
       nullable(T),
       "The message of the empty reply this turn left in the chat, where it ended before a word of its reply went out and that reply still stands there empty (read from Lumiverse now); null for any other turn. It stays unless the setting lumiverse.reply.removeEmpty takes it away.",
     ),
-    error: field(nullable(replyError), "Why the reply failed, when it did."),
+    error: field(nullable(replyError), "Why its reply failed, when it did: its reply's run's, never a Settle now run's (that one is among its runs)."),
     trace: field(shape.list(traceRecord), "Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it."),
     lore: field(
       shape.object({ activated: shape.list(T), map: shape.list(T) }),

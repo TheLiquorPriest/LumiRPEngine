@@ -220,22 +220,24 @@ export function turnRoutes(deps: TurnRoutesDeps) {
 
   /**
    * A turn as the list gives it: what it is (the kind of the run that made it: a continue that joined its reply makes it no continue,
-   * plan §10.10, and a Settle now run none), its latest run's status, and the times of its reply (its latest run that wrote into the
-   * chat; a Settle now run's own times are among its runs).
+   * plan §10.10, and a Settle now run none), its state, and the times of its reply (its latest run that wrote into the chat; a Settle
+   * now run's own times are among its runs). Its state is running while a run of it goes on, else its reply's: a Settle now run writes
+   * nothing to the chat, so how it ended is its own, said among the turn's runs, and never what became of the turn's reply.
    */
   const summary = (user: string, chat: string, r: RunRecord) => {
     const store = turns.store.user(user);
     const row = store.turn(r.turn);
     const onPath = r.status === "running" || store.path(chat).some((e) => e.turn === r.turn);
     const all = turns.runs.ofTurn(user, r.turn);
+    const said = turns.runs.reply(user, r.turn) ?? r;
     return {
       id: r.turn,
       kind: all.find((run) => run.kind !== "settle")?.kind ?? r.kind,
       onPath,
       message: row?.message ?? null,
-      status: r.status,
+      status: r.status === "running" ? r.status : said.status,
       marks: turns.marks.ofTurn(user, r.turn),
-      timings: momentsOf(turns.runs.reply(user, r.turn) ?? r),
+      timings: momentsOf(said),
       usage: spent(all),
     };
   };
@@ -312,7 +314,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
       reply: { text: said.reply, progress: [...said.progress] },
       emptyReply: await turns.lane.emptyReplyLeft(user, r.turn),
-      error: r.error,
+      error: said.error,
       trace: records.filter(within),
       lore: await keptLore(r),
       runs: await runsOf(r, runs, within),

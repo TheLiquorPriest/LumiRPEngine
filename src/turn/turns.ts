@@ -1223,7 +1223,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         throw error;
       }
       void over.promise.then(() => this.#project(user, chat));
-      void this.#run(run, request, NO_CHAT, new AbortController().signal, { errors: lines(errors), lastText: settings.lastText, hold: null, heading: null }, over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
+      // It writes nothing into the chat: never the Author's last text in place of a line either.
+      void this.#run(run, request, NO_CHAT, new AbortController().signal, { errors: lines(errors), lastText: false, hold: null, heading: null }, over).catch((error: unknown) => this.#d.log.error("A Settle now run failed.", { turn: run.turn, error: words(error) }));
       return { turn: turn.id, run: run.id };
     } finally {
       intake.done();
@@ -2042,8 +2043,13 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         replied.resolve();
       },
       error: (e: ReplyError) => {
-        run.error = e;
         answered = true;
+        // A Settle now run owes no reply: ending with none is how it settles, its own end and no error, and nothing goes out.
+        if (run.kind === "settle" && e.code === "no-reply") {
+          replied.resolve();
+          return;
+        }
+        run.error = e;
         if (e.code === "limit" && e.limit !== undefined) run.stoppedBy ??= { limit: e.limit };
         // Stopped where it stood, at a limit or at the hold: what the Author had written of the reply goes out as the whole reply.
         if (run.stoppedBy !== null && run.reply !== "") {
@@ -2143,13 +2149,15 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   /**
    * A run that ended is told once in RPE's log, so the log answers why a reply failed: at warn where it failed, reached a limit or
    * released no reply, with the turn, the run, the chat, its kind and the reason in the words the player is shown (or the error's own, where
-   * that part has none), said as the end of a run whose reply had begun to go out where it had; at info where it was stopped; a run that
-   * released its reply and ended well is told in no line above debug.
+   * that part has none), said as the end of a run whose reply had begun to go out where it had (a Settle now run's always had, the run
+   * before it gave it); at info where it was stopped; a run that released its reply and ended well, and a Settle now run that settled
+   * (ended with no reply, which it owes none), are told in no line above debug.
    */
   #runEnded(run: Run, errors: LinesPart | undefined): void {
     if (run.status === "released" && run.stoppedBy === null) return;
+    if (run.kind === "settle" && run.status === "no-reply") return;
     const e = run.error;
-    const why = e === null ? `no reason was given (the run's status is ${run.status})` : replyErrorWords(e, errors, run.released !== null) || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
+    const why = e === null ? `no reason was given (the run's status is ${run.status})` : replyErrorWords(e, errors, run.released !== null || run.kind === "settle") || `${e.code}${e.detail !== undefined ? `: ${e.detail}` : ""}`;
     const how = run.stoppedBy !== null ? "stopped where it stood" : run.status === "limit" ? "at a limit" : run.status === "no-reply" ? "with no reply" : run.status === "stopped" ? "stopped" : "failed";
     const fields = { turn: run.turn, run: run.id, chat: run.chat, kind: run.kind, generation: run.generation, status: run.status };
     if (run.status === "stopped" && run.stoppedBy === null) this.#d.log.info(`A turn's run ended ${how}: ${why}`, fields);
