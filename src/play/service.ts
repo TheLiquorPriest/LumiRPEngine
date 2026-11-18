@@ -435,7 +435,7 @@ export class PlayService {
    */
   private async pressed(user: string, chat: string, tap: PanelTap, text: string): Promise<PanelAsk> {
     const { registry, world, state } = headOf(this.deps.store, user, chat);
-    const ask = (what: string, on: string[]): PanelAsk => ({ action: tap.action, values: tap.values, from: tap.from, what, on: on.length > 0 ? on.join(", ") : null });
+    const ask = (what: string, on: string[], values: JsonObject = tap.values): PanelAsk => ({ action: tap.action, values, from: tap.from, what, on: on.length > 0 ? on.join(", ") : null });
     if (tap.action === TIMELAPSE_ACTION) {
       const label = tap.values.label;
       return ask(typeof label === "string" && label.trim() !== "" ? label.trim() : tap.action, []);
@@ -457,7 +457,9 @@ export class PlayService {
       if (typeof v === "number") return [own(action.params, key)?.type === "money" ? formatMoney(v, world.currency) : String(v)];
       return typeof v === "string" && v !== "" ? [nameOf(v)] : [];
     });
-    return ask(action.label, here === null ? picked : [nameOf(here), ...picked]);
+    // An amount of money is kept as the world prints it, so the Author, who carries the press out with `act`, reads it as the world's own coin and not as the smallest unit.
+    const values = Object.fromEntries(Object.entries(tap.values).map(([key, v]) => [key, own(action.params, key)?.type === "money" && typeof v === "number" ? formatMoney(v, world.currency) : v]));
+    return ask(action.label, here === null ? picked : [nameOf(here), ...picked], values);
   }
 
   /**
