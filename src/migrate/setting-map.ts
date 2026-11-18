@@ -24,7 +24,7 @@ const WRITER = gone("LumiAH's writer agent");
 const LOOP = gone("LumiAH's agent loop");
 const RECALL = gone("LumiAH's recall tools");
 const JOBS = gone("how LumiAH's jobs were run");
-const MODEL = { none: "the model and effort an agent of today's runs on are carried as model choices, and its limits and tools into the header of an agent definition of his own; RPE's own agents are set up in their files" } as const;
+const MODEL = { none: "the model and effort an agent of today's runs on are carried as model choices, and its limits and tools into the header of an agent definition of your own; RPE's own agents are set up in their files" } as const;
 
 /** LumiAH's settings by path (`core.*` is its harness section); the paths of a group not named here are looked up by prefix (`LUMIAH_GROUPS`). */
 const LUMIAH: Readonly<Record<string, Fate>> = {
@@ -45,11 +45,11 @@ const LUMIAH: Readonly<Record<string, Fate>> = {
   "core.loop.retryWaitMs": { to: "calls.retryWaitSeconds", seconds: true },
   "core.loop.answerFloor": { to: "limits.minAnswerTokens" },
   "core.cache.retention": { to: "calls.cacheRetention" },
-  "core.cache.key": { none: "RPE asks a provider to cache by the call, with no key of the user's" },
+  "core.cache.key": { none: "RPE asks a provider to cache by the call, with no key of yours" },
   "core.connections.atOnce": { to: "throttles.atOnce" },
   "core.connections.throttles": { none: "a throttle is carried to the connection of RPE's that the connection it names is (the same id, or the same provider, model and address); one set on a connection RPE holds none for has no connection to go to" },
   "core.connections.toolRefusalMinutes": { to: "calls.toolRefusalMinutes" },
-  "core.prices": { none: "RPE keeps no money figures, so none of the user's prices" },
+  "core.prices": { none: "RPE keeps no money figures, so none of your prices" },
   "core.session.keepTurns": { to: "compaction.keepTurns" },
   "core.delegation.depth": { to: "limits.turn.depth" },
   "core.delegation.atOnce": { to: "limits.turn.agentsAtOnce" },
@@ -138,7 +138,7 @@ const ENGINE: Readonly<Record<string, Fate>> = {
   findings: gone("the old engines' findings list"),
   minds: { none: "RPE has no setting of that meaning besides those named of it; each chat's own choices are carried with the chat" },
   loreIndex: { none: "RPE has no setting of that meaning besides the entry that heads the index" },
-  prompts: { none: "his edited texts are attached under imported/, switched off" },
+  prompts: { none: "your edited texts are attached under imported/, switched off" },
   tidy: { to: "things.maxTidyFindings" },
 };
 
@@ -182,7 +182,7 @@ const TUNING: Readonly<Record<string, Fate>> = {
   providerMs: { to: "calls.providerWaitSeconds", seconds: true },
   answerSilentMs: { to: "calls.silentAfterSeconds", seconds: true },
   signInMs: { to: "calls.signInOpenSeconds", seconds: true },
-  connectionsRead: { none: "it capped today's read of his connections at one page of 200; RPE reads every page" },
+  connectionsRead: { none: "it capped today's read of your connections at one page of 200; RPE reads every page" },
   traceMs: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceBatch: { none: "RPE's trace is written to the turn's folder, not sent in batches" },
   traceHeld: { none: "RPE's trace is written to the turn's folder, not sent in batches" },

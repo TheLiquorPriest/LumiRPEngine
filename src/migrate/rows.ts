@@ -93,5 +93,5 @@ export const NO_PLACE_YET: Readonly<Partial<Record<RowId, string>>> = {
   "assistant-threads": "the pages lane",
   "chips-staged": "the turn lane's tables, which a run is given by its caller (`MigrateOptions.runs`); without them it is kept in the backup only",
   "approvals-jobs": "the turn lane's tables, and its writer of a carried job (`MigrateOptions.runs.keepJob`), which a run is given by its caller",
-  "owner-rows": "nothing reads a file he names (§22): an attached one stays in the backup, with his line, until a reader of it is built",
+  "owner-rows": "nothing reads a file you name (§22): an attached one stays in the backup, with your line, until a reader of it is built",
 };

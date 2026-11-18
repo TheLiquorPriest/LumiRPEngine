@@ -46,7 +46,7 @@ function targetOf(path: string, folders: SwitchOnDeps["folders"]): string | null
  */
 export async function switchOn(path: string, deps: SwitchOnDeps): Promise<SwitchedOn> {
   const to = targetOf(path, deps.folders);
-  if (to === null) throw new SwitchOnRefused(path, `only his GUIDANCE.md and his agents and skills under ${IMPORTED}/ are switched on`);
+  if (to === null) throw new SwitchOnRefused(path, `only your GUIDANCE.md and your agents and skills under ${IMPORTED}/ are switched on`);
   const attached = await readText(join(deps.root, path));
   if (attached === null) throw new SwitchOnRefused(path, "the file is not there");
   for (const [level, base] of [["global", deps.root], ["shipped", deps.shipped]] as const) {

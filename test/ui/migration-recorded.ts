@@ -31,7 +31,7 @@ export const MIGRATED: MigrationReply = {
   waiting: [
     { kind: "guidance", path: "imported/GUIDANCE.md", done: false },
     { kind: "agent", id: "scout", path: "imported/agents/scout.md", done: true, pins: [], deadTools: [] },
-    { kind: "connection", where: "agent scout of his own", connection: "Harbour Flash", agent: "scout", path: "imported/agents/scout.md", done: false },
+    { kind: "connection", where: "agent scout of your own", connection: "Harbour Flash", agent: "scout", path: "imported/agents/scout.md", done: false },
     { kind: "paused", chat: "chat-harbour", questions: 1, answered: null, done: false },
     { kind: "chat", chat: "chat-harbour", chips: 0, reviewCards: 1, rollback: true, done: false },
     { kind: "filing", chat: "chat-calder", characters: 2, notes: true, done: false },

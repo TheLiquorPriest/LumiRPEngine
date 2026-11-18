@@ -71,7 +71,7 @@ export function findChoices(engine: unknown, harness: unknown): Named[] {
     const id = /^harness\/settings\.json: core\.agents\.([^.]+)\.connectionId$/.exec(c.where)?.[1];
     if (id !== undefined && Object.hasOwn(defs, id)) c.to = agentPlace(id);
   }
-  for (const [id, def] of Object.entries(defs)) if (isRecord(def) && text(def.connectionId) !== null) out.push({ where: `agent ${id} of his own`, connection: def.connectionId as string, model: text(def.model), to: agentPlace(id) });
+  for (const [id, def] of Object.entries(defs)) if (isRecord(def) && text(def.connectionId) !== null) out.push({ where: `agent ${id} of your own`, connection: def.connectionId as string, model: text(def.model), to: agentPlace(id) });
   return out;
 }
 

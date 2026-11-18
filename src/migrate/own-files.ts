@@ -388,7 +388,7 @@ export async function carryOwnFiles(today: Today, items: readonly Item[], places
     if (!isRecord(def)) continue;
     out.agentIds.push(id);
     const run = runOf(id, ownAgents, settings);
-    const choice = run.connection === null ? null : models({ where: `agent ${id} of his own`, connection: run.connection, model: run.model, to: { agent: id, path: `${IMPORTED_AGENTS}/${id}.md` } });
+    const choice = run.connection === null ? null : models({ where: `agent ${id} of your own`, connection: run.connection, model: run.model, to: { agent: id, path: `${IMPORTED_AGENTS}/${id}.md` } });
     if (choice !== null) out.agentModels.push({ agent: id, connection: choice.connection, carriedTo: choice.carried?.id ?? null, why: choice.why });
     for (const tool of run.tools) if (tools !== null && !tools.has(tool)) out.deadTools.push({ agent: id, tool });
     const given = def.given === "request" ? ["chat:history[-1:]"] : undefined;

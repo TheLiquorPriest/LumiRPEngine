@@ -23,7 +23,7 @@ describe("a model choice", () => {
     const engine = { helper: { connectionId: "lv-1", model: null }, story: { models: { default: { connectionId: "lv-2" } } } };
     const harness = { v: 1, own: [{ path: ["core", "agents", "scout", "connectionId"], value: "mine-1" }, { path: ["core", "connections", "throttles", "lv-3"], value: { atOnce: 2 } }], definitions: { agents: { scout: { connectionId: "gone-1", model: "x" } } } };
     const found = findChoices(engine, harness);
-    expect(found.map((f) => f.where)).toEqual(["settings.json: helper.connectionId", "settings.json: story.models.default.connectionId", "harness/settings.json: core.agents.scout.connectionId", "harness/settings.json: core.connections.throttles.lv-3", "agent scout of his own"]);
+    expect(found.map((f) => f.where)).toEqual(["settings.json: helper.connectionId", "settings.json: story.models.default.connectionId", "harness/settings.json: core.agents.scout.connectionId", "harness/settings.json: core.connections.throttles.lv-3", "agent scout of your own"]);
     const match = matcherOf(PROFILES, RPE);
     expect(found.map((f) => match(f).carried?.id ?? null)).toEqual(["mine-1", "mine-2", "mine-1", null, null]);
     expect(match(found[4] as never).why).toContain("neither RPE nor Lumiverse");

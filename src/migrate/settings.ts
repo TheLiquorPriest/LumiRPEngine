@@ -224,7 +224,7 @@ export async function carrySettings(today: Today, items: readonly Item[], global
     else if (runtime.memory !== undefined) out.noHome.push(`runtime ${name}: memory`);
     // The runtime writes its whole tuning back whenever any field changes (`keepTuning`), so a field at today's own default is no choice of his: RPE's own default stands for it, and it is named, not carried.
     for (const [field, value] of Object.entries(isRecord(runtime.tuning) ? runtime.tuning : {})) {
-      if (Object.hasOwn(RUNTIME_DEFAULTS, field) && value === (RUNTIME_DEFAULTS as Record<string, unknown>)[field]) archived.push({ from: `runtime ${name}: tuning.${field}`, why: "it is at today's own default, which is no choice of his: RPE's own default for the setting of that meaning stands" });
+      if (Object.hasOwn(RUNTIME_DEFAULTS, field) && value === (RUNTIME_DEFAULTS as Record<string, unknown>)[field]) archived.push({ from: `runtime ${name}: tuning.${field}`, why: "it is at today's own default, which is no choice of yours: RPE's own default for the setting of that meaning stands" });
       else settle(`runtime ${name}: tuning.${field}`, tuningFate(field), value as JsonValue);
     }
     if (runtime.autoUpdate !== undefined) puts.push({ from: [`runtime ${name}: autoUpdate`], to: "update.restart", value: runtime.autoUpdate as JsonValue });

@@ -489,7 +489,7 @@ export function reportText(report: MigrationReport): string {
       lines.push(`  ${c.chatId}: ${c.outcome}, ${c.turns} turns (${where})${c.shares ? `; shares ${c.shares.messages} message(s) with ${c.shares.chat}` : ""}; ${check}${c.differences.length > 0 ? "; MARKED: today's state is kept as the start where they differ" : ""}`);
       for (const d of c.differences) lines.push(`    ${d.kept ? "differs" : "differs (not kept: the turn is the chat it was made from's)"} at ${d.at === "head" ? "the head" : `message ${d.at.message}, swipe ${d.at.swipe}`}: ${d.values.join(", ")}`);
       if ((c.edited ?? 0) > 0) lines.push(`    ${c.edited} swipe(s) edited since today's build read them: each is told to the chat's agents as a reply edited after its turn, at the first turn on RPE that finds it showing`);
-      if (c.own !== undefined) lines.push(`    ${c.own.placed} change(s) of his own and his jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
+      if (c.own !== undefined) lines.push(`    ${c.own.placed} change(s) of your own and your jobs' made in RPE since an earlier run are kept, tied to the same replies${c.own.lost > 0 ? `; ${c.own.lost} had lost their place (their reply is gone) and are not kept` : ""}`);
     }
   }
   if (report.unreadable.length > 0) {
@@ -564,21 +564,21 @@ export function reportText(report: MigrationReport): string {
     const choices = report.carried.modelChoices ?? [];
     if (choices.length > 0) {
       lines.push("", "Model choices, each where today's build kept it:");
-      for (const c of choices) lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for his agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
+      for (const c of choices) lines.push(`  ${c.where} (connection ${c.connection}${c.model === null ? "" : `, model ${c.model}`}): ${c.carried !== null ? `RPE's connection ${c.carried.id} (${c.carried.how})` : `no match in RPE${c.to === null ? "; RPE has no place for that work, which its default connection does" : `; pick one of RPE's for your agent ${c.to.agent} on the Migration page, until then its default connection does that work`}`}`);
     }
     // His texts and his agents' tools with no counterpart, by name.
     if (ownFiles !== null) {
       const apart = ownFiles.textsSetApart ?? [];
       if (apart.length > 0) {
-        lines.push("", "His texts that today's build would not send, or whose id no build had, attached as set apart:");
+        lines.push("", "Your texts that today's build would not send, or whose id no build had, attached as set apart:");
         for (const t of apart) lines.push(`  ${t.id}: ${t.reason.replaceAll("_", " ")}${t.missing.length > 0 ? ` (${t.missing.join(", ")})` : ""}`);
       }
       if ((ownFiles.textsNotText ?? []).length > 0) lines.push("", `Texts that are no text, kept in the backup: ${(ownFiles.textsNotText ?? []).join(", ")}.`);
       const dead = ownFiles.deadTools ?? [];
       if (dead.length > 0) {
-        lines.push("", "Tools his agents name that no longer exist:");
+        lines.push("", "Tools your agents name that no longer exist:");
         for (const d of dead) lines.push(`  ${d.agent}: ${d.tool}`);
-      } else if (ownFiles.toolsChecked === false && ownFiles.agents > 0) lines.push("", "His agents' tools were not checked: this run was not given the tree's list of tools.");
+      } else if (ownFiles.toolsChecked === false && ownFiles.agents > 0) lines.push("", "Your agents' tools were not checked: this run was not given the tree's list of tools.");
     }
     // Pins whose agent is not the one they were pinned for in today's build, each said with the file (R-174): none is lost, each is still used in play or waits on a switch.
     const pinned = report.carried.pins ?? null;
@@ -587,7 +587,7 @@ export function reportText(report: MigrationReport): string {
       for (const p of pinned.forAuthor) lines.push(`  ${p.file}: pinned for ${p.role} in today's build`);
     }
     if (pinned !== null && pinned.forOwn.length > 0) {
-      lines.push("", "Pins for one of his own agents, which is carried switched off, so the file is handed to it once he switches it on:");
+      lines.push("", "Pins for one of your own agents, which is carried switched off, so the file is handed to it once you switch it on:");
       for (const p of pinned.forOwn) lines.push(`  ${p.file}: ${p.agent}`);
     }
     if (pinned !== null && pinned.carried + pinned.removed + pinned.takenOut > 0) lines.push("", "Today's pin budgets (how much of a pin the old engines gave) are not carried: RPE hands a pinned file whole, and the budgets are archived with the old engines' settings.");

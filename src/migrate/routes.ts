@@ -176,7 +176,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       handle: async ({ user, body }) => {
         const folders = needs(presses?.folders, "the file tree's folders");
         const write = needs(presses?.writeAsUser, "the file tree's writer");
-        if (!/^[^/\\]+$/.test(body.agent)) throw new RouteError(400, `${body.agent} names no agent of his.`);
+        if (!/^[^/\\]+$/.test(body.agent)) throw new RouteError(400, `${body.agent} names no agent of yours.`);
         const written: string[] = [];
         for (const path of [`${IMPORTED}/${IMPORTED_AGENTS}/${body.agent}.md`, `${folders.agents}/${body.agent}.md`]) {
           const text = await readText(join(deps.paths.files, path));
@@ -211,7 +211,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
             ...(body.message === undefined ? {} : { message: body.message }),
             choice: body.choice,
             now: p.now(),
-            write: (work) => p.write(work, "landing his answer to a paused chat"),
+            write: (work) => p.write(work, "landing your answer to a paused chat"),
           });
           return { ...done, landed: JSON.parse(JSON.stringify(done.landed)) };
         } catch (error) {

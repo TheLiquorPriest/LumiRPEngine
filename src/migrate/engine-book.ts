@@ -134,7 +134,7 @@ export function goingBackRoutes(deps: GoingBackDeps) {
       handle: async ({ user, body }) => {
         if (!body.sure) throw new RouteError(400, "Confirm that you will not go back: nothing is kept otherwise.");
         const at = new Date(deps.now()).toISOString();
-        return { said: await deps.writes.run((db) => sayNoGoingBack(db, user, at), "his word that he will not go back") };
+        return { said: await deps.writes.run((db) => sayNoGoingBack(db, user, at), "your word that you will not go back") };
       },
     }),
     route({
