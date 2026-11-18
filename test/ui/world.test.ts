@@ -4,9 +4,9 @@
 // behind it, which ask what the page shows and nothing after it has moved on.
 
 import { describe, expect, test } from "bun:test";
-import { h, render } from "preact";
+import { Component, type ComponentChildren, h, render } from "preact";
 import { act } from "preact/test-utils";
-import type { WorldReply } from "../../src/shared/api";
+import type { OwnValues, WorldReply } from "../../src/shared/api";
 import { AppContext, type UiApp } from "../../src/ui/app";
 import type { RpeClient } from "../../src/ui/client";
 import { createGate } from "../../src/ui/gate";
@@ -169,4 +169,67 @@ describe("the World page as it reads the chat's turns", () => {
       page.close();
     }
   });
+});
+
+/** What a chat that plays a world answers to its own values: a level, the claims and the check rules. */
+const PLAYED_OWN: OwnValues = {
+  world: true,
+  realism: { preset: "story", levels: { money: 2 }, caps: { principal: {}, supporting: {}, background: {} }, floors: {}, tiers: { principal: [], supporting: [], background: [] } },
+  claims: { mode: "real", capped: false, own: false },
+  checks: { when: "risky", riskyAt: 0.5, trivialAt: null, impossibleAt: null, retry: "once", retryAfter: 0, own: false },
+};
+
+/** Takes what a component throws while drawing, as a browser's page would show it: the web app mounts its pages under no boundary of its own. */
+class Caught extends Component<{ into: unknown[]; children?: ComponentChildren }> {
+  override componentDidCatch(error: unknown): void {
+    this.props.into.push(error);
+  }
+
+  override render(): ComponentChildren {
+    return this.props.children;
+  }
+}
+
+describe("the World page as the web app draws it", () => {
+  // The web app gives its pages the page's own app and none of the kept views' (`useApp` of the extension's frontend throws without it).
+  for (const [name, own, gate] of [
+    ["a chat that plays a world, spoilers hidden", PLAYED_OWN, false],
+    ["a chat that plays a world, spoilers shown", PLAYED_OWN, true],
+    ["a chat that plays no world, spoilers hidden", { world: false }, false],
+    ["a chat that plays no world, spoilers shown", { world: false }, true],
+  ] as const) {
+    test(`${name}: its head and For this chat are drawn once, nothing throws while drawing, and leaving the page takes all of it away`, async () => {
+      const page = openPage();
+      try {
+        const client = {
+          call: ((key: string) => {
+            if (key === "GET /api/v1/chats/:chat/turns") return Promise.resolve({ turns: [], more: false });
+            if (key === "GET /api/v1/chats/:chat/world") return Promise.resolve(worldAt("world", 1));
+            if (key === "GET /api/v1/chats/:chat/own-values") return Promise.resolve(own);
+            if (key === "GET /api/v1/chats/:chat/state/due") return Promise.resolve({ items: [], span: null, more: 0 });
+            if (key === "GET /api/v1/chats/:chat/state/not-applied") return Promise.resolve({ reply: null, items: [] });
+            return Promise.reject(new Error("not read here"));
+          }) as RpeClient["call"],
+        };
+        const opened = createGate();
+        if (gate) opened.open(CHAT);
+        const errors: unknown[] = [];
+        const root = page.document.createElement("div") as PageElement;
+        await act(() => {
+          render(h(AppContext.Provider, { value: { client, gate: opened, kept: () => new Promise(() => undefined) } as unknown as UiApp }, h(Caught, { into: errors }, h(WorldPage, { chat: CHAT }))), root as unknown as HTMLElement);
+        });
+        await act(() => settle());
+        expect(errors.map(String)).toEqual([]);
+        expect(root.querySelectorAll("h2").map((e) => e.textContent)).toEqual(["World"]);
+        expect(root.querySelectorAll("h3").filter((e) => e.textContent === "For this chat")).toHaveLength(1);
+        // What it says of this chat is drawn whole: its three controls (the levels' preset line beside them), or that it plays no world.
+        expect(root.querySelectorAll("[data-own]").map((e) => e.getAttribute("data-own")).filter((name) => name !== "preset")).toEqual(own.world ? ["levels", "claims", "checks"] : ["no-world"]);
+        await act(() => render(null, root as unknown as HTMLElement));
+        expect(root.childNodes).toHaveLength(0);
+        expect(root.textContent).toBe("");
+      } finally {
+        page.close();
+      }
+    });
+  }
 });

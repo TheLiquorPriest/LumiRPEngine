@@ -11,7 +11,7 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
 import { diffCounts, diffRows, lineDiff } from "../shared/text-diff";
-import { type Toast, useApp, useUi } from "./app";
+import { AppContext, type Toast, useApp, useUi } from "./app";
 import { formatOdds } from "./format";
 import type { IconName } from "../ui/icons";
 import { Icon } from "../ui/icons";
@@ -722,7 +722,27 @@ export function HostSlider(props: { min: number; max: number; step?: number; int
   return <div ref={slot} class="lre-host-slot" />;
 }
 
+/**
+ * A labelled on-or-off switch. Under the kept views' own app it is the host's switch; a page the web app draws gives no such app
+ * (`useApp` would throw while rendering, and the page's tree would never be taken down), so there it is a plain switch of the pages' own.
+ */
 export function HostSwitch(props: { checked: boolean; label: string; disabled?: boolean; onChange(checked: boolean): void }) {
+  return useContext(AppContext) === null ? <PlainSwitch {...props} /> : <MountedSwitch {...props} />;
+}
+
+function PlainSwitch(props: { checked: boolean; label: string; disabled?: boolean; onChange(checked: boolean): void }) {
+  return (
+    <label class="lre-row">
+      <span class="k">{props.label}</span>
+      <span class="rpe-switch">
+        <input type="checkbox" role="switch" aria-label={props.label} checked={props.checked} disabled={props.disabled} onChange={(event) => props.onChange(event.currentTarget.checked)} />
+        <span class="rpe-switch-track" aria-hidden="true" />
+      </span>
+    </label>
+  );
+}
+
+function MountedSwitch(props: { checked: boolean; label: string; disabled?: boolean; onChange(checked: boolean): void }) {
   const { host } = useApp();
   const slot = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props);
