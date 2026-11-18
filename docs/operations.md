@@ -1545,7 +1545,7 @@ Worked example:
 
 #### time_totals
 
-Reads what the span from now to then would bring a person, from today's engine run on a copy of the world: each of their accounts' money in and out by category and by month (wages, rent and upkeep among them), the account's balance before and after, and where each of their needs would stand at the end. Nothing is recorded or changed, and nothing it lists happens until it is written.
+Reads what the span from now to then would bring a person, on copies of the world: each of their accounts' money in and out by category and by month (wages, rent and upkeep among them) as pass_time would record it over the same span, each payday and bill counted once, the account's balance before and after, and where each of their needs would stand at the end if their days were lived as the world's routines have them. The answer is numbers, not words. Nothing is recorded or changed here: the money is recorded when you pass the time, and a need is met only by what you record with act.
 
 Reads; changes nothing.
 

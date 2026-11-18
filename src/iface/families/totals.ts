@@ -1,12 +1,13 @@
-// The sums of a long stretch (the skill `time`): what today's engine would bring someone over a span, as
-// data: each of their accounts' money in and out by category and by month (wages, rent and upkeep among
-// them, as the journal books them) and where each need they keep would stand at its end. It is today's own
-// simulation run on a copy of the state and read off: nothing is recorded, applied or moved, and the
-// state the call reads has no part in it.
+// The sums of a long stretch (the skill `time`): what a span would bring someone, as data: each of their
+// accounts' money in and out by category and by month (wages, rent and upkeep among them, as the journal
+// books them) as `pass_time` would record it over the span, the same run on a copy, and where each need
+// they keep would stand at its end. It is run on copies of the state and read off: nothing is recorded,
+// applied or moved, and the state the call reads has no part in it.
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { calendarOf, formatClock } from "../../engine/calendar";
 import { advance, ALL_NOTE } from "../../engine/simulate";
+import { standingRun } from "../../engine/standing";
 import { clampUnitCap } from "../../engine/time-limits";
 import { Working } from "../../engine/working";
 import { NEED_IDS, needsSettingsOf } from "../../shared/needs";
@@ -50,18 +51,31 @@ const totals = readTool({
     if (to <= from) return { line: "unreadable", fields: { field: "until", value: JSON.stringify(said), wants: r.lines.line("wants_time") ?? "" } };
     const who = args.at === undefined || args.at === null ? { id: r.world.pov, name: r.nameOf(r.world.pov) } : foundIn(r, "at", args.at, "person");
     if ("line" in who) return who;
-    // Today's engine run over the span on a copy: its books and its needs at the end are what the span would bring.
-    const w = new Working(r.registry, r.doc, r.state.world);
-    const run = advance(r.registry, w, to, { runSeed: `totals:${call.scope.chat}`, mode: "timelapse", cause: "advance", includePov: true, povRoutine: false, interrupts: ALL_NOTE, unitCap: clampUnitCap(r.state.world.time.unitCap) });
+    // The span's money is what pass_time would record over it: the same run (`standingRun`) on a copy, so each slot counts once, the part of
+    // one before now and the one the span ends in as pass_time counts them. The needs are where the engine's own days lived would leave each,
+    // read from a second copy; both stop at the same minute, which is `reached`.
+    const seed = `totals:${call.scope.chat}`;
+    const kept = (upto: number) => {
+      const w = new Working(r.registry, r.doc, r.state.world);
+      return { w, run: standingRun(r.registry, w, upto, { runSeed: seed, cause: "advance" }) };
+    };
+    const lived = (upto: number) => {
+      const w = new Working(r.registry, r.doc, r.state.world);
+      return { w, run: advance(r.registry, w, upto, { runSeed: seed, mode: "timelapse", cause: "advance", includePov: true, povRoutine: false, interrupts: ALL_NOTE, unitCap: clampUnitCap(r.state.world.time.unitCap) }) };
+    };
+    let books = kept(to);
+    const days = lived(books.run.to);
+    if (days.run.to < books.run.to) books = kept(days.run.to);
+    const reached = Math.min(books.run.to, days.run.to);
     const accounts = Object.keys(r.state.world.entities).filter((id) => r.state.world.entities[id].kind === "account" && ownersOf(r.state.world, id).some((o) => o.party === who.id));
     const tuned = needsSettingsOf(r.world);
     const needs: JsonObject = {};
     for (const need of NEED_IDS) {
-      if (tuned[need].on) needs[need] = { from: Math.round(needValue(r.ctx, who.id, need, from)), to: Math.round(needValue(w.ctx, who.id, need, run.to)) };
+      if (tuned[need].on) needs[need] = { from: Math.round(needValue(r.ctx, who.id, need, from)), to: Math.round(needValue(days.w.ctx, who.id, need, reached)) };
     }
     const cal = calendarOf(r.world);
-    if (run.stop !== "target") reply.line("totals_cut_short", { reached: formatClock(cal, run.to), until: formatClock(cal, to) });
-    reply.data({ who: who.id, name: who.name, from: formatClock(cal, from), until: formatClock(cal, run.to), minutes: run.to - from, money: accounts.map((a) => moneyOf(r.state.world, w.state, r.world, a, from, run.to)) as unknown as JsonValue, needs });
+    if (reached < to) reply.line("totals_cut_short", { reached: formatClock(cal, reached), until: formatClock(cal, to) });
+    reply.data({ who: who.id, name: who.name, from: formatClock(cal, from), until: formatClock(cal, reached), minutes: reached - from, money: accounts.map((a) => moneyOf(r.state.world, books.w.state, r.world, a, from, reached)) as unknown as JsonValue, needs });
     return undefined;
   },
 });
