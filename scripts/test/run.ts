@@ -4,16 +4,13 @@
 //
 //   bun scripts/test/run.ts               the tests for what changed since the branch left main, and in the working tree
 //   bun scripts/test/run.ts --check       both typechecks and the generated files' checks, then those tests (`bun run check`)
-//   bun scripts/test/run.ts --release     the release gate: the checks, every test file through the per-file runner, the property suite on the fixed seeds and fresh ones
-//   bun scripts/test/run.ts --properties  the property suite alone, on the fixed seeds and fresh ones
-//   bun scripts/test/run.ts --timings     records test/timings.json again (every test file but the property suite, one after another in one process)
+//   bun scripts/test/run.ts --release     the release gate: the checks, then every test file through the per-file runner
+//   bun scripts/test/run.ts --timings     records test/timings.json again (every test file, one after another in one process)
 //   bun scripts/test/run.ts <test files>  these files
 //
 //   --base <ref>      compare with <ref> instead of main (HEAD: only what isn't committed yet)
 //   --budget <s>      seconds of recorded test time for the tests taken nearest first (default 60)
 //   --list            print the selection and stop; with --release, every test file the per-file runner runs
-//   --fresh <n>       fresh sequences for --release and --properties (default 200; 0 for none)
-//   --seed-base <b>   the fresh sequences' seed base (default a new one), to run a release's again
 //   -- <args>         passed on to `bun test` (`-t <pattern>`, `--bail`)
 //
 // The tests for what changed run in one `bun test` process, a worker per core, slowest first by
@@ -23,34 +20,26 @@
 // test/timings-all.json (`bun run test:timings`), of each file's whole process.
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { rmSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join, resolve } from "node:path";
-import { addCoverage, coverageGaps, noCoverage, type Coverage } from "../../test/support/coverage";
 import { changedSince, isTest, readRepo, readTimings, selectTests, type Pick } from "./select";
 import { TIMEOUT_MS, judge, readKnown, runAll, summarize, testFiles } from "../test-all";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const TIMINGS = "test/timings.json";
-const PROPERTIES = "test/ledger/properties.test.ts";
-/** Sequences a shard of the fixed sample runs: a multiple of ten, so its L31 double runs are the whole run's. */
-const FIXED_SHARD = 20;
-/** Sequences a shard of fresh seeds runs: enough that each is held to the minds' coverage, as a run of 40 is. */
-const FRESH_SHARD = 40;
 
 interface Args {
-  mode: "changed" | "check" | "release" | "properties" | "timings" | "files";
+  mode: "changed" | "check" | "release" | "timings" | "files";
   base: string;
   budget: number;
   list: boolean;
-  fresh: number;
-  seedBase: string;
   files: string[];
   bun: string[];
 }
 
 function parse(argv: readonly string[]): Args {
-  const args: Args = { mode: "changed", base: "main", budget: 60, list: false, fresh: 200, seedBase: `lre-${Date.now().toString(36)}`, files: [], bun: [] };
+  const args: Args = { mode: "changed", base: "main", budget: 60, list: false, files: [], bun: [] };
   const value = (i: number, flag: string): string => {
     const v = argv[i + 1];
     if (v === undefined) throw new Error(`${flag} needs a value`);
@@ -62,17 +51,15 @@ function parse(argv: readonly string[]): Args {
       args.bun.push(...argv.slice(i + 1));
       break;
     }
-    if (a === "--check" || a === "--release" || a === "--properties" || a === "--timings") args.mode = a.slice(2) as Args["mode"];
+    if (a === "--check" || a === "--release" || a === "--timings") args.mode = a.slice(2) as Args["mode"];
     else if (a === "--list") args.list = true;
     else if (a === "--base") args.base = value(i++, a);
     else if (a === "--budget") args.budget = Number(value(i++, a));
-    else if (a === "--fresh") args.fresh = Number(value(i++, a));
-    else if (a === "--seed-base") args.seedBase = value(i++, a);
     else if (a.startsWith("-")) args.bun.push(a);
     else args.files.push(a.replace(/^\.\//, ""));
   }
   if (args.files.length > 0 && args.mode === "changed") args.mode = "files";
-  if (!Number.isFinite(args.budget) || args.budget < 0 || !Number.isInteger(args.fresh) || args.fresh < 0) throw new Error("--budget and --fresh take a number");
+  if (!Number.isFinite(args.budget) || args.budget < 0) throw new Error("--budget takes a number");
   return args;
 }
 
@@ -125,58 +112,6 @@ async function suite(extra: readonly string[]): Promise<Done> {
   return { label: `tests: every test file, each in a process of its own (${judged.run.first.length})`, ok: judged.ok, ms: performance.now() - started, out: "" };
 }
 
-/**
- * The property suite in shards: the fixed sample's 200 sequences, held together to their coverage,
- * and `fresh` sequences from `seedBase`, each shard held to its own. `narrow` shards run at a time
- * until `widen` settles (the other test files are done with the cores), then one per core.
- */
-async function properties(fresh: number, seedBase: string, narrow: number, widen: Promise<unknown>): Promise<Done[]> {
-  const dir = mkdtempSync(join(tmpdir(), "lre-properties-"));
-  const shard = (label: string, env: Record<string, string>) => async (): Promise<Done> => {
-    // Every knob set, so a seed or a base left in the shell's environment can't change the gate's sequences.
-    const done = await exec(label, [bun, "test", `./${PROPERTIES}`], { quiet: true, env: { LRE_PROPERTY_SEED: "", LRE_PROPERTY_OPS: "60", LRE_PROPERTY_COVERAGE: "", ...env } });
-    console.log(`${done.ok ? "ok  " : "FAIL"} ${label} (${(done.ms / 1000).toFixed(1)} s)`);
-    return done;
-  };
-  const fixed = Array.from({ length: 200 / FIXED_SHARD }, (_, k) => k * FIXED_SHARD);
-  const freshFrom = Array.from({ length: Math.ceil(fresh / FRESH_SHARD) }, (_, k) => k * FRESH_SHARD);
-  // The longer fresh shards first, so the last to finish is a short one.
-  const tasks = [
-    ...freshFrom.map((from) => {
-      const runs = Math.min(FRESH_SHARD, fresh - from);
-      return shard(`properties: ${seedBase}-${from}…${from + runs - 1}`, { LRE_PROPERTY_BASE: seedBase, LRE_PROPERTY_FROM: `${from}`, LRE_PROPERTY_RUNS: `${runs}` });
-    }),
-    ...fixed.map((from) => shard(`properties: lre-fixed-${from}…${from + FIXED_SHARD - 1}`, { LRE_PROPERTY_BASE: "lre-fixed", LRE_PROPERTY_FROM: `${from}`, LRE_PROPERTY_RUNS: `${FIXED_SHARD}`, LRE_PROPERTY_COVERAGE: join(dir, `${from}.json`) })),
-  ];
-  const started = performance.now();
-  const results: Done[] = [];
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < tasks.length) {
-      const i = next++;
-      const task = tasks[i];
-      if (task) results[i] = await task();
-    }
-  };
-  const workers = Array.from({ length: Math.min(narrow, tasks.length) }, worker);
-  await widen;
-  workers.push(...Array.from({ length: Math.max(0, availableParallelism() - narrow) }, worker));
-  await Promise.all(workers);
-  if (results.slice(freshFrom.length).every((r) => r.ok)) {
-    const sum = noCoverage();
-    let counted = 0;
-    for (const from of fixed) {
-      const shardRun = JSON.parse(readFileSync(join(dir, `${from}.json`), "utf8")) as { runs: number; coverage: Coverage };
-      addCoverage(sum, shardRun.coverage);
-      counted += shardRun.runs;
-    }
-    const gaps = coverageGaps(sum, counted);
-    results.push({ label: `properties: the fixed sample reaches its coverage (${counted} sequences)`, ok: gaps.length === 0, ms: performance.now() - started, out: gaps.length > 0 ? `never reached: ${gaps.join(", ")}\n` : "" });
-  }
-  rmSync(dir, { recursive: true, force: true });
-  return results;
-}
-
 function report(title: string, steps: readonly Done[], started: number): boolean {
   const failed = steps.filter((s) => !s.ok);
   for (const s of failed) if (s.out) console.log(`\n--- ${s.label}\n${s.out.trimEnd()}`);
@@ -208,10 +143,10 @@ function describe(changed: readonly string[], since: string, base: string, run: 
 async function targeted(args: Args): Promise<Done | null> {
   const { since, files: changed } = changedSince(ROOT, args.base);
   const timings = readTimings(join(ROOT, TIMINGS));
-  const selection = selectTests(readRepo(ROOT), changed, { timings, budget: args.budget * 1000, releaseOnly: [PROPERTIES] });
+  const selection = selectTests(readRepo(ROOT), changed, { timings, budget: args.budget * 1000, releaseOnly: [] });
   describe(changed, since, args.base, selection.run, selection.left, selection.uncovered, selection.all, args.list);
   if (args.list) return null;
-  if (selection.all) return bunTest("tests: every test file but the property suite", [], [`--path-ignore-patterns=${PROPERTIES}`, ...args.bun]);
+  if (selection.all) return bunTest("tests: every test file", [], args.bun);
   if (selection.run.length === 0) {
     console.log("Nothing to run.");
     return null;
@@ -238,15 +173,10 @@ async function main(): Promise<boolean> {
       const tests = await targeted(args);
       return report("Checks before a commit", tests ? [...steps, tests] : steps, started);
     }
-    case "properties": {
-      const props = await properties(args.fresh, args.seedBase, availableParallelism(), Promise.resolve());
-      if (args.fresh > 0) console.log(`Fresh sequences: LRE_PROPERTY_BASE=${args.seedBase} (LRE_PROPERTY_SEED=${args.seedBase}-<i> replays one).`);
-      return report("Property suite", props, started);
-    }
     case "timings": {
       // One file after another in one process, as plain `bun test` runs them, so a file's time is its own and not a share of the machine's.
       rmSync(join(ROOT, TIMINGS), { force: true });
-      return (await exec("timings", [bun, "test", `--timings=${TIMINGS}`, "--update-timings", `--path-ignore-patterns=${PROPERTIES}`])).ok;
+      return (await exec("timings", [bun, "test", `--timings=${TIMINGS}`, "--update-timings"])).ok;
     }
     case "release": {
       if (args.list) {
@@ -255,11 +185,7 @@ async function main(): Promise<boolean> {
       }
       const steps = await checks();
       const tests = suite(args.bun);
-      // The shards spend much of their time waiting on the fake host's event loop, so a few share
-      // the cores with the test files, and the rest start as the files finish.
-      const props = properties(args.fresh, args.seedBase, Math.max(2, Math.floor(availableParallelism() / 3)), tests);
-      const done = [...steps, await tests, ...(await props)];
-      if (args.fresh > 0) console.log(`Fresh sequences: LRE_PROPERTY_BASE=${args.seedBase} (LRE_PROPERTY_SEED=${args.seedBase}-<i> replays one).`);
+      const done = [...steps, await tests];
       return report("Release gate", done, started);
     }
   }
