@@ -154,7 +154,7 @@
     "strings": { "type": "array", "items": { "type": "string" } },
     "expr": { "title": "a formula", "type": "string", "description": "a formula in the expression language" },
     "level": { "type": "integer", "minimum": 0, "maximum": 4 },
-    "domain": { "enum": ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"] },
+    "domain": { "enum": ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets", "d20"] },
     "domainLevels": {
       "type": "object",
       "additionalProperties": false,
@@ -167,7 +167,8 @@
         "space": { "$ref": "#/$defs/level" },
         "calendar": { "$ref": "#/$defs/level" },
         "weather": { "$ref": "#/$defs/level" },
-        "sheets": { "$ref": "#/$defs/level" }
+        "sheets": { "$ref": "#/$defs/level" },
+        "d20": { "$ref": "#/$defs/level" }
       }
     },
     "band": { "enum": ["principal", "supporting", "background"] },
@@ -948,7 +949,8 @@
             "space": { "$ref": "#/$defs/level" },
             "calendar": { "$ref": "#/$defs/level" },
             "weather": { "$ref": "#/$defs/level" },
-            "sheets": { "$ref": "#/$defs/level" }
+            "sheets": { "$ref": "#/$defs/level" },
+            "d20": { "$ref": "#/$defs/level" }
           }
         },
         "tierCaps": {

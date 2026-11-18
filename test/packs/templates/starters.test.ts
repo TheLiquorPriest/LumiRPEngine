@@ -13,6 +13,7 @@ import { ALL_PACKS, STARTER_WORLDS, defaultTables } from "../../../src/packs/ind
 import { hashJson } from "../../../src/shared/hash";
 import type { JsonValue } from "../../../src/shared/json";
 import { objectiveWhen, type EffectSpec, type WorldDoc } from "../../../src/shared/world";
+import { profileOf } from "../../../src/shared/profiles/index";
 import { buildAll } from "../../../scripts/templates/build";
 import { startState, trialBalance } from "../support";
 import { registry } from "./play";
@@ -155,10 +156,12 @@ describe.each(IDS)("%s", (id) => {
     }
   });
 
-  test("every default table is copied, re-hashed and pinned", () => {
+  test("every default table is copied, re-hashed and pinned; the tables of the rule set it carries are its own", () => {
     const defaults = defaultTables(ALL_PACKS);
-    expect(Object.keys(world.tables).sort()).toEqual(Object.keys(defaults).sort());
-    for (const [tableId, table] of Object.entries(world.tables)) {
+    const set = new Set(Object.keys(profileOf(world.ruleset?.profile)?.tables ?? {}));
+    const tables = Object.entries(world.tables).filter(([tableId]) => !set.has(tableId));
+    expect(tables.map(([tableId]) => tableId).sort()).toEqual(Object.keys(defaults).sort());
+    for (const [tableId, table] of tables) {
       expect(table.revision).toBe(hashJson({ schema: table.schema, columns: table.columns, rows: table.rows } as unknown as JsonValue));
       expect(world.pins.tables[tableId]).toBe(table.revision);
     }

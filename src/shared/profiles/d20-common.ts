@@ -25,7 +25,8 @@ export const ABILITY_MOD: Expr = "floor((x - 10) / 2)";
 
 /** A modifier as a table's cell holds it. */
 export function mod(to: string, value: number | Expr, more: { type?: string; when?: Expr; note?: string; limit?: true; bypass?: string[] } = {}): JsonObject {
-  return { to, value, ...more };
+  // A stored world reads -0 back as 0, so a step of none (`steps * -4` at medium) is written as 0.
+  return { to, value: typeof value === "number" ? value + 0 : value, ...more };
 }
 
 /** A d20 table of a role: the role's columns and any more the set gives, its rows, and the revision the engine computes for any table. */

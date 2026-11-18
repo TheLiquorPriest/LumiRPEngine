@@ -27,6 +27,14 @@ import { encounterOf } from "../../src/packs/combat/core/model";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { baseWorld, POV } from "../packs/support";
 import { withoutAmbient } from "./support";
+import fantasyTown from "../../src/packs/starters/fantasy_town.json";
+import mysteryManor from "../../src/packs/starters/mystery_manor.json";
+import modernSliceOfLife from "../../src/packs/starters/modern_slice_of_life.json";
+
+/** The starters as their templates make them, before the rule set each carries is put on as it loads (`withRules`). */
+const BARE_STARTERS: Record<string, (id: string, name: string) => WorldDoc> = Object.fromEntries(
+  Object.entries({ fantasy_town: fantasyTown, mystery_manor: mysteryManor, modern_slice_of_life: modernSliceOfLife }).map(([key, doc]) => [key, (id: string, name: string): WorldDoc => ({ ...structuredClone(doc as unknown as WorldDoc), id, name })]),
+);
 
 const reg = createRegistry(ALL_PACKS);
 const packKinds = Object.fromEntries(reg.kinds);
@@ -81,7 +89,7 @@ function withFoe(world: WorldDoc): string {
 }
 
 describe("each profile on each starter world", () => {
-  for (const [starter, make] of Object.entries(STARTER_WORLDS)) {
+  for (const [starter, make] of Object.entries(BARE_STARTERS)) {
     for (const id of PROFILE_IDS) {
       const profile = PROFILES[id];
       const applied = () => applyProfile(make(starter, starter), profile, packKinds);

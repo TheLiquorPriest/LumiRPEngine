@@ -35,6 +35,7 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { withoutAmbient } from "../../engine/support";
 import { fold, POV, registryOf, startState } from "../support";
 import { fightWorld, plan, povFirst, reg, started } from "./support";
+import fantasyTown from "../../../src/packs/starters/fantasy_town.json";
 
 function dataOf(e: LedgerEvent | undefined): Record<string, unknown> {
   return e && "data" in e ? e.data : {};
@@ -501,8 +502,8 @@ describe("rules and sides", () => {
 
   test("Playtest reads fight words as fight actions only where the ruleset has combat", () => {
     const registry = createRegistry(ALL_PACKS);
-    const make = STARTER_WORLDS.fantasy_town;
-    if (!make) throw new Error("no starter");
+    // Brindlemere as its template makes it, before the rule set it carries is put on as it loads.
+    const make = (id: string, name: string): WorldDoc => ({ ...structuredClone(fantasyTown as unknown as WorldDoc), id, name });
     const read = (world: WorldDoc, text: string) => typedIntent(registry, world, initialState(world, hashJson(world), registry), text)?.action ?? null;
     const plain = make("f", "f");
     for (const text of ["I draw my weapon on Wren", "I end my turn", "I pick a fight with Marta"]) expect(read(plain, text)).toBeNull();
