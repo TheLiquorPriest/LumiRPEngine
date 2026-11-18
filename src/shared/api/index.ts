@@ -25,7 +25,7 @@ export interface AgentRef {
   plays?: string;
 }
 
-/** A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile and effort as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on. */
+/** A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile, effort and limits as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on. */
 export interface AgentShown {
   name: string;
   description: string;
@@ -35,6 +35,7 @@ export interface AgentShown {
   off: boolean;
   model?: string;
   effort?: Effort;
+  limits?: DefinitionLimitsView;
   toolsAs?: ToolsAs;
   tools: string[];
   reads: string[];
@@ -63,7 +64,7 @@ export interface ApplyNowAsk {
   chat: string;
 }
 
-/** What "Apply now" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words. */
+/** What "Apply now" did: the session whose opening block was made afresh at the press, which the next run of each agent takes, or none when no session is open, and what that means in words. */
 export interface ApplyNowReply {
   session: string | null;
   note: string;
@@ -144,7 +145,7 @@ export interface BootstrapBatchAsk {
   chats: "migrated" | string[];
   /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
-  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.askAtTokens` in force for the chat. */
   tokenLimit?: number;
 }
 
@@ -187,7 +188,7 @@ export interface BootstrapQuestion {
 export interface BootstrapStartAsk {
   /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
-  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.askAtTokens` in force for the chat. */
   tokenLimit?: number;
 }
 
@@ -706,11 +707,27 @@ export interface ConsentGrant {
   gapCheck?: string;
 }
 
-/** What a definition runs on, resolved among the user's connections for the chat it is listed for: the connection its header names (his default where it names none), that connection's model, and the effort it thinks at: its definition's, else its connection's own. */
+/** An agent's limits as a definition's header and the settings write them: `time` and `callTime` in seconds. Each absent is no limit of its own. */
+export interface DefinitionLimitsView {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  time?: number;
+  callTokensIn?: number;
+  callTokensOut?: number;
+  callTime?: number;
+  toolRounds?: number;
+  toolsPerAnswer?: number;
+  toolsAtOnce?: number;
+  messages?: number;
+}
+
+/** What a definition runs on, resolved among the user's connections for the chat it is listed for, with what the settings there set for it standing over its header: the connection its header names (his default where it names none), that connection's model, the effort it thinks at (the settings' for its definition, else the settings' for its connection, else its definition's, else its connection's own), and the limits it is held to (its header's, each one the settings set standing over it; absent where none holds). */
 export interface DefinitionRun {
   connection: { id: string; name: string } | null;
   model: string | null;
   effort: Effort | null;
+  limits?: DefinitionLimitsView;
 }
 
 /** One line of a difference between two texts: in both, only in the second, or only in the first. */
@@ -729,7 +746,7 @@ export interface DoneEnoughShown {
   principals: { known: true; principals: { id: string; name: string; base: string[]; memories: number; own: number; ownFromPerceptions: number }[] } | FactNotKnown;
 }
 
-/** What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted). */
+/** What a turn's time brought due, soonest first, as many as the chat's engine.maxDueItems lists, and how many more fell due (null: more did, uncounted). */
 export interface DueReply {
   turn: TurnId;
   /** The turn's span as the world prints its two ends; null where no time passed. */
@@ -911,7 +928,7 @@ export interface FileMovedReply {
   guidance: GuidanceKind | null;
 }
 
-/** A file pinned for an agent, or the pin taken away, in the `pins:` list of a level's config: the global level's, or a chat's, which names the chat. */
+/** A file pinned for an agent, or the pin taken away, in the `stack.pins` list of a level's config: the global level's, or a chat's, which names the chat. */
 export interface FilePinAsk {
   level: "global" | "chat";
   chat?: string | null;
@@ -931,7 +948,7 @@ export interface FileReply {
   text: string;
 }
 
-/** A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat. */
+/** A file's name switched off or on again in the `stack.off` list of a level's config: the global level's, or a chat's, which names the chat. */
 export interface FileSwitchAsk {
   level: "global" | "chat";
   chat?: string | null;
@@ -1674,6 +1691,86 @@ export interface MapWrote {
   advised: JsonValue[];
 }
 
+/** One decision the script plants in the scene, with the check of whether the scene honoured it: what was planted and in which turn, the question put to the judging connection and the turn it tested, the excerpt of the reply and of the Author's records it judged, whether it found the decision honoured, and the judge's own answer. */
+export interface MeasureDecision {
+  name: string;
+  planted: number;
+  check: string;
+  tested: number;
+  evidence: string;
+  honoured: boolean;
+  answer: string;
+}
+
+/** What a stretch of turns cost, as the measurement counts it from RPE's own record of each turn: tokens in, out and cached, the time to the reply's end and to the run's end (ms), and the model calls made. */
+export interface MeasureFigures {
+  tokensIn: number;
+  tokensOut: number;
+  cached: number;
+  replyMs: number;
+  runMs: number;
+  calls: number;
+}
+
+/** A report kept: the id RPE gave it and when it received it (ms). */
+export interface MeasurementKept {
+  id: string;
+  at: number;
+}
+
+/** A kept report whole, as it was sent, with its id and when RPE received it. */
+export interface MeasurementRead {
+  id: string;
+  at: number;
+  report: MeasurementReport;
+}
+
+/** A run of the session measurement: when it ran, the Author's connection and model, the judging connection and model, the script's hash, the three carry modes as played, and the recommendation of whoever ran it (blank until they write it; a report with none is kept and the page marks it as waiting for one). */
+export interface MeasurementReport {
+  ran: number;
+  connection: string;
+  model: string;
+  judge: { connection: string; model: string };
+  script: string;
+  modes: MeasureMode[];
+  recommendation: string;
+}
+
+/** A kept report in the list: its id, when RPE received it, when it ran, the connection and model it ran on, the judging connection, and whether its recommendation is written. */
+export interface MeasurementRow {
+  id: string;
+  at: number;
+  ran: number;
+  connection: string;
+  model: string;
+  judge: string;
+  recommended: boolean;
+}
+
+/** The script played in one carry mode: each turn's figures, their totals and medians, each planted decision with its check, and the look-ups made (calls of read tools) and the ones that repeated an earlier turn's, each named. */
+export interface MeasureMode {
+  mode: CarryMode;
+  turns: MeasureTurn[];
+  totals: MeasureFigures;
+  medians: MeasureFigures;
+  decisions: MeasureDecision[];
+  lookups: { total: number; repeated: MeasureRepeat[] };
+}
+
+/** A look-up an agent made again: the tool and its arguments as they were made, the turn that repeated it and the turn that made it first. */
+export interface MeasureRepeat {
+  tool: string;
+  args: string;
+  turn: number;
+  first: number;
+}
+
+/** One turn of the measurement's script as played in a mode: its number in the script, and what it cost. */
+export interface MeasureTurn {
+  n: number;
+  figures: MeasureFigures;
+}
+
 /** A memory's tier: top of mind, short term, long term. */
 export type MemoryBand = "top" | "short" | "long";
 
@@ -1885,19 +1982,29 @@ export interface ModelLimit {
   from: "user" | "pi" | "connection";
 }
 
-/** A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; and the figures nobody has given, in the order the page asks for them. */
+/** A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; whether it takes audio and video, the user's entry else the server's report, never asked for (a request passed through that carries one the model is said to take none of is refused); and the figures nobody has given, in the order the page asks for them. */
 export interface ModelLimits {
   contextWindow: ModelLimit | null;
   maxTokens: ModelLimit | null;
   pictures: ModelPictures | null;
+  audio: ModelMedia | null;
+  video: ModelMedia | null;
   asked: ModelFigure[];
 }
 
-/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures. */
+/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures, audio and video. */
 export interface ModelLimitsEntry {
   contextWindow?: number;
   maxTokens?: number;
   pictures?: boolean;
+  audio?: boolean;
+  video?: boolean;
+}
+
+/** Whether a model takes audio, or video, and where that came from: pi's catalogue says neither, so the user's entry or the connection's server. */
+export interface ModelMedia {
+  takes: boolean;
+  from: "user" | "connection";
 }
 
 /** Whether a model takes pictures, and where that came from. */
@@ -2602,6 +2709,8 @@ export interface RunShown {
   target: string | null;
   /** A continue's own turn, which held what it changed until Lumiverse's end decided its turn, and whose folder holds its files (its requests among them): the turn id its files are read under. Null for any other run. */
   held: string | null;
+  /** A continue's own intent record, kept with its run, never over the intent record of the turn it extended (the turn's `intent`). Null for any other run, whose intent record is its turn's. */
+  intentRecord: string | null;
   timings: TurnMoments;
   usage: Usage;
   /** What this run sent to the chat. */
@@ -2687,7 +2796,7 @@ export interface ServiceTimings {
   parts: { part: string; turns: number; median: number; slowest: number; latest: number }[];
 }
 
-/** A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own. */
+/** A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password, the Lumiverse session token too: a client that keeps one (the command line) keeps it as its own; RPE ends it through the door when this session signs out. */
 export interface Session {
   /** The session's token: given as the bearer of every call, and traded again for a new one before it ends. */
   session: string;
@@ -2695,7 +2804,7 @@ export interface Session {
   ends: number;
   /** The Lumiverse user it is of. */
   user: string;
-  /** Lumiverse's own session, handed back for a client that keeps one (the command line); never for the web shell. */
+  /** Lumiverse's own session, made by a sign-in by password, handed back; a page need not keep it, since its sign-out ends it. */
   lumiverse?: { token: string; username: string };
 }
 
@@ -2795,8 +2904,8 @@ export interface SettingsWrite {
   none?: boolean;
 }
 
-/** One of RPH's shapes of a value: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names. */
-export type SettingTakes = { type: "whole"; least: number; most?: number } | { type: "number"; least: number; most?: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
+/** One of RPH's shapes of a value: a whole number, at least `least` and at most `most` where it has one; a number, at least `least` where it has one and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names. */
+export type SettingTakes = { type: "whole"; least: number; most?: number } | { type: "number"; least?: number; most?: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
 
 /** A setting as the Settings page shows it. */
 export interface SettingView {
@@ -2910,8 +3019,8 @@ export interface Span {
 /** One part of an agent's stack: its kind, which part, the file it came from, its level, whether it sits in the opening block or comes with the briefing, its text, and the situations that hand it to the briefing; a part left out is listed with why. */
 export interface StackPartRow {
   /** What the part is. */
-  kind: "definition" | "instruction" | "rule" | "contract" | "guide" | "closing" | "description" | "skills" | "given";
-  /** Its name as `off:` lists name it; for `given`, the item as `opening:` writes it. */
+  kind: "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
+  /** Its name as `stack.off` lists name it; for `given`, the item as `opening:` writes it. */
   part: string;
   /** The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it. */
   path: string;
@@ -3327,10 +3436,12 @@ export interface TagCheck {
 /** A tag check asked for: the job it runs as, at once; or why none was started (jobs off, the day's count or tokens reached, no such connection, the check's part missing or not as it needs, his job-start hook). */
 export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
 
-/** The hash of the provider key today's connection holds, which RPE takes over at the swap. */
+/** The hash of the provider key today's connections hold, which RPE takes over at the swap, with the model names those connections name, which the key opens. */
 export interface TakenKeyAsk {
   /** The key's SHA-256, in hex. */
   hash: string;
+  /** The model names of the connections that hold the key. */
+  models: string[];
 }
 
 /** What a level may set a setting to: one of RPH's shapes; a table of names, each to a value of `of` (with `whole`, such a value alone for every name); or a list of records, each holding every field. */
@@ -3378,7 +3489,7 @@ export interface TraceDelta {
 }
 
 /** What RPH did; each kind's fields are the facts of it. */
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "effort_lowered"; connection: string; model: string; asked: Effort; sent: Effort } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 
 /** An event of RPH's, numbered within its run, with who did it and where; for a sub-agent or a job, the agent, run and tool call that started it. No agent for a record of the host's word outside any agent's work (a session opened, closed, forked or opened again by a call of the sessions API). */
 export interface TraceRecord {
@@ -3434,15 +3545,15 @@ export interface TreeFileRow {
   level: LayerLevel;
   kind: TreeFileKind;
   bytes: number;
-  /** The name RPH loads it by, and an `off:` list names it by; null for a file RPH does not load by its name. */
+  /** The name RPH loads it by, and a `stack.off` list names it by; null for a file RPH does not load by its name. */
   item: string | null;
   /** Whether RPH takes it: a named file when it is the nearest of its name, not switched off and not an example; any other file as it is. */
   applies: boolean;
   /** The nearer file of the same name taken in its place; null when none is. */
   replacedBy: string | null;
-  /** Its name is in a config's `off:` list, which switches it off at every level. */
+  /** Its name is in a config's `stack.off` list, which switches it off at every level. */
   off: boolean;
-  /** The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. */
+  /** The levels whose config's `stack.off` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. */
   offIn: LayerLevel[];
   /** Whether the user may write it where it is: never a shipped file or a generated one. */
   editable: boolean;
@@ -3464,13 +3575,13 @@ export interface TreeFileRow {
   held?: "needs" | "broken" | null;
   /** What RPH found wrong with it, in its own words, line by line. */
   problems?: string[];
-  /** The agents whose stacks it joins: a file `instructions:` names or an agent reads. */
+  /** The agents whose stacks it joins: a file `stack.instructions` names or an agent reads. */
   joins?: string[];
   /** For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it. */
   hooks?: TreeHook[];
 }
 
-/** A hook as a hooks file names it: its name (an `off:` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on. */
+/** A hook as a hooks file names it: its name (a `stack.off` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on. */
 export interface TreeHook {
   name: string;
   on: HookEvent;
@@ -3940,7 +4051,7 @@ export interface WorldRevisionNote {
 
 /** Every route in the form that answers in JSON, by its method and path pattern: its params, its query, its body, its reply, whether it pages, and whether it is long (answered at once with an id, its answer read from `ANSWERS_PATH`). */
 export interface ApiRoutes {
-  /** Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its tools, what it reads and is given, and what it runs on (its connection, its model and its effort) as RPH resolves them. */
+  /** Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its effort and limits as its header says them, its tools, what it reads and is given, and what it runs on (its connection, its model, its effort and its limits, the settings for it standing over its header) as RPH resolves them. */
   "GET /api/v1/agents": {
     params: Record<string, never>;
     query: { chat?: string };
@@ -4000,7 +4111,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.running` allows. */
+  /** Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.atOnce` allows. */
   "POST /api/v1/build/jobs": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -4210,7 +4321,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.pageMost`). */
+  /** A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.maxPage`). */
   "GET /api/v1/chats/:chat/carried": {
     params: { chat: string };
     query: { from?: number; limit?: number };
@@ -4660,7 +4771,7 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
-  /** Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.pageMost` give a page's length. */
+  /** Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.maxPage` give a page's length. */
   "GET /api/v1/chats/:chat/prompt/history": {
     params: { chat: string };
     query: { limit?: number; cursor?: string };
@@ -4710,7 +4821,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than requests.textMost is not kept, and the answer says so. */
+  /** Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than turn.maxRequestChars is not kept, and the answer says so. */
   "POST /api/v1/chats/:chat/requests": {
     params: { chat: string };
     query: Record<string, never>;
@@ -5020,7 +5131,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.tidyRunMost`; with the switch on or off. Nothing is changed. */
+  /** Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.maxTidyFindings`; with the switch on or off. Nothing is changed. */
   "GET /api/v1/chats/:chat/tidy": {
     params: { chat: string };
     query: Record<string, never>;
@@ -5030,7 +5141,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.tidyLeftMost`), or taken out; then Tidy up's run as it stands. */
+  /** Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.maxTidyLeft`), or taken out; then Tidy up's run as it stands. */
   "POST /api/v1/chats/:chat/tidy/left": {
     params: { chat: string };
     query: Record<string, never>;
@@ -5050,7 +5161,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length. */
+  /** A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length. */
   "GET /api/v1/chats/:chat/turns": {
     params: { chat: string };
     query: { limit?: number; before?: TurnId };
@@ -5420,7 +5531,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** "Apply now": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it. */
+  /** "Apply now": makes each lead's opening block of the chat's open session afresh from the files as they stand, there and then, and the next run of each takes it; says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it. */
   "POST /api/v1/files-apply": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -5490,7 +5601,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Switches a file's name off or on again in the `off:` list of a level's config, which is what "Delete" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it. */
+  /** Switches a file's name off or on again in the `stack.off` list of a level's config, which is what "Delete" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it. */
   "PUT /api/v1/files-off/*": {
     params: { "*": string };
     query: Record<string, never>;
@@ -5500,7 +5611,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Pins a file for an agent, or takes the pin away, in the `pins:` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it. */
+  /** Pins a file for an agent, or takes the pin away, in the `stack.pins` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it. */
   "PUT /api/v1/files-pin/*": {
     params: { "*": string };
     query: Record<string, never>;
@@ -5570,7 +5681,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `off:` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. */
+  /** Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force. */
   "DELETE /api/v1/files/*": {
     params: { "*": string };
     query: { chat?: string; level?: "global" | "chat" };
@@ -6030,6 +6141,36 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
+  /** The kept reports of the session measurement, newest received first, a page at a time: each with when it ran, the connection and model it ran on, the judging connection and whether its recommendation is written. One report whole is read by its id. */
+  "GET /api/v1/sessions/measurements": {
+    params: Record<string, never>;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    reply: { items: MeasurementRow[]; next: string | null };
+    paged: true;
+    long: false;
+    joined: false;
+  };
+  /** Keeps a report of the session measurement, whole as it was sent: the three carry modes as played (each turn's tokens, time and calls, totals and medians, each planted decision with its check and the judge's answer, the look-ups and the repeated ones), when and on what it ran, and the recommendation of whoever ran it (blank until they write it). Every report is kept; one that does not fit its type is refused. Nothing here changes a setting: the default carry mode changes only when he presses it on the Sessions page. */
+  "POST /api/v1/sessions/measurements": {
+    params: Record<string, never>;
+    query: Record<string, never>;
+    body: MeasurementReport;
+    reply: MeasurementKept;
+    paged: false;
+    long: false;
+    joined: false;
+  };
+  /** One kept report of the session measurement, whole as it was sent, with when RPE received it. */
+  "GET /api/v1/sessions/measurements/:id": {
+    params: { id: string };
+    query: Record<string, never>;
+    body: undefined;
+    reply: MeasurementRead;
+    paged: false;
+    long: false;
+    joined: false;
+  };
   /** Every setting RPH and RPE read, with the value in force for a chat (or for every chat), its default, the level and file it comes from, when a change takes effect, what it does and where the page shows it; one set per connection or per agent once for each. */
   "GET /api/v1/settings": {
     params: Record<string, never>;
@@ -6050,7 +6191,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session the caller names, through the door to Lumiverse. */
+  /** Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session its sign-in by password made, or the one the caller names, through the door to Lumiverse. */
   "POST /api/v1/signin/end": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -6340,7 +6481,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.patchOps` operations bringing in at most `worlds.patchBytes`. */
+  /** Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.maxPatchOps` operations bringing in at most `worlds.maxPatchChars`. */
   "POST /api/v1/worlds/:world/draft/patch": {
     params: { world: string };
     query: Record<string, never>;
@@ -6524,7 +6665,7 @@ export interface CommandRoutes {
     long: false;
     joined: false;
   };
-  /** Takes over the provider key today's connection holds, by its hash alone. */
+  /** Takes over the provider key today's connections hold, by its hash alone, paired with their model names. */
   "POST /api/v1/command/keys/taken": {
     params: Record<string, never>;
     query: Record<string, never>;
@@ -6622,7 +6763,7 @@ export interface RawRoutes {
     answers: "an OpenAI chat completion, streamed or whole, as OpenAI answers";
     joined: false;
   };
-  /** The models the provider endpoint offers, as the connection in Lumiverse lists them. */
+  /** The models the provider endpoint offers to the request's key: those of the connections in Lumiverse that hold it. */
   "GET /v1/models": {
     params: Record<string, never>;
     answers: "an OpenAI model list";
@@ -6632,7 +6773,7 @@ export interface RawRoutes {
 
 /** Every kind the live socket carries, the app's and the areas' own, and what each carries. */
 export interface LiveKinds {
-  /** A record of RPH's trace, for a run played in the chat: every event of the run, as RPH gave it. */
+  /** A record of RPH's trace, for a run played in the chat (on ~jobs, for a job of no chat): every event of the run, as RPH gave it. */
   trace: TraceRecord;
   /** A piece of a model call's text as it streams, for the live view; the call's call_ended record holds it whole. */
   delta: TraceDelta;

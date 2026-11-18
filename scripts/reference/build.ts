@@ -14,7 +14,7 @@ import { DEFAULT_SECTIONS } from "../../src/shared/sections";
 import { CORE_EFFECTS } from "../../src/engine/effects";
 import { coreEventTypes } from "../../src/engine/events";
 import { MATH_FUNCTIONS } from "../../src/engine/expr";
-import type { CoreRegistry, EventGuardDef, MaterializerDef, PackDef, ProcessDef, ProposalChannelDef, TableDef } from "../../src/engine/registry";
+import type { CoreRegistry, EventGuardDef, MaterializerDef, PackAction, PackDef, ProcessDef, ProposalChannelDef, TableDef } from "../../src/engine/registry";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { BUILTIN_FUNCTIONS } from "../../src/engine/scope";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -23,7 +23,7 @@ import { LORE_PIN_LINTS } from "../../src/shared/lore";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import { STEP_OUTPUTS, STEP_PLACEHOLDERS, STEP_SIGNALS } from "../../src/shared/steps";
 import { BAND_LABEL } from "../../src/shared/tiers";
-import type { ActionDef, FieldDef, KindDef, RelationTypeDef, RuleDef, ScheduleDef } from "../../src/shared/world";
+import type { FieldDef, KindDef, RelationTypeDef, RuleDef, ScheduleDef } from "../../src/shared/world";
 import { BUILTIN_RELATIONS, EFFECT_ONLY_FUNCTIONS, ENGINE_VERSION, WORLD_FORMAT } from "../../src/shared/world";
 
 const ROOT = resolve(import.meta.dir, "../..");
@@ -41,7 +41,7 @@ interface PackRecord {
   effects: { type: string; args: readonly string[] }[];
   formulas: { name: string; fn: Formula }[];
   slots: string[];
-  actions: ActionDef[];
+  actions: PackAction[];
   rules: RuleDef[];
   schedules: ScheduleDef[];
   tables: TableDef[];
@@ -186,12 +186,31 @@ function formulaRows(formulas: readonly { name: string; fn: Formula }[]): string
   return sortedBy(formulas, (f) => f.name).map((f) => `- ${code(`${f.name}(${formulaParams(f.fn).join(", ")})`)}`);
 }
 
-function actionRows(actions: readonly ActionDef[]): string[] {
+/**
+ * The actions' own words as shipped (`guidance/.prompts/history-actions.md`, one `name: text` line each): an action's label and
+ * description are no longer in code, so the reference reads them where the engine does. A label with no line reads as the action's id.
+ */
+const ACTION_WORDS: ReadonlyMap<string, string> = new Map(
+  readFileSync(join(ROOT, "guidance/.prompts/history-actions.md"), "utf8")
+    .split("\n")
+    .map((line) => /^(action_[a-z0-9_]+): (.*)$/.exec(line))
+    .flatMap((found) => (found === null ? [] : [[found[1] as string, found[2] as string] as const])),
+);
+
+/** A shipped line with the fields the code gives it filled in (`{{name}}` from the action's own `words`), as the engine's reader fills it. */
+function filled(text: string, words: PackAction["words"]): string {
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (whole, name: string) => {
+    const value = words?.[name];
+    return typeof value === "string" || typeof value === "number" ? String(value) : Array.isArray(value) ? value.join(", ") : whole;
+  });
+}
+
+function actionRows(actions: readonly PackAction[]): string[] {
   const rows = sortedBy(actions, (a) => a.id).map((a) => {
     // A ref param a player's claim may fill says where the claimed thing appears, and one that pays an outside account for a receiver the story hasn't established names it (DESIGN §9.4).
     const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}${p.outside ? `, outside: ${p.outside}` : ""}`);
     const check = a.check === undefined ? "" : typeof a.check === "string" ? code(a.check) : code(a.check.dice);
-    return [code(a.id), a.label, a.description ?? "", params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
+    return [code(a.id), filled(ACTION_WORDS.get(`action_${a.id}_label`) ?? a.id, a.words), filled(ACTION_WORDS.get(`action_${a.id}_description`) ?? "", a.words), params.length === 0 ? "" : params.map(code).join(", "), check, codes(Object.keys(a.outcomes).sort(byText)), code(a.duration), (a.lexicon ?? []).join(", ")];
   });
   return table(["Action", "Label", "Description", "Parameters", "Check", "Outcomes", "Minutes", "Lexicon"], rows);
 }

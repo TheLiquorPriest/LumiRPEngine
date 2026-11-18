@@ -44,13 +44,13 @@ The provider endpoint: Lumiverse's chat completions, answered as the Lumiverse p
 | | |
 |---|---|
 | Access | provider: Lumiverse on RPE's connection (the provider key) |
-| Body limit | the server's `server.providerBodyBytes` (32 MiB as shipped) |
+| Body limit | the server's `server.maxProviderBodyBytes` (32 MiB as shipped) |
 | Params | none |
 | Answers | an OpenAI chat completion, streamed or whole, as OpenAI answers |
 
 ### `GET /v1/models`
 
-The models the provider endpoint offers, as the connection in Lumiverse lists them.
+The models the provider endpoint offers to the request's key: those of the connections in Lumiverse that hold it.
 
 | | |
 |---|---|
@@ -102,12 +102,12 @@ What waits in a chat for the next message, asked for beside his words: each requ
 
 ### `POST /api/v1/chats/:chat/requests`
 
-Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than requests.textMost is not kept, and the answer says so.
+Holds a composer control's ask (depth or swipe) for the next message, in place of one of its kind that waited; one longer than turn.maxRequestChars is not kept, and the answer says so.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`RequestAsk`](#requestask) |
@@ -148,7 +148,7 @@ His word on a question a lane set to Confirm is waiting on: go ahead, or not wit
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `approval` |
 | Query | none |
 | Body | [`ApprovalAnswerBody`](#approvalanswerbody) |
@@ -189,7 +189,7 @@ Makes one of his edits to the prompt map as found in a turn's prompt (rename a m
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | `turn` (may be left out): [`TurnId`](#turnid), The turn whose prompt is read; the chat's newest whose prompt RPE still keeps when left out |
 | Body | [`PromptEditAsk`](#prompteditask) |
@@ -198,7 +198,7 @@ Makes one of his edits to the prompt map as found in a turn's prompt (rename a m
 
 ### `GET /api/v1/chats/:chat/prompt/history`
 
-Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.pageMost` give a page's length.
+Each turn's prompt notices and front, newest first, with its number on the chat's path and Lumiverse's clipping, for the turns whose prompt RPE still keeps. The settings `turns.page` and `turns.maxPage` give a page's length.
 
 | | |
 |---|---|
@@ -237,14 +237,14 @@ Settle now: a run on the chat's newest turn that writes nothing into the chat; a
 
 ### `GET /api/v1/chats/:chat/turns`
 
-A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.pageMost` give a page's length.
+A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
-| Query | `limit` (may be left out): `number`, How many turns to give: the setting `turns.page` when left out, and at most `turns.pageMost`<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
+| Query | `limit` (may be left out): `number`, How many turns to give: the setting `turns.page` when left out, and at most `turns.maxPage`<br>`before` (may be left out): [`TurnId`](#turnid), A turn's id: the turns older than it are given |
 | Body | none |
 | Reply | [`TurnsReply`](#turnsreply) |
 | Also answers | status 409, [`JoinedAnswer`](#joinedanswer): the turn is joined to another, and the turn it joined is the one to ask for |
@@ -396,7 +396,7 @@ Says something to the Author while the turn runs: the lead hears it at its next 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `turn` |
 | Query | none |
 | Body | [`TurnSay`](#turnsay) |
@@ -491,7 +491,7 @@ What the chat made in play (things, places, the grids laid or changed) that the 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ draft: JsonValue }` |
@@ -504,7 +504,7 @@ Keep in the world: the draft patch that copies the picked places, then things, i
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ draft: JsonValue; things: string[]; places: string[] }` |
@@ -543,7 +543,7 @@ A tap that plays now (a chip, Send now, Timelapse or a tap with words): its line
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`PlayAsk`](#playask) |
@@ -556,7 +556,7 @@ A panel's tap for his next message (the palette, Walk here, any tap with no word
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`PanelTapAsk`](#paneltapask) |
@@ -663,7 +663,7 @@ A tap that manages, or a correction from any page, recorded at once as his own e
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`TapAsk`](#tapask) |
@@ -723,7 +723,7 @@ The catalog the player's + Add offers: the types of things and the vehicle class
 
 ### `GET /api/v1/chats/:chat/tidy`
 
-Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.tidyRunMost`; with the switch on or off. Nothing is changed.
+Tidy up: what does not add up among the chat's things at its head, every kind, each with its fix or fixes, less those he left as they are, at most `things.maxTidyFindings`; with the switch on or off. Nothing is changed.
 
 | | |
 |---|---|
@@ -736,12 +736,12 @@ Tidy up: what does not add up among the chat's things at its head, every kind, e
 
 ### `POST /api/v1/chats/:chat/tidy/left`
 
-Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.tidyLeftMost`), or taken out; then Tidy up's run as it stands.
+Leave it, or bring it back: the finding's key put in the chat's `things.tidyLeft` (newest last, the oldest gone past `things.maxTidyLeft`), or taken out; then Tidy up's run as it stands.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ key: string; left: boolean }` |
@@ -754,7 +754,7 @@ One of the HUD's time controls (Pause clock, Resume clock, and the others the cl
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ control: string; scope: JsonValue; to: JsonValue }` |
@@ -824,7 +824,7 @@ Redraws documents of a character's base as the owner's own change: each document
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`BaseAsk`](#baseask) |
@@ -837,7 +837,7 @@ Sets how large a part a character plays, as the owner's own change: pinned, it s
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`CastingAsk`](#castingask) |
@@ -850,7 +850,7 @@ Writes a perception for a character, corrects one or strikes one, as the player'
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`PerceptionAsk`](#perceptionask) |
@@ -864,7 +864,7 @@ Says which of the world's people a character is, by the person's id or name (nul
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`PersonAsk`](#personask) |
@@ -877,7 +877,7 @@ Binds a source to a character (a card, a persona, a lore entry or a memory entit
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`SourceAsk`](#sourceask) |
@@ -890,7 +890,7 @@ Strikes an entry of a character's record, or takes its strike back, as the playe
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `character` |
 | Query | none |
 | Body | [`CastStrikeAsk`](#caststrikeask) |
@@ -933,7 +933,7 @@ Corrects any field of any item of the story record (a beat's text, a thread's st
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`StoryCorrectAsk`](#storycorrectask) |
@@ -972,7 +972,7 @@ Strikes an item of the story record, or takes its strike back, as the player's o
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`StoryStrikeAsk`](#storystrikeask) |
@@ -1013,7 +1013,7 @@ Lays a grid for a place, by the same code as the `map_lay` tool: rows of symbols
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ place: string; rows?: string[]; width?: number; height?: number; doors?: number[][]; legend?: { [key: string]: JsonValue }; feet?: number; title?: string; over?: string; square?: number[]; tell?: boolean }` |
@@ -1040,7 +1040,7 @@ Keeps the chat's map of a place in the world: its map as the chat plays it, with
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `place` |
 | Query | none |
 | Body | `{ places?: string[]; paths?: string[]; settings?: boolean }` |
@@ -1053,7 +1053,7 @@ Drags someone or something to a square of the grid of a place: his own change, a
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `place` |
 | Query | none |
 | Body | `{ who: string; square: number[]; tell?: boolean }` |
@@ -1066,7 +1066,7 @@ Edits squares of the grid of a place, by the same code as the `map_edit` tool: s
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `place` |
 | Query | none |
 | Body | `{ strokes: { symbol: string; squares?: number[][]; rect?: number[][]; line?: number[][] }[]; legend?: { [key: string]: JsonValue }; tell?: boolean }` |
@@ -1107,7 +1107,7 @@ Writes the owner's own words as a place's base, a change of his own with source 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `place` |
 | Query | none |
 | Body | `{ text: string }` |
@@ -1190,7 +1190,7 @@ Sets one entry's own LRE fields (its visibility, links and aliases; null takes t
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `book`, `entry` |
 | Query | none |
 | Body | `{ fields: JsonValue; revision: number }` |
@@ -1203,7 +1203,7 @@ Make secret and Make public on one entry, on his press, checked against the revi
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `book`, `entry` |
 | Query | none |
 | Body | `{ change: JsonValue; revision: number }` |
@@ -1229,7 +1229,7 @@ Writes the world's lore index as an entry, on his press: the entry written befor
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ world: string; book?: string }` |
@@ -1281,7 +1281,7 @@ Apply: the undo copy of every entry the move lists is kept first, then each secr
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `book` |
 | Query | none |
 | Body | `{ version: string }` |
@@ -1294,7 +1294,7 @@ Confirm: once the book reads right, LRE's old secrecy fields come off every move
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `book` |
 | Query | none |
 | Body | `{ version: string }` |
@@ -1307,7 +1307,7 @@ Restore secrecy as it was: every entry in the undo copy goes back as it stood be
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `book` |
 | Query | none |
 | Body | `{ version: string }` |
@@ -1346,7 +1346,7 @@ The owner's own lines for one entry of a chat's lore: its kind, its line, what i
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `entry` |
 | Query | none |
 | Body | `{ kind?: string | null; line?: string | null; defines?: { what: string; aspect: string }[] | null; related?: string[] | null }` |
@@ -1424,7 +1424,7 @@ Saves the chat's latest reply, or an excerpt of its messages (found whatever its
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ text?: string }` |
@@ -1464,7 +1464,7 @@ Approves an open proposal, with his edits if he sends any: one write, to his Lum
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
 | Body | `{ text?: string; title?: string; keys?: string[]; book?: string }` |
@@ -1526,12 +1526,12 @@ Every file of the chat's view of the tree; with no chat, of the shipped level an
 
 ### `POST /api/v1/files-apply`
 
-"Apply now": starts the opening block of the chat's open session afresh from the files as they stand, there and then (the next run of each agent makes it); says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.
+"Apply now": makes each lead's opening block of the chat's open session afresh from the files as they stand, there and then, and the next run of each takes it; says which session, or that none is open and the next one opens with the files as they stand. Nothing else carries it.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`ApplyNowAsk`](#applynowask) |
@@ -1544,7 +1544,7 @@ Copies a file or folder of the user's to a path nothing stands at (the copy of a
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`FileMoveAsk`](#filemoveask) |
@@ -1570,7 +1570,7 @@ Makes a folder of the user's, and the folders above it, at a path of a chat's vi
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`FolderAsk`](#folderask) |
@@ -1598,7 +1598,7 @@ The chat's view of the tree read like a filesystem: one folder's files and folde
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
-| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`folder` (may be left out): `string`, The folder to list, by its path in the view; the chat's own top when left out<br>`search` (may be left out): `string`, Search every level for files whose path or text holds this, instead of listing a folder<br>`limit` (may be left out): `number`, How many entries a page holds; the `files.listPage` setting's when left out, and at most `files.listMost`<br>`after` (may be left out): `string`, Where the page starts after: the `next` of the page before |
+| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`folder` (may be left out): `string`, The folder to list, by its path in the view; the chat's own top when left out<br>`search` (may be left out): `string`, Search every level for files whose path or text holds this, instead of listing a folder<br>`limit` (may be left out): `number`, How many entries a page holds; the `files.list.page` setting's when left out, and at most `files.list.maxPage`<br>`after` (may be left out): `string`, Where the page starts after: the `next` of the page before |
 | Body | none |
 | Reply | [`TreeListedReply`](#treelistedreply) |
 
@@ -1609,7 +1609,7 @@ Renames or moves a file or folder of the user's to a path nothing stands at; a f
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`FileMoveAsk`](#filemoveask) |
@@ -1617,12 +1617,12 @@ Renames or moves a file or folder of the user's to a path nothing stands at; a f
 
 ### `PUT /api/v1/files-off/*`
 
-Switches a file's name off or on again in the `off:` list of a level's config, which is what "Delete" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.
+Switches a file's name off or on again in the `stack.off` list of a level's config, which is what "Delete" on a shipped file does; for a hooks file, one hook of it by its name; says the file as the listing now shows it.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `*` (the rest of the path) |
 | Query | none |
 | Body | [`FileSwitchAsk`](#fileswitchask) |
@@ -1630,12 +1630,12 @@ Switches a file's name off or on again in the `off:` list of a level's config, w
 
 ### `PUT /api/v1/files-pin/*`
 
-Pins a file for an agent, or takes the pin away, in the `pins:` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it.
+Pins a file for an agent, or takes the pin away, in the `stack.pins` list of a level's config (the global level's, or a chat's): the agent is handed the file whole at the start of each of its runs. A path the view does not hold is refused; says the file as the listing now shows it.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `*` (the rest of the path) |
 | Query | none |
 | Body | [`FilePinAsk`](#filepinask) |
@@ -1661,7 +1661,7 @@ A prompt part or a tool's description rendered as RPH renders it for a chat, as 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ path: string; chat?: string; text?: string }` |
@@ -1674,7 +1674,7 @@ Prunes a chat's old turn folders as the chat's retention setting says, never whi
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`PruneAsk`](#pruneask) |
@@ -1713,7 +1713,7 @@ Writes a file's whole text as the user at a level (for a file of another level, 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `*` (the rest of the path) |
 | Query | none |
 | Body | [`FileWriteAsk`](#filewriteask) |
@@ -1721,14 +1721,14 @@ Writes a file's whole text as the user at a level (for a file of another level, 
 
 ### `DELETE /api/v1/files/*`
 
-Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `off:` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.
+Removes a file of the user's; for one in place of a default, that is resetting to the default. "Delete" on a shipped file writes its name in the `stack.off` list of the level named (the chat's when a chat is named, else the global level's), so the shipped file stays and is not in force.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `*` (the rest of the path) |
-| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`level` (may be left out): `"global" | "chat"`, For a shipped file, the level whose `off:` list takes its name; the chat's when a chat is named, else the global level's |
+| Query | `chat` (may be left out): `string`, The chat whose view of the tree is read; left out, the shipped level and the user's own<br>`level` (may be left out): `"global" | "chat"`, For a shipped file, the level whose `stack.off` list takes its name; the chat's when a chat is named, else the global level's |
 | Body | none |
 | Reply | `{ removed: string; switchedOff?: LayerLevel }` |
 
@@ -1741,7 +1741,7 @@ What the tree takes, a page of chats at a time from the sizes RPE keeps (a chat 
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | none |
-| Query | `limit` (may be left out): `number`, How many chats a page holds; the `storage.chatsListed` setting's when left out, and at most `files.listMost`<br>`after` (may be left out): `string`, The chat after which the page starts: the `next` of the page before |
+| Query | `limit` (may be left out): `number`, How many chats a page holds; the `storage.page` setting's when left out, and at most `files.list.maxPage`<br>`after` (may be left out): `string`, The chat after which the page starts: the `next` of the page before |
 | Body | none |
 | Reply | [`StorageReply`](#storagereply) |
 
@@ -1752,7 +1752,7 @@ Prunes on request, asked first: without `plan` it answers which places would go 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`StoragePruneAsk`](#storagepruneask) |
@@ -1804,7 +1804,7 @@ Accepts a suggestion as it is or edited, writing it as the user at the level nam
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
 | Body | [`SuggestionAcceptAsk`](#suggestionacceptask) |
@@ -1884,7 +1884,7 @@ His Undo of a close: takes back the change the close answered with, so the scene
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `session` |
 | Query | none |
 | Body | [`SessionReopenAsk`](#sessionreopenask) |
@@ -1910,11 +1910,50 @@ Undoes one compaction of a session by its id: from its next turn the turns the s
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `session` |
 | Query | none |
 | Body | [`SessionUncompactAsk`](#sessionuncompactask) |
 | Reply | [`SessionCompactions`](#sessioncompactions) |
+
+### `GET /api/v1/sessions/measurements`
+
+The kept reports of the session measurement, newest received first, a page at a time: each with when it ran, the connection and model it ran on, the judging connection and whether its recommendation is written. One report whole is read by its id.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | none |
+| Query | `limit` (may be left out): `number`, the page's size<br>`cursor` (may be left out): `string`, where the page starts: a page's `next` |
+| Body | none |
+| Reply | `{ items: MeasurementRow[]; next: string | null }`, a page at a time |
+
+### `POST /api/v1/sessions/measurements`
+
+Keeps a report of the session measurement, whole as it was sent: the three carry modes as played (each turn's tokens, time and calls, totals and medians, each planted decision with its check and the judge's answer, the look-ups and the repeated ones), when and on what it ran, and the recommendation of whoever ran it (blank until they write it). Every report is kept; one that does not fit its type is refused. Nothing here changes a setting: the default carry mode changes only when he presses it on the Sessions page.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
+| Params | none |
+| Query | none |
+| Body | [`MeasurementReport`](#measurementreport) |
+| Reply | [`MeasurementKept`](#measurementkept) |
+
+### `GET /api/v1/sessions/measurements/:id`
+
+One kept report of the session measurement, whole as it was sent, with when RPE received it.
+
+| | |
+|---|---|
+| Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
+| Body limit | takes no body |
+| Params | `id` |
+| Query | none |
+| Body | none |
+| Reply | [`MeasurementRead`](#measurementread) |
 
 ## Jobs
 
@@ -1938,7 +1977,7 @@ Starts the bootstrap job for the chats named, or for every chat the last migrati
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`BootstrapBatchAsk`](#bootstrapbatchask) |
@@ -1964,7 +2003,7 @@ Starts a chat's bootstrap job (taking on a story with a past), with his choice o
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`BootstrapStartAsk`](#bootstrapstartask) |
@@ -1977,7 +2016,7 @@ His word to a bootstrap job of the chat that waits for it at its token limit: go
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `job` |
 | Query | none |
 | Body | [`BootstrapAnswerAsk`](#bootstrapanswerask) |
@@ -2003,7 +2042,7 @@ He starts a job of the chat, as his own and tied to no turn, with any agent defi
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`JobStartAsk`](#jobstartask) |
@@ -2029,7 +2068,7 @@ He starts a job of no chat, as his own and tied to no turn, with any agent defin
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`JobStartAsk`](#jobstartask) |
@@ -2056,7 +2095,7 @@ Answers a job that asks whether to go on: it goes on in its own session, to the 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `job` |
 | Query | none |
 | Body | `{ go: "on"; askAt?: number } | { go: "end" }` |
@@ -2108,7 +2147,7 @@ Carries on a job that stopped at one of its own limits, from its own session whe
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `job` |
 | Query | none |
 | Body | `{ limits?: JobLimitsAsk }` |
@@ -2212,7 +2251,7 @@ Says a word to a running job's lead, which hears it at its next call as his.
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `job` |
 | Query | none |
 | Body | `{ text: string }` |
@@ -2238,7 +2277,7 @@ Switches all his jobs off or on, holds them or lets them go, and answers the swi
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ off?: boolean; held?: boolean }` |
@@ -2248,7 +2287,7 @@ Switches all his jobs off or on, holds them or lets them go, and answers the swi
 
 ### `GET /api/v1/agents`
 
-Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its tools, what it reads and is given, and what it runs on (its connection, its model and its effort) as RPH resolves them.
+Every definition in force for a chat, or for none: its file, level, what it replaces, whether it is off, its effort and limits as its header says them, its tools, what it reads and is given, and what it runs on (its connection, its model, its effort and its limits, the settings for it standing over its header) as RPH resolves them.
 
 | | |
 |---|---|
@@ -2294,7 +2333,7 @@ Runs a rule, as it reads now, against a past turn of the chat, with that turn's 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat`, `name` |
 | Query | none |
 | Body | [`RuleTestAsk`](#ruletestask) |
@@ -2310,7 +2349,7 @@ The rules that fired in a chat, newest first, a page at a time (a job's of his a
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
-| Query | `rule` (may be left out): `string`, Only this rule's firings<br>`limit` (may be left out): `number`, How many to give: the setting `turns.page` when left out, and at most `turns.pageMost`<br>`cursor` (may be left out): `string`, The id of the last firing read: older ones follow it |
+| Query | `rule` (may be left out): `string`, Only this rule's firings<br>`limit` (may be left out): `number`, How many to give: the setting `turns.page` when left out, and at most `turns.maxPage`<br>`cursor` (may be left out): `string`, The id of the last firing read: older ones follow it |
 | Body | none |
 | Reply | [`FiringsReply`](#firingsreply) |
 
@@ -2334,7 +2373,7 @@ Switches a rule on or off at a chat's level or the global one (the level's off: 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `name` |
 | Query | none |
 | Body | [`RuleSwitch`](#ruleswitch) |
@@ -2375,7 +2414,7 @@ Adds a connection, with its key when it has one.
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`SaveConnection`](#saveconnection) |
@@ -2388,7 +2427,7 @@ Changes a connection, whole: a field left out is cleared; its key stays when the
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
 | Body | [`SaveConnection`](#saveconnection) |
@@ -2466,7 +2505,7 @@ Cancels a sign-in's open flow; nothing of it is kept.
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
 | Body | `{ flow: string }` |
@@ -2479,7 +2518,7 @@ Finishes a sign-in with what the user pasted back, and says how it stands; the t
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `id` |
 | Query | none |
 | Body | `{ flow: string; code: string }` |
@@ -2532,7 +2571,7 @@ Sets the web search provider web_search asks, or takes it away; a key follows th
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`WebProviderSet`](#webproviderset) |
@@ -2560,7 +2599,7 @@ Writes one setting into one level's config file, as the user would write it, and
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`SettingsWrite`](#settingswrite) |
@@ -2583,12 +2622,12 @@ The user's jobs for a world, oldest first, each with its status, progress and re
 
 ### `POST /api/v1/build/jobs`
 
-Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.running` allows.
+Starts a job on a world: its progress and result are told on the user's live channel as it goes, and kept. Refused where as many jobs run as `build.jobs.atOnce` allows.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ world: string; kind: "import_lore" | "refine" | "describe_map" | "propose_routines" | "playtest" | "check_world" | "index_text"; input: JsonValue }` |
@@ -2640,7 +2679,7 @@ Moves the chat to a revision of its world from its next turn, with his picks (a 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ to: string; merge?: JsonValue }` |
@@ -2653,7 +2692,7 @@ Takes an Upgrade of the chat back, whole: the chat goes to the revision it came 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | `{ edit: string }` |
@@ -2718,7 +2757,7 @@ Attaches the world to a chat. A chat that plays no world takes the world's head 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ chat: string }` |
@@ -2744,7 +2783,7 @@ The draft as the world's next revision, with its note; one made on a draft that 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ base: string | null; note?: string; version?: number }` |
@@ -2771,7 +2810,7 @@ Discards the stored draft: the world goes back to its head.
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ version?: number }` |
@@ -2818,7 +2857,7 @@ Sets one part of the draft (the world's name and start, its calendar, its rulese
 
 ### `POST /api/v1/worlds/:world/draft/patch`
 
-Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.patchOps` operations bringing in at most `worlds.patchBytes`.
+Applies an RFC 6902 patch to the draft, all of it or none; at most `worlds.maxPatchOps` operations bringing in at most `worlds.maxPatchChars`.
 
 | | |
 |---|---|
@@ -2836,7 +2875,7 @@ Brings a ruleset profile into the draft in one write, each choice taking the aut
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ profile: string; choices: { [key: string]: "mine" | "profile" }; base: string | null; version?: number }` |
@@ -2849,7 +2888,7 @@ Puts a copy of one of the world's revisions into the draft; committing it makes 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ revision: string; base: string | null; version?: number }` |
@@ -2862,7 +2901,7 @@ Takes the version this build ships of each named data table into the draft.
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `world` |
 | Query | none |
 | Body | `{ tables: string[]; base: string | null; version?: number }` |
@@ -3029,14 +3068,14 @@ The starter worlds a new world can be made from.
 
 ### `GET /api/v1/chats/:chat/carried`
 
-A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.pageMost`).
+A migrated chat's carried turns, in the order the run imported them, each tied to its message and swipe, with the engine that played it, why it stood with no turn played, and how many departures and texts of the old engine it holds. `from` is how many to pass over; `limit` how many to give (the setting `migration.page` when left out, at most `migration.maxPage`).
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
 | Body limit | takes no body |
 | Params | `chat` |
-| Query | `from` (may be left out): `number`, How many carried turns to pass over; none when left out<br>`limit` (may be left out): `number`, How many carried turns to give: the setting `migration.page` when left out, and at most `migration.pageMost` |
+| Query | `from` (may be left out): `number`, How many carried turns to pass over; none when left out<br>`limit` (may be left out): `number`, How many carried turns to give: the setting `migration.page` when left out, and at most `migration.maxPage` |
 | Body | none |
 | Reply | [`CarriedTurnsReply`](#carriedturnsreply) |
 
@@ -3165,7 +3204,7 @@ Answers the keep-or-discard question today's build left the chat paused on (R-54
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `chat` |
 | Query | none |
 | Body | [`PausedAnswerAsk`](#pausedanswerask) |
@@ -3179,7 +3218,7 @@ Picks one of RPE's connections for the work one of his own agents does, where to
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`ConnectionPick`](#connectionpick) |
@@ -3220,7 +3259,7 @@ Keeps his word that he will not go back, once confirmed, with its time; said aga
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`NoGoingBackAsk`](#nogoingbackask) |
@@ -3233,7 +3272,7 @@ Starts a rehearsal over today's data, read-only as `rpe migrate --rehearse` read
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`RehearsalAsk`](#rehearsalask) |
@@ -3247,7 +3286,7 @@ One press switches one of his attached files on (R-81): GUIDANCE.md as AGENTS.md
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`SwitchOnAsk`](#switchonask) |
@@ -3299,7 +3338,7 @@ Makes a new key of a kind, which retires the one before it; shown this once.
 | | |
 |---|---|
 | Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`KeyAsk`](#keyask) |
@@ -3307,12 +3346,12 @@ Makes a new key of a kind, which retires the one before it; shown this once.
 
 ### `POST /api/v1/command/keys/taken`
 
-Takes over the provider key today's connection holds, by its hash alone.
+Takes over the provider key today's connections hold, by its hash alone, paired with their model names.
 
 | | |
 |---|---|
 | Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`TakenKeyAsk`](#takenkeyask) |
@@ -3325,7 +3364,7 @@ Keeps RPE's sign-in to Lumiverse and the config's Lumiverse block.
 | | |
 |---|---|
 | Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | [`LumiverseSave`](#lumiversesave) |
@@ -3351,7 +3390,7 @@ Switches a thing that runs a command or calls out on or off: the one road to it.
 | | |
 |---|---|
 | Access | command: the server's own command line, on its socket in the data folder that only the owner's account may open; never on the TCP listener, so no page reaches it |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | `name` |
 | Query | none |
 | Body | [`SwitchAsk`](#switchask) |
@@ -3364,7 +3403,7 @@ The extension's word that a new app file has arrived, with the hash stated for i
 | | |
 |---|---|
 | Access | extension: the light extension (its registration key) |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ hash?: string }` |
@@ -3377,7 +3416,7 @@ The extension asks whether the registration it holds is the one this RPE made.
 | | |
 |---|---|
 | Access | extension: the light extension (its registration key) |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: `{ rpe: "confirmed", user, relay }`, or 409 for a registration this RPE did not make |
 
@@ -3388,7 +3427,7 @@ A page's follow of a chat's live events, carried by the extension to RPE's relay
 | | |
 |---|---|
 | Access | extension: the light extension (its registration key) |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: an empty object, or 400 for a follow RPE does not read |
 
@@ -3410,7 +3449,7 @@ A page's start-up facts, asked for by the extension: a page token for the user t
 | | |
 |---|---|
 | Access | extension: the light extension (its registration key) |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: the page's start-up facts (`StartFacts`, `src/adapter/lumiverse/pipe-wire.ts`) |
 
@@ -3421,7 +3460,7 @@ The extension's record of a generation it stopped because it could not tell whos
 | | |
 |---|---|
 | Access | extension: the light extension (its registration key) |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Answers | JSON: `{ kept: true }`, or 400 for a record the extension does not send |
 
@@ -3479,12 +3518,12 @@ How long the parts of a turn took across the latest turns of a chat, or of all c
 
 ### `POST /api/v1/signin/end`
 
-Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session the caller names, through the door to Lumiverse.
+Signs out: ends the session the call came with, so it opens nothing more, and the Lumiverse session its sign-in by password made, or the one the caller names, through the door to Lumiverse.
 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ lumiverse?: string }` |
@@ -3497,7 +3536,7 @@ Signs in with a Lumiverse account: a username and password, or a Lumiverse sessi
 | | |
 |---|---|
 | Access | public: anyone who reaches RPE |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ client?: "web shell" | "command line" | "mcp server"; username?: string; password?: string; session?: string }` |
@@ -3510,7 +3549,7 @@ Trades the web app's printed token for a session, or a session that is still in 
 | | |
 |---|---|
 | Access | page: a page of the Lumiverse user this RPE belongs to (a page token or the web UI's token), or the server's own command line on its socket |
-| Body limit | the server's `server.bodyBytes` (1 MiB as shipped) |
+| Body limit | the server's `server.maxBodyBytes` (1 MiB as shipped) |
 | Params | none |
 | Query | none |
 | Body | `{ client?: "web shell" | "command line" | "mcp server" }` |
@@ -3639,7 +3678,7 @@ What a page following a chat on `/api/v1/live` is sent: each event is `{ chat, s
 
 | Kind | Carries | What it says |
 |---|---|---|
-| `trace` | [`TraceRecord`](#tracerecord) | A record of RPH's trace, for a run played in the chat: every event of the run, as RPH gave it. |
+| `trace` | [`TraceRecord`](#tracerecord) | A record of RPH's trace, for a run played in the chat (on ~jobs, for a job of no chat): every event of the run, as RPH gave it. |
 | `delta` | [`TraceDelta`](#tracedelta) | A piece of a model call's text as it streams, for the live view; the call's call_ended record holds it whole. |
 | `reply` | [`ReplyPiece`](#replypiece) | What went to the chat as the reply was written: its text, and the progress lines of its thinking block. |
 | `released` | [`ReplyReleased`](#replyreleased) | A run's reply began to go out to the chat (its first text, or the harness's release, whichever came first), told at that moment while the run may go on. |
@@ -3695,7 +3734,7 @@ export interface AgentRef {
 
 ### `AgentShown`
 
-A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile and effort as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.
+A definition in force for a chat, as RPH lists it: its file and level, the farther files it replaces, whether it is switched off, its profile, effort and limits as its header says them, how its tools are offered, its fixed tools, the instruction files it reads and what it is given at a run's start, the definition its reply goes to a writer through, and what it runs on.
 
 ```ts
 export interface AgentShown {
@@ -3707,6 +3746,7 @@ export interface AgentShown {
   off: boolean;
   model?: string;
   effort?: Effort;
+  limits?: DefinitionLimitsView;
   toolsAs?: ToolsAs;
   tools: string[];
   reads: string[];
@@ -3753,7 +3793,7 @@ export interface ApplyNowAsk {
 
 ### `ApplyNowReply`
 
-What "Apply now" did: the session whose opening block starts afresh with the next run of each agent, or none when no session is open, and what that means in words.
+What "Apply now" did: the session whose opening block was made afresh at the press, which the next run of each agent takes, or none when no session is open, and what that means in words.
 
 ```ts
 export interface ApplyNowReply {
@@ -3896,7 +3936,7 @@ export interface BootstrapBatchAsk {
   chats: "migrated" | string[];
   /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
-  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.askAtTokens` in force for the chat. */
   tokenLimit?: number;
 }
 ```
@@ -3964,7 +4004,7 @@ What starts a chat's bootstrap job: his choice of what to relive, and his own to
 export interface BootstrapStartAsk {
   /** His choice of what to relive: one of the words the bootstrap skill's header offers (`relive:`); left out or null, the skill decides. Another word is refused with the words it takes. */
   relive?: string | null;
-  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.tokenLimit` in force for the chat. */
+  /** His own token limit for this job, a whole number above 0, at which it asks him whether to go on; left out, the setting `bootstrap.askAtTokens` in force for the chat. */
   tokenLimit?: number;
 }
 ```
@@ -4714,15 +4754,36 @@ export interface ConsentGrant {
 }
 ```
 
+### `DefinitionLimitsView`
+
+An agent's limits as a definition's header and the settings write them: `time` and `callTime` in seconds. Each absent is no limit of its own.
+
+```ts
+export interface DefinitionLimitsView {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  time?: number;
+  callTokensIn?: number;
+  callTokensOut?: number;
+  callTime?: number;
+  toolRounds?: number;
+  toolsPerAnswer?: number;
+  toolsAtOnce?: number;
+  messages?: number;
+}
+```
+
 ### `DefinitionRun`
 
-What a definition runs on, resolved among the user's connections for the chat it is listed for: the connection its header names (his default where it names none), that connection's model, and the effort it thinks at: its definition's, else its connection's own.
+What a definition runs on, resolved among the user's connections for the chat it is listed for, with what the settings there set for it standing over its header: the connection its header names (his default where it names none), that connection's model, the effort it thinks at (the settings' for its definition, else the settings' for its connection, else its definition's, else its connection's own), and the limits it is held to (its header's, each one the settings set standing over it; absent where none holds).
 
 ```ts
 export interface DefinitionRun {
   connection: { id: string; name: string } | null;
   model: string | null;
   effort: Effort | null;
+  limits?: DefinitionLimitsView;
 }
 ```
 
@@ -4754,7 +4815,7 @@ export interface DoneEnoughShown {
 
 ### `DueReply`
 
-What a turn's time brought due, soonest first, as many as the chat's engine.dueItems lists, and how many more fell due (null: more did, uncounted).
+What a turn's time brought due, soonest first, as many as the chat's engine.maxDueItems lists, and how many more fell due (null: more did, uncounted).
 
 ```ts
 export interface DueReply {
@@ -5046,7 +5107,7 @@ export interface FileMovedReply {
 
 ### `FilePinAsk`
 
-A file pinned for an agent, or the pin taken away, in the `pins:` list of a level's config: the global level's, or a chat's, which names the chat.
+A file pinned for an agent, or the pin taken away, in the `stack.pins` list of a level's config: the global level's, or a chat's, which names the chat.
 
 ```ts
 export interface FilePinAsk {
@@ -5081,7 +5142,7 @@ export interface FileReply {
 
 ### `FileSwitchAsk`
 
-A file's name switched off or on again in the `off:` list of a level's config: the global level's, or a chat's, which names the chat.
+A file's name switched off or on again in the `stack.off` list of a level's config: the global level's, or a chat's, which names the chat.
 
 ```ts
 export interface FileSwitchAsk {
@@ -6202,6 +6263,131 @@ export interface MapWrote {
 }
 ```
 
+### `MeasureDecision`
+
+One decision the script plants in the scene, with the check of whether the scene honoured it: what was planted and in which turn, the question put to the judging connection and the turn it tested, the excerpt of the reply and of the Author's records it judged, whether it found the decision honoured, and the judge's own answer.
+
+```ts
+export interface MeasureDecision {
+  name: string;
+  planted: number;
+  check: string;
+  tested: number;
+  evidence: string;
+  honoured: boolean;
+  answer: string;
+}
+```
+
+### `MeasureFigures`
+
+What a stretch of turns cost, as the measurement counts it from RPE's own record of each turn: tokens in, out and cached, the time to the reply's end and to the run's end (ms), and the model calls made.
+
+```ts
+export interface MeasureFigures {
+  tokensIn: number;
+  tokensOut: number;
+  cached: number;
+  replyMs: number;
+  runMs: number;
+  calls: number;
+}
+```
+
+### `MeasurementKept`
+
+A report kept: the id RPE gave it and when it received it (ms).
+
+```ts
+export interface MeasurementKept {
+  id: string;
+  at: number;
+}
+```
+
+### `MeasurementRead`
+
+A kept report whole, as it was sent, with its id and when RPE received it.
+
+```ts
+export interface MeasurementRead {
+  id: string;
+  at: number;
+  report: MeasurementReport;
+}
+```
+
+### `MeasurementReport`
+
+A run of the session measurement: when it ran, the Author's connection and model, the judging connection and model, the script's hash, the three carry modes as played, and the recommendation of whoever ran it (blank until they write it; a report with none is kept and the page marks it as waiting for one).
+
+```ts
+export interface MeasurementReport {
+  ran: number;
+  connection: string;
+  model: string;
+  judge: { connection: string; model: string };
+  script: string;
+  modes: MeasureMode[];
+  recommendation: string;
+}
+```
+
+### `MeasurementRow`
+
+A kept report in the list: its id, when RPE received it, when it ran, the connection and model it ran on, the judging connection, and whether its recommendation is written.
+
+```ts
+export interface MeasurementRow {
+  id: string;
+  at: number;
+  ran: number;
+  connection: string;
+  model: string;
+  judge: string;
+  recommended: boolean;
+}
+```
+
+### `MeasureMode`
+
+The script played in one carry mode: each turn's figures, their totals and medians, each planted decision with its check, and the look-ups made (calls of read tools) and the ones that repeated an earlier turn's, each named.
+
+```ts
+export interface MeasureMode {
+  mode: CarryMode;
+  turns: MeasureTurn[];
+  totals: MeasureFigures;
+  medians: MeasureFigures;
+  decisions: MeasureDecision[];
+  lookups: { total: number; repeated: MeasureRepeat[] };
+}
+```
+
+### `MeasureRepeat`
+
+A look-up an agent made again: the tool and its arguments as they were made, the turn that repeated it and the turn that made it first.
+
+```ts
+export interface MeasureRepeat {
+  tool: string;
+  args: string;
+  turn: number;
+  first: number;
+}
+```
+
+### `MeasureTurn`
+
+One turn of the measurement's script as played in a mode: its number in the script, and what it cost.
+
+```ts
+export interface MeasureTurn {
+  n: number;
+  figures: MeasureFigures;
+}
+```
+
 ### `MemoryBand`
 
 A memory's tier: top of mind, short term, long term.
@@ -6520,26 +6706,41 @@ export interface ModelLimit {
 
 ### `ModelLimits`
 
-A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; and the figures nobody has given, in the order the page asks for them.
+A model's limits as RPH uses them, each found on its own: the user's entry, else pi's catalog, else what the connection's server reported; null where nobody knows it; whether it takes audio and video, the user's entry else the server's report, never asked for (a request passed through that carries one the model is said to take none of is refused); and the figures nobody has given, in the order the page asks for them.
 
 ```ts
 export interface ModelLimits {
   contextWindow: ModelLimit | null;
   maxTokens: ModelLimit | null;
   pictures: ModelPictures | null;
+  audio: ModelMedia | null;
+  video: ModelMedia | null;
   asked: ModelFigure[];
 }
 ```
 
 ### `ModelLimitsEntry`
 
-A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures.
+A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures, audio and video.
 
 ```ts
 export interface ModelLimitsEntry {
   contextWindow?: number;
   maxTokens?: number;
   pictures?: boolean;
+  audio?: boolean;
+  video?: boolean;
+}
+```
+
+### `ModelMedia`
+
+Whether a model takes audio, or video, and where that came from: pi's catalogue says neither, so the user's entry or the connection's server.
+
+```ts
+export interface ModelMedia {
+  takes: boolean;
+  from: "user" | "connection";
 }
 ```
 
@@ -7644,6 +7845,8 @@ export interface RunShown {
   target: string | null;
   /** A continue's own turn, which held what it changed until Lumiverse's end decided its turn, and whose folder holds its files (its requests among them): the turn id its files are read under. Null for any other run. */
   held: string | null;
+  /** A continue's own intent record, kept with its run, never over the intent record of the turn it extended (the turn's `intent`). Null for any other run, whose intent record is its turn's. */
+  intentRecord: string | null;
   timings: TurnMoments;
   usage: Usage;
   /** What this run sent to the chat. */
@@ -7767,7 +7970,7 @@ export interface ServiceTimings {
 
 ### `Session`
 
-A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password for the command line or the MCP server, the Lumiverse session token too, for the client to keep as it keeps its own.
+A session of RPE's web app: its token, which a browser keeps in place of the printed token, when it ends, and whose it is. After a sign-in by password, the Lumiverse session token too: a client that keeps one (the command line) keeps it as its own; RPE ends it through the door when this session signs out.
 
 ```ts
 export interface Session {
@@ -7777,7 +7980,7 @@ export interface Session {
   ends: number;
   /** The Lumiverse user it is of. */
   user: string;
-  /** Lumiverse's own session, handed back for a client that keeps one (the command line); never for the web shell. */
+  /** Lumiverse's own session, made by a sign-in by password, handed back; a page need not keep it, since its sign-out ends it. */
   lumiverse?: { token: string; username: string };
 }
 ```
@@ -7940,10 +8143,10 @@ export interface SettingsWrite {
 
 ### `SettingTakes`
 
-One of RPH's shapes of a value: a whole number or a number, at least `least` and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.
+One of RPH's shapes of a value: a whole number, at least `least` and at most `most` where it has one; a number, at least `least` where it has one and at most `most` where it has one; one of `values`; yes or no; a line of text that is not blank; or a list of names.
 
 ```ts
-export type SettingTakes = { type: "whole"; least: number; most?: number } | { type: "number"; least: number; most?: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
+export type SettingTakes = { type: "whole"; least: number; most?: number } | { type: "number"; least?: number; most?: number } | { type: "oneOf"; values: readonly string[] } | { type: "yesNo" } | { type: "text" } | { type: "texts" };
 ```
 
 ### `SettingView`
@@ -8112,8 +8315,8 @@ One part of an agent's stack: its kind, which part, the file it came from, its l
 ```ts
 export interface StackPartRow {
   /** What the part is. */
-  kind: "definition" | "instruction" | "rule" | "contract" | "guide" | "closing" | "description" | "skills" | "given";
-  /** Its name as `off:` lists name it; for `given`, the item as `opening:` writes it. */
+  kind: "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
+  /** Its name as `stack.off` lists name it; for `given`, the item as `opening:` writes it. */
   part: string;
   /** The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it. */
   path: string;
@@ -8752,12 +8955,14 @@ export type TagCheckStarted = { job: JobView } | { refusal: JobRefusal };
 
 ### `TakenKeyAsk`
 
-The hash of the provider key today's connection holds, which RPE takes over at the swap.
+The hash of the provider key today's connections hold, which RPE takes over at the swap, with the model names those connections name, which the key opens.
 
 ```ts
 export interface TakenKeyAsk {
   /** The key's SHA-256, in hex. */
   hash: string;
+  /** The model names of the connections that hold the key. */
+  models: string[];
 }
 ```
 
@@ -8845,7 +9050,7 @@ export interface TraceDelta {
 What RPH did; each kind's fields are the facts of it.
 
 ```ts
-export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
+export type TraceEvent = { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string } | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } } | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" } | { kind: "intent_began" } | { kind: "intent"; text: string } | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number } | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string } | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number } | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number } | { kind: "connection_stand_in"; named: string; used: string } | { kind: "effort_lowered"; connection: string; model: string; asked: Effort; sent: Effort } | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" } | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult } | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal } | { kind: "rule_fired"; firing: RuleFiring } | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number } | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string } | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string } | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string } | { kind: "approval_asked"; callId: string; tool: string; lane: string } | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: { go: true } | { go: false; reason?: string } } | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] } | { kind: "todo"; items: { text: string; done: boolean }[] } | { kind: "limit"; hit: LimitHit } | { kind: "paused"; call: number } | { kind: "resumed"; call: number; ms: number } | { kind: "said"; call: number; text: string } | { kind: "released"; release: Release } | { kind: "progress_missing"; time: number } | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number } | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string } | { kind: "job"; job: JobView } | { kind: "agent_ended"; status: "done" | "asked" | "limit" | "stopped" | "failed"; limit?: LimitHit; usage: Usage } | { kind: "run_ended"; outcome: RunOutcome };
 ```
 
 ### `TraceRecord`
@@ -8926,15 +9131,15 @@ export interface TreeFileRow {
   level: LayerLevel;
   kind: TreeFileKind;
   bytes: number;
-  /** The name RPH loads it by, and an `off:` list names it by; null for a file RPH does not load by its name. */
+  /** The name RPH loads it by, and a `stack.off` list names it by; null for a file RPH does not load by its name. */
   item: string | null;
   /** Whether RPH takes it: a named file when it is the nearest of its name, not switched off and not an example; any other file as it is. */
   applies: boolean;
   /** The nearer file of the same name taken in its place; null when none is. */
   replacedBy: string | null;
-  /** Its name is in a config's `off:` list, which switches it off at every level. */
+  /** Its name is in a config's `stack.off` list, which switches it off at every level. */
   off: boolean;
-  /** The levels whose config's `off:` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. */
+  /** The levels whose config's `stack.off` list names it, farthest first: switching it on at one of these takes the name out there; at any other level it changes nothing. */
   offIn: LayerLevel[];
   /** Whether the user may write it where it is: never a shipped file or a generated one. */
   editable: boolean;
@@ -8956,7 +9161,7 @@ export interface TreeFileRow {
   held?: "needs" | "broken" | null;
   /** What RPH found wrong with it, in its own words, line by line. */
   problems?: string[];
-  /** The agents whose stacks it joins: a file `instructions:` names or an agent reads. */
+  /** The agents whose stacks it joins: a file `stack.instructions` names or an agent reads. */
   joins?: string[];
   /** For a level's hooks file (`hooks.yml` in its hooks folder): each hook it names, as RPH's hook reader takes it. */
   hooks?: TreeHook[];
@@ -8965,7 +9170,7 @@ export interface TreeFileRow {
 
 ### `TreeHook`
 
-A hook as a hooks file names it: its name (an `off:` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.
+A hook as a hooks file names it: its name (a `stack.off` list names it `hooks/<name>`), the moment it runs at and its command line as written; switched off, and by which levels; the nearer level's hooks file that names it in its place; whether RPH runs it; and, where RPH lists it, whether its command is switched on.
 
 ```ts
 export interface TreeHook {

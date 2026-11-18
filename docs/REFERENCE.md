@@ -1441,6 +1441,7 @@ Extends `container`.
 
 ### Formula functions
 
+- `burns_fuel(vehicle)`
 - `drive_minutes(vehicle, to, from)`
 - `fuel_ok(vehicle, to, from)`
 - `fuel_pct(vehicle)`
