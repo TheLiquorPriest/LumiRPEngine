@@ -3024,43 +3024,43 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### economy
 
-- Names: `world_apply`, `pay`, `spawn`, `fill_in_detail`, `fact`, `apply_credit`, `act`, `checks_odds`.
-- Actions it names, carried out by `act`: `lend_money`, `job_hire`, `job_end`, `job_raise`, `invoice_issue`, `owner_draw`, `property_buy`, `property_sell`, `trade`.
+- Names: `world_apply`, `pay`, `spawn`, `fill_in_detail`, `fact`, `act`, `world_query`, `apply_credit`, `donate`.
+- Actions it names, carried out by `act`: `eat`, `pay_card`, `move_money`, `withdraw_cash`, `deposit_cash`, `card_freeze`, `card_unfreeze`, `card_report_lost`, `card_replace`, `set_autopay`, `set_pay_prefs`, `flow_create`, `flow_update`, `flow_pause`, `flow_resume`, `flow_delete`, `lend_money`, `job_hire`, `job_end`, `job_raise`, `job_hours`, `job_leave`, `job_return`, `job_position`, `job_title`, `org_pay_schedule`, `invoice_issue`, `invoice_pay`, `invoice_void`, `owner_draw`, `distribute_profit`, `shares_issue`, `shares_buy_back`, `shares_classes`, `shares_list`, `shares_delist`, `stake_sell`, `project_start`, `project_pause`, `project_resume`, `project_drop`, `tax_consolidate`, `consent_dividend`, `property_buy`, `property_sell`, `property_list`, `lease_start`, `lease_end`, `trade`, `exercise_option`, `route_distributions`.
 - Names with no engine tool, operation or action of that name: `tool_search`, `tool_use`.
-- Its families' tools it does not name: `gm_adjust_money`, `open_account`, `close_account`, `tax_status`, `donate`, `money_prices`, `gm_revenue`, `set_price`, `gm_project`, `gm_effects`, `gm_effect`, `money_balances`.
+- Its families' tools it does not name: `gm_adjust_money`, `open_account`, `close_account`, `tax_status`, `money_prices`, `gm_revenue`, `set_price`, `gm_project`, `gm_effects`, `gm_effect`, `money_balances`.
 
 ### items-and-wardrobe
 
-- Names: `world_apply`, `give`, `wear`, `store`, `place`, `spawn`, `world_query`, `fill_in_detail`, `act`, `checks_odds`.
-- Actions it names, carried out by `act`: `search`, `fetch`, `take_piece`.
+- Names: `world_apply`, `give`, `wear`, `store`, `place`, `spawn`, `world_query`, `fill_in_detail`, `set_save`, `set_apply`, `set_drop`, `act`.
+- Actions it names, carried out by `act`: `take`, `drop`, `hand_over`, `give_back`, `lend`, `reclaim`, `lose`, `put_in`, `put_away`, `remove`, `use`, `search`, `fetch`, `take_piece`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
-- Its families' tools it does not name: `item_condition`, `item_use`, `item_own`, `item_grant`, `item_revoke`, `item_permit`, `item_unpermit`, `item_home`, `item_label`, `item_merge`, `item_lose`, `item_remove`, `set_save`, `set_apply`, `set_drop`, `items_access`, `items_of`.
+- Its families' tools it does not name: `item_condition`, `item_use`, `item_own`, `item_grant`, `item_revoke`, `item_permit`, `item_unpermit`, `item_home`, `item_label`, `item_merge`, `item_lose`, `item_remove`, `items_access`, `items_of`.
 
 ### vehicles
 
-- Names: `world_apply`, `store`, `place`, `vehicles_drive`, `move`, `give`, `pay`, `spawn`, `vehicles_classes`, `act`, `pass_time`.
-- Actions it names, carried out by `act`: `refuel`, `repair_vehicle`, `service_vehicle`.
+- Names: `world_apply`, `store`, `place`, `act`, `vehicles_drive`, `move`, `give`, `pay`, `spawn`, `vehicles_classes`, `pass_time`, `world_query`.
+- Actions it names, carried out by `act`: `drive`, `refuel`, `repair_vehicle`, `service_vehicle`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `vehicle_refuel`, `vehicle_service`.
 
 ### ruleset-and-sheets
 
-- Names: `world_query`, `world_apply`, `act`, `roll`, `set`, `fact`.
-- Actions it names, carried out by `act`: none.
-- Names with no engine tool, operation or action of that name: none.
-- Its families' tools it does not name: `gm_set_life`, `gm_despawn`, `gm_restore`, `gm_classify`, `gm_set_entity`, `gm_link`, `gm_unlink`, `fill_in_detail`, `checks_odds`, `people_regard`.
+- Names: `world_query`, `checks_odds`, `roll`, `world_apply`, `act`, `set`, `fact`.
+- Actions it names, carried out by `act`: `attempt`.
+- Names with no engine tool, operation or action of that name: `tool_search`.
+- Its families' tools it does not name: `gm_set_life`, `gm_despawn`, `gm_restore`, `gm_classify`, `gm_set_entity`, `gm_link`, `gm_unlink`, `fill_in_detail`, `people_regard`.
 
 ### combat
 
-- Names: `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `give`.
-- Actions it names, carried out by `act`: none.
+- Names: `world_apply`, `act`, `fight_round`, `map_measure`, `set`, `move`, `place`, `wear`, `give`.
+- Actions it names, carried out by `act`: `fight`, `end_turn`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `fight_start`, `fight_read`, `fight_end`.
 
 ### places-and-maps
 
-- Names: `map_measure`, `map_lay`, `world_map_place`, `world_map_link`, `places_route`, `map_place`, `world_keep`, `world_apply`, `place`, `spawn`, `place_label`, `place_remove`, `world_path`, `fact`, `world_query`, `move`, `map_door`, `map_edit`.
-- Actions it names, carried out by `act`: `remove`.
+- Names: `map_measure`, `map_lay`, `world_map_place`, `world_map_link`, `places_route`, `map_place`, `world_keep`, `world_apply`, `place`, `spawn`, `place_label`, `place_remove`, `world_path`, `fact`, `world_query`, `move`, `act`, `map_door`, `map_edit`.
+- Actions it names, carried out by `act`: `remove`, `go`, `step`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `map_view`, `world_map_settings`.
 
@@ -3080,7 +3080,7 @@ For each domain skill: the everyday operations and engine tools its text names i
 
 ### groups
 
-- Names: `world_query`, `set`, `fact`, `world_apply`, `act`, `checks_odds`, `relate`, `pay`.
-- Actions it names, carried out by `act`: `org_admit`, `org_leave`, `org_remove`, `org_title`, `org_appoint`, `org_position`, `chat_with`, `give_gift`, `org_dues`, `org_pay_schedule`, `org_share_out`, `job_hire`, `org_found`.
+- Names: `world_query`, `set`, `world_apply`, `act`, `fact`, `relate`, `pay`, `place`.
+- Actions it names, carried out by `act`: `org_admit`, `org_leave`, `org_remove`, `org_title`, `org_appoint`, `org_position`, `job_hire`, `chat_with`, `give_gift`, `org_dues`, `org_pay_schedule`, `org_share_out`, `org_entry`, `org_rename`, `org_restructure`, `org_merge`, `org_wind_up`, `org_delegate`, `org_revoke`, `org_decisions`, `org_vote_rule`, `org_goal`, `org_order`, `org_plan_status`, `party_name`, `party_tier`, `party_purse`, `party_hire`, `org_vote`, `org_motion_end`, `org_approve`, `org_deny`, `org_found`.
 - Names with no engine tool, operation or action of that name: `tool_search`.
 - Its families' tools it does not name: `gm_org`, `orgs_who_may`, `orgs_list`, `orgs_read`.
