@@ -12,7 +12,7 @@ import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Foun
 import { type GrepLines, grepLines, TaskTimedOut, type Workers } from "../app";
 import { oneFileAtATime, writeWhole } from "../app/disk";
 import type { TreeChats, TreeWrites } from "./chats";
-import { areaOf, MOUNTS } from "./layout";
+import { areaOf, MOUNTS, NO_CHAT } from "./layout";
 import { treeSettingsOf } from "./settings";
 import { scan } from "./ranged";
 import { linesOf, RunningFiles } from "./running";
@@ -38,6 +38,8 @@ export interface TreeFilesDeps {
   /** The one user this RPE serves; a scope of anyone else's is refused. */
   user: string;
   chats: TreeChats;
+  /** Places a chat not placed yet (`chatPlacer`), so a write at its levels has their folders; absent where RPE cannot (a test's own tree), and a write there is refused as outside. */
+  place?(user: string, chat: string): Promise<unknown>;
   /** The folder name of the scope's turn (`turnFolderName`); null for a turn RPE does not know. */
   turnFolder(scope: Scope): Promise<string | null>;
   writes: TreeWrites;
@@ -213,6 +215,20 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     return found;
   }
 
+  /**
+   * Finds a path of the scope's view for a write. A path at a level of the scope's chat that has no folder yet places the chat first,
+   * as its first turn places it, and is found again: whatever writes first (a job started before the chat's first message, his
+   * switch of a rule) writes, and is never refused for a turn not yet played. A chat Lumiverse does not have is refused in words.
+   */
+  async function lookupToWrite(scope: RunScope | UserScope, path: string): Promise<{ loc: ChatLocation; lookup: Lookup }> {
+    const loc = location(scope);
+    const lookup = await lookupIn(scope, loc, path);
+    if (!lookup.ok || lookup.at.disk !== null || !namesChat(scope) || scope.chat === NO_CHAT || deps.place === undefined) return { loc, lookup };
+    await deps.place(scope.user, scope.chat);
+    const placed = location(scope);
+    return { loc: placed, lookup: await lookupIn(scope, placed, path) };
+  }
+
   /** The scope's places: its session's and its turn's ids name folders, each no longer than the setting `files.maxIdChars` at the chat's levels. */
   async function places(scope: RunScope): Promise<Places> {
     const { idChars } = await treeSettingsOf(location(scope));
@@ -377,8 +393,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     find,
 
     async write(scope, path, op, by) {
-      const loc = location(scope);
-      const lookup = await lookupIn(scope, loc, path);
+      const { loc, lookup } = await lookupToWrite(scope, path);
       if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, by);
       const run = runOf(scope);
       if (by === "owner") {
@@ -423,8 +438,7 @@ export function treeFiles(deps: TreeFilesDeps): TreeFiles {
     },
 
     async update(scope, path, change) {
-      const loc = location(scope);
-      const lookup = await lookupIn(scope, loc, path);
+      const { loc, lookup } = await lookupToWrite(scope, path);
       if (!lookup.ok) return await refusal(scope, lookup.path, lookup.reason, "harness");
       const reason = lookup.at.disk === null ? "outside" : refusalFor(lookup.at, writableFor(await places(scope), "harness"));
       if (reason !== undefined || lookup.at.disk === null) return await refusal(scope, lookup.at.path, reason ?? "outside", "harness");

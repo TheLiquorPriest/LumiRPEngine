@@ -8,6 +8,7 @@
 import type { Database } from "bun:sqlite";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { RouteError } from "../app";
 import type { AreaTables } from "../app/app";
 import type { Migration } from "../app/migrations";
 import { CHARACTER_FOLDERS, CHAT_FOLDERS, CHATS_FOLDER, folderFor, id8, NOTE_FOLDERS, NOTES_FOLDER, SESSIONS_FOLDER, type StorageArea } from "./layout";
@@ -237,6 +238,31 @@ export interface ChatNames {
 export interface ChatFolders {
   character: string;
   chat: string;
+}
+
+/** Lumiverse's own names for a chat and its character, as the adapter reads them: null for one Lumiverse does not have. */
+export interface ChatNamesRead {
+  chat(chat: string): Promise<{ name: string; character: string | null } | null>;
+  character(id: string): Promise<{ id: string; name: string } | null>;
+}
+
+/**
+ * The one way a chat RPE knows by Lumiverse's id gets its folders (plan §5): placed by Lumiverse's own names for it and its character,
+ * by whatever needs them first (its first turn, a job started in it, a file or a setting written at its level or its character's),
+ * laid with every folder its levels hold and no file. A chat placed already is as it was placed. A chat Lumiverse does not have gets
+ * none, and neither does any while RPE cannot reach Lumiverse to read its names: both are refused in words.
+ */
+export function chatPlacer(chats: TreeChats, reads: () => ChatNamesRead | null): (user: string, chat: string) => Promise<ChatFolders> {
+  return async (user, chat) => {
+    const known = chats.folders(user, chat);
+    if (known !== null) return known;
+    const at = reads();
+    if (at === null) throw new RouteError(503, "RPE is not connected to Lumiverse, so it cannot make that chat's folder yet: try again once it is.");
+    const lv = await at.chat(chat);
+    if (lv === null) throw new RouteError(404, "Lumiverse has no such chat of yours, so RPE makes no folder for it.");
+    const character = lv.character === null ? null : await at.character(lv.character);
+    return await chats.place(user, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv.name } });
+  };
 }
 
 export class TreeChats {

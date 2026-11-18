@@ -45,7 +45,7 @@ import { aboutOf } from "../store/fold";
 import { type SceneSession, sceneSession, storyBrief, storyCoverage, storyRecordParts } from "../story";
 import { storyAt } from "../story/path";
 import { type StorySoFar, storySoFar, storySoFarBudget } from "../story/sofar";
-import { mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
+import { type ChatFolders, mergeTurnRecord, type Pruned, type TreeChats, type TreeFiles, type TreeNotes, turnFolderName, type TurnRecordMessage, type TurnRecordTokens } from "../tree";
 import { type Attempt, type AttemptFeedback, type CastFolder, type FolderAsk, writeAlongside } from "./folder";
 import { jobsEndedBetween } from "./jobs";
 import { ownerEditsBefore } from "./owner-changes";
@@ -189,6 +189,8 @@ export interface TurnLaneDeps {
   writes: Writes;
   files: TreeFiles;
   chats: TreeChats;
+  /** The one way a chat gets its folders (`chatPlacer`): its first turn places it, unless a job or a write placed it first. */
+  place(user: string, chat: string): Promise<ChatFolders>;
   prompts: TurnPrompts;
   lore: Lore;
   /** The lore index, whose full lore map the briefing holds. */
@@ -1235,13 +1237,11 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     return { waiting: before !== undefined, turn: before ?? Promise.resolve(), done: () => mine.resolve() };
   }
 
-  /** The chat in the store: made on the spot the first time, sharing its source's tree when it is a fork of a chat RPE knows; and its folders. */
+  /** The chat in the store: made on the spot the first time, sharing its source's tree when it is a fork of a chat RPE knows; and its folders, unless something placed it before its first turn. */
   async #chat(reads: LumiverseReads, user: string, chat: string): Promise<void> {
     const store = this.#d.store.user(user);
-    const placed = this.#d.chats.folders(user, chat) !== null;
-    if (store.chat(chat) !== null && placed) return;
-    const lv = await reads.chat(chat);
     if (store.chat(chat) === null) {
+      const lv = await reads.chat(chat);
       const fork = await forkOf(reads, chat);
       const at = lv?.metadata.branch_at_message;
       await this.#d.writes.run(() => {
@@ -1250,10 +1250,7 @@ export class TurnLane implements TurnPlayer, ChatChanges {
         else store.createChat({ id: chat });
       }, "making a chat");
     }
-    if (!placed) {
-      const character = lv === null || lv.character === null ? null : await reads.character(lv.character);
-      await this.#d.chats.place(user, chat, { character: character === null ? null : { id: character.id, name: character.name }, chat: { name: lv?.name ?? "" } });
-    }
+    await this.#d.place(user, chat);
   }
 
   /**

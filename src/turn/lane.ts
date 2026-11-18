@@ -48,7 +48,7 @@ import { openStore, STATE_SEARCH_SETTING_DEFS, StateIndex, type Store, STORE_SET
 import type { StoreFailure } from "../store/store";
 import type { FoldJob, StoreBrief } from "../store/away";
 import { STORY_FACT_SETTING_DEFS, storyFacts, storyTools } from "../story";
-import { CHATS_FOLDER, GeneratedFiles, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
+import { type ChatFolders, chatPlacer, CHATS_FOLDER, GeneratedFiles, NO_CHAT, promptMapFields, pruneChat, retentionOf, TreeChats, type TreeFiles, treeFiles, TreeNotes, TreeSuggestions, turnFolderName } from "../tree";
 import { Approvals } from "./approvals";
 import { type EventsDeps, givenViews, turnEvents } from "./events";
 import { FactsRegistry, turnFacts } from "./facts";
@@ -101,6 +101,38 @@ function servedFiles(owner: () => string | null, make: (user: string) => TreeFil
     },
     turnDisk: async (scope) => now().turnDisk(scope),
     sessionDisk: async (scope) => now().sessionDisk(scope),
+  };
+}
+
+/**
+ * The harness, its jobs placing the chat a job is started in before it starts (`chatPlacer`), so a job started before the chat's first
+ * message (the lore's indexing, the prompt's mapper, a bootstrap, the Jobs page's own form) has its chat's folder for its session, its
+ * transcripts and the results it keeps; a chat Lumiverse does not have starts no job and is refused in words. A job of no chat places
+ * nothing.
+ */
+function placingJobs(harness: Harness, place: (user: string, chat: string) => Promise<unknown>): Harness {
+  const { jobs } = harness;
+  return {
+    ...harness,
+    jobs: {
+      list: (filter) => jobs.list(filter),
+      get: (user, id) => jobs.get(user, id),
+      switches: (user) => jobs.switches(user),
+      start: async (scope, start) => {
+        if ("chat" in scope && scope.chat !== NO_CHAT) await place(scope.user, scope.chat);
+        return await jobs.start(scope, start);
+      },
+      cancel: (user, id) => jobs.cancel(user, id),
+      setSwitches: (user, change) => jobs.setSwitches(user, change),
+      hold: (user, id) => jobs.hold(user, id),
+      letGo: (user, id) => jobs.letGo(user, id),
+      again: (user, id) => jobs.again(user, id),
+      carryOn: (user, id, more) => jobs.carryOn(user, id, more),
+      resume: (user, id) => jobs.resume(user, id),
+      answer: (user, id, answer) => jobs.answer(user, id, answer),
+      tagCheck: (user, connection) => jobs.tagCheck(user, connection),
+      tagChecks: (user) => jobs.tagChecks(user),
+    },
   };
 }
 
@@ -225,7 +257,9 @@ export interface Turns {
   env: Environment;
   facts: FactsRegistry;
   files: TreeFiles;
+  /** The tree's record of where each chat's folders are; `place` is the one way a chat gets them (`chatPlacer`), by whatever writes at its levels first. */
   chats: TreeChats;
+  place(user: string, chat: string): Promise<ChatFolders>;
   prompts: TurnPrompts;
   runs: Runs;
   /** What he asks for beside his words, waiting or kept with the turn that answered it. */
@@ -269,6 +303,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   const clock = options.clock ?? MACHINE_CLOCK;
   const { store } = options;
   const chats = new TreeChats(app.db, app.writes, app.paths.files);
+  // A chat's folders are made by whatever needs them first, by Lumiverse's own names for it: its first turn, a job started in it, a write at its levels.
+  const place = chatPlacer(chats, () => options.lumiverse()?.reads ?? null);
   const notes = new TreeNotes({ files: app.paths.files, db: app.db, writes: app.writes, chats });
   const suggestions = new TreeSuggestions({ db: app.db, writes: app.writes, now: () => clock.now(), limits: (user, chat) => chats.suggestionLimits(user, chat) });
   // A file written with a turn named is told on the chat's live socket, so the Live page shows the turn's folder as it is written.
@@ -279,6 +315,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
         files: app.paths.files,
         user,
         chats,
+        place,
         // A grep's pattern runs on the worker pool, ended at `files.grepMs` even inside one line.
         workers: app.workers,
         async turnFolder(scope) {
@@ -542,12 +579,13 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     settingKeys: app.settings.filter((s) => !RPH_SETTINGS.some((rph) => rph.key === s.key)).map((s) => s.key),
     log: app.log,
   };
-  const harness = createHarness(env, { appName: "RPE", ...options.harness });
+  const harness = placingJobs(createHarness(env, { appName: "RPE", ...options.harness }), place);
   const lane = new TurnLane({
     store,
     writes: app.writes,
     files,
     chats,
+    place,
     prompts,
     lore,
     loreIndex,
@@ -595,5 +633,5 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   }
   const secretMarks = (at: LoreScope): Promise<LinesPart | undefined> => secretMarkLines(loadGuidance(files, chatLevels(at)));
   const given = (scope: Scope, agent: AgentRef, refs: readonly string[], moment: AttachMoment) => givenViews(eventsDeps, joined(scope), agent, refs, moment);
-  return { lane, store, harness, env, facts, files, chats, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
+  return { lane, store, harness, env, facts, files, chats, place, prompts, runs, requests, approvals, writes: app.writes, marks, trace, lore, secretSettings, secretMarks, loreIndex, notes, suggestions, projection, meaning, stateIndex, given, sources, placeSources, castKnowledge };
 }

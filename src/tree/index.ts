@@ -3,7 +3,7 @@
 // shipped folders with what an update changed of it, and the Files page's listing and routes.
 
 export { type TreeFileEntry, treeListing } from "./catalog";
-export { type ChatFolders, type ChatNames, TREE_MIGRATIONS, TREE_TABLES, TreeChats, type TreeWrites } from "./chats";
+export { type ChatFolders, type ChatNames, type ChatNamesRead, chatPlacer, TREE_MIGRATIONS, TREE_TABLES, TreeChats, type TreeWrites } from "./chats";
 export { type DefaultStanding, type DefaultUpdate, type DefaultsDeps, defaultStanding, type DiffLine, type FileWritten, layDefaults, lineDiff, recordWritten } from "./defaults";
 export { cut, type TreeFiles, type TreeFilesDeps, treeFiles } from "./files";
 export { GeneratedFiles, type GeneratedDeps, type GeneratedWrite, type PromptMapFields, promptMapFields } from "./generated";

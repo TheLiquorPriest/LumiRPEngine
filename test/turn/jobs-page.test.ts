@@ -78,3 +78,25 @@ test("a turn stopped before its reply's first word is dropped, RPH is told it le
   await b.until("RPH to be told the turn left the path", () => b.left.some((s) => s.turn === turn));
   expect(await b.until("the job to be cut off", async () => (await b.turns.harness.jobs.get(USER, running.id))?.state === "off-path")).toBe(true);
 });
+
+test("a job started in a chat RPE has not played yet makes the chat's folder first, and its session file is written; a chat Lumiverse does not have starts none", async () => {
+  const b = await openTurnBed({ answers: [{ pieces: [{ text: "Three storm nights." }] }] });
+  beds.push(b);
+  expect(b.turns.chats.folders(USER, CHAT)).toBeNull();
+
+  const started = await b.page<{ job: JobView }>("POST", `/api/v1/chats/${CHAT}/jobs`, { definition: "historian", brief: BRIEF });
+  expect(started.status).toBe(200);
+  const ended = await b.until("the job to end", async () => {
+    const job = await b.turns.harness.jobs.get(USER, started.body.job.id);
+    return job?.ended !== undefined ? job : null;
+  });
+  expect(ended.state).toBe("done");
+  expect(b.turns.chats.folders(USER, CHAT)).not.toBeNull();
+  const { session } = ended.scope;
+  expect((await b.turns.files.read({ user: USER, chat: CHAT, session }, `sessions/${session}/${session}.jsonl`)).status).toBe("read");
+  expect(b.logged.filter((l) => /could not be (written|saved)/.test(l.message))).toEqual([]);
+
+  const none = await b.page<{ error: string }>("POST", "/api/v1/chats/chat-nobody-has/jobs", { definition: "historian", brief: BRIEF });
+  expect(none.status).toBe(404);
+  expect(b.turns.chats.folders(USER, "chat-nobody-has")).toBeNull();
+});
