@@ -82,7 +82,7 @@ describe("on this repository", () => {
   const root = resolve(import.meta.dir, "../..");
   const repo = readRepo(root);
   const timings = readTimings(resolve(root, "test/timings.json"));
-  const opts = { timings, budget: 60_000, releaseOnly: ["test/ledger/properties.test.ts"] };
+  const opts = { timings, budget: 60_000, releaseOnly: [] };
 
   test("the docs and the starter templates reach the tests that read them", () => {
     expect(run(selectTests(repo, ["docs/RECIPES.md"], opts))).toContain("test/docs/recipes.test.ts");
@@ -91,27 +91,21 @@ describe("on this repository", () => {
     expect(run(selectTests(repo, ["test/ledger/regressions.json"], opts))).toEqual(["test/ledger/regressions.test.ts"]);
   });
 
-  test("a change to the property suite's runner takes the suite and its regressions; nothing further out takes the suite", () => {
-    expect(run(selectTests(repo, ["test/support/ops.ts"], opts))).toEqual(expect.arrayContaining(["test/ledger/properties.test.ts", "test/ledger/regressions.test.ts"]));
-    expect(run(selectTests(repo, ["src/engine/ledger/fold.ts"], opts))).not.toContain("test/ledger/properties.test.ts");
-  });
-
   test("the hubs keep to the budget and still run their own tests", () => {
-    for (const hub of ["src/backend/runtime.ts", "test/support/rig.ts", "src/shared/json.ts", "src/packs/index.ts"]) {
+    for (const hub of ["src/app/app.ts", "test/support/rig.ts", "src/shared/json.ts", "src/packs/index.ts"]) {
       const picked = selectTests(repo, [hub], opts);
       const spent = picked.run.reduce((sum, p) => sum + p.ms, 0);
       const own = picked.run.filter((p) => p.why.startsWith("named after")).reduce((sum, p) => sum + p.ms, 0);
       expect(spent).toBeLessThanOrEqual(Math.max(opts.budget, own));
       expect(picked.left.length).toBeGreaterThan(0);
     }
-    expect(run(selectTests(repo, ["src/backend/runtime.ts"], opts))).toContain("test/backend/runtime.test.ts");
   });
 
   test("the budget is spent in the targeted run's own unit, each file's time in one `bun test` process, so a module most tests reach runs more of them than a minute of whole processes would", () => {
     // In a process of its own a file's time is mostly the process starting and loading (the whole run's recording, test/timings-all.json): a minute of that runs fewer of these.
     // The count is compared with that, not with a fixed number: how many fit in a minute follows the record, which is made again as the tests change.
     const wholeProcesses = { ...opts, timings: readTimings(resolve(root, "test/timings-all.json")) };
-    for (const module of ["src/backend/harness/extension.ts", "src/engine/ledger/fold.ts"]) {
+    for (const module of ["src/app/app.ts", "src/engine/ledger/fold.ts"]) {
       const own = selectTests(repo, [module], opts).run.length;
       expect({ module, moreThanWholeProcesses: own > selectTests(repo, [module], wholeProcesses).run.length }).toEqual({ module, moreThanWholeProcesses: true });
     }

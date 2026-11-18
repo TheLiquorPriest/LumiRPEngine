@@ -1,8 +1,6 @@
-// Wires the fake host, the engine, test and combat packs and the real backend ledger service for tests.
+// Wires the fake host, the engine, test and combat packs and the ledger service the migration reads old chats with, for tests.
 
-import { LedgerService } from "../../src/backend/ledger-io";
-import { ChatSnapshots, toChain } from "../../src/migrate/today/ledger-io";
-import { MessageCache } from "../../src/backend/message-cache";
+import { ChatSnapshots, LedgerService, toChain } from "../../src/migrate/today/ledger-io";
 import { defaultSettings } from "../../src/migrate/today/settings-store";
 import { startMarkersFrom } from "../../src/migrate/today/start-markers";
 import type { TurnFrame } from "../../src/migrate/today/turn-frame";
@@ -12,7 +10,7 @@ import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { EditOp } from "../../src/shared/edit-ops";
 import { SECRET_MARK_WORDING } from "../../src/shared/secret-marks";
-import type { UserSettings } from "../../src/shared/settings";
+import type { UserSettings } from "../../src/migrate/today/user-settings";
 import { NARRATOR_DEFAULTS } from "../../src/shared/narrator-view";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
@@ -34,8 +32,6 @@ export interface HarnessOptions {
   packs?: readonly PackDef[];
   model?: TurnModel;
   settings?: UserSettings;
-  /** The ledger reads and writes the chats through the runtime's copy of their messages (`MessageCache`), each boot a new one, as a restarted backend has. */
-  copy?: boolean;
 }
 
 /** The queued turns the harness's own model planned (Re-runs and turns planned in flight included), and how each queue that stopped early stopped. */
@@ -59,10 +55,6 @@ export class Harness {
   readonly worlds: Map<string, WorldDoc>;
   readonly revisions: string[];
   service!: LedgerService;
-  /** The copy the ledger reads the chats through (`HarnessOptions.copy`). */
-  copy: MessageCache | null = null;
-  /** Each whole read of a chat the copy made since the backend started or the chat was forgotten; a second is a read again (`Runner.check`). */
-  readonly copyReads = new Map<ChatId, number>();
   private seeds = 0;
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
@@ -77,7 +69,6 @@ export class Harness {
   readonly failures: string[] = [];
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
-  private readonly copied: boolean;
   /** What a turn runs on (`TurnHooks.frame`): the user's settings, and a chat with no choices of its own. */
   private frameOf(chatId: ChatId): TurnFrame {
     return { userId: this.host.userId, chatId, settings: this.settings, revision: 0, chat: {} };
@@ -93,7 +84,6 @@ export class Harness {
         if (plan.stopped) this.plays[plan.stopped.cause]++;
       });
     this.settings = options.settings ?? defaultSettings();
-    this.copied = options.copy === true;
     this.worlds = testWorlds(seedMode, true, true);
     this.revisions = [...this.worlds.keys()];
     this.boot();
@@ -106,14 +96,10 @@ export class Harness {
   }
 
   private boot(): void {
-    this.copy = this.copied ? new MessageCache(this.host) : null;
-    this.copyReads.clear();
-    if (this.copy) this.copy.onRead = (chatId) => this.copyReads.set(chatId, (this.copyReads.get(chatId) ?? 0) + 1);
-    const copy = this.copy;
     // Every chat of the harness folds on one fold, as one user's do.
     const fold = new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY });
     this.service = new LedgerService(
-      copy ? copy.host : this.host,
+      this.host,
       async (chatId) => {
         const meta = await this.host.chats.chatMetadata(chatId, this.host.userId);
         const raw = meta[LEDGER_NAMESPACE];
@@ -134,10 +120,6 @@ export class Harness {
         };
       },
       () => fold,
-      (chatId) => {
-        copy?.forget(chatId);
-        this.copyReads.delete(chatId);
-      },
     );
     const noop = async (): Promise<void> => undefined;
     this.service.hooks = {

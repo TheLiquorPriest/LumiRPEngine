@@ -37,7 +37,7 @@ import type {
   WorldInfoInput,
   WorldInfoVerdict,
 } from "../../src/shared/host";
-import { decodeEvent } from "../../src/backend/spindle-host";
+import { num, str } from "../../src/migrate/today/host-message";
 import { outsideTurns } from "../../src/migrate/today/turn-frame";
 
 export interface FakeMessage {
@@ -682,16 +682,15 @@ export class FakeHost implements HostPort {
     this.emit("FRONTEND_SESSION_CLOSED", { frontendSessionId: session });
   }
 
-  /** The user's settings are written (`SETTINGS_UPDATED`): a Lumiverse page saves its settings as one batch naming every key (`settings.putMany`), read as the engine reads the host's payload. */
+  /** The user's settings are written (`SETTINGS_UPDATED`): a Lumiverse page saves its settings as one batch naming every key (`settings.putMany`). */
   settingsSaved(keys: string[]): void {
-    const event = decodeEvent("SETTINGS_UPDATED", { keys });
-    if (event) this.emit("SETTINGS_UPDATED", event);
+    this.emit("SETTINGS_UPDATED", { keys });
   }
 
-  /** A `CHAT_CHANGED` as Lumiverse sends it (a raw payload: `{ chatId, reattributedUserMessages }`, or `{ chat, changedFields }`), read as the engine reads the host's payload. */
+  /** A `CHAT_CHANGED` as Lumiverse sends it (a raw payload: `{ chatId, reattributedUserMessages }`, or `{ chat, changedFields }`, which names no chat and tells the reader nothing): read as the ledger reads the host's payload. */
   chatChanged(payload: unknown): void {
-    const event = decodeEvent("CHAT_CHANGED", payload);
-    if (event) this.emit("CHAT_CHANGED", event);
+    const chatId = str(payload, "chatId");
+    if (chatId) this.emit("CHAT_CHANGED", { chatId, renamed: (num(payload, "reattributedUserMessages") ?? 0) > 0 });
   }
 
   /** The user's messages in a chat renamed for a persona (`reattributeUserMessages`): written without message events, then one `CHAT_CHANGED`. */
