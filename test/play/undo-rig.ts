@@ -19,6 +19,7 @@ import { migrateStore, openStore, type Report, storedWorlds, type UserStore } fr
 import type { ChangeRow } from "../../src/store/types";
 import { Requests } from "../../src/turn/requests";
 import { HARNESS_MIGRATIONS } from "../../src/turn/tables";
+import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { CHAT, GUIDANCE, registry, USER } from "./bed";
 
@@ -35,6 +36,8 @@ export interface Rig {
   record(events: readonly LedgerEvent[]): Promise<ChangeRow[]>;
   /** One change taken back (the Undo of a change of a reply's turn), with what it left. */
   take(change: number): Promise<{ left: Report[] }>;
+  /** The chat's state view at its head, as the page reads it. */
+  view(): Promise<StateView>;
 }
 
 /** A chat on a starter world, one turn played, and the play service over its store. */
@@ -69,6 +72,7 @@ export async function rig(pov?: string, template = "modern_slice_of_life"): Prom
     doc,
     writes,
     world: () => s.headState(CHAT).state.world,
+    view: () => service.state(USER, CHAT, null),
     tap: (ask) => service.tap(USER, CHAT, ask),
     undo: async (id) => {
       if (id === null) throw new Error("the tap gave no Undo");

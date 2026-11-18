@@ -11,7 +11,7 @@ import { Badge, Button, Empty, IdText, List, ListRow, PageHeader, Section, useBu
 import { Icon } from "../../../ui/icons";
 import type { SheetProps } from "../../../frontend/registry";
 import { hintRequest } from "../../../frontend/requests";
-import { decodeQuestsView, KIND_LABEL, objectiveCount, STATUS_LABEL } from "./panel";
+import { decodeQuestsView, KIND_LABEL, objectiveCount, STAGE_STATE_LABEL, STATUS_LABEL } from "./panel";
 
 export function QuestSheet(props: SheetProps) {
   const app = useApp();
@@ -42,6 +42,17 @@ export function QuestSheet(props: SheetProps) {
             {track.cue ? <p class="lre-world-cue">{track.cue}</p> : null}
           </div>
         </Section>
+      ) : null}
+      {track.past.length > 0 ? (
+        <div data-lre-quest-past>
+          <Section title="Stages gone by" flush>
+            <List>
+              {track.past.map((p) => (
+                <ListRow key={p.label} title={p.label} subtitle={p.why} value={STAGE_STATE_LABEL[p.state]} valueTone="muted" />
+              ))}
+            </List>
+          </Section>
+        </div>
       ) : null}
       {track.objectives.length > 0 ? (
         <Section title="Objectives" aside={<Badge>{objectiveCount(track)}</Badge>} flush>

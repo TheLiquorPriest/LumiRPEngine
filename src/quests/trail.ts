@@ -2,10 +2,10 @@
 // is a `stage` change in the ledger, with the reason the Author gave it, and `/state/history` reads it there. A page of the quests reads
 // the same changes, through the same reader (`valueHistory`), so a stage the quest has been moved past shows how it ended and why, and a
 // quest standing on an end stage shows how it ended, with no second record kept beside the ledger. What the story itself called on a stage
-// (`quests.call`) stands over what a move gives it.
+// (`quests.call`) stands over what a move gives it. The play view's quest log lists the same stages under each quest it holds.
 
 import type { TrackState } from "../engine/state";
-import { isRecord } from "../shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../shared/json";
 import type { TrackDef } from "../shared/world";
 import type { UserStore } from "../store";
 import type { FoldEnv } from "../store/fold";
@@ -72,6 +72,29 @@ export function withTrails(views: readonly QuestView[], tracks: Readonly<Record<
     const closed: QuestClosedDoc | null = view.closed ?? (isTerminal(def, last.to) ? { outcome: Object.values(def.stages).some((s) => s.fail?.to === last.to) ? "failed" : "met", why: last.why, turn: last.turn, n: last.n, by: last.by } : null);
     return { ...view, closed, stages: view.stages.map((s) => (s.call !== null || !ended.has(s.id) ? s : { ...s, call: ended.get(s.id) as QuestCallDoc })) };
   });
+}
+
+/**
+ * The quest log of the play view (`story.quests`: its active, done and failed tracks) with, under each track a world's quest stands behind,
+ * the stages it was moved past or the story called on, as `withTrails` gives them to the pages. A track the log lists under a stand-in id
+ * (a secret one) is no quest's here and lists none.
+ */
+export function withPast(log: JsonValue, views: readonly QuestView[]): JsonValue {
+  if (!isRecord(log)) return log;
+  const past = new Map<string, JsonObject[]>();
+  for (const view of views) {
+    if (!view.world) continue;
+    const stages: JsonObject[] = [];
+    for (const s of view.stages) if (s.call !== null && s.call.state !== "open") stages.push({ label: s.label, state: s.call.state, why: s.call.why });
+    if (stages.length > 0) past.set(view.id, stages);
+  }
+  const out: JsonObject = { ...log };
+  for (const status of ["active", "done", "failed"]) {
+    const tracks = log[status];
+    if (!Array.isArray(tracks)) continue;
+    out[status] = tracks.map((t) => (isRecord(t) && typeof t.id === "string" && past.has(t.id) ? { ...t, past: past.get(t.id) ?? [] } : t));
+  }
+  return out;
 }
 
 /** The moves of a world's quest as its history lists them, each with its number on the path: the reason and outcome it came with, in the order made. */

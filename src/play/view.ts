@@ -19,6 +19,8 @@ import type { JournalNote } from "../shared/ledger";
 import type { OffstageSettings } from "../shared/offstage";
 import type { CallMeterView, Chip, PendingMark, StateView } from "../shared/state-view";
 import type { Store, UserStore } from "../store";
+import { questSliceOf, questViews } from "../quests/record";
+import { trailsOf, withPast, withTrails } from "../quests/trail";
 import { replyClocks } from "./panel-reads";
 import { type ControlsKnowledge, controls } from "./state/controls";
 import { hud } from "./state/hud";
@@ -64,7 +66,8 @@ export function chatView(input: ChatViewInput): StateView {
   const s = store.user(input.user);
   const row = s.chat(chat);
   if (row === null || row.world === null) return notWorldView(chat);
-  const state = (input.turn === null ? s.headState(chat) : s.stateAt(input.turn)).state.world;
+  const folded = input.turn === null ? s.headState(chat) : s.stateAt(input.turn);
+  const state = folded.state.world;
   const doc = store.env.worlds(state.revision) ?? (row.revision === null ? undefined : store.env.worlds(row.revision));
   if (doc === undefined) return notWorldView(chat);
   // The world as the state plays it (ITEMS-SPEC §6.2): with the places play made.
@@ -86,6 +89,9 @@ export function chatView(input: ChatViewInput): StateView {
         panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
       }
     }
+    // The quest log lists, under each world quest it holds, the stages that quest was moved past: the pages' own reading of them (`withTrails`).
+    const log = panels["story.quests"];
+    if (log !== undefined) panels["story.quests"] = withPast(log, withTrails(questViews(world.tracks, questSliceOf(folded.state)), world.tracks, trailsOf(s, store.env, chat, input.turn, world.tracks, state.tracks)));
     const shown = scene(world, state, elapsed, registry);
     const packs: Record<PackId, number> = {};
     for (const pack of registry.packs) packs[pack.id] = pack.version;

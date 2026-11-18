@@ -21,6 +21,8 @@ type Kind = (typeof KINDS)[number];
 export const KIND_LABEL: Record<Kind, string> = { quest: "Quest", secret: "Secret", puzzle: "Puzzle", agenda: "Agenda" };
 export const KIND_ICON: Record<Kind, IconName> = { quest: "flag", secret: "key", puzzle: "help", agenda: "scroll" };
 export const STATUS_LABEL: Record<Status, string> = { active: "Active", done: "Done", failed: "Failed" };
+export const STAGE_STATES = ["met", "failed"] as const;
+export const STAGE_STATE_LABEL: Record<(typeof STAGE_STATES)[number], string> = { met: "Done", failed: "Failed" };
 
 export interface QuestTrack {
   id: string;
@@ -33,6 +35,8 @@ export interface QuestTrack {
   /** The hints earned at this stage, in order; the first `opened` of them the player has opened. */
   hints: string[];
   opened: number;
+  /** The stages it was moved past or the story called on, in the order the quest has them: how each ended and why. */
+  past: { label: string; state: (typeof STAGE_STATES)[number]; why?: string }[];
   status: Status;
 }
 
@@ -52,6 +56,7 @@ export function decodeQuestsView(value: unknown): { tracks: QuestTrack[] } | nul
               objectives: list(t.objectives, (o) => ({ label: str(o.label), done: o.done === true })),
               hints: strings(t.hints),
               opened: num(t.opened),
+              past: list(t.past, (p) => ({ label: str(p.label), state: oneOf(p.state, STAGE_STATES, "met"), why: optStr(p.why) })),
               status,
             }
           : null,
