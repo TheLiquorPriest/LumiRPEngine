@@ -98,6 +98,11 @@ export function PromptView(props: PromptViewProps) {
               <span>The raw layout's parts are shown, named by the chat application's blocks and by place, until a map is learned.</span>
             </Banner>
           )}
+          {shown.mapped && !shown.playedMapped ? (
+            <Banner tone="info" icon="info" title="This turn was played before the preset had a map">
+              <span>The parts below are cut by the map as it stands now. The front and the notices, further down, are as recorded when it was played, when its prompt was known only by the chat application's layout.</span>
+            </Banner>
+          ) : null}
           {shown.complete ? null : (
             <Banner tone="warn" icon="alert" title="The prompt could not be told apart">
               <span>The chat application joined parts of it in a way that cannot be undone, so its parts cannot be found by name.</span>
@@ -127,7 +132,7 @@ export function PromptView(props: PromptViewProps) {
           <Section id="front" title="How much of the front stayed the same">
             <FrontLine front={shown.front} />
           </Section>
-          <Section id="notices" title="What changed in this prompt">
+          <Section id="notices" title="What changed when this turn was played">
             <NoticeList notices={shown.notices} lines={props.lines} />
           </Section>
         </>

@@ -2349,8 +2349,10 @@ export type PromptNotice = { kind: "changed"; marker: string } | { kind: "gone";
 export interface PromptShown {
   turn: TurnId;
   preset: { id: string; name?: string; revision?: string } | null;
-  /** The slices are the learned map's; false: the raw layout's, named by the chat application's blocks and by place. */
+  /** How the map as it stands now cuts this prompt: the slices are the learned map's; false: the raw layout's, named by the chat application's blocks and by place. */
   mapped: boolean;
+  /** How the prompt was known when the turn was played, as recorded then: false for a turn played before the preset had a map, whose notices say it was not mapped yet. It does not change when a map is learned later. */
+  playedMapped: boolean;
   /** The prompt's text could be told apart; false: slices cannot be found in some of it. */
   complete: boolean;
   slices: PromptSliceShown[];

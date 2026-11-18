@@ -22,6 +22,7 @@ const slice = (marker: string, over: Partial<PromptSliceShown> = {}): PromptSlic
 const SHOWN: PromptShown = {
   preset: { id: "preset-1", name: "Harbor preset", revision: "r2" },
   mapped: true,
+  playedMapped: true,
   complete: true,
   turn: "turn-9",
   slices: [slice("preset.style", { kind: "style" }), slice("persona", { kind: "persona", edited: true, breakdown: "corrected", found: "block" })],
@@ -67,6 +68,14 @@ describe("the Prompt page", () => {
     const text = textOf(view({ shown: { ...SHOWN, mapped: false } }));
     expect(text).toContain("This preset has no prompt map yet");
     expect(text).toContain("preset.style");
+  });
+
+  test("a turn played before the preset had a map says how it was known then and how the map cuts it now, as two things", () => {
+    const text = textOf(view({ shown: { ...SHOWN, mapped: true, playedMapped: false, notices: [{ kind: "unmapped" }] } }));
+    expect(text).toContain("This turn was played before the preset had a map");
+    expect(text).toContain("The parts below are cut by the map as it stands now.");
+    expect(text).not.toContain("This preset has no prompt map yet");
+    expect(textOf(view())).not.toContain("played before the preset had a map");
   });
 });
 

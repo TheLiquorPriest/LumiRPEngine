@@ -70,6 +70,8 @@ export function promptRoutes(turns: Turns) {
       turn: map.turn,
       preset: map.preset,
       mapped: map.mapped,
+      // What was recorded when the turn was played says how its prompt was known then; the map may have been learned since.
+      playedMapped: !map.notices.some((notice) => notice.kind === "unmapped"),
       complete: carried?.layout.complete ?? true,
       slices: map.slices,
       unclaimed: map.unclaimed,
