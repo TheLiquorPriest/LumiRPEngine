@@ -1,5 +1,6 @@
 ---
 description: fight_start as the model is told it - what the tool does, and what each of its arguments is.
+doing: starting a fight
 arguments:
   with: "Who fights on the player's side, each by name; name the player's character too if they fight."
   foes: "Who fights against them, each by name."

@@ -1,5 +1,6 @@
 ---
 description: fight_round as the model is told it - what the tool does, and what each of its arguments is.
+doing: recording a round of a fight
 arguments:
   fight: "The id of the fight; left out, the one fight under way."
   actions: "What each fighter did, in the order they did it."
