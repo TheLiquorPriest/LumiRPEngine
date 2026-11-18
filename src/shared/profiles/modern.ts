@@ -249,9 +249,9 @@ const traitRows: Record<string, TableRow> = {
   // Training with weapons and armour.
   personal_firearms_proficiency: trait("Personal Firearms", "feat", "No -4 to attack with a handgun or a longarm.", { grants: { proficiency: ["personal_firearms"] } }),
   advanced_firearms_proficiency: trait("Automatic Fire", "feat", "No -4 on a weapon's automatic fire.", { requires: has("personal_firearms_proficiency") }),
-  exotic_firearms_proficiency: trait("Heavy Weapon", "feat", "No -4 to attack with the heavy weapons taken as its choice: heavy_machine_guns, rocket_launchers or grenade_launchers.", { requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
+  exotic_firearms_proficiency: trait("Heavy Weapon", "feat", "No -4 to attack with the heavy weapons taken as its choice: heavy_machine_guns, rocket_launchers or grenade_launchers.", { grants: { proficiency: [] }, requires: all("personal_firearms_proficiency", "advanced_firearms_proficiency") }),
   archaic_weapons_proficiency: trait("Old Weapons", "feat", "No -4 to attack with a sword, a bow or another weapon of before guns.", { grants: { proficiency: ["archaic"] } }),
-  exotic_melee_weapon_proficiency: trait("Exotic Melee Weapon", "feat", "No -4 to attack with the exotic melee weapon taken as its choice.", { requires: `${BASE_ATTACK} >= 1` }),
+  exotic_melee_weapon_proficiency: trait("Exotic Melee Weapon", "feat", "No -4 to attack with the exotic melee weapon taken as its choice.", { grants: { proficiency: [] }, requires: `${BASE_ATTACK} >= 1` }),
   armor_light: trait("Light Armour Training", "feat", "Light armour's whole bonus counts to defence; without the training only its lesser bonus does."),
   armor_medium: trait("Medium Armour Training", "feat", "Medium armour's whole bonus counts to defence; without the training only its lesser bonus does.", { requires: has("armor_light") }),
   armor_heavy: trait("Heavy Armour Training", "feat", "Heavy armour's whole bonus counts to defence; without the training only its lesser bonus does.", { requires: has("armor_medium") }),
