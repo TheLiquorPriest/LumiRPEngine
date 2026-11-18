@@ -154,8 +154,8 @@ describe("the party's entity and purse", () => {
     expect(refusal(act(w, "party_name", { name: "The Night Shift" }))).toContain("already called The Night Shift");
   });
 
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view without the money no longer drops the unit.
-  test.skip("Start a purse opens an account the party owns with Jordan's deposit, in the same unit; a rebased view without the money drops it whole", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42), so the unit is kept whole.
+  test("Start a purse opens an account the party owns with Jordan's deposit, in the same unit; a rebased view without the money keeps it whole, advised", () => {
     const w = portAlder({ danny_okafor: "companion" });
     const before = structuredClone(w.state);
     const started = act(w, "party_purse", { amount: 10_000 });
@@ -174,7 +174,7 @@ describe("the party's entity and purse", () => {
     expect(partyPage(w).exists).toBe(true);
     expect(Object.keys(partyPage(w).sections)).toContain("money");
     expect(refusal(act(w, "party_purse", { amount: 5_000 }))).toContain("already has a purse");
-    // The deposit came from one of Jordan's accounts; a view in which it holds nothing folds none of the unit.
+    // The deposit came from one of Jordan's accounts; a view in which it holds nothing folds the unit all the same, advised.
     const post = unit.find((ev) => ev.type === "post");
     const source = post?.type === "post" ? post.lines.find((l) => l.amount < 0)?.account : undefined;
     expect(source).toBeDefined();
@@ -183,8 +183,8 @@ describe("the party's entity and purse", () => {
     applyValidUnits(reg, head, rebased, (s) => reg.context(w.world, s));
     rebased.accounts[source ?? ""] = 0;
     applyValidUnits(reg, unit, rebased, (s) => reg.context(w.world, s));
-    expect(rebased.entities[PARTY]).toBeUndefined();
-    expect(Object.values(rebased.entities).some((e) => e.kind === "account" && JSON.stringify(e.fields.owners ?? []).includes(PARTY))).toBe(false);
+    expect(rebased.entities[PARTY]).toBeDefined();
+    expect(Object.values(rebased.entities).some((e) => e.kind === "account" && JSON.stringify(e.fields.owners ?? []).includes(PARTY))).toBe(true);
   });
 });
 

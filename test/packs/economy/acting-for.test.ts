@@ -160,8 +160,8 @@ describe("Marcus delegates money.spend to Jordan, up to $200 a payment, until Fr
 });
 
 describe("a rebased view keeps or drops a payment as the shop whole (L41)", () => {
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where the shop can't pay no longer drops the unit.
-  test.skip("where the shop's account can't pay, the payment, its orgs.spent and its orgs.log drop together", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42), so the unit is kept whole in a rebased view where the shop can't pay.
+  test("where the shop's account can't pay, the payment, its orgs.spent and its orgs.log stand together, advised", () => {
     const w = portAlder();
     const before = structuredClone(w.state) as WorldState;
     const paid = act(w, DANNY, "pay", { to: PRIYA, amount: 40000, as: SHOP });
@@ -178,9 +178,9 @@ describe("a rebased view keeps or drops a payment as the shop whole (L41)", () =
     const poor = new Working(reg, w.world, structuredClone(before));
     const till = poor.state.accounts[TILL] ?? 0;
     expect(poor.apply({ type: "post", lines: [{ account: TILL, amount: -till }, { account: "economy.external:elsewhere", amount: till }], memo: "Spent elsewhere" })).toBeNull();
-    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toEqual([]);
-    expect(spent(poor.state, poor.world, DANNY)).toBe(0);
-    expect(orgHistory(poor.state, SHOP)).toEqual([]);
+    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toHaveLength(unit.length);
+    expect(spent(poor.state, poor.world, DANNY)).toBe(40000);
+    expect(orgHistory(poor.state, SHOP)).not.toEqual([]);
   });
 });
 

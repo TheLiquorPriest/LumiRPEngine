@@ -73,8 +73,8 @@ function account(w: Working, business: string): string {
 }
 
 describe("founding Ellis Mobile Repair in units", () => {
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where his savings can't put the capital in no longer drops the unit.
-  test.skip("an LLC with $2,000 from his savings and 1,000 units, as one unit", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42), so the unit is kept whole.
+  test("an LLC with $2,000 from his savings and 1,000 units, as one unit", () => {
     const w = portAlder();
     const before = structuredClone(w.state) as WorldState;
     const savings = w.state.accounts[SAVINGS] ?? 0;
@@ -91,12 +91,12 @@ describe("founding Ellis Mobile Repair in units", () => {
     expect(unit.map((e) => e.type)).toEqual(expect.arrayContaining(["spawn", "post", "set", "orgs.log"]));
     expect(unit.filter((e) => e.type === "spawn").map((e) => (e.type === "spawn" ? e.entity.kind : ""))).toEqual(["business", "account"]);
 
-    // A rebased view where his savings can't put the capital in drops all of it.
+    // A rebased view where his savings can't put the capital in keeps all of it, advised (`fundsAdvice`, 89e807b42).
     const poor = new Working(reg, w.world, structuredClone(before));
     const left = poor.state.accounts[SAVINGS] ?? 0;
     expect(poor.apply({ type: "post", lines: [{ account: SAVINGS, amount: -left }, { account: "economy.external:elsewhere", amount: left }], memo: "Spent elsewhere" })).toBeNull();
-    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toEqual([]);
-    expect(poor.state.entities[EMR]).toBeUndefined();
+    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toHaveLength(unit.length);
+    expect(poor.state.entities[EMR]).toBeDefined();
     const rich = new Working(reg, w.world, structuredClone(before));
     expect(applyValidUnits(reg, unit, rich.state, (s) => reg.context(rich.world, s))).toHaveLength(unit.length);
     expect(rich.state.entities[EMR]?.fields.owners).toEqual(owners(w, EMR));

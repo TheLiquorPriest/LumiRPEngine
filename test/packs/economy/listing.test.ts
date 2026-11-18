@@ -399,15 +399,16 @@ describe("going off the market", () => {
     expect(orgHistory(w.state, EMR)[0]?.text).toBe("Went off the market: bought back 500 public units at $2.50 a unit ($1,250.00)");
   });
 
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so going off the market with no money to pay is no longer refused.
-  test.skip("below the market price, or with no money to pay, nothing changes", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42): going off the market with no money to pay goes ahead.
+  test("below the market price nothing changes; with no money to pay, going off the market goes ahead, advised", () => {
+    // Below the market price: nothing changes.
     const w = portAlder();
     listed(w);
     expect(why(act(w, JORDAN, "shares_delist", { business: EMR, price: 100 }))).toBe("the public sells at no less than its market price, $2.00 a unit");
     const till = account(w, EMR);
     expect(w.apply({ type: "post", lines: [{ account: till, amount: -balance(w, till) }, { account: "economy.external:elsewhere", amount: balance(w, till) }], memo: "Spent elsewhere" })).toBeNull();
-    expect(why(act(w, JORDAN, "shares_delist", { business: EMR }))).not.toBe("");
-    expect(listingIn(w.state.entities[EMR]?.fields ?? {})?.float).toBe(500);
+    expect(why(act(w, JORDAN, "shares_delist", { business: EMR }))).toBe("");
+    expect(listingIn(w.state.entities[EMR]?.fields ?? {})).toBeNull();
   });
 });
 

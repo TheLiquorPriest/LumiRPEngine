@@ -306,8 +306,8 @@ describe("motions closing in the same slot", () => {
 });
 
 describe("replay", () => {
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where Danny can't pay no longer drops the unit.
-  test.skip("a rebased view where Danny can't pay drops the carrying vote's unit whole", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42), so the carrying vote's unit is kept whole.
+  test("a rebased view where Danny can't pay keeps the carrying vote's unit whole, advised", () => {
     const w = threeHolders();
     const id = opened(w);
     const before = structuredClone(w.state) as WorldState;
@@ -319,9 +319,8 @@ describe("replay", () => {
     const poor = new Working(reg, w.world, structuredClone(before));
     const left = poor.state.accounts[DANNY_CHECKING] ?? 0;
     expect(poor.apply({ type: "post", lines: [{ account: DANNY_CHECKING, amount: -left }, { account: "economy.external:elsewhere", amount: left }], memo: "Spent elsewhere" })).toBeNull();
-    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toEqual([]);
-    expect(motionsOf(poor.state, EMR)[0]?.status).toBe("open");
-    expect(motionsOf(poor.state, EMR)[0]?.votes[DANNY]).toBeUndefined();
+    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toHaveLength(unit.length);
+    expect(motionsOf(poor.state, EMR)[0]).toEqual(motionsOf(rich.state, EMR)[0]);
   });
 
   test("the whole ledger folds to the same records and owners again", () => {

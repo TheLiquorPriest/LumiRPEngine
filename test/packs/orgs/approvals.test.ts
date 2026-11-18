@@ -198,8 +198,8 @@ describe("an act over a limit, put to whoever holds the power above", () => {
     expect(requestsOf(w.state, SHOP)[0]).toMatchObject({ status: "approved", answered: { by: MARCUS } });
   });
 
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where the shop can't pay no longer drops the unit.
-  test.skip("a rebased view where the shop's account can't pay drops the approval's unit whole", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42), so the approval's unit is kept whole.
+  test("a rebased view where the shop's account can't pay keeps the approval's unit whole, advised", () => {
     const w = portAlder();
     const id = asked(w);
     const before = structuredClone(w.state) as WorldState;
@@ -211,9 +211,9 @@ describe("an act over a limit, put to whoever holds the power above", () => {
     const poor = new Working(reg, w.world, structuredClone(before));
     const left = poor.state.accounts[TILL] ?? 0;
     expect(poor.apply({ type: "post", lines: [{ account: TILL, amount: -left }, { account: "economy.external:elsewhere", amount: left }], memo: "Spent elsewhere" })).toBeNull();
-    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toEqual([]);
-    expect(requestsOf(poor.state, SHOP)[0]?.status).toBe("asked");
-    expect(spent(poor.state, poor.world, DANNY)).toBe(0);
+    expect(applyValidUnits(reg, unit, poor.state, (s) => reg.context(poor.world, s))).toHaveLength(unit.length);
+    expect(requestsOf(poor.state, SHOP)[0]?.status).toBe(requestsOf(rich.state, SHOP)[0]?.status);
+    expect(spent(poor.state, poor.world, DANNY)).toBe(spent(rich.state, rich.world, DANNY));
   });
 
   test("the whole ledger folds to the same records again", () => {

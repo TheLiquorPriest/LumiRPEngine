@@ -154,8 +154,8 @@ describe("W1: winding up all at once", () => {
     expect(r.events.some((e) => e.type === "economy.payslip")).toBe(true);
   });
 
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a rebased view where the shop can't pay no longer drops the unit.
-  test.skip("a rebased view where the shop's account can't pay the loan drops it whole", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42): the wind-up stays whole in a rebased view where the shop can't pay.
+  test("a rebased view where the shop's account can't pay the loan keeps it whole, advised", () => {
     const w = funded(portAlder());
     const before = structuredClone(w.state) as WorldState;
     const r = act(w, MARCUS, "org_wind_up", { org: SHOP });
@@ -163,8 +163,8 @@ describe("W1: winding up all at once", () => {
     const poor = new Working(reg, w.world, structuredClone(before));
     const left = poor.state.accounts[SHOP_ACCOUNT] ?? 0;
     expect(poor.apply({ type: "post", lines: [{ account: SHOP_ACCOUNT, amount: -left }, { account: "economy.external:elsewhere", amount: left }], memo: "Spent elsewhere" })).toBeNull();
-    expect(applyValidUnits(reg, r.events, poor.state, (s) => reg.context(poor.world, s))).toEqual([]);
-    expect(poor.state.entities[SHOP]?.fields.dissolved).toBeUndefined();
+    expect(applyValidUnits(reg, r.events, poor.state, (s) => reg.context(poor.world, s))).toHaveLength(r.events.length);
+    expect(poor.state.entities[SHOP]?.fields.dissolved).toBeDefined();
   });
 });
 

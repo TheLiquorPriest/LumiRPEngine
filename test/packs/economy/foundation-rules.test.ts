@@ -580,8 +580,8 @@ describe("a returned-payment fee is charged only when the money wasn't there", (
 });
 
 describe("a cash withdrawal's fees never let the cash past the funds check", () => {
-  // hardening: a posting the account can't cover stands now, advised (`fundsAdvice`), so a withdrawal the account can no longer cover is no longer dropped at the fold.
-  test.skip("a withdrawal the account can no longer cover is dropped whole at the fold, fees and all", () => {
+  // A posting the account can't cover stands, advised (`fundsAdvice`, 89e807b42): the withdrawal and its fee stay one unit, and the account goes short.
+  test("a withdrawal the account can no longer cover stands whole at the fold, fees and all, advised", () => {
     const w = setup((world) => {
       world.entities.debit = entity("debit", "card", { account: "checking", holder: "you", network: "debit", state: "active" });
       const place = world.places[String(world.entities.you!.fields.place ?? world.start.place)]!;
@@ -595,8 +595,8 @@ describe("a cash withdrawal's fees never let the cash past the funds check", () 
     const drain = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "checking", -(w.state.accounts.checking ?? 0) + 1_000);
     if (!drain || "code" in drain) throw new Error("no adjust");
     w.applyAll(drain);
-    expect(applyValidUnits(reg, out, w.state, (s) => reg.context(w.world, s))).toEqual([]);
-    expect(w.state.accounts.checking).toBe(1_000);
+    expect(applyValidUnits(reg, out, w.state, (s) => reg.context(w.world, s))).toHaveLength(out.length);
+    expect(w.state.accounts.checking ?? 0).toBeLessThan(0);
   });
 });
 
