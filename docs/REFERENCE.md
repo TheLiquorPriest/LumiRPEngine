@@ -371,23 +371,23 @@ Version 1 · realism domain `d20` · requires `combat`, `gear`, `space`.
 
 ### Formula functions
 
-- `bonus()`
-- `bonus_only()`
-- `bonus_without()`
-- `class_level()`
-- `class_skill()`
-- `class_sum()`
-- `has_trait()`
-- `hit_dice()`
-- `levels()`
-- `limit()`
-- `mod()`
-- `ranks()`
-- `rest_minutes()`
-- `score()`
-- `size_mod()`
-- `total()`
-- `under()`
+- `bonus(...args)`
+- `bonus_only(...args)`
+- `bonus_without(...args)`
+- `class_level(...args)`
+- `class_skill(...args)`
+- `class_sum(...args)`
+- `has_trait(...args)`
+- `hit_dice(...args)`
+- `levels(...args)`
+- `limit(...args)`
+- `mod(...args)`
+- `ranks(...args)`
+- `rest_minutes(...args)`
+- `score(...args)`
+- `size_mod(...args)`
+- `total(...args)`
+- `under(...args)`
 
 ### Actions
 
@@ -1412,6 +1412,7 @@ Extends `thing`.
 ### Formula functions
 
 - `can_go(from, to)`
+- `distance(a, b)`
 - `distance_km(from, to, mode)`
 - `entry_why(who, place)`
 - `go_minutes(from, to)`

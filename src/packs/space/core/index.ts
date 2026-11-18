@@ -41,6 +41,7 @@ import { labelOf, optionalService, sliceRecord, strOf, own } from "../../../engi
 import { entersFrom, entryClosed, entryFor, entryRefusal, withoutLeave } from "../../../engine/entry";
 import { arrivalEvents, entered, layEvents, POS_EVENT, reach, sightFor, stepEvents, walkOn } from "./positions";
 import { groundAt, spotData, spotOf, type GroundSource } from "./grid-model";
+import { between } from "./grid-measure";
 import type { Walk } from "./grid-path";
 import { closedRoutes, goMinutes, nominalRoute, routeAt, vehicleTrips } from "./travel";
 import type { TravelPlan, VehicleTrip, VehicleTripAsk } from "../../../shared/travel";
@@ -351,6 +352,16 @@ export const spacePack: PackDef = {
     // Things in cells (DESIGN §11): `reach(self, item)` holds on or next to the item's cell while the
     // grid system tracks both, else at the same place; `on_grid(item)` while it lies in a cell itself.
     r.formula("reach", (ctx, a, b) => reach(ctx, String(a ?? ""), String(b ?? "")));
+    // How far apart two on one grid stand, from the nearest square of one to the nearest of the other, by the grid's rule for
+    // diagonals, in the world's units (feet or metres, as its ruleset or the map says); null where they do not stand on one grid.
+    r.formula("distance", (ctx, a, b) => {
+      const [x, y] = [String(a ?? ""), String(b ?? "")];
+      const place = placeOfEntity(ctx.state, x);
+      const ground = place === null ? null : groundAt(ctx, place);
+      if (ground === null || placeOfEntity(ctx.state, y) === null) return null;
+      const squares = between(ground.drawn, ground.moving, x, y);
+      return squares === null ? null : squares * (ground.drawn.scale.unit === "feet" ? ground.drawn.scale.feet : ground.drawn.scale.metres);
+    });
     r.formula("on_grid", (ctx, thing) => {
       const e = own(ctx.state.entities, String(thing ?? ""));
       return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;

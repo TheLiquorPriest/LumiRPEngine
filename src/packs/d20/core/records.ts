@@ -14,10 +14,11 @@ import { labelOf, own } from "../../../engine/pack-kit";
 /** The fields of a record that name someone or something, said by their names. */
 const NAMED: Readonly<Record<string, true>> = { who: true, target: true, item: true, by: true, aided: true, vs: true };
 
-/** A record's values as its line takes them: a name for an id, a list's words joined, a number or words as they are. */
+/** A record's values as its line takes them: a name for an id, an outcome in words, a list's words joined, a number or words as they are. */
 function fieldsOf(e: PackEvent, ctx: ReadContext): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
   const word = (key: string, v: JsonValue): string | number | boolean | null => {
+    if (key === "outcome" && typeof v === "string") return say(`d20_outcome_${v}`) || v;
     if (typeof v === "string") return own(NAMED, key) && own(ctx.state.entities, v) ? labelOf(ctx, v) : v;
     if (typeof v === "number" || typeof v === "boolean") return v;
     if (Array.isArray(v)) return v.map((x) => (typeof x === "string" && own(NAMED, key) && own(ctx.state.entities, x) ? labelOf(ctx, x) : typeof x === "string" || typeof x === "number" ? String(x) : "")).filter((x) => x !== "").join(", ");
