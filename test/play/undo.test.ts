@@ -1,59 +1,10 @@
 // A tap of the play views and its Undo, through the play service on a chat that plays a starter world: what a press changes is taken
 // back by its Undo, the answer says when part of it stays, and a second organization of a name there is already is refused.
 
-import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { LiveHub, WriteQueue } from "../../src/app";
-import { shippedTexts } from "../../src/iface/index";
-import { STARTER_WORLDS } from "../../src/packs/index";
-import { PlayService } from "../../src/play";
 import type { TapAsk } from "../../src/play/service";
-import { TAP_DEFAULTS } from "../../src/play/settings";
-import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
-import { MAP_DEFAULTS } from "../../src/shared/map-config";
-import { migrateStore, openStore, storedWorlds } from "../../src/store";
-import { Requests } from "../../src/turn/requests";
-import { HARNESS_MIGRATIONS } from "../../src/turn/tables";
-import { CHAT, GUIDANCE, registry, USER } from "./bed";
-
-/** A chat on the starter world, one turn played, and the play service over its store. */
-async function rig(pov?: string, template = "modern_slice_of_life") {
-  const db = new Database(":memory:");
-  migrateStore(db);
-  for (const step of HARNESS_MIGRATIONS) db.run(step.sql);
-  const store = openStore({ db, registry: registry(), worlds: storedWorlds(db) });
-  const writes = new WriteQueue(db, 10);
-  const live = new LiveHub({ queueEvents: 64, now: () => 0 });
-  const requests = new Requests(db, writes, () => undefined);
-  const lumiverse = () => {
-    throw new Error("The rig has no Lumiverse to put a message in.");
-  };
-  const log = () => undefined;
-  const service = new PlayService({ store, writes, live, db, guidance: GUIDANCE, texts: () => shippedTexts(), turning: () => false, settings: async () => ({ dueItems: 50, editOps: 64, taps: TAP_DEFAULTS, map: MAP_DEFAULTS }), requests, lumiverse, writeChatSetting: async () => {}, log: { debug: log, info: log, warn: log, error: log } });
-  const make = STARTER_WORLDS[template];
-  if (make === undefined) throw new Error(`no starter world ${template}`);
-  const doc = make(template, template);
-  if (pov !== undefined) doc.pov = pov;
-  const revision = hashJson(doc);
-  const s = store.user(USER);
-  await writes.run(() => {
-    s.putWorld(revision, doc);
-    s.createChat({ id: CHAT, world: doc.id, revision });
-  });
-  const begun = await writes.run(() => s.beginTurn({ chat: CHAT, kind: "normal" }), "a turn");
-  await writes.run(() => s.tieTurn(begun.id, { message: "msg-1", hash: "hash-1" }), "tying the turn");
-  const world = () => s.headState(CHAT).state.world;
-  return {
-    world,
-    books: () => s.headState(CHAT).state.world.packs.economy ?? {},
-    tap: (ask: TapAsk) => service.tap(USER, CHAT, ask),
-    undo: async (id: string | null) => {
-      if (id === null) throw new Error("the tap gave no Undo");
-      return await service.undoEdit(USER, CHAT, id);
-    },
-  };
-}
+import { rig } from "./undo-rig";
 
 const found = (name: string): TapAsk => ({ kind: "action", action: "org_found", params: { type: "group", name, kind: "faction" }, source: "panel" });
 const named = (name: string): TapAsk => ({ kind: "action", action: "party_name", params: { name }, source: "panel" });
@@ -118,7 +69,8 @@ test("a thing renamed is taken back by its Undo, and a change of several things 
 });
 
 test("what the money presses and the plan keep in their books is taken back with the press", async () => {
-  const { tap, undo, books } = await rig("marcus_delgado");
+  const { tap, undo, world } = await rig("marcus_delgado");
+  const books = (): JsonObject => world().packs.economy ?? {};
   const books0 = JSON.stringify(books().books ?? null);
   for (const ask of [
     { action: "owner_draw", params: { business: "alder_automotive_co", amount: 5000 } },
