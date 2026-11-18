@@ -6,7 +6,7 @@ fact: turn.without.intent(unreleased) > 0
 at: after-message
 repeat: once per turn
 ---
-You have not written an intent record for this turn, and your reply has not gone out. Write it now, at the head of your next message, marked the way the reply contract says, before you go on. See `TURN.md`, "Intent first".
+You have not written an intent record for this turn, and your reply has not gone out. Write it now, the way the reply contract says an intent record is written, before you go on. See `TURN.md`, "Intent first".
 {{#turns.without.intent}}
 The {{turns.without.intent}} turns before this one went without one too.
 {{/turns.without.intent}}
