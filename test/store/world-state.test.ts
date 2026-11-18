@@ -27,13 +27,15 @@ function played() {
   const ts = testStore();
   const { s } = ts;
   s.createChat({ id: "c", revision: ts.revision });
-  const first: ChangeInput[] = [
+  // Each written by its agent's own call, as an agent's write is: with its handle.
+  const written: ChangeInput[] = [
     { lane: "story", op: "story.horizon", value: { list: ["common_room", "tam"] }, by: "author", source: "author" },
     { lane: "story", op: "store.note", value: { at: "lamp_ladle", text: "busier than usual" }, by: "author", source: "author" },
     { lane: "engine", ...factStore.change({ about: `entity:${POV}`, key: "mood", value: "on edge" }), by: "gm", source: "prose", precision: "vague" },
     ...engine(pay("acct_wren", 75, "A round for the room")).map((c) => ({ ...c, precision: "approximate" as const })),
     ...engine({ type: "set", entity: "nobody", field: "mood", value: "glad" }),
   ];
+  const first = written.map((c): ChangeInput => ({ ...c, handle: `${c.by}-1` }));
   play(s, "c", "m1", "Wren buys the room a round.", 1, first);
   const t2 = s.beginTurn({ chat: "c", kind: "normal" });
   return { ...ts, t2 };
