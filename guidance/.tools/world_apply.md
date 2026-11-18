@@ -36,7 +36,7 @@ arguments:
   operations.add: "set: a number to add (negative to take away). A gauge such as hit points is held to its bounds, and the answer says what was asked past them."
   operations.quest: "quest: the quest, secret, puzzle or agenda."
   operations.stage: "quest: the stage a quest the world built moves to (the one it stands on, to call that one); the stage called, for a quest opened in play."
-  operations.outcome: "quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules."
+  operations.outcome: "quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it, one with a check has its check rolled by the world's rules, and one of the tabletop rules' works its outcome out itself."
   operations.action: "act: the action, by its id."
   operations.params: "act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is."
   operations.reveal: "quest: true to show the player."
