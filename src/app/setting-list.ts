@@ -180,6 +180,9 @@ const GROUPS: Readonly<Record<string, readonly [group: string, section: string]>
   live: ["What you see while a turn runs", "Turns and replies"],
   turns: ["Lists of turns", "Turns and replies"],
   calls: ["Model calls", "Connections and model calls"],
+  // What counts as a dead call, then how a failed one is made again: the page reads them in RPH's order, top to bottom.
+  "calls.silentAfterSeconds": [RETRY_GROUP, "Connections and model calls"],
+  "calls.unansweredAfterSeconds": [RETRY_GROUP, "Connections and model calls"],
   "calls.retries": [RETRY_GROUP, "Connections and model calls"],
   "calls.retryWaitSeconds": [RETRY_GROUP, "Connections and model calls"],
   "calls.retryWaitGrowth": [RETRY_GROUP, "Connections and model calls"],

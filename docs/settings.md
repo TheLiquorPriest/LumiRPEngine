@@ -240,7 +240,6 @@ Each connection's own values, how a model call is made, tried again and throttle
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
-| `calls.silentAfterSeconds` | `300` seconds | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A model's answer that goes silent | Silent answer ends after: Seconds an answer that has begun may go with nothing from its server before it is ended. |
 | `calls.providerWaitSeconds` | `60` seconds | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Provider wait: Seconds a provider has to answer a connection's test or list its models. |
 | `calls.signInOpenSeconds` | `600` seconds | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Sign-in stays open: Seconds a sign-in to a provider stays open for you to finish it. |
 | `calls.testRoomTokens` | `64` tokens | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Test call's room: Tokens a connection's test call lets its answer take. |
@@ -257,6 +256,8 @@ Each connection's own values, how a model call is made, tried again and throttle
 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
+| `calls.silentAfterSeconds` | `300` seconds | RPE-global.yml or a chat's RPE.yml | from the next turn | Appendix D.1: A model's answer that goes silent | Silent answer ends after: Seconds an answer that has begun may go with nothing from its server before it is ended. |
+| `calls.unansweredAfterSeconds` | `300` seconds | RPE-global.yml or a chat's RPE.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Unanswered call ends after: Seconds a call that has been sent may wait for the first word, thought or tool call of its answer; past them it is called failed, as a call that timed out, and made again as a failed call is. It finds a provider that took the call and went dead; it is no limit on an agent's work, which takes as long as it takes once its answer has begun. |
 | `calls.retries` | `2` | RPE-global.yml | from the next turn | Appendix D.1: A model call that failed | Retries of a failed call: Times a failed call is made again, whenever in the call it failed, where another try can help and its kind of failure is switched on; its connection's own number stands over this. Each try counts as a call against every limit, and a reply already partly shown goes on from where it stopped. A request passed through with no turn is made again only when it failed before any of its answer came. |
 | `calls.retryWaitSeconds` | `1` seconds | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Wait before a retry: Seconds before a failed call is made again the first time; each wait after it grows by the retry wait growth. |
 | `calls.retryWaitGrowth` | `2` | RPE-global.yml | from the next turn | beyond Appendix D.1, for the owner's approval | Retry wait growth: Each wait before a retry after the first is the one before times this: 2 doubles it, 1 keeps it the same. |
