@@ -66,7 +66,7 @@ export function withoutSystemd(why: string, io: CliIO, paths: DataPaths, bun: st
   return [
     `--systemd installs a systemd service, and ${why}, so none is installed here; ${appFile === undefined ? "" : "RPE's own copy is, and "}RPE runs in the foreground below instead.`,
     `To keep RPE running here, have your system start this line when you log in and again whenever it stops: ${keep}`,
-    "On macOS that is launchd, on Windows Task Scheduler, in a container a second process or a compose service that shares Lumiverse's network (127.0.0.1 is then the same for both); docs/install.md, \"Keep it running\", has the entries.",
+    "On macOS that is launchd, on Windows Task Scheduler, in a container a second process or a compose service that shares Lumiverse's network (127.0.0.1 is then the same for both); docs/install.md, \"Keep it running on macOS, Windows and in a container\", has the entries.",
     appFile === undefined
       ? "RPE does not restart itself onto an update there: stop it and start it again after you update the extension."
       : `RPE does not restart itself onto an update there: after you update the extension, run ${runLine(io, paths, "up", "--systemd")} again, which puts the new build in RPE's copy, then restart RPE.`,
