@@ -34,12 +34,47 @@ export interface Counted {
 /** Modifier reads in progress: a modifier whose value asks for a bonus stops here instead of recursing. */
 let reading = 0;
 
+/**
+ * Who attacks whom and how far apart they stand, while an attack is worked out (§5.1): a modifier of either side reads the other as
+ * `target`, and the distance between them as `distance`. A distance none knows leaves a modifier that reads it out, and says so.
+ */
+export interface Situation {
+  who: EntityId;
+  target: EntityId;
+  distance: number | null;
+}
+
+const situations = new WeakMap<ReadContext, Situation & { unknown: boolean }>();
+
+/** `fn` worked out with an attack's situation bound for both sides' modifiers; and whether a modifier asked for a distance none knew. */
+export function inSituation<T>(ctx: ReadContext, situation: Situation, fn: () => T): { value: T; unknownDistance: boolean } {
+  const before = situations.get(ctx);
+  const now = { ...situation, unknown: false };
+  situations.set(ctx, now);
+  try {
+    return { value: fn(), unknownDistance: now.unknown };
+  } finally {
+    if (before) situations.set(ctx, before);
+    else situations.delete(ctx);
+  }
+}
+
+/** A bare `distance` in a formula (not the function of that name). */
+const DISTANCE = /\bdistance\b(?!\s*\()/;
+
 function worked(ctx: ReadContext, who: EntityId, v: number | string | undefined, fallback: Value): Value {
   if (typeof v === "number") return v;
   if (reading > 6) return fallback;
+  const sit = situations.get(ctx);
+  const other = sit === undefined ? undefined : who === sit.who ? sit.target : who === sit.target ? sit.who : undefined;
+  if (sit !== undefined && other !== undefined && sit.distance === null && typeof v === "string" && DISTANCE.test(v)) {
+    sit.unknown = true;
+    return fallback;
+  }
   reading++;
   try {
-    return evalExpr(v, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who } }), fallback);
+    const bindings: Record<string, EntityId> = other !== undefined ? { self: who, target: other } : { self: who };
+    return evalExpr(v, scopeEnv({ reg: ctx.registry, ctx, bindings, ...(other !== undefined && sit?.distance !== null && sit?.distance !== undefined ? { vars: { distance: sit.distance } } : {}) }), fallback);
   } finally {
     reading--;
   }

@@ -23,6 +23,7 @@ import { selectorMatches } from "../engine/selector";
 import { canSeeEntity } from "../engine/visibility";
 import { downsOf } from "../packs/combat/core/flow";
 import { fightById, fighterOf, fightsOf, rulesOf as fightRulesOf } from "../packs/combat/core/model";
+import { costKeys } from "../packs/d20/core/procedures";
 import { isAlready, notApplicable } from "./families/run";
 import { find, isUnread, minorUnits, named, notAs, type OpContext, type OpDef, textArg, type Unread } from "./ops";
 import { clockText } from "./ops-time";
@@ -157,7 +158,8 @@ function actionNamed(o: OpContext): ActionDef | Unread {
 
 /**
  * An action of the tabletop rules (the `d20` pack's) carried out while its doer is in a fight under way (RULESET-DESIGN §5.3): what
- * it costs of the fight's budgets (`ruleset.d20.costs`, by the action's id, `attack.full` for every attack a high base attack gives)
+ * it costs of the fight's budgets (`ruleset.d20.costs`, by the keys `costKeys` gives: the action's id, `attack.full` for every attack
+ * a high base attack gives, `reload.<kind>` by the magazine's kind before the plain reload)
  * is spent, and said where its doer has it not left this turn and carried out all the same; the act is recorded into the fight, as
  * `fight_round` records one, with `told`, its records' words, for the fight's round to show its numbers; and who that leaves down or
  * back up is settled by the fight's rules. Nothing for any other action.
@@ -169,8 +171,7 @@ function intoFight(o: OpContext, action: ActionDef, actor: EntityId, params: Jso
   if (d20 === undefined || rules === null || action.pack !== "d20") return;
   const enc = fightsOf(w.state).find((f) => fighterOf(f, actor) !== undefined);
   if (!enc) return;
-  const key = action.id === "attack" && params.full === true ? "attack.full" : action.id;
-  const cost = own(d20.costs ?? {}, key) ?? {};
+  const cost = costKeys(w.ctx, action.id, actor, params).map((key) => own(d20.costs ?? {}, key)).find((c) => c !== undefined) ?? {};
   if (Object.keys(cost).length > 0) {
     const refused = o.draft.applyAll([{ type: "combat.spend", data: { encounter: enc.id, who: actor, cost } }]);
     if (refused) o.reply.report("fight_cost_not_left", { n: o.n, op: o.op, who: named(o.reading, actor), cost: Object.entries(cost).map(([b, n]) => `${n} ${rules.economy[b]?.label ?? b}`).join(", "), why: refused.reason });

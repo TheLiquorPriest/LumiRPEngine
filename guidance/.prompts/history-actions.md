@@ -486,12 +486,14 @@ action_check_param_vs_skill: Their skill (left out: the same)
 action_check_param_take: Take 10 or 20 in place of the roll, where the ruleset has such a number to take
 action_check_param_aid: Helped by (each rolls the same check, and the ruleset says what a helper adds)
 action_check_param_mods: A circumstance the sheet does not have (a number, its type and why: +2 circumstance: high ground)
+action_check_param_boost: Spend a point on the roll (an action point, where the ruleset has them): its dice are added
 action_save_label: Save
 action_save_description: Roll a save for someone, and for others who make the same one. It takes who saves, which save and the difficulty (one of the ruleset's by name, or a number the effect sets), and reads the total from the sheet, with the ruleset's rule for the natural die. Each roll is recorded with where its parts came from. To rule it without dice, give the outcome success or failure.
 action_save_param_save: Which save (by name)
 action_save_param_difficulty: Difficulty (one of the ruleset's by name, or a number the effect sets)
 action_save_param_also: Others who make the same save
 action_save_param_mods: A circumstance the sheet does not have (a number, its type and why)
+action_save_param_boost: Spend a point on the roll (an action point, where the ruleset has them): its dice are added
 action_attack_label: Attack
 action_attack_description: Attack someone with a weapon or one of one's own attacks. It takes who attacks, the target and, unless it is what is readied, what with. It reads the rest: the weapon's row, the attack total, the target's defence (flat-footed until it has acted in a fight), the range from the grid, the natural die's rule, a threat and its confirming roll, the damage with its multiplier, the target's reduction and resistances, and the round spent from the magazine. The hit points and the states they leave the target in are then set. It is recorded as one attack, and into the fight under way. To rule it without dice, give the outcome hit, miss or critical: the damage of a hit is rolled all the same.
 action_attack_param_target: Target
@@ -502,7 +504,9 @@ action_attack_param_held: Held (as the ruleset names it, such as one, two or off
 action_attack_param_shots: Shots (as the ruleset names them, such as single, double, burst or auto)
 action_attack_param_nonlethal: Nonlethal
 action_attack_param_concealment: Concealment (the miss chance in percent)
+action_attack_param_distance: How far apart they stand, in the world's units, where no map gives it
 action_attack_param_mods: A circumstance the sheet does not have (a number, its type, what it changes and why: +4 cover to ac: behind the wall)
+action_attack_param_boost: Spend a point on the first attack's roll (an action point, where the ruleset has them): its dice are added
 action_harm_label: Harm
 action_harm_description: Take hit points off someone, off several, or off everyone in an area, for harm no weapon gives: a fall, a fire, a trap, a ruling. It takes who is harmed (or a centre and a radius on the grid), the harm as dice or as a number the story gives, its type, and a save with its difficulty for half or none. It reads each one's saving total, reduction and resistance to the type, and the states the hit points leave them in. Each is recorded with its own harm.
 action_harm_param_amount: Amount (dice such as 2d6, or a number the story gives)

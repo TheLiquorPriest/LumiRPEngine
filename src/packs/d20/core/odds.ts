@@ -16,14 +16,19 @@ import type { ReadContext } from "../../../engine/registry";
 import type { OddsLine, PackOdds } from "../../../engine/resolve";
 import { createRng } from "../../../engine/rng";
 import { isOn, rulesOf } from "./model";
-import { attackPlan, checkPlan, defenceOf, DIE, PERCENT, saveCall, savePlan, Scratch } from "./procedures";
+import { attackPlan, boostDice, canBoost, checkPlan, defenceOf, DIE, PERCENT, saveCall, savePlan, Scratch } from "./procedures";
 
 type Chances = Record<string, number>;
 type Params = Readonly<Record<string, JsonValue>>;
 
-/** The family's die read by bands, as a check of the engine's counts them. */
-function onDie(bands: CheckBand[]): CheckDef {
-  return { id: "d20", dice: DIE, bands } as CheckDef;
+/** Dice read by bands, as a check of the engine's counts them: the family's die, with a point's dice added where one is spent. */
+function onDie(bands: CheckBand[], dice = DIE): CheckDef {
+  return { id: "d20", dice, bands } as CheckDef;
+}
+
+/** The family's die with a point's dice added (`1d20+2d6kh1`), or the die alone. */
+function withBoost(boost: string): string {
+  return boost === "" ? DIE : `${DIE}+${boost}`;
 }
 
 /** A roll against a difficulty: the natural die's own results first (a sure success over a sure failure, as the procedures apply them), then the margin. */
@@ -43,7 +48,15 @@ function weighed(parts: readonly { w: number; chances: Chances }[]): Chances {
   return out;
 }
 
-/** A check: against a difficulty or another's roll, rolled or taking a number, with every count of helpers who reach their mark weighed by its chance. */
+/** The point's dice `who` could spend on `action`'s roll now, or "" where none could be spent. */
+function spendable(s: Scratch, who: EntityId, action: string): string {
+  return canBoost(s, who, action) ? boostDice(s.ctx, s.rules, who) : "";
+}
+
+/**
+ * A check: against a difficulty or another's roll, rolled or taking a number, with every count of helpers who reach their mark
+ * weighed by its chance; and its chance with a point spent on it, where one could be.
+ */
 function checkChances(s: Scratch, who: EntityId, p: Params): PackOdds | { missing: string } {
   const plan = checkPlan(s, who, p);
   if ("code" in plan) return { missing: plan.reason };
@@ -58,20 +71,27 @@ function checkChances(s: Scratch, who: EntityId, p: Params): PackOdds | { missin
     const was = reached;
     reached = [...was, 0].map((w, k) => w * (1 - q) + (k > 0 ? (was[k - 1] ?? 0) * q : 0));
   }
-  const one = (bonus: number): Chances => {
+  const one = (bonus: number, boost: string): Chances => {
     if (take) {
-      // A number taken rolls no die of its own: only another's roll against it is left to chance.
+      // A number taken rolls no die of its own, and the natural die's rule does not apply: only a point's dice and another's roll are left to chance.
       const total = take.value + bonus;
-      const won = vs ? probAtMost(die, total - vs.theirs.total - (bonus >= vs.theirs.total ? 0 : 1)) : total >= (dc ?? 0) ? 1 : 0;
-      return { success: won, failure: 1 - won };
+      if (boost === "") {
+        const won = vs ? probAtMost(die, total - vs.theirs.total - (bonus >= vs.theirs.total ? 0 : 1)) : total >= (dc ?? 0) ? 1 : 0;
+        return { success: won, failure: 1 - won };
+      }
+      if (vs) return checkOdds(fixedCheck(onDie(dieBands(undefined, undefined, bonus >= vs.theirs.total ? 0 : 1), boost), { modifier: total, against: { dice: DIE, modifier: vs.theirs.total }, opponent: vs.who }));
+      return checkOdds(fixedCheck(onDie(dieBands(undefined, undefined, 0), boost), { modifier: total, dc }));
     }
     // Equal totals go to the higher bonus; equal bonuses, to the one who acts.
-    if (vs) return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, bonus >= vs.theirs.total ? 0 : 1)), { modifier: bonus, against: { dice: DIE, modifier: vs.theirs.total }, opponent: vs.who }));
-    return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, 0)), { modifier: bonus, dc }));
+    if (vs) return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, bonus >= vs.theirs.total ? 0 : 1), withBoost(boost)), { modifier: bonus, against: { dice: DIE, modifier: vs.theirs.total }, opponent: vs.who }));
+    return checkOdds(fixedCheck(onDie(dieBands(c.autoFail, c.autoSucceed, 0), withBoost(boost)), { modifier: bonus, dc }));
   };
   const base = plan.mine.total + plan.extra;
+  const boost = spendable(s, who, "check");
+  const all = (spent: string): Chances => weighed(reached.map((w, k) => ({ w, chances: one(base + k * c.aid.bonus, spent) })));
   return {
-    chances: weighed(reached.map((w, k) => ({ w, chances: one(base + k * c.aid.bonus) }))),
+    chances: all(""),
+    ...(boost !== "" ? { spent: all(boost) } : {}),
     modifier: base,
     notation: take ? String(take.value) : vs ? opposedDice(DIE, DIE) : DIE,
     dc: vs ? null : dc,
@@ -79,56 +99,91 @@ function checkChances(s: Scratch, who: EntityId, p: Params): PackOdds | { missin
   };
 }
 
-/** A save: each who makes it against the one difficulty, each with their own line where there are several. */
+/** A save: each who makes it against the one difficulty, each with their own line where there are several; the doer's with a point spent, where one could be. */
 function saveChances(s: Scratch, who: EntityId, p: Params): PackOdds | { missing: string } {
   const call = saveCall(s, who, p);
   if ("code" in call) return { missing: call.reason };
   const sv = s.rules.save;
+  const odds = (bonus: number, boost: string): Chances => checkOdds(fixedCheck(onDie(dieBands(sv.autoFail, sv.autoSucceed, 0), withBoost(boost)), { modifier: bonus, dc: call.dc }));
   const lines: OddsLine[] = call.savers.map((one) => {
     const { bonus } = savePlan(s, one, call.id, call.given);
-    return { who: one, modifier: bonus, against: call.dc, chances: checkOdds(fixedCheck(onDie(dieBands(sv.autoFail, sv.autoSucceed, 0)), { modifier: bonus, dc: call.dc })) };
+    return { who: one, modifier: bonus, against: call.dc, chances: odds(bonus, "") };
   });
   const first = lines[0];
-  return { chances: first?.chances ?? {}, modifier: first?.modifier ?? 0, notation: DIE, dc: call.dc, opponent: null, ...(lines.length > 1 ? { lines } : {}) };
+  const boost = spendable(s, who, "save");
+  return {
+    chances: first?.chances ?? {},
+    ...(first && boost !== "" ? { spent: odds(first.modifier, boost) } : {}),
+    modifier: first?.modifier ?? 0,
+    notation: DIE,
+    dc: call.dc,
+    opponent: null,
+    ...(lines.length > 1 ? { lines } : {}),
+  };
 }
 
 /**
- * An attack: each attack against the target's defence as the procedure reads it (touch, flat-footed, the GM's own modifiers), the
- * range's penalty in its total, the natural die's sure miss and sure hit; a threat that hits, confirmed by a second roll against the
- * same defence where the ruleset confirms; concealment turning a hit into a miss. An area shot rolls no attack and gives none.
+ * An attack: each attack against the target's defence as the procedure reads it (touch, flat-footed, the GM's own modifiers, the target
+ * and the distance bound), the range's penalty in its total, the natural die's sure miss and sure hit; a threat that hits, confirmed by
+ * a second roll against the same defence where the ruleset confirms; concealment turning a hit into a miss; the first attack with a
+ * point spent on it, where one could be. An area shot that rolls first is that roll against its own defence; one that rolls none gives none.
  */
 function attackChances(s: Scratch, who: EntityId, p: Params): PackOdds | { missing: string } | null {
   const plan = attackPlan(s, who, p);
   if ("code" in plan) return { missing: plan.reason };
-  if (plan.shot?.area !== undefined && plan.shot.save !== undefined && plan.shot.dc !== undefined) return null;
   const a = s.rules.attack;
+  const boost = spendable(s, who, "attack");
+  const hits = (bonus: number, defence: number, dice: string): number =>
+    checkOdds(fixedCheck(onDie([{ outcome: "miss", natural: { max: a.autoMiss } }, { outcome: "hit", natural: { min: a.autoHit } }, { outcome: "hit", margin: { min: 0 } }, { outcome: "miss" }], dice), { modifier: bonus, dc: defence })).hit ?? 0;
+  const shot = plan.shot;
+  if (shot?.area !== undefined && shot.save !== undefined && shot.dc !== undefined) {
+    if (shot.defence === undefined) return null;
+    const bonus = plan.roll.total + plan.extra;
+    const hit = hits(bonus, shot.defence, DIE);
+    const spent = boost !== "" ? hits(bonus, shot.defence, withBoost(boost)) : null;
+    return { chances: { hit, miss: 1 - hit }, ...(spent !== null ? { spent: { hit: spent, miss: 1 - spent } } : {}), modifier: bonus, notation: DIE, dc: shot.defence, opponent: null };
+  }
   const { defence } = defenceOf(s, plan);
   const concealed = plan.concealment > 0 ? probAtMost(diceDistribution(PERCENT), plan.concealment) : 0;
-  const lines: OddsLine[] = plan.offsets.map((offset, n) => {
-    const bonus = plan.roll.total + plan.extra + offset;
+  const chancesOf = (bonus: number, dice: string): { chances: Chances; threat: number } => {
     const first = checkOdds(
       fixedCheck(
-        onDie([
-          { outcome: "miss", natural: { max: a.autoMiss } },
-          { outcome: "threat", natural: { min: Math.max(a.autoHit, plan.threatFrom) } },
-          { outcome: "hit", natural: { min: a.autoHit } },
-          { outcome: "threat", natural: { min: plan.threatFrom }, margin: { min: 0 } },
-          { outcome: "hit", margin: { min: 0 } },
-          { outcome: "miss" },
-        ]),
+        onDie(
+          [
+            { outcome: "miss", natural: { max: a.autoMiss } },
+            { outcome: "threat", natural: { min: Math.max(a.autoHit, plan.threatFrom) } },
+            { outcome: "hit", natural: { min: a.autoHit } },
+            { outcome: "threat", natural: { min: plan.threatFrom }, margin: { min: 0 } },
+            { outcome: "hit", margin: { min: 0 } },
+            { outcome: "miss" },
+          ],
+          dice,
+        ),
         { modifier: bonus, dc: defence },
       ),
     );
     const threat = first.threat ?? 0;
-    const confirmed = a.confirm
-      ? (checkOdds(fixedCheck(onDie([{ outcome: "miss", natural: { max: a.autoMiss } }, { outcome: "hit", natural: { min: a.autoHit } }, { outcome: "hit", margin: { min: 0 } }, { outcome: "miss" }]), { modifier: bonus, dc: defence })).hit ?? 0)
-      : 1;
+    // The confirming roll is a roll of its own: no point spent goes on it.
+    const confirmed = a.confirm ? hits(bonus, defence, DIE) : 1;
     const critical = threat * confirmed * (1 - concealed);
     const hit = ((first.hit ?? 0) + threat * (1 - confirmed)) * (1 - concealed);
-    return { n: n + 1, modifier: bonus, against: defence, threat, chances: { hit, critical, miss: Math.max(0, 1 - hit - critical) } };
+    return { threat, chances: { hit, critical, miss: Math.max(0, 1 - hit - critical) } };
+  };
+  const lines: OddsLine[] = plan.offsets.map((offset, n) => {
+    const bonus = plan.roll.total + plan.extra + offset;
+    const { chances, threat } = chancesOf(bonus, DIE);
+    return { n: n + 1, modifier: bonus, against: defence, threat, chances };
   });
   const head = lines[0];
-  return { chances: head?.chances ?? {}, modifier: head?.modifier ?? 0, notation: DIE, dc: defence, opponent: plan.target, ...(lines.length > 1 ? { lines } : {}) };
+  return {
+    chances: head?.chances ?? {},
+    ...(head && boost !== "" ? { spent: chancesOf(head.modifier, withBoost(boost)).chances } : {}),
+    modifier: head?.modifier ?? 0,
+    notation: DIE,
+    dc: defence,
+    opponent: plan.target,
+    ...(lines.length > 1 ? { lines } : {}),
+  };
 }
 
 /** The odds of one of the layer's actions as things stand, by its doer with the act's arguments; null for an action that rolls none, or a world without the rules on. */

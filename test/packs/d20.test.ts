@@ -195,4 +195,18 @@ describe("the d20 layer's sums", () => {
     expect(def.describe(record, reg.context(doc, state))).toContain("hit points 10 to -10");
     expect(def.describe(record, reg.context(doc, state), "wren")).not.toContain("hit points 10 to -10");
   });
+
+  test("a point spent adds its die to a check's odds (57.5% against 15); automatic fire rolls first against defence 10 (80%)", () => {
+    const doc = d20World();
+    doc.ruleset = { ...doc.ruleset, d20: { ...RULES, boost: { gauge: "points", dice: "'1d6'", rolls: ["check", "save", "attack"] }, attack: { ...RULES.attack, shots: { auto: { needs: "auto", rounds: 10, area: 10, save: "fort", dc: 15, defence: 10 } } } } };
+    Object.assign(doc.kinds.character!.fields, { points: { type: "number", pool: { max: "5" } } });
+    const reg = registry();
+    const state = initialState(doc, "t", reg);
+    // +2 Strength against 15 needs 13 on the die alone (40%); with a d6 more, (9 + 10 + ... + 14) / 6 of 20 faces.
+    const check = actionOdds(reg, doc, state, { action: "check", actor: "wren", params: { skill: "str", difficulty: 15 } });
+    expect(check.odds?.success).toBeCloseTo(0.4, 6);
+    expect(check.spent?.success).toBeCloseTo(0.575, 6);
+    // The area's one roll at +5 against 10: 5 or more, a 1 always missing.
+    expect(actionOdds(reg, doc, state, { action: "attack", actor: "wren", params: { target: "bram", shots: "auto" } }).odds?.hit).toBeCloseTo(0.8, 6);
+  });
 });

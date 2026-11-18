@@ -286,6 +286,8 @@ export interface PackOdds {
   dc: number | null;
   opponent: EntityId | null;
   lines?: OddsLine[];
+  /** The chances with a point spent on the roll, where the doer could spend one. */
+  spent?: Record<string, number>;
 }
 
 export interface Availability {
@@ -300,6 +302,8 @@ export interface Availability {
   verdict: Verdict | null;
   /** Each roll's own odds, where the action makes several. */
   lines?: readonly OddsLine[];
+  /** The chances with a point spent on the roll (an action point), where the doer could spend one. */
+  spent?: Record<string, number>;
   /** What the odds need that the call does not give (a difficulty, a target), in words. */
   missing?: string;
 }
@@ -338,6 +342,7 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
     verdict: usable && counts ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, counts }) : null,
     ...(packed?.lines ? { lines: packed.lines } : {}),
+    ...(packed?.spent ? { spent: packed.spent } : {}),
     ...(theirs !== null && "missing" in theirs ? { missing: theirs.missing } : {}),
   };
 }

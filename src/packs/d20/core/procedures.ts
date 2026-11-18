@@ -25,14 +25,14 @@ import type { EnvVars } from "../../../engine/expr";
 import { fieldBounds } from "../../../engine/effects";
 import { lifeOf } from "../../../engine/life";
 import type { EffectContext, EffectDef, ReadContext, Rejection } from "../../../engine/registry";
-import type { Rng } from "../../../engine/rng";
+import { createRng, type Rng } from "../../../engine/rng";
 import { labelOf, optionalQuery, own } from "../../../engine/pack-kit";
 import { evalExpr, fieldDef, placeOfEntity, poolMax, scopeEnv, truthy } from "../../../engine/scope";
 import type { EntityState, WorldState } from "../../../engine/state";
 import { contentsOf } from "../../../engine/things";
 import { classSum, isClassSkill, levelsOf, modOf } from "./functions";
 import { classesOf, conditionsHeld, gearOn, isOn, labelOfRow, modifiersIn, naturalAttacks, numberIn, ranksOf, rowIdOf, rowOf, rowsOf, rulesOf, sizeOf, textIn, thingNumber, traitsTaken, wordsIn } from "./model";
-import { explain, modWords, partsWords, signed, stacked, sumOf, totalOf, type Explained } from "./modifiers";
+import { explain, inSituation, modWords, partsWords, signed, stacked, sumOf, totalOf, type Explained, type Situation } from "./modifiers";
 
 /** The family's die: a check, a save and an attack are rolled on it. */
 export const DIE = "1d20";
@@ -178,6 +178,48 @@ function difficultyOf(ctx: ReadContext, rules: D20Def, said: JsonValue | undefin
 /** What one roll of the family's die came to. */
 function d20(rng: Rng): number {
   return rollDice(DIE, rng).total;
+}
+
+/** The dice a point spent on a roll adds at the spender's level (`boost.dice`, a formula that reads as a notation), or "" in a ruleset without them. */
+export function boostDice(ctx: ReadContext, rules: D20Def, who: EntityId): string {
+  if (!rules.boost) return "";
+  const v = evalExpr(rules.boost.dice, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who } }), "");
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/** Whether `who` could spend a point on `action`'s roll now: the ruleset lets that roll take one and the gauge holds one. */
+export function canBoost(s: Scratch, who: EntityId, action: string): boolean {
+  const b = s.rules.boost;
+  return b !== undefined && b.rolls.includes(action) && s.number(who, b.gauge) > 0 && boostDice(s.ctx, s.rules, who) !== "";
+}
+
+/**
+ * A point spent on a roll (`boost`), where the call asks for one: one taken from the gauge (said where it held none, and spent all the
+ * same) and the dice it gives rolled, to be added to that roll; nothing, and said, where the ruleset lets this roll take none.
+ */
+function boostOf(s: Scratch, who: EntityId, action: string, p: Readonly<Record<string, JsonValue>>, rng: Rng, notes: string[]): { total: number; words: string } | null {
+  if (!yes(p.boost)) return null;
+  const b = s.rules.boost;
+  if (!b || !b.rolls.includes(action)) {
+    notes.push(say("d20_no_boost", { action }));
+    return null;
+  }
+  const kind = own(s.ctx.state.entities, who)?.kind ?? "";
+  const def = fieldDef(s.ctx.registry, s.ctx.world, kind, b.gauge);
+  const gauge = def?.label ?? b.gauge;
+  const left = s.number(who, b.gauge);
+  if (left <= 0) notes.push(say("d20_boost_empty", { who: s.name(who), gauge }));
+  const floor = fieldBounds(s.ctx.registry, s.ctx, who, def).min;
+  s.set(who, b.gauge, floor !== undefined ? Math.max(floor, left - 1) : left - 1);
+  const dice = boostDice(s.ctx, s.rules, who);
+  try {
+    const rolled = rollDice(dice, rng).total;
+    return { total: rolled, words: say("d20_boost", { gauge, dice, rolled }) };
+  } catch (e) {
+    if (!(e instanceof DiceError)) throw e;
+    notes.push(say("d20_boost_unread", { dice }));
+    return null;
+  }
 }
 
 /** Dice or a number as given; null where it is neither. */
@@ -355,16 +397,16 @@ export function savePlan(s: Scratch, who: EntityId, said: string, given: readonl
 }
 
 /** A save worked out from the sheet, against a difficulty, with the ruleset's rule for the natural die. */
-function rollSave(s: Scratch, who: EntityId, said: string, dc: number, given: readonly Modifier[], rng: Rng, ruled?: string): Rolled & { save: string; parts: string } {
+function rollSave(s: Scratch, who: EntityId, said: string, dc: number, given: readonly Modifier[], rng: Rng, ruled?: string, spent: { total: number; words: string } | null = null): Rolled & { save: string; parts: string } {
   const rules = s.rules;
   const { id, bonus, parts } = savePlan(s, who, said, given);
   if (ruled === "success" || ruled === "failure") return { save: id, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: id, outcome: say(`d20_outcome_${ruled}`) }) };
   const natural = d20(rng);
-  const total = natural + bonus;
+  const total = natural + bonus + (spent?.total ?? 0);
   let outcome: "success" | "failure" = total >= dc ? "success" : "failure";
   if (rules.save.autoFail !== undefined && natural <= rules.save.autoFail) outcome = "failure";
   if (rules.save.autoSucceed !== undefined && natural >= rules.save.autoSucceed) outcome = "success";
-  return { save: id, natural, total, outcome, parts, words: say("d20_roll", { natural, bonus: signed(bonus), total, dc, outcome: say(`d20_outcome_${outcome}`) }) };
+  return { save: id, natural, total, outcome, parts, words: say("d20_roll", { natural, bonus: signed(bonus), ...(spent ? { boost: spent.words } : {}), total, dc, outcome: say(`d20_outcome_${outcome}`) }) };
 }
 
 // ---------------------------------------------------------------- the procedures
@@ -439,10 +481,12 @@ const check: Procedure = (s, who, p, rng, ruled) => {
   let total = bonus;
   let outcome: string = "rolled";
   let against: number | null = null;
+  let spent: { total: number; words: string } | null = null;
   if (ruled === "success" || ruled === "failure") outcome = ruled;
   else {
     natural = take ? take.value : d20(rng.fork("check"));
-    total = natural + bonus;
+    spent = boostOf(s, who, "check", p, rng.fork("boost"), plan.notes);
+    total = natural + bonus + (spent?.total ?? 0);
     if (vs) {
       against = d20(rng.fork("vs")) + vs.theirs.total;
       // Equal totals go to the higher bonus; equal bonuses, to the one who acts.
@@ -458,6 +502,7 @@ const check: Procedure = (s, who, p, rng, ruled) => {
     ...(natural !== null ? { natural } : {}),
     total,
     ...(parts !== "" ? { parts } : {}),
+    ...(spent ? { boost: spent.words } : {}),
     ...(dc !== null ? { dc } : {}),
     ...(vs && against !== null ? { vs: vs.who, against } : {}),
     ...(take ? { take: take.said } : {}),
@@ -484,9 +529,11 @@ const save: Procedure = (s, who, p, rng, ruled) => {
   const call = saveCall(s, who, p);
   if ("code" in call) return call;
   const { id, dc } = call;
+  const notes: string[] = [];
   for (const one of call.savers) {
-    const r = rollSave(s, one, id, dc, call.given, rng.fork(`save:${one}`), ruled);
-    s.record(D20_EVENTS.save, { who: one, save: id, ...(r.natural !== null ? { natural: r.natural } : {}), total: r.total, ...(r.parts !== "" ? { parts: r.parts } : {}), dc, outcome: r.outcome, ...(ruled !== undefined ? { ruled: true } : {}) });
+    const spent = one === who && ruled === undefined ? boostOf(s, who, "save", p, rng.fork("boost"), notes) : null;
+    const r = rollSave(s, one, id, dc, call.given, rng.fork(`save:${one}`), ruled, spent);
+    s.record(D20_EVENTS.save, { who: one, save: id, ...(r.natural !== null ? { natural: r.natural } : {}), total: r.total, ...(r.parts !== "" ? { parts: r.parts } : {}), ...(spent ? { boost: spent.words } : {}), dc, outcome: r.outcome, ...(ruled !== undefined ? { ruled: true } : {}), ...(one === who && notes.length > 0 ? { notes: notes.join("; ") } : {}) });
   }
   return null;
 };
@@ -607,6 +654,8 @@ export interface AttackPlan {
   target: EntityId;
   w: Weapon;
   ranged: boolean;
+  /** Who attacks whom and how far apart they stand, as both sides' modifiers read them. */
+  situation: Situation;
   toAc: Modifier[];
   roll: Explained;
   /** What the attack adds beyond its total, each with its words: the weapon's enhancement, an unskilled weapon, range, a shot. */
@@ -616,6 +665,8 @@ export interface AttackPlan {
   nonlethal: boolean;
   notes: string[];
   shot: ShotDef | undefined;
+  /** The weapon's damage dice a shot adds: none where it was fired without the trait its `without` names. */
+  shotDice: number;
   magazine: number | null;
   spend: number;
   dice: string;
@@ -630,7 +681,11 @@ export interface AttackPlan {
   concealment: number;
 }
 
-/** An attack's plan (§5.1): the weapon's numbers from its row, the attack's total from the sheet, the range and its penalty from the grid; or why it cannot be worked out. */
+/**
+ * An attack's plan (§5.1): the weapon's numbers from its row, the attack's total from the sheet, the range and its penalty from the
+ * grid (or from the call's `distance` where there is none), the shot and what holds of it without its trait; every modifier read with
+ * the target and the distance bound. Or why it cannot be worked out.
+ */
 export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string, JsonValue>>): AttackPlan | Rejection {
   const rules = s.rules;
   const a = rules.attack;
@@ -639,15 +694,26 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
   const w = weaponOf(s, who, text(p.with));
   if (w === null) return reject("d20_no_weapon", say("why_d20_no_weapon", { who: s.name(who), said: text(p.with) }));
   const notes: string[] = [];
+  const distanceFn = s.ctx.registry.formulas.get("distance");
+  const grid = distanceFn ? distanceFn(s.ctx, who, target) : null;
+  const apart = typeof grid === "number" ? grid : numberIn(p.distance ?? null);
+  const situation: Situation = { who, target, distance: apart };
+  let unknown = false;
+  const situated = <T>(fn: () => T): T => {
+    const r = inSituation(s.ctx, situation, fn);
+    if (r.unknownDistance) unknown = true;
+    return r.value;
+  };
   const held = text(p.held) !== "" ? text(p.held) : w.natural ? (w.natural.held ?? "one") : textIn(w.row?.held);
   const ranged = held === "projectile" || held === "thrown" || held === "ranged";
   const totalName = w.natural?.total ?? (ranged ? a.totals.ranged : a.totals.melee);
-  const vars: EnvVars = { weapon: w.rowId, key: w.rowId };
+  const vars: EnvVars = { weapon: w.rowId, key: w.rowId, ...(apart !== null ? { distance: apart } : {}) };
+  const bindings = { target };
   const given = givenMods(p.mods, "attack");
   const toAc = given.filter((m) => m.to === "ac" || m.to.startsWith("ac."));
   const toRoll = given.filter((m) => !toAc.includes(m) && !m.to.startsWith("damage"));
   const toDamage = given.filter((m) => m.to.startsWith("damage"));
-  const roll = explain(s.ctx, rules, who, totalName, vars) ?? { total: 0, parts: [] };
+  const roll = situated(() => explain(s.ctx, rules, who, totalName, vars, bindings)) ?? { total: 0, parts: [] };
   const extras: { value: number; words: string }[] = [];
   const enh = w.item ? thingNumber(s.ctx, w.item, D20_FIELDS.enhancement) : 0;
   if (enh !== 0) extras.push({ value: enh, words: say("d20_part_enhancement", { value: signed(enh), from: w.label }) });
@@ -658,33 +724,39 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
   if (w.natural?.bonus !== undefined) extras.push({ value: w.natural.bonus, words: say("d20_part_base", { value: signed(w.natural.bonus) }) });
   if (w.natural?.secondary === true) extras.push({ value: a.secondary, words: say("d20_part_secondary", { value: signed(a.secondary) }) });
   for (const g of toRoll) extras.push({ value: Number(g.value), words: modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...(g.note !== undefined ? { note: g.note } : {}), counted: true }) });
-  // Range, from the grid where both stand on one: each increment past the first takes the ruleset's penalty.
+  // Range: each increment past the first takes the ruleset's penalty.
   const increment = numberIn(w.row?.range ?? null);
-  const distanceFn = s.ctx.registry.formulas.get("distance");
-  const apart = distanceFn ? distanceFn(s.ctx, who, target) : null;
-  if (ranged && increment !== null && increment > 0 && typeof apart === "number") {
+  if (ranged && increment !== null && increment > 0 && apart !== null) {
     const steps = Math.max(0, Math.ceil(apart / increment) - 1);
     const most = held === "thrown" ? a.increments.thrown : a.increments.projectile;
     if (steps + 1 > most) notes.push(say("d20_out_of_range", { distance: apart, most: most * increment }));
     if (steps > 0) extras.push({ value: steps * a.incrementPenalty, words: say("d20_part_range", { value: signed(steps * a.incrementPenalty), distance: apart, increments: steps }) });
   }
-  // A shot of a weapon that fires: what it needs of the weapon, what it adds, and the rounds it spends.
+  // A shot of a weapon that fires: what it needs of the weapon, what it adds, the rounds it spends, and what holds without its trait.
   const shotName = text(p.shots);
   const shot: ShotDef | undefined = shotName === "" ? undefined : own(a.shots, shotName);
   if (shotName !== "" && shot === undefined) notes.push(say("d20_no_shot", { said: shotName, shots: Object.keys(a.shots).join(", ") }));
+  const lacks = shot?.trait !== undefined && !traitsTaken(s.ctx, who).some((t) => t.id === shot.trait);
+  const untrained = lacks && shot?.without !== undefined;
   if (shot) {
     if (!wordsIn(w.row?.fire).includes(shot.needs)) notes.push(say("d20_shot_not_fired", { weapon: w.label, shot: shotName }));
-    if (shot.trait !== undefined && !traitsTaken(s.ctx, who).some((t) => t.id === shot.trait)) notes.push(say("d20_shot_needs_trait", { shot: shotName, trait: labelOfRow(own(rowsOf(s.ctx, rules, "traits"), shot.trait), shot.trait) }));
-    if (shot.attack !== undefined && shot.attack !== 0) extras.push({ value: shot.attack, words: say("d20_part_shot", { value: signed(shot.attack), shot: shotName }) });
+    const trait = shot.trait === undefined ? "" : labelOfRow(own(rowsOf(s.ctx, rules, "traits"), shot.trait), shot.trait);
+    if (lacks) notes.push(untrained ? say("d20_shot_without_trait", { shot: shotName, trait }) : say("d20_shot_needs_trait", { shot: shotName, trait }));
+    const added = untrained ? shot.without?.attack : shot.attack;
+    if (added !== undefined && added !== 0) extras.push({ value: added, words: say("d20_part_shot", { value: signed(added), shot: shotName }) });
   }
   const magazine = numberIn(w.row?.magazine ?? null);
   // The attacks: one, or every one a high base attack gives, each lower by the ruleset's step.
-  const base = totalOf(s.ctx, rules, who, a.totals.base, vars);
+  const base = situated(() => totalOf(s.ctx, rules, who, a.totals.base, vars, bindings));
   const further = yes(p.full) && !w.natural && base >= a.iterative.from ? Math.floor((base - a.iterative.from) / a.iterative.step) + 1 : 0;
+  const threat = situated(() => threatFrom(s.ctx, rules, who, w));
+  const damageBonus = situated(() => totalOf(s.ctx, rules, who, a.totals.damage, vars, bindings)) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0);
+  if (unknown) notes.push(say("d20_no_distance"));
   return {
     target,
     w,
     ranged,
+    situation,
     toAc,
     roll,
     extras,
@@ -693,25 +765,31 @@ export function attackPlan(s: Scratch, who: EntityId, p: Readonly<Record<string,
     nonlethal,
     notes,
     shot,
+    shotDice: shot && !untrained ? (shot.dice ?? 0) : 0,
     magazine,
     spend: shot?.rounds ?? (magazine !== null ? 1 : 0),
     dice: damageDice(w, sizeOf(s.ctx, rules, who)),
     types: w.natural?.types ?? wordsIn(w.row?.types),
-    threatFrom: threatFrom(s.ctx, rules, who, w),
+    threatFrom: threat,
     multiplier: w.natural?.multiplier ?? numberIn(w.row?.multiplier ?? null) ?? 1,
     strength: Math.floor((own(a.strengthShare, held) ?? 0) * modOf(s.ctx, rules, who, a.strength)),
-    damageBonus: totalOf(s.ctx, rules, who, a.totals.damage, vars) + enh + toDamage.reduce((n, g) => n + Number(g.value), 0),
+    damageBonus,
     offsets: [0, ...Array.from({ length: further }, (_, i) => -(i + 1) * a.iterative.step)],
     touch: yes(p.touch),
     concealment: numberIn(p.concealment ?? null) ?? 0,
   };
 }
 
-/** The defence an attack is read against as the target stands now: touch or not, flat-footed or not, with the GM's own modifiers to it. */
-export function defenceOf(s: Scratch, plan: AttackPlan): { flat: boolean; ac: Explained; defence: number } {
+/**
+ * The defence an attack is read against as the target stands now: touch or not, flat-footed or not, with the GM's own modifiers to
+ * it, the target's modifiers read with the attacker bound as their `target` and the distance between them.
+ */
+export function defenceOf(s: Scratch, plan: AttackPlan): { flat: boolean; ac: Explained; defence: number; unknownDistance: boolean } {
   const flat = flatFooted(s, plan.target);
-  const ac = explain(s.ctx, s.rules, plan.target, plan.touch ? "ac.touch" : flat ? "ac.flat" : "ac", { vs: plan.ranged ? "ranged" : "melee" }) ?? { total: 0, parts: [] };
-  return { flat, ac, defence: ac.total + plan.toAc.reduce((m, g) => m + Number(g.value), 0) };
+  const vars: EnvVars = { vs: plan.ranged ? "ranged" : "melee", ...(plan.situation.distance !== null ? { distance: plan.situation.distance } : {}) };
+  const r = inSituation(s.ctx, plan.situation, () => explain(s.ctx, s.rules, plan.target, plan.touch ? "ac.touch" : flat ? "ac.flat" : "ac", vars, { target: plan.situation.who }));
+  const ac = r.value ?? { total: 0, parts: [] };
+  return { flat, ac, defence: ac.total + plan.toAc.reduce((m, g) => m + Number(g.value), 0), unknownDistance: r.unknownDistance };
 }
 
 /**
@@ -737,10 +815,10 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
     let notation = dice;
     try {
       for (let i = 0; i < mult; i++) rolled += rollDice(dice, r.fork(`dice:${i}`)).total;
-      if (shot?.dice !== undefined && shot.dice > 0) {
+      if (plan.shotDice > 0) {
         const g = parseDice(dice).groups[0];
         if (g) {
-          const more = `${shot.dice * g.count}d${g.sides}`;
+          const more = `${plan.shotDice * g.count}d${g.sides}`;
           rolled += rollDice(more, r.fork("shot")).total;
           notation = `${dice}+${more}`;
         }
@@ -751,8 +829,26 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
     const total = Math.max(1, rolled + (strength + damageBonus) * mult);
     return { total, words: say("d20_damage", { dice: notation, rolled, ...(mult > 1 ? { times: mult } : {}), ...(strength !== 0 ? { strength: signed(strength * mult) } : {}), ...(damageBonus !== 0 ? { bonus: signed(damageBonus * mult) } : {}), total }) };
   };
-  // An area shot: no attack roll; everyone in its square saves, and takes the damage on a failure.
+  // An area shot: everyone in its square saves, and takes the damage on a failure; one that rolls first does so only if its roll hits.
   if (shot?.area !== undefined && shot.save !== undefined && shot.dc !== undefined) {
+    if (shot.defence !== undefined) {
+      let hits: boolean;
+      if (ruled === "hit" || ruled === "miss" || ruled === "critical") {
+        hits = ruled !== "miss";
+        told.push(plain(say("d20_area_ruled", { outcome: say(`d20_outcome_${ruled}`) })));
+      } else {
+        const natural = d20(rng.fork("area-roll"));
+        const spent = boostOf(s, who, "attack", p, rng.fork("boost"), notes);
+        const bonus = plan.roll.total + plan.extra;
+        const total = natural + bonus + (spent?.total ?? 0);
+        hits = natural <= a.autoMiss ? false : natural >= a.autoHit ? true : total >= shot.defence;
+        told.push(plain(say("d20_area_roll", { natural, bonus: signed(bonus), ...(plan.rollParts !== "" ? { parts: plan.rollParts } : {}), ...(spent ? { boost: spent.words } : {}), total, defence: shot.defence, outcome: say(`d20_outcome_${hits ? "hit" : "miss"}`) })));
+      }
+      if (!hits) {
+        s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined(told, "; ")), ...(notes.length > 0 ? { notes: notes.join("; ") } : {}) });
+        return null;
+      }
+    }
     for (const one of around(s, target, shot.area / 2)) {
       if (one === who) continue;
       const sv = rollSave(s, one, shot.save, shot.dc, [], rng.fork(`area:${one}`));
@@ -773,7 +869,8 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
   plan.offsets.forEach((offset, n) => {
     if (n > 0 && s.number(target, rules.hp.field) <= (hpOf(s, target).min ?? -Infinity)) return;
     const r = rng.fork(`attack:${n}`);
-    const { flat, ac, defence } = defenceOf(s, plan);
+    const { flat, ac, defence, unknownDistance } = defenceOf(s, plan);
+    if (unknownDistance && !notes.includes(say("d20_no_distance"))) notes.push(say("d20_no_distance"));
     const bonus = plan.roll.total + plan.extra + offset;
     let outcome: "hit" | "miss" | "critical";
     let natural: number | null = null;
@@ -783,7 +880,9 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
       words = say("d20_attack_ruled", { outcome: say(`d20_outcome_${ruled}`) });
     } else {
       natural = d20(r.fork("roll"));
-      const total = natural + bonus;
+      // A point spent goes on the first attack's roll; the confirming roll is a roll of its own.
+      const spent = n === 0 ? boostOf(s, who, "attack", p, rng.fork("boost"), notes) : null;
+      const total = natural + bonus + (spent?.total ?? 0);
       const hits = natural <= a.autoMiss ? false : natural >= a.autoHit ? true : total >= defence;
       outcome = hits ? "hit" : "miss";
       let confirm = "";
@@ -803,7 +902,7 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
           confirm = [confirm, say("d20_concealed", { rolled: chance, chance: concealment })].filter((x) => x !== "").join(", ");
         }
       }
-      words = say("d20_attack_roll", { natural, bonus: signed(bonus), ...(n === 0 && plan.rollParts !== "" ? { parts: plan.rollParts } : {}), ...(offset !== 0 ? { offset: signed(offset) } : {}), total, defence, ...(n === 0 ? { defence_parts: [partsWords(ac), ...plan.toAc.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...(g.note !== undefined ? { note: g.note } : {}), counted: true }))].filter((x) => x !== "").join(", ") } : {}), ...(flat ? { flat: true } : {}), ...(touch ? { touch: true } : {}), outcome: say(`d20_outcome_${outcome}`), ...(confirm !== "" ? { confirm } : {}) });
+      words = say("d20_attack_roll", { natural, bonus: signed(bonus), ...(n === 0 && plan.rollParts !== "" ? { parts: plan.rollParts } : {}), ...(spent ? { boost: spent.words } : {}), ...(offset !== 0 ? { offset: signed(offset) } : {}), total, defence, ...(n === 0 ? { defence_parts: [partsWords(ac), ...plan.toAc.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...(g.note !== undefined ? { note: g.note } : {}), counted: true }))].filter((x) => x !== "").join(", ") } : {}), ...(flat ? { flat: true } : {}), ...(touch ? { touch: true } : {}), outcome: say(`d20_outcome_${outcome}`), ...(confirm !== "" ? { confirm } : {}) });
     }
     let line = plain(words);
     if (outcome !== "miss") {
@@ -1023,6 +1122,20 @@ const reload: Procedure = (s, who, p) => {
   return null;
 };
 
+/**
+ * The keys an action's cost in a fight's budgets is read by (`ruleset.d20.costs`), the first a ruleset gives counting: all the attacks
+ * a high base attack gives (`attack.full`); a reload by its weapon's magazine kind (`reload.<kind>`), then the plain one; else the id.
+ */
+export function costKeys(ctx: ReadContext, action: string, who: EntityId, params: Readonly<Record<string, JsonValue>>): string[] {
+  if (action === "attack" && yes(params.full)) return ["attack.full"];
+  const rules = rulesOf(ctx.world);
+  if (action === "reload" && rules !== null && own(ctx.state.entities, who)) {
+    const kind = textIn(weaponOf(new Scratch({ ...ctx, rng: createRng("d20.cost"), params: {} }, rules), who, text(params.item))?.row?.magazine_kind);
+    if (kind !== "") return [`reload.${kind}`, action];
+  }
+  return [action];
+}
+
 /** The level an amount of experience reaches by the experience table, read in the column its progression's thresholds name (`xp` without one). */
 function levelForXp(s: Scratch, xp: number): number {
   const thresholds = own(s.ctx.world.ruleset?.progression ?? {}, s.rules.levels.progression)?.thresholds;
@@ -1085,6 +1198,10 @@ const advance: Procedure = (s, who, p, rng) => {
   // The first hit die is the one taken while none is kept: a creature with hit dice of its own took its first before any class.
   const before = numberIn(own(s.ctx.state.entities, who)?.fields[D20_FIELDS.hitDice] ?? null) ?? 0;
   const first = before === 0;
+  // The feats the level gives: the levels `featAt` lists (one each time it names this one), how many its formula gives, or the first and each `featEvery`.
+  const featAt = rules.levels.featAt;
+  const counted = Array.isArray(featAt) ? featAt.filter((l) => l === total).length : featAt !== undefined ? evalExpr(featAt, scopeEnv({ reg: s.ctx.registry, ctx: s.ctx, bindings: { self: who }, vars: { level: total } }), 0) : null;
+  const feats = counted === null ? (first || (rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0) ? 1 : 0) : counted === true ? 1 : typeof counted === "number" ? Math.max(0, Math.floor(counted)) : 0;
   const way = said === "" ? (first && rules.levels.firstMost ? "most" : rules.levels.hitPoints) : said;
   let kept: number;
   if (numberIn(said) !== null) kept = numberIn(said) ?? 0;
@@ -1111,7 +1228,7 @@ const advance: Procedure = (s, who, p, rng) => {
       die,
       way,
       points,
-      ...((rules.levels.featAt !== undefined ? s.holds(String(rules.levels.featAt), who, { level: total }) : first || (rules.levels.featEvery > 0 && total % rules.levels.featEvery === 0)) ? { feat: true } : {}),
+      ...(feats > 0 ? { feats } : {}),
       ...(rules.levels.abilityEvery > 0 && total % rules.levels.abilityEvery === 0 ? { ability: true } : {}),
       ...(features.length > 0 ? { features: features.map((f) => labelOfRow(own(traits, f), f)).join(", ") } : {}),
     }),

@@ -34,17 +34,17 @@ function action(id: D20ActionId, params: Record<string, ParamDef>, outcomes: rea
 }
 
 export const D20_ACTION_DEFS: readonly PackAction[] = [
-  action("check", { skill: TEXT, difficulty: MAYBE_TEXT, vs: MAYBE_SOMEONE, vs_skill: MAYBE_TEXT, take: MAYBE_TEXT, aid: SEVERAL, mods: MODS }, ["success", "failure"], "1", {
+  action("check", { skill: TEXT, difficulty: MAYBE_TEXT, vs: MAYBE_SOMEONE, vs_skill: MAYBE_TEXT, take: MAYBE_TEXT, aid: SEVERAL, mods: MODS, boost: MAYBE_YES }, ["success", "failure"], "1", {
     lexicon: ["roll for", "make a check", "use my skill"],
     observable: "puts a skill to use",
   }),
-  action("save", { save: TEXT, difficulty: TEXT, also: SEVERAL, mods: MODS }, ["success", "failure"], "0", {
+  action("save", { save: TEXT, difficulty: TEXT, also: SEVERAL, mods: MODS, boost: MAYBE_YES }, ["success", "failure"], "0", {
     lexicon: ["make a save", "resist"],
     observable: "braces against it",
   }),
   action(
     "attack",
-    { target: SOMEONE, with: MAYBE_TEXT, full: MAYBE_YES, touch: MAYBE_YES, held: MAYBE_TEXT, shots: MAYBE_TEXT, nonlethal: MAYBE_YES, concealment: MAYBE_NUMBER, mods: MODS },
+    { target: SOMEONE, with: MAYBE_TEXT, full: MAYBE_YES, touch: MAYBE_YES, held: MAYBE_TEXT, shots: MAYBE_TEXT, nonlethal: MAYBE_YES, concealment: MAYBE_NUMBER, distance: MAYBE_NUMBER, mods: MODS, boost: MAYBE_YES },
     ["hit", "miss", "critical"],
     "0",
     { lexicon: ["attack", "strike at", "shoot at", "swing at"], observable: "attacks" },

@@ -141,8 +141,12 @@ export interface ShotDef {
   area?: number;
   save?: string;
   dc?: number;
-  /** A trait the shot needs: one fired without it is reported, and made all the same. */
+  /** A trait the shot needs: one fired without it is reported, and made all the same; with `without`, made as that says. */
   trait?: string;
+  /** What holds of a shot fired without its `trait`: this added to the roll in place of `attack`, and none of the extra dice. */
+  without?: { attack: number };
+  /** An area shot that rolls first: one attack against this defence for the area, and only if it hits does each one in it save. */
+  defence?: number;
 }
 
 /** A state hit points put a creature in (§4.5): what holds it, and the condition and life state it brings. */
@@ -227,6 +231,11 @@ export interface D20Def {
     rest: { hours: number; hp: Expr; nonlethal: Expr; daily: FieldId[] };
   };
   /**
+   * Points spent on a roll (§5.1): one taken from `gauge` adds the dice `dice` gives (a formula with `self` that reads as a notation,
+   * such as `'2d6kh1'`) to the roll of an action named in `rolls` (of `check`, `save` and `attack`) whose call asks to spend one.
+   */
+  boost?: { gauge: FieldId; dice: Expr; rolls: string[] };
+  /**
    * What each action spends of a fight's budgets (`ruleset.combat.economy`) when its doer is in a fight, by the action's id, and
    * `attack.full` for all the attacks a high base attack gives (§5.3). An action not named spends nothing.
    */
@@ -244,8 +253,11 @@ export interface D20Def {
     skillPoints: { plus: Expr; min: number; first: number };
     /** A feat at the first level and each `featEvery`; an ability point each `abilityEvery`. Both told as open, never chosen. */
     featEvery: number;
-    /** Where a ruleset's feats fall otherwise: a formula with `level`, the total level reached, read in place of `featEvery` when given. */
-    featAt?: Expr;
+    /**
+     * Where a ruleset's feats fall otherwise, read in place of `featEvery` when given: the levels that give one, a level named twice
+     * giving two; or a formula with `level` (the total level reached) that gives how many (true is one).
+     */
+    featAt?: Expr | number[];
     abilityEvery: number;
     /** Experience as the GM gives it (`table`), or worked out from what was overcome (`challenge`). */
     experienceBy: "table" | "challenge";
@@ -306,12 +318,13 @@ export const D20_COLUMNS: Readonly<Record<D20TableRole, Record<string, ColumnDef
     threat: int(false, "The lowest natural die that threatens a critical"),
     multiplier: int(false, "What a critical multiplies its damage by"),
     range: int(true, "Its range increment, in the world's units"),
-    proficiency: text(false, "What it takes to be proficient with it"),
+    proficiency: text(true, "What it takes to be proficient with it; left out or empty, nothing"),
     held: text(false, "How it is held or used: light, one, two, thrown, projectile"),
     types: texts(true, "Its damage types"),
     nonlethal: bool(true, "Its harm is nonlethal"),
     fire: texts(true, "The fire modes a weapon that fires has"),
     magazine: int(true, "Rounds its magazine holds"),
+    magazine_kind: text(true, "What kind of magazine it takes: reloading it costs `costs['reload.<kind>']` of a fight's budgets, else `costs.reload`"),
     area: int(true, "An area weapon's burst: its radius, in the world's units"),
     save: json(true, "The save of those in its area: {save, dc, half}"),
     modifiers: json(true, "Its own modifiers"),

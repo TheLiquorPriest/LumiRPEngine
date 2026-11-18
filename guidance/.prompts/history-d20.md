@@ -20,8 +20,8 @@ d20_part_formula: {{value}} ({{formula}})
 d20_part_mod: {{value}}{{#type}} {{type}}{{/type}} {{from}}{{#note}} ({{note}}){{/note}}
 d20_part_mod_lost: {{value}}{{#type}} {{type}}{{/type}} {{from}}, not counted: a better {{type}} bonus counts
 d20_given: named in the call
-ev_d20_check: {{who}} {{#ruled}}used {{what}}: ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}rolled {{what}}{{#take}} taking {{take}}{{/take}}: {{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}}{{#dc}} against {{dc}}{{/dc}}{{#vs}} against {{vs}}'s {{against}}{{/vs}}{{#aided}}; helped: {{aided}}{{/aided}}{{#outcome}}: {{outcome}}{{/outcome}}{{/ruled}}{{#notes}} ({{notes}}){{/notes}}.
-ev_d20_save: {{who}} made a {{save}} save: {{#ruled}}ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}{{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}} against {{dc}}: {{outcome}}{{/ruled}}.
+ev_d20_check: {{who}} {{#ruled}}used {{what}}: ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}rolled {{what}}{{#take}} taking {{take}}{{/take}}: {{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}}{{#boost}} ({{boost}}){{/boost}}{{#dc}} against {{dc}}{{/dc}}{{#vs}} against {{vs}}'s {{against}}{{/vs}}{{#aided}}; helped: {{aided}}{{/aided}}{{#outcome}}: {{outcome}}{{/outcome}}{{/ruled}}{{#notes}} ({{notes}}){{/notes}}.
+ev_d20_save: {{who}} made a {{save}} save: {{#ruled}}ruled {{outcome}}, nothing rolled{{/ruled}}{{^ruled}}{{#natural}}{{natural}} on the die, {{/natural}}total {{total}}{{#parts}} ({{parts}}){{/parts}}{{#boost}} ({{boost}}){{/boost}} against {{dc}}: {{outcome}}{{/ruled}}{{#notes}} ({{notes}}){{/notes}}.
 ev_d20_attack: {{who}} attacked {{target}}{{#with}} with {{with}}{{/with}}: {{told}}{{#notes}} ({{notes}}){{/notes}}
 ev_d20_harm: {{who}} took {{amount}}{{#type}} {{type}}{{/type}}{{#nonlethal}} nonlethal{{/nonlethal}} harm{{#dice}} ({{dice}} rolled {{rolled}}){{/dice}}{{#by}} from {{by}}{{/by}}{{#why}}, {{why}}{{/why}}: {{told}}.
 ev_d20_heal: {{who}} was healed{{#dice}} ({{dice}} rolled {{rolled}}){{/dice}}{{#why}}, {{why}}{{/why}}: {{told}}.
@@ -42,7 +42,7 @@ d20_outcome_rolled: rolled
 d20_outcome_hit: a hit
 d20_outcome_miss: a miss
 d20_outcome_critical: a critical
-d20_roll: {{natural}} on the die {{bonus}} makes {{total}} against {{dc}}: {{outcome}}
+d20_roll: {{natural}} on the die {{bonus}}{{#boost}} ({{boost}}){{/boost}} makes {{total}} against {{dc}}: {{outcome}}
 d20_save_ruled: the {{save}} save ruled {{outcome}}
 d20_part_aid: {{value}} from help
 d20_part_enhancement: {{value}} enhancement of {{from}}
@@ -55,7 +55,7 @@ d20_untrained: {{skill}} is used only with ranks in it, and was rolled all the s
 d20_aid: {{who}} helped with {{total}} against {{dc}}, {{outcome}}
 d20_no_take: no number {{take}} to take (the ruleset's are {{takes}}), so the check was rolled
 d20_attack_one: Attack {{n}}: {{words}}.
-d20_attack_roll: {{natural}} on the die {{bonus}}{{#offset}} (a further attack, {{offset}}){{/offset}}{{#parts}} ({{parts}}){{/parts}} makes {{total}} against {{#touch}}touch {{/touch}}{{#flat}}flat-footed {{/flat}}defence {{defence}}{{#defence_parts}} ({{defence_parts}}){{/defence_parts}}: {{outcome}}{{#confirm}}; {{confirm}}{{/confirm}}
+d20_attack_roll: {{natural}} on the die {{bonus}}{{#offset}} (a further attack, {{offset}}){{/offset}}{{#parts}} ({{parts}}){{/parts}}{{#boost}} ({{boost}}){{/boost}} makes {{total}} against {{#touch}}touch {{/touch}}{{#flat}}flat-footed {{/flat}}defence {{defence}}{{#defence_parts}} ({{defence_parts}}){{/defence_parts}}: {{outcome}}{{#confirm}}; {{confirm}}{{/confirm}}
 d20_attack_ruled: ruled {{outcome}}
 d20_confirm: confirming {{natural}} on the die makes {{total}}: {{outcome}}
 d20_concealed: concealment's {{chance}} in a hundred came up {{rolled}}: a miss
@@ -68,6 +68,14 @@ d20_out_of_range: {{distance}} away is beyond the most the range reaches ({{most
 d20_no_shot: no shot {{said}} (the ruleset's are {{shots}}), so a single attack was made
 d20_shot_not_fired: {{weapon}} has no fire mode for a {{shot}} shot, fired all the same
 d20_shot_needs_trait: a {{shot}} shot needs {{trait}}, which the shooter does not have, fired all the same
+d20_shot_without_trait: a {{shot}} shot fired without {{trait}}: the ruleset's penalty to the roll, and none of its extra dice
+d20_area_roll: the area first: {{natural}} on the die {{bonus}}{{#parts}} ({{parts}}){{/parts}}{{#boost}} ({{boost}}){{/boost}} makes {{total}} against defence {{defence}}: {{outcome}}
+d20_area_ruled: the area first: ruled {{outcome}}, nothing rolled
+d20_no_distance: no map and no distance given, so what holds only within a distance of the target did not count
+d20_boost: {{gauge}}: one spent, {{dice}} rolled {{rolled}}
+d20_boost_empty: {{who}} had no {{gauge}} left; one was spent all the same
+d20_no_boost: this ruleset lets no point be spent on a {{action}} roll, so none was
+d20_boost_unread: the ruleset's dice for a point spent ({{dice}}) do not read as dice, so none were added
 d20_area_saved: {{who}} saved ({{save}}) and took nothing
 d20_area_hit: {{who}} did not save ({{save}}); {{damage}}{{#stopped}}; {{stopped}}{{/stopped}}; {{harm}}
 d20_harm_hp: hit points {{from}} to {{to}}
@@ -88,7 +96,7 @@ d20_effect_on: is under {{label}} ({{mods}}) {{length}}
 d20_effect_off: is no longer under {{label}}
 d20_reloaded: rounds in the magazine {{from}} to {{to}} of {{magazine}}{{#short}}, {{short}} short: no more were carried{{/short}}
 d20_awarded: experience {{from}} to {{to}}{{#open}}; it reaches level {{level}}, so {{open}} more level(s) can be taken{{/open}}
-d20_advanced: level {{level}} of it, level {{total}} in all; {{kept}} hit points on a d{{die}} ({{way}}); {{points}} skill point(s) to spend{{#feat}}; a feat to choose{{/feat}}{{#ability}}; an ability point to place{{/ability}}{{#features}}; it gives {{features}}{{/features}}
+d20_advanced: level {{level}} of it, level {{total}} in all; {{kept}} hit points on a d{{die}} ({{way}}); {{points}} skill point(s) to spend{{#feats}}; {{feats}} feat(s) to choose{{/feats}}{{#ability}}; an ability point to place{{/ability}}{{#features}}; it gives {{features}}{{/features}}
 d20_trait_on: has {{trait}} now{{#text}}: {{text}}{{/text}}{{#unmet}} (it requires {{unmet}}, which does not hold: taken all the same){{/unmet}}
 d20_trait_off: no longer has {{trait}}
 d20_ranks: has {{to}} rank(s) in {{skill}} (from {{from}}); at most {{most}}{{#over}}, so this is over the most{{/over}}{{#class_skill}}, a class skill{{/class_skill}}; {{left}} skill point(s) left
