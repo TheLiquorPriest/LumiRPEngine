@@ -85,7 +85,7 @@ export const LORE_INDEX_ENTRY_DEF = {
   default: null,
   takes: { type: "text" },
   orNone: true,
-  none: "no index entry of his own",
+  none: "no index entry of your own",
   perConnection: false,
   name: "Your own lore index entry",
   about: "A lore entry of yours whose text heads the readable lore index of each chat, in front of the lines RPE writes. Give its id in Lumiverse.",
@@ -103,7 +103,7 @@ export const SECRETS_NARRATOR_KNOWLEDGE_DEF = {
   takes: { type: "oneOf", values: NARRATOR_KNOWLEDGE },
   perConnection: false,
   name: "Narrator's knowledge",
-  about: "What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (the player's character only). The chat's own choice wins over its world's own, which wins over this global one.",
+  about: "What the narrator knows of the chat's secrets: `scene` (everyone in the scene) or `pov` (your character only). The chat's own choice wins over its world's own, which wins over this global one.",
   effect: "use",
 } as const satisfies Setting;
 
@@ -113,7 +113,7 @@ export const SECRETS_NARRATOR_SECRETS_DEF = {
   takes: { type: "oneOf", values: NARRATOR_SECRETS },
   perConnection: false,
   name: "Narrator's secrets",
-  about: "How a secret kept from the player's character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one.",
+  about: "How a secret kept from your character reaches the narrator: `marked` (put in, marked as a secret) or `omit` (left out). The chat's own choice wins over its world's own, which wins over this global one.",
   effect: "use",
 } as const satisfies Setting;
 

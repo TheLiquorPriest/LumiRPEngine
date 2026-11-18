@@ -219,7 +219,7 @@ const DEFS = {
     takes: { type: "yesNo" },
     perConnection: false,
     name: "Hidden messages readable",
-    about: "Agents may read the messages the player hid from the prompt.",
+    about: "Agents may read the messages you hid from the prompt.",
     effect: "turn",
     row: "Hidden messages readable by agents",
   },
@@ -365,7 +365,7 @@ const DEFS = {
     takes: { type: "whole", least: 1 },
     perConnection: false,
     name: "Longest request",
-    about: "The most characters a request beside his words may hold (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
+    about: "The most characters a request may hold beside your words (what was pressed and on what, or a composer control's choice and words); one past it is not kept, and the answer says so.",
     effect: "use",
   },
   storyFrom: {
@@ -382,8 +382,8 @@ const DEFS = {
     default: TURN_DEFAULTS.storyNewest,
     takes: { type: "oneOf", values: STORY_NEWEST },
     perConnection: false,
-    name: "His newest message",
-    about: "With the story made of the replies: whether his newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
+    name: "Your newest message",
+    about: "With the story made of the replies: whether your newest message is the turn's direction (directive) or left out (leave_out). A briefing fact the guidance reads.",
     effect: "turn",
   },
   gapSnippet: {
@@ -401,7 +401,7 @@ const DEFS = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Write permission, the story lane",
-    about: "What the agents' writes to the story record do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    about: "What the agents' writes to the story record do: go ahead (auto), wait for your word on the turn's card (confirm), or are left out (never).",
     effect: "turn",
   },
   permissionEngine: {
@@ -410,7 +410,7 @@ const DEFS = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Write permission, the engine lane",
-    about: "What the agents' writes to the world's state do: go ahead (auto), wait for his word on the turn's card (confirm), or are left out (never).",
+    about: "What the agents' writes to the world's state do: go ahead (auto), wait for your word on the turn's card (confirm), or are left out (never).",
     effect: "turn",
   },
   permissionExternal: {
@@ -419,7 +419,7 @@ const DEFS = {
     takes: { type: "oneOf", values: LANE_PERMISSIONS },
     perConnection: false,
     name: "Permission for tools that reach outside RPE",
-    about: "What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for his word (confirm), or is refused (never).",
+    about: "What a call of a tool outside RPE (the web, a command, an MCP server) does: go ahead (auto), wait for your word (confirm), or is refused (never).",
     effect: "turn",
   },
 } as const satisfies Record<string, Setting>;

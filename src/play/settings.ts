@@ -134,7 +134,7 @@ const TELL_GROUP_DEFS: Readonly<Record<OffstageGroup, Setting>> = Object.fromEnt
       takes: { type: "yesNo" },
       perConnection: false,
       name: `Tell the Author: ${OFFSTAGE_GROUP_LABEL[group]}`,
-      about: "Whether a tap of this group is told to the next turn's Author when he made no choice of his own on it.",
+      about: "Whether a tap of this group is told to the next turn's Author when you made no choice of your own on it.",
       effect: "use",
     },
   ]),
@@ -171,7 +171,7 @@ const TIDY_DEFS = {
     takes: { type: "texts" },
     perConnection: false,
     name: "Tidy-up findings left as they are",
-    about: "The keys of the tidy-up's findings he told it to leave alone (Leave it): they are not listed again.",
+    about: "The keys of the tidy-up's findings you told it to leave alone (Leave it): they are not listed again.",
     effect: "turn",
   },
   leftMost: {

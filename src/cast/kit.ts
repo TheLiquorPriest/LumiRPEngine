@@ -92,8 +92,8 @@ export const CAST_PLAYER_MIND: Setting = {
   default: false,
   takes: { type: "yesNo" },
   perConnection: false,
-  name: "His character has a mind",
-  about: "His own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind.",
+  name: "Your character has a mind",
+  about: "Your own character is cast with an agent of its own, with its own memories and knowledge, as any principal is; off, it is the persona alone and has none. The shipped guidance reads it as the fact cast.playerMind.",
   effect: "turn",
 };
 

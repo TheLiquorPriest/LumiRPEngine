@@ -23,7 +23,7 @@ export const STORY_FACT_SETTING_DEFS = {
     levels: ["shipped", "global"],
     perConnection: false,
     name: "Messages ahead of a turn",
-    about: "Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and the player's next message), where the story record is measured.",
+    about: "Messages the chat is taken to grow by before the next turn's prompt (this turn's reply and your next message), where the story record is measured.",
     effect: "start",
   },
 } as const satisfies NumberSettings<keyof StoryFactSettings>;
