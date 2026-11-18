@@ -184,7 +184,7 @@ export function decisionMindLines(ctx: ReadContext, who: EntityId): string[] {
     for (const m of motionsOf(ctx.state, org)) {
       if (m.status !== "open" || m.electorate[who] === undefined || ctx.state.clock > m.closes) continue;
       const mine = m.votes[who];
-      out.push(say("feed_a_vote_at_org_put_by_name", { org: labelOf(ctx, org), name: refFor(ctx, who, m.by).name, text: m.text, closes: formatStamp(cal, m.closes), who: pctWords(m.electorate[who] ?? 0), vote: VOTE_WORDS[mine.vote], who2: standingWords(ctx, m, who), if_m: m.by !== "", if_mine: !!(mine), if_rule: mine.how === "rule" }));
+      out.push(say("feed_a_vote_at_org_put_by_name", { org: labelOf(ctx, org), name: refFor(ctx, who, m.by).name, text: m.text, closes: formatStamp(cal, m.closes), who: pctWords(m.electorate[who] ?? 0), vote: mine === undefined ? undefined : VOTE_WORDS[mine.vote], who2: standingWords(ctx, m, who), if_m: m.by !== "", if_mine: mine !== undefined, if_rule: mine?.how === "rule" }));
     }
   }
   for (const org of orgsWithRequests(ctx.state)) {
