@@ -8,12 +8,14 @@ import fantasyTown from "./fantasy_town.json";
 import mysteryManor from "./mystery_manor.json";
 import modernSliceOfLife from "./modern_slice_of_life.json";
 import { FANTASY_TOWN_RULES } from "./fantasy_town_rules";
+import { MODERN_SLICE_OF_LIFE_RULES } from "./modern_slice_of_life_rules";
+import { MYSTERY_MANOR_RULES } from "./mystery_manor_rules";
 import { withRules } from "./rules";
 
 const starter = (doc: unknown) => (id: string, name: string): WorldDoc => ({ ...structuredClone(doc as WorldDoc), id, name });
 
 export const STARTER_WORLDS: Record<string, (id: string, name: string) => WorldDoc> = {
   fantasy_town: starter(withRules(fantasyTown as unknown as WorldDoc, FANTASY_TOWN_RULES)),
-  mystery_manor: starter(mysteryManor),
-  modern_slice_of_life: starter(modernSliceOfLife),
+  mystery_manor: starter(withRules(mysteryManor as unknown as WorldDoc, MYSTERY_MANOR_RULES)),
+  modern_slice_of_life: starter(withRules(modernSliceOfLife as unknown as WorldDoc, MODERN_SLICE_OF_LIFE_RULES)),
 };
