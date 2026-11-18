@@ -1,6 +1,6 @@
 ---
 name: combat
-description: Running a fight. How to open it, take it round by round on the grid, let each fighter choose for themselves, record harm and position, and close it with its aftermath. Load it when blows are about to be traded.
+description: Running a fight. How to open it, take it round by round on the grid, let each fighter choose for themselves, record harm and position, and close it with its aftermath; with the tabletop rules, how a turn is taken with their actions. Load it when blows are about to be traded.
 ---
 # Running a fight
 
@@ -21,8 +21,19 @@ A round on a room grid is a few seconds. The grid keeps that time, and `fight_ro
 2. **Each principal chooses for themselves.** Their own agent is given the fight as that character perceives it and answers with what they do. Do not choose for them.
 3. **You choose for everyone else,** by who they are and what they want. A guard fights like a guard. Something cornered fights like something cornered. Most people do not fight to the death.
 4. **Resolve in the ruleset's order.** Measure reach, range and line of sight with `map_measure`. Roll what the ruleset calls for, once each.
-5. **Record what changed:** the round with `fight_round`, each fighter's act as it came out, the roll that decided it, and the harm it did in `harm`, a number that comes off the gauge the world's ruleset names for a fight's harm (a fighter it leaves down is marked down; where the world names no gauge, the answer says so). Do not set a value of your own naming for harm. Conditions are a `set`; who moved is `move`; what was dropped, drawn or broken is `place`, `wear` or the item tools. A player's press to end their turn is the action `end_turn`, carried out with `act`; a requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`).
+5. **Record what changed.** With the tabletop rules, the next section is this step. Without them: the round with `fight_round`, each fighter's act as it came out, the roll that decided it, and the harm it did in `harm`, a number that comes off the gauge the world's ruleset names for a fight's harm (a fighter it leaves down is marked down; where the world names no gauge, the answer says so). Do not set a value of your own naming for harm. Conditions are a `set`; who moved is `move`; what was dropped, drawn or broken is `place`, `wear` or the item tools. A player's press to end their turn is the action `end_turn`, carried out with `act`; a requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`).
 6. **Say what the round did** for the Author: who acted, what landed, who is down, where everyone now stands.
+
+## With the tabletop rules
+
+The world has them when `world_query` at `ruleset` names a rule set; the skill `ruleset-and-sheets` says how to tell, and how each action below is called. Then a fighter's act is an action of the rules, carried out with `world_apply` and the operation `act`, and every number comes from the sheets, not from you. Name who, the target and the weapon; give no modifier, defence or damage.
+
+- **Opening.** `fight_start` rolls each fighter's initiative from its sheet and sets the order, unless you give `order` yourself or `roll_initiative` false. Place everyone first: range and areas are read from the grid.
+- **A turn.** `fight_read` says whose turn it is. Carry out what that fighter does, one action at a time, each with `who`: `attack` (`full` for every attack a high base attack gives), `reload`, `condition` or `effect` for what it puts on someone, `heal`, `harm` for harm no weapon gives, and `move` for where it goes. An action of the rules taken in a fight under way is recorded into that fight, spends what it costs of the turn's budgets (a standard action, a move and the rest) and settles who is down. Where the fighter has not that much left, the answer says so and the action is carried out all the same.
+- **Ending a turn.** `act` with `end_turn` for the one whose turn it is. It moves the fight to the next fighter and does what the rules say happens as a turn comes: a dying fighter's roll to stabilize, a condition or an effect counted in rounds losing one and ending at none, one that lasts until a save having the save tried. The answer says what it did. Do not work any of it out in your own words.
+- **Who is down.** The actions put the hit points and the states they bring on the sheet, each recorded, and a fighter left down is marked down in the fight. Do not `set` hit points or those conditions yourself.
+- **A turn ruled in words.** A turn you decided in words that no action carries is recorded with `fight_round`, as without the rules. Record a turn one way or the other: one recorded with the actions is not recorded again with `fight_round`, and `fight_round`'s `harm` is only for harm you ruled in words.
+- **Time.** The actions pass no time. Pass the round's seconds once for the round, with `pass_time` and `rounds`; `fight_round` moves the clock itself, and then you pass nothing on top.
 
 ## Ending it
 
@@ -30,10 +41,11 @@ A fight ends when one side is down, has fled, has yielded, or when the story int
 
 Then the aftermath, which is where fights are forgotten:
 
-- Wounds that will last are facts on the person, with how they got them.
+- Wounds that will last are facts on the person, with how they got them. With the tabletop rules, hit points and conditions are on the sheet already, and a fact is only for what the sheet has no field for.
 - What was taken from the fallen changes hands with `give`, said as taken.
 - Who saw it. The perceptions rule says what is owed to those who did.
 - Time: the fight itself took seconds. What follows it (binding wounds, searching, fleeing) takes its own time, passed afterwards.
+- With the tabletop rules: experience is `award` with `overcame` naming those who were overcome (the rules' own table says what each is worth), a level taken is `advance`, what is given back in the story is `heal`, and a night's rest is `d20_rest`. The skill `ruleset-and-sheets` says how each is called.
 
 ## What a tool tells you
 
