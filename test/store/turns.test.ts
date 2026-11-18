@@ -8,7 +8,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { castAt } from "../../src/cast/path";
-import { CAST_MIGRATIONS, dropCastStaged, joinCast, takeBackCast } from "../../src/cast/index";
+import { CAST_MIGRATIONS, CAST_STORE_AREA } from "../../src/cast/index";
 import { writeCast } from "../../src/cast/record";
 import { LORE_MIGRATIONS } from "../../src/lore/schema";
 import { hashJson } from "../../src/shared/hash";
@@ -17,7 +17,7 @@ import { migrateStore, STORE_MIGRATIONS } from "../../src/store/schema";
 import { openStore, type Store, type UserStore } from "../../src/store/store";
 import { JoinedTurnError, StoreInputError, type SeenMessage, type ShownMessage, type TurnRow } from "../../src/store/types";
 import { storyAt } from "../../src/story/path";
-import { recordStory, STORY_MIGRATIONS } from "../../src/story/index";
+import { recordStory, STORY_MIGRATIONS, STORY_STORE_AREA } from "../../src/story/index";
 import { carried, engine, goTo, hand, hashOf, make, moveStoredClock, play, POV, registry, shown, testStore, tick, USER, type TestStore } from "./fixtures";
 import { CHAT, CONNECTION, GREETING, openTurnBed, PRESET, replying, settledTurn, USER as BED_USER, type TurnBed } from "../turn/bed";
 
@@ -25,7 +25,7 @@ const placeOf = (s: UserStore, chat: string): unknown => s.headState(chat).state
 
 /** Another store over the same database: nothing held in memory, as after a restart. */
 function reopened(ts: TestStore): Store {
-  return openStore({ db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r) });
+  return openStore({ areas: [STORY_STORE_AREA], db: ts.store.db, registry: registry(), worlds: (r) => ts.worlds.get(r) });
 }
 
 /**
@@ -1239,9 +1239,12 @@ describe("one home for what a joined turn refuses", () => {
   function whole() {
     const db = new Database(":memory:");
     migrateStore(db);
-    for (const m of [...CAST_MIGRATIONS, ...STORY_MIGRATIONS, ...LORE_MIGRATIONS]) if ("sql" in m) db.run(m.sql);
+    for (const m of [...CAST_MIGRATIONS, ...STORY_MIGRATIONS, ...LORE_MIGRATIONS]) {
+      if ("sql" in m) db.run(m.sql);
+      else m.up(db, USER);
+    }
     let clock = 0;
-    const ts = testStore({ db, now: () => ++clock });
+    const ts = testStore({ db, now: () => ++clock, areas: [CAST_STORE_AREA, STORY_STORE_AREA] });
     const { s, revision } = ts;
     s.createChat({ id: "c", revision });
     const t1 = play(s, "c", "m1", "Wren comes in from the rain.", 1, engine(tick(10)));
@@ -1260,9 +1263,9 @@ describe("one home for what a joined turn refuses", () => {
     }
   }
 
-  test("joinTurn and joinCast refuse the same cases with the same errors, from one check", () => {
+  test("joinTurn refuses each case with its own error, and writes nothing", () => {
     const ts = whole();
-    const { s, store, revision, t1, t2 } = ts;
+    const { s, revision, t1, t2 } = ts;
     s.createChat({ id: "d", revision });
     const open = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
     const joined = s.beginTurn({ chat: "c", kind: "continue", on: t2.node });
@@ -1282,7 +1285,6 @@ describe("one home for what a joined turn refuses", () => {
     for (const [what, held, into] of cases) {
       const byStore = refusal(() => s.joinTurn(held, into));
       expect([what, byStore === null]).toEqual([what, false]);
-      expect([what, refusal(() => joinCast(store, USER, held, into))]).toEqual([what, byStore]);
     }
     expect(written(ts)).toBe(before);
     expect(s.turn(open.id)?.status).toBe("open");
@@ -1299,9 +1301,7 @@ describe("one home for what a joined turn refuses", () => {
       ["the store's change", () => s.addChanges(held.id, engine(tick(1)))],
       ["the store's take-back", () => s.takeBack(held.id, -1)],
       ["the store's staged changes", () => s.dropStaged(held.id)],
-      ["the cast's write", () => writeCast(store.db, { ...writer, at: null }, [{ character: "bram", part: "knowledge", item: null, value: { text: "Wren went down to the cellar." } }])],
-      ["the cast's take-back", () => takeBackCast(store.db, USER, held.id, -1)],
-      ["the cast's staged rows", () => dropCastStaged(store, USER, held.id)],
+      ["the cast's write", () => writeCast(store, { ...writer, at: null }, [{ character: "bram", part: "knowledge", item: null, value: { text: "Wren went down to the cellar." } }])],
       ["the story's write", () => recordStory(store, writer, [{ part: "beat", item: null, value: { text: "Wren goes down with the lantern." } }])],
       ["the lore's overlay", () => recordStory(store, writer, [{ entry: "w-1", note: "The cellar is flooded now." }])],
     ];
