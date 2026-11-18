@@ -215,20 +215,25 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     );
   };
 
-  /** A turn as the list gives it: its latest run's kind and status, and the times of its reply (its latest run that wrote into the chat; a Settle now run's own times are among its runs). */
+  /**
+   * A turn as the list gives it: what it is (the kind of the run that made it: a continue that joined its reply makes it no continue,
+   * plan §10.10, and a Settle now run none), its latest run's status, and the times of its reply (its latest run that wrote into the
+   * chat; a Settle now run's own times are among its runs).
+   */
   const summary = (user: string, chat: string, r: RunRecord) => {
     const store = turns.store.user(user);
     const row = store.turn(r.turn);
     const onPath = r.status === "running" || store.path(chat).some((e) => e.turn === r.turn);
+    const all = turns.runs.ofTurn(user, r.turn);
     return {
       id: r.turn,
-      kind: r.kind,
+      kind: all.find((run) => run.kind !== "settle")?.kind ?? r.kind,
       onPath,
       message: row?.message ?? null,
       status: r.status,
       marks: turns.marks.ofTurn(user, r.turn),
       timings: momentsOf(turns.runs.reply(user, r.turn) ?? r),
-      usage: spent(turns.runs.ofTurn(user, r.turn)),
+      usage: spent(all),
     };
   };
 
@@ -369,7 +374,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
           lastTurnAt: last,
           running: turns.runs.ofChat(user, chat).length > 0,
           played: last !== null,
-          world: (store.chat(chat)?.revision ?? null) !== null,
+          world: (store.chat(chat)?.world ?? null) !== null,
         });
         const unplayed = await Promise.all(store.chats().flatMap((c) => (ran.has(c.id) ? [] : [row(c.id, null)])));
         unplayed.sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

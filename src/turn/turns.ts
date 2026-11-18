@@ -2117,6 +2117,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       return;
     }
     if (saved === undefined || written === undefined || (cut && written.text === run.base)) {
+      // An impersonation's draft that went out whole saves no message (plan §10.8 step 5): its run ends by itself before its attempt is
+      // dropped, so it reads as the draft it released and is not stopped by the drop.
+      if (run.kind === "impersonate" && !cut) await held?.over;
       // Saving nothing new, an attempt is dropped, and RPH told it left the path, so its jobs are cut off (plan §13.5).
       const record = settle();
       const dropped = await this.#d.writes.run((db) => {

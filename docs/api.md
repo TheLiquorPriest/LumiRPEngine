@@ -4503,13 +4503,13 @@ export interface ChatRow {
   id: string;
   /** The chat's name in Lumiverse. */
   name: string;
-  /** When its newest turn on RPE began; null for a chat RPE holds and has not played yet (one a migration imported). */
+  /** When its newest turn on RPE began; null for a chat RPE holds and has not played yet (one a migration imported, one a world was attached to, one a page named before its first turn). */
   lastTurnAt: number | null;
   /** Whether a turn of it runs now. */
   running: boolean;
   /** Whether RPE has played a turn of it. */
   played: boolean;
-  /** Whether RPE's store has a world for it. */
+  /** Whether it plays a world in RPE's store, attached from its start or taken from its next turn, as the chat's state reads it. */
   world: boolean;
 }
 ```
@@ -9500,7 +9500,7 @@ export interface TurnReply {
 
 ### `TurnRow`
 
-A turn as a chat's list shows it: its newest run's kind and status, its reply's times, what all its runs spent, and each of its runs in its own words.
+A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its newest run's status, its reply's times, what all its runs spent, and each of its runs in its own words.
 
 ```ts
 export interface TurnRow {

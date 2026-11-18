@@ -84,10 +84,10 @@ export const chatsReply = shape.named(
         shape.object({
           id: T,
           name: field(T, "The chat's name in Lumiverse."),
-          lastTurnAt: field(nullable(N), "When its newest turn on RPE began; null for a chat RPE holds and has not played yet (one a migration imported)."),
+          lastTurnAt: field(nullable(N), "When its newest turn on RPE began; null for a chat RPE holds and has not played yet (one a migration imported, one a world was attached to, one a page named before its first turn)."),
           running: field(shape.yesNo(), "Whether a turn of it runs now."),
           played: field(shape.yesNo(), "Whether RPE has played a turn of it."),
-          world: field(shape.yesNo(), "Whether RPE's store has a world for it."),
+          world: field(shape.yesNo(), "Whether it plays a world in RPE's store, attached from its start or taken from its next turn, as the chat's state reads it."),
         }),
       ),
     ),
@@ -109,7 +109,7 @@ const turnRunRow = shape.named(
 
 const turnRow = shape.named(
   "TurnRow",
-  "A turn as a chat's list shows it: its newest run's kind and status, its reply's times, what all its runs spent, and each of its runs in its own words.",
+  "A turn as a chat's list shows it: what it is (the kind of the run that made it, which a continue that joined its reply does not change), its newest run's status, its reply's times, what all its runs spent, and each of its runs in its own words.",
   shape.object({ ...rowFields, runs: field(shape.list(turnRunRow), "Each of its runs, the first first: the run that answered is the latest that is not a Settle now run.") }),
 );
 export const turnsReply = shape.named("TurnsReply", "A chat's turns, newest first.", shape.object({ turns: shape.list(turnRow), more: field(shape.yesNo(), "Older turns remain.") }));

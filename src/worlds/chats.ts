@@ -138,14 +138,23 @@ export class WorldChats {
     for (const chat of chats) this.told(chat);
   }
 
-  /** The chats that play one of his worlds (one world's with `world`, one chat with `chat`), each with its name, the revision it plays and whether that is behind the world's head. */
+  /**
+   * The chats that play one of his worlds (one world's with `world`, one chat with `chat`), each with its name, the revision it plays and
+   * whether that is behind the world's head. A chat whose state cannot be read (the revision it started from is gone) is left out, and the
+   * rest are listed: one such chat never fails the list.
+   */
   async chatsOf(user: UserId, of: { world?: WorldId; chat?: string } = {}): Promise<WorldChat[]> {
     const s = this.deps.store.user(user);
     const rows = of.chat !== undefined ? [s.chat(of.chat)] : s.chats();
     const out: WorldChat[] = [];
     for (const row of rows) {
       if (row === null || row.deleted !== null || row.world === null || (of.world !== undefined && row.world !== of.world)) continue;
-      const revision = s.headState(row.id).state.world.revision;
+      let revision: RevisionId;
+      try {
+        revision = s.headState(row.id).state.world.revision;
+      } catch {
+        continue;
+      }
       if (revision === BLANK_REVISION) continue;
       const index = await this.deps.worlds.index(row.world, user);
       out.push({

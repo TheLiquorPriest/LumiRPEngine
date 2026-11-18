@@ -43,9 +43,15 @@ export function carriedWords(row: CarriedRow): string {
   return `carried from the previous build, played by ${engine}${row.unplayed === null ? "" : `; no turn was played: ${row.unplayed}`}${row.departures === 0 ? "" : `; ${counted(row.departures, "line")} say something against its turn`}`;
 }
 
+/** What a turn is, in words: the kind of the run that made it, and "continued" where a continue joined its reply (plan §10.10: the same turn, extended). */
+export function turnKindWords(turn: { kind: TurnRow["kind"]; runs: readonly { kind: TurnRow["kind"] }[] }): string {
+  const continued = turn.kind !== "continue" && turn.runs.some((run) => run.kind === "continue");
+  return `${TURN_KIND_WORDS[turn.kind]}${continued ? ", continued" : ""}`;
+}
+
 function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOpen: () => void }) {
   const { turn } = props;
-  // What the turn is and what became of its reply are the run that answered's; a later run (Settle now) is said beside it in its own words, with its own time and spend, and the turn's total is said as one.
+  // What became of its reply is the run that answered's; a later run (Settle now) is said beside it in its own words, with its own time and spend, and the turn's total is said as one. What the turn is, is its own.
   const answering = answeringRun(turn.runs);
   const head = answering ?? turn.runs.at(-1);
   const kind = head?.kind ?? turn.kind;
@@ -59,7 +65,7 @@ function TurnLine(props: { turn: TurnRow; carried?: CarriedRow | undefined; onOp
         <span class="lre-listrow-content">
           <span class="lre-listrow-text">
             <span class="lre-listrow-title">
-              {TURN_KIND_WORDS[kind]} · {when(turn.timings.received)}
+              {turnKindWords(turn)} · {when(turn.timings.received)}
             </span>
             <span class="lre-listrow-sub lre-num">
               {end === null ? "" : `${duration(end - turn.timings.received)} · `}
@@ -440,8 +446,8 @@ export interface TurnViewProps {
 export function TurnView(props: TurnViewProps) {
   const { turn, settle } = props;
   const sections = props.sections ?? TURN_SECTIONS;
-  // What the turn is and what became of its reply are the run that answered's (a Settle now run writes nothing to the chat): a swipe whose
-  // reply was released and whose run then failed stays that, and a Settle now run after it is said in its own line below.
+  // What became of its reply is the run that answered's (a Settle now run writes nothing to the chat): a swipe whose reply was released
+  // and whose run then failed stays that, and a Settle now run after it is said in its own line below. What the turn is, is its own.
   const answering = answeringRun(turn.runs);
   const head = answering ?? turn.runs.at(-1);
   const kind = head?.kind ?? turn.kind;
@@ -454,7 +460,7 @@ export function TurnView(props: TurnViewProps) {
   return (
     <div class="lre-stack rpe-page" data-page="turn" data-turn={turn.id}>
       <PageHeader
-        title={`${TURN_KIND_WORDS[kind]}, ${when(turn.timings.received)}`}
+        title={`${turnKindWords(turn)}, ${when(turn.timings.received)}`}
         subtitle={
           <span class="lre-inline">
             <span class={`lre-badge ${status.tone}`}>{status.words}</span>
