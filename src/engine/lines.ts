@@ -39,6 +39,9 @@ export function withLines<T>(source: LineSource | null, work: () => T): T {
   }
 }
 
+/** What says a line: `say` says the lines in force; a page, which has no lines, says its own. */
+export type Voice = (name: string, fields?: LineFields) => string;
+
 /** The line `name` filled with `fields`; the empty text where there is none. */
 export function say(name: string, fields?: LineFields): string {
   return (current === undefined ? installed : current)?.line(name, fields) ?? "";

@@ -13,6 +13,7 @@ import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonValue } from "../../shared/json";
 import type { JobProposal } from "../../shared/jobs";
 import type { RoutineJobInput } from "../../ui/kept/protocol";
+import { pageVoice } from "../../shared/page-voice";
 import { BLOCK_KIND_LABEL, isOff, routineShapeProblems, type RoutineDef, type RoutineEntry } from "../../shared/routines";
 import { playedKinds, type ScheduleDef, type WorldDoc } from "../../shared/world";
 import type { App } from "../app";
@@ -232,7 +233,7 @@ function asSchedule(value: JsonValue): ScheduleDef | null {
 
 /** What is wrong with an edited value's shape, in the form's words. */
 export function editProblems(p: JobProposal): string[] {
-  if (p.collection === "routines") return routineShapeProblems(p.value);
+  if (p.collection === "routines") return routineShapeProblems(p.value, pageVoice);
   const schedule = asSchedule(p.value);
   return schedule ? slotProblems(schedule.slots) : ["it isn't a schedule"];
 }

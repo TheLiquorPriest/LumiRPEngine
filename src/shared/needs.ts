@@ -5,7 +5,7 @@
 
 import { hasOwn, isRecord } from "./json";
 import type { ParamDef } from "./world";
-import { wordedParam } from "../engine/lines";
+import { say, type Voice, wordedParam } from "../engine/lines";
 
 export type NeedId = "hunger" | "fatigue" | "social" | "fun";
 export const NEED_IDS: readonly NeedId[] = ["hunger", "fatigue", "social", "fun"];
@@ -101,18 +101,18 @@ export function isNeedId(v: unknown): v is NeedId {
   return typeof v === "string" && (NEED_IDS as readonly string[]).includes(v);
 }
 
-/** What is wrong with needs settings as written, each naming its field; none when the engine reads them as given. */
-export function needsSettingsProblems(v: unknown): string[] {
-  if (!isRecord(v)) return ["needs settings are an object, one entry per need"];
+/** What is wrong with needs settings as written, each naming its field, said by `voice` (the lines in force unless a page gives its own); none when the engine reads them as given. */
+export function needsSettingsProblems(v: unknown, voice: Voice = say): string[] {
+  if (!isRecord(v)) return [voice("fault_needs_settings_are_an_object_one")];
   return Object.entries(v).flatMap(([need, set]) => {
-    if (!isNeedId(need)) return [`there's no need ${need} (${NEED_IDS.join(", ")})`];
-    if (!isRecord(set)) return [`${need} is an object: on, rate, tell, alert`];
+    if (!isNeedId(need)) return [voice("fault_there_s_no_need_need_needids", { need, needIds: NEED_IDS.join(", ") })];
+    if (!isRecord(set)) return [voice("fault_need_is_an_object_on_rate", { need })];
     return Object.entries(set).flatMap(([part, value]) => {
       const takes = hasOwn(NEED_SETTING_PARTS, part) ? NEED_SETTING_PARTS[part] : undefined;
-      if (takes === undefined) return [`${need} has no setting ${part} (${Object.keys(NEED_SETTING_PARTS).join(", ")})`];
-      if (takes === "switch") return typeof value === "boolean" ? [] : [`${need}.${part} is true or false`];
-      if (takes === "rate") return inScale(value, RATE_MAX) ? [] : [`${need}.${part} is a number from 0 to ${RATE_MAX}, its growth an hour`];
-      return inScale(value, 100) ? [] : [`${need}.${part} is a number from 0 to 100`];
+      if (takes === undefined) return [voice("fault_need_has_no_setting_part", { need, part, parts: Object.keys(NEED_SETTING_PARTS).join(", ") })];
+      if (takes === "switch") return typeof value === "boolean" ? [] : [voice("fault_need_part_is_true_or_false", { need, part })];
+      if (takes === "rate") return inScale(value, RATE_MAX) ? [] : [voice("fault_need_part_is_a_number_from", { need, part, rateMax: RATE_MAX })];
+      return inScale(value, 100) ? [] : [voice("fault_need_part_is_a_number_from_2", { need, part })];
     });
   });
 }

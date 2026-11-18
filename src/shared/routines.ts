@@ -16,6 +16,7 @@
 // a chat (`RoutineEditOp`, one `fix` entry with its Undo), and the story changes them too (a new job,
 // a move, a new habit read from a reply), recorded with the turn it came from.
 
+import { say, type Voice } from "../engine/lines";
 import type { EntityId, KindId, MessageId, PlaceId, ScheduleId, SceneTypeId } from "./ids";
 import type { JsonValue } from "./json";
 import { hasOwn, isRecord } from "./json";
@@ -553,40 +554,40 @@ function isTime(v: unknown): v is string {
   return typeof v === "string" && HHMM.test(v);
 }
 
-function sourceProblem(v: unknown, world: boolean): string | null {
+function sourceProblem(v: unknown, world: boolean, voice: Voice): string | null {
   if (v === undefined) return null;
-  if (!isRecord(v)) return "its source isn't one";
+  if (!isRecord(v)) return voice("fault_its_source_isn_t_one");
   const t = v.type;
   const quote = v.quote === undefined || typeof v.quote === "string";
   if (t === "authored") return null;
-  if (t === "lore") return typeof v.entry === "string" && v.entry !== "" && quote ? null : "a lore source names its entry";
-  if (t === "sheet") return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : "a sheet source names its entity and field";
-  if (world) return "world data rests on what's authored, a lore entry or a sheet field";
+  if (t === "lore") return typeof v.entry === "string" && v.entry !== "" && quote ? null : voice("fault_a_lore_source_names_its_entry");
+  if (t === "sheet") return typeof v.entity === "string" && typeof v.field === "string" && quote ? null : voice("fault_a_sheet_source_names_its_entity");
+  if (world) return voice("fault_world_data_rests_on_what_s");
   if (t === "builtin") return null;
-  if (t === "story") return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") && (v.by === undefined || v.by === "player") ? null : "a story source has its time";
-  if (t === "gm") return typeof v.at === "number" ? null : "a GM source has its time";
-  return "its source isn't one";
+  if (t === "story") return typeof v.at === "number" && (v.turn === undefined || typeof v.turn === "string") && (v.by === undefined || v.by === "player") ? null : voice("fault_a_story_source_has_its_time");
+  if (t === "gm") return typeof v.at === "number" ? null : voice("fault_a_gm_source_has_its_time");
+  return voice("fault_its_source_isn_t_one");
 }
 
-function placeProblem(v: unknown): string | null {
+function placeProblem(v: unknown, voice: Voice): string | null {
   if (v === undefined || v === "home" || v === "work" || v === "here" || v === "with") return null;
   if (isRecord(v) && typeof v.place === "string" && v.place !== "") return null;
   if (isRecord(v) && typeof v.nearest === "string" && v.nearest !== "") return null;
-  return "its place is home, work, here, with, {place} or {nearest}";
+  return voice("fault_its_place_is_home_work_here");
 }
 
-function daysProblem(v: unknown): string | null {
+function daysProblem(v: unknown, voice: Voice): string | null {
   if (v === undefined) return null;
-  if (!isRecord(v)) return "its days aren't a set of constraints";
+  if (!isRecord(v)) return voice("fault_its_days_aren_t_a_set");
   const ints = (x: unknown, lo: number, hi: number): boolean => Array.isArray(x) && x.every((n) => Number.isInteger(n) && n >= lo && n <= hi);
   const strs = (x: unknown): boolean => Array.isArray(x) && x.every((s) => typeof s === "string");
-  if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6)) return "weekdays are 0 (Sunday) to 6";
-  if (v.off !== undefined && v.off !== "only" && v.off !== "never") return "days off are only or never";
-  if (v.holidays !== undefined && !strs(v.holidays)) return "holidays are calendar ids";
-  if (v.except !== undefined && !strs(v.except)) return "except lists calendar ids";
-  if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend") return "a birthday is own or friend";
-  if (v.seasons !== undefined && !(Array.isArray(v.seasons) && v.seasons.every((s) => SEASONS.some((x) => x === s)))) return "seasons are spring, summer, autumn and winter";
-  if (v.weather !== undefined && v.weather !== "fair" && v.weather !== "foul") return "weather is fair or foul";
+  if (v.weekdays !== undefined && !ints(v.weekdays, 0, 6)) return voice("fault_weekdays_are_0_sunday_to_6");
+  if (v.off !== undefined && v.off !== "only" && v.off !== "never") return voice("fault_days_off_are_only_or_never");
+  if (v.holidays !== undefined && !strs(v.holidays)) return voice("fault_holidays_are_calendar_ids");
+  if (v.except !== undefined && !strs(v.except)) return voice("fault_except_lists_calendar_ids");
+  if (v.birthday !== undefined && v.birthday !== "own" && v.birthday !== "friend") return voice("fault_a_birthday_is_own_or_friend");
+  if (v.seasons !== undefined && !(Array.isArray(v.seasons) && v.seasons.every((s) => SEASONS.some((x) => x === s)))) return voice("fault_seasons_are_spring_summer_autumn_and");
+  if (v.weather !== undefined && v.weather !== "fair" && v.weather !== "foul") return voice("fault_weather_is_fair_or_foul");
   return null;
 }
 
@@ -595,44 +596,44 @@ function daysProblem(v: unknown): string | null {
  * `world`: world data, whose sources are authored, lore or sheet only. The world-aware checks (places,
  * owners, lore entries, needs) are the castlife lint's (`routineIssues`).
  */
-export function blockShapeProblems(v: unknown, world = true): string[] {
-  if (!isRecord(v)) return ["a block is an object"];
+export function blockShapeProblems(v: unknown, world = true, voice: Voice = say): string[] {
+  if (!isRecord(v)) return [voice("fault_a_block_is_an_object")];
   const out: string[] = [];
-  if (typeof v.id !== "string" || v.id === "") out.push("a block has an id");
+  if (typeof v.id !== "string" || v.id === "") out.push(voice("fault_a_block_has_an_id"));
   if (v.off === true) return out;
-  if (typeof v.label !== "string" || v.label.trim() === "") out.push("a block has a label");
-  if (typeof v.activity !== "string" || v.activity.trim() === "") out.push("a block has an activity");
-  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind)) out.push("its kind is fixed, flexible or optional");
-  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440) out.push("its length (minutes) is 1 to 1,440 minutes");
-  if (v.kind === "fixed" && !isTime(v.at)) out.push("a fixed block starts at an HH:MM time (at)");
-  if (v.kind !== "fixed" && v.at !== undefined) out.push("only a fixed block has a start time (at)");
-  if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to))) out.push("its window is HH:MM to HH:MM");
-  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7)) out.push("times a week (perWeek) is 1 to 7, for a flexible or optional block");
-  if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1)) out.push("a chance is above 0 and at most 1, for an optional block");
-  if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5)) out.push("its priority is 1 to 5");
-  if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string"))) out.push("its needs are names");
-  if (v.private !== undefined && typeof v.private !== "boolean") out.push("private is true or false");
-  if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean"))) out.push("its company is {who: a selector, invite?}");
-  for (const p of [placeProblem(v.place), daysProblem(v.days), sourceProblem(v.source, world)]) if (p) out.push(p);
+  if (typeof v.label !== "string" || v.label.trim() === "") out.push(voice("fault_a_block_has_a_label"));
+  if (typeof v.activity !== "string" || v.activity.trim() === "") out.push(voice("fault_a_block_has_an_activity"));
+  if (!ROUTINE_BLOCK_KINDS.some((k) => k === v.kind)) out.push(voice("fault_its_kind_is_fixed_flexible_or"));
+  if (typeof v.minutes !== "number" || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 1440) out.push(voice("fault_its_length_minutes_is_1_to"));
+  if (v.kind === "fixed" && !isTime(v.at)) out.push(voice("fault_a_fixed_block_starts_at_an"));
+  if (v.kind !== "fixed" && v.at !== undefined) out.push(voice("fault_only_a_fixed_block_has_a"));
+  if (v.kind !== "fixed" && !(isRecord(v.window) && isTime(v.window.from) && isTime(v.window.to))) out.push(voice("fault_its_window_is_hh_mm_to"));
+  if (v.perWeek !== undefined && !(v.kind !== "fixed" && Number.isInteger(v.perWeek) && typeof v.perWeek === "number" && v.perWeek >= 1 && v.perWeek <= 7)) out.push(voice("fault_times_a_week_perweek_is_1"));
+  if (v.chance !== undefined && !(v.kind === "optional" && typeof v.chance === "number" && v.chance > 0 && v.chance <= 1)) out.push(voice("fault_a_chance_is_above_0_and"));
+  if (v.priority !== undefined && !(typeof v.priority === "number" && Number.isInteger(v.priority) && v.priority >= 1 && v.priority <= 5)) out.push(voice("fault_its_priority_is_1_to_5"));
+  if (v.needs !== undefined && !(Array.isArray(v.needs) && v.needs.every((n) => typeof n === "string"))) out.push(voice("fault_its_needs_are_names"));
+  if (v.private !== undefined && typeof v.private !== "boolean") out.push(voice("fault_private_is_true_or_false"));
+  if (v.company !== undefined && !(isRecord(v.company) && isRecord(v.company.who) && (v.company.invite === undefined || typeof v.company.invite === "boolean"))) out.push(voice("fault_its_company_is_who_a_selector"));
+  for (const p of [placeProblem(v.place, voice), daysProblem(v.days, voice), sourceProblem(v.source, world, voice)]) if (p) out.push(p);
   return out;
 }
 
 /** What is wrong with a routine's shape (a Build write, a proposal); none when it reads. Block problems are prefixed with the block's index. */
-export function routineShapeProblems(v: unknown): string[] {
-  if (!isRecord(v)) return ["a routine is an object"];
+export function routineShapeProblems(v: unknown, voice: Voice = say): string[] {
+  if (!isRecord(v)) return [voice("fault_a_routine_is_an_object")];
   const out: string[] = [];
-  if (typeof v.id !== "string" || v.id === "") out.push("a routine has an id");
-  if (v.label !== undefined && typeof v.label !== "string") out.push("its label is text");
-  if (v.owner !== undefined && !(typeof v.owner === "string" ? v.owner !== "" : isRecord(v.owner))) out.push("its owner is an entity, a group, a kind or a selector");
-  if (v.inherit !== undefined && typeof v.inherit !== "boolean") out.push("inherit is true or false");
-  const src = sourceProblem(v.source, true);
+  if (typeof v.id !== "string" || v.id === "") out.push(voice("fault_a_routine_has_an_id"));
+  if (v.label !== undefined && typeof v.label !== "string") out.push(voice("fault_its_label_is_text"));
+  if (v.owner !== undefined && !(typeof v.owner === "string" ? v.owner !== "" : isRecord(v.owner))) out.push(voice("fault_its_owner_is_an_entity_a"));
+  if (v.inherit !== undefined && typeof v.inherit !== "boolean") out.push(voice("fault_inherit_is_true_or_false"));
+  const src = sourceProblem(v.source, true, voice);
   if (src) out.push(src);
-  if (!Array.isArray(v.blocks)) return [...out, "a routine has a list of blocks"];
+  if (!Array.isArray(v.blocks)) return [...out, voice("fault_a_routine_has_a_list_of")];
   const ids = new Set<string>();
   v.blocks.forEach((b, i) => {
-    for (const p of blockShapeProblems(b, true)) out.push(`block ${i + 1}: ${p}`);
+    for (const p of blockShapeProblems(b, true, voice)) out.push(voice("fault_block_n_problem", { n: i + 1, problem: p }));
     const id = isRecord(b) && typeof b.id === "string" ? b.id : "";
-    if (id !== "" && ids.has(id)) out.push(`block ${i + 1}: another block of this routine is ${id}`);
+    if (id !== "" && ids.has(id)) out.push(voice("fault_block_n_another_block_of_this_routine", { n: i + 1, id }));
     ids.add(id);
   });
   return out;
@@ -647,16 +648,16 @@ export const ROUTINE_SETTING_VALUES: Record<string, readonly string[] | "switch"
  * and so does a level `roles` or `skips` leaves out. Stored settings are read leniently
  * (`routineSettingsOf`); a write is held to this.
  */
-export function routineSettingsProblems(v: unknown): string[] {
-  if (!isRecord(v)) return ["routine settings are an object"];
+export function routineSettingsProblems(v: unknown, voice: Voice = say): string[] {
+  if (!isRecord(v)) return [voice("fault_routine_settings_are_an_object")];
   return Object.entries(v).flatMap(([key, value]) => {
     const allowed = hasOwn(ROUTINE_SETTING_VALUES, key) ? ROUTINE_SETTING_VALUES[key] : undefined;
-    if (!allowed) return [`there's no setting ${key} (${Object.keys(ROUTINE_SETTING_VALUES).join(", ")})`];
-    if (allowed === "switch") return typeof value === "boolean" ? [] : [`${key} is true or false`];
+    if (!allowed) return [voice("fault_there_s_no_setting_key_settings", { key, settings: Object.keys(ROUTINE_SETTING_VALUES).join(", ") })];
+    if (allowed === "switch") return typeof value === "boolean" ? [] : [voice("fault_key_is_true_or_false", { key })];
     if ("levels" in allowed) {
-      if (!isRecord(value)) return [`${key} give ${FIDELITIES.join(", ")} each one of ${allowed.levels.join(", ")}`];
-      return Object.entries(value).flatMap(([level, one]) => (!FIDELITIES.some((f) => f === level) ? [`${key} have no level ${level} (${FIDELITIES.join(", ")})`] : typeof one === "string" && allowed.levels.includes(one) ? [] : [`${key}.${level} is ${allowed.levels.join(", ")}`]));
+      if (!isRecord(value)) return [voice("fault_key_give_fidelities_each_one_of", { key, fidelities: FIDELITIES.join(", "), levels: allowed.levels.join(", ") })];
+      return Object.entries(value).flatMap(([level, one]) => (!FIDELITIES.some((f) => f === level) ? [voice("fault_key_have_no_level_level_fidelities", { key, level, fidelities: FIDELITIES.join(", ") })] : typeof one === "string" && allowed.levels.includes(one) ? [] : [voice("fault_key_level_is_levels", { key, level, levels: allowed.levels.join(", ") })]));
     }
-    return typeof value === "string" && allowed.includes(value) ? [] : [`${key} is ${allowed.join(", ")}`];
+    return typeof value === "string" && allowed.includes(value) ? [] : [voice("fault_key_is_allowed", { key, allowed: allowed.join(", ") })];
   });
 }

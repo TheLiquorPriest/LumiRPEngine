@@ -9,6 +9,7 @@ import { nameOfId } from "../../../shared/maps";
 import type { Fidelity } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/edit-ops";
 import type { BlockOrigin, ChatRoutineSource, EffectiveBlock, EffectiveSchedule, InvitationView, OwnerRef, RoutineAwareness, RoutineBlock, RoutineBlockId, RoutineChangeSummary, RoutineGmView, RoutineMode, RoutinePlace, RoutineRole, SkipLife, SourceView, StoryHoldView } from "../../../shared/routines";
+import { pageVoice } from "../../../shared/page-voice";
 import { blockShapeProblems, isOff, PLAN_BEND_LABEL, ROUTINE_ROLE_LABEL } from "../../../shared/routines";
 import type { GmEntity } from "../../../shared/state-view";
 import type { Recurrence, ScheduleDef, ScheduleSlot } from "../../../shared/world";
@@ -297,7 +298,7 @@ export function followOp(entity: EntityId, mode: RoutineMode, awareness: Routine
 export function blockOp(entity: EntityId, block: RoutineBlock): { op: EditOp } | { problems: string[] } {
   const value: RoutineBlock = { ...block };
   delete value.source;
-  const problems = blockShapeProblems(value, false);
+  const problems = blockShapeProblems(value, false, pageVoice);
   return problems.length > 0 ? { problems } : { op: { op: "routine_block", entity, block: value.id, value } };
 }
 
