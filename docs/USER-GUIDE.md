@@ -72,7 +72,7 @@ A reply RPE did not play says **Made without RPE.** A reply carried over from th
 
 A reply whose turn's record was not finished (its run failed or was stopped after the reply had begun to go out) says why. Where it can be settled, **Settle now** has the Author finish the record of that reply now; nothing is written to your chat.
 
-An empty reply, which Lumiverse keeps when a turn ended before a word of its reply went out, says so: "Swipe it or delete it in Lumiverse." The button beside it opens the setting **Take away an empty reply a failed or stopped turn left** (`lumiverse.reply.removeEmpty`), which is off as shipped ([what it does](troubleshooting.md#a-turn-ends-without-a-reply)).
+An empty reply, which Lumiverse keeps when a turn ended before a word of its reply went out, says so: "Swipe it or delete it in Lumiverse." The button beside it opens the setting **Take away an empty reply a failed or stopped turn left** (`lumiverse.reply.removeEmpty`), which is off as shipped. Switched on, RPE takes such a reply away itself, through Lumiverse's own routes, once Lumiverse says the generation ended and only while its text is still empty: the whole message, or only the swipe the turn added ([what it does](troubleshooting.md#a-turn-ends-without-a-reply)).
 
 **Questions under a reply.** Where you set a lane's writes to wait for your word (see [Who may write what](#who-may-write-what)), each write that waits shows under its turn's reply with **Go ahead** and **No**.
 
@@ -347,7 +347,7 @@ A swipe or a regenerate is another attempt at the same turn: a new turn beside t
 
 ### Edits
 
-- **A reply you edit** in Lumiverse: the turn is marked **edited**, and at the next turn the Author is told the text before and after. The text that stands is what happened, and the Author settles both lanes against it. **Settle now** has it do that at once (below).
+- **A reply you edit** in Lumiverse: the turn is marked **edited**, on its page and under the reply, and at the next turn the Author is told the text before and after. The text that stands is what happened, and the Author settles both lanes against it. **Settle now** has it do that at once (below).
 - **A message of yours you edit**, with turns after it: the later turns are marked "an earlier message edited", and the next briefing names the stretch after it, for the Author to look over.
 - **A reply Lumiverse saved differently** from what RPE released is marked **saved otherwise**.
 
@@ -388,7 +388,7 @@ A turn's own page has its sections, those behind the spoiler gate shown once you
 - **Quests it touched**, **Threads it left open**, **What is still open** and **Unsettled**, what did not add up (gated);
 - **Gap checks, consents and what it was told** (gated): each gap check and what came back, each consent, each rule that fired.
 
-A turn whose reply ended empty says **Its empty reply is still in your chat**, with the setting that would take such replies away.
+A turn whose reply ended empty says **Its empty reply is still in your chat**, with the setting that would take such replies away. A turn that ended with nothing of its reply saved was dropped with everything it had changed: its card says **Nothing of this turn stands**, each change is marked **dropped**, and there is nothing to undo.
 
 ### Settle now
 

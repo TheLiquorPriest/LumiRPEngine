@@ -55,7 +55,7 @@ RPE played the turn, and it ended with no reply. The chat shows one plain line, 
 
 What happens to that empty reply depends on the setting `lumiverse.reply.removeEmpty` ("Take away an empty reply a failed or stopped turn left"):
 
-- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
+- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting, and so does the HUD's line where the chat plays a world, until the next run begins: it names the setting, and a press opens the turn's page. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
 - **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
 
 The **Turns** page and the turn's own page show what each agent did.
