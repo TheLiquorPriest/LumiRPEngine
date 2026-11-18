@@ -198,6 +198,16 @@ export const jobRefusal = shape.named(
   ),
 );
 type RefusalMirrored = Holds<Exactly<Infer<typeof jobRefusal>, JobRefusal>>;
+const callFailureKind = shape.named(
+  "CallFailureKind",
+  "What broke a model call that failed. Made again as the settings say: connection (refused, reset, cut, or the stream ended early), timeout (timed out, or went silent too long), overloaded (the provider is busy or asks to slow down), server (a fault of the provider's server), other. Never made again: credit, key, invalid, too-long, unmade (never sent).",
+  shape.oneOf("connection", "timeout", "overloaded", "server", "other", "credit", "key", "invalid", "too-long", "unmade"),
+);
+const callBreakPoint = shape.named(
+  "CallBreakPoint",
+  "Where in a model call it broke: before any answer came, while it thought, while it wrote a tool call, while it wrote text none of which was shown, or after some of the reply was shown.",
+  shape.oneOf("before", "thinking", "tool-call", "text", "shown"),
+);
 export const replyError = shape.object({
   code: shape.oneOf("no-reply", "limit", "provider", "stopped", "failed", "no-definition", "no-tags", "hook"),
   hook: opt(T, "For hook: the turn-start hook that blocked the turn; detail is its reason."),
@@ -205,6 +215,7 @@ export const replyError = shape.object({
   detail: opt(T),
   agent: opt(T, "For no-definition and no-tags: the agent definition the turn named as its lead."),
   text: opt(T),
+  broke: opt(shape.object({ failure: callFailureKind, tries: N }), "For provider: what broke the lead's last call, and how many times that call was made, its retries among them."),
 });
 const runOutcome = shape.named(
   "RunOutcome",
@@ -222,6 +233,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("intent"), text: T }),
     shape.object({ kind: shape.literal("call_started"), call: N, connection: T, model: T, sampling: opt(sampling), maxTokens: opt(N), messages: N, tools: N, request: opt(T), toolTokens: opt(N), openingTokens: opt(N) }),
     shape.object({ kind: shape.literal("call_ended"), call: N, model: T, text: T, thinking: opt(T), toolCalls: shape.list(toolCall), stop: T, usage, ms: N, error: opt(T) }),
+    shape.object({ kind: shape.literal("call_failed"), call: N, failure: callFailureKind, words: T, at: callBreakPoint, status: opt(N), tries: N, retries: N, retried: shape.yesNo(), wait: opt(N), asked: opt(N) }),
     shape.object({ kind: shape.literal("connection_wait"), connection: T, for: shape.oneOf("minute", "place"), ms: opt(N) }),
     shape.object({ kind: shape.literal("waiting"), for: shape.oneOf("tool", "agent"), callId: T, tool: T, ms: opt(N) }),
     shape.object({ kind: shape.literal("connection_stand_in"), named: T, used: T }),
