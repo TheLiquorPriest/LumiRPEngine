@@ -18,11 +18,11 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 The answer to `pass_time` lists what fell due in that span and near the scene: where people's routines now put them, who arrives, a need that crossed a threshold (hunger, sleep), an effect that ended, something the Author scheduled, a payment, a change in the weather or in prices.
 
-It is a list of things to decide. The tool applied none of it. Your definition says whose the deciding is; this is how it is recorded:
+It is a list of things to decide. The tool applied none of it. The GM decides each item when it is asked; on a turn the Author runs alone, the deciding is the Author's. An item nobody decides did not happen: a person listed at school at 8:00 is still at home. This is how it is recorded:
 
 1. For each item, what happened: it happened as scheduled, it happened differently, or it did not happen and why.
 2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`).
-3. The Author is told what the time brought, in a few lines. An arrival or an ending effect may change the scene.
+3. The Author is told what the time brought, unless the Author decided it. An arrival or an ending effect may change the scene.
 
 ## A long skip
 
