@@ -1,5 +1,6 @@
 ---
 description: item_grant as the model is told it - what the tool does, and what each of its arguments is.
+doing: letting someone use a thing
 arguments:
   item: "The thing."
   who: "Who may use it."

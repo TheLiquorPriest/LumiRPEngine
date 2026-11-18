@@ -1,5 +1,6 @@
 ---
 description: item_lose as the model is told it - what the tool does, and what each of its arguments is.
+doing: losing a thing
 arguments:
   item: "The thing."
   by: "The thief, when it was stolen."

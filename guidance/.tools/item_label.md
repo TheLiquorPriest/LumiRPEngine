@@ -1,5 +1,6 @@
 ---
 description: item_label as the model is told it - what the tool does, and what each of its arguments is.
+doing: renaming or describing a thing
 arguments:
   item: "The thing."
   name: "Its new name."
