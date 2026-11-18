@@ -11,7 +11,7 @@ The world has one clock for the chat. The world state shows the date, the hour a
 `world_apply` with a `pass_time` operation: how long, or until when. A time is read as it is written: a date and time, a clock time (22:00, noon), a part of the day the world's calendar names, or a counted span (two hours). Words that count nothing (a while) and a part of the day the calendar does not name are refused with what a time takes.
 
 - Pass the time the story took. A conversation is minutes. A meal is an hour. A night's sleep is a night. If the prose does not say, choose plainly and say what you chose.
-- Pass it once per turn, for the whole of what the turn covers. Do not pass it again when a sub-agent has already done so: look at the clock first.
+- Pass the whole of what the turn covers. Time passed twice is time passed twice, so look at the clock before passing more when a sub-agent may already have done so.
 - In a fight or a chase on a room grid, time moves in the grid's own step, a few seconds a round. Pass it as `rounds` (the scene's grid says how long each is) or as `seconds`; do not add minutes on top. The round tool already moves the clock by the rounds it plays: do not pass those again.
 
 ## What time brings due

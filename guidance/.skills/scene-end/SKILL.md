@@ -8,7 +8,7 @@ A closed scene is what the story remembers once its messages have left the promp
 
 ## 1. The summary
 
-Write the scene's summary with `story_record`: five to twelve lines, in order.
+Write the scene's summary with `story_record`, in order, as long as the scene's course needs.
 
 - Where and when, and who was there.
 - What happened, as fact: who did what, what changed hands, what was decided. Keep names, numbers and the exact words of a promise.
@@ -21,7 +21,7 @@ Then check it against the scene's beats. Every beat that changed something is in
 
 ## 2. The arcs
 
-For the plot, and for each principal who was in the scene, read the arc with `story_query`. If the scene moved it, add where it stands now, in one or two lines. An arc the scene did not move is left alone.
+For the plot, and for each principal who was in the scene, read the arc with `story_query`. If the scene moved it, add where it stands now. An arc the scene did not move is left alone.
 
 ## 3. The threads
 

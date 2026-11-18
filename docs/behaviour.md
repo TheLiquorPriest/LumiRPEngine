@@ -62,9 +62,9 @@ Shipped rules in force:
 | `guidance/.rules/history-leaving.md` | Warns the Author when messages are about to leave the prompt and the story record does not cover them. |
 | `guidance/.rules/unsourced.md` | Points out a write that named no source. |
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
-| `guidance/.rules/save-before-compaction.md` | Gives the Author one call to save what matters before a session's earlier turns are summarized. |
+| `guidance/.rules/save-before-compaction.md` | Gives the Author the chance to save what matters before a session's earlier turns are summarized. |
 
-Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and three the build added, `intent-missing` (the last reply went out with no intent record before it), `turn-unrecorded` (a turn is about to end with nothing recorded) and `limits-left` (the Author is about to end its run with two or fewer calls or tool rounds left; it names the fact `limits.left`). `TURN.md` is the one home of the first two behaviours.
+Examples to copy from are in `guidance/.rules/examples/`. Nothing there is in force: `no-player-voice`, `banned-phrases`, `memory-nudge`, `scene-too-long`, and three the build added, `intent-missing` (the last reply went out with no intent record before it), `turn-unrecorded` (a turn is about to end with nothing recorded) and `limits-left` (the Author has two or fewer calls or tool rounds left, a limit the player set; it is told so with its next call, and the rule names the fact `limits.left`). `TURN.md` is the one home of the first two behaviours.
 
 ### Skills
 

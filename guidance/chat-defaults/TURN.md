@@ -32,7 +32,7 @@ Only then decide how deep to go, and say so in one line after your intent record
 - **Assisted.** You need a fact, a ruling, a roll, or one character's own answer to something pivotal: get it, then write.
 - **Full.** The moment turns on what several minds do, on a contest, or on a stretch of time with consequences: turn it into a living moment and run it with the characters and the GM. Load the skill `sandbox`.
 
-For a turn of more than three steps, write the steps down with `todo` and tick them as you go, so that none is dropped.
+For a turn of several steps, write the steps down with `todo` and tick them as you go, so that none is dropped.
 
 ## 4. Both lanes, every turn
 

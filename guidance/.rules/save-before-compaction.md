@@ -1,5 +1,5 @@
 ---
-description: Gives the Author one call to save what matters before a session's earlier turns are summarized.
+description: Gives the Author the chance to save what matters before a session's earlier turns are summarized.
 agents: [author]
 at: before-compaction
 repeat: always
