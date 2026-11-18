@@ -54,7 +54,7 @@ Two things come with a later build:
 - **The `lumirpengine` command line and MCP server for outside harnesses.** Until then the commands that read or change worlds and chats say that the command returns with a later build; worlds are edited in **Build**.
 - **Talk, the GM assistant chat.** The assistant's definition ships, and nothing starts it yet. The GM assistant threads you had in the previous build are kept in the migration's backup.
 
-RPE never writes to your own Lumiverse lore books; a chat can have a book of RPE's own, which is off until you switch on `lore.projection`.
+RPE never writes your own Lumiverse lore books by itself. It writes an entry only on your word: a lore proposal you approve, or one of Build's actions that write to an entry (its fields, a secret line, the lore index entry, moving a book's secrecy). Each write checks that the entry is as it was read, keeps what it was, and is listed on the **Lore** page with **Put it back**. A chat can have a book of RPE's own, which is off until you switch on `lore.projection`.
 
 ## Where to go next
 
