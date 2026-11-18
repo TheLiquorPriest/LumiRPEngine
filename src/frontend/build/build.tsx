@@ -30,7 +30,7 @@ import { tierGroups } from "../batch";
 import { PickBox, SelectBar, useSelection } from "../multi-select";
 import { DraftBatchSheet } from "./batch-sheet";
 import { CheckView, issuePart, IssueRow } from "./check";
-import { COLLECTION_INFO, type CollectionInfo, deleteItem, go, holdNew, ItemHeader, itemLabel, KEPT_UNUSED, NewItem, newItemName, OverflowMenu, PART_INFO, UNREAD_COLLECTIONS, UNREAD_PARTS } from "./chrome";
+import { COLLECTION_INFO, type CollectionInfo, deleteItem, go, holdNew, ItemHeader, itemLabel, KEPT_UNUSED, NewItem, newItemName, OverflowMenu, PART_INFO, packName, UNREAD_COLLECTIONS, UNREAD_PARTS } from "./chrome";
 import { CharacterPage } from "./character";
 import { entityFormSpecs, isCharacter, opensCharacterPage } from "./character-model";
 import { RevealItem } from "./contents";
@@ -636,7 +636,7 @@ function CollectionView(props: { collection: WorldCollection; group?: Exclude<En
   const listed = props.group ? new Set(entityGroups({ ...doc, kinds })[props.group]) : null;
   const info: CollectionInfo = props.group ? GROUP_INFO[props.group] : props.collection === "entities" ? { ...COLLECTION_INFO.entities, label: "All entities" } : COLLECTION_INFO[props.collection];
   const items = Object.entries(doc[props.collection] as Record<string, unknown>)
-    .map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places), path: `${props.collection}.${id}`, note: undefined as string | undefined }))
+    .map(([id, value]) => ({ id, value, label: itemLabel(props.collection, id, value, doc.places, draft.packLabels), path: `${props.collection}.${id}`, note: undefined as string | undefined }))
     .filter((item) => listed === null || listed.has(item.id));
   const q = query.trim().toLowerCase();
   const shown = items.filter((item) => !q || item.id.toLowerCase().includes(q) || item.label.toLowerCase().includes(q));
@@ -648,7 +648,7 @@ function CollectionView(props: { collection: WorldCollection; group?: Exclude<En
     if (!isRecord(value)) return undefined;
     const parts: string[] = [];
     if (typeof value.kind === "string" && value.kind) parts.push(hasOwn(kinds, value.kind) ? (kinds[value.kind]?.label ?? value.kind) : humanize(value.kind));
-    if (typeof value.pack === "string" && value.pack) parts.push(humanize(value.pack));
+    if (typeof value.pack === "string" && value.pack) parts.push(packName(draft.packLabels, value.pack));
     if (typeof value.map === "string") parts.push(`Drawn by the map ${itemLabel("maps", value.map, hasOwn(doc.maps, value.map) ? doc.maps[value.map] : undefined)}`);
     return parts.length > 0 ? parts.join(" · ") : undefined;
   };
@@ -786,7 +786,7 @@ export function SchemaEditor(props: EditorProps & { children?: ComponentChildren
   }, [isNew, props.collection, props.id]);
   if (isRecord(stored) && typeof stored.map === "string") return <MapOwned worldId={props.world.id} collection={props.collection} id={id} value={stored} map={stored.map} />;
   const noun = COLLECTION_INFO[props.collection].noun;
-  const name = itemLabel(props.collection, id, value, props.world.places);
+  const name = itemLabel(props.collection, id, value, props.world.places, draft?.packLabels);
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: props.collection, id, value });

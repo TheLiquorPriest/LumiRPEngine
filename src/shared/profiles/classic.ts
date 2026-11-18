@@ -20,6 +20,8 @@ import {
   creatureType,
   D20_ABILITY_IDS,
   D20_COSTS,
+  D20_SAVE_LABELS,
+  D20_SAVES,
   d20Combat,
   d20Fields,
   d20Sheet,
@@ -542,6 +544,7 @@ const NEGATIVE = "self.hp < 0 and self.hp > -10";
 const D20: D20Def = {
   abilities: [...D20_ABILITY_IDS],
   mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
   kinds: ["person"],
   defaultSize: "medium",
   bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
@@ -597,12 +600,6 @@ const D20: D20Def = {
   },
 };
 
-const SAVES = [
-  { id: "fort", label: "Fortitude" },
-  { id: "ref", label: "Reflex" },
-  { id: "will", label: "Will" },
-];
-
 export const CLASSIC: D20SetDef = {
   id: "classic",
   label: "Classic",
@@ -644,7 +641,7 @@ export const CLASSIC: D20SetDef = {
         { formula: signedTotal("attack.ranged"), label: "Ranged" },
         { formula: signedTotal("grapple"), label: "Grapple" },
       ],
-      saves: SAVES,
+      saves: D20_SAVES,
       skills: SKILLS.map(([id, label]) => ({ id, label })),
       daily: Object.keys(DAILY),
     }),

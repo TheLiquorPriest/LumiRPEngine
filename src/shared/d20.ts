@@ -180,6 +180,8 @@ export interface D20Def {
   tables: Partial<Record<D20TableRole, TableId>>;
   /** The named totals (`D20_TOTALS` and any more), each a formula with `self`, and `target`, `skill` and `weapon` where they apply. */
   totals: Record<string, Expr>;
+  /** What a person and an agent are shown of a named total, by its name (`save.fort`: Fortitude); one with none is shown by its name. */
+  labels?: Record<string, string>;
   check: {
     /** By what is said (`10`, `20`). */
     take: Record<string, TakeDef>;
@@ -366,6 +368,18 @@ export const D20_COLUMNS: Readonly<Record<D20TableRole, Record<string, ColumnDef
 /** A table of a role's schema string (`DataTable.schema`). */
 export function d20Schema(role: D20TableRole): string {
   return `lre-table/d20.${role}/v1`;
+}
+
+/** A named total in words, as the rules label it (`totalLabel(rules, "save.fort")`: Fortitude); its name where they label none. */
+export function totalLabel(rules: Pick<D20Def, "labels">, name: string): string {
+  const label = rules.labels !== undefined && hasOwn(rules.labels, name) ? rules.labels[name] : undefined;
+  return label !== undefined && label !== "" ? label : name;
+}
+
+/** A save in words, by its id (`fort`), as the rules label its total (`save.fort`); the id where they label none. */
+export function saveLabel(rules: Pick<D20Def, "labels">, save: string): string {
+  const label = totalLabel(rules, `save.${save}`);
+  return label === `save.${save}` ? save : label;
 }
 
 /** A table's role by its schema (`d20Schema`), or null for a table that is none of the layer's. */

@@ -76,7 +76,7 @@ export function loadDraft(app: Pick<App, "request" | "drafts">, worldId: WorldId
     (async (): Promise<Draft | null> => {
       const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
       if (!got) return null;
-      const draft: Draft = { worldId, base: got.base, version: got.version, doc: got.draft, lint: got.lint, dirty: got.stored, reloaded: true, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, functions: world?.functions ?? [] };
+      const draft: Draft = { worldId, base: got.base, version: got.version, doc: got.draft, lint: got.lint, dirty: got.stored, reloaded: true, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, packLabels: world?.packLabels ?? {}, functions: world?.functions ?? [] };
       app.drafts.set(draft);
       return draft;
     })(),

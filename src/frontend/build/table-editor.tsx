@@ -26,7 +26,8 @@ import { parseJsonText } from "../json-text";
 import { MoneyInput } from "../money-input";
 import type { EditorProps, Send } from "../registry";
 import { revealInScroller } from "../scroll";
-import { go, ItemHeader } from "./chrome";
+import { useSelect } from "../../ui/store";
+import { go, ItemHeader, packName } from "./chrome";
 import { CheckField, FormGroup, FormSheet, RefPicker } from "./form-kit";
 import { useHeld } from "./held";
 import { isModifierList, ModifiersField } from "./modifier-cell";
@@ -774,6 +775,7 @@ function NewRow(props: { nameColumn: string | null; taken: ReadonlySet<string>; 
 /** The world's data tables, when the editor opens on none: each by its label, with its pack, its rows and where its figures come from. */
 function TableList(props: EditorProps) {
   const app = useApp();
+  const labels = useSelect(app.drafts, (d) => d?.packLabels);
   const tables = Object.entries(props.world.tables);
   if (tables.length === 0) {
     return (
@@ -792,7 +794,7 @@ function TableList(props: EditorProps) {
               <ListRow
                 key={key}
                 title={t.label}
-                subtitle={`${humanize(t.pack)} · ${count} ${count === 1 ? "row" : "rows"} · ${t.source ? (t.source.approximate ? "approximate" : "exact") : "authored"}`}
+                subtitle={`${packName(labels, t.pack)} · ${count} ${count === 1 ? "row" : "rows"} · ${t.source ? (t.source.approximate ? "approximate" : "exact") : "authored"}`}
                 id={key}
                 chevron
                 onClick={() => go(app, { view: "item", worldId: props.world.id, collection: "tables", id: key })}
@@ -808,6 +810,7 @@ function TableList(props: EditorProps) {
 /** A table's page: its header, what it is, its rows as a paged grid, a row's sheet while one is open, and Save / Revert. */
 function TablePage(props: { world: WorldDoc; send: Send; id: string; table: DataTable; stored: DataTable | undefined; update(edit: (table: DataTable) => DataTable): void; revert(): void }) {
   const app = useApp();
+  const labels = useSelect(app.drafts, (d) => d?.packLabels);
   const { table, update } = props;
   const [rowId, setRowId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -867,7 +870,7 @@ function TablePage(props: { world: WorldDoc; send: Send; id: string; table: Data
 
   return (
     <div class="lre-build-page" data-lre-editor="tables">
-      <ItemHeader title={table.label} id={props.id} subtitle={`${humanize(table.pack)} pack`} />
+      <ItemHeader title={table.label} id={props.id} subtitle={`${packName(labels, table.pack)} pack`} />
       <Disclosure summary="About this table">
         <div>
           <Row k="Schema" v={<code class="lre-form-table-code">{table.schema}</code>} />

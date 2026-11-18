@@ -21,6 +21,8 @@ import {
   creatureType,
   D20_ABILITY_IDS,
   D20_COSTS,
+  D20_SAVE_LABELS,
+  D20_SAVES,
   d20Combat,
   d20Fields,
   d20Sheet,
@@ -645,6 +647,7 @@ const family = familyTotals({ skills: T.skills, weapons: T.weapons });
 const D20: D20Def = {
   abilities: [...D20_ABILITY_IDS],
   mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
   kinds: ["person"],
   defaultSize: "medium",
   bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
@@ -712,12 +715,6 @@ const D20: D20Def = {
   },
 };
 
-const SAVES = [
-  { id: "fort", label: "Fortitude" },
-  { id: "ref", label: "Reflex" },
-  { id: "will", label: "Will" },
-];
-
 export const CLASSIC_REVISED: D20SetDef = {
   id: "classic_revised",
   label: "Classic Revised",
@@ -767,7 +764,7 @@ export const CLASSIC_REVISED: D20SetDef = {
         { formula: signedTotal("attack.ranged"), label: "Ranged" },
         { formula: signedTotal("cmb"), label: "Manoeuvre bonus" },
       ],
-      saves: SAVES,
+      saves: D20_SAVES,
       skills: SKILLS.map(([id, label]) => ({ id, label })),
       daily: Object.keys(DAILY),
     }),

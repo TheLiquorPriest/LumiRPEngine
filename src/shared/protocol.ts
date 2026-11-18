@@ -914,14 +914,15 @@ export interface ResultBodies {
   /**
    * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and
    * relation type the registered packs define, for Build's kind and relation pickers and typed
-   * field forms (a world kind or relation type with the same id wins); and `functions`: every
+   * field forms (a world kind or relation type with the same id wins); `packLabels`: each pack's own
+   * label, by its id, which Build shows wherever it names a pack; and `functions`: every
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
    * sections, or null when the ruleset designs no sheet. `templates`, `chats` and `updates` answer their ops.
    * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
    * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; packLabels?: Record<string, string>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** The chat's own knowledge choices after the request, null where it follows; `tidy`, its own Tidy up switch (absent: the world's). `engine` and `harnessBlocked` are retired: nothing sets them, for RPE plays every chat itself. */

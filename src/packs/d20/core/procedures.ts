@@ -17,7 +17,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { TableRow } from "../../../shared/tables";
 import { ALIVE } from "../../../shared/world";
 import type { ConditionHeld, D20Def, EffectHeld, Modifier, NaturalAttack, ShotDef, TraitHeld } from "../../../shared/d20";
-import { D20_ACTIONS, D20_EVENTS, D20_FIELDS } from "../../../shared/d20";
+import { D20_ACTIONS, D20_EVENTS, D20_FIELDS, saveLabel } from "../../../shared/d20";
 import { parseDice, rollDice, DiceError } from "../../../engine/dice";
 import { readyCheck, rollCheck } from "../../../engine/checks";
 import { passOutcomes } from "../../../engine/adjudication";
@@ -400,7 +400,7 @@ export function savePlan(s: Scratch, who: EntityId, said: string, given: readonl
 function rollSave(s: Scratch, who: EntityId, said: string, dc: number, given: readonly Modifier[], rng: Rng, ruled?: string, spent: { total: number; words: string } | null = null): Rolled & { save: string; parts: string } {
   const rules = s.rules;
   const { id, bonus, parts } = savePlan(s, who, said, given);
-  if (ruled === "success" || ruled === "failure") return { save: id, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: id, outcome: say(`d20_outcome_${ruled}`) }) };
+  if (ruled === "success" || ruled === "failure") return { save: id, natural: null, total: bonus, outcome: ruled, parts, words: say("d20_save_ruled", { save: saveLabel(rules, id), outcome: say(`d20_outcome_${ruled}`) }) };
   const natural = d20(rng);
   const total = natural + bonus + (spent?.total ?? 0);
   let outcome: "success" | "failure" = total >= dc ? "success" : "failure";
@@ -518,7 +518,7 @@ const check: Procedure = (s, who, p, rng, ruled) => {
 export function saveCall(s: Scratch, who: EntityId, p: Readonly<Record<string, JsonValue>>): { id: string; dc: number; savers: EntityId[]; given: Modifier[] } | Rejection {
   const rules = s.rules;
   const id = saveNamed(rules, text(p.save));
-  if (id === null) return reject("d20_no_save", say("why_d20_no_save", { said: text(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)).join(", ") }));
+  if (id === null) return reject("d20_no_save", say("why_d20_no_save", { said: text(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => saveLabel(rules, k.slice(5))).join(", ") }));
   const dc = difficultyOf(s.ctx, rules, p.difficulty);
   if (dc === null) return reject("d20_no_difficulty", say("why_d20_no_difficulty", { said: text(p.difficulty) }));
   return { id, dc, savers: andAlso(who, p.also, s.ctx), given: givenMods(p.mods, `save.${id}`) };
@@ -984,7 +984,7 @@ const harm: Procedure = (s, who, p, rng) => {
   if (centre !== "" && radius !== null) targets = [...new Set([...targets, ...around(s, centre, radius)])];
   if (targets.length === 0) targets = [who];
   const id = text(p.save) === "" ? null : saveNamed(rules, text(p.save));
-  if (text(p.save) !== "" && id === null) return reject("d20_no_save", say("why_d20_no_save", { said: text(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)).join(", ") }));
+  if (text(p.save) !== "" && id === null) return reject("d20_no_save", say("why_d20_no_save", { said: text(p.save), saves: Object.keys(rules.totals).filter((k) => k.startsWith("save.")).map((k) => saveLabel(rules, k.slice(5))).join(", ") }));
   const dc = difficultyOf(s.ctx, rules, p.difficulty);
   const rolled = amountRolled(p.amount, rng.fork("amount"));
   if (rolled === null) return reject("d20_no_amount", say("why_d20_no_amount", { said: text(p.amount) }));
@@ -1052,9 +1052,9 @@ function lengthOf(s: Scratch, p: Readonly<Record<string, JsonValue>>): { until?:
   return { ...(minutes > 0 ? { until: s.ctx.state.clock + Math.round(minutes) } : {}), ...(rounds !== null && rounds > 0 ? { rounds: Math.round(rounds) } : {}), ...(id !== null && dc !== null ? { save: { save: id, dc } } : {}) };
 }
 
-/** A length in words. */
-function lengthWords(l: { until?: number; rounds?: number; save?: { save: string; dc: number } }, clock: number): string {
-  return say("d20_length", { ...(l.rounds !== undefined ? { rounds: l.rounds } : {}), ...(l.until !== undefined ? { minutes: l.until - clock } : {}), ...(l.save !== undefined ? { save: l.save.save, dc: l.save.dc } : {}) });
+/** A length in words, its save as the rules label it. */
+function lengthWords(s: Scratch, l: { until?: number; rounds?: number; save?: { save: string; dc: number } }): string {
+  return say("d20_length", { ...(l.rounds !== undefined ? { rounds: l.rounds } : {}), ...(l.until !== undefined ? { minutes: l.until - s.ctx.state.clock } : {}), ...(l.save !== undefined ? { save: saveLabel(s.rules, l.save.save), dc: l.save.dc } : {}) });
 }
 
 /** A condition of the ruleset put on, for how long, or taken off. */
@@ -1074,7 +1074,7 @@ const condition: Procedure = (s, who, p) => {
   const l = lengthOf(s, p);
   s.set(who, D20_FIELDS.conditions, [...rest, { id: hit.id, ...l, ...(text(p.why) !== "" ? { why: text(p.why) } : {}) }] as unknown as JsonValue);
   const mods = modifiersIn(hit.row.modifiers).map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to }));
-  s.record(D20_EVENTS.condition, { who, told: say("d20_condition_on", { condition: label, ...(mods.length > 0 ? { mods: mods.join(", ") } : {}), ...(textIn(hit.row.text) !== "" ? { text: textIn(hit.row.text) } : {}), length: lengthWords(l, s.ctx.state.clock) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
+  s.record(D20_EVENTS.condition, { who, told: say("d20_condition_on", { condition: label, ...(mods.length > 0 ? { mods: mods.join(", ") } : {}), ...(textIn(hit.row.text) !== "" ? { text: textIn(hit.row.text) } : {}), length: lengthWords(s, l) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
   return null;
 };
 
@@ -1096,7 +1096,7 @@ const effect: Procedure = (s, who, p) => {
   const l = lengthOf(s, p);
   const held: EffectHeld = { label, modifiers: mods, ...l, ...(text(p.why) !== "" ? { why: text(p.why) } : {}) };
   s.set(who, D20_FIELDS.effects, [...rest, held] as unknown as JsonValue);
-  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label, mods: mods.map((m) => say("d20_mod_to", { value: signed(Number(m.value)), type: m.type ?? "", to: m.to })).join(", "), length: lengthWords(l, s.ctx.state.clock) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
+  s.record(D20_EVENTS.effect, { who, told: say("d20_effect_on", { label, mods: mods.map((m) => say("d20_mod_to", { value: signed(Number(m.value)), type: m.type ?? "", to: m.to })).join(", "), length: lengthWords(s, l) }), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
   return null;
 };
 

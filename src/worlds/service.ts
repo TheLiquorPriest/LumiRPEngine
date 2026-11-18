@@ -77,6 +77,7 @@ export interface WorldRead {
   history: RevisionNote[];
   packKinds: NonNullable<ResultBodies["lre.world"]["packKinds"]>;
   packRelations: NonNullable<ResultBodies["lre.world"]["packRelations"]>;
+  packLabels: NonNullable<ResultBodies["lre.world"]["packLabels"]>;
   functions: string[];
 }
 
@@ -131,7 +132,7 @@ export class WorldService {
   /** A world at a revision (its head by default), with its history and what the packs give the editors. */
   async read(user: UserId, world: WorldId, revision?: RevisionId): Promise<WorldRead> {
     const got = await this.worlds.get(world, user, revision);
-    return { ...got, history: await this.worlds.history(world, user), packKinds: Object.fromEntries(this.registry.kinds), packRelations: Object.fromEntries(this.registry.relations), functions: formulaFunctions(this.registry) };
+    return { ...got, history: await this.worlds.history(world, user), packKinds: Object.fromEntries(this.registry.kinds), packRelations: Object.fromEntries(this.registry.relations), packLabels: Object.fromEntries(this.registry.packs.map((p) => [p.id, p.label])), functions: formulaFunctions(this.registry) };
   }
 
   /** A new world, from a starter (`template`) or blank. */

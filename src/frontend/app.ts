@@ -302,6 +302,8 @@ export interface Draft {
   packKinds: Record<string, KindDef>;
   /** Relation types the registered packs define (`lre.world get`), for relation pickers; world relation types win. */
   packRelations: Record<string, RelationTypeDef>;
+  /** Each registered pack's own label, by its id (`lre.world get`): what Build shows wherever it names a pack. */
+  packLabels: Record<string, string>;
   /** Every function a formula may call outside an effect argument (`lre.world get`), for the expression editor. */
   functions: string[];
 }

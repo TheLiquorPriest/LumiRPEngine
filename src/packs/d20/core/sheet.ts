@@ -6,7 +6,8 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { FieldFixTarget } from "../../../shared/state-view";
-import { D20_FIELDS } from "../../../shared/d20";
+import type { D20Def } from "../../../shared/d20";
+import { D20_FIELDS, saveLabel } from "../../../shared/d20";
 import { say } from "../../../shared/lines";
 import type { ReadContext } from "../../../engine/registry";
 import { labelOf, own } from "../../../engine/pack-kit";
@@ -103,8 +104,8 @@ function weapons(ctx: ReadContext, who: EntityId, name: (id: EntityId) => string
 }
 
 /** What is left of a condition or an effect: turns, minutes, a save that ends it, in the lines' words. */
-function left(ctx: ReadContext, held: { until?: number; rounds?: number; save?: { save: string; dc: number } }): string {
-  return say("d20_length", { ...(held.rounds !== undefined ? { rounds: held.rounds } : {}), ...(held.until !== undefined ? { minutes: Math.max(0, held.until - ctx.state.clock) } : {}), ...(held.save !== undefined ? { save: held.save.save, dc: held.save.dc } : {}) });
+function left(ctx: ReadContext, rules: D20Def, held: { until?: number; rounds?: number; save?: { save: string; dc: number } }): string {
+  return say("d20_length", { ...(held.rounds !== undefined ? { rounds: held.rounds } : {}), ...(held.until !== undefined ? { minutes: Math.max(0, held.until - ctx.state.clock) } : {}), ...(held.save !== undefined ? { save: saveLabel(rules, held.save.save), dc: held.save.dc } : {}) });
 }
 
 /**
@@ -129,7 +130,7 @@ export function sheetOf(ctx: ReadContext, who: EntityId, name: (id: EntityId) =>
   });
   const saves = Object.keys(rules.totals)
     .filter((k) => k.startsWith("save."))
-    .map((k) => ({ save: k.slice(5), ...line(ctx, who, k) }));
+    .map((k) => ({ save: saveLabel(rules, k.slice(5)), ...line(ctx, who, k) }));
   const ranks = ranksOf(ctx, who);
   const skills = Object.entries(rowsOf(ctx, rules, "skills"))
     .filter(([id, row]) => row.trained !== true || (own(ranks, id) ?? 0) > 0)
@@ -188,8 +189,8 @@ export function sheetOf(ctx: ReadContext, who: EntityId, name: (id: EntityId) =>
       ...(Object.keys(hpFix).length > 0 ? { fix: hpFix } : {}),
     },
     ...(progress ? { experience: { level: progress.level, xp: progress.xp, next: progress.next, ...(xpFix ? { fix: xpFix } : {}) } } : {}),
-    conditions: held.map((c) => ({ condition: labelOfRow(own(conditionsTable, c.id), c.id), left: left(ctx, c), ...(textIn(own(conditionsTable, c.id)?.text) !== "" ? { does: textIn(own(conditionsTable, c.id)?.text) } : {}) })),
-    effects: effectsHeld(ctx, who).map((x) => ({ effect: x.label, mods: x.modifiers.map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to })).join(", "), left: left(ctx, x) })),
+    conditions: held.map((c) => ({ condition: labelOfRow(own(conditionsTable, c.id), c.id), left: left(ctx, rules, c), ...(textIn(own(conditionsTable, c.id)?.text) !== "" ? { does: textIn(own(conditionsTable, c.id)?.text) } : {}) })),
+    effects: effectsHeld(ctx, who).map((x) => ({ effect: x.label, mods: x.modifiers.map((m) => say("d20_mod_to", { value: typeof m.value === "number" ? signed(m.value) : m.value, type: m.type ?? "", to: m.to })).join(", "), left: left(ctx, rules, x) })),
     ...(daily.length > 0 ? { daily } : {}),
     traits: traitsHeld(ctx, rules, who).map((t) => {
       const row = own(traitsTable, t.id);

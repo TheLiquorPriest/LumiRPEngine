@@ -148,11 +148,6 @@ function Plain(props: { label: string; value: ComponentChildren }) {
   );
 }
 
-/** A save's word as the page names it. */
-function saveLabel(id: string): string {
-  return id === "" ? "Save" : `${id.charAt(0).toUpperCase()}${id.slice(1)}`;
-}
-
 /** Hit points: a gauge of what is left (or the wound alone, where the ruleset shows no more), temporary hit points, nonlethal harm, the state they bring. */
 function HitPoints(props: { sheet: Sheet }) {
   const { hp } = props.sheet;
@@ -237,7 +232,7 @@ function SheetBody(props: { sheet: Sheet }) {
         <Section title="Saves" flush>
           <div class="lre-me-stats">
             {s.saves.map((save) => (
-              <Total key={save.save} label={saveLabel(save.save)} line={save.total !== undefined ? { total: save.total, parts: save.parts ?? "" } : null} sign />
+              <Total key={save.save} label={save.save} line={save.total !== undefined ? { total: save.total, parts: save.parts ?? "" } : null} sign />
             ))}
           </div>
         </Section>

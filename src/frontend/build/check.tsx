@@ -101,13 +101,14 @@ export function IssueLine(props: { issue: LintIssue; where: string; busy?: boole
  */
 export function IssueRow(props: { issue: LintIssue; worldId?: WorldId; doc?: WorldDoc; busy?: boolean; onFix?(fix: LintFix): void }) {
   const app = useApp();
+  const labels = useSelect(app.drafts, (d) => d?.packLabels);
   const { issue, worldId, doc } = props;
   const target = issueTarget(issue.path);
   const part = target ? null : issuePart(issue.path);
   let where = issue.path;
   if (target) {
     const items = doc ? ((doc[target.collection] ?? {}) as Record<string, unknown>) : {};
-    where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places)}`;
+    where = `${COLLECTION_INFO[target.collection].label} › ${itemLabel(target.collection, target.id, hasOwn(items, target.id) ? items[target.id] : undefined, doc?.places, labels)}`;
   } else if (part) where = PART_INFO[part].label;
   const route = worldId === undefined ? null : issueRoute(worldId, issue.path);
   return <IssueLine issue={issue} where={where} busy={props.busy} onOpen={route ? () => go(app, route) : undefined} onFix={props.onFix} />;

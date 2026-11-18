@@ -30,7 +30,7 @@ import type { Req } from "../requests";
 import { createStore, useSelect } from "../../ui/store";
 import { bookLabels } from "./book-lore";
 import { IssueRow } from "./check";
-import { COLLECTION_INFO, itemLabel } from "./chrome";
+import { COLLECTION_INFO, itemLabel, packName } from "./chrome";
 import { draftSend } from "./draft";
 import { RoutineJobStart, RoutineProposalReview } from "./propose-routines";
 
@@ -356,7 +356,7 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
             {/* One pack's proposals need no heading of their own. */}
             {groups.length > 1 ? (
               <div class="lre-build-group-head">
-                <span>{humanize(group.pack)}</span>
+                <span>{packName(draft?.packLabels, group.pack)}</span>
                 <span class="lre-build-count">
                   {group.proposals.filter((p) => accepted.has(p.id)).length} of {group.proposals.length}
                 </span>

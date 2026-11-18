@@ -4277,6 +4277,8 @@ export interface WorldRead {
   packKinds: JsonValue;
   /** The relation types the packs bring, by id. */
   packRelations: JsonValue;
+  /** Each pack's label, by its id: what a person is shown of a pack. */
+  packLabels: JsonValue;
   /** The formula functions. */
   functions: string[];
 }

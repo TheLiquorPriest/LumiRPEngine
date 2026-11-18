@@ -136,12 +136,19 @@ export function go(app: Pick<App, "ui">, build: BuildRoute): void {
   });
 }
 
+/** A pack as Build names it: its own label (`Draft.packLabels`), or, for a pack none registered, its id in words. */
+export function packName(labels: Readonly<Record<string, string>> | undefined, pack: string): string {
+  const label = labels !== undefined && hasOwn(labels, pack) ? labels[pack] : undefined;
+  return label !== undefined && label !== "" ? label : humanize(pack);
+}
+
 /**
  * An item's name as Build lists it: its name, label or title; a route by the places it joins (named
- * when `places` is given). An item without one reads as its id in words, since ids show only under
- * Show ids.
+ * when `places` is given); a pack by its own label (when `packs` is given). An item without one reads
+ * as its id in words, since ids show only under Show ids.
  */
-export function itemLabel(collection: WorldCollection, id: string, value: unknown, places?: Readonly<Record<string, { name: string }>>): string {
+export function itemLabel(collection: WorldCollection, id: string, value: unknown, places?: Readonly<Record<string, { name: string }>>, packs?: Readonly<Record<string, string>>): string {
+  if (collection === "packs") return packName(packs, id);
   if (isRecord(value)) {
     if (typeof value.name === "string" && value.name) return value.name;
     if (typeof value.label === "string" && value.label) return value.label;

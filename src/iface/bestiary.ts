@@ -6,7 +6,7 @@
 
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { BESTIARY_TABLE } from "../packs/combat/core/bestiary";
-import { D20_ACTIONS, type D20Def, type D20TableRole } from "../shared/d20";
+import { D20_ACTIONS, type D20Def, type D20TableRole, saveLabel } from "../shared/d20";
 import { say } from "../shared/lines";
 import type { TableRow } from "../shared/tables";
 import type { RulesetDef, WorldDoc } from "../shared/world";
@@ -61,7 +61,9 @@ function d20Summary(world: Pick<WorldDoc, "ruleset" | "tables">, d20: D20Def): J
   return {
     ...(typeof world.ruleset?.profile === "string" ? { ruleset: world.ruleset.profile } : {}),
     abilities: d20.abilities,
-    saves: Object.keys(d20.totals).filter((k) => k.startsWith("save.")).map((k) => k.slice(5)),
+    saves: Object.keys(d20.totals)
+      .filter((k) => k.startsWith("save."))
+      .map((k) => `${saveLabel(d20, k.slice(5))} [${k.slice(5)}]`),
     totals: Object.keys(d20.totals),
     skills: rows("skills").map(([id, row]) => say("d20_ruleset_skill", { skill: label(id, row), id, ability: String(row.ability ?? ""), ...(row.trained === true ? { trained: true } : {}), ...(row.armor === true ? { armor: true } : {}) })),
     classes: rows("classes").map(([id, row]) => `${label(id, row)} [${id}]`),

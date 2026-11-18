@@ -7,22 +7,25 @@
 import type { JsonValue } from "../../../shared/json";
 import { say } from "../../../shared/lines";
 import type { PackEvent } from "../../../shared/ledger";
-import { D20_EVENTS } from "../../../shared/d20";
+import { D20_EVENTS, saveLabel } from "../../../shared/d20";
 import type { EventTypeDef, ReadContext } from "../../../engine/registry";
 import { labelOf, own } from "../../../engine/pack-kit";
+import { rulesOf } from "./model";
 
 /** The fields of a record that name someone or something, said by their names. */
 const NAMED: Readonly<Record<string, true>> = { who: true, target: true, item: true, by: true, aided: true, vs: true };
 
 /**
- * A record's values as its line takes them: a name for an id, an outcome in words, a list's words joined, a number or words as they
- * are. A player's line (`player`) takes the words the player is shown (`shown`, another's hit points as the fight shows them) in place
- * of the record's own.
+ * A record's values as its line takes them: a name for an id, an outcome and a save in words, a list's words joined, a number or
+ * words as they are. A player's line (`player`) takes the words the player is shown (`shown`, another's hit points as the fight
+ * shows them) in place of the record's own.
  */
 function fieldsOf(e: PackEvent, ctx: ReadContext, player: boolean): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
+  const rules = rulesOf(ctx.world);
   const word = (key: string, v: JsonValue): string | number | boolean | null => {
     if (key === "outcome" && typeof v === "string") return say(`d20_outcome_${v}`) || v;
+    if (key === "save" && typeof v === "string" && rules !== null) return saveLabel(rules, v);
     if (typeof v === "string") return own(NAMED, key) && own(ctx.state.entities, v) ? labelOf(ctx, v) : v;
     if (typeof v === "number" || typeof v === "boolean") return v;
     if (Array.isArray(v)) return v.map((x) => (typeof x === "string" && own(NAMED, key) && own(ctx.state.entities, x) ? labelOf(ctx, x) : typeof x === "string" || typeof x === "number" ? String(x) : "")).filter((x) => x !== "").join(", ");

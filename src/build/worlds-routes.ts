@@ -60,6 +60,7 @@ const worldRead = shape.named(
     history: field(shape.list(revisionNote), "How each revision became head, oldest first."),
     packKinds: field(shape.json(), "The kinds the packs bring, by id."),
     packRelations: field(shape.json(), "The relation types the packs bring, by id."),
+    packLabels: field(shape.json(), "Each pack's label, by its id: what a person is shown of a pack."),
     functions: field(shape.list(T), "The formula functions."),
   }),
 );

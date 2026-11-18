@@ -26,6 +26,8 @@ import {
   D20_ABILITY_IDS,
   D20_BUDGETS,
   D20_COSTS,
+  D20_SAVE_LABELS,
+  D20_SAVES,
   d20Combat,
   d20Fields,
   d20Sheet,
@@ -831,6 +833,7 @@ const HELD: Expr = `table('${T.weapons}', weapon, 'held')`;
 const D20: D20Def = {
   abilities: [...D20_ABILITY_IDS],
   mod: ABILITY_MOD,
+  labels: D20_SAVE_LABELS,
   kinds: ["person"],
   defaultSize: "medium",
   bonuses: { stack: ["dodge", "circumstance"], penaltiesStack: true },
@@ -912,12 +915,6 @@ const D20: D20Def = {
   },
 };
 
-const SAVES = [
-  { id: "fort", label: "Fortitude" },
-  { id: "ref", label: "Reflex" },
-  { id: "will", label: "Will" },
-];
-
 /** The fight's budgets: an attack action (the standard), a move, the full round and free actions; no swift or immediate one. */
 const BUDGETS: Record<string, CombatBudgetDef> = Object.fromEntries(
   Object.entries(D20_BUDGETS)
@@ -980,7 +977,7 @@ export const MODERN: D20SetDef = {
         { formula: signedTotal("attack.ranged"), label: "Ranged" },
         { formula: signedTotal("grapple"), label: "Grapple" },
       ],
-      saves: SAVES,
+      saves: D20_SAVES,
       skills: SKILLS.map(([id, label]) => ({ id, label })),
       daily: Object.keys(DAILY),
       vitals: [{ pool: "action_points" }, { formula: "total(self, 'action_dice') + 'd6'", label: "Action point dice" }, { formula: signedTotal("reputation"), label: "Reputation" }],

@@ -253,6 +253,16 @@ export function d20Combat(down: Expr): CombatDef {
 
 // ---------------------------------------------------------------- the sheet
 
+/** The family's saves, as each set's sheet lists them and its rules label their totals (`D20_SAVE_LABELS`). */
+export const D20_SAVES: readonly { id: string; label: string }[] = [
+  { id: "fort", label: "Fortitude" },
+  { id: "ref", label: "Reflex" },
+  { id: "will", label: "Will" },
+];
+
+/** The saves' totals in words, for a set's `D20Def.labels`: what the sheet, the tool `sheet` and the records call each. */
+export const D20_SAVE_LABELS: Readonly<Record<string, string>> = Object.fromEntries(D20_SAVES.map((s) => [`save.${s.id}`, s.label]));
+
 /** A total on the sheet with its sign. */
 export function signedTotal(name: string, key?: string): string {
   return signed(key === undefined ? `total(self, '${name}')` : `total(self, '${name}', '${key}')`);
@@ -264,7 +274,7 @@ export function abilityRows(): SheetRowDef[] {
 }
 
 /** The sheet: who it is, defence, attack, saves, abilities, skills, the daily gauges, and what it has and is under. */
-export function d20Sheet(opts: { defence: { label: string; rows: SheetRowDef[] }; attack: SheetRowDef[]; saves: { id: string; label: string }[]; skills: { id: string; label: string }[]; daily: string[]; vitals?: SheetRowDef[] }): SheetLayoutDef {
+export function d20Sheet(opts: { defence: { label: string; rows: SheetRowDef[] }; attack: SheetRowDef[]; saves: readonly { id: string; label: string }[]; skills: { id: string; label: string }[]; daily: string[]; vitals?: SheetRowDef[] }): SheetLayoutDef {
   const sections: SheetSectionDef[] = [
     { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { field: "hp_temp" }, { field: "nonlethal" }, { progression: "level" }, { field: D20_FIELDS.classes }, { formula: "levels(self) + self.racial_hd", label: "Hit dice" }, ...(opts.vitals ?? [])] },
     { id: "defence", label: opts.defence.label, rows: opts.defence.rows },
