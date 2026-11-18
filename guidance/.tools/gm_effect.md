@@ -1,5 +1,6 @@
 ---
 description: gm_effect as the model is told it - what the tool does, and what each of its arguments is.
+doing: running one of the world's effects
 arguments:
   effect: "The effect's name, as gm_effects lists it."
   args: "The arguments it reads, as field: value."
