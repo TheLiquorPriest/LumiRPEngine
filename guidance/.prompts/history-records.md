@@ -5,7 +5,7 @@ keys:
   ev_*: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - each is filled with what it names (ev_set - name, field, value, atMost; ev_add - name, field, delta; ev_link and ev_unlink - from, rel, to; ev_roll - actor, action, outcome, rolled, why; ev_check - actor, for (what the roll was for), check (the world's check, where it was one), notation, dice (what each die showed), total, dc, outcome (absent where the roll had none))
   need_eased, need_rose: a need eased or rose - you (true where it is the player's), name, need
   need_standing, needs_none: a person's need as it stands, as the Needs view shows it, and the words where the world has every need off - name, value (of 100), word (its word once it presses, hungry), pressing, since (when it began to press by the story's clock, where its record says), tell (the point it presses from), alert (the point it falls due from), met_by
-  story_flag: the record line of a story flag - name
+  story_flag: the record line of a story flag set, on the GM's and the Author's side (a player's line says nothing of it) - name (in words), set (it is on), cleared (it is off), value (a value other than on or off)
   regard_*: what changed in someone's regard - by, whose, axis, to, moved, parts
   draft_*: what changed in a world draft - how, what, from, to, map, place
 ---
@@ -61,7 +61,7 @@ need_eased: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} eased
 need_rose: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} rose
 need_standing: {{name}} {{value}} of 100{{#pressing}}, so {{word}}{{#if_since}} since {{since}}{{/if_since}}{{/pressing}}{{^pressing}}, {{word}} from {{tell}}{{/pressing}}. Met by {{met_by}}; from {{alert}} it falls due when time passes.
 needs_none: Every need is off in this world.
-story_flag: flag {{name}}
+story_flag: The story flag “{{name}}”{{#set}} is set{{/set}}{{#cleared}} is cleared{{/cleared}}{{#value}} is now {{value}}{{/value}}
 regard_rose: rose by {{by}}
 regard_fell: fell by {{by}}
 regard_axis: {{whose}} {{axis}} toward {{to}} {{moved}}

@@ -515,6 +515,16 @@ export interface QuestStageView extends QuestStageDoc {
   world: boolean;
   /** What the story called on it; null where nothing was. */
   call: QuestCallDoc | null;
+  /** A world's stage's objectives, each with whether it holds on the record now; none for a stage the story wrote, or where none was read. */
+  objectives: readonly { label: string; met: boolean }[];
+  /** For the stage a world's quest stands on: the way on that holds on the record now, to the stage it leads to (by its label), and whether it is how the stage fails; null where none holds or none was read. Only an agent takes it (plan §8.3). */
+  way: { to: string; fails: boolean } | null;
+}
+
+/** How the record stands for the world's tracks, as the engine reads their conditions (`engine/tracks.ts`): a stage's objectives, and the way on that holds from where a track stands. */
+export interface TrackStanding {
+  objectives(track: TrackDef, stage: string): readonly { label: string; met: boolean }[];
+  way(track: string): { from: string; to: string; fails: boolean } | null;
 }
 
 /** A quest as it is read, whether the world defined it or the story opened it. */
@@ -543,10 +553,11 @@ export interface QuestView {
 /**
  * A track the world defines as a record of the same kind as a quest opened in play: its name and kind, its owner as a who binding
  * (none for the GM's own), and each stage with the world's label and, as its condition, the objectives' labels, else the
- * conditions to the next stages, as the world wrote them.
+ * conditions to the next stages, as the world wrote them; with `standing`, each objective met or not and the way on that holds.
  */
-export function trackAsQuest(def: TrackDef, mark: QuestMarkDoc = noMark()): QuestView {
+export function trackAsQuest(def: TrackDef, mark: QuestMarkDoc = noMark(), standing?: TrackStanding): QuestView {
   const owner = trackOwner(def);
+  const way = standing?.way(def.id) ?? null;
   return {
     id: def.id,
     kind: def.kind,
@@ -564,6 +575,8 @@ export function trackAsQuest(def: TrackDef, mark: QuestMarkDoc = noMark()): Ques
       condition: (s.objectives !== undefined && s.objectives.length > 0 ? s.objectives.map(objectiveLabel) : s.next.map((n) => n.when)).join("; "),
       world: true,
       call: mark.calls[id] ?? null,
+      objectives: standing?.objectives(def, id) ?? [],
+      way: way !== null && way.from === id ? { to: def.stages[way.to]?.label ?? way.to, fails: way.fails } : null,
     })),
     who: owner === undefined ? [] : [owner],
     where: [],
@@ -574,12 +587,12 @@ export function trackAsQuest(def: TrackDef, mark: QuestMarkDoc = noMark()): Ques
 }
 
 function viewOf(doc: QuestDoc, mark: QuestMarkDoc): QuestView {
-  return { ...doc, world: false, stages: doc.stages.map((s) => ({ ...s, world: false, call: mark.calls[s.id] ?? null })), closed: mark.closed, shown: mark.shown };
+  return { ...doc, world: false, stages: doc.stages.map((s) => ({ ...s, world: false, call: mark.calls[s.id] ?? null, objectives: [], way: null })), closed: mark.closed, shown: mark.shown };
 }
 
-/** Every quest of the chat: the world's tracks as it defines them, then those opened in play in the order opened, each with what the story called on it. */
-export function questViews(tracks: Readonly<Record<string, TrackDef>>, slice: Readonly<QuestSlice>): QuestView[] {
-  return [...Object.values(tracks).map((t) => trackAsQuest(t, marksOf(slice, t.id))), ...Object.values(slice.quests).map((q) => viewOf(q, marksOf(slice, q.id)))];
+/** Every quest of the chat: the world's tracks as it defines them (as the record stands for them, with `standing`), then those opened in play in the order opened, each with what the story called on it. */
+export function questViews(tracks: Readonly<Record<string, TrackDef>>, slice: Readonly<QuestSlice>, standing?: TrackStanding): QuestView[] {
+  return [...Object.values(tracks).map((t) => trackAsQuest(t, marksOf(slice, t.id), standing)), ...Object.values(slice.quests).map((q) => viewOf(q, marksOf(slice, q.id)))];
 }
 
 /**

@@ -7911,6 +7911,10 @@ export interface QuestStageRow {
   why: string | null;
   /** Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand. */
   current: boolean | null;
+  /** A world's stage's objectives, each with whether it holds on the record now; none for a stage the story wrote. */
+  objectives: { label: string; met: boolean }[];
+  /** For the stage a world's quest stands on, the way on that holds on the record now: the stage it leads to and whether it is how the stage fails. The Author moves the quest; null where no way holds. */
+  way: { to: string; fails: boolean } | null;
 }
 ```
 

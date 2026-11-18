@@ -23,6 +23,7 @@ import { calendarOf, formatClock, placeOffset, placeZone } from "../engine/calen
 import { own } from "../engine/pack-kit";
 import { presetOf } from "../engine/realism";
 import { clockPaused } from "../engine/time";
+import { wayOn, wayOnFields } from "../engine/tracks";
 import { BLANK_REVISION, clockRecorded } from "./blank";
 import { answers } from "./due";
 import { standing } from "./facts";
@@ -318,16 +319,21 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
     sections.due = dueLists.flatMap((l) => l.lines);
   }
   // Open business (plan §6.9): the quests and threads that touch the horizon (what they name is shown on it, or in the chains above
-  // it), and those that name no one and nowhere in the tree, which are the whole world's.
+  // it), and those that name no one and nowhere in the tree, which are the whole world's. A world's quest whose way on from where it
+  // stands holds on the record, or whose stage fails by its own condition, is listed wherever it is, with that way and the call that
+  // takes it: only an agent moves it (plan §8.3).
   if (want("open")) {
     const touches = (refs: readonly string[]): boolean => refs.length === 0 || refs.some((r) => within.has(r) || chain.includes(r));
     sections.open = [];
+    const reading = { state: state.world, ctx: view.context };
     for (const [id, t] of Object.entries(view.world.tracks)) {
       const stage = state.world.tracks[id]?.stage ?? t.start;
       const at = own(t.stages, stage);
       const owner = trackOwner(t);
-      if ((at?.next.length ?? 0) === 0 || !touches(owner === undefined ? [] : [`entity:${owner}`])) continue;
-      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, ...(owner === undefined ? {} : { owner: nameOf(`entity:${owner}`) }), ...markFields(state.marks[`track:${id}`]?.stage) } });
+      const way = (at?.next.length ?? 0) === 0 && at?.fail === undefined ? null : wayOn(view.context.registry, reading, id);
+      if (way === null && ((at?.next.length ?? 0) === 0 || !touches(owner === undefined ? [] : [`entity:${owner}`]))) continue;
+      const opened: JsonObject = way === null ? {} : { way: wayOnFields(t, id, way) };
+      sections.open.push({ kind: "quest", depth: 0, fields: { id, label: t.label, kind: t.kind, stage: at?.label ?? stage, ...(owner === undefined ? {} : { owner: nameOf(`entity:${owner}`) }), ...markFields(state.marks[`track:${id}`]?.stage), ...opened } });
     }
     for (const t of view.threads()) {
       if (!touches(t.refs)) continue;

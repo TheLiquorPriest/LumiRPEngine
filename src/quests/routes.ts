@@ -4,6 +4,7 @@
 // user this RPE belongs to. The words of every refusal are lines of `.prompts/story-answers.md`, as the chat has them.
 
 import { route, RouteError, shape } from "../app";
+import { trackStanding } from "../engine/tracks";
 import { trackKnown } from "../engine/visibility";
 import type { GuidanceFiles } from "../iface/texts";
 import type { TrackDef } from "../shared/world";
@@ -74,7 +75,9 @@ async function standingAt(deps: QuestRoutesDeps, user: string, chat: string, tur
     return doc !== undefined && track !== undefined && trackKnown(deps.store.env.registry, doc, folded.state.world, doc.pov, track);
   };
   const trails = trailsOf(s, deps.store.env, chat, turn, tracks, folded.state.world.tracks);
-  return { views: withTrails(questViews(tracks, slice), tracks, trails), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks, trails, knows };
+  // Each world stage's objectives met or not, and the way on that holds, as the engine reads the conditions on this record.
+  const read = doc === undefined ? undefined : trackStanding(deps.store.env.registry, { state: folded.state.world, ctx: deps.store.env.registry.context(doc, folded.state.world) });
+  return { views: withTrails(questViews(tracks, slice, read), tracks, trails), open: new Set(openQuests(tracks, slice, standing).map((q) => q.id)), standing, tracks, trails, knows };
 }
 
 export function questRoutes(deps: QuestRoutesDeps) {

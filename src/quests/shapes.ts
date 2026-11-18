@@ -20,6 +20,8 @@ const stageRow = shape.named(
     state: field(nullable(call), "What the Author or the GM called on the stage; for a stage the world's quest was moved past and nothing was called on, how the move went (its outcome, or failed where it took the stage's failing way, else met); null where nothing was called and the quest has not moved on."),
     why: field(nullable(T), "The reason given with that call, or with the move."),
     current: field(nullable(shape.yesNo()), "Whether the quest stands on this stage now; null for a quest the story opened, which has no single place to stand."),
+    objectives: field(shape.list(shape.object({ label: T, met: shape.yesNo() })), "A world's stage's objectives, each with whether it holds on the record now; none for a stage the story wrote."),
+    way: field(nullable(shape.object({ to: T, fails: shape.yesNo() })), "For the stage a world's quest stands on, the way on that holds on the record now: the stage it leads to and whether it is how the stage fails. The Author moves the quest; null where no way holds."),
   }),
 );
 

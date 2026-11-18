@@ -7,7 +7,7 @@ import { JournalView } from "../../src/ui/pages/quests/journal";
 import { QuestRecordView, shownWords } from "../../src/ui/pages/quests/record";
 import { elements, expand, textOf } from "./vnodes";
 
-const stage = (id: string, over: Partial<QuestStageRow> = {}): QuestStageRow => ({ id, label: id, condition: `${id} is done`, state: null, why: null, current: null, ...over });
+const stage = (id: string, over: Partial<QuestStageRow> = {}): QuestStageRow => ({ id, label: id, condition: `${id} is done`, state: null, why: null, current: null, objectives: [], way: null, ...over });
 const record = (over: Partial<QuestRecordRow> = {}): QuestRecordRow => ({ id: "q1", kind: "quest", name: "The bell", world: false, objective: "Ring it.", why: null, stakes: null, rewards: null, stages: [], who: [], where: [], things: [], closed: null, thread: null, visibility: "secret", shown: null, open: true, ...over });
 const seen = (id: string, over: Partial<JournalQuestRow> = {}): JournalQuestRow => ({ id, kind: "quest", name: id, world: false, objective: null, why: null, stakes: null, rewards: null, stages: [], who: [], where: [], things: [], closed: null, whole: true, thread: null, ...over });
 

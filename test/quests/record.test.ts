@@ -88,8 +88,8 @@ describe("the world's tracks as quests", () => {
     const view = trackAsQuest(ERRAND);
     expect(view).toMatchObject({ id: "errand", kind: "quest", name: "The warden's errand", world: true, who: ["wren"], where: [], visibility: "public" });
     expect(view.stages).toEqual([
-      { id: "go", label: "Set out", condition: "Reach the keep; has(wren, letter)", world: true, call: null },
-      { id: "done", label: "Handed over", condition: "", world: true, call: null },
+      { id: "go", label: "Set out", condition: "Reach the keep; has(wren, letter)", world: true, call: null, objectives: [], way: null },
+      { id: "done", label: "Handed over", condition: "", world: true, call: null, objectives: [], way: null },
     ]);
     const t = await openTable({ areas: [QUEST_STORE_AREA] });
     const turn = await t.begin();

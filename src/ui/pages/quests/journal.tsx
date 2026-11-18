@@ -23,7 +23,23 @@ export function StageList(props: { stages: readonly QuestStageRow[]; withConditi
             <strong>{stage.label}</strong>{" "}
             <Badge tone={stage.state === "met" ? "pos" : stage.state === "failed" ? "neg" : undefined}>{stage.state ?? "not called on"}</Badge>
           </p>
-          {props.withCondition === true ? <p class="rpe-meta" data-condition>It moves on when: {stage.condition}</p> : null}
+          {props.withCondition === true && stage.objectives.length === 0 ? <p class="rpe-meta" data-condition>It moves on when: {stage.condition}</p> : null}
+          {stage.objectives.length === 0 ? null : (
+            <ul class="rpe-plain" data-objectives>
+              {stage.objectives.map((o) => (
+                <li key={o.label} class="rpe-meta" data-objective-met={o.met ? "yes" : "no"}>
+                  {o.met ? "✓ " : "○ "}
+                  {o.label}
+                  {o.met ? " (done)" : " (not yet)"}
+                </li>
+              ))}
+            </ul>
+          )}
+          {stage.way === null ? null : (
+            <p class="rpe-meta" data-way-on>
+              {stage.way.fails ? `It has failed by its own condition, which leads to ${stage.way.to}.` : `What moves it on to ${stage.way.to} has happened.`} The Author moves the quest there on its next turn.
+            </p>
+          )}
           <p class="rpe-meta">{stageWords(stage)}</p>
         </li>
       ))}

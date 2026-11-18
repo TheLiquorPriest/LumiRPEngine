@@ -460,6 +460,11 @@ export class TreeView {
     return this.doc;
   }
 
+  /** The engine's reading of the state the tree is made from: what a world's conditions are read against (a quest's way on). */
+  get context(): ReadContext {
+    return this.ctx;
+  }
+
   private add(node: Omit<Node, "children" | "people" | "things" | "places" | "groups" | "records" | "notable" | "open" | "changed">): void {
     this.nodes.set(node.ref, { ...node, children: [], people: 0, things: 0, places: 0, groups: 0, records: 0, notable: [], open: 0, changed: null });
   }

@@ -18,6 +18,7 @@ import { playedWorld } from "../engine/places-in-play";
 import type { Advice, Rejection } from "../engine/registry";
 import { standingRun, type StandingResult } from "../engine/standing";
 import type { EntityState, WorldState } from "../engine/state";
+import { waysOpened, wayOnFields } from "../engine/tracks";
 import { Working } from "../engine/working";
 import { followOf } from "../packs/castlife/core/routines";
 import { fighterOf, fightsOf } from "../packs/combat/core/model";
@@ -481,6 +482,14 @@ export function answerDraft(draft: Draft, done: Committed, reply: Reply, extra: 
     }
   }
   operations.sort((a, b) => Number(a.n) - Number(b.n));
+  // A world's quest whose way on this call made hold (an action's outcome that set a flag its stage reads): nothing moves it but an
+  // agent's call (plan §8.3), so the answer says so, with the call that moves it, and a stage that now fails by its own condition the same.
+  const env = draft.call.deps.env;
+  const after = env.worlds(done.state.world.revision);
+  if (after !== undefined) {
+    const now = { state: done.state.world, ctx: env.registry.context(after, done.state.world) };
+    for (const opened of waysOpened(env.registry, { state: draft.base.state.world, ctx: draft.base.ctx }, now)) reply.line("quest_way_on", wayOnFields(opened.def, opened.track, opened.way));
+  }
   const now =
     view === null
       ? []

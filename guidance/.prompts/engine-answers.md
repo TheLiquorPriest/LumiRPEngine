@@ -268,6 +268,7 @@ quest_opened: Operation {{n}} ({{op}}): opened the {{kind}} {{what}}.
 quest_exists: Operation {{n}} ({{op}}): {{what}} is already a quest, so the call writes to it.
 quest_written: Operation {{n}} ({{op}}): {{what}} was written: {{parts}}.
 quest_world_part: Operation {{n}} ({{op}}): {{what}} is the world's own quest, so {{fields}} was left out; only its stages, what the player is shown and how it closes are written to it.
+quest_way_on: {{#fails}}This makes the quest {{quest}} fail at {{from}} by its own condition, and its failing way leads to {{to}}{{/fails}}{{^fails}}This lets the quest {{quest}} move on from {{from}} to {{to}}{{/fails}}. Nothing moves it but a call: world_apply with {{call}}, and your reason as why.
 unknown_thread: Operation {{n}} ({{op}}): the story record holds no thread {{thread}}.{{#near}} Its threads: {{near}}.{{/near}}
 unknown_beat: Operation {{n}} ({{op}}): the story record holds no beat {{beat}}.{{#near}} Its beats near that: {{near}}.{{/near}}
 fact_part_place: Operation {{n}} ({{op}}): a part names where in a place's record a fact belongs, and {{about}} is not a place. Leave the part out{{#choices}}, or write a fact about a place with one of: {{choices}}{{/choices}}.

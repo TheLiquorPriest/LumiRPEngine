@@ -7,11 +7,14 @@
 import { type QuestView, seenOf } from "./record";
 import type { JournalQuest, QuestRecordRow } from "./shapes";
 
-/** One stage of a quest as a page shows it, with the world's standing where the quest is one the world defines. */
-function stagesOf(view: QuestView, standing: Readonly<Record<string, string>>, only: ReadonlySet<string> | null): QuestRecordRow["stages"] {
+/**
+ * One stage of a quest as a page shows it, with the world's standing where the quest is one the world defines: each objective met or
+ * not, as the player's quests show it; and on the record behind the gate (`record`), the way on that holds, which the Author takes.
+ */
+function stagesOf(view: QuestView, standing: Readonly<Record<string, string>>, only: ReadonlySet<string> | null, record: boolean): QuestRecordRow["stages"] {
   return view.stages
     .filter((s) => only === null || only.has(s.id))
-    .map((s) => ({ id: s.id, label: s.label, condition: s.condition, state: s.call?.state ?? null, why: s.call?.why ?? null, current: view.world ? standing[view.id] === s.id : null }));
+    .map((s) => ({ id: s.id, label: s.label, condition: s.condition, state: s.call?.state ?? null, why: s.call?.why ?? null, current: view.world ? standing[view.id] === s.id : null, objectives: [...s.objectives], way: record ? s.way : null }));
 }
 
 /** A quest as the record holds it, whatever the player may see. */
@@ -25,7 +28,7 @@ export function recordOf(view: QuestView, standing: Readonly<Record<string, stri
     why: view.why,
     stakes: view.stakes,
     rewards: view.rewards,
-    stages: stagesOf(view, standing, null),
+    stages: stagesOf(view, standing, null, true),
     who: view.who,
     where: view.where,
     things: view.things,
@@ -55,7 +58,7 @@ export function journalOf(views: readonly QuestView[], standing: Readonly<Record
           why: view.why,
           stakes: view.stakes,
           rewards: view.rewards,
-          stages: stagesOf(view, standing, null),
+          stages: stagesOf(view, standing, null, false),
           who: view.who,
           where: view.where,
           things: view.things,
@@ -64,6 +67,6 @@ export function journalOf(views: readonly QuestView[], standing: Readonly<Record
         },
       ];
     }
-    return [{ ...base, whole: false, objective: null, why: null, stakes: null, rewards: null, stages: stagesOf(view, standing, new Set(seen.stages)), who: [], where: [], things: [], closed: null, thread: null }];
+    return [{ ...base, whole: false, objective: null, why: null, stakes: null, rewards: null, stages: stagesOf(view, standing, new Set(seen.stages), false), who: [], where: [], things: [], closed: null, thread: null }];
   });
 }

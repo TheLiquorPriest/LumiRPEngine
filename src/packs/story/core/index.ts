@@ -522,7 +522,13 @@ export const storyPack: PackDef = {
         const s = mutableSlice(state, "story");
         s.flags = { ...objOf(s.flags), [strOf(e.data.name)]: e.data.value ?? true };
       },
-      describe: (e) => say("story_flag", { name: strOf(e.data.name) }),
+      // What it set, in words, on the GM's and the Author's side (the turn's card among them); a player's line says nothing of it: what it
+      // moves on (a quest's objective met) is how the player sees it.
+      describe: (e, _ctx, viewer) => {
+        if (viewer !== undefined) return "";
+        const value = e.data.value ?? true;
+        return say("story_flag", { name: strOf(e.data.name).replace(/_/g, " "), set: value === true, cleared: value === false || value === null, ...(typeof value === "string" || typeof value === "number" ? { value: String(value) } : {}) });
+      },
     });
     r.query("story.flag", (ctx, name) => flagValue(ctx, name));
     r.formula("flag", (ctx, name) => {

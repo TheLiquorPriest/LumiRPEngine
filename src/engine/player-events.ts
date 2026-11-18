@@ -77,7 +77,6 @@ function bookkeeping(type: string): boolean {
     "economy.dispose": true,
     "economy.acquire": true,
     "economy.stake_route": true,
-    "story.flag": true,
     // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
     "combat.turn": true,
     "combat.spend": true,

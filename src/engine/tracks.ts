@@ -15,7 +15,7 @@ import { hashParts } from "../shared/hash";
 import type { EntityId, StageId, TrackId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { StageDef, TrackDef, WorldDoc } from "../shared/world";
-import { objectiveWhen, trackOwner } from "../shared/world";
+import { objectiveLabel, objectiveWhen, trackOwner } from "../shared/world";
 import { applyEffects } from "./effects";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import type { ExprEnv } from "./expr";
@@ -52,13 +52,17 @@ function ownerBindings(track: TrackDef): Record<string, EntityId> {
   return owner ? { self: owner, owner } : {};
 }
 
+/** A stage's objectives, each by its label with whether its condition holds on the record now (its owner as `self` and `owner`). */
+export function objectivesOf(reg: Registry, w: Pick<Working, "state" | "ctx">, track: TrackDef, stage: StageId): { label: string; met: boolean }[] {
+  const env = scopeEnv({ reg, ctx: w.ctx, bindings: ownerBindings(track) });
+  return (own(track.stages, stage)?.objectives ?? []).map((o) => ({ label: objectiveLabel(o), met: truthy(evalExpr(objectiveWhen(o), env, false)) }));
+}
+
 /** What a track's predicates read (`next`, `fail`, a target's `gate`): its owner as `self` and `owner`, and `track.*` (its id, stage, minutes there, attempts and objectives met). */
 export function trackEnv(reg: Registry, w: Pick<Working, "state" | "ctx">, track: TrackDef, trackId: TrackId): ExprEnv {
   const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-  const def = own(track.stages, stage);
-  const env0 = scopeEnv({ reg, ctx: w.ctx, bindings: ownerBindings(track) });
-  const objectives = def?.objectives ?? [];
-  const done = objectives.filter((o) => truthy(evalExpr(objectiveWhen(o), env0, false))).length;
+  const objectives = objectivesOf(reg, w, track, stage);
+  const done = objectives.filter((o) => o.met).length;
   const slice = readEngineSlice(w.state);
   return scopeEnv({
     reg,
@@ -109,10 +113,68 @@ function enter(reg: Registry, w: Working, trackId: TrackId, track: TrackDef, fro
   return { track: trackId, from, to, via, events: w.events.slice(start) };
 }
 
-function gateOpen(reg: Registry, w: Working, track: TrackDef, trackId: TrackId, to: StageId): boolean {
+function gateOpen(reg: Registry, w: Pick<Working, "state" | "ctx">, track: TrackDef, trackId: TrackId, to: StageId): boolean {
   const gate = own(track.stages, to)?.gate;
   if (gate === undefined) return true;
   return truthy(evalExpr(gate, trackEnv(reg, w, track, trackId), false));
+}
+
+/** A way on from where a track stands that holds on the record: the stage it leads to, and how (its own failing first). */
+export interface WayOn {
+  from: StageId;
+  to: StageId;
+  via: "next" | "fail" | "answer";
+}
+
+/**
+ * The way on that holds from the stage a track stands on, as arithmetic over the record (DESIGN §10): its `fail.when` first, else for a
+ * puzzle answered its first way, else the first `next` whose `when` and whose target's `gate` hold; null where none does. It moves
+ * nothing: in a chat an agent moves a world's quest (plan §8.3), told of it by this, and the engine's own steps (`stepTracks`) take it.
+ */
+export function wayOn(reg: Registry, w: Pick<Working, "state" | "ctx">, trackId: TrackId): WayOn | null {
+  const track = own(w.ctx.world.tracks, trackId);
+  if (!track) return null;
+  const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
+  const def: StageDef | undefined = own(track.stages, stage);
+  if (!def) return null;
+  const env = trackEnv(reg, w, track, trackId);
+  if (def.fail && truthy(evalExpr(def.fail.when, env, false))) return { from: stage, to: def.fail.to, via: "fail" };
+  const solvedHere = track.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
+  if (solvedHere && def.next[0] && gateOpen(reg, w, track, trackId, def.next[0].to)) return { from: stage, to: def.next[0].to, via: "answer" };
+  const next = def.next.find((n) => truthy(evalExpr(n.when, env, false)) && gateOpen(reg, w, track, trackId, n.to));
+  return next === undefined ? null : { from: stage, to: next.to, via: "next" };
+}
+
+/**
+ * A world's quest whose way on holds, as a line's fields: the quest by its label and id, the stage it stands on and the stage the way
+ * leads to by their labels, whether it fails by its own condition, and the `quest` operation of `world_apply` that moves it there (its
+ * reason, `why`, the agent's own). What every road an agent is told of it fills its line with.
+ */
+export function wayOnFields(track: TrackDef, trackId: TrackId, way: WayOn): Record<string, string | boolean> {
+  const label = (stage: StageId): string => own(track.stages, stage)?.label ?? stage;
+  const fails = way.via === "fail";
+  return { quest: `${track.label} [${trackId}]`, from: label(way.from), to: label(way.to), fails, call: JSON.stringify({ op: "quest", quest: trackId, stage: way.to, outcome: fails ? "failed" : "met" }) };
+}
+
+/** Each world track whose way on holds on `after` and did not (or led elsewhere) on `before`: what a call made hold, with its way. */
+export function waysOpened(reg: Registry, before: Pick<Working, "state" | "ctx">, after: Pick<Working, "state" | "ctx">): { track: TrackId; def: TrackDef; way: WayOn }[] {
+  return Object.entries(after.ctx.world.tracks).flatMap(([id, def]) => {
+    const way = wayOn(reg, after, id);
+    if (way === null) return [];
+    const was = wayOn(reg, before, id);
+    return was !== null && was.from === way.from && was.to === way.to ? [] : [{ track: id, def, way }];
+  });
+}
+
+/** How the record stands for the world's tracks on `w`, as the quest views read it (`questViews`'s `TrackStanding`): each stage's objectives met, and the way on that holds. */
+export function trackStanding(reg: Registry, w: Pick<Working, "state" | "ctx">): { objectives(track: TrackDef, stage: StageId): { label: string; met: boolean }[]; way(track: TrackId): { from: StageId; to: StageId; fails: boolean } | null } {
+  return {
+    objectives: (track, stage) => objectivesOf(reg, w, track, stage),
+    way: (track) => {
+      const way = wayOn(reg, w, track);
+      return way === null ? null : { from: way.from, to: way.to, fails: way.via === "fail" };
+    },
+  };
 }
 
 /** Advances every track whose predicates hold, in id order, until stable (bounded per track). */
@@ -122,22 +184,8 @@ export function stepTracks(reg: Registry, w: Working, seed: string): TrackChange
     const track = own(w.world.tracks, trackId);
     if (!track) continue;
     for (let i = 0; i < TRANSITION_CAP; i++) {
-      const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
-      const def: StageDef | undefined = own(track.stages, stage);
-      if (!def) break;
-      const env = trackEnv(reg, w, track, trackId);
-      let change: TrackChange | null = null;
-      const solvedHere = track.kind === "puzzle" && def.answer !== undefined && own(readEngineSlice(w.state).solved, trackId) === stage;
-      if (def.fail && truthy(evalExpr(def.fail.when, env, false))) change = enter(reg, w, trackId, track, stage, def.fail.to, "fail", seed);
-      else if (solvedHere && def.next[0] && gateOpen(reg, w, track, trackId, def.next[0].to)) change = enter(reg, w, trackId, track, stage, def.next[0].to, "answer", seed);
-      else {
-        for (const n of def.next) {
-          if (!truthy(evalExpr(n.when, env, false))) continue;
-          if (!gateOpen(reg, w, track, trackId, n.to)) continue;
-          change = enter(reg, w, trackId, track, stage, n.to, "next", seed);
-          break;
-        }
-      }
+      const way = wayOn(reg, w, trackId);
+      const change = way === null ? null : enter(reg, w, trackId, track, way.from, way.to, way.via, seed);
       if (!change) break;
       changes.push(change);
     }
