@@ -45,7 +45,7 @@ async function started(b: TurnBed, turn: string): Promise<Record<string, { effor
 test("the Author starts on the effort its definition names", async () => {
   const b = (bed = await openTurnBed({ answers: [replying("Wren looks up.")] }));
   const turn = await play(b, "I wave.");
-  expect((await started(b, turn)).author).toMatchObject({ effort: "off" });
+  expect((await started(b, turn)).author).toMatchObject({ effort: "max" });
 });
 
 test("the indexer, which holds tools, is given the consent rule and the file for every agent in its first request", async () => {

@@ -104,7 +104,7 @@ function described(name: string): string {
 }
 
 describe("a row each of E.6: present, laid out as its row says, asking for nothing", () => {
-  test("reply-contract.md marks a reply, an intent record and a closing call, in each form, with the tags' names set here", async () => {
+  test("reply-contract.md marks a reply and an intent record and says what ends a run, in each form, with the tags' names set here", async () => {
     const part = await template("reply-contract");
     expect(part.header["tags"]).toEqual({ reply: "reply", intent: "intent" });
     const tags = part.render({ form: { tags: true } }).text;
@@ -114,7 +114,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     const files = part.render({ form: { two_step: true } }).text;
     expect(files).toContain("`scratch/intent.md`");
     expect(files).not.toContain("<reply>");
-    for (const text of [tags, files]) expect(text).toContain("A call marked `closing: true` is one that needs no answer");
+    for (const text of [tags, files]) expect(text).toContain("A message of yours that makes no call ends your run");
     expect(described("reply-contract")).toContain("Whether to write an intent record, and what goes in it, is in TURN.md");
   });
 
