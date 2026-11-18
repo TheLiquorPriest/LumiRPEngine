@@ -58,6 +58,10 @@ Shipped rules in force:
 | `guidance/.rules/perceptions.md` | Why perceptions matter, who gets one, what goes in it, what is kept from a character even when the line only says it does not know, and when it is written. |
 | `guidance/.rules/perceptions-owed.md` | Reminds the Author when someone on stage has no perception for this turn. |
 | `guidance/.rules/perceptions-missing.md` | Tells the Author at a turn's start when someone on stage in an earlier turn has no perception for it. |
+| `guidance/.rules/memory-owed.md` | Reminds the Author, as its run ends, when a principal on stage this turn holds perceptions its own agent has not taken in, and asks for what the perceptions rule asks. |
+| `guidance/.rules/memory-late.md` | Tells the Author at a turn's start when a principal has held such perceptions for as many turns as its header says (one, as shipped). |
+| `guidance/.rules/memory-scene-end.md` | Tells the Author at a turn's start when a scene has closed and a principal still holds perceptions of it its own agent has not taken in. |
+| `guidance/.rules/dream-due.md` | Reminds the Author, as its run ends, when a principal has begun a sleep, or lived the story hours of `cast.dreamAfterHours`, since it last dreamt. |
 | `guidance/.rules/engine-silent.md` | Notices when nothing has been recorded in the engine lane for a while. |
 | `guidance/.rules/history-leaving.md` | Warns the Author when messages are about to leave the prompt and the story record does not cover them. |
 | `guidance/.rules/unsourced.md` | Points out a write that named no source. |
@@ -155,7 +159,7 @@ stack:
   off: [rules/engine-silent]
 ```
 
-For one chat only, put the same line in that chat's `RPE.yml`. Take the name out of the list to switch it on again. A rule tied to a file with `needs:` goes off with that file: switch off `rules/perceptions` and `perceptions-owed` and `perceptions-missing` go off with it.
+For one chat only, put the same line in that chat's `RPE.yml`. Take the name out of the list to switch it on again. A rule tied to a file with `needs:` goes off with that file: switch off `rules/perceptions` and `perceptions-owed`, `perceptions-missing`, `memory-owed`, `memory-late`, `memory-scene-end` and `dream-due` go off with it.
 
 ### Change what the Author is shown of the characters on stage
 

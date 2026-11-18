@@ -1,7 +1,9 @@
-// A principal's own memory work when the Author voiced it (plan §7.2, §7.4, §10.9): the Author has the principal's own agent
+// A principal's own memory work when the Author voiced it (plan §7.2, §7.3, §7.4, §10.9): the Author has the principal's own agent
 // take in what it perceived, right after the reply with `delegate`, or as a job with `job_start`, naming the character definition
 // and whom it plays; the agent is given what it has not taken in by its definition, writes its memories, a belief and how it feels
-// about someone, and what it named is taken in. Played through the stand-in Lumiverse on the scripted model. Every name is invented.
+// about someone, and what it named is taken in. The shipped reminders that read what waits (`memory-owed`, `memory-late`,
+// `memory-scene-end`, `dream-due`) fire when it waits, and not otherwise; following one clears it, and none fires twice in a turn.
+// Played through the stand-in Lumiverse on the scripted model. Every name is invented.
 
 import { afterEach, expect, test } from "bun:test";
 import type { JsonObject } from "rp-harness/contract";
@@ -9,7 +11,9 @@ import type { Answer } from "rp-harness/testing/rig";
 import { CastRecord, chatLine, findCharacter } from "../../src/cast";
 import { untakenPerceptions } from "../../src/cast/memory";
 import { castAt } from "../../src/cast/path";
-import { CHAT, CONNECTION, openTurnBed, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
+import { toldRows } from "../../src/turn/events";
+import { world } from "../iface/rig";
+import { CHAT, CONNECTION, openTurnBed, playsWorld, PRESET, replying, settledTurn, type TurnBed, USER } from "./bed";
 
 const beds: TurnBed[] = [];
 afterEach(async () => {
@@ -64,6 +68,26 @@ async function play(b: TurnBed, said: string): Promise<string> {
   return (await settledTurn(b, out.generationId!)).id;
 }
 
+/** The rules that fired on a turn, in order. */
+function fired(b: TurnBed, turn: string): string[] {
+  return toldRows(b.app.db, USER, "rule", { turn }).map((r) => r.body.rule);
+}
+
+/** The Author's requests that hold a line. */
+function told(b: TurnBed, line: string): number {
+  return b.model.requests.filter((r) => JSON.stringify(r.messages).includes(line)).length;
+}
+
+/** Each call answered from its own agent's list: a character's agent holds `remember`, the Author does not. */
+function routed(author: Answer[], hers: Answer[]): Answer[] {
+  const route: Answer = (request) => {
+    const next = (request.tools.some((t) => t.name === "remember") ? hers : author).shift();
+    if (next === undefined) throw new Error("the script has no answer left for this call");
+    return typeof next === "function" ? next(request) : next;
+  };
+  return Array.from({ length: author.length + hers.length }, () => route);
+}
+
 test("right after the reply, the Author delegates to the character definition for the principal it voiced: its agent is given what it perceived, writes from it, and that is taken in", async () => {
   const b = await openTurnBed({
     off: ["rules/unsourced"],
@@ -89,25 +113,23 @@ test("right after the reply, the Author delegates to the character definition fo
     relationships: [["the stranger", -20]],
     untaken: [],
   });
+  // Nothing waited when the run ended: no reminder fired.
+  expect(fired(b, turn)).toEqual([]);
 });
 
 test("as a job, the Author starts the character definition for the principal it voiced: what its agent writes is taken in from the first turn that begins after the job ended", async () => {
-  const author: Answer[] = [...VOICED, calling("job_start", { agent: "character", plays: WREN, brief: BRIEF }), { pieces: [{ text: "Started." }] }, replying("The lamp turns.")];
-  const hers: Answer[] = [TAKING_IN, { pieces: [{ text: "Taken in." }] }];
-  // Each call answered from its own agent's list: her agent holds `remember`.
-  const route: Answer = (request) => {
-    const next = (request.tools.some((t) => t.name === "remember") ? hers : author).shift();
-    if (next === undefined) throw new Error("the script has no answer left for this call");
-    return typeof next === "function" ? next(request) : next;
-  };
-  const b = await openTurnBed({ off: ["rules/unsourced"], answers: Array.from({ length: 9 }, () => route) });
+  // The run ends with her perception still waiting (the job's writes count from the next turn), so the reminder fires once, and the Author says a job has it.
+  const author: Answer[] = [...VOICED, calling("job_start", { agent: "character", plays: WREN, brief: BRIEF }), { pieces: [{ text: "Started." }] }, { pieces: [{ text: "A job is taking them in." }] }, replying("The lamp turns.")];
+  // Who has no perception of the second turn is not this test's: its reminder is off.
+  const b = await openTurnBed({ off: ["rules/unsourced", "rules/perceptions-owed"], answers: routed(author, [TAKING_IN, { pieces: [{ text: "Taken in." }] }]) });
   beds.push(b);
   const first = await play(b, "I ask whether the boat came.");
 
   // The job ran on its own, tied to the turn, and ended done.
   const job = await b.until("the job to end", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.ended !== undefined));
   expect(job).toMatchObject({ agent: "character", state: "done", scope: { turn: first } });
-  // The turn it was started in reads none of it; the first turn begun after it ended reads it all.
+  expect(fired(b, first)).toEqual(["memory-owed"]);
+  // The turn it was started in reads none of it; the first turn begun after it ended reads it all, and nothing reminds anyone of it.
   expect(wrenAt(b, first)).toMatchObject({ memories: [], untaken: wrenAt(b, first).given });
   const next = await play(b, "I wait.");
   expect(wrenAt(b, next)).toMatchObject({
@@ -117,4 +139,117 @@ test("as a job, the Author starts the character definition for the principal it 
     relationships: [["the stranger", -20]],
     untaken: [],
   });
+  expect(fired(b, next)).toEqual([]);
+});
+
+test("memory-owed: a run that ends with a principal it voiced holding what it perceived is reminded once, by name; it has her agent take it in, and the run ends", async () => {
+  const b = await openTurnBed({
+    off: ["rules/unsourced"],
+    answers: [
+      ...VOICED,
+      { pieces: [{ text: "Nothing more." }] },
+      // The reminder's text is added and the Author gets another call: it does what the text asks.
+      calling("delegate", { agent: "character", plays: WREN, brief: BRIEF }),
+      TAKING_IN,
+      { pieces: [{ text: "Taken in." }] },
+      { pieces: [{ text: "Done." }] },
+    ],
+  });
+  beds.push(b);
+  const turn = await play(b, "I ask whether the boat came.");
+  expect(told(b, "were on stage this turn and hold perceptions their own agent has not taken in: Wren Hale.")).toBeGreaterThan(0);
+  expect(told(b, "- Wren Hale (principal): 1 waiting, the oldest of this turn.")).toBeGreaterThan(0);
+  expect(fired(b, turn)).toEqual(["memory-owed"]);
+  expect(wrenAt(b, turn).untaken).toEqual([]);
+});
+
+test("memory-late: what a principal still holds from an earlier turn is in the next turn's briefing; once its agent takes it in, the turn after has nothing", async () => {
+  const LATE = "hold perceptions of earlier turns their own agent has not taken in, the oldest from 1 turn(s) ago: Wren Hale.";
+  const b = await openTurnBed({
+    // Who has no perception of the second turn is not this test's: its reminders are off.
+    off: ["rules/unsourced", "rules/perceptions-owed", "rules/perceptions-missing"],
+    answers: [
+      ...VOICED,
+      { pieces: [{ text: "Nothing more." }] },
+      // The first turn's reminder: the Author holds her as only present, and ends.
+      { pieces: [{ text: "She was only present; it waits." }] },
+      // The second turn begins with the late reminder in its briefing: her agent takes them in, then the reply.
+      calling("delegate", { agent: "character", plays: WREN, brief: BRIEF }, "Wren takes in what waits."),
+      TAKING_IN,
+      { pieces: [{ text: "Taken in." }] },
+      { pieces: [{ text: "<reply>Wren trims the wick.</reply>" }] },
+      replying("The lamp turns."),
+    ],
+  });
+  beds.push(b);
+  const first = await play(b, "I ask whether the boat came.");
+  expect(fired(b, first)).toEqual(["memory-owed"]);
+  expect(told(b, LATE)).toBe(0);
+
+  const second = await play(b, "I watch her work.");
+  expect(fired(b, second)).toEqual(["memory-late"]);
+  expect(told(b, LATE)).toBeGreaterThan(0);
+  expect(wrenAt(b, second).untaken).toEqual([]);
+
+  const third = await play(b, "I wait.");
+  expect(fired(b, third)).toEqual([]);
+});
+
+test("memory-scene-end: a scene closed with a principal's perceptions waiting is in the next turn's briefing; a job takes them in, and the turn after has nothing", async () => {
+  const ENDED = "A scene has closed, and these characters still hold perceptions of it their own agent has not taken in: Wren Hale.";
+  const author: Answer[] = [
+    ...VOICED,
+    calling("story_record", { operations: [{ op: "scene", close: true, summary: "The stranger asked after the boat." }] }),
+    { pieces: [{ text: "Nothing more." }] },
+    // The second turn begins with the reminder: a job for her, then the reply.
+    calling("job_start", { agent: "character", plays: WREN, brief: BRIEF }, "Wren's memory work, as the scene ended."),
+    { pieces: [{ text: "<reply>The lamp turns.</reply>" }] },
+    replying("The sea is loud."),
+  ];
+  const b = await openTurnBed({ off: ["rules/unsourced"], answers: routed(author, [TAKING_IN, { pieces: [{ text: "Taken in." }] }]) });
+  beds.push(b);
+  const first = await play(b, "I ask whether the boat came.");
+  // The scene closed in this turn, so nobody is on stage as it ends: no run-end reminder; and nothing is late in turns.
+  expect(fired(b, first)).toEqual([]);
+
+  const second = await play(b, "I go down the stairs.");
+  expect(fired(b, second)).toEqual(["memory-scene-end"]);
+  expect(told(b, ENDED)).toBeGreaterThan(0);
+  await b.until("the job to end", async () => (await b.turns.harness.jobs.list({ user: USER, chat: CHAT })).jobs.find((j) => j.ended !== undefined));
+
+  const third = await play(b, "I wait.");
+  expect(fired(b, third)).toEqual([]);
+  expect(wrenAt(b, third).untaken).toEqual([]);
+});
+
+test("dream-due: a principal who goes to sleep is reminded of once, as the run ends; its agent dreams, and sleeping on brings nothing back", async () => {
+  const DUE = "Since they last dreamt, these characters have slept or lived a long stretch: Bram.";
+  const asleep = { operations: [{ op: "set", at: "bram", key: "activity", value: "sleep", source: "author" }] };
+  const b = await openTurnBed({
+    // Only the dream's reminder: Bram is on stage with nobody writing his perceptions of the later turns or taking in the first.
+    off: ["rules/unsourced", "rules/memory-owed", "rules/memory-late", "rules/perceptions-owed", "rules/perceptions-missing"],
+    answers: [
+      calling("cast_update", { operations: [{ op: "cast", who: "Bram", as: "principal" }] }, "Bram closes up."),
+      { pieces: [{ text: "<reply>Bram bars the door.</reply>" }, { call: "perceive", args: { perceptions: [{ who: "Bram", reach: "whole", content: "The last guest goes up the stairs." }] } }] },
+      { pieces: [{ text: "Nothing more." }] },
+      // He goes to bed: as the run ends the reminder fires, and his agent dreams.
+      { pieces: [{ text: "<intent>Bram sleeps.</intent><reply>Bram goes up to bed.</reply>" }, { call: "world_apply", args: asleep }] },
+      { pieces: [{ text: "Nothing more." }] },
+      calling("delegate", { agent: "character", plays: "Bram", brief: "BRIEF-DREAM You sleep." }),
+      calling("dream", {}),
+      { pieces: [{ text: "Slept." }] },
+      { pieces: [{ text: "Done." }] },
+      replying("The inn is quiet."),
+    ],
+  });
+  beds.push(b);
+  await playsWorld(b, world());
+  const first = await play(b, "I sit by the fire.");
+  expect(fired(b, first)).toEqual([]);
+  const night = await play(b, "I watch him go up.");
+  expect(fired(b, night)).toEqual(["dream-due"]);
+  expect(told(b, DUE)).toBeGreaterThan(0);
+  expect(told(b, "- Bram (principal): a sleep has begun since it first perceived anything; it has never dreamt.")).toBeGreaterThan(0);
+  const third = await play(b, "I wait.");
+  expect(fired(b, third)).toEqual([]);
 });

@@ -96,6 +96,10 @@ export const HOME_FILES: readonly string[] = [...new Set(HOMES.map((row) => row.
 export const REMINDERS: readonly { file: string; needs: string | null }[] = [
   { file: ".rules/perceptions-owed.md", needs: "perceptions" },
   { file: ".rules/perceptions-missing.md", needs: "perceptions" },
+  { file: ".rules/memory-owed.md", needs: "perceptions" },
+  { file: ".rules/memory-late.md", needs: "perceptions" },
+  { file: ".rules/memory-scene-end.md", needs: "perceptions" },
+  { file: ".rules/dream-due.md", needs: "perceptions" },
   { file: ".rules/unsourced.md", needs: "ALL-AGENTS" },
   { file: ".rules/engine-silent.md", needs: "TURN" },
   { file: ".rules/history-leaving.md", needs: "TURN" },
