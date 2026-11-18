@@ -6,9 +6,11 @@ import { expect, test } from "bun:test";
 import { LiveHub, WriteQueue } from "../../src/app";
 import { shippedTexts } from "../../src/iface/index";
 import { STARTER_WORLDS } from "../../src/packs/index";
-import { PlayService, type TapAsk } from "../../src/play";
+import { PlayService } from "../../src/play";
+import type { TapAsk } from "../../src/play/service";
 import { TAP_DEFAULTS } from "../../src/play/settings";
 import { hashJson } from "../../src/shared/hash";
+import type { JsonObject } from "../../src/shared/json";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
 import { migrateStore, openStore, storedWorlds } from "../../src/store";
 import { Requests } from "../../src/turn/requests";
@@ -126,7 +128,7 @@ test("what the money presses and the plan keep in their books is taken back with
     { action: "pay_card", params: { card: "acct_marcus_mortgage", from: "acct_marcus_shop", amount: 5000 } },
     { action: "apply_credit", params: { product: "credit_card", amount: 5000, term: 1 } },
     { action: "org_goal", params: { org: "alder_automotive_co", text: "Do a thing" } },
-  ]) {
+  ] as { action: string; params: JsonObject }[]) {
     const pressed = await tap({ kind: "action", ...ask, source: "panel" });
     expect(pressed.applied, ask.action).toBe(true);
     expect(await undo(pressed.undo), ask.action).toMatchObject({ applied: true, words: "" });
