@@ -275,7 +275,11 @@ function CallView(props: { step: CallStep; open: boolean; now: number }) {
         <Badge>{answer?.model ?? step.sent.model}</Badge>
         <span class="rpe-meta lre-num">
           {counted(step.sent.messages, "message")} · {counted(step.sent.tools, "tool")}
-          {answer === null ? ` · writing for ${duration(props.now - step.at)}` : ` · ${duration(answer.ms)} · ${tokenWords(answer.usage)} · ${answer.stop}`}
+          {answer === null
+            ? step.streamed.text === "" && step.streamed.thinking === ""
+              ? ` · sent, no answer yet for ${duration(props.now - step.at)}`
+              : ` · writing for ${duration(props.now - step.at)}`
+            : ` · ${duration(answer.ms)} · ${tokenWords(answer.usage)} · ${answer.stop}`}
         </span>
       </div>
       {answer?.error === undefined ? null : <p class="lre-neg rpe-line">{answer.error}</p>}

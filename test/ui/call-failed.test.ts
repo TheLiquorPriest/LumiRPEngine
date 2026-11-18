@@ -57,4 +57,17 @@ describe("a failed model call", () => {
     expect(shown).toContain("Call 1 failed after some of the reply was shown: the connection broke. Tried again after 1.0 s: try 2 of 3.");
     expect(shown).toContain(`In the provider's words: ${RESET}`);
   });
+
+  test("a call sent that has had nothing of its answer yet is drawn as sent and waiting, with how long", () => {
+    const events: TraceEvent[] = [
+      { kind: "run_started", run: "turn", turn: "new", lead: "author" },
+      { kind: "agent_started", definition: "author", connection: "Main", model: "m1", session: "s1", given: [] },
+      { kind: "call_started", call: 1, connection: "Main", model: "m1", messages: 2, tools: 0 },
+    ];
+    const model = events.reduce((live, event, i) => applyRecord(live, record(i + 1, event)), EMPTY_LIVE);
+    const run = runOf(model, "r1");
+    if (run === undefined) throw new Error("no run");
+    // Its record came at 30 ms; four minutes on, nothing of its answer has come.
+    expect(textOf(expand(h(AgentTree, { run, now: 30 + 4 * 60_000 })))).toContain("sent, no answer yet for 4 min 00 s");
+  });
 });
