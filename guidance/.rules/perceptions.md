@@ -1,5 +1,6 @@
 ---
 description: Perceptions. Why they matter, who gets one, what goes in it, and when it is written. This file is the one home of that behaviour.
+title: What each character perceives, and when it is written
 agents: [author, gm]
 ---
 # Perceptions

@@ -1,5 +1,6 @@
 ---
 description: Reminds the Author, as its run ends, when a principal on stage this turn holds perceptions its own agent has not taken in. The header says whose count; change it and the reminder follows. A reminder of the perceptions rule.
+title: Memory work owed for someone who was on stage
 agents: [author]
 needs: perceptions
 fact: stage.untaken(principal) > 0

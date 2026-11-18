@@ -1,5 +1,6 @@
 ---
 description: Reminds the Author, as its run ends, when a principal has begun a sleep, or lived a stretch of story time as long as the setting cast.dreamAfterHours, since it last dreamt. The header says whose count; change it and the reminder follows. A reminder of the perceptions rule.
+title: A character is due to dream
 agents: [author]
 needs: perceptions
 fact: dream.due(principal) > 0

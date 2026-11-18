@@ -1,5 +1,6 @@
 ---
 description: Tells the Author, at a turn's start, when a principal has held perceptions its own agent has not taken in for as many turns as the header says (one who acted was owed them right after the reply, so a turn later they are late). Those of a scene that has closed are memory-scene-end's. The header says whose count and how many turns; change it and the reminder follows. A reminder of the perceptions rule.
+title: Memory work late for a character
 agents: [author]
 needs: perceptions
 fact: path.untaken.turns(principal) >= 1

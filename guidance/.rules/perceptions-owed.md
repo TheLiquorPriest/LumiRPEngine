@@ -1,5 +1,6 @@
 ---
 description: Reminds the Author when someone on stage has no perception for this turn. The header says whose perceptions count; change it and the reminder follows.
+title: Perceptions owed for someone on stage this turn
 agents: [author]
 needs: perceptions
 fact: stage.unperceived(principal, supporting) > 0
