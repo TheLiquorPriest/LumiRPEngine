@@ -55,7 +55,7 @@ export function chatsRoutes(service: WorldService) {
       path: "/api/v1/worlds/:world/attach",
       access: "page",
       group: "worlds",
-      does: "Attaches the world to a chat. A chat that plays no world takes the world's head revision from its next turn (a turn that runs now keeps the state it started with); one that plays an older revision of it is answered with where it stands, so the Upgrade is offered, and one that plays another world, with which. RPE writes nothing to Lumiverse for it.",
+      does: "Attaches the world to a chat. A chat that plays no world takes the world's head revision from its next turn (a turn that runs now keeps the state it started with); so does one whose world was deleted, from the revision it played, which the deletion kept; one that plays an older revision of it is answered with where it stands, so the Upgrade is offered, and one that plays another world, with which. A chat that is not one of the user's chats in Lumiverse is refused (404). RPE writes nothing to Lumiverse for it.",
       body: shape.object({ chat: field(T, "The chat to attach it to.") }),
       reply: shape.named(
         "WorldAttached",

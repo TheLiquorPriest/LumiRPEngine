@@ -61,4 +61,37 @@ describe("a world's chats", () => {
     expect(bed.store.user(USER).chat("ghost")).toBeNull();
     expect(await service.chats.chatsOf(USER, { chat: "ghost" })).toEqual([]);
   });
+
+  test("a world that is deleted leaves its chats with their record and the revision they played, playing no world, and a world can be attached to them again", async () => {
+    const { bed, service } = rig();
+    const s = bed.store.user(USER);
+    const first = await service.create(USER, "Fernwick", "fantasy_town");
+    const other = await service.create(USER, "Hollowmere", "mystery_manor");
+    const lonely = await service.create(USER, "Nobody's", "fantasy_town");
+    await bed.writes.run(() => s.createChat({ id: "c" }), "a chat that plays no world");
+    const turn = await bed.writes.run(() => s.beginTurn({ chat: "c", kind: "normal" }), "a turn");
+    await bed.writes.run(() => s.addChanges(turn.id, [tick(5)]), "its changes");
+    await service.chats.attach(USER, first.world.id, "c");
+    await bed.writes.run(() => s.tieTurn(turn.id, { message: "m1", hash: "h1", date: 1 }), "the turn is tied to its reply");
+    expect(s.headState("c").state.world.revision).toBe(first.revision);
+    // Which chats play it is what deleting it must name beforehand.
+    expect((await service.chats.chatsOf(USER, { world: first.world.id })).map((c) => c.chat)).toEqual(["c"]);
+
+    await service.remove(USER, first.world.id);
+    // The world is gone from his worlds; the chat plays none, keeps its record and the revision it played, and the revision is still there to read.
+    expect((await service.list(USER)).map((w) => w.id).sort()).toEqual([lonely.world.id, other.world.id].sort());
+    expect(s.chat("c")?.world).toBeNull();
+    expect(s.headState("c").state.world.revision).toBe(first.revision);
+    expect(bed.store.env.worlds(first.revision)?.name).toBe("Fernwick");
+    // A world no chat plays goes whole, its revisions too.
+    await service.remove(USER, lonely.world.id);
+    expect(s.worldRevisions(lonely.world.id)).toEqual([]);
+
+    // It takes a world again, from the revision it plays.
+    const attached = await service.chats.attach(USER, other.world.id, "c");
+    expect(attached).toMatchObject({ attached: true, revision: other.revision });
+    expect(s.chat("c")?.world).toBe(other.world.id);
+    expect(s.headState("c").state.world.revision).toBe(other.revision);
+    expect((await service.chats.chatsOf(USER, { world: other.world.id })).map((c) => c.chat)).toEqual(["c"]);
+  });
 });

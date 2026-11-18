@@ -97,7 +97,12 @@ export function storeBacking(store: Pick<Store, "user">, writes: WriteQueue, log
       const out = await writes.run(() => of(user).dropDraft(world, madeOn), "discarding a world's draft");
       return out.done ? { done: true, version: out.version } : { done: false };
     },
-    remove: (user, world) => writes.run(() => of(user).remove(world), "removing a world"),
+    // The chats that play the world keep their record and the revisions they played, and play no world from now: the world goes from his worlds, its revisions stay. A world no chat plays goes whole.
+    remove: (user, world) =>
+      writes.run(() => {
+        const played = store.user(user).forgetWorld(world);
+        of(user).remove(world, { keepRevisions: played.length > 0 });
+      }, "removing a world"),
     // A row of the store is written whole by RPE alone: a damaged one is said, and the next commit's note starts the history afresh.
     setAside: async (user, _world, file, what, why) => {
       log(`the ${what} file was ${why}; a fresh one is used`, { user, file });

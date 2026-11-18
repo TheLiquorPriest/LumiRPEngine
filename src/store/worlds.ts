@@ -320,9 +320,12 @@ export class UserWorlds {
     this.tell({ world, part: "history" });
   }
 
-  /** Removes every part of the world this user keeps. */
-  remove(world: WorldId): void {
-    const had = this.run(() => this.db.run("DELETE FROM world_part WHERE user = ? AND world = ?", [this.user, world]).changes > 0);
+  /**
+   * Removes every part of the world this user keeps. With `keepRevisions` the revisions stay, unlisted and under the world's id: chats that
+   * played the world name their revisions by id, and a chat's fold starts from one (a chat's record stays whole).
+   */
+  remove(world: WorldId, options: { keepRevisions?: boolean } = {}): void {
+    const had = this.run(() => this.db.run(`DELETE FROM world_part WHERE user = ? AND world = ?${options.keepRevisions === true ? " AND file NOT LIKE 'rev/%'" : ""}`, [this.user, world]).changes > 0);
     if (had) this.tell({ world, part: "removed" });
   }
 

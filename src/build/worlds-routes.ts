@@ -215,7 +215,7 @@ export function worldsRoutes(service: WorldService, bodyBytes: number) {
       path: WORLD_PATH,
       access: "page",
       group: "worlds",
-      does: "A world gone, with every revision, its draft and its history; his worlds as they stand after.",
+      does: "A world gone, with its draft, its history and every revision no chat plays; his worlds as they stand after. A chat that plays it keeps its record and the revisions it played, and plays no world from then on: a world can be attached to it again (`POST /worlds/:world/attach`). The chats that play a world are listed by `GET /worlds/chats?world=`, which is what to read before deleting it.",
       reply: shape.object({ worlds: shape.list(worldIndex) }),
       handle: ({ params, user }) => guarded(async () => ({ worlds: (await service.remove(user, params.world)) as never })),
     }),

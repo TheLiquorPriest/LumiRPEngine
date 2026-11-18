@@ -133,6 +133,11 @@ export class WorldChats {
     this.deps.live.publish(chat, { kind: "state", data: {} });
   }
 
+  /** Tells the pages of chats that played a world its deletion let go of: they play no world from now. */
+  released(chats: readonly string[]): void {
+    for (const chat of chats) this.told(chat);
+  }
+
   /** The chats that play one of his worlds (one world's with `world`, one chat with `chat`), each with its name, the revision it plays and whether that is behind the world's head. */
   async chatsOf(user: UserId, of: { world?: WorldId; chat?: string } = {}): Promise<WorldChat[]> {
     const s = this.deps.store.user(user);
@@ -229,7 +234,8 @@ export class WorldChats {
    * Attaches the world to the chat. A chat that plays no world takes its head revision from its next turn (a marker of his own that takes
    * in everything the world has, as an Upgrade from nothing does), and a chat the store has not met starts on it. One that plays an older
    * revision of this world is offered the Upgrade instead of a refusal, and one that plays another world is told so; neither is written.
-   * A chat that is not one of the user's in Lumiverse is refused, whatever the store holds of it.
+   * A chat whose world was deleted plays none (its record and the revision it played stay): the world is taken from that revision on, as for
+   * a chat that plays none. A chat that is not one of the user's in Lumiverse is refused, whatever the store holds of it.
    */
   async attach(user: UserId, world: WorldId, chat: string): Promise<Attached> {
     const index = await this.deps.worlds.index(world, user);
@@ -237,22 +243,28 @@ export class WorldChats {
     const s = this.deps.store.user(user);
     const waiting = this.deps.turning(user, chat);
     const row = s.chat(chat);
-    if (row === null || row.world === null) await this.known(chat);
+    // A deletion lets go of the chats that played the world; one made before that did not, so a world that is gone counts as none here too.
+    const gone = row !== null && row.world !== null && row.world !== world && (await this.deps.worlds.index(row.world, user)) === null ? row.world : null;
+    if (row === null || row.world === null || gone !== null) await this.known(chat);
     if (row === null) {
       await this.deps.writes.run(() => s.attachWorld({ id: chat, world, revision: index.head }), "attaching a world to a chat");
       return { attached: true, revision: index.head, waiting };
     }
-    if (row.world !== null) {
+    if (row.world !== null && gone === null) {
       const revision = s.headState(chat).state.world.revision;
       const other = row.world === world ? index : await this.deps.worlds.index(row.world, user);
       return { attached: false, revision, plays: { world: row.world, name: other?.name ?? row.world, revision, behind: other !== null && other.head !== revision }, waiting };
     }
     if (this.deps.store.env.worlds(index.head) === undefined) throw new WorldError("not_found", `the head revision ${index.head} of ${world} is not kept`);
+    // The revision the chat plays now is where the new world comes in from; one deleted along with its world, before a deletion kept what chats play, leaves nothing to come in from.
+    const was = s.headState(chat).state.world.revision;
+    if (was !== BLANK_REVISION && this.deps.store.env.worlds(was) === undefined) throw new WorldError("conflict", "The world this chat played was deleted before RPE kept the revisions chats play, so nothing is left to move the chat to another world from: start the story again in a new chat.");
     const marker = validMarkerBody({ kind: "migrate", to: index.head, merge: {} });
     if (marker === null) throw new WorldError("bad_request", "the world's head is no revision to attach");
-    const input: ChangeInput = { lane: "engine", op: STORE_OPS.marker, value: marker as unknown as JsonValue, by: "player", source: "player", cite: { tap: crypto.randomUUID(), request: { kind: "attach", world, from: BLANK_REVISION, to: index.head } } };
+    const input: ChangeInput = { lane: "engine", op: STORE_OPS.marker, value: marker as unknown as JsonValue, by: "player", source: "player", cite: { tap: crypto.randomUUID(), request: { kind: "attach", world, from: was, to: index.head } } };
     await this.deps.writes.run(() => {
       s.record(s.writeTarget({ chat }), [input]);
+      if (gone !== null) s.forgetWorld(gone);
       s.playsWorld(chat, world);
     }, "attaching a world to a chat");
     this.told(chat);

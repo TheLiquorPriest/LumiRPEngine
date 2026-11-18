@@ -2850,4 +2850,12 @@ export class UserStore {
     this.chatOrThrow(chat);
     return this.write(false, () => this.db.run("UPDATE chat SET world = ? WHERE user = ? AND id = ? AND world IS NULL", [world, this.id, chat]).changes > 0);
   }
+
+  /**
+   * Lets go of a world that is deleted: each live chat that plays it plays none from now, so a world can be attached to it again. Its record
+   * stays whole, and so do its `revision` (the fold's start) and the revisions it played, which the deletion keeps. The chats it was.
+   */
+  forgetWorld(world: WorldId): string[] {
+    return this.write(false, () => this.db.query<{ id: string }, [string, string]>("UPDATE chat SET world = NULL WHERE user = ? AND world = ? AND deleted IS NULL RETURNING id").all(this.id, world).map((row) => row.id));
+  }
 }

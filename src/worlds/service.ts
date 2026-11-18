@@ -150,9 +150,14 @@ export class WorldService {
     return this.worlds.exportFile(world, user, revision);
   }
 
-  /** A world gone, with every revision, its draft and its history; his worlds as they stand after. */
+  /**
+   * A world gone, with its draft and its history and every revision no chat plays; his worlds as they stand after. A chat that plays it keeps its
+   * record and the revisions it played (the deletion keeps them), and plays no world from now: a world can be attached to it again.
+   */
   async remove(user: UserId, world: WorldId): Promise<WorldIndex[]> {
+    const played = this.chatDeps === undefined ? [] : await this.chats.chatsOf(user, { world });
     await this.worlds.remove(world, user);
+    if (this.chatDeps !== undefined) this.chats.released(played.map((c) => c.chat));
     return this.worlds.list(user);
   }
 

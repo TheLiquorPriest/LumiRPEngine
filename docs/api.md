@@ -2739,7 +2739,7 @@ A world at a revision (its head by default), with how each revision became head 
 
 ### `DELETE /api/v1/worlds/:world`
 
-A world gone, with every revision, its draft and its history; his worlds as they stand after.
+A world gone, with its draft, its history and every revision no chat plays; his worlds as they stand after. A chat that plays it keeps its record and the revisions it played, and plays no world from then on: a world can be attached to it again (`POST /worlds/:world/attach`). The chats that play a world are listed by `GET /worlds/chats?world=`, which is what to read before deleting it.
 
 | | |
 |---|---|
@@ -2752,7 +2752,7 @@ A world gone, with every revision, its draft and its history; his worlds as they
 
 ### `POST /api/v1/worlds/:world/attach`
 
-Attaches the world to a chat. A chat that plays no world takes the world's head revision from its next turn (a turn that runs now keeps the state it started with); one that plays an older revision of it is answered with where it stands, so the Upgrade is offered, and one that plays another world, with which. RPE writes nothing to Lumiverse for it.
+Attaches the world to a chat. A chat that plays no world takes the world's head revision from its next turn (a turn that runs now keeps the state it started with); so does one whose world was deleted, from the revision it played, which the deletion kept; one that plays an older revision of it is answered with where it stands, so the Upgrade is offered, and one that plays another world, with which. A chat that is not one of the user's chats in Lumiverse is refused (404). RPE writes nothing to Lumiverse for it.
 
 | | |
 |---|---|

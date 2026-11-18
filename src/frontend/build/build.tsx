@@ -306,7 +306,15 @@ function Worlds() {
     });
   const deleteWorld = (world: WorldIndex) =>
     run(async () => {
-      if (!(await app.host.confirm("Delete world", `Delete “${world.name}” and all its revisions? Chats attached to it stop simulating.`, "danger", "Delete"))) return;
+      // Which chats play it is said before it goes: each keeps its story at the revision it played, and plays no world until a world is attached to it.
+      const playing = (await app.request({ type: "lre.world", op: "chats", worldId: world.id }))?.chats ?? [];
+      const names = playing.map((chat) => `“${chat.name}”`);
+      const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+      const words =
+        playing.length === 0
+          ? `Delete “${world.name}” and all its revisions?`
+          : `Delete “${world.name}”? ${playing.length === 1 ? "One chat plays it" : `${playing.length} chats play it`}: ${who}. ${playing.length === 1 ? "Its story stays" : "Their stories stay"} as played, at the revision ${playing.length === 1 ? "it plays" : "each plays"}, and ${playing.length === 1 ? "the chat plays" : "the chats play"} no world until you attach one.`;
+      if (!(await app.host.confirm("Delete world", words, "danger", "Delete"))) return;
       if (await app.request({ type: "lre.world", op: "delete", worldId: world.id })) refresh();
     });
   return (
