@@ -18,6 +18,10 @@
 //                              that owes no reply
 //   turn.last.without.intent   1 when the last reply RPE released on the turn before on that line (a continue's: on its own turn)
 //                              began to go out before any intent record of its run had ended, in the order the two reached RPE; else 0
+//   turn.without.intent        1 while the run owes the player a reply and its lead has no intent record taken (one whose end reached
+//                              RPE); by whether its reply has gone out yet
+//   turns.without.intent       the turns RPE played on that line before this one, newest back, that took no intent record, up to the
+//                              newest that took one (a turn a migration carried is passed over)
 //   previous.run.stopped       the runs of the turn before that this turn stopped at the wait's limit as it began
 //   story.from, story.newest   the chat's story choice (R-176), 1 in the group the chat's settings name
 //   threads.quests.split       a story thread and a quest naming it where one side is closed and the other open, at the turn, by
@@ -78,8 +82,8 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, whether that was before its intent record, and its session (none for the record a migration keeps of a carried turn's run). */
-export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "withoutIntent" | "session">;
+/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, its intent record's time and whether its reply went out before it, and its session (none for the record a migration keeps of a carried turn's run). */
+export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "intent" | "withoutIntent" | "session">;
 
 /** What the turn lane's facts read beside the store: a turn's runs, the runs a turn stopped as it began, and the chat's story choice. */
 export interface TurnFactsDeps {
@@ -106,6 +110,12 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
       { name: "turn.owes.record", counts: "1 while this run owes the player a reply and has recorded nothing in any lane (turn.recorded is 0); 0 once it has, and for a run that owes no reply." },
       { name: "turn.last.without.intent", counts: "1 when the last reply released on the turn before this one on its line (for a continue, on the turn it goes on with) went out with no intent record taken before it; 0 otherwise, and where no reply was released on that turn." },
+      {
+        name: "turn.without.intent",
+        counts: "1 while this run owes the player a reply and its lead has written no intent record the reply contract took (one is taken when its end reaches RPE); 0 once it has, and for a run that owes no reply (a Settle now run). By whether its reply has gone out yet.",
+        by: ["unreleased", "released"],
+      },
+      { name: "turns.without.intent", counts: "Turns RPE played on this turn's own line before this one, counting back from the newest, that took no intent record, up to the newest that took one; a turn a migration carried is passed over." },
       { name: "previous.run.stopped", counts: "Runs of the turn before that this turn stopped at the wait's limit as it began, their work left as it stood." },
       { name: "story.from", counts: "Whose messages are the chat's story: 1 in the group the chat's setting story.from names.", by: [...STORY_FROM] },
       { name: "story.newest", counts: "With the replies as the story, his newest message: 1 in the group the chat's setting story.newest names.", by: [...STORY_NEWEST] },
@@ -129,6 +139,8 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       // brings with it carry none. What a migration wrote on a carried turn is the previous build's, nothing this turn recorded.
       const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && c.handle !== null && c.source !== "import"));
       const recorded = (): number => mine().length;
+      // An intent record is taken when its end reaches RPE.
+      const intended = (r: FactsRun): boolean => r.intent?.to != null;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
         // One read along the line, however long: the newest turn on it that recorded an engine-lane change; then the turns after it RPE played.
@@ -151,6 +163,22 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         const before = turns.at(-1);
         const last = before === undefined ? undefined : ownRuns(before).findLast((r) => r.released !== null);
         out["turn.last.without.intent"] = { count: last?.withoutIntent === true ? 1 : 0 };
+      }
+      if (names.includes("turn.without.intent")) {
+        const without = owes && !intended(runNow) ? 1 : 0;
+        const released = runNow?.released != null;
+        out["turn.without.intent"] = { count: without, by: { unreleased: released ? 0 : without, released: released ? without : 0 } };
+      }
+      if (names.includes("turns.without.intent")) {
+        let count = 0;
+        for (const t of turns.toReversed()) {
+          if (t === turn) continue;
+          const played = ownRuns(t);
+          if (played.length === 0) continue;
+          if (played.some(intended)) break;
+          count++;
+        }
+        out["turns.without.intent"] = { count };
       }
       if (names.includes("threads.quests.split")) {
         const record = at === null ? null : StoryRecord.read(store, scope.user, at);

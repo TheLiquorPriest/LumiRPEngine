@@ -36,6 +36,7 @@ const APPENDIX_E: readonly string[] = [
   ".rules/dream-due.md",
   ".rules/unsourced.md",
   ".rules/engine-silent.md",
+  ".rules/intent-owed.md",
   ".rules/reply-missing.md",
   ".rules/history-leaving.md",
   ".rules/save-before-compaction.md",
@@ -59,7 +60,7 @@ const APPENDIX_E: readonly string[] = [
 ];
 
 /** The rules in force at the shipped level (E.1, E.2, E.3): the two for the agents, and the reminders. */
-const IN_FORCE = ["consent", "perceptions", "perceptions-owed", "perceptions-missing", "memory-owed", "memory-late", "memory-scene-end", "dream-due", "unsourced", "engine-silent", "reply-missing", "history-leaving", "save-before-compaction"];
+const IN_FORCE = ["consent", "perceptions", "perceptions-owed", "perceptions-missing", "memory-owed", "memory-late", "memory-scene-end", "dream-due", "unsourced", "engine-silent", "intent-owed", "reply-missing", "history-leaving", "save-before-compaction"];
 
 /** The examples the build added beyond E.3's four, for the owner's approval: two on the Author's record of a turn, one on what is left of its limits. */
 const BUILD_EXAMPLES = [".rules/examples/intent-missing.md", ".rules/examples/turn-unrecorded.md", ".rules/examples/limits-left.md"];
