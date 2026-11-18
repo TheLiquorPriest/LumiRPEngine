@@ -208,6 +208,8 @@ export interface MigrationReport {
   disowned?: Disowned;
   /** The rows he gave (`migration.rows`) to what no row names: each with what was found under it. Absent where he gave none. */
   given?: { path: string; fate: "archived" | "attached"; line: string; found: number }[];
+  /** The rows `migration.rows` gives that cannot be used (a fate that is not archived or attached, no path, a path that leaves the folder), as written, each with why. Absent where every row can be used. */
+  refused?: { written: string; why: string }[];
   /** What today's readers tried to write, kept in memory by the stand-in; and their log lines, counted by level. */
   standIn: { writes: AttemptedWrite[]; logged: Record<"debug" | "info" | "warn" | "error", number> };
   /** What today's build put in Lumiverse itself, which stays as it is. */
@@ -511,9 +513,11 @@ export function reportText(report: MigrationReport): string {
     for (const r of leftAlone) lines.push(`  Left alone: ${r.name}, ${r.why}.`);
     for (const r of report.runtime.archived ?? []) lines.push(`  Runtime folder ${r.name}: ${r.why}; its files are counted under the working copy and archived in the backup.`);
   }
-  if ((report.given ?? []).length > 0) {
+  if ((report.given ?? []).length > 0 || (report.refused ?? []).length > 0) {
     lines.push("", "Rows you gave to what no row names (migration.rows):");
     for (const g of report.given ?? []) lines.push(`  ${g.path}: ${g.fate}, ${g.line} (${g.found} thing(s) found${g.found === 0 ? ": nothing found under that path" : ""})`);
+    // A row the file gives that cannot be used is named as written, and the run goes on without it.
+    for (const r of report.refused ?? []) lines.push(`  Not used: ${r.written}: ${r.why}. The run goes on without it.`);
   }
   lines.push("", `The previous build's readers tried ${report.standIn.writes.length} write(s), kept in memory and never made:`);
   for (const w of report.standIn.writes) lines.push(`  ${w.store}: ${w.op} ${w.path}${w.to ? ` to ${w.to}` : ""}`);

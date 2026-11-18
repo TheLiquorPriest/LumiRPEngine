@@ -141,7 +141,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       does: "The Migration page's summary: the last real run and the page's rehearsal in brief, the folders a rehearsal reads, the backup, what waits on the user, the swap's steps and going back's with the permissions by name; before any run as after.",
       reply: migrationReply,
       handle: async ({ user }) => {
-        const p = migrationPage({ ...page(user), given: await rowsGiven(deps.paths) });
+        const p = migrationPage({ ...page(user), given: (await rowsGiven(deps.paths)).given });
         // What today's build put in Lumiverse is a document the migration kept as JSON; it is carried as it is.
         return { ...p, lumiverse: p.lumiverse === null ? null : { ...p.lumiverse } };
       },

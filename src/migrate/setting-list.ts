@@ -73,14 +73,42 @@ export async function carriedPage(globalConfig: string): Promise<{ size: number;
   return { size: number("migration.page"), most: number("migration.maxPage") };
 }
 
-/** The rows a config holds, from the records the reader gives for the setting (`ConfigRead.read`): each entry that is a whole row. */
-export function ownerRowsOf(value: unknown): OwnerRow[] {
-  if (!Array.isArray(value)) return [];
-  const out: OwnerRow[] = [];
-  for (const item of value as unknown[]) {
-    if (!isMapping(item)) continue;
+/** A row the config gives that cannot be used: as it is written, and why. */
+export interface RefusedRow {
+  written: string;
+  why: string;
+}
+
+/** A path as the report names a place: `user storage: stray-notes.txt` names the place in front of the file's own path. */
+const PLACE = /^(?:user storage|extension storage|runtime|Lumiverse database): /;
+
+/** Whether a row's path leaves the folder it names a place in: it starts at the root of the machine, or goes up with `..`. */
+function leavesFolder(path: string): boolean {
+  const inside = path.replace(PLACE, "");
+  return inside.startsWith("/") || inside.split("/").includes("..");
+}
+
+/**
+ * The rows a config gives, read from what it writes (`ConfigRead.setAt`), not from the records the reader takes: each entry that is a
+ * whole row is one; each that is not is named as written with why, so none is left out in silence.
+ */
+export function ownerRowsRead(written: unknown): { rows: OwnerRow[]; refused: RefusedRow[] } {
+  const rows: OwnerRow[] = [];
+  const refused: RefusedRow[] = [];
+  if (written === undefined || written === null) return { rows, refused };
+  if (!Array.isArray(written)) return { rows, refused: [{ written: JSON.stringify(written), why: `${MIGRATION_ROWS_KEY} is a list of rows, each with a path, a fate (archived or attached) and your line saying what it is` }] };
+  for (const item of written as unknown[]) {
+    const as = JSON.stringify(item);
+    if (!isMapping(item)) {
+      refused.push({ written: as, why: "it is not a row: a row has a path, a fate (archived or attached) and your line saying what it is" });
+      continue;
+    }
     const { path, fate, line } = item as Mapping;
-    if (typeof path === "string" && typeof line === "string" && (fate === "archived" || fate === "attached")) out.push({ path, fate, line });
+    if (typeof path !== "string" || path.trim() === "") refused.push({ written: as, why: "it has no path: say which file the row is for, as the report names it" });
+    else if (leavesFolder(path)) refused.push({ written: as, why: `its path ${path} leaves the folder: give the path as the report names the file, such as stray-notes.txt, or a folder with a / at its end` });
+    else if (fate !== "archived" && fate !== "attached") refused.push({ written: as, why: `its fate is ${typeof fate === "string" ? `"${fate}"` : "not given as text"}, and the fates you may give are archived and attached: nothing is carried that nothing reads` });
+    else if (typeof line !== "string") refused.push({ written: as, why: "it has no line: say in your own words what the file is" });
+    else rows.push({ path, fate, line });
   }
-  return out;
+  return { rows, refused };
 }

@@ -28,7 +28,7 @@ import type { ChatRow, LumiverseDb } from "./lumiverse-db";
 import { CHAT_HELD, chatEndOf, changesSince, countRow, insideEnds, refusalsOf, type ChatReport, type Item, type MigrationReport, REPORT_FORMAT, type RowReport, type Where } from "./report";
 import { placesOf, type Place } from "./carry";
 import { ROW, ROWS, type RowId } from "./rows";
-import type { OwnerRow } from "./setting-list";
+import type { OwnerRow, RefusedRow } from "./setting-list";
 import { runtimeOrigins } from "./today/lumiah/runtime/lumiverse";
 import { loopbackModel, loopsBack, runtimeBase } from "./today/lumiah/link/contract";
 import { openToday, type Sources, type Today } from "./today";
@@ -45,6 +45,8 @@ export interface RehearseOptions {
   rpe?: { owner: string | null; earlier: readonly string[] };
   /** The rows he gave to what no row names (`migration.rows`). */
   given?: readonly OwnerRow[];
+  /** The rows `migration.rows` gives that cannot be used, as written, each with why: the report names them, and the run goes on without them. */
+  refused?: readonly RefusedRow[];
   /** Whether the real run is given the file tree's places, where the user's own files go (`rpe migrate` always gives them). */
   tree?: boolean;
   /** Whether the real run is given the turn lane's writer of his jobs and approvals, so they land (`rpe migrate` gives it). */
@@ -497,6 +499,7 @@ export async function reportOf(today: Today, options: RehearseOptions = {}): Pro
       runtime: { taken: found.runtime.runtimes.map(({ name, why, config }) => ({ name, why, unit: config.service?.unit ?? null, source: config.source })).at(0) ?? null, leftAlone: found.runtime.leftAlone, archived: found.runtime.archived },
       ...(disowned === null ? {} : { disowned }),
       ...(given.length > 0 ? { given: given.map((g, i) => ({ ...g, found: gave[i] ?? 0 })) } : {}),
+      ...((options.refused ?? []).length > 0 ? { refused: [...(options.refused ?? [])] } : {}),
       standIn: { writes, logged },
       lumiverse: db.marks(chatRows, sources.identifier, found.runtime.runtimes.flatMap((r) => runtimeOrigins(r.config.listen, r.config.port))),
       disk,

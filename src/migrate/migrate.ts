@@ -34,7 +34,7 @@ import { type ChatNames, type TreeLayout } from "./own-files";
 import { openQuiet } from "./quiet-db";
 import { backupOf, reportOf } from "./rehearse";
 import { BACKUP_ONLY, chatEndOf, insideEnds, type MigrationReport, recountRows, refusalsOf } from "./report";
-import { MIGRATE_SETTINGS, type OwnerRow, ownerRowsOf } from "./setting-list";
+import { MIGRATE_SETTINGS, MIGRATION_ROWS_KEY, type OwnerRow, ownerRowsRead, type RefusedRow } from "./setting-list";
 import { NO_PLACE_YET } from "./rows";
 import { followWorlds } from "./worlds";
 import { answersOf, importedChats, keepCarried, keepRun, lastReport, MIGRATE_TABLES, runUsers } from "./tables";
@@ -87,10 +87,15 @@ export function earlierRuns(file: string, user: string): { previous: MigrationRe
   }
 }
 
-/** The rows he gave (`migration.rows` in his `RPE-global.yml`), read without changing anything; none where there is no file or none given. */
-export async function rowsGiven(paths: Pick<DataPaths, "globalConfig">): Promise<OwnerRow[]> {
+/**
+ * The rows he gave (`migration.rows` in his `RPE-global.yml`), read without changing anything; none where there is no file or none given.
+ * A row the file gives that cannot be used is named, as written, with why (`refused`): the report says it, and the run goes on without it.
+ */
+export async function rowsGiven(paths: Pick<DataPaths, "globalConfig">): Promise<{ given: OwnerRow[]; refused: RefusedRow[] }> {
   const read = readConfig(await diskTexts([{ level: "global", file: paths.globalConfig, disk: paths.globalConfig }]), null, MIGRATE_SETTINGS);
-  return MIGRATE_SETTINGS.flatMap((def) => ownerRowsOf(read.read(def).value));
+  const def = MIGRATE_SETTINGS.find((s) => s.key === MIGRATION_ROWS_KEY);
+  const { rows, refused } = ownerRowsRead(def === undefined ? undefined : read.setAt(def).at(-1)?.value);
+  return { given: rows, refused };
 }
 
 /**
@@ -120,7 +125,8 @@ export async function rehearsal(sources: Sources, options: { data: string; db: D
   const today = await openToday(sources);
   try {
     today.reader.useAnswers(answersOf(options.db, sources.userId));
-    const report = await reportOf(today, { mode: "rehearsal", target: options.data, ...(options.now ? { now: options.now } : {}), rpe: { owner: options.owner, earlier: runUsers(options.db) }, tree: true, jobs: true, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
+    const rows = await rowsGiven(paths);
+    const report = await reportOf(today, { mode: "rehearsal", target: options.data, ...(options.now ? { now: options.now } : {}), rpe: { owner: options.owner, earlier: runUsers(options.db) }, tree: true, jobs: true, given: rows.given, refused: rows.refused, ...(previous ? { previous } : {}) });
     return { report, names: new Map(today.chats.map((c) => [c.id, c.name])) };
   } finally {
     today.close();
@@ -139,7 +145,8 @@ export async function migrate(sources: Sources, options: MigrateOptions): Promis
   try {
     // His answers given in RPE to the questions chats were paused on, written as today's build writes them over the stand-in.
     today.reader.useAnswers(answers);
-    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, jobs: options.runs?.keepJob !== undefined, given: await rowsGiven(paths), ...(previous ? { previous } : {}) });
+    const rows = await rowsGiven(paths);
+    const report = await reportOf(today, { mode: options.rehearse ? "rehearsal" : "real run", target: options.data, now, rpe: { owner: config.lumiverse.user, earlier: users }, tree: options.tree !== undefined, jobs: options.runs?.keepJob !== undefined, given: rows.given, refused: rows.refused, ...(previous ? { previous } : {}) });
     if (options.rehearse || report.refusals.length > 0) return { report, ran: false };
     // No row is written without its user (R-179): with none named, nothing is, the data folder, the backup and the config included.
     const owner = config.lumiverse.user;
