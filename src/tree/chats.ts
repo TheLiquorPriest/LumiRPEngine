@@ -6,7 +6,7 @@
 // (plan §5.1, `notes.ts`); the shipped defaults an update changed; and agents' suggestions.
 
 import type { Database } from "bun:sqlite";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { RouteError } from "../app";
 import type { AreaTables } from "../app/app";
@@ -299,10 +299,12 @@ export class TreeChats {
 
   /**
    * Lumiverse deleted the chat (RPE heard it, or found it gone at its reconcile): its session files go, and it is marked deleted from
-   * `at`. Its other files stay, listed on the Storage page as a deleted chat's, to be pruned when the user asks. A chat RPE never
-   * placed has nothing here, and a chat already marked keeps its first mark.
+   * `at`. Its other files stay, listed on the Storage page as a deleted chat's, to be pruned when the user asks. The sessions in `going`
+   * (of a turn or a job of the chat still under way) stay too, whole, so what they go on writing lands after their first lines and not
+   * in a file begun again without them; they are the deleted chat's files like the rest. A chat RPE never placed has nothing here, and
+   * a chat already marked keeps its first mark.
    */
-  async deleted(user: string, chat: string, at: number): Promise<void> {
+  async deleted(user: string, chat: string, at: number, going: ReadonlySet<string> = new Set()): Promise<void> {
     const folders = this.folders(user, chat);
     if (folders === null) return;
     await this.writes.run((db) => {
@@ -310,7 +312,9 @@ export class TreeChats {
       // What the folder took is not what it took: the Storage page measures it again.
       db.run("DELETE FROM tree_size WHERE user = ? AND chat = ?", [user, chat]);
     }, "marking a deleted chat");
-    await rm(join(this.files, CHATS_FOLDER, folders.character, folders.chat, SESSIONS_FOLDER), { recursive: true, force: true });
+    const sessions = join(this.files, CHATS_FOLDER, folders.character, folders.chat, SESSIONS_FOLDER);
+    if (going.size === 0) await rm(sessions, { recursive: true, force: true });
+    else for (const name of await readdir(sessions).catch(() => [] as string[])) if (!going.has(name)) await rm(join(sessions, name), { recursive: true, force: true });
   }
 
   /** What each chat's folder takes, by area, as kept (`tree_size`), with when each was last checked against the disk. A chat measured never has no entry. */

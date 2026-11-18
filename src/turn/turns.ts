@@ -826,13 +826,24 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     // Lumiverse's breakdown of a saved reply names the feedback typed in its regenerate dialog: its word governs what the turn kept.
     else if (change.kind === "feedback-told") work = this.#feedbackTold(user, change.generation, change.feedback);
     // A chat deleted in Lumiverse: its folders are kept as a deleted chat's, and its turns stay in the store.
-    else if (change.kind === "chat-deleted") work = this.#d.chats.deleted(user, change.chat, this.#d.clock.now()).then(() => this.#d.forgetChat(user, change.chat));
+    else if (change.kind === "chat-deleted") work = this.#chatDeleted(user, change.chat);
     if (work === null) return;
     const done = work.catch((error: unknown) => this.#d.log.error("A change Lumiverse told of could not be recorded; the chat's next turn finds it again.", { chat: change.chat, change: change.kind, error: words(error) }));
     this.#recording.add(done);
     void done.finally(() => this.#recording.delete(done));
     // A change of the path (a delete, a swipe, an edit, an insert, a branch) brings the projection book into step with it.
     if (change.kind === "message-deleted" || change.kind === "message-edited" || change.kind === "message-swiped" || change.kind === "message-inserted" || change.kind === "chat-forked") void done.then(() => this.#project(user, change.chat));
+  }
+
+  /**
+   * Lumiverse deleted the chat: its session files go, but for those of its turns and jobs still under way, which go on writing them
+   * (code stops neither); what they write lands whole, among the deleted chat's files the Storage page prunes on his word.
+   */
+  async #chatDeleted(user: string, chat: string): Promise<void> {
+    const jobs = await this.#d.harness().jobs.list({ user, chat, states: ["queued", "held", "running", "asking"] });
+    const going = new Set([...this.#d.runs.ofChat(user, chat).map((r) => r.session), ...jobs.jobs.map((j) => j.scope.session)]);
+    await this.#d.chats.deleted(user, chat, this.#d.clock.now(), going);
+    await this.#d.forgetChat(user, chat);
   }
 
   /**
