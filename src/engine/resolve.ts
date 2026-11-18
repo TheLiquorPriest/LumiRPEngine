@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId, PlaceId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import { heldBy } from "../shared/finance";
+import { D20_PACK } from "../shared/d20";
 import { isHardLock, requirementExpr, requirementWhy, spanRecords, type ActionDef, type CheckDef, type EffectSpec, type Expr, type ParamDef, type Requirement, type WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
@@ -263,6 +264,30 @@ export function missedPlainRequirement(res: Pick<Resolution, "ok" | "failed">): 
   return !res.ok && res.failed?.code === "requirement" && res.failed.hard !== true;
 }
 
+/** One roll's own odds in an action of several: each attack of a full attack, each one who makes a save. */
+export interface OddsLine {
+  /** The attack's number. */
+  n?: number;
+  /** Who makes the save. */
+  who?: EntityId;
+  modifier: number;
+  /** The difficulty or defence it is read against. */
+  against: number;
+  chances: Record<string, number>;
+  /** An attack's chance of a threat: a natural die in its range that hits, before it is confirmed. */
+  threat?: number;
+}
+
+/** The odds a pack works out for an action of its own that rolls in its own procedure, from that procedure's numbers (`d20.odds`). */
+export interface PackOdds {
+  chances: Record<string, number>;
+  modifier: number;
+  notation: string;
+  dc: number | null;
+  opponent: EntityId | null;
+  lines?: OddsLine[];
+}
+
 export interface Availability {
   available: boolean;
   failed: Failure | null;
@@ -273,6 +298,10 @@ export interface Availability {
   duration: number;
   /** What the adjudication policy makes of the check before it is taken (no roll, too hard, the story decides). */
   verdict: Verdict | null;
+  /** Each roll's own odds, where the action makes several. */
+  lines?: readonly OddsLine[];
+  /** What the odds need that the call does not give (a difficulty, a target), in words. */
+  missing?: string;
 }
 
 /**
@@ -295,16 +324,21 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
   const usable = ready && !("code" in ready) ? ready : null;
   const counts = usable ? checkCounts(usable) : null;
   const odds = counts ? oddsOf(counts) : null;
+  // An action of the tabletop rules rolls in its own procedure: its odds are that procedure's numbers, counted by the pack.
+  const theirs = !def && p.action.pack === D20_PACK ? (optionalService(ctx, "d20.odds")?.(ctx, p.action.id, p.actor, p.params) ?? null) : null;
+  const packed = theirs !== null && "chances" in theirs ? theirs : null;
   const spend = combatSpend(ctx, p.actor, p.action);
   const refused = Array.isArray(spend) ? null : spend;
   return {
     available: unmet === null && refused === null && usable === ready,
     failed: unmet ?? refused ?? (ready && "code" in ready ? ready : null),
-    odds,
-    modifier: usable?.modifier ?? 0,
-    check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
+    odds: packed?.chances ?? odds,
+    modifier: packed?.modifier ?? usable?.modifier ?? 0,
+    check: packed ? { notation: packed.notation, advantage: 0, dc: packed.dc, opponent: packed.opponent } : usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
     verdict: usable && counts ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, counts }) : null,
+    ...(packed?.lines ? { lines: packed.lines } : {}),
+    ...(theirs !== null && "missing" in theirs ? { missing: theirs.missing } : {}),
   };
 }
 

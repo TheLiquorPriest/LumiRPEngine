@@ -2143,7 +2143,7 @@ Worked example:
 
 #### checks_odds
 
-Reads the odds of an action as things stand now, by anyone: whether it can be tried now and, if not, the engine's reason; the chance of each outcome in percent; the dice, the modifier, the DC, advantage and whom it is rolled against; and what the world's way of judging checks makes of it. Nothing is rolled and nothing changes.
+Reads the odds of an action as things stand now, by anyone: whether it can be tried now and, if not, the engine's reason; the chance of each outcome in percent; the dice, the modifier, the DC, advantage and whom it is rolled against; and what the world's way of judging checks makes of it. Nothing is rolled and nothing changes. Under the world's tabletop rules, a check, a save and an attack are counted from the numbers the action itself rolls with, the target's defence included; an action of several rolls (each attack of a full attack, each one who saves) gives each its own line, with an attack's chance of a threat; and a call that lacks what the chance needs, such as a difficulty or a target, is answered with what is missing.
 
 Reads; changes nothing.
 

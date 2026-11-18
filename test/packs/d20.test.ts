@@ -1,5 +1,6 @@
 // A few worked sums of the tabletop rules layer on a small ruleset of its own: a defence with its stacking and its touch and
-// flat-footed variants, an attack that crits on dice that all come up high, and a creature harmed below 0 and then to its floor.
+// flat-footed variants, an attack that crits on dice that all come up high, a creature harmed below 0 and then to its floor, and the
+// odds of a check and an attack as the actions sheet and checks_odds show them.
 
 import { describe, expect, test } from "bun:test";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
@@ -9,6 +10,7 @@ import type { D20Def } from "../../src/shared/d20";
 import type { Rng } from "../../src/engine/rng";
 import { initialState } from "../../src/engine/world-state";
 import type { WorldState } from "../../src/engine/state";
+import { actionOdds } from "../../src/engine/resolve";
 import { explain } from "../../src/packs/d20/core/modifiers";
 import { registry, world } from "../iface/rig";
 
@@ -164,5 +166,21 @@ describe("the d20 layer's sums", () => {
     const events = run(doc, initialState(doc, "t", reg), "d20.check", "wren", { skill: "str" });
     const record = events.find((e) => e.type === "d20.check");
     expect(JSON.stringify(record)).toContain('"total":20');
+  });
+
+  test("odds: a Strength check against 15 is 40%, 45.5% with a helper who reaches 10 on 55%; an attack at +5 against 11 hits 67.5% and crits 7.5%", () => {
+    const doc = d20World();
+    const reg = registry();
+    const state = initialState(doc, "t", reg);
+    expect(actionOdds(reg, doc, state, { action: "check", actor: "wren", params: { skill: "str", difficulty: 15 } }).odds?.success).toBeCloseTo(0.4, 6);
+    // Bram reaches the helper's 10 on 11 faces; with his +2, Wren needs 11 (10 faces), without it 13 (8 faces).
+    expect(actionOdds(reg, doc, state, { action: "check", actor: "wren", params: { skill: "str", difficulty: 15, aid: "bram" } }).odds?.success).toBeCloseTo(0.55 * 0.5 + 0.45 * 0.4, 6);
+    expect(actionOdds(reg, doc, state, { action: "check", actor: "wren", params: { skill: "str" } }).missing).toBeDefined();
+    // 6 or more hits (75%); 19 and 20 threaten (10%), confirmed on 6 or more again (75%).
+    const attack = actionOdds(reg, doc, state, { action: "attack", actor: "wren", params: { target: "bram" } });
+    expect(attack.check?.dc).toBe(11);
+    expect(attack.odds?.critical).toBeCloseTo(0.075, 6);
+    expect(attack.odds?.hit).toBeCloseTo(0.675, 6);
+    expect(attack.odds?.miss).toBeCloseTo(0.25, 6);
   });
 });

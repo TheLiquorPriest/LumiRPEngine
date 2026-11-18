@@ -7,11 +7,13 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { PackDef, ReadContext } from "../../../engine/registry";
+import type { PackOdds } from "../../../engine/resolve";
 import type { Rng } from "../../../engine/rng";
 import { D20_PACK } from "../../../shared/d20";
 import { D20_ACTION_DEFS } from "./actions";
 import { D20_FORMULAS } from "./functions";
 import { isOn } from "./model";
+import { d20Odds } from "./odds";
 import { D20_PROCEDURES, upkeep } from "./procedures";
 import { D20_RECORDS } from "./records";
 import { sheetsView } from "./sheet";
@@ -20,6 +22,8 @@ declare module "../../../engine/registry" {
   interface ServiceMap {
     /** What a creature's turn in a fight brings of itself by the tabletop rules (§4.5), as the changes and the record that says them; none without the rules on. */
     "d20.upkeep": (ctx: ReadContext, who: EntityId, rng: Rng) => LedgerEvent[];
+    /** The odds of the layer's check, save or attack by its doer, from the plan its procedure rolls; what is missing for them; null for any other. */
+    "d20.odds": (ctx: ReadContext, action: string, who: EntityId, params: Readonly<Record<string, JsonValue>>) => PackOdds | { missing: string } | null;
   }
   interface QueryMap {
     /** Whether the tabletop rules are on in the chat: their sheet is then Play's You, in place of the sheets pack's. */
@@ -39,6 +43,7 @@ export const d20Pack: PackDef = {
     for (const def of D20_PROCEDURES) r.effect(def);
     for (const def of D20_ACTION_DEFS) r.action(def);
     r.service("d20.upkeep", upkeep);
+    r.service("d20.odds", d20Odds);
     r.query("d20.on", (ctx) => isOn(ctx));
     r.view({ panel: "d20.sheet", build: (ctx) => sheetsView(ctx) as unknown as JsonValue });
   },

@@ -122,6 +122,8 @@ const odds: ReadDef = {
         ...(a.odds ? { chances: Object.fromEntries(Object.entries(a.odds).map(([outcome, p]) => [outcome, percent(p)])) } : {}),
         ...(c ? { dice: c.notation, modifier: a.modifier, ...(c.dc !== null ? { dc: c.dc } : {}), ...(c.advantage !== 0 ? { advantage: c.advantage } : {}), ...(c.opponent ? { opponent: named(r, c.opponent) } : {}) } : {}),
         ...(v ? { verdict: { roll: v.roll, why: v.why, outcome: v.outcome, chance: v.chance === null ? null : percent(v.chance), pass: v.pass } } : {}),
+        ...(a.lines ? { lines: a.lines.map((l) => ({ ...(l.n !== undefined ? { attack: l.n } : {}), ...(l.who !== undefined ? { who: named(r, l.who) } : {}), modifier: l.modifier, against: l.against, chances: Object.fromEntries(Object.entries(l.chances).map(([outcome, p]) => [outcome, percent(p)])), ...(l.threat !== undefined ? { threat: percent(l.threat) } : {}) })) } : {}),
+        ...(a.missing !== undefined ? { missing: a.missing } : {}),
         ...(Object.keys(says).length > 0 ? { says } : {}),
       },
     });

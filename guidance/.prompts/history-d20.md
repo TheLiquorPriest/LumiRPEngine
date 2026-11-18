@@ -106,7 +106,8 @@ why_d20_off: The tabletop rules are switched off in this chat; switch them on to
 why_d20_no_skill: {{said}} is no skill or ability of this ruleset. Skills: {{skills}}.{{#abilities}} Abilities: {{abilities}}.{{/abilities}}
 why_d20_no_save: {{said}} is no save of this ruleset. Saves: {{saves}}.
 why_d20_no_difficulty: A save needs a difficulty: a number, or one of the ruleset's difficulties{{#said}} ({{said}} is neither){{/said}}.
-why_d20_no_target: {{said}} is no one in the world to attack.
+why_d20_no_target: {{#said}}{{said}} is no one in the world to attack.{{/said}}{{^said}}An attack needs a target: whom it is made against, by name or id.{{/said}}
+why_d20_odds_no_difficulty: A check's chance needs a difficulty (a number, or one of the ruleset's difficulties) or someone it is rolled against (vs); without either the check is only rolled.
 why_d20_no_weapon: {{who}} has nothing to attack with{{#said}} by the name {{said}}{{/said}}: no weapon readied and no attack of its own. Name a weapon it carries, one of its own attacks, or a weapons row in with.
 why_d20_no_amount: {{said}} is no number and no dice.
 why_d20_no_condition: {{said}} is no condition of this ruleset. Conditions: {{conditions}}.
