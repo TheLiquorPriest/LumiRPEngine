@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { factProblems } from "rp-harness/testing/kit";
 import { CAST_FACT_DEFS, castFacts } from "../../src/cast/facts";
+import { turnFacts } from "../../src/turn/facts";
 import { charactersOf } from "../../src/cast/record";
 import { CHAT, openBench, USER } from "./rig";
 
@@ -99,6 +100,9 @@ describe("stage.unperceived and path.unperceived", () => {
     expect(asked.some((t) => carried.includes(t))).toBe(false);
     // Read at a carried turn, no one is owed a perception of it.
     expect((await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: carried[1] }, ["stage.unperceived"]))["stage.unperceived"]?.count).toBe(0);
+    // Nor is a carried turn one since the engine lane last changed: only the turn RPE played is counted.
+    const turnSide = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }) });
+    expect((await turnSide.read({ user: USER, chat: CHAT, session: "s-1", turn: next.id }, ["turns.since.engine.change"]))["turns.since.engine.change"]).toEqual({ count: 1 });
   });
 
   test("a chat with no record yet counts no one", async () => {

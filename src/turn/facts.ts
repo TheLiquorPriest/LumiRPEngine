@@ -4,7 +4,8 @@
 //
 // The turn lane's own facts, counted along the scope turn's own line (the turns it was made after, and
 // itself once its reply is tied), or along the chat's path for a scope with no turn:
-//   turns.since.engine.change  turns on that line since the last one that recorded an engine-lane change
+//   turns.since.engine.change  turns RPE played on that line since the last one that recorded an engine-lane change (a turn a
+//                              migration carried is none since anything, though an engine change it carried ends the count)
 //   turn.recorded              what this turn has recorded so far in any lane, all of it the store's changes (the story's and the
 //                              cast's among them); a continue's, since it began (the marks its run took, as its take-back uses them)
 //   unsourced.writes           this turn's writes with no source, through any tool, counted as `turn.recorded` counts
@@ -25,7 +26,7 @@ import { pairMarks } from "../quests/thread";
 import type { ChangeRow, Store } from "../store";
 import { storyAt } from "../story/path";
 import { StoryRecord } from "../story/record";
-import type { RunRecord } from "./runs";
+import { CARRIED_SESSION, type RunRecord } from "./runs";
 import { STORY_FROM, STORY_NEWEST, type StoryFrom, type StoryNewest } from "./settings";
 
 /** Facts one area counts. */
@@ -74,8 +75,8 @@ export class FactsRegistry implements FactsPort {
   }
 }
 
-/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, and whether that was before its intent record. */
-export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "withoutIntent">;
+/** A turn's run as the facts read it: where its own writes begin, its kind, when its reply went out, whether that was before its intent record, and its session (none for the record a migration keeps of a carried turn's run). */
+export type FactsRun = Pick<RunRecord, "mark" | "kind" | "released" | "withoutIntent" | "session">;
 
 /** What the turn lane's facts read beside the store: a turn's runs, the runs a turn stopped as it began, and the chat's story choice. */
 export interface TurnFactsDeps {
@@ -96,7 +97,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
   return {
     area: "turn",
     defs: [
-      { name: "turns.since.engine.change", counts: "Turns on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn on it when none has." },
+      { name: "turns.since.engine.change", counts: "Turns RPE played on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn RPE played on it when none has. A turn a migration carried is not counted: the previous build played it." },
       { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
       { name: "unsourced.writes", counts: "This turn's writes with no source, through any tool, counted as turn.recorded counts them." },
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
@@ -116,16 +117,19 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       const line = at?.turns ?? [];
       const turns = scope.turn !== undefined && user.turn(scope.turn)?.status === "open" ? line.filter((t) => t !== scope.turn) : line;
       const turn = known && scope.turn !== undefined && user.turn(scope.turn)?.chat === scope.chat ? scope.turn : null;
-      const runNow = turn === null ? null : (runs(scope.user, turn).at(-1) ?? null);
+      // A turn's runs are those RPE played: the record a migration keeps of a carried turn's run is none of them (plan §15.2).
+      const ownRuns = (t: string): FactsRun[] => runs(scope.user, t).filter((r) => r.session !== CARRIED_SESSION);
+      const runNow = turn === null ? null : (ownRuns(turn).at(-1) ?? null);
       // Every run owes the player a reply but one that writes nothing into the chat.
       const owes = runNow !== null && runNow.kind !== "settle";
-      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null));
+      // What a migration wrote on a carried turn (source `import`) is the previous build's, nothing this turn recorded.
+      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && c.source !== "import"));
       const recorded = (): number => mine().length;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
-        // One read along the line, however long: the newest turn on it that recorded an engine-lane change.
+        // One read along the line, however long: the newest turn on it that recorded an engine-lane change; then the turns after it RPE played.
         const newest = turns.length === 0 ? null : user.newestWith(turns, "engine");
-        out["turns.since.engine.change"] = { count: newest === null ? turns.length : turns.length - 1 - turns.lastIndexOf(newest) };
+        out["turns.since.engine.change"] = { count: user.playedOf(newest === null ? turns : turns.slice(turns.lastIndexOf(newest) + 1)).size };
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
       if (names.includes("unsourced.writes")) out["unsourced.writes"] = { count: mine().filter((c) => c.source === null).length };
@@ -140,7 +144,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       if (names.includes("turn.last.without.intent")) {
         // The last of the turn's runs whose reply went out stands for the turn.
         const before = turns.at(-1);
-        const last = before === undefined ? undefined : runs(scope.user, before).findLast((r) => r.released !== null);
+        const last = before === undefined ? undefined : ownRuns(before).findLast((r) => r.released !== null);
         out["turn.last.without.intent"] = { count: last?.withoutIntent === true ? 1 : 0 };
       }
       if (names.includes("threads.quests.split")) {
