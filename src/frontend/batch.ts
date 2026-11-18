@@ -6,7 +6,6 @@
 
 import type { DomainId, EntityId, Level, PlaceId, TierId } from "../shared/ids";
 import { pointerOf } from "../shared/json-patch";
-import { lorePinKey, lorePinsJson, lorePinsOf } from "../shared/lore";
 import type { Fidelity, MindApproach } from "../shared/minds";
 import { FIDELITIES } from "../shared/minds";
 import type { PartyTier } from "../shared/party";
@@ -14,7 +13,7 @@ import type { EditOp } from "../shared/edit-ops";
 import type { JsonPatchOp } from "../shared/json-patch";
 import type { RoutineRole } from "../shared/routines";
 import type { GmView } from "../shared/state-view";
-import type { LorePin, WorldDoc } from "../shared/world";
+import type { WorldDoc } from "../shared/world";
 import { partyOf } from "./requests";
 
 /** A group a list selects at once ("by level"): exactly these rows. */
@@ -143,30 +142,13 @@ export type DraftChange =
   /** A domain's level override, or null to remove it (the tier decides). */
   | { kind: "level"; domain: DomainId; level: Level | null }
   /** A place's default scene type, or null to remove it. */
-  | { kind: "sceneType"; sceneType: string | null }
-  /** A lore pin added to each one's pinned lore (entities as characters, places as places). */
-  | { kind: "pin"; pin: LorePin };
+  | { kind: "sceneType"; sceneType: string | null };
 
 /**
  * The JSON Patch that makes a change for each selected item of the draft, only where it changes
- * something. A place a map draws keeps its scene type (the map is its source); pins go to the
- * `lorePins` part whole, in one op.
+ * something. A place a map draws keeps its scene type (the map is its source).
  */
 export function draftPatch(doc: WorldDoc, collection: "entities" | "places", ids: readonly string[], change: DraftChange): JsonPatchOp[] {
-  if (change.kind === "pin") {
-    const pins = lorePinsOf(doc);
-    const target = collection === "entities" ? "characters" : "places";
-    const key = lorePinKey(change.pin);
-    let added = false;
-    const next = { ...pins[target] };
-    for (const id of ids) {
-      const list = next[id] ?? [];
-      if (list.some((p) => lorePinKey(p) === key)) continue;
-      next[id] = [...list, change.pin];
-      added = true;
-    }
-    return added ? [{ op: "add", path: "/lorePins", value: lorePinsJson({ ...pins, [target]: next }) }] : [];
-  }
   const ops: JsonPatchOp[] = [];
   for (const id of ids) {
     if (collection === "places") {
