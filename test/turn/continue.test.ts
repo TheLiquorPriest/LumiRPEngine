@@ -39,8 +39,8 @@ const PASS_TIME: Answer = { pieces: [{ text: "<intent>Then the storm.</intent>" 
 /** The kinds of what the harness was told had happened since the last turn, in its `n`th request. */
 const toldKinds = (b: TurnBed, n: number): string[] => b.requests[n]!.since.map((s) => s.kind);
 
-/** The thinking Lumiverse kept with a reply RPE wrote: its progress lines. */
-const KEPT_THINKING = "Reading the turn.\nWriting.\n";
+/** The thinking Lumiverse kept with a reply RPE wrote: its progress lines (the scripted model thinks nothing). */
+const KEPT_THINKING = "Reading the chat for the briefing.\nReading the turn.\nWriting.\n";
 
 /** The last `n` messages of the request Lumiverse sent the connection. */
 const sentLast = (out: { body: Record<string, unknown> | null }, n: number): unknown[] => (out.body!.messages as unknown[]).slice(-n);

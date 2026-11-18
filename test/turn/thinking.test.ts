@@ -21,6 +21,8 @@ test("the Author's thinking goes into the thinking block as it is written, under
   const first = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
   const reasoning = b.host.streams.get(first.generationId!)?.reasoning ?? "";
   expect(reasoning).toContain("The Author thinks:\nWren is at the lamp. The stair comes next.");
+  // From the first moment: the chat read for the briefing, then the harness's first line, then the thinking.
+  expect(reasoning).toStartWith("Reading the chat for the briefing.\nReading the turn.\n");
   expect(reasoning.indexOf("Reading the turn.")).toBeLessThan(reasoning.indexOf("The Author thinks:"));
   const turn = await settledTurn(b, first.generationId!);
   // Lumiverse keeps it with the message, and sends it back with that reply in the next prompt.

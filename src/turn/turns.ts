@@ -550,13 +550,23 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     };
     let held = false;
     try {
+      // What the turn is doing is said from its first moment, in the words of the progress part as it stands before the chat's own
+      // levels are read: that this request waits for another of the chat's, and then that the chat is being read for the briefing,
+      // which the harness's first line follows. The part is read beside the intake's own steps, so that it holds none of them up, and
+      // a part that cannot be read says nothing rather than stop the turn.
+      const firstLines = loadGuidance(this.#d.files, { user, chat, session: NO_SESSION })
+        .part(PARTS.progress)
+        .then(lines, () => undefined);
       if (intake.waiting) {
-        // The player is shown that this request waits for another of the chat's, in the words of the progress part.
-        const line = lines(await loadGuidance(this.#d.files, { user, chat, session: NO_SESSION }).part(PARTS.progress))?.line("waiting_previous");
+        const line = (await firstLines)?.line("waiting_previous");
         if (line !== undefined) out.progress(line);
       }
       lap("queue");
       if (!(await waited(unlessAborted(intake.turn, signal), intake.waiting))) return;
+      const introduced = firstLines.then((part) => {
+        const reading = part?.line("intake");
+        if (reading !== undefined) out.progress(reading);
+      });
 
       // The chat taken on, and its folders.
       await this.#d.place(user, chat);
@@ -835,6 +845,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       // Each stretch of an agent's thinking is headed in the progress part's words, a character by the name the cast gives it in this chat.
       const progressLines = lines(progress);
       const heading = (agent: AgentRef): string | undefined => thinkingHeading(progressLines, agent, (id) => findCharacter(this.#d.store.db, user, chatLine(this.#d.store.user(user), chat), id)?.name ?? null);
+      // The intake's own line goes out before anything the harness says.
+      await introduced;
       await this.#run(run, request, out, signal, { errors: lines(errors), lastText: settings.lastText, hold: tagged.whole === true ? (tagged.hold ?? null) : null, heading }, afterFolder);
       const early = this.#early.get(tag.generation);
       if (early !== undefined) {

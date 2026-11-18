@@ -292,7 +292,7 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
   test("progress.md has the line that keeps a long turn alive, among the lines shown in the thinking block", async () => {
     const part = await lines("progress");
     expect(part.line("still", { elapsed: "1:30" })).toBe("Still working (1:30).");
-    expect(part.names).toEqual(expect.arrayContaining(["started", "tool", "delegate", "writing", "still"]));
+    expect(part.names).toEqual(expect.arrayContaining(["intake", "started", "tool", "delegate", "writing", "still"]));
     expect(written(part)).not.toMatch(ASKS);
     // A call made again: what broke it, the wait and the try, as RPH fills the row (its turn's `call_failed`).
     expect(part.line("retrying", { failure: "connection", is: { connection: true }, seconds: 1, next: 2, most: 3 })).toBe("A call to the model failed (the connection broke). Trying again in 1s, try 2 of 3.");

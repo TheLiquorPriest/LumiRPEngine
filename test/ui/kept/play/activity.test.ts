@@ -61,7 +61,33 @@ describe("the HUD's run line", () => {
     expect(state.get().activity).toBeNull();
     rpe.publish([{ kind: "trace", data: record(1, 5000, { kind: "run_started", run: "turn", lead: "author" }) } as unknown as Pick<LiveEvent, "kind" | "data">]);
     await settle();
-    expect(state.get().activity).toMatchObject({ state: "running", label: "author is starting the turn", since: 5000 });
+    expect(state.get().activity).toMatchObject({ state: "running", label: "The Author is starting the turn", since: 5000 });
+    state.stop();
+  });
+
+  test("while a model call of the turn streams, the line says whose it is and that it thinks or writes, until a progress line comes", async () => {
+    const { rpe, state } = opened(null);
+    await settle();
+    const lead = { id: "lead-7", definition: "author" };
+    const gm = { id: "gm-2", definition: "gm" };
+    const said = (events: { kind: string; data: unknown }[]) => rpe.publish(events as unknown as Pick<LiveEvent, "kind" | "data">[]);
+    said([{ kind: "trace", data: { ...record(1, 5000, { kind: "run_started", run: "turn", lead: "author" }), agent: lead } }]);
+    said([{ kind: "delta", data: { run: "run-1", agent: "lead-7", call: 1, thinking: "The lamp first.", at: 5100 } }]);
+    await settle();
+    expect(state.get().activity?.label).toBe("The Author is thinking");
+    said([
+      { kind: "trace", data: { ...record(2, 5200, { kind: "agent_started", definition: "gm" }), agent: gm } },
+      { kind: "delta", data: { run: "run-1", agent: "gm-2", call: 1, thinking: "A roll.", at: 5300 } },
+    ]);
+    await settle();
+    expect(state.get().activity?.label).toBe("The GM is thinking");
+    // Another run's call, a job's, says nothing of this turn's.
+    said([{ kind: "delta", data: { run: "run-9", agent: "keeper-1", call: 1, text: "Kept.", at: 5400 } }]);
+    await settle();
+    expect(state.get().activity?.label).toBe("The GM is thinking");
+    said([{ kind: "delta", data: { run: "run-1", agent: "lead-7", call: 2, text: "<reply>The", at: 5500 } }]);
+    await settle();
+    expect(state.get().activity?.label).toBe("The Author is writing");
     state.stop();
   });
 });

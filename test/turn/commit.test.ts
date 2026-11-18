@@ -187,7 +187,7 @@ describe("what a continue recorded", () => {
     // It was sent as Lumiverse sends a continue: the reply it goes on with last, out of the history, with its thinking sent back as Lumiverse sends it (RPE's progress lines of the turn that
     // wrote it, `reasoning_content`, `prompt-assembly.service.ts:3370-3394`), with no postfix, as the preset sets none, and the nudge after it (`:742-775`, `generate.service.ts:1969-1978`).
     expect((out.body!.messages as unknown[]).slice(-2)).toEqual([
-      { role: "assistant", content: "The lamp turns.", reasoning_content: "Reading the turn.\nWriting.\n" },
+      { role: "assistant", content: "The lamp turns.", reasoning_content: "Reading the chat for the briefing.\nReading the turn.\nWriting.\n" },
       { role: "system", content: CONTINUE_NUDGE },
     ]);
     await asBefore(b, turn, before, out.generationId!, "The lamp turns.");
