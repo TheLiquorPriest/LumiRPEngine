@@ -8,7 +8,12 @@
 
 import type { Value } from "../../../engine/expr";
 import type { ReadContext } from "../../../engine/registry";
-import { D20_FUNCTIONS } from "../../../shared/d20";
+import { own } from "../../../engine/pack-kit";
+import { evalExpr, scopeEnv } from "../../../engine/scope";
+import type { D20Def } from "../../../shared/d20";
+import { D20_FIELDS } from "../../../shared/d20";
+import { classesOf, conditionsHeld, numberIn, ranksOf, rowsOf, rulesOf, traitsHeld, wordsIn } from "./model";
+import { limitOf, modifiersOf, namesOf, stacked, sumOf, totalOf } from "./modifiers";
 
 type Fn = (ctx: ReadContext, ...args: Value[]) => Value;
 
