@@ -33,7 +33,6 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { ORG_LINTS } from "../../src/packs/orgs/core/lint";
 import { decodeOrgPage } from "../../src/packs/orgs/ui/decode";
 import { appointAction, delegationDraft, delegationEditOps, givable, hireAction, isGmPage, memberControls, newcomers, orgEditOf, orgEditRoute, payoutAction, payoutOps, payoutProblem, peopleControls, positionArgs, positionDraft, positionEditOps, positionOfView, positionProblem, rulesControls, titleAction, type OrgAction } from "../../src/packs/orgs/ui/edit";
-import { GmOwners, gmPage, gmSheetFor, jobTitleOps, type GmOrgSheet } from "../../src/packs/orgs/ui/gm";
 import { MemberDetails } from "../../src/packs/orgs/ui/member";
 import { OrgPeople } from "../../src/packs/orgs/ui/people";
 import { OrgRules } from "../../src/packs/orgs/ui/rules";
@@ -213,7 +212,7 @@ describe("Live 1: the GM makes Jordan Shop foreman, and he hires Jess into it", 
     edit(w, positionEditOps(SHOP, foreman, null, USD));
     const job = gmView(w).entities.find((e) => e.id === "job_pov_mechanic");
     if (!job) throw new Error("no job for Jordan");
-    edit(w, jobTitleOps(job, "Mechanic", "shop_foreman"));
+    edit(w, [{ op: "set", entity: job.id, field: "position", value: "shop_foreman" }]);
     const org = page(w, SHOP);
     expect(person(org, "pov").position?.title).toBe("Shop foreman");
     expect(person(org, "pov").powers.map((p) => [p.power, p.basis, p.id])).toEqual(expect.arrayContaining([["staff.hire", "position", "shop_foreman"]]));
@@ -237,23 +236,6 @@ describe("Live 2: the GM records Marcus's delegation to Jordan", () => {
     expect(org.you.delegations[0]?.until).toContain("2026");
     expect(person(org, "pov").powers.find((p) => p.power === "money.spend")).toEqual({ power: "money.spend", basis: "delegate", id: "marcus_delgado", words: "spend its money" });
     expect(givable(org)).toEqual(expect.arrayContaining(["money.spend"]));
-  });
-});
-
-describe("GM → Orgs", () => {
-  test("Play's editors open the GM's sheets, and the GM's page gives every Rules control", () => {
-    expect(gmSheetFor(orgEditRoute(SHOP, "member", "pov"))).toEqual({ kind: "person", who: "pov" });
-    expect(gmSheetFor(orgEditRoute(SHOP, "position", "mechanic"))).toEqual({ kind: "position", id: "mechanic" });
-    expect(gmSheetFor(orgEditRoute(SHOP, "delegate"))).toEqual({ kind: "delegation", who: null });
-    expect(gmSheetFor(orgEditRoute(SHOP, "hire"))).toEqual({ kind: "job", id: null });
-    expect(gmSheetFor({ kind: "person", id: "pov" })).toBeNull();
-    const entry = gmView(portAlder("pov")).orgs.find((o) => o.page.id === SHOP);
-    if (!entry) throw new Error("no shop in GM → Orgs");
-    const org = gmPage(entry.page);
-    expect(isGmPage(org)).toBe(true);
-    expect(rulesControls(org)).toEqual({ positions: true, delegate: true, dues: false });
-    expect(peopleControls(org)).toEqual({ hire: false, admit: false, payout: false });
-    expect(memberControls(org, person(org, "pov"))).toEqual([]);
   });
 });
 
@@ -295,24 +277,6 @@ describe("a trust's People and payout (DESIGN §29.7)", () => {
     expect(play(w, "sir_alaric", payout)).toBe("");
     expect(w.state.accounts.acct_thorne_trust).toBe(before - 10_000);
     expect(peopleControls(page(manor("lady_honoria"), TRUST)).payout).toBe(false);
-  });
-
-  test("GM → Orgs: the trust's owners offer Pay out, Play's route opens the GM's sheet, and the GM's edit pays out", () => {
-    const w = manor("sir_alaric");
-    expect(gmSheetFor(orgEditRoute(TRUST, "payout"))).toEqual({ kind: "payout" });
-    const gm = gmView(w);
-    const entry = gm.orgs.find((o) => o.page.id === TRUST);
-    if (!entry) throw new Error("no trust in GM → Orgs");
-    const section: GmSectionProps = { chatId: "c", gm, currency: USD, reloadKey: "", busy: false, edit: () => Promise.resolve(true), reload: () => Promise.resolve(), changed: () => Promise.resolve(), send: () => Promise.reject(new Error("no backend")) };
-    const opened: GmOrgSheet[] = [];
-    const tree = GmOwners({ entry, section, open: (s) => opened.push(s) });
-    const pay = elements(tree).find((v) => v.type === Button && textOf(v.props.children) === "Pay out to its beneficiaries");
-    (pay?.props.onClick as () => void)();
-    expect(opened).toEqual([{ kind: "payout" }]);
-    expect(payoutOps(TRUST, "50", USD)).toEqual([{ op: "effect", effect: "economy.distribute", args: { business: TRUST, cents: 5_000 } }]);
-    const before = w.state.accounts.acct_thorne_trust ?? 0;
-    edit(w, payoutOps(TRUST, "50", USD));
-    expect(w.state.accounts.acct_thorne_trust).toBe(before - 5_000);
   });
 });
 

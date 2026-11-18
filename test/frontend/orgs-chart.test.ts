@@ -17,7 +17,6 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { CHART_DEPTH, controlChain, controlTree, defaultOpen, hasChart, reportingParents, reportingTree, rerooted, rowMenu, rowPress, treeRows, type ChartNode } from "../../src/packs/orgs/ui/chart-model";
 import { decodeOrgPage } from "../../src/packs/orgs/ui/decode";
 import { orgEditRoute } from "../../src/packs/orgs/ui/edit";
-import { gmPage } from "../../src/packs/orgs/ui/gm";
 import type { JsonValue } from "../../src/shared/json";
 import type { OrgView } from "../../src/shared/org-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -159,12 +158,6 @@ describe("menus by power", () => {
     expect(menu(jordan, "p:foreman/h:danny_okafor")).toEqual(["open"]);
     const row = treeRows(jordan, new Set(all(jordan).map((n) => n.key))).find((r) => r.node.key === "p:foreman/h:danny_okafor");
     expect(row ? rowPress(row) : null).toBe("open");
-  });
-
-  test("GM → Orgs' page offers everything, as its parts do", () => {
-    const tree = reportingTree(gmPage(page(portAlder("pov", chain), SHOP)));
-    expect(menu(tree, "p:manager")).toEqual(["edit", "under", "move", "remove", "appoint", "admit", "hire"]);
-    expect(menu(tree, "p:mechanic")).toEqual(["edit", "under", "move", "remove", "appoint", "admit", "hire"]);
   });
 });
 

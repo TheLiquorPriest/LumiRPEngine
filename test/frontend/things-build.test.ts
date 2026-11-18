@@ -23,7 +23,6 @@ import type { ThingRow } from "../../src/shared/thing-view";
 import { presumedLine, whoseWords } from "../../src/shared/thing-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
-import { Rig } from "../support/rig";
 import { propsOf, type Props } from "../support/tree";
 
 const reg = createRegistry(ALL_PACKS);
@@ -83,16 +82,6 @@ describe("the Things read", () => {
     expect(findThingIds(ctx, "wal")).toEqual(["pov_wallet"]);
     const fridge = thingTypes(ctx).find((t) => t.id === "refrigerator");
     expect(fridge).toMatchObject({ table: "economy.catalog", size: "furniture" });
-  });
-
-  test("the backend answers lre.things from the draft, and refuses what isn't a thing", async () => {
-    const rig = new Rig({ shipped: true });
-    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
-    const list = rig.body(await rig.send({ type: "lre.things", scope: "build", worldId, op: "list" })).list as { rows: ThingRow[] };
-    expect(list.rows.some((r) => r.id === "pov_wallet")).toBe(true);
-    expect((rig.body(await rig.send({ type: "lre.things", scope: "build", worldId, op: "find", words: "pontoon keys" })).found as string[])[0]).toBe("pontoon_keys");
-    const missing = await rig.send({ type: "lre.things", scope: "build", worldId, op: "thing", entity: "pov" });
-    expect(missing.type).toBe("lre.error");
   });
 });
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { initialUi } from "../../src/frontend/app";
 import { claimedThings, findEntities } from "../../src/frontend/gm/editor";
 import { gmAt, hideTruth, revealTruth } from "../../src/frontend/gm/gate";
-import { placesInOrder } from "../../src/frontend/gm/sections";
 import { buildGmWorld } from "../../src/engine/gm-view";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { Working } from "../../src/engine/working";
@@ -43,31 +42,6 @@ describe("World's search", () => {
     expect(findEntities(all, "  ROS ", "").map((e) => e.id)).toEqual(["npc_rosie"]);
     expect(findEntities(all, "npc_", "vehicle")).toEqual([]);
     expect(findEntities(all, "civic", "").map((e) => e.id)).toEqual(["civic"]);
-  });
-});
-
-describe("GM Places", () => {
-  const place = (id: string, parent: string | null): GmView["places"][number] => ({ id, name: id, visibility: "public", parent, pins: 0 });
-
-  test("each place reads under its parent, depth first, in the world's order", () => {
-    const order = placesInOrder([place("office", "diner"), place("diner", null), place("apartment", null), place("booth", "diner"), place("drawer", "office")]);
-    expect(order.map((p) => [p.place.id, p.depth])).toEqual([
-      ["diner", 0],
-      ["office", 1],
-      ["drawer", 2],
-      ["booth", 1],
-      ["apartment", 0],
-    ]);
-  });
-
-  test("a place under a parent the GM view doesn't list is at the top, and a loop of parents still lists every place once", () => {
-    const order = placesInOrder([place("cellar", "gone"), place("a", "b"), place("b", "a"), place("self", "self")]);
-    expect(order.map((p) => [p.place.id, p.depth])).toEqual([
-      ["cellar", 0],
-      ["a", 0],
-      ["b", 0],
-      ["self", 0],
-    ]);
   });
 });
 

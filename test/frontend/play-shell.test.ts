@@ -20,7 +20,6 @@ const catalog: UiCatalog = {
   configs: new Map(),
   chips: new Map(),
   previews: new Map(),
-  gmSections: [],
   fields: [],
   placeFields: [],
   sheets: new Map(),

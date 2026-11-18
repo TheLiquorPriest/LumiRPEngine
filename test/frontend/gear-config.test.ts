@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { ChoiceInput, NumberInput } from "../../src/frontend/build/schema-form";
-import { SettingRow, type Reset } from "../../src/frontend/settings/kit";
+import { SettingRow, type Reset } from "../../src/frontend/setting-row";
 import { ContainerRows, GearConfig, SavedSetRows } from "../../src/packs/gear/ui/config";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import type { JsonObject } from "../../src/shared/json";

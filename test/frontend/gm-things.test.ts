@@ -17,7 +17,6 @@ import { buildContext, thingPage, thingPicks, thingsList, thingTypes } from "../
 import { buildClasses, HoldsSection, ThingRowView } from "../../src/frontend/build/things";
 import { AddPicker, RefPicker } from "../../src/frontend/build/form-kit";
 import { Button, Disclosure, HostSwitch, ListRow, NumberStepper, Section } from "../../src/frontend/components";
-import { thingsSummary, tidyRequest, TidySwitch } from "../../src/frontend/gm/chat-things";
 import type { BulkEditor } from "../../src/frontend/gm/editor";
 import { FieldRow, Relations } from "../../src/frontend/gm/entity";
 import { addEdit, allWorn, bulkEdit, bulkLoans, GmAddSheet, GmSets, gmSets, GmThingBody, HereView, KeepList, ThingsBulkBar, TidyCard, TidyList, hereSections, isThingKind, keepKey, type BulkSheet, type GmThingBodyProps, type ThingSheet } from "../../src/frontend/gm/things";
@@ -467,31 +466,5 @@ describe("a person's outfits and loadouts on their GM page", () => {
       { ops: [{ op: "item", change: { do: "set_apply", who: "pov", set: "set_keys" } }], done: "Jordan Ellis changed into Keys out." },
       { ops: [{ op: "item", change: { do: "set_drop", who: "pov", set: "set_watch" } }], done: "Jordan Ellis no longer keeps Watch on." },
     ]);
-  });
-});
-
-describe("GM → This chat → Things", () => {
-  test("following the world's setting, it says so; its own setting starts from the world's and sends lre.chat.knowledge with tidy, null to follow again", () => {
-    const sent: (boolean | null)[] = [];
-    const following = TidySwitch({ tidy: { chat: null, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
-    expect(find(following, HostSwitch).map((p) => [p.label, p.checked])).toEqual([["This chat has its own setting", false]]);
-    expect(textOf(following)).toContain("It follows the world's setting (Build → Packs → gear → Tidy up), now On.");
-    expect(thingsSummary({ chat: null, world: true })).toBe("Tidy impossible holds every turn: on · the world's setting");
-    press(labelled(following, HostSwitch, "This chat has its own setting"), true);
-    const own = TidySwitch({ tidy: { chat: true, world: true }, busy: false, onChange: (tidy) => sent.push(tidy) });
-    expect(find(own, HostSwitch).map((p) => [p.label, p.checked])).toEqual([
-      ["This chat has its own setting", true],
-      ["Tidy impossible holds every turn in this chat", true],
-    ]);
-    press(labelled(own, HostSwitch, "Tidy impossible holds every turn in this chat"), false);
-    press(labelled(own, HostSwitch, "This chat has its own setting"), false);
-    expect(sent).toEqual([true, false, null]);
-    expect(thingsSummary({ chat: false, world: true })).toBe("Tidy impossible holds every turn: off · this chat's own");
-    expect(tidyRequest("chat_1", false)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: false });
-    expect(tidyRequest("chat_1", null)).toEqual({ type: "lre.chat.knowledge", chatId: "chat_1", tidy: null });
-    // A world that has it off: the chat's own setting starts off too.
-    const off: (boolean | null)[] = [];
-    press(labelled(TidySwitch({ tidy: { chat: null, world: false }, busy: false, onChange: (tidy) => off.push(tidy) }), HostSwitch, "This chat has its own setting"), true);
-    expect(off).toEqual([false]);
   });
 });

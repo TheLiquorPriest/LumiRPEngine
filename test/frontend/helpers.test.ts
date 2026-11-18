@@ -6,7 +6,6 @@ import { kindFields, refOptions } from "../../src/frontend/build/schema-form";
 import { cellProblem } from "../../src/frontend/build/table-editor";
 import { parseFixValue } from "../../src/frontend/fix-editor";
 import { visiblePanels } from "../../src/frontend/play/play";
-import { settingsTimePatch, speedRows } from "../../src/frontend/time-controls";
 import type { PanelDef } from "../../src/frontend/registry";
 import type { UiCatalog } from "../../src/frontend/ui-registry";
 import { slotProblems } from "../../src/frontend/build/schedule-form";
@@ -167,27 +166,10 @@ describe("Build kind pickers", () => {
   });
 });
 
-describe("time settings patches", () => {
-  test("each time control maps to its settings path; scope-less ones without a scope give no patch", () => {
-    expect(settingsTimePatch({ control: "tick", scope: { sceneType: "action" }, to: 0.5 })).toEqual({ time: { sceneTicks: { action: 0.5 } } });
-    expect(settingsTimePatch({ control: "tick", scope: { all: true }, to: 1 })).toEqual({});
-    expect(settingsTimePatch({ control: "interrupt", scope: { interrupt: "bill" }, to: "stop" })).toEqual({ time: { interrupts: { bill: "stop" } } });
-    expect(settingsTimePatch({ control: "speed_through", scope: { activity: "sleep" }, to: { mode: "auto", thresholdMinutes: 60 } })).toEqual({ time: { speedThrough: { sleep: { mode: "auto", thresholdMinutes: 60 } } } });
-    expect(settingsTimePatch({ control: "pause", scope: { all: true }, to: true })).toEqual({});
-  });
-
-  test("Speed through lists its four activities and the world's own, and one without a policy shows none rather than a default", () => {
-    const rows = speedRows({ sleep: { mode: "auto", thresholdMinutes: 60 }, ferry: { mode: "offer", thresholdMinutes: 15 } });
-    expect(rows.map((r) => r.activity)).toEqual(["sleep", "work_shift", "travel", "waiting", "ferry"]);
-    expect(rows.find((r) => r.activity === "sleep")?.policy).toEqual({ mode: "auto", thresholdMinutes: 60 });
-    expect(rows.find((r) => r.activity === "travel")?.policy).toBeNull();
-  });
-});
-
 describe("Play panels", () => {
   const Empty = () => null;
   const panel = (id: string, order: number): PanelDef => ({ id, label: id, order, home: "now", component: Empty });
-  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), gmSections: [], fields: [], placeFields: [], sheets: new Map(), glances: [], orgTabs: [], placeParts: [], packs: [] };
+  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), fields: [], placeFields: [], sheets: new Map(), glances: [], orgTabs: [], placeParts: [], packs: [] };
 
   test("core panels always show; a pack panel shows once its view is in the state", () => {
     const view = { panels: { "economy.money": { level: 1 } } } as unknown as StateView;

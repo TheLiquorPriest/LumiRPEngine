@@ -18,7 +18,6 @@ import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
 import { Badge, Button, ListRow, Row } from "../../src/frontend/components";
 import { GmPage } from "../../src/frontend/gm/ui";
-import { PlaceEntryPage, PlacesList } from "../../src/frontend/gm/sections";
 import { entryDraft, EntryForm, entryOps, PremiseRows, type EntryDraft } from "../../src/frontend/place-entry";
 import type { OrgTabDef } from "../../src/frontend/registry";
 import { buildCatalog } from "../../src/frontend/ui-registry";
@@ -189,37 +188,5 @@ describe("GM → Orgs → Alder Automotive → Property", () => {
     if (!cleared) throw new Error("no place");
     expect(entryOps(cleared, { ...entryDraft(cleared), keys: "" })).toEqual([{ op: "effect", effect: "orgs.entry", args: { place: SHOP_PLACE, keys: "none" } }]);
     expect(entryOps(cleared, { ...entryDraft(cleared), keys: "default" })).toEqual([{ op: "effect", effect: "orgs.entry", args: { place: SHOP_PLACE, keys: "default" } }]);
-  });
-});
-
-describe("GM → Places: Marcus's house (Live 4's route)", () => {
-  test("12 Birch Lane opens whose it is; set to owner only by one edit, Jordan has no leave there", () => {
-    const w = portAlder("pov", (world) => {
-      const marcus = world.entities.marcus_delgado;
-      if (marcus) marcus.fields.place = SHOP_PLACE;
-    });
-    const gm = gmOf(w);
-    const opened: string[] = [];
-    const list = PlacesList({ gm, onOpen: (id) => opened.push(id) });
-    const row = find(list, ListRow).find((p) => p.title === "12 Birch Lane");
-    expect([row?.subtitle, row?.chevron]).toEqual(["In Port Alder", true]);
-    (row?.onClick as () => void)();
-    expect(opened).toEqual([HOUSE]);
-    const entry = gm.places.find((p) => p.id === HOUSE)?.entry;
-    if (!entry) throw new Error("no entry for 12 Birch Lane");
-    expect([entry.owners, entry.words, entry.inPlay]).toEqual([["Marcus Delgado"], "Anyone", false]);
-    const draft: EntryDraft = { ...entryDraft(entry), entry: "owner" };
-    const page = PlaceEntryPage({ name: "12 Birch Lane", entry, draft, busy: false, onDraft: () => undefined, onSave: () => undefined, onBack: () => undefined });
-    expect(find(page, GmPage).map((p) => [p.title, p.subtitle])).toEqual([["12 Birch Lane", "Marcus Delgado's"]]);
-    expect(find(page, EntryForm).map((p) => p.keys)).toEqual([true]);
-    expect(withoutLeave(w.ctx, "pov", HOUSE)).toBe(false);
-    const ops = entryOps(entry, draft);
-    expect(ops).toEqual([{ op: "effect", effect: "orgs.entry", args: { place: HOUSE, entry: "owner" } }]);
-    edit(w, ops);
-    const after = gmOf(w);
-    const set = after.places.find((p) => p.id === HOUSE)?.entry;
-    expect([set?.entry, set?.playEntry, set?.words, set?.inPlay]).toEqual(["owner", "owner", "Owner only", true]);
-    expect(find(PlacesList({ gm: after, onOpen: () => undefined }), ListRow).find((p) => p.title === "12 Birch Lane")?.subtitle).toBe("In Port Alder · Owner only");
-    expect(withoutLeave(w.ctx, "pov", HOUSE)).toBe(true);
   });
 });
