@@ -1,5 +1,6 @@
 ---
 description: Example. Not in force while it sits in `examples/`; copy it into `rules/` to switch it on. Flags a reply that spoke for the player's character. A question is asked after the reply is written, so this rule cannot stop a reply; it tells the Author in the next briefing. To stop one as it is written, use a pattern rule (`condition:`) instead. A reminder of what the file for every agent says about the player's character, so it goes when that file goes.
+title: A reply speaks for the player's character
 agents: [author]
 needs: ALL-AGENTS
 scope: [reply]
