@@ -14,7 +14,7 @@ RPE is an application for roleplay with AI models. It runs beside [Lumiverse](ht
 - [Bun](https://bun.sh) 1.4 or later, on the machine that runs Lumiverse.
 - A Lumiverse you can sign in to, and an admin of it to approve the extension's permissions.
 - A model connection: an account and key with a provider (DeepSeek, OpenAI, Anthropic, OpenRouter and others), or a provider that signs in without a key.
-- For a service that starts by itself: Linux with systemd. Anywhere else, run RPE in the foreground.
+- For a service that starts by itself: Linux with systemd. Anywhere else, run RPE in the foreground, or keep it running with your system's own service manager ([how](docs/install.md#keep-it-running-on-macos-windows-and-in-a-container)).
 
 ## From nothing to a first reply
 
@@ -41,23 +41,20 @@ In these steps, `rpe` stands for `bun <the folder of this repository>/dist/rpe.j
 
 ## The pages
 
-RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own web app. The pages of one chat: **Live** (what the agents are doing now), **Turns** (each turn and what its agents did; **Settle now**), **World** (the world's state at any turn), **Cast** (each character's whole record), **Story** (the story record, and bootstrap: setting RPE's agents to go over a chat's past), **Lore** (his books and the world's lore as RPE understands them), **Prompt** (how the chat's preset is cut into named parts) and **Play** (the previous build's play panels and HUD, running against RPE). The pages for everything: **Build** (the previous build's world builder, running against RPE), **Files**, **Connections**, **Settings**, **Runtime**, **Storage** and **Migration**. The web app also has **Chats**. What each does, and what Play and Build cannot do yet, is in [Install and run](docs/install.md#the-pages).
+RPE's pages are in a tab of Lumiverse's drawer called **RPE**, and in RPE's own web app. The pages of one chat: **Live** (what the agents are doing now), **Turns** (each turn and what its agents did; **Settle now**), **Sessions** (the Author's working memory between turns), **World** (the world's state at any turn), **Places**, **Quests**, **Cast** (each character's whole record), **Story** (the story record, and bootstrap: setting RPE's agents to go over a chat's past), **Lore** (your books and the world's lore as RPE understands them), **Prompt** (how the chat's preset is cut into named parts) and **Play** (the play panels: scene, map, money, gear, vehicles, people, organizations, quests and the rest). The pages for everything: **Build** (the world builder), **Jobs**, **Agents**, **Rules**, **Files**, **Connections**, **Settings**, **Runtime**, **Storage** and **Migration**. The web app also has **Chats**. RPE also draws in the chat itself: the HUD, the controls beside the composer, and the line and markers under each reply. What each does is in [Install and run](docs/install.md#the-pages).
 
 ## Already using the previous build?
 
-Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over with Lumiverse's own "switch branch". Your chats and their connection keep working, and you can go back.
+Do not install over it. Read [Moving from the previous build](docs/migration.md) first. You rehearse the move, run it for real, and only then switch the extension over with Lumiverse's own branch switch. Your chats and their connection keep working, and you can go back to the previous build, which is kept on the branch `before-standalone`.
 
-## What this build does not have yet
+## What is not in this build
 
-- **The HUD inside the chat** (the floating status pill and its sheets). The previous build's panels are on the Play page instead.
-- **On the Play page:** a tap that goes with your next message or plays at once as your message; the journal and the chips; the map full screen, the actions sheet (Act, Actions, Timelapse) and the World sheet; the things browser; walking on the map; a chat's own choices (knowledge tracking, what the narrator knows).
-- **On the Build page:** its background jobs, lore and secrecy tools.
-- **The `lumirpengine` command line and MCP server for outside harnesses do not work after the switch.** They still talk to the previous build's extension, which the new one replaces.
-- The Places, Quests, Rules, Agents and Sessions pages, and a Jobs page of its own: a chat's jobs are listed on its Turns page and all of yours on Chats, each with Cancel while it is queued or running.
-- On the pages there are: Live's pause and "say something to the Author"; the Turn page's lanes, perceptions, gap checks, consents, unsourced items, open items, and a migrated turn's old record; editing the world, and a value's history; the Story page's beats beside the prose, its uncovered stretches and its story so far; the Cast page's game side, lore bindings and setting a casting.
-- Anything RPE adds to the chat itself in Lumiverse.
-- Talk.
-- Writing to your Lumiverse lore books.
+Two things come with a later build:
+
+- **The `lumirpengine` command line and MCP server for outside harnesses.** Until then the commands that read or change worlds and chats say that the command returns with a later build; worlds are edited in **Build**.
+- **Talk, the GM assistant chat.** The assistant's definition ships, and nothing starts it yet. The GM assistant threads you had in the previous build are kept in the migration's backup.
+
+RPE never writes to your own Lumiverse lore books; a chat can have a book of RPE's own, which is off until you switch on `lore.projection`.
 
 ## Where to go next
 
