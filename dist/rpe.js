@@ -119491,6 +119491,8 @@ class Builds {
   #ready = null;
   #fellBack = null;
   #arriving = Promise.resolve();
+  #arrivals = 0;
+  #pressed = false;
   #update = null;
   constructor(deps) {
     this.deps = deps;
@@ -119544,16 +119546,32 @@ class Builds {
     return this.#checking;
   }
   arrived(hash, now = false) {
+    this.#arrivals += 1;
     const run2 = this.#arriving.then(() => this.#arrive(hash, now));
     this.#arriving = run2.catch(() => {
       return;
     });
-    return run2;
+    return run2.finally(() => {
+      this.#arrivals -= 1;
+      if (this.#arrivals === 0)
+        this.#unpress();
+    });
+  }
+  #unpress() {
+    if (!this.#pressed)
+      return;
+    this.#pressed = false;
+    if (this.#restart === "waiting" && this.#ready === null)
+      this.#restart = "none";
   }
   async#arrive(hash, now) {
     const { file, log, version } = this.deps;
     const copy = file?.copy;
-    const answer = (taken) => ({ taken, words: this.status().words });
+    const answer = (taken) => {
+      if (!taken)
+        this.#unpress();
+      return { taken, words: this.status().words };
+    };
     if (file === null || copy === undefined) {
       this.#refused = "RPE runs from no installed copy of its own, so it takes no app file the extension brings: restart it onto a new one by hand";
       this.#arrivedNow(this.#refused);
@@ -119600,14 +119618,21 @@ class Builds {
     this.#refused = null;
     this.#ready = { build: fetched.build, hash: stated };
     this.#enter("restart");
-    log.info("RPE has a new build that starts, and will swap onto it.", { running: version, build: fetched.build });
-    if (!settings.restart && !now)
+    const pressed = now || this.#pressed;
+    this.#pressed = false;
+    if (pressed)
+      log.info("RPE has a new build that starts, and restarts onto it now, as you pressed Update now.", { running: version, build: fetched.build });
+    else if (settings.restart)
+      log.info("RPE has a new build that starts, and will restart onto it once no turn or job runs.", { running: version, build: fetched.build });
+    else
+      log.info(`RPE has a new build that starts, and waits for you to press Update now: "${DEFS.restart.name}" is off, so RPE does not restart onto it by itself.`, { running: version, build: fetched.build });
+    if (!settings.restart && !pressed)
       this.#restart = "off";
     else if (!await file.service())
       this.#restart = "by hand";
     else {
       this.#restart = "waiting";
-      this.#waitThenRestart(file, copy, now).catch((error) => {
+      this.#waitThenRestart(file, copy, pressed).catch((error) => {
         this.#restart = "none";
         this.#leave(error instanceof Error ? error.message : String(error));
         log.error("RPE's restart onto its new build failed; it goes on running its build", { error: error instanceof Error ? error.message : String(error) });
@@ -119618,10 +119643,15 @@ class Builds {
   async now() {
     const { file } = this.deps;
     if (file?.copy !== undefined) {
-      const ready = this.#ready;
-      if (ready === null)
+      const service = await file.service();
+      if (this.#ready === null) {
+        if (service && this.#arrivals > 0) {
+          this.#pressed = true;
+          this.#restart = "waiting";
+        }
         return this.status();
-      if (!await file.service())
+      }
+      if (!service)
         this.#restart = "by hand";
       else if (this.#restart !== "restarting") {
         this.#restart = "restarting";
@@ -119644,14 +119674,16 @@ class Builds {
     const agree = broken === null && (disk === null || disk === version) && (extension === null || extension === version);
     const parts = { running: version, disk, broken, extension, agree, restart: this.#restart };
     const update2 = this.#update === null ? null : { build: this.#update.build, stages: this.#update.stages.map((s) => ({ ...s })) };
-    return { ...parts, update: update2, words: wordsOf10(parts, copy, this.#extras(copy, disk)) };
+    return { ...parts, update: update2, words: wordsOf10({ ...parts, restart: this.#pressed ? "none" : parts.restart }, copy, this.#extras(copy, disk)) };
   }
   #extras(copy, disk) {
     if (!copy)
       return [];
     const { version } = this.deps;
     const extras = [];
-    if (this.#extension !== null && this.#extension !== version && this.#ready === null && this.#refused === null && (disk === null || disk === version))
+    if (this.#pressed)
+      extras.push(`You pressed Update now: RPE will restart on ${this.#sourceBuild === null ? "the new build" : `build ${this.#sourceBuild}`} as soon as it has checked that it starts.`);
+    else if (this.#extension !== null && this.#extension !== version && this.#ready === null && this.#refused === null && (disk === null || disk === version))
       extras.push(NOT_TOLD);
     if (this.#fellBack !== null)
       extras.push(this.#fellBack);
@@ -280261,5 +280293,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "3fa1ba7d", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "73a70ebb", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
