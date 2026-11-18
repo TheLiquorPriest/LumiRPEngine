@@ -107,7 +107,7 @@ export function NotCarriedPresses(props: { view: StateView }) {
     <>
       {missed.map((p) => (
         <span key={p.request} class="lre-chat-staged lre-chat-staged-missed" data-lre-not-carried={p.request} role="group" aria-label="Not carried out">
-          <span class="lre-chat-staged-text" title={`Not carried out: ${p.label}. The turn you pressed it for did not carry it out, nor had the world refuse it.`}>
+          <span class="lre-chat-staged-text" title={`Not carried out: ${p.label}. The turn you pressed it for did not carry it out, and the world did not refuse it.`}>
             Not carried out: {p.label}
           </span>
           {next === undefined ? null : (
