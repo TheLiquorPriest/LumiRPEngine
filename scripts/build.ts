@@ -101,8 +101,11 @@ const LEFT_OUT: readonly string[] = ["supports-color"];
 /** What the extension's backend may not hold, by its path from the repository's root: the server's own areas, any package (pi, the SDKs), and the harness. */
 const APPLICATION = /^(?:src\/(?:app|store|turn|tree|iface|cast|story|lore|migrate|ui|cli)\/|node_modules\/|\.\.\/)/;
 
-/** What the extension's first file may not hold, by its path from the repository's root: the previous build's packs and engine code, Build's own, and the kept views the second file carries (`src/ui/kept/chunk.ts`). */
-const LIGHT_REFUSES = /^src\/(?:packs\/|engine\/|frontend\/(?:build|gm|things)\/|frontend\/play\/(?!activity\.)|frontend\/(?:packs|palette|overlays)\.|ui\/kept\/(?:build|catalog|chunk|things)\.|ui\/kept\/play\/mount\.)/;
+/**
+ * What the extension's first file may not hold, by its path from the repository's root: the previous build's packs and engine code, Build's own, and the kept views the second file carries (`src/ui/kept/chunk.ts`).
+ * The one file of the engine it may hold is the reader of shipped lines (`src/engine/lines.ts`): a few lines that import nothing, which the shared modules name where they word a line on the server.
+ */
+const LIGHT_REFUSES = /^src\/(?:packs\/|engine\/(?!lines\.ts$)|frontend\/(?:build|gm|things)\/|frontend\/play\/(?!activity\.)|frontend\/(?:packs|palette|overlays)\.|ui\/kept\/(?:build|catalog|chunk|things)\.|ui\/kept\/play\/mount\.)/;
 
 /** Builds everything but the pages. */
 const NO_PAGES = "--no-pages";
