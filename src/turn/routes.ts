@@ -426,7 +426,6 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       does: "The newest turn on the chat's path in one read, as the turn's own route gives it: a turn going on now, else the newest of the chat's own on its path, however far back it was swiped.",
       query: runQuery,
       reply: turnReply,
-      joined: true,
       handle: ({ user, params, query }) => {
         const store = turns.store.user(user);
         const going = turns.runs.ofChat(user, params.chat).sort((a, b) => b.received - a.received)[0];
