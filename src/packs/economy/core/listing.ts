@@ -200,7 +200,7 @@ function listShares(api: FinanceApi, ctx: ReadContext, a: Args): LedgerEvent[] |
     next = { asset: assetIdFor(ctx, business), symbol, float: units, since: ctx.state.clock, price: each, ...(cls !== "" && cls !== classes[0]?.id ? { class: cls } : {}) };
   }
   const memo = say("org_log_units_new_units_of_name_sold_on", { units: units, name: name, each: moneyWords(ctx, each) });
-  const posted = api.post(ctx, [{ account: marketOf(api, next.asset), amount: -cents }, { account: deposit, amount: cents }], { memo, kind: "sale", category: "investment", payer: "The market" });
+  const posted = api.post(ctx, [{ account: marketOf(api, next.asset), amount: -cents }, { account: deposit, amount: cents }], { memo, kind: "sale", category: "investment", payer: say("fin_the_market") });
   if (isRejection(posted)) return posted;
   const words = listing ? say("org_log_offered_units_more_units_on_the_market", { units: units, each: moneyWords(ctx, each), cents: moneyWords(ctx, cents) }) : say("org_log_listed_units_units_on_the_market_as", { units: units, symbol: next.symbol, each: moneyWords(ctx, each), cents: moneyWords(ctx, cents) });
   return unit([
@@ -301,7 +301,7 @@ function marketSale(api: FinanceApi, ctx: ReadContext, sale: MarketSale): Ledger
   const unusable = api.mayUse(ctx, party, to, "into");
   if (unusable) return unusable;
   const memo = say("org_log_sold_units_units_of_name_on_the", { units: units, name: name, price: moneyWords(ctx, Math.round(price)) });
-  const posted = cents > 0 ? api.post(ctx, [{ account: marketOf(api, listing.asset), amount: -cents }, { account: to, amount: cents }], { memo, kind: "sale", category: "investment", payer: "The market" }) : [];
+  const posted = cents > 0 ? api.post(ctx, [{ account: marketOf(api, listing.asset), amount: -cents }, { account: to, amount: cents }], { memo, kind: "sale", category: "investment", payer: say("fin_the_market") }) : [];
   if (isRejection(posted)) return posted;
   let left = units;
   const next = owners.map((o) => {
@@ -416,10 +416,10 @@ function marketView(api: FinanceApi, ctx: ReadContext, business: EntityId, viewe
       if (n <= QTY_EPSILON) continue;
       held += n;
       const hidden = hiddenFrom(ctx, viewer, party);
-      holders.push(line(hidden ? null : party, hidden ? "an investor" : labelOf(ctx, party), n));
+      holders.push(line(hidden ? null : party, hidden ? say("fin_an_investor") : labelOf(ctx, party), n));
     }
     const outside = Math.max(0, listing.float - held);
-    if (outside > QTY_EPSILON) holders.push(line(null, "The public", outside));
+    if (outside > QTY_EPSILON) holders.push(line(null, say("fin_the_public"), outside));
     const asset = assetOf(ctx, listing.asset);
     view = {
       asset: listing.asset,

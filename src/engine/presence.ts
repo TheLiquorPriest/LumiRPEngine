@@ -15,6 +15,7 @@ import type { RouteDef, WorldDoc } from "../shared/world";
 import { placeChain } from "./lore-pins";
 import { placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
+import { say } from "./lines";
 
 /**
  * How many levels apart two places may be, one inside the other, and still be together: a floor, a
@@ -119,5 +120,5 @@ export function inPovScene(world: WorldDoc, state: Readonly<WorldState>, id: Ent
 
 /** How the People section names the POV, first of everyone there; the helpers' facts lead with the POV already. */
 export function povLead(name: string): string {
-  return `${name} (you)`;
+  return say("eng2_name_you", { name });
 }

@@ -71,7 +71,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     if (!r.ok) lines.push(say("eng_what_doesnt_happen_reason_not_possible_here", { what: what, reason: r.failed?.reason, if_requirement: r.failed && r.failed.code !== "requirement" }));
     // A check the adjudication policy settled without a roll is decided all the same.
     else if (r.check || r.adjudged) lines.push(say("eng_what_the_result_is_decided_outcome_took", { what: what, outcome: r.outcome, took: took, changed: changed }));
-    else lines.push(`${what} happens${took}.${changed}`);
+    else lines.push(say("eng2_what_happens_took_changed", { what, took, changed }));
   }
   const tl = input.timelapse;
   if (tl) {

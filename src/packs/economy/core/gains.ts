@@ -79,7 +79,7 @@ function disposeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const part = Math.round((b.basis * pct) / 100);
       const held = b.since === null ? Infinity : state.clock - b.since;
       const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held >= 2 * YEAR_MINUTES;
-      recordGain(state, ctx.world, party, { term: held >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...(home ? { home: true } : {}) });
+      recordGain(state, ctx.world, party, { term: held >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, say("fin_sold_entity", { entity: labelOf(ctx, entity) })), qty: pct / 100, ...(home ? { home: true } : {}) });
       setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
     },
     describe: (e, ctx, viewer) => (viewer ? "" : say("stake_sold", { party: labelOf(ctx, str(e, "party")), pct: numOf(e.data.pct), entity: labelOf(ctx, str(e, "entity")) })),

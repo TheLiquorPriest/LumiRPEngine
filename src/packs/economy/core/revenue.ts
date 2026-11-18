@@ -67,8 +67,6 @@ const ADJUSTED_EVENT = "economy.revenue_adjusted";
 export const REVENUE_FACT = "revenue";
 
 /** Who a royalty's severance tax and deductions are paid to, outside the world. */
-const SEVERANCE_PAYEE = "Severance tax";
-const DEDUCTIONS_PAYEE = "Post-production costs";
 
 const MINUTES_A_YEAR = 365 * 1440;
 
@@ -638,7 +636,7 @@ function royaltyPosting(api: FinanceApi, ctx: ReadContext, flow: Flow, id: Entit
     const party = land.party;
     const out = (cents: number, payee: string, category: string): LedgerEvent[] =>
       cents > 0 ? posting([{ account, amount: -cents }, { account: outsideAccount(payee), amount: cents }], { memo: `${flow.label}: ${payee.toLowerCase()}`, kind: "payment", category, flow: flow.id, at, counterparty: payee, payer: party }) : [];
-    extra.push(...out(severance, SEVERANCE_PAYEE, REVENUE_CATEGORIES.severance), ...out(deductions, DEDUCTIONS_PAYEE, REVENUE_CATEGORIES.deductions), ...incomeFor(id, party, t.cents - deductions - severance, "royalty"));
+    extra.push(...out(severance, say("fin_severance_tax"), REVENUE_CATEGORIES.severance), ...out(deductions, say("fin_post_production_costs"), REVENUE_CATEGORIES.deductions), ...incomeFor(id, party, t.cents - deductions - severance, "royalty"));
   }
   return { cents: earned.cents, lines: mergedLines(lines), memo: flow.label, kind: "income", category: REVENUE_CATEGORIES.royalties, extra: [...extra, recorded(r ? net : earned.cents)] };
 }

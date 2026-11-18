@@ -1207,7 +1207,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
   // The statuses the GM may give it: none for a household or the party, which hold none.
   const type = viewer === null ? orgTypeOf(ctx, org) : null;
   const statusable = type !== null && type !== "household" && type !== "party";
-  const consolidate = !corporate || !values ? say("org_log_only_a_c_corporation_paying_business_taxes") : filer !== undefined ? `${named(filer, "Its parent")}'s consolidated return files its income tax` : may !== null && !may.ok ? may.reason : null;
+  const consolidate = !corporate || !values ? say("org_log_only_a_c_corporation_paying_business_taxes") : filer !== undefined ? say("fin_filer_s_consolidated_return_files_its", { filer: named(filer, say("fin_its_parent")) }) : may !== null && !may.ok ? may.reason : null;
   return {
     income: exempt ? "exempt" : company ? (corporate ? "corporate" : "owners") : null,
     years,
@@ -1222,7 +1222,7 @@ export function taxesView(api: FinanceApi, ctx: ReadContext, org: EntityId, view
     exempt,
     statuses: statusable ? exemptStatuses(ctx) : null,
     consolidation,
-    filedBy: filer !== undefined ? named(filer, "its parent") : null,
+    filedBy: filer !== undefined ? named(filer, say("fin_its_parent_2")) : null,
     acts: viewer === null ? null : { consolidate },
     ...taxesExtra(api, ctx, org, corporate && values, viewer),
   };

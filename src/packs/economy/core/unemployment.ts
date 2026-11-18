@@ -18,7 +18,7 @@
 // settles the year before (with the credit reduction); SUTA pays each quarter ended and any unpaid
 // one before it. A company books both as payroll.
 
-import { say } from "../../../engine/lines";
+import { say, wordTable } from "../../../engine/lines";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
@@ -56,7 +56,7 @@ const DUE_SCHEDULE: FlowSchedule = { every: "year", months: [1, 4, 7, 10], days:
 
 export type UnemploymentKind = "futa" | "suta";
 
-const KIND_WORDS: Readonly<Record<UnemploymentKind, string>> = { futa: "Federal unemployment tax (FUTA)", suta: "State unemployment tax (SUTA)" };
+const KIND_WORDS: Readonly<Record<UnemploymentKind, string>> = wordTable("unemployment_kind", ["futa", "suta"]);
 const AUTHORITY: Readonly<Record<UnemploymentKind, string>> = { futa: "tax:federal", suta: "tax:state" };
 
 const numOrNull = (v: JsonValue | undefined): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);

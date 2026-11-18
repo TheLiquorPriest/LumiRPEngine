@@ -134,7 +134,7 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
       memo,
       kind: "income",
       category,
-      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", `${name} ${kind} reinvested`)],
+      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", say("fin_name_kind_reinvested", { name, kind }))],
       quiet: true,
     };
   }

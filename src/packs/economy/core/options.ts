@@ -58,7 +58,7 @@ function exerciseEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const contracts = takeFifo(lotsOf({ world: ctx.world, state, tables: ctx.tables }, option), numOf(e.data.qty));
       if (!contracts) return;
       const premium = contracts.taken.reduce((a, l) => a + l.cost, 0);
-      const label = strOf(e.data.label, `Exercised ${labelOf(ctx, option)}`);
+      const label = strOf(e.data.label, say("fin_exercised_option", { option: labelOf(ctx, option) }));
       // The contracts leave without a gain of their own: their cost moves to the units.
       applyLots(api, state, ctx.world, ctx.tables, option, -numOf(e.data.qty), 0, label, false);
       if (e.data.right === "call") applyLots(api, state, ctx.world, ctx.tables, into, numOf(e.data.units), cash + premium, label);
@@ -99,7 +99,7 @@ export function exercise(api: FinanceApi, ctx: ReadContext, x: Exercise): Ledger
   const strike = Math.round(units * a.option.strike);
   const account = accountOfHolding(ctx.state, x.holding);
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  const label = `Exercised ${qty} ${a.label}`;
+  const label = say("fin_exercised_qty_label", { qty, label: a.label });
 
   if (a.option.settlement === "cash") {
     const cash = Math.round(units * intrinsic(a.option.right, priceOf(ctx, under), a.option.strike));
@@ -180,7 +180,7 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
     const notes = (line: string, fields: LineFields): LedgerEvent[] => owners.flatMap((o) => api.note(ctx, o.party, "bill", line, fields));
     if (a.bond) {
       const cash = Math.round(qty * a.bond.face);
-      const label = `${a.label} matured`;
+      const label = say("fin_label_matured", { label: a.label });
       // Its last coupon is paid with it, to where its coupons go, and is the year's interest.
       const coupon = holdingIncome(api, ctx, holding, at.at, true);
       const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest", payer: a.label }) : [];
@@ -194,14 +194,14 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
     const under = assetOf(ctx, a.option.underlying);
     const value = under ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf(ctx, under, at.at), a.option.strike)) : 0;
     if (value > 0) {
-      const label = `${a.label} exercised at expiry`;
+      const label = say("fin_label_exercised_at_expiry", { label: a.label });
       const settled = settle(api, ctx, holding, a, qty, value, label);
       if (!isRejection(settled)) {
         out.push(...unit([...settled, ...notes("option_exercised", { asset: a.label, value: money(value) })]));
         continue;
       }
     }
-    out.push(...unit([lotsChange(ctx.state, holding, -qty, 0, "expire", `${a.label} expired`), ...notes("option_expired", { asset: a.label })]));
+    out.push(...unit([lotsChange(ctx.state, holding, -qty, 0, "expire", say("fin_label_expired", { label: a.label })), ...notes("option_expired", { asset: a.label })]));
   }
   return out;
 }

@@ -62,7 +62,7 @@ export function absentCash(ctx: ReadContext, action: string, params: JsonObject,
   if (!payee || !kindIs(ctx.registry, ctx.world, payee.kind, "person")) return null;
   const here = placeOfEntity(ctx.state, actor);
   if (here !== null && placeOfEntity(ctx.state, to) === here) return null;
-  return `Cash goes hand to hand, and ${labelOf(ctx, to)} isn't here: pay by card or from an account, or type how you hand it over to play it as a turn.`;
+  return say("fin_cash_goes_hand_to_hand_and", { to: labelOf(ctx, to) });
 }
 
 /** The cash rule's event, the GM's effect that records it, and the off-screen check. */

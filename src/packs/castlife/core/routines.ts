@@ -328,7 +328,7 @@ function windowSpan(window: { from: string; to: string }): { from: number; to: n
 
 /** The reason a routine block gives the player: what kind of block it is, never what it rests on. */
 function blockReason(block: RoutineBlock, from: Applied): string {
-  if (from.level === "builtin") return "basic need";
+  if (from.level === "builtin") return say("eng2_basic_need");
   return block.kind === "optional" ? "a habit" : "routine";
 }
 
@@ -474,7 +474,7 @@ export function sourceView(ctx: Pick<ReadContext, "world" | "state">, source: Ro
     case "lore": {
       // A World Info entry (`book:<bookId>/<entryId>`) the world being read doesn't hold goes by where it is.
       const title = own(ctx.world.lore, source.entry)?.title;
-      const fallback = wiFactIdOfLiveLore(source.entry) !== null ? `World Info: ${source.entry.slice("book:".length)}` : `Lore: ${source.entry}`;
+      const fallback = wiFactIdOfLiveLore(source.entry) !== null ? say("eng2_world_info_entry", { entry: source.entry.slice("book:".length) }) : say("eng2_lore_entry", { entry: source.entry });
       return { ...source, label: title !== undefined ? `Lore: ${title}` : fallback, ...(title !== undefined ? { title } : {}) };
     }
     case "sheet":
@@ -516,7 +516,7 @@ export function routineIssues(world: WorldDoc, reg: Registry, id: string, value:
     const seen = new Set<string>();
     const each = blocks.flatMap((b, i) => {
       const blockId = isRecord(b) && typeof b.id === "string" ? b.id : "";
-      const twice = blockId !== "" && seen.has(blockId) ? [`another block of this routine is ${blockId}`] : [];
+      const twice = blockId !== "" && seen.has(blockId) ? [say("eng2_another_block_of_this_routine_is", { blockId })] : [];
       seen.add(blockId);
       return [...blockShapeProblems(b, true), ...twice].map((message) => ({ severity: "error" as const, code: ROUTINE_LINT.shape, message: say("lint_routine_id_block_i_message", { id: id, i: i + 1, message: message }), path: `${at}.blocks.${i}` }));
     });
@@ -541,7 +541,7 @@ export function routineIssues(world: WorldDoc, reg: Registry, id: string, value:
     if (source?.type === "sheet" && !own(world.entities, source.entity)) warn(ROUTINE_LINT.source, `${path}.source`, say("lint_routine_id_block_id2_rests_on_entity", { id: id, id2: entry.id, entity: source.entity }));
     if (isOff(entry)) return;
     const b = entry;
-    const name = `Routine ${id}, block ${b.id}`;
+    const name = say("eng2_routine_id_block_id2", { id, block: b.id });
     if (b.place !== undefined && typeof b.place === "object" && "place" in b.place && !own(world.places, b.place.place)) warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_theres_no_place_place_it_happens", { name: name, place: b.place.place }));
     if (b.place !== undefined && typeof b.place === "object" && "nearest" in b.place && !scenes.has(b.place.nearest)) warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_no_place_has_the_scene_type", { name: name, nearest: b.place.nearest }));
     if (b.place === "with" && !b.company && b.days?.birthday !== "friend") warn(ROUTINE_LINT.place, `${path}.place`, say("lint_name_happens_with_its_company_but_names", { name: name }));

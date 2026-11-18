@@ -173,7 +173,7 @@ export function entryRefusal(ctx: EntryContext, viewer: EntityId | null, place: 
   if (entry === "members" && owners.some((o) => orgTypeOf(ctx, o) !== null)) return say("eng_members_only");
   const shown = owners.every((o) => viewer === null || o === viewer || canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, o));
   const names = owners.map((o) => own(ctx.state.entities, o)?.name ?? o);
-  return shown && names.length > 0 ? `Private: ${possessive(listOf(names))}` : say("eng_private");
+  return shown && names.length > 0 ? say("eng2_private_possessive", { possessive: possessive(listOf(names)) }) : say("eng_private");
 }
 
 /** Someone else there who acts and may enter it (at the place, in a part of it or around it in the same building): whose company makes an entry no trespass. Null for nobody. */

@@ -39,11 +39,11 @@ function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null 
     case "number":
     case "money":
       if (typeof v !== "number" || !Number.isFinite(v)) return say("lint_is_not_a_number");
-      if (f.min !== undefined && v < f.min) return `is below ${f.min}`;
-      if (f.max !== undefined && v > f.max) return `is above ${f.max}`;
+      if (f.min !== undefined && v < f.min) return say("eng2_is_below_min", { min: f.min });
+      if (f.max !== undefined && v > f.max) return say("eng2_is_above_max", { max: f.max });
       return f.type === "money" && !Number.isInteger(v) ? say("lint_is_not_whole_minor_units") : null;
     case "text":
-      return typeof v === "string" ? null : "is not text";
+      return typeof v === "string" ? null : say("eng2_is_not_text");
     case "bool":
       return typeof v === "boolean" ? null : say("lint_is_not_true_or_false");
     case "enum":
@@ -240,7 +240,7 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
       const raw: JsonValue | undefined = spec.args.class;
       if (raw === undefined || (isRecord(raw) && Object.values(raw).some((v) => typeof v === "string" && v.startsWith("=")))) return;
       const classes = classOf(raw);
-      const who = `A spawn in ${path}`;
+      const who = say("eng2_a_spawn_in_path", { path });
       const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: say("lint_who_gives_a_class_that_isnt_a", { who: who }) }];
       for (const p of problems) warn(`${path}.${i}`, p.code, say("lint_message_the_spawn_is_refused", { message: p.message }));
     });

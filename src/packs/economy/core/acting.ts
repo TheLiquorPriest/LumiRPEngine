@@ -106,7 +106,7 @@ function approvalFor(ctx: ReadContext, party: EntityId): NonNullable<EffectConte
 export function approvedWords(ctx: ReadContext, party: EntityId): string {
   const approval = approvalFor(ctx, party);
   if (!approval) return "";
-  return approval.by !== undefined && approval.by !== "" ? ` (approved by ${labelOf(ctx, approval.by)})` : " (approved)";
+  return approval.by !== undefined && approval.by !== "" ? ` ${say("fin_approved_by_by", { by: labelOf(ctx, approval.by) })}` : ` ${say("fin_approved")}`;
 }
 
 /**

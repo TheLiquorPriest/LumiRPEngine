@@ -133,7 +133,7 @@ function shapeProblem(reg: Registry, w: Working, type: FieldType, def: FieldDef,
       if (!def.of) return null;
       for (const item of value) {
         const problem = shapeProblem(reg, w, def.of, { ...def, type: def.of }, item);
-        if (problem) return `has an item that ${problem.replace(/^must be /, "isn't ")}`;
+        if (problem) return say("eng2_has_an_item_that_replace", { replace: problem.replace(/^must be /, "isn't ") });
       }
       return null;
     }

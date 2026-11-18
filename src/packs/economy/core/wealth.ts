@@ -94,7 +94,7 @@ function alertsFor(api: FinanceApi, ctx: ReadContext, party: EntityId): AlertLin
     if (!a) continue;
     const qty = qtyOf(lotsOf(ctx, id));
     if (a.option && a.option.expiry > ctx.state.clock && a.option.expiry - ctx.state.clock <= 7 * day) out.push({ tone: "warn", text: say("feed_contract_of_label_expire_expiry", { contract: unitsWord(qty, "contract"), label: a.label, expiry: dateText(ctx.world, a.option.expiry) }) });
-    if (a.bond && a.bond.maturity > ctx.state.clock && a.bond.maturity - ctx.state.clock <= 31 * day) out.push({ tone: "info", text: `${a.label} matures ${dateText(ctx.world, a.bond.maturity)}.` });
+    if (a.bond && a.bond.maturity > ctx.state.clock && a.bond.maturity - ctx.state.clock <= 31 * day) out.push({ tone: "info", text: say("fin_label_matures_maturity", { label: a.label, maturity: dateText(ctx.world, a.bond.maturity) }) });
   }
   return out;
 }
@@ -145,7 +145,7 @@ export function registerAssets(r: FinanceRegistry): void {
       const party = strOf(a.party) || ctx.world.pov;
       const to = strOf(a.to);
       const from = strOf(a.holding) || strOf(a.property) || strOf(a.business);
-      const where = to === "" ? "back to its owners" : to === "reinvest" ? "to be reinvested" : `to ${labelOf(ctx, to)}`;
+      const where = to === "" ? say("fin_back_to_its_owners") : to === "reinvest" ? say("fin_to_be_reinvested") : `to ${labelOf(ctx, to)}`;
       const what = strOf(a.property) !== "" ? "rent" : strOf(a.business) !== "" ? "profits" : "dividends";
       return actAs(ctx, { by: strOf(a.by), party, power: strOf(a.property) !== "" ? "property.manage" : "money.manage", line: () => say("org_log_sent_from_s_what_where", { from: labelOf(ctx, from), what: what, where: where }) }, () => {
         if (strOf(a.holding) !== "") return setRoute(r.api, ctx, party, strOf(a.holding), to);

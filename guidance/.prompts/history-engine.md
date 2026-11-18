@@ -232,3 +232,16 @@ eng_the_gate_of_reads: The gate of "{{what}}" reads
 eng_track_never_changes: what reads {{it}} in this track never changes, and only the GM's Stage moves the track past {{it}}
 eng_gate_never_opens: the gate never opens or closes
 eng_an_answer_that_names_none: an answer that names none
+eng2_what_happens_took_changed: {{what}} happens{{took}}.{{changed}}
+eng2_has_an_item_that_replace: has an item that {{replace}}
+eng2_private_possessive: Private: {{possessive}}
+eng2_name_you: {{name}} (you)
+eng2_is_below_min: is below {{min}}
+eng2_is_above_max: is above {{max}}
+eng2_is_not_text: is not text
+eng2_a_spawn_in_path: A spawn in {{path}}
+eng2_basic_need: basic need
+eng2_world_info_entry: World Info: {{entry}}
+eng2_lore_entry: Lore: {{entry}}
+eng2_another_block_of_this_routine_is: another block of this routine is {{blockId}}
+eng2_routine_id_block_id2: Routine {{id}}, block {{block}}

@@ -452,7 +452,7 @@ function assetsOf(api: FinanceApi, ctx: ReadContext, business: EntityId, plan: P
     ...soleHoldings(api, ctx, business).map((h) => ({ ...shown(h, say("org_log_a_holding")), value: holdingValue(ctx, h), goes: say("org_log_sold_at_the_market") })),
     ...properties.map((p) => ({ ...shown(p.id, say("org_log_a_property")), value: Math.round((propertyValue(ctx.state, p.id) * api.shareOf(ctx.state, p.id, business)) / 100), goes: p.sold ? say("org_log_sold_at_its_value") : say("org_log_to_its_owners_by_share") })),
     ...stakes.map((s) => ({ ...shown(s.id, say("org_log_a_stake_in_another_company")), value: Math.round((orgValue(api, ctx, s.id) * api.shareOf(ctx.state, s.id, business)) / 100), goes: s.sold ? say("org_log_sold_at_its_value") : say("org_log_to_its_owners_by_share") })),
-    ...ownedThings(ctx, business).map((t) => ({ ...shown(t, "Something it owns"), value: null, goes })),
+    ...ownedThings(ctx, business).map((t) => ({ ...shown(t, say("fin_something_it_owns")), value: null, goes })),
   ];
 }
 
@@ -520,7 +520,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     const due = optionalService(w.ctx, "economy.unemployment_due")?.(w.ctx, business) ?? null;
     if (due && due.cents > 0) {
       // Booked as payroll by the payment's own record, as the quarterly flow books it.
-      const failed = pay(paidFrom(due.lines, new Set(due.lines.filter((l) => l.amount < 0).map((l) => l.account)), gather), "Unemployment tax", "payroll", due.events);
+      const failed = pay(paidFrom(due.lines, new Set(due.lines.filter((l) => l.amount < 0).map((l) => l.account)), gather), say("fin_unemployment_tax"), "payroll", due.events);
       if (failed) return failed;
     }
     for (const what of ["suppliers", "sales_tax"] as const) {
@@ -540,17 +540,17 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     // Its income tax still owed, with the estimated-tax records that say which periods it settled.
     const tax = taxStillOwed(api, w.ctx, business);
     if (tax) {
-      const failed = pay([{ account: gather, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], "Corporate income tax", "business_tax", tax.extra);
+      const failed = pay([{ account: gather, amount: -tax.cents }, { account: api.outside("tax:federal"), amount: tax.cents }], say("fin_corporate_income_tax"), "business_tax", tax.extra);
       if (failed) return failed;
     }
     for (const a of ownAccounts(api, w.ctx, business)) {
       const owed = -api.balance(w.ctx.state, a);
       if (a === gather || owed <= 0) continue;
-      const failed = pay([{ account: gather, amount: -owed }, { account: a, amount: owed }], `${labelOf(w.ctx, a)} paid off`, isDebt(api, w.ctx, a) ? "loan" : "transfer");
+      const failed = pay([{ account: gather, amount: -owed }, { account: a, amount: owed }], say("fin_a_paid_off", { a: labelOf(w.ctx, a) }), isDebt(api, w.ctx, a) ? "loan" : "transfer");
       if (failed) return failed;
     }
   }
-  if (owing > 0) said.push({ text: `Paid ${money(owing)} it owed`, names: [] });
+  if (owing > 0) said.push({ text: say("fin_paid_owing_it_owed", { owing: money(owing) }), names: [] });
 
   // What it is owed, written off.
   const owed = owedOf(w.ctx, business, null);
@@ -631,7 +631,7 @@ function finish(api: FinanceApi, w: Working, business: EntityId, plan: WindPlan,
     }
     const parent = (holders.find((h) => h.party === part.party)?.share ?? 0) + 1e-9 >= 80 && api.partyKind(w.ctx, part.party) === "business" && structureOf(w.ctx.state, part.party) === "c_corp";
     const proceeds = parent ? basisOf(api, w.ctx, business, part.party).basis : part.cents + (inKind.get(part.party) ?? 0);
-    const failed = applied(w, [disposal(business, part.party, 100, proceeds, `${bizName} wound up`)]);
+    const failed = applied(w, [disposal(business, part.party, 100, proceeds, say("fin_bizname_wound_up", { bizName }))]);
     if (failed) return failed;
   }
   if (left > 0) for (const p of parts) said.push({ text: say("org_log_paid_party_cents_share_of_what_was", { party: labelOf(w.ctx, p.party), cents: money(p.cents), share: Math.round((holders.find((h) => h.party === p.party)?.share ?? 0) * 100) / 100 }), names: [p.party] });
@@ -742,10 +742,10 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
     const cents = paid.get(h.party) ?? 0;
     const stock = got * a.perUnit;
     const carried = Math.round(was * (stock + cents > 0 ? stock / (stock + cents) : got > 0 ? 1 : 0));
-    basis.push(disposal(business, h.party, 100, cents + carried, `${name} merged into ${intoName}`));
+    basis.push(disposal(business, h.party, 100, cents + carried, say("fin_name_merged_into_intoname", { name, intoName })));
     if (got > 0) basis.push(acquisition(into, h.party, carried));
   }
-  if (!terms.keep && holdersOf(api, ctx, business).some((h) => h.party === into)) basis.push(disposal(business, into, 100, basisOf(api, ctx, business, into).basis, `${name} merged into ${intoName}`));
+  if (!terms.keep && holdersOf(api, ctx, business).some((h) => h.party === into)) basis.push(disposal(business, into, 100, basisOf(api, ctx, business, into).basis, say("fin_name_merged_into_intoname", { name, intoName })));
   const failedBasis = applied(w, basis);
   if (failedBasis) return failedBasis;
 
@@ -811,7 +811,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   };
   const carryBasis = (entity: EntityId): void => {
     const was = basisOf(api, w.ctx, entity, business).basis;
-    events.push(disposal(entity, business, 100, was, `${name} merged into ${intoName}`), acquisition(entity, into, was));
+    events.push(disposal(entity, business, 100, was, say("fin_name_merged_into_intoname", { name, intoName })), acquisition(entity, into, was));
   };
   // Its accounts and the holdings it holds directly.
   for (const acc of accountsNaming(api, w.ctx, business)) setOwners(acc, rowsTo(api.ownersOf(w.ctx.state, acc), business, into));
@@ -874,7 +874,7 @@ function merge(api: FinanceApi, ctx: ReadContext, business: EntityId, into: Enti
   );
   const failed = applied(w, events);
   if (failed) return failed;
-  said.push({ text: `Took in ${name}${deal !== "" ? `: its holders got ${deal}` : ""}`, names: holders.map((h) => h.party) });
+  said.push({ text: say("fin_took_in_deal", { name, deal: deal !== "" ? deal : undefined }), names: holders.map((h) => h.party) });
   if (staff.length > 0) said.push({ text: say("org_log_staff_staffcount_staff_came_over_from_name", { staff: labelOf(ctx, staff[0] ?? ""), staffCount: staff.length, name: name, if_staff: staff.length === 1 }), names: staff.length === 1 ? staff : [] });
   return { events: w.events, said };
 }

@@ -202,3 +202,5 @@ word_op_change_exempt: change a tax-exempt status
 word_op_consolidate: file a consolidated return
 word_op_run_projects: run production projects
 word_op_lend_money: lend money
+word_unemployment_kind_futa: Federal unemployment tax (FUTA)
+word_unemployment_kind_suta: State unemployment tax (SUTA)

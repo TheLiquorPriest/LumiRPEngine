@@ -292,3 +292,33 @@ econ_let_staff_go: let {{count}} staff go
 econ_ended_a_standing_payment: ended a standing payment
 econ_ended_standing_payments: ended {{count}} standing payments
 econ_began_winding_up: Began winding up{{#parts}}: {{parts}}{{/parts}}
+fin_approved_by_by: (approved by {{by}})
+fin_approved: (approved)
+fin_cash_goes_hand_to_hand_and: Cash goes hand to hand, and {{to}} isn't here: pay by card or from an account, or type how you hand it over to play it as a turn.
+fin_sold_entity: Sold {{entity}}
+fin_name_kind_reinvested: {{name}} {{kind}} reinvested
+fin_the_market: The market
+fin_an_investor: an investor
+fin_the_public: The public
+fin_exercised_option: Exercised {{option}}
+fin_exercised_qty_label: Exercised {{qty}} {{label}}
+fin_label_matured: {{label}} matured
+fin_label_exercised_at_expiry: {{label}} exercised at expiry
+fin_label_expired: {{label}} expired
+fin_severance_tax: Severance tax
+fin_post_production_costs: Post-production costs
+fin_units_units: {{units}} units
+fin_filer_s_consolidated_return_files_its: {{filer}}'s consolidated return files its income tax
+fin_its_parent: Its parent
+fin_its_parent_2: its parent
+fin_label_matures_maturity: {{label}} matures {{maturity}}.
+fin_back_to_its_owners: back to its owners
+fin_to_be_reinvested: to be reinvested
+fin_something_it_owns: Something it owns
+fin_unemployment_tax: Unemployment tax
+fin_corporate_income_tax: Corporate income tax
+fin_a_paid_off: {{a}} paid off
+fin_paid_owing_it_owed: Paid {{owing}} it owed
+fin_bizname_wound_up: {{bizName}} wound up
+fin_name_merged_into_intoname: {{name}} merged into {{intoName}}
+fin_took_in_deal: Took in {{name}}{{#deal}}: its holders got {{deal}}{{/deal}}
