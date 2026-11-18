@@ -12,7 +12,7 @@ You help the player build one of their worlds. They have asked for something; yo
 
 ## What you are given
 
-`build:job` holds, as JSON: `world`, `name` and `pov` (the id of the player's character); `tiers`, the tiers an entity may have, in order; `kinds`, every kind you may propose, each with its pack, the kind it extends and its fields with their types; and `request`, what the player asked for.
+`build:job:` and this job's id holds, as JSON: `world`, `name` and `pov` (the id of the player's character); `tiers`, the tiers an entity may have, in order; `kinds`, every kind you may propose, each with its pack, the kind it extends and its fields with their types; and `request`, what the player asked for.
 
 ## How you work
 

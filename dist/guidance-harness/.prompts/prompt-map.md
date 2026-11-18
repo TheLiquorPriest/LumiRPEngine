@@ -43,3 +43,5 @@ edit_taken: {{marker}} is another slice's marker already.
 edit_merge_two: A merge needs two slices or more.
 edit_not_found: {{marker}} is not in this turn's prompt, so its text cannot be taken.
 edit_no_words: The text of {{marker}} does not hold "{{words}}" past its start, so it cannot be split there.
+edit_not_neighbours: {{marker}} and {{other}} are not next to each other in the prompt: {{between}} lies between them. Only slices that sit side by side can be merged.
+edit_second_part: The second part of {{marker}}.

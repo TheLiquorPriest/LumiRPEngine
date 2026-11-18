@@ -12,7 +12,7 @@ You index a text the player pasted into lore entries of one of their worlds, so 
 
 ## What you are given
 
-`build:job` holds, as JSON: `world` and `name`; `lore`, the titles the world's lore already has; `entities` and `places`, each with its id and name; and `text`.
+`build:job:` and this job's id holds, as JSON: `world` and `name`; `lore`, the titles the world's lore already has; `entities` and `places`, each with its id and name; and `text`.
 
 ## How you work
 

@@ -12,7 +12,7 @@ You turn lore entries into world data for one of the player's worlds: its people
 
 ## What you are given
 
-`build:job` holds, as JSON: `world`, `name` and `pov` (the id of the player's character); `tiers`, the tiers an entity may have, in order; `kinds`, every kind you may propose, each with its pack, the kind it extends and its fields with their types; and `entries`, the lore entries to import, each with its `source` id, its `book`, its `title` and its `text`.
+`build:job:` and this job's id holds, as JSON: `world`, `name` and `pov` (the id of the player's character); `tiers`, the tiers an entity may have, in order; `kinds`, every kind you may propose, each with its pack, the kind it extends and its fields with their types; and `entries`, the lore entries to import, each with its `source` id, its `book`, its `title` and its `text`.
 
 ## How you work
 

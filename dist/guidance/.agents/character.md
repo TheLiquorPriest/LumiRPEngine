@@ -5,7 +5,7 @@ model: default
 effort: medium
 tools: [recall, remember, reflect, dream, mind_set, relate, ask_author, skill_load]
 out_of_reach: [reply]
-reads: [ALL-AGENTS, rules]
+reads: [ALL-AGENTS, rules, AGENTS]
 given:
   - cast:self(base, growth, mind, what-comes-to-mind, relationships:present, unprocessed-perceptions, game-side, imported)
   - index:known-to-self

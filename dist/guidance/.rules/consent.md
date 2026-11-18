@@ -17,7 +17,7 @@ Why: this story has a past. The player built its world over many hours and remem
 
 ## If you are the Author
 
-1. **Brief in full.** Give each agent the parts of the prompt that bear on its task, the lore entries in full, the history it needs, the state of what it will touch, and the parts of a character's record it is entitled to, because a thin brief is how inventions happen: an agent that lacks a name or a past event fills it in.
+1. **Brief in full.** Give each agent the parts of the prompt that bear on its task, the lore entries in full, the history it needs, the state of what it will touch, and the parts of a character's record it is entitled to (the perceptions rule says what is kept from a character), because a thin brief is how inventions happen: an agent that lacks a name or a past event fills it in.
 2. **When you are asked, answer from what you hold.** If you do not have it either, run `gap_check`. Search on the thing's name, its other names, and the words around it, and by meaning where that is available. It searches the lore, the chat, the state and the story record, and keeps what it found as evidence. Read what it found before you decide.
 3. **Only when that search comes back empty** may you invent, or allow another to. Say what may be invented, and within what bounds.
 4. **Record what was invented as invented,** with the gap check and the consent it rests on. From then on it is continuity. If it belongs in the player's lore, propose it.

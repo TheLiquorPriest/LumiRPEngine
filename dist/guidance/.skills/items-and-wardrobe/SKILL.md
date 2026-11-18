@@ -41,7 +41,9 @@ If nothing is recorded of what they carry and the story has not said, `fill_in_d
 
 ## The rest
 
-A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged, a thing lost: each has a tool of its own, found with `tool_search`.
+A thing's condition (broken, worn, mended), its names and description, standing permission to use another's things, two records of one thing merged: each has a tool of its own, found with `tool_search`.
+
+The engine also has an action for each way a person handles a thing, with the ids the player's own actions sheet shows: `take`, `drop`, `give`, `hand_over`, `give_back`, `lend`, `reclaim`, `lose`, `put_in`, `put_away`, `wear`, `remove`, `use`, `search` (a place or a container), `fetch` (something of yours from close by), `take_piece` (one piece out of a kit), and for outfits `set_save`, `set_apply`, `set_drop`. Carry one out with the `world_apply` operation `act`: `who` is the one who does it, and `params` holds what it takes (`item`; `to` for the person it goes to, `into` for what it goes into). The operations above record the same changes; use an action when a press of the player's names one, or when its own minutes matter. `world_query` at `ruleset` lists every action the world has, and a call that leaves out what its action asks for is answered with what it needs. A requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`); `act` passes no time, and the answer gives the action's own minutes.
 
 ## What a tool tells you
 

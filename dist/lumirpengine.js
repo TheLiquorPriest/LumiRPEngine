@@ -691,7 +691,7 @@ var package_default = {
     "bun-types": "^1.4.2",
     "lumiverse-spindle-types": "0.6.80",
     preact: "11.0.1",
-    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#5e059017672bea84c4dca9459bfa0b6bc1c11541",
+    "rp-harness": "git+https://github.com/TheLiquorPriest/RPHarness.git#31eeb289f7cc268bf390d0502af6ba78041e81a0",
     typescript: "7.0.2"
   },
   exports: {
@@ -719,7 +719,6 @@ var package_default = {
     check: '"$npm_execpath" scripts/test/run.ts --check',
     "test:all": '"$npm_execpath" scripts/test-all.ts',
     "test:release": '"$npm_execpath" scripts/test/run.ts --release',
-    "test:properties": '"$npm_execpath" scripts/test/run.ts --properties',
     "test:timings": '"$npm_execpath" scripts/test-all.ts --record'
   },
   type: "module"
@@ -736,7 +735,7 @@ var DEFAULT_PLACE_CAPS = Object.freeze({ turn: 2, chat: 64 });
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "3948aa28";
+var BUILD = "4263bee0";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

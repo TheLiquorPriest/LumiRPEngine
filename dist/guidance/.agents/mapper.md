@@ -5,7 +5,7 @@ model: default
 effort: medium
 tools: [prompt, prompt_map_write, file_read]
 out_of_reach: [reply]
-reads: [ALL-AGENTS, rules, PRESET]
+reads: [ALL-AGENTS, rules, AGENTS, PRESET]
 given:
   - prompt:layout
 ---

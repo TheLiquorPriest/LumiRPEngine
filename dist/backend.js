@@ -1594,8 +1594,8 @@ async function startExtension(spindle2, options = {}) {
     spindle: spindle2,
     registrations,
     missing: lacking,
-    build: options.build ?? "3948aa28" ?? "dev",
-    statedHash: options.statedHash !== undefined ? options.statedHash : "8b7e1bc9e30af2547134332eb434bbf5ce8ca4275e9d74f762a497441d3e4245",
+    build: options.build ?? "4263bee0" ?? "dev",
+    statedHash: options.statedHash !== undefined ? options.statedHash : "2c43142f289bcf0ae3f99ae2eb37dc590380500c707eddddcc21c6d77baa44a3",
     log,
     registered: () => notice(),
     refused: (user) => {

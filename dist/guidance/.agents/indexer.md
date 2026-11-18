@@ -7,7 +7,7 @@ model: default
 effort: low
 tools: [lore_read, lore_index_write]
 out_of_reach: [reply]
-reads: [ALL-AGENTS, rules]
+reads: [ALL-AGENTS, rules, AGENTS]
 given:
   - index:batch
 ---

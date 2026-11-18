@@ -2,8 +2,8 @@
 description: world_apply as the model is told it - what the tool does, and what each of its arguments is.
 arguments:
   operations: The operations, applied in order. A later one may name what an earlier one made.
-  operations.op: "move (go somewhere, others along), place (set a thing down or pick it up; or make a place), give (a thing passes between people), wear (put on, ready, take off), store (put into something, or back where it is kept), pay (money and goods), pass_time (the clock moves on; lists what falls due, applies none), set (a value on someone, something, a place or the time), fact (a statement; about a place, one part of its record), quest (a quest moves), relate (how someone regards another), spawn (someone or something is made), horizon (what the next turn needs)."
-  operations.who: "move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes."
+  operations.op: "move (go somewhere, others along), place (set a thing down or pick it up; or make a place), give (a thing passes between people), wear (put on, ready, take off), store (put into something, or back where it is kept), pay (money and goods), pass_time (the clock moves on; lists what falls due, applies none), set (a value on someone, something, a place or the time), fact (a statement; about a place, one part of its record), quest (a quest moves), relate (how someone regards another), spawn (someone or something is made), horizon (what the next turn needs), act (one of the world's actions is carried out: eat, sleep, org_admit, or any other that world_query at ruleset lists)."
+  operations.who: "move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. act: who takes the action; left out, the player's character."
   operations.what: "place, give, wear, store: the thing (for place and store, or the person). place: leave it out, and give a name, to make a place."
   operations.to: "move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard."
   operations.from: "give: who gives it."
@@ -35,7 +35,9 @@ arguments:
   operations.add: "set: a number to add (negative to take away)."
   operations.quest: "quest: the quest, secret, puzzle or agenda."
   operations.stage: "quest: the stage it moves to."
-  operations.outcome: "quest: met or failed."
+  operations.outcome: "quest: met or failed. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules."
+  operations.action: "act: the action, by its id."
+  operations.params: "act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is."
   operations.reveal: "quest: true to show the player."
   operations.axis: "relate: the regard that changes (trust, liking); leave it out for all."
   operations.change: "relate: how much, up or down."
@@ -58,4 +60,4 @@ arguments:
   operations.why: "move, place, give, store, quest, relate: the reason, kept with the change."
   operations.source: "Where it comes from (horizon takes none). lore, message and roll cite an entry, message or roll by id; an invention cites its gap_check and consent."
 ---
-Applies operations to the world's recorded state in order, each on the state the ones before it left, and answers with each one's lane, what changed, how things now stand, and what does not add up. A name that is not there, or a value that is none of the choices, answers the whole call with what would work and records nothing; but a thing that move, place, give, wear or store names with no recorded name near it is made where the one who acts is. Words that name nothing are kept as your words. A thing spawned at, in or on words that name nothing is made where its owner is, else at the scene's place, as assumed; with neither, the call is refused.
+Applies operations to the world's recorded state in order, each on the state the ones before it left, and answers with each one's lane, what changed, how things now stand, and what does not add up. A name that is not there, or a value that is none of the choices, answers the whole call with what would work and records nothing; but a thing that move, place, give, wear or store names with no recorded name near it is made where the one who acts is. Words that name nothing are kept as your words. A thing spawned at, in or on words that name nothing is made where its owner is, else at the scene's place, as assumed; with neither, the call is refused. act applies the outcome's effects as the action defines them, sets the activity it starts with its end and meets what that activity meets at that end; a requirement of the action that does not hold is said, and the action is carried out all the same. Its own time is given in the answer and does not pass: pass_time passes it. An act the call cannot carry out is answered with what its action takes and a call with a value of each.

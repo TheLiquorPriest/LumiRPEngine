@@ -5,7 +5,7 @@ model: default
 effort: medium
 tools: [chat_read, chat_search, prompt, lore_read, lore_search, archive_search, story_record, world_apply, cast_update, perceive, gap_check, file_write, ask_author]
 out_of_reach: [reply]
-reads: [ALL-AGENTS, rules]
+reads: [ALL-AGENTS, rules, AGENTS]
 ---
 You read the past so that the story can stand on it. The task you were started with names what to look for, and the range of messages comes attached to it.
 

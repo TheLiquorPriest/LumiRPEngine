@@ -10,7 +10,7 @@ Everyone's coin is kept as accounts. Every payment has two sides: it leaves one 
 
 `world_apply` with a `pay` operation: who pays, who is paid, how much, and what for.
 
-- If something was bought, name the goods in the same operation: goods nothing recorded goes by are `spawn`ed first, earlier in the same call. The money and the goods change hands as one change, so a swipe takes both back.
+- If something was bought, name the goods in the same operation: goods nothing recorded goes by are `spawn`ed first, earlier in the same call. The money and the goods change hands as one change, so a swipe takes both back. A meal bought is paid here; that it is eaten is the action `eat`, in the skill `time`.
 - If it was a gift, a bribe, a fine or a loss, say which. The books keep the reason.
 - A payment between two people who are both in the scene is one operation, not two.
 
@@ -34,11 +34,17 @@ When someone's money matters and nothing recorded or told says what they have, `
 
 ## What comes due
 
-When time passes, the answer lists what the time brought due: wages, rent, a loan's instalment, a tax, a standing payment. It applies none of them. What is decided for each is recorded as what it was: paid is a `pay`; missed or put off is a `fact` about the one who owes it.
+When time passes, the answer lists what the time brought due: wages, rent, a loan's instalment, a tax, a standing payment. It applies none of them. What is decided for each is recorded as what it was: paid is a `pay` (a card's or a loan's instalment, `pay_card`); missed or put off is a `fact` about the one who owes it.
 
 ## The rest
 
-Accounts opened and closed, loans, credit, taxes, a job taken or lost, a business and its takings, property: each has a tool of its own. Find it with `tool_search` and call it with `tool_use`.
+Accounts opened and closed, a business and its takings, a price set: each has a tool of its own, found with `tool_search` and called with `tool_use`. The rest of money is the engine's own actions, carried out with the `world_apply` operation `act`: `{"op": "act", "action": "<id>", "who": "<who does it>", "params": {…}}`. `world_query` at `ruleset` lists every action the world has, and a call that leaves out what its action asks for is answered with what it needs. A requirement that does not hold is told in the answer, and the action is carried out all the same (`SIMULATION.md`); `act` passes no time.
+
+- **Your own money:** `move_money`, `withdraw_cash`, `deposit_cash`, `pay_card`, `card_freeze`, `card_unfreeze`, `card_report_lost`, `card_replace`, `set_autopay`, `set_pay_prefs`; a standing payment: `flow_create`, `flow_update`, `flow_pause`, `flow_resume`, `flow_delete`.
+- **Credit and lending:** `apply_credit`, `lend_money`.
+- **A job:** `job_hire`, `job_end`, `job_raise`, `job_hours`, `job_leave`, `job_return`, `job_position`, `job_title`; how often an organization pays its staff, `org_pay_schedule`. Someone taken on for pay is a `job_hire`, not a line of text on the person.
+- **A business:** `invoice_issue`, `invoice_pay`, `invoice_void`, `owner_draw`, `distribute_profit`, `donate`; its shares, `shares_issue`, `shares_buy_back`, `shares_classes`, `shares_list`, `shares_delist`, `stake_sell`; its projects, `project_start`, `project_pause`, `project_resume`, `project_drop`; its tax, `tax_consolidate`, `consent_dividend`.
+- **Property and investments:** `property_buy`, `property_sell`, `property_list`, `lease_start`, `lease_end`, `trade`, `exercise_option`, `route_distributions`.
 
 ## What a tool tells you
 

@@ -5,4 +5,3 @@ format: lines
 too_long: What was asked holds {{length}} characters, past the {{most}} a request may hold (the setting turn.maxRequestChars), so it was not kept.
 kept: This request was already told to turn {{turn}} and is kept with it, so it can no longer be withdrawn.
 not_found: No request {{request}} waits in this chat.
-no_chat: RPE holds no chat {{chat}}.

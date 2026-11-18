@@ -12,7 +12,7 @@ You draw one place of the player's world as a map of its inside, from the player
 
 ## What you are given
 
-`build:job` holds, as JSON: `mapId`; `place`, the place to draw, and `inside`, the place that holds it; `placesInside`, the places already inside it; `otherPlaces`, the ids a link may name; `prose`, the player's description; and `schema`, the JSON Schema of the map format.
+`build:job:` and this job's id holds, as JSON: `mapId`; `place`, the place to draw, and `inside`, the place that holds it; `placesInside`, the places already inside it; `otherPlaces`, the ids a link may name; `prose`, the player's description; and `schema`, the JSON Schema of the map format.
 
 ## How you work
 

@@ -12,7 +12,7 @@ You propose how the people and groups of the player's world spend their days and
 
 ## What you are given
 
-`build:job` holds, as JSON: the story's `start` and its `weekday`; the calendar's `dayParts` and `holidays`; `owners`, the people and groups to propose for, each with its sheet, its members or its groups, its ties, where the story starts it (`startsAt`) and what it already `has`; `lore`, the entries about them, each by its `id`; and `places`, every place you may name.
+`build:job:` and this job's id holds, as JSON: the story's `start` and its `weekday`; the calendar's `dayParts` and `holidays`; `owners`, the people and groups to propose for, each with its sheet, its members or its groups, its ties, where the story starts it (`startsAt`) and what it already `has`; `lore`, the entries about them, each by its `id`; and `places`, every place you may name.
 
 ## What you propose
 
