@@ -72,12 +72,48 @@ const REPLY_ERROR_WORDS: Readonly<Record<ReplyError["code"], string>> = {
   hook: "A hook of yours stopped the reply.",
 };
 
-/** Why a reply failed, in words; null where the status beside it already says all of it. */
+/** What broke a model call that failed, in words. */
+const FAILURE_WORDS: Readonly<Record<EventOf<"call_failed">["failure"], string>> = {
+  connection: "the connection broke",
+  timeout: "it timed out, or its answer went silent too long",
+  overloaded: "the provider was busy or asked to slow down",
+  server: "the provider's server failed",
+  other: "it failed",
+  credit: "no credit was left with the provider",
+  key: "the provider refused the key",
+  invalid: "the provider refused the request as invalid",
+  "too-long": "the prompt was too long for the model",
+  unmade: "it was never sent",
+};
+
+/** Where in a model call it broke, in words. */
+const BROKE_AT_WORDS: Readonly<Record<EventOf<"call_failed">["at"], string>> = {
+  before: "before any answer came",
+  thinking: "while it was thinking",
+  "tool-call": "while it was writing a tool call",
+  text: "while it was writing, before any of the reply was shown",
+  shown: "after some of the reply was shown",
+};
+
+/** The kinds of failure another try cannot help: never made again, whatever the settings say. */
+const NEVER_AGAIN: Readonly<Partial<Record<EventOf<"call_failed">["failure"], true>>> = { credit: true, key: true, invalid: true, "too-long": true, unmade: true };
+
+/** A failed model call in words: what broke it, where in the call, and whether it was made again, after what wait, as which try of how many. */
+export function callFailedWords(event: EventOf<"call_failed">): string {
+  const head = `Call ${event.call} failed ${BROKE_AT_WORDS[event.at]}: ${FAILURE_WORDS[event.failure]}.`;
+  if (event.retried) return `${head} Tried again after ${duration(event.wait ?? 0)}${event.asked === undefined ? "" : ` (the provider asked for ${duration(event.asked)})`}: try ${event.tries + 1} of ${event.retries + 1}.`;
+  if (NEVER_AGAIN[event.failure] === true) return `${head} Not tried again: another try cannot help.`;
+  if (event.tries > event.retries) return `${head} Not tried again: all ${counted(event.tries, "try", "tries")} were made.`;
+  return `${head} Not tried again: trying again after this kind of failure is switched off in Settings.`;
+}
+
+/** Why a reply failed, in words; null where the status beside it already says all of it. A provider that failed after its call was made more than once says how many times, and what broke the last. */
 export function replyErrorWords(error: ReplyError, status: RunStatus | "running"): string | null {
-  if (error.code === status && error.detail === undefined) return null;
+  if (error.code === status && error.detail === undefined && error.broke === undefined) return null;
   const limit = error.limit === undefined ? "" : ` (${limitName(error.limit)}: ${limitCount(error.limit)})`;
   const lead = error.agent === undefined ? "" : ` (the lead: ${error.agent})`;
-  return `${REPLY_ERROR_WORDS[error.code]}${limit}${lead}${error.detail === undefined ? "" : ` ${error.detail}`}`;
+  const words = error.broke === undefined ? REPLY_ERROR_WORDS[error.code] : `${REPLY_ERROR_WORDS[error.code].slice(0, -1)} after ${counted(error.broke.tries, "try", "tries")}; the last time, ${FAILURE_WORDS[error.broke.failure]}.`;
+  return `${words}${limit}${lead}${error.detail === undefined ? "" : ` ${error.detail}`}`;
 }
 
 /** What a run is, in a few words: "New reply, led by author". */
@@ -375,6 +411,13 @@ function NoteView(props: { step: NoteStep; notices: NoticeLines }) {
       );
     case "effort_lowered":
       return <NoteHead icon="alert" title={`The provider refused effort ${event.asked} on ${event.connection} · ${event.model}: sent ${event.sent}`} />;
+    case "call_failed":
+      return (
+        <div class="lre-stack">
+          <NoteHead icon="alert" title={callFailedWords(event)} />
+          <p class="rpe-meta">In the provider's words: {event.words}</p>
+        </div>
+      );
     case "intent":
       return (
         <div class="lre-stack">
