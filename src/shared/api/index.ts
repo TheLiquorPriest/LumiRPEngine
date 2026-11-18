@@ -2448,7 +2448,7 @@ export type PromptEditAsk = { edit: "rename"; marker: string; to: string } | { e
 /** What changed in the prompt's shape since the turn before, or that it is not mapped or could not be told apart. */
 export type PromptNotice = { kind: "changed"; marker: string } | { kind: "gone"; marker: string } | { kind: "unclaimed"; message: number; start: number; end: number } | { kind: "order"; markers: string[] } | { kind: "preset"; was: { id: string; name?: string; revision?: string } | null; now: { id: string; name?: string; revision?: string } | null } | { kind: "unmapped" } | { kind: "incomplete" };
 
-/** The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, and the old engines' blocks the preset still holds. */
+/** The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, the old engines' blocks the preset still holds, and how many earlier replies Lumiverse sent their thinking back with. */
 export interface PromptShown {
   turn: TurnId;
   preset: { id: string; name?: string; revision?: string } | null;
@@ -2465,6 +2465,8 @@ export interface PromptShown {
   front: { length: number; brokenBy?: string };
   /** Null where the window's messages are all in the prompt. */
   clipped: PromptClipped | null;
+  /** How many messages of the turn's prompt Lumiverse sent with an earlier reply's thinking beside them (`reasoning_content`), as its Reasoning settings' Keep in history, or the connection's own, keep it. RPE gives none of it to its agents; another connection the chat is switched to is sent it. */
+  thinkingBack: number;
   /** The old engines' blocks the preset still holds: a block named `RPEngine · <step>` (its step), or an `{{outlet::lre_…}}` reference left in a block's text (the outlet), each with the block it stands in. */
   old: ({ kind: "block" | "outlet"; name: string; in: string })[];
 }

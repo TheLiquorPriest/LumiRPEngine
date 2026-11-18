@@ -101,6 +101,22 @@ export function ClippedNote(props: { clipped: PromptClipped | null; lines: Notic
   );
 }
 
+/**
+ * The thinking Lumiverse sent back with earlier replies in this turn's prompt (its Reasoning settings' Keep in history, or the
+ * connection's own): RPE gave none of it to its agents, but another connection the chat is switched to would be sent it.
+ */
+export function ThinkingBackNote(props: { count: number }) {
+  if (props.count === 0) return null;
+  return (
+    <Banner tone="info" icon="info" title="Lumiverse sends earlier replies' thinking back">
+      <span>
+        This prompt came with the thinking of {counted(props.count, "earlier reply", "earlier replies")}, as Lumiverse's Reasoning settings (Keep in history) or this connection's own keep it. RPE gave none of it to its agents. A connection you switch this chat
+        to would be sent it, and the thinking of RPE's agents can hold what the story has not shown you yet. Set Keep in history to 0 in Lumiverse to send none.
+      </span>
+    </Banner>
+  );
+}
+
 /** The old engines' blocks the preset still holds, each by name; RPE does not edit presets. */
 export function OldBlocks(props: { old: PromptShown["old"] }) {
   if (props.old.length === 0) return null;

@@ -37,6 +37,9 @@ test("the Author's thinking goes into the thinking block as it is written, under
   const given = b.requests.at(-1)!.prompt.map(textOf).join("\n");
   expect(given).not.toContain("Wren is at the lamp.");
   expect(given).not.toContain("The Author thinks:");
+  // The Prompt page says how many earlier replies came with their thinking.
+  const shown = await b.page<{ thinkingBack: number }>("GET", `/api/v1/chats/${CHAT}/prompt?turn=${next.id}`);
+  expect(shown).toMatchObject({ status: 200, body: { thinkingBack: sentBack.length } });
 });
 
 test("with the progress lines alone, no thinking goes into the thinking block", async () => {

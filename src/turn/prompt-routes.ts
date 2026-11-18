@@ -78,6 +78,8 @@ export function promptRoutes(turns: Turns) {
       notices: map.notices,
       front: map.front,
       clipped: clippedOf(carried?.cut),
+      // The thinking Lumiverse sent back with earlier replies, which the door read apart and gave no agent (`readBodyMessages`, `promptOf`).
+      thinkingBack: carried?.layout.messages.filter((m) => m.thinking !== undefined).length ?? 0,
       old: oldBlocks(carried?.layout ?? null),
     };
   };

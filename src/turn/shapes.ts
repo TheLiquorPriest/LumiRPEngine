@@ -243,7 +243,7 @@ const promptClipped = shape.named(
 
 export const promptShownReply = shape.named(
   "PromptShown",
-  "The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, and the old engines' blocks the preset still holds.",
+  "The prompt map of the chat's preset as found in one turn's prompt: its slices, the text no slice claims, the turn's notices and front, whether the prompt's text could be told apart, Lumiverse's clipping, the old engines' blocks the preset still holds, and how many earlier replies Lumiverse sent their thinking back with.",
   shape.object({
     turn: shape.turnId(),
     preset: nullable(presetRef),
@@ -255,6 +255,10 @@ export const promptShownReply = shape.named(
     notices: shape.list(promptNotice),
     front: promptFront,
     clipped: field(nullable(promptClipped), "Null where the window's messages are all in the prompt."),
+    thinkingBack: field(
+      shape.whole({ least: 0 }),
+      "How many messages of the turn's prompt Lumiverse sent with an earlier reply's thinking beside them (`reasoning_content`), as its Reasoning settings' Keep in history, or the connection's own, keep it. RPE gives none of it to its agents; another connection the chat is switched to is sent it.",
+    ),
     old: field(
       shape.list(shape.object({ kind: shape.oneOf("block", "outlet"), name: T, in: T })),
       "The old engines' blocks the preset still holds: a block named `RPEngine · <step>` (its step), or an `{{outlet::lre_…}}` reference left in a block's text (the outlet), each with the block it stands in.",

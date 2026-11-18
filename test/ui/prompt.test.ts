@@ -30,6 +30,7 @@ const SHOWN: PromptShown = {
   notices: [{ kind: "changed", marker: "preset.style" }, { kind: "unclaimed", message: 2, start: 10, end: 30 }],
   front: { length: 4200, brokenBy: "persona" },
   clipped: { count: 3, by: "context-size" },
+  thinkingBack: 2,
   old: [{ kind: "block", name: "RPEngine · world", in: "the main prompt" }, { kind: "outlet", name: "{{outlet::lre_state}}", in: "Scene block" }],
 };
 
@@ -62,6 +63,10 @@ describe("the Prompt page", () => {
     expect(text).toContain("RPEngine · world");
     expect(text).toContain("{{outlet::lre_state}}");
     expect(text).toContain("RPE does not edit presets");
+    // Earlier replies' thinking Lumiverse sent back is said, with who was given none of it and who would be sent it.
+    expect(text).toContain("This prompt came with the thinking of 2 earlier replies");
+    expect(text).toContain("RPE gave none of it to its agents.");
+    expect(textOf(view({ shown: { ...SHOWN, thinkingBack: 0 } }))).not.toContain("earlier replies' thinking");
   });
 
   test("before a map is learned it says so, and shows the raw layout's parts", () => {

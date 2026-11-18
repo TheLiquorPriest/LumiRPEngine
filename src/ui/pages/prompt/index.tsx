@@ -22,7 +22,7 @@ import type { PromptShown, PromptTurnShown } from "../../../shared/api";
 import { clock } from "../../words";
 import { MapAgain } from "./map-again";
 import { readPrompt, readPromptHistory } from "./read";
-import { ClippedNote, FrontLine, NoticeList, OldBlocks, SliceCard, type SliceSlots, Unclaimed } from "./slices";
+import { ClippedNote, FrontLine, NoticeList, OldBlocks, SliceCard, type SliceSlots, ThinkingBackNote, Unclaimed } from "./slices";
 import { SliceTools } from "./tools";
 
 const GATE_WHY = "The text of the prompt's parts holds the persona, the card and the lore the model was given, which can give away what comes next.";
@@ -110,6 +110,7 @@ export function PromptView(props: PromptViewProps) {
           )}
           <OldBlocks old={shown.old} />
           <ClippedNote clipped={shown.clipped} lines={props.lines} />
+          <ThinkingBackNote count={shown.thinkingBack} />
           {props.turn === null ? null : (
             <Banner tone="info" icon="info" title="As found in an earlier turn's prompt" actions={<Button onClick={() => props.onPickTurn(null)}>The newest</Button>}>
               <span>The parts below are where they were found in turn {shown.turn}.</span>
