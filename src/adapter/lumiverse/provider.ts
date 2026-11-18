@@ -95,7 +95,7 @@ export interface ProviderDeps {
   lore: LoreCheck;
   /** The feedback typed in Lumiverse's regenerate dialog, told apart from a regeneration's prompt where that is certain (`feedback.ts`). */
   feedback: FeedbackFor;
-  /** The generations the event socket heard (`heard.ts`): a tagged request's activated lore, and whether one on RPE's connection awaits its tag. */
+  /** The generations the event socket heard (`heard.ts`): a tagged request's activated lore, and whether one that started on a request's model awaits its tag. */
   heard: Pick<HeardGenerations, "tagged" | "untagged">;
   /** `lumiverse.untagged.whileAwaited`, read at each untagged request. */
   untaggedWhileAwaited(): "pass" | "fail";
@@ -152,8 +152,8 @@ export function providerEndpoint(deps: ProviderDeps): (request: Request, call: E
     const now = deps.clock.now();
     const read = readTag(body);
     if ("absent" in read) {
-      // Counted against every generation that awaits its tag; failed only where the setting says so (N-18).
-      const awaited = deps.heard.untagged();
+      // Counted against every generation that started on this request's model and awaits its tag; failed only where the setting says so (N-18).
+      const awaited = deps.heard.untagged(typeof body.model === "string" ? body.model : null);
       return awaited && deps.untaggedWhileAwaited() === "fail" ? failUntagged(deps, body as JsonObject, request.signal, now) : passThrough(deps, body as JsonObject, request.signal, now);
     }
     if ("invalid" in read) return error(400, `RPE could not read this reply's tag (${read.invalid}). Update the extension and RPE to the same build.`);

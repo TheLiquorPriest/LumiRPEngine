@@ -141,8 +141,8 @@ export const LUMIVERSE_SETTING_DEFS = {
 
 /**
  * `lumiverse.untagged.whileAwaited` (§4.2 l.246-258; READINGS N-18): a request with no tag on RPE's connection, while a generation RPE
- * heard start on its connection (or answered the question for) has neither sent its tagged request nor ended, is passed on (`pass`,
- * the plan's rule) or answered with the shipped file's error line (`fail`), which may fail an unrelated side request once.
+ * heard start on the model that request names has neither sent its tagged request nor ended, is passed on (`pass`, the plan's rule) or
+ * answered with the shipped file's error line (`fail`), which may fail an unrelated side request once.
  */
 export const UNTAGGED_WHILE_AWAITED = {
   key: "lumiverse.untagged.whileAwaited",

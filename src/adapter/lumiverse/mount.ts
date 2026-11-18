@@ -196,13 +196,11 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
   const rpeModels = (): string[] => app?.config.lumiverse.models ?? [];
   /** Tells how each activated entry came in, over the door's reads; set when the door is built. */
   let activations: Activations | null = null;
-  /** The generations the event socket hears: their activated lore, told, and the ones on RPE's connections whose tagged request never came. */
+  /** The generations the event socket hears: their activated lore, told, and the ones that ended with no tagged request after untagged requests came on RPE's connection for their model. */
   const heard = new HeardGenerations({
     tell: async (chat, lore) => (activations === null ? [...lore] : activations.tell(chat, lore)),
-    rpeModel: (model) => rpeModels().includes(model),
-    asked: (chat, generation) => answers.answered(chat, generation),
-    untaggedEnd: ({ chat, generation, untagged, stopped }) =>
-      log(`generation ${generation} of chat ${chat} on RPE's connection ${stopped ? "was stopped" : "ended"} with no tagged request; ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection meanwhile.`),
+    untaggedEnd: ({ chat, generation, model, untagged, stopped }) =>
+      log(`generation ${generation} of chat ${chat} ${stopped ? "was stopped" : "ended"} with no tagged request, and ${untagged} request${untagged === 1 ? "" : "s"} with no tag came on RPE's connection for its model${model === null ? "" : ` ${model}`} while it ran: if it was a reply on RPE's connection, RPE did not play it.`),
   });
   /** The door's limits as the shared levels set them now. */
   const settings = (): LumiverseSettings => (deps.settings === undefined ? LUMIVERSE_DEFAULTS : lumiverseSettings(deps.settings.shared()));

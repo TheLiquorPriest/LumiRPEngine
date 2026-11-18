@@ -284,8 +284,33 @@ describe("what only the events of the end and of the chat's own rows tell", () =
     expect(ended("GENERATION_ENDED", { error: "assembly failed" })).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: null, error: "assembly failed" });
     const stopped = ended("GENERATION_STOPPED", { content: "partial" });
     expect(stopped).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: null, stopped: true });
-    const heard = new HeardGenerations({ rpeModel: () => false, asked: () => false, untaggedEnd: () => undefined, tell: async (_chat, lore) => [...lore] });
+    const heard = new HeardGenerations({ untaggedEnd: () => undefined, tell: async (_chat, lore) => [...lore] });
     void heard.tagged(CHAT, "g1", "m5");
     expect(heard.named(stopped!)).toEqual({ kind: "generation-ended", chat: CHAT, generation: "g1", message: "m5", stopped: true });
+  });
+
+  test("a generation's end is told only where a request with no tag came on RPE's connection for its model; a reply of another connection, even on the same model, sends RPE nothing and is not told", () => {
+    const told: string[] = [];
+    const heard = new HeardGenerations({ untaggedEnd: (what) => told.push(`${what.chat}:${what.untagged}`), tell: async (_chat, lore) => [...lore] });
+    const run = (chat: string, generation: string): void => {
+      heard.heard({ kind: "generation-started", chat, generation, model: "rpe" });
+    };
+    const end = (chat: string, generation: string): void => {
+      heard.heard({ kind: "generation-ended", chat, generation, message: null });
+    };
+    // Another connection, the same model: no request reaches RPE.
+    run("chat-other", "g1");
+    end("chat-other", "g1");
+    // On RPE's connection with the extension gone: a request with no tag arrives, and the generation ends without its tagged request.
+    run(CHAT, "g2");
+    expect(heard.untagged("rpe")).toBe(true);
+    expect(heard.untagged("another-model")).toBe(false);
+    end(CHAT, "g2");
+    // On RPE's connection and tagged: not told, whatever else came.
+    run(CHAT, "g3");
+    expect(heard.untagged("rpe")).toBe(true);
+    void heard.tagged(CHAT, "g3");
+    end(CHAT, "g3");
+    expect(told).toEqual([`${CHAT}:1`]);
   });
 });

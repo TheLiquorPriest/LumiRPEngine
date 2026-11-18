@@ -2,34 +2,36 @@
 // l.221, l.246-258; READINGS N-18): that it started, on which model; the lore Lumiverse activated for it
 // (`WORLD_INFO_ACTIVATED`, the turn's activated lore, never the context's list), told as it is heard
 // (`activation.ts`); whether its tagged request came; and that it ended. Lumiverse runs one generation
-// per chat at a time (`generate.service.ts:1601-1651`), so a chat's next replaces its last. A generation
-// on RPE's connection (its model one of RPE's connection's names, or one whose question RPE answered)
-// that ends with no tagged request is told, with the untagged requests that came on RPE's connection
-// meanwhile. RPE cannot know whether an untagged request in that time is that generation's own or a side
-// request (a title, a summary, another extension's call): nothing in an untagged request ties it to one.
+// per chat at a time (`generate.service.ts:1601-1651`), so a chat's next replaces its last.
+//
+// Nothing the event socket says tells whose connection a generation is on: `GENERATION_STARTED` names a
+// model, and another connection of Lumiverse (the user's default one, say) may name the same. Nor does the
+// extension's question: it asks one for every generation of every chat, before the connection is known
+// (`ext/question.ts`). What does tell is a request that reaches RPE's provider route naming that model while
+// the generation runs. A generation that ends with no tagged request is told, with the untagged requests
+// that came on RPE's connection for its model meanwhile, only where one came; a generation that sent RPE
+// nothing was not on RPE's connection, or sent it nothing to get wrong. RPE cannot know whether an untagged
+// request in that time is that generation's own or a side request (a title, a summary, another extension's
+// call): nothing in an untagged request ties it to one.
 
 import type { ChatChange } from "./events";
 import type { TagLore } from "./wire";
 
 interface Running {
   generation: string;
-  /** On RPE's connection, by its model or by the question RPE answered for it. */
-  ours: boolean;
+  /** The model it started on, as Lumiverse named it; null where it named none. */
+  model: string | null;
   /** Lumiverse's list of what activated, told as it was heard; null where none was heard (none activated). */
   lore: Promise<TagLore[]> | null;
   /** Its tagged request came. */
   tagged: boolean;
-  /** Untagged requests on RPE's connection while it awaited its tag. */
+  /** Untagged requests on RPE's connection, for its model, while it awaited its tag. */
   untagged: number;
 }
 
 export interface HeardDeps {
-  /** Whether a model name is one RPE's connection in Lumiverse may name. */
-  rpeModel(model: string): boolean;
-  /** Whether RPE answered the question for this generation of the chat. */
-  asked(chat: string, generation: string): boolean;
-  /** A generation on RPE's connection ended with no tagged request: told in RPE's log. */
-  untaggedEnd(what: { chat: string; generation: string; untagged: number; stopped: boolean }): void;
+  /** A generation ended with no tagged request, after untagged requests came on RPE's connection for its model: told in RPE's log. */
+  untaggedEnd(what: { chat: string; generation: string; model: string | null; untagged: number; stopped: boolean }): void;
   /** Tells how each activated entry of the chat's running generation came in, and names its book (`Activations.tell`); never rejects. */
   tell(chat: string, lore: readonly TagLore[]): Promise<TagLore[]>;
 }
@@ -44,7 +46,7 @@ export class HeardGenerations {
   /** A change the event socket heard. For lore Lumiverse activated, the entries told, once they are; null for any other change. */
   heard(change: ChatChange): Promise<TagLore[]> | null {
     if (change.kind === "generation-started") {
-      this.#byChat.set(change.chat, { generation: change.generation, ours: change.model !== null && this.deps.rpeModel(change.model), lore: null, tagged: false, untagged: 0 });
+      this.#byChat.set(change.chat, { generation: change.generation, model: change.model, lore: null, tagged: false, untagged: 0 });
     } else if (change.kind === "lore-activated") {
       const told = this.deps.tell(change.chat, change.lore);
       const running = this.#byChat.get(change.chat);
@@ -54,8 +56,8 @@ export class HeardGenerations {
       const running = this.#byChat.get(change.chat);
       if (running === undefined || running.generation !== change.generation) return null;
       this.#byChat.delete(change.chat);
-      if (!running.tagged && (running.ours || this.deps.asked(change.chat, change.generation))) {
-        this.deps.untaggedEnd({ chat: change.chat, generation: change.generation, untagged: running.untagged, stopped: change.stopped === true });
+      if (!running.tagged && running.untagged > 0) {
+        this.deps.untaggedEnd({ chat: change.chat, generation: change.generation, model: running.model, untagged: running.untagged, stopped: change.stopped === true });
       }
     }
     return null;
@@ -86,11 +88,11 @@ export class HeardGenerations {
     return change.stopped === true && change.message === null ? { ...change, message: kept.message } : change;
   }
 
-  /** Whether a generation heard to start on RPE's connection, or asked about, awaits its tagged request now; each counts this untagged request. */
-  untagged(): boolean {
+  /** Whether a generation heard to start on this model awaits its tagged request now; each counts this untagged request on RPE's connection. A request that names no model is counted against none. */
+  untagged(model: string | null): boolean {
     let awaiting = false;
-    for (const [chat, running] of this.#byChat) {
-      if (running.tagged || !(running.ours || this.deps.asked(chat, running.generation))) continue;
+    for (const running of this.#byChat.values()) {
+      if (running.tagged || model === null || running.model !== model) continue;
       running.untagged++;
       awaiting = true;
     }
