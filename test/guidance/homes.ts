@@ -104,6 +104,7 @@ export const REMINDERS: readonly { file: string; needs: string | null }[] = [
   { file: ".rules/engine-silent.md", needs: "TURN" },
   { file: ".rules/intent-owed.md", needs: "TURN" },
   { file: ".rules/intent-owed-end.md", needs: "TURN" },
+  { file: ".rules/press-owed.md", needs: "TURN" },
   { file: ".rules/history-leaving.md", needs: "TURN" },
   { file: ".rules/reply-missing.md", needs: null },
 ];

@@ -22,6 +22,8 @@
 //                              RPE), and no rule naming this fact has been said to it in the run; by whether its reply has gone out
 //   turns.without.intent       the turns RPE played on that line before this one, newest back, that took no intent record, up to the
 //                              newest that took one (a turn a migration carried is passed over)
+//   asked.unanswered           the panel's presses of an action this turn was told that no `act` of the action reached the engine for in
+//                              it (carried out, or refused with the world's reason), and he did not drop; named by what was pressed
 //   previous.run.stopped       the runs of the turn before that this turn stopped at the wait's limit as it began
 //   story.from, story.newest   the chat's story choice (R-176), 1 in the group the chat's settings name
 //   threads.quests.split       a story thread and a quest naming it where one side is closed and the other open, at the turn, by
@@ -95,6 +97,8 @@ export interface TurnFactsDeps {
   story(scope: Scope): Promise<{ from: StoryFrom; newest: StoryNewest }>;
   /** The facts named by the rules said to the turn's lead since `since`: those the trace told of the run going on, and those kept. */
   told(user: string, turn: string, since: number): ReadonlySet<string>;
+  /** The panel's presses of an action kept with `turn` that no `act` of the turn answered, as the requests keep them and as the run going on has acted. */
+  unanswered(user: string, turn: string): readonly { what: string; on: string | null; action: string }[];
 }
 
 /**
@@ -118,6 +122,11 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         by: ["unreleased", "released"],
       },
       { name: "turns.without.intent", counts: "Turns RPE played on this turn's own line before this one, counting back from the newest, that took no intent record, up to the newest that took one; a turn a migration carried is passed over." },
+      {
+        name: "asked.unanswered",
+        counts: "The player's presses from a panel of one of the world's actions this turn was told, that no `act` of that action has reached the engine for in this turn, carried out or refused with the world's reason; named by what was pressed and on what. asked: each with what was pressed (what), on what (on) and the action's id (action).",
+        fields: ["asked"],
+      },
       { name: "previous.run.stopped", counts: "Runs of the turn before that this turn stopped at the wait's limit as it began, their work left as it stood." },
       { name: "story.from", counts: "Whose messages are the chat's story: 1 in the group the chat's setting story.from names.", by: [...STORY_FROM] },
       { name: "story.newest", counts: "With the replies as the story, his newest message: 1 in the group the chat's setting story.newest names.", by: [...STORY_NEWEST] },
@@ -187,6 +196,10 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
           count++;
         }
         out["turns.without.intent"] = { count };
+      }
+      if (names.includes("asked.unanswered")) {
+        const asked = turn === null ? [] : deps.unanswered(scope.user, turn);
+        out["asked.unanswered"] = { count: asked.length, names: asked.map((a) => (a.on === null ? a.what : `${a.what}, on ${a.on}`)), fields: { asked: asked.map((a) => ({ what: a.what, on: a.on, action: a.action })) } };
       }
       if (names.includes("threads.quests.split")) {
         const record = at === null ? null : StoryRecord.read(store, scope.user, at);

@@ -194,6 +194,27 @@ export class Requests {
     if (ids.length === 0) return;
     into.run(`UPDATE request SET turn = ? WHERE rowid IN (SELECT r.rowid FROM request r WHERE r.user = ? AND r.id IN (SELECT value FROM json_each(?)) AND ${WAITS})`, [turn, user, JSON.stringify(ids)]);
   }
+
+  /**
+   * Keeps, inside the caller's write, that an `act` of one of `actions` (the world's action ids, as a call named them) reached the
+   * engine in `turn`: each panel's press kept with the turn that asked for one of them is answered, carried out or refused with the
+   * world's reason. Ids are compared as the world keeps them, without regard to case.
+   */
+  answer(into: Database, user: string, turn: string, actions: readonly string[]): void {
+    if (actions.length === 0) return;
+    into.run(
+      "UPDATE request SET answered = 1 WHERE user = ? AND turn = ? AND kind = 'panel' AND lower(json_extract(asked, '$.action')) IN (SELECT lower(value) FROM json_each(?))",
+      [user, turn, JSON.stringify(actions)],
+    );
+  }
+
+  /** The panel's presses of an action kept with `turn` that no `act` of the turn answered and he did not drop, oldest first. */
+  unanswered(user: string, turn: string): RequestRecord[] {
+    return this.db
+      .query<RequestRow, [string, string]>("SELECT r.* FROM request r WHERE r.user = ? AND r.turn = ? AND r.kind = 'panel' AND json_extract(r.asked, '$.action') IS NOT NULL AND r.answered = 0 AND r.dropped = 0 ORDER BY r.at, r.rowid")
+      .all(user, turn)
+      .map(recordOf);
+  }
 }
 
 /** The carrier's writer (PlanCarry): a request put onto a given turn, inside the carrier's own write; told to no turn after it. */

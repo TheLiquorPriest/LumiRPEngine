@@ -6,6 +6,7 @@
 // `run_started`. Nothing here waits for, holds or orders anything RPH does: it only notes when things came.
 
 import type { TraceDelta, TraceRecord } from "rp-harness/contract";
+import { isRecord } from "../shared/json";
 import type { Run, Runs, Span } from "./runs";
 
 /** One of the lead's model calls as its pieces arrive: its thinking before its first output, the last thinking token so far, and whether its output began. */
@@ -15,18 +16,32 @@ interface Call {
   output: boolean;
 }
 
-/** A turn's run followed while it goes on: RPE's run, the lead's handle, and its calls on the reply's path, by number. */
+/** A turn's run followed while it goes on: RPE's run, the lead's handle, its calls on the reply's path, by number, and its agents' `world_apply` calls under way that act, by agent and call: the action ids they name. */
 interface Followed {
   run: Run;
   lead: string;
   calls: Map<number, Call>;
+  acting: Map<string, string[]>;
+}
+
+/** The action ids a `world_apply` call's `act` operations name, as written; none for another call. */
+function actionsOf(tool: string, args: unknown): string[] {
+  if (tool !== "world_apply" || !isRecord(args) || !Array.isArray(args.operations)) return [];
+  return args.operations.flatMap((op) => (isRecord(op) && op.op === "act" && typeof op.action === "string" && op.action.trim() !== "" ? [op.action.trim()] : []));
 }
 
 export class RunTimes {
   /** By RPH's id for each run. */
   readonly #followed = new Map<string, Followed>();
 
-  constructor(private readonly runs: Pick<Runs, "started" | "running">) {}
+  /**
+   * `acted`: told, for a turn, the action ids of the `act` operations of a `world_apply` call of any of its run's agents the moment that
+   * call ended, carried out or refused: the presses the turn was told of those actions are answered.
+   */
+  constructor(
+    private readonly runs: Pick<Runs, "started" | "running">,
+    private readonly acted: (user: string, turn: string, actions: readonly string[]) => void = () => undefined,
+  ) {}
 
   /** A record of RPH's trace, as it came. */
   record(record: TraceRecord): void {
@@ -34,7 +49,7 @@ export class RunTimes {
     if (event.kind === "run_started") {
       this.runs.started(record);
       const run = record.scope.turn === undefined ? undefined : this.runs.running(record.scope.user, record.scope.turn);
-      if (run !== undefined && run.traceRun === record.run && record.agent !== undefined) this.#followed.set(record.run, { run, lead: record.agent.id, calls: new Map() });
+      if (run !== undefined && run.traceRun === record.run && record.agent !== undefined) this.#followed.set(record.run, { run, lead: record.agent.id, calls: new Map(), acting: new Map() });
       return;
     }
     const followed = this.#followed.get(record.run);
@@ -46,6 +61,19 @@ export class RunTimes {
     if (event.kind === "tool_started" && (event.tool === "lore_search" || event.tool === "lore_read")) {
       if (event.tool === "lore_search") followed.run.lookups.searches++;
       else followed.run.lookups.reads++;
+    }
+    // An `act` of any agent of the run, once its call ended: the press of that action the turn was told is answered.
+    const key = `${record.agent?.id ?? ""}\n${event.kind === "tool_started" || event.kind === "tool_ended" ? event.callId : ""}`;
+    if (event.kind === "tool_started") {
+      const actions = actionsOf(event.tool, event.args);
+      if (actions.length > 0) followed.acting.set(key, actions);
+    } else if (event.kind === "tool_ended") {
+      const actions = followed.acting.get(key);
+      if (actions !== undefined) {
+        followed.acting.delete(key);
+        for (const a of actions) (followed.run.acted ??= new Set()).add(a.toLowerCase());
+        this.acted(followed.run.user, followed.run.turn, actions);
+      }
     }
     if (record.agent?.id !== followed.lead) return;
     const { run, calls } = followed;

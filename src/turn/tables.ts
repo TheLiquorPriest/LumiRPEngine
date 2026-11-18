@@ -560,4 +560,14 @@ CREATE INDEX measurement_at ON measurement (user, at);
 ALTER TABLE turn_run ADD COLUMN intent_record TEXT;
 `,
   },
+  {
+    version: 24,
+    name: "whether a press a turn was told was carried out, and whether you dropped it",
+    // `request.answered`: an `act` of the request's action reached the engine in the turn it is kept with (carried out, or refused with
+    // the world's reason); `request.dropped`: he dropped one his turn did not carry out, so it is no longer shown as waiting on him.
+    sql: `
+ALTER TABLE request ADD COLUMN answered INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

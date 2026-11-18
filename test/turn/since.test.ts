@@ -35,6 +35,9 @@ async function worldBed(options: TurnBedOptions): Promise<TurnBed> {
   return b;
 }
 
+/** What a turn is told of a press is what these tests look at, not what it does with it: the reminder of a press no `act` answered is off. */
+const PRESS_OWED = "rules/press-owed";
+
 /** A panel's press that waits for the player's next message, on its own route: the Timelapse, which the palette offers, by its label. */
 const press = (b: TurnBed, label: string) => b.page<{ request: { id: string } | null }>("POST", `/api/v1/chats/${CHAT}/requests/panel`, { action: TIMELAPSE_ACTION, values: { label }, from: "palette" });
 
@@ -272,7 +275,7 @@ describe("what has happened in the chat since the last turn", () => {
   });
 
   test("a request from a panel is told, as what was pressed, to the turn that answers the next message and to a swipe of it, and to no turn after", async () => {
-    const b = await worldBed({ answers: [replying("The lamp turns."), replying("Wren points at the steps."), replying("Wren nods at the steps."), replying("Wren waits.")] });
+    const b = await worldBed({ off: [PRESS_OWED], answers: [replying("The lamp turns."), replying("Wren points at the steps."), replying("Wren nods at the steps."), replying("Wren waits.")] });
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     const asked = await press(b, "Walk here");
     expect(asked.status).toBe(200);
@@ -300,6 +303,7 @@ describe("what has happened in the chat since the last turn", () => {
   test("a request made while a reply is written, or after the newest reply flipped to another swipe, reaches the turn that answers the next message", async () => {
     const hold = gate();
     const b = await worldBed({
+      off: [PRESS_OWED],
       answers: [
         { pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns" }, { hold }, { text: ".</reply>" }] },
         replying("Wren points at the steps."),
@@ -488,7 +492,7 @@ describe("the kinds of what happened since", () => {
   test("each item goes under its kind as the harness's contract has it, so a file the user's config adds for that kind is given to that turn", async () => {
     // The user's own files at the global level, each added for one kind by the user's own config.
     const b = await worldBed({
-      global: "stack:\n  added:\n    migrated: [CARRIED]\n    swiped: [SHOWN]\n",
+      global: `stack:\n  off: [${PRESS_OWED}]\n  added:\n    migrated: [CARRIED]\n    swiped: [SHOWN]\n`,
       answers: [replying("The lamp turns."), replying("The lamp gutters."), replying("Wren trims the wick.")],
     });
     const files = { CARRIED: "FILE-CARRIED Mind what was carried.", SHOWN: "FILE-SHOWN Mind the swipe the player chose." };

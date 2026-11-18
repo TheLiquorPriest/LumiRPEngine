@@ -30,7 +30,7 @@ describe("unsourced.writes", () => {
     expect(unsourced(GM.id)).toBeGreaterThan(0);
     expect(unsourced(null)).toBe(1);
 
-    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() });
+    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set(), unanswered: () => [] });
     const scope = { user: USER, chat: CHAT, session: "s-1", turn: turn.id };
     const read = async (agent?: AgentRef) => await facts.read(scope, ["unsourced.writes", "turn.recorded"], agent);
     expect((await read(AUTHOR))["unsourced.writes"]).toEqual({ count: unsourced(AUTHOR.id) });
@@ -59,7 +59,7 @@ describe("unsourced.writes", () => {
     expect(changes.filter((c) => c.handle === null && c.source === null).map((c) => c.by)).toEqual([KNOWLEDGE_BY, "migration"]);
 
     const listed = u.unsettledOf(CHAT, tied.id);
-    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() });
+    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set(), unanswered: () => [] });
     const counted = (await facts.read({ user: USER, chat: CHAT, session: "s-1", turn: tied.id }, ["unsourced.writes"]))["unsourced.writes"];
     // Of the turn's own changes, the list's unsourced ones are exactly those the count counts.
     const listedOfTurn = listed.filter((l) => l.turn === tied.id);
@@ -80,7 +80,7 @@ describe("unsourced.writes", () => {
     await write("character-1", null);
     await write("character-1", null);
     await write("character-1", "j-1");
-    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set() });
+    const facts = turnFacts(b.t.store, { runs: () => [], stopped: () => 0, story: async () => ({ from: "lumiverse", newest: "directive" }), told: () => new Set(), unanswered: () => [] });
     const read = async (agent: AgentRef) => (await facts.read({ user: USER, chat: CHAT, session: "s-2", turn: turn.id }, ["unsourced.writes"], agent))["unsourced.writes"];
     expect(await read({ id: "character-1", definition: "character", job: "j-1" })).toEqual({ count: 1 });
     expect(await read({ id: "character-1", definition: "character" })).toEqual({ count: 2 });

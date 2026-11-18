@@ -199,6 +199,8 @@ export interface Run extends RunRecord {
    * Kept nowhere: the rule firings RPE is told once the agent has gone on (`rule_firing`) keep them for good.
    */
   told?: Set<string>;
+  /** The action ids its agents' `act` operations named, in calls that ended, lower case; absent before any. Kept with the presses they answered (`Requests.answer`). */
+  acted?: Set<string>;
 }
 
 interface RunRow {

@@ -488,12 +488,18 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
       },
       // What the trace told of the run going on, the moment each rule fired, and the firings kept once its agent went on.
       told: (user, turn, since) => new Set([...(runs.running(user, turn)?.told ?? []), ...toldRows(app.db, user, "rule", { turn }).flatMap((r) => (r.at >= since && r.body.fact !== undefined ? [r.body.fact.name] : []))]),
+      // As kept, less what the run going on has acted on already (its write of it may not have landed yet).
+      unanswered: (user, turn) => {
+        const acted = runs.running(user, turn)?.acted;
+        return requests.unanswered(user, turn).flatMap((r) => ("what" in r.asked && r.asked.action !== null && acted?.has(r.asked.action.toLowerCase()) !== true ? [{ what: r.asked.what, on: r.asked.on, action: r.asked.action }] : []));
+      },
     }),
   );
   facts.add(loreIndex.facts());
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
-  const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs), log: app.log });
+  // A press of an action the turn was told is answered the moment an `act` of that action ends in it.
+  const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs, (user, turn, actions) => void app.writes.run((db) => requests.answer(db, user, turn, actions), "keeping the presses a turn acted on").catch((error: unknown) => app.log.error("The presses a turn acted on could not be kept.", { turn, error: error instanceof Error ? error.message : String(error) }))), log: app.log });
   app.kept.add("Turn runs going on", () => ({ count: runs.going }));
   app.kept.add("Turn folders the trace is writing to", () => ({ count: trace.held().folders }));
   app.kept.add("Trace records not yet written", () => ({ count: trace.held().writes }));
