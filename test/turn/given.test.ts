@@ -18,7 +18,8 @@ afterEach(async () => {
 
 /** A bed whose chat plays `doc`, kept by the store, from before its first turn. */
 async function worldBed(doc: WorldDoc, options: TurnBedOptions): Promise<TurnBed> {
-  const b = await openTurnBed(options);
+  // The reminder of writes that name no source would ask for calls these tests do not script.
+  const b = await openTurnBed({ off: ["rules/unsourced"], ...options });
   beds.push(b);
   await playsWorld(b, doc);
   return b;
@@ -62,7 +63,7 @@ test("a delegated GM's first request holds the scene in full with its map, what 
   await play(b, "I ask Tam whether he will make the market.");
 
   // The GM's first request: its own, holding the brief it was sent.
-  const gm = b.model.requests.map((r) => JSON.stringify(r.messages)).find((sent) => sent.includes("Can Tam reach the market before nine?") && sent.includes("game master's hand"));
+  const gm = b.model.requests.map((r) => JSON.stringify(r.messages)).find((sent) => sent.includes("Can Tam reach the market before nine?") && sent.includes("You are the GM, at this table"));
   expect(gm).toBeDefined();
   // The scene in full: the room, under the world state's own heading, with a row of its map as the map prints it.
   expect(gm).toContain("### At hand");
@@ -133,13 +134,13 @@ test("a GM delegated on a chat's first turn, in a world where nothing is due, is
   });
   await play(b, "I look around.");
 
-  const gm = b.model.requests.map((r) => JSON.stringify(r.messages)).find((sent) => sent.includes("BRIEF-BARE") && sent.includes("game master's hand"));
+  const gm = b.model.requests.map((r) => JSON.stringify(r.messages)).find((sent) => sent.includes("BRIEF-BARE") && sent.includes("You are the GM, at this table"));
   expect(gm).toBeDefined();
-  // The story brief's none part, the world state's own heading and line for an empty horizon, and its line for nothing due in the
-  // span the chat's settings give (360 minutes as shipped).
+  // The story brief's none part, the world state's own heading and the place it opens on (the player's, with no scene or horizon), and
+  // its line for nothing due in the span the chat's settings give (360 minutes as shipped).
   expect(gm).toContain("Nothing to brief: no scene is open, no thread is held hot, no future's time has come, and nothing is recorded of the player.");
   expect(gm).toContain("### At hand");
-  expect(gm).toContain("Nothing is at hand: no place, person or thing is on the horizon.");
+  expect(gm).toContain("The Common Room [common_room] (place)");
   expect(gm).toContain("### Due");
   expect(gm).toContain("The world state lists nothing due in the next 360 minutes of story time.");
 
@@ -166,7 +167,7 @@ test("a character delegated in a chat with no world, before the cast has any rec
   expect(wren).toContain("Nothing is recorded of who they are yet.");
   expect(wren).toContain("### On Wren Hale's mind");
   expect(wren).toContain("Nothing is recorded on their mind.");
-  expect(wren).toContain("The world holds no one by their name, or more than one.");
+  expect(wren).toContain("The world holds no person this character is: none is tied to them, and their name finds no one, or more than one.");
   expect(wren).not.toContain("in the world ()");
 
   const answered = JSON.stringify(b.model.requests.at(-1)!.messages);
