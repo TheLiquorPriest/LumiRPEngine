@@ -102,7 +102,7 @@ test("jobs the Author starts run on after the reply, and the next turn is told h
   ];
   const jobs: Record<string, Answer[]> = {
     [briefs.done]: [{ pieces: [{ hold: held.done }, { call: "world_apply", args: { operations: [setMood] } }] }, { pieces: [{ text: "Bram's mood is recorded as sour." }] }],
-    [briefs.failed]: [{ pieces: [{ hold: held.failed }], end: { error: "The provider refused the call." } }],
+    [briefs.failed]: [{ pieces: [{ hold: held.failed }], end: { error: "400: The provider refused the call." } }],
     [briefs.cancelled]: [{ pieces: [{ hold: held.cancelled }, { text: "The regulars are Tam and Odile." }] }],
   };
   // Each call answered from its own agent's list, whatever order the Author's and the jobs' calls come in: the Author holds job_start.

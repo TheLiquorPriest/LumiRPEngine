@@ -12,7 +12,8 @@ afterEach(async () => {
 });
 
 test("a provider that fails before the reply: the notice carries the provider's words, the thinking Lumiverse keeps the same line without them", async () => {
-  const b = await openTurnBed({ answers: [{ pieces: [], end: { error: "UPSTREAM-WORDS The gateway at relay-7 answered 502." } }] });
+  // No retries, so the one failure scripted is the turn's own.
+  const b = await openTurnBed({ answers: [{ pieces: [], end: { error: "UPSTREAM-WORDS The gateway at relay-7 answered 502." } }], global: "calls:\n  retries: 0\n" });
   beds.push(b);
   b.host.send(CHAT, "I climb the stairs.");
   const out = await b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
