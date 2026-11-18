@@ -705,6 +705,38 @@ Two more tools play the world's latest revision with the engine alone, on RPE's 
 
 Neither is a turn of RPE: no agent plays in them.
 
+## Settings, storage and the runtime
+
+### The Settings page
+
+**Settings** holds every setting RPE and its harness read, found by what it does: in sections of plain words, chosen from a row of them (a column beside the settings on a wide page), with **Find a setting** over every name and what it does, and **Changed** to show only the ones you changed. Each setting shows what it does, the control that fits it, its unit, the advice its value passes, what was shipped with the way back to it, and where it is set. A switch or a choice is written at once; a typed value waits for **Save** (or Enter). RPE takes or refuses a value in its own words.
+
+With a chat open, **Where a change goes** chooses **For every chat** or **For this chat only**. Your changes for every chat are kept in `files/RPE-global.yml`; a chat's own in its `RPE.yml`. The settings set for one connection or one agent at a time are a table, a row for each: press a cell to change it. **Server and service** lists what the server's own command line sets (`rpe up`, `rpe lumiverse`) and [anything that runs a command or calls out](#what-runs-a-command-or-calls-out): no page can change those. Every setting, its default and what it does is in [settings.md](settings.md).
+
+### The Storage page
+
+**Storage** shows what RPE keeps and how much, on disk and in its database:
+
+- **What RPE keeps**: each kind, with how many, how big, the oldest, how long it is kept (the setting that decides it opens on Settings) and when you last pruned it;
+- **Chat by chat**: each chat's folder by area and its rows of the database, with its notes; a chat Lumiverse deleted says so, with **Prune what is left of it**;
+- **The notes agents lean on**, each opening on the Files page;
+- **Backups and copies of the database**, with **Make a backup now**.
+
+Nothing is pruned by a press alone: **Prune old turn folders**, **Prune closed sessions' files**, **Prune note versions past what is kept** and **Prune decided suggestions past what is kept** first say exactly what would go and what stays, and take exactly that on **Yes, prune exactly that**. A backup asks the same way (**Yes, make it**).
+
+### The Runtime page
+
+**Runtime** shows how RPE runs, and which build:
+
+- **How RPE runs**: as a service or started by hand, since when, the addresses it listens on, the build, and the memory it holds now, at its highest and against its service's limit. **Restart** waits for the turns and jobs running, and says so. What only the server's command line can do is listed with the line to run there (`rpe up --memory`, `rpe up --systemd`).
+- **Builds**: the build RPE runs, the app file on disk and what the extension says it is; the newest update stage by stage; and **Update now**, which takes a new build that has passed its checks, or says there is none, or why the last one was refused. How an update arrives is in [install.md](install.md#updating). In the web app, what this browser signs in with: its session and when it ends, and the web key.
+- **RPE's log**: its newest lines first, a page at a time, narrowed by level, area, chat, turn and job. The Jobs and Turns pages link to the lines of one job or one turn.
+- **Where the time goes**: for **This chat** or **Every chat**, each part of a turn over the latest turns, with its middle time, the slowest and the latest. It reports; it decides nothing.
+
+### The Migration page
+
+**Migration** moves you from the previous build: **A rehearsal** that reads its data and writes nothing, **The last real run** with its report, **The backup**, what is **Waiting on you**, **The switch** and **Going back**. Its steps are in [migration.md](migration.md).
+
 ## Your agent's MCP server
 
 Your own agent (Claude Code, Codex, Cursor…) reaches your worlds through the `lumirpengine` MCP server ([MCP.md](MCP.md)). It follows LumiRPEngine: when you update LumiRPEngine, a server on the same machine as Lumiverse loads the new build's tools and guide by itself, with no reinstall.
