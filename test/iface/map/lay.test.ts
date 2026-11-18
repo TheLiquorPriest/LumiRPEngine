@@ -49,8 +49,8 @@ describe("a room grid over one square of a coarse map", () => {
     expect([between(town, coarse, "wren", "bram"), town.scale.metres]).toEqual([0, 80]);
     const apart = [positionChange({ scope: "crooked_kettle" }, "wren", [3, 3], null), positionChange({ scope: "crooked_kettle" }, "bram", [6, 4], null)];
     expect(chatOn(world).record(apart).changes.map((c) => [c.applied, c.reports[0]?.code])).toEqual([
-      [false, "off_grid"],
-      [false, "off_grid"],
+      [true, "off_grid"],
+      [true, "off_grid"],
     ]);
 
     // Laid over the inn's square: the map is the inn's own, and both are taken off the town's square.

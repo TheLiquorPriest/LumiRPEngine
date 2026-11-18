@@ -68,7 +68,7 @@ describe("the first turn of a chat with no world", () => {
       "Nothing was recorded. Send the call again with that put right.",
     ]);
     // Nothing at all.
-    expect(await refused({})).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon."]);
+    expect(await refused({})).toEqual(["operations cannot be read. It is a list of operations, each with its op, one of: move, place, give, wear, store, pay, pass_time, set, fact, quest, relate, spawn, horizon, act."]);
     // Someone moved to a place nobody had made.
     expect(await refused({ operations: [{ op: "spawn", kind: "person", name: "Ada Lorne", source: src }, { op: "move", who: "Ada Lorne", to: ROCK, source: src }] })).toEqual([
       `Operation 2 (move): there is nothing called ${ROCK} that is a place. ${NOTHING_PLACE}`,
