@@ -19904,12 +19904,16 @@ function applyItemOp(w, op, opts) {
       return grant(w, op, opts);
     case "home": {
       const bad = op.home !== null ? restProblem(ctx, op.home) : null;
-      if (bad)
+      const bent = bad !== null && bad.code === "cant_hold" && opts.advise === true && op.home !== null && op.home !== "owner" && "in" in op.home ? op.home.in : null;
+      if (bad && bent === null)
         return bad;
       const value = op.home === null ? null : restValue2(op.home);
       if ((own(ctx.state.entities, op.item)?.fields.home ?? null) === value)
         return reject9("no_change", say("why_it_rests_there_already"));
-      return applyAll(w, [{ type: "set", entity: op.item, field: "home", value }]) ?? {};
+      const done = applyAll(w, [{ type: "set", entity: op.item, field: "home", value }]);
+      if (done)
+        return done;
+      return bent === null ? {} : { advice: [{ code: "rule_bent", values: { what: ref(ctx, op.item), where: ref(ctx, bent), code: "cant_hold" } }] };
     }
     case "use": {
       const n = op.qty ?? 1;
@@ -97531,7 +97535,7 @@ var package_default = {
 // src/cli/version.ts
 var CLI_NAME = "lumirpengine";
 var CLI_VERSION = package_default.version;
-var BUILD = "4263bee0";
+var BUILD = "235340e5";
 function runtimeCannotFollow(bun) {
   if (bun === undefined)
     return null;

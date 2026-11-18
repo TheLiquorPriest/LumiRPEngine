@@ -23753,12 +23753,16 @@ function applyItemOp(w, op, opts) {
       return grant(w, op, opts);
     case "home": {
       const bad = op.home !== null ? restProblem(ctx, op.home) : null;
-      if (bad)
+      const bent = bad !== null && bad.code === "cant_hold" && opts.advise === true && op.home !== null && op.home !== "owner" && "in" in op.home ? op.home.in : null;
+      if (bad && bent === null)
         return bad;
       const value = op.home === null ? null : restValue2(op.home);
       if ((own2(ctx.state.entities, op.item)?.fields.home ?? null) === value)
         return reject9("no_change", say("why_it_rests_there_already"));
-      return applyAll2(w, [{ type: "set", entity: op.item, field: "home", value }]) ?? {};
+      const done = applyAll2(w, [{ type: "set", entity: op.item, field: "home", value }]);
+      if (done)
+        return done;
+      return bent === null ? {} : { advice: [{ code: "rule_bent", values: { what: ref(ctx, op.item), where: ref(ctx, bent), code: "cant_hold" } }] };
     }
     case "use": {
       const n = op.qty ?? 1;
@@ -158968,6 +158972,8 @@ ${parent}`);
       const steps = await reads.path(chat);
       if (steps === null)
         return;
+      if (this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0)
+        return;
       await this.#compare(user, chat, steps, null, null, store2.heardCount(chat));
       await this.#d.notes.follow(user, chat, { turns: store2.line(chat).map((l) => l.turn), branchOf: store2.chat(chat)?.sourceChat ?? null });
     } finally {
@@ -272287,5 +272293,5 @@ if (Bun.isMainThread) {
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs2(process.execPath, Bun.main)
-  }, { version: "4263bee0", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "235340e5", areas: compose2().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
 }
