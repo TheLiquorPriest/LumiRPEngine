@@ -49,6 +49,8 @@ describe("the door's settings", () => {
       dryRunMs: DRY_RUN_MS,
       commentMs: COMMENT_MS,
       wholeHoldMs: WHOLE_HOLD_MS,
+      // Off as shipped: the empty reply a failed or stopped turn left stays (plan §4.2's closed table of writes).
+      removeEmptyReply: false,
       relay: RELAY_DEFAULTS,
       questionBytes: QUESTION_BODY_BYTES,
       extension: { questionMs: QUESTION_WAIT_MS, logChars: EXTENSION_LOG_CHARS, requestMs: PAGE_ROAD_DEFAULTS.requestMs, renewMs: PAGE_ROAD_DEFAULTS.renewMs, whoseMs: WHOSE_WAIT_MS },
@@ -74,6 +76,7 @@ describe("the door's settings", () => {
       at[path.at(-1)!] = value;
     }
     (config.lumiverse as Record<string, JsonValue>).untagged = { whileAwaited: "fail" };
+    ((config.lumiverse as Record<string, JsonValue>).reply as Record<string, JsonValue>).removeEmpty = true;
     const set = leaves(lumiverseSettings(readConfig([{ level: "global", file: "RPE-global.yml", text: JSON.stringify(config) }], null)));
     const defaults = leaves(LUMIVERSE_DEFAULTS);
     expect([...set.keys()]).toEqual([...defaults.keys()]);

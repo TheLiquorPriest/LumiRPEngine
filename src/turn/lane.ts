@@ -29,7 +29,6 @@ import type { Hints } from "../adapter/lumiverse/hint";
 import type { IndexFeed } from "../adapter/lumiverse/index-feed";
 import type { LumiverseReads } from "../adapter/lumiverse/reads";
 import type { Stores } from "../adapter/lumiverse/stores";
-import type { Writes as LumiverseWrites } from "../adapter/lumiverse/writes";
 import { type App, LIVE_JOBS, RouteError } from "../app";
 import { portTexts, readConfig } from "../app/config-read";
 import { type BookReader, CAST_PLAYER_MIND, castFacts, CastRecord, castTools, chatLine, findCharacter, MemorySearch, playerMindOf, type SourceReader } from "../cast";
@@ -270,11 +269,11 @@ export interface TurnsOptions {
   /**
    * The adapter's reads of Lumiverse, its chat port, and Lumiverse's Stop of one generation of the
    * user's (false when it was not going on), the search index's feed the lore searches books by, the
-   * names of a chat's prompt's blocks found since a turn's layout was made (`Hints`), and the door's
-   * writes a turn's end makes (the empty reply it staged, taken away); null before it is mounted, or
-   * when RPE is not set up for a Lumiverse.
+   * names of a chat's prompt's blocks found since a turn's layout was made (`Hints`), and the empty
+   * reply a turn left taken away where `lumiverse.reply.removeEmpty` is on (null where it is off);
+   * null before it is mounted, or when RPE is not set up for a Lumiverse.
    */
-  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean>; feed?: Pick<IndexFeed, "foundEntries">; hints?: Pick<Hints, "named">; writes?: Pick<LumiverseWrites, "dropEmptyReply"> } | null;
+  lumiverse(): { reads: LumiverseReads; chat: ChatReads; stores: Stores; stopGeneration(generation: string): Promise<boolean>; feed?: Pick<IndexFeed, "foundEntries">; hints?: Pick<Hints, "named">; removeEmptyReply?(user: string, chat: string, message: string, swipe: number | null): Promise<boolean | null> } | null;
   /** The user's books, as the lore reads them. */
   books: LoreBooks;
   /** What a migration carried of a chat, for its first briefing on RPE. */
@@ -671,7 +670,7 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     live: app.live,
     reads: () => options.lumiverse()?.reads ?? null,
     stopGeneration: async (generation) => (await options.lumiverse()?.stopGeneration(generation)) ?? false,
-    dropEmptyReply: async (user, chat, message, swipe) => (await options.lumiverse()?.writes?.dropEmptyReply(user, chat, message, swipe)) ?? false,
+    removeEmptyReply: async (user, chat, message, swipe) => (await options.lumiverse()?.removeEmptyReply?.(user, chat, message, swipe)) ?? null,
     harness: () => harness,
     owner,
     clock,

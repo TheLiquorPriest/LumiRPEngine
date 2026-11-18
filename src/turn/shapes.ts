@@ -344,6 +344,10 @@ export const turnReply = shape.named(
     chat: T,
     intent: field(nullable(T), "The lead's intent record as it was written (plan §10.3); null when it wrote none. Shown behind the spoiler gate."),
     reply: field(replySoFar, "What its latest run sent to the chat so far."),
+    emptyReply: field(
+      nullable(T),
+      "The message of the empty reply this turn left in the chat, where it ended before a word of its reply went out and that reply still stands there empty (read from Lumiverse now); null for any other turn. It stays unless the setting lumiverse.reply.removeEmpty takes it away.",
+    ),
     error: field(nullable(replyError), "Why the reply failed, when it did."),
     trace: field(shape.list(traceRecord), "Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it."),
     lore: field(

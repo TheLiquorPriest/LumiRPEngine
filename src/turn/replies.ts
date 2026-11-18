@@ -10,6 +10,7 @@
 // which the panels' zone may not import.
 
 import type { ReplyError } from "rp-harness/contract";
+import { textHash } from "../adapter/lumiverse/wire";
 import { type Infer, route, shape } from "../app";
 import { type LinesPart, loadGuidance } from "../app/guidance";
 import { playerLines } from "../engine/player-events";
@@ -33,10 +34,11 @@ const laneShown = shape.named(
 
 const replyLine = shape.named(
   "ReplyLine",
-  "The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on).",
+  "The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), whether it is an empty reply (nothing written in it, as Lumiverse keeps one when a generation fails or is stopped before its first word with thinking already shown; never played), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on).",
   shape.object({
     message: T,
     played: shape.yesNo(),
+    empty: shape.yesNo(),
     engine: shape.nullable(T),
     turn: shape.nullable(T),
     joined: shape.nullable(shape.object({ turn: T, joined: T })),
@@ -101,7 +103,7 @@ export function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user:
     const entry = path.get(message);
     if (entry === undefined || entry.user) continue;
     if (entry.turn === null) {
-      out.push({ message, played: false, engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null });
+      out.push({ message, played: false, empty: entry.hash === textHash(""), engine: null, turn: null, joined: null, time: null, place: null, lanes: [], marks: [], unfinished: null });
       continue;
     }
     let turn = entry.turn;
@@ -120,6 +122,7 @@ export function replyLines(turns: Pick<Turns, "store" | "marks" | "runs">, user:
     out.push({
       message,
       played: true,
+      empty: false,
       engine: imported ? row.engine : null,
       turn: joined?.turn ?? turn,
       joined,

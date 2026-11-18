@@ -132,6 +132,12 @@ export interface Lumiverse {
    * (`:48`, `:63-64`).
    */
   stopGeneration(generation: string): Promise<boolean>;
+  /**
+   * The empty reply a turn's generation left in the chat, taken away (`Writes.dropEmptyReply`), only where he switched
+   * `lumiverse.reply.removeEmpty` on: a write the plan's table of what RPE writes in Lumiverse does not hold, off as shipped. Null where
+   * it is off and nothing was asked of Lumiverse; else whether the reply was taken away.
+   */
+  removeEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean | null>;
 }
 
 export interface LumiverseDoor {
@@ -294,7 +300,9 @@ export function lumiverseDoor(lanes: AdapterLanes, deps: AdapterDeps): Lumiverse
       await fed.dropChat(id);
     };
     const hints = new Hints({ reads, session, log, dryRunMs: () => settings().dryRunMs });
-    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, hints, writes: createWrites({ session, reads, user }), calls: lumiverseCalls(session), stopGeneration };
+    const writes = createWrites({ session, reads, user });
+    const removeEmptyReply = async (owner: string, chat: string, message: string, swipe: number | null): Promise<boolean | null> => (settings().removeEmptyReply ? await writes.dropEmptyReply(owner, chat, message, swipe) : null);
+    return { session, reads, chat, events, relaySocket, relay, database, stores, feed: fed, dropChat, hints, writes, calls: lumiverseCalls(session), stopGeneration, removeEmptyReply };
   }
 
   /** The adapter's handlers, made once the area is mounted in an app set up for a Lumiverse user. */

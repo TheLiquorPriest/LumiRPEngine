@@ -17,7 +17,8 @@
 //     reads: { rereads: 3, breakdownReplies: 10, keepSeconds: 15, kept: 32 }  a changing chat's rereads; newest replies asked for a stored breakdown; seconds a read over HTTP is held; chats, books and presets held at once
 //     dryRun: { waitSeconds: 10 }        seconds a dry run is waited for before the reply goes on without its names
 //     stream: { commentSeconds: 5 }      seconds a reply's stream may send nothing before a comment line keeps its connection
-//     reply: { holdSeconds: 540 }        seconds after a reply asked for whole arrives at which its turn stops with what it has
+//     reply: { holdSeconds: 540, removeEmpty: false }  seconds after a reply asked for whole arrives at which its turn stops with what it has;
+//                                        whether RPE deletes the empty reply a turn left when it failed or was stopped before its first word
 //     relay:
 //       flushSeconds: 0.25               seconds between a page's frames
 //       frameKiB: 256                    KiB of characters in one frame; a longer list goes in parts
@@ -60,6 +61,8 @@ export interface LumiverseSettings {
   dryRunMs: number;
   commentMs: number;
   wholeHoldMs: number;
+  /** `lumiverse.reply.removeEmpty`: the empty reply a turn left when it failed or was stopped before its first word is taken away. */
+  removeEmptyReply: boolean;
   relay: RelaySettings;
   questionBytes: number;
   /** The light extension's values (group "Lumiverse ▸ extension"): sent with RPE's registration (`questionMs`, `logChars`, `whoseMs`) and the page's start facts (`requestMs`, `renewMs`). */
@@ -155,8 +158,25 @@ export const UNTAGGED_WHILE_AWAITED = {
   effect: "use",
 } as const satisfies Setting;
 
-/** Every setting the door reads, as a config file writes it: the Settings page's group "Lumiverse". */
-export const LUMIVERSE_SETTINGS: readonly Setting[] = [...Object.values(LUMIVERSE_SETTING_DEFS), UNTAGGED_WHILE_AWAITED];
+/**
+ * `lumiverse.reply.removeEmpty`: off as shipped, which is the plan's own behaviour (§4.2's table of what RPE writes in Lumiverse is closed):
+ * the empty reply Lumiverse keeps when a turn fails or is stopped before its first word stays, its thinking saying why. On, RPE deletes
+ * it (the message, or the swipe the turn added), only while its text is still empty: a write to his chat RPE otherwise never makes.
+ */
+export const REMOVE_EMPTY_REPLY = {
+  key: "lumiverse.reply.removeEmpty",
+  default: false,
+  takes: { type: "yesNo" },
+  levels: GLOBAL,
+  perConnection: false,
+  name: "Take away an empty reply a failed or stopped turn left",
+  about:
+    "When a turn fails or is stopped before a word of its reply went out, Lumiverse keeps an empty reply for it, whose thinking holds RPE's progress lines and why it ended. On: RPE deletes that empty reply in Lumiverse (the message, or the swipe the turn added to a message), and only while its text is still empty. This is a write to your chat that RPE otherwise never makes. Off: the reply stays; swipe it or delete it in Lumiverse.",
+  effect: "use",
+} as const satisfies Setting;
+
+/** Every setting the door reads, as a config file writes it: the Settings page's group "Lumiverse", the empty reply's beside the whole reply's hold. */
+export const LUMIVERSE_SETTINGS: readonly Setting[] = [...Object.values(LUMIVERSE_SETTING_DEFS).flatMap((s): Setting[] => (s === LUMIVERSE_SETTING_DEFS.wholeHold ? [s, REMOVE_EMPTY_REPLY] : [s])), UNTAGGED_WHILE_AWAITED];
 
 /** The door's limits as a read of the levels every chat shares sets them over the defaults; a value a setting does not take is logged by the read. */
 export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
@@ -169,6 +189,7 @@ export function lumiverseSettings(read: ConfigRead): LumiverseSettings {
     dryRunMs: v.dryRun * S,
     commentMs: v.comment * S,
     wholeHoldMs: v.wholeHold * S,
+    removeEmptyReply: read.value(REMOVE_EMPTY_REPLY) === true,
     relay: { flushMs: v.flush * S, frameChars: v.frame * KIB, leaseMs: v.lease * S, holdChars: v.hold * KIB, retryMs: v.relayRetry * S },
     questionBytes: v.questionBody * KIB,
     extension: { questionMs: v.questionWait * S, logChars: v.logChars, whoseMs: v.whoseWait * S, requestMs: v.requestWait * S, renewMs: v.followRenewal * S },

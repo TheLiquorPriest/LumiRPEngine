@@ -1431,7 +1431,7 @@ export interface LiveBatch {
 }
 
 /** One event as the live socket sends it: of a chat (or of ~jobs, ~user, or an address), numbered from 1 for each, of one of the kinds the socket carries, with that kind's data; an event of a kind declared with a key carries it. */
-export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
+export type LiveEvent = { chat: string; seq: number; kind: "trace"; at: number; data: TraceRecord } | { chat: string; seq: number; kind: "delta"; at: number; data: TraceDelta } | { chat: string; seq: number; kind: "reply"; at: number; data: ReplyPiece } | { chat: string; seq: number; kind: "released"; at: number; data: ReplyReleased } | { chat: string; seq: number; kind: "state"; key: "state"; at: number; data: Record<string, never> } | { chat: string; seq: number; kind: "handler_failed"; at: number; data: { op: string; error: string; turn: string; change: number | null } } | { chat: string; seq: number; kind: "requests"; at: number; data: { waiting: number } } | { chat: string; seq: number; kind: "folder"; at: number; data: { turn: string; path: string } } | { chat: string; seq: number; kind: "job"; at: number; data: { job: JobView } } | { chat: string; seq: number; kind: "empty_reply"; at: number; data: { turn: string; message: string; off: boolean } } | { chat: string; seq: number; kind: "world"; at: number; data: WorldChanged } | { chat: string; seq: number; kind: "build_job"; at: number; data: BuildJobChanged } | { chat: string; seq: number; kind: "extension"; at: number; data: ExtensionStatusReply };
 
 /** What the live socket sends a page: that following a chat (or a name) began, with the number of its last event then; its events in order, with the numbers of those the hub dropped before them for a page that fell behind; or why it did not take what the page sent. */
 export type LiveMessage = { type: "following"; chat: string; seq: number } | { type: "events"; chat: string; events: LiveEvent[]; missed?: LiveMissed } | { type: "refused"; message: string };
@@ -2559,10 +2559,11 @@ export interface RepliesReply {
   replies: ReplyLine[];
 }
 
-/** The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on). */
+/** The line under one reply, by the swipe shown: whether RPE played it (false: made without RPE, no turn tied to it), whether it is an empty reply (nothing written in it, as Lumiverse keeps one when a generation fails or is stopped before its first word with thinking already shown; never played), the old engine that played a carried one, its turn, the joined form where that turn was a continue's held turn joined to another (the line is then the joined turn's), the world's date and time at the turn's end and the place his character was in (null where the clock was never set, or no place holds him), each lane's changes, the turn's marks, and, where the turn's record of the reply was not finished (its newest run failed, reached a limit or was stopped once the reply had begun to go out), why in the reply-errors part's words and whether Settle now settles it (the turn is the newest of the chat's own on its path and no run of the chat goes on). */
 export interface ReplyLine {
   message: string;
   played: boolean;
+  empty: boolean;
   engine: string | null;
   turn: string | null;
   joined: { turn: string; joined: string } | null;
@@ -3819,6 +3820,8 @@ export interface TurnReply {
   intent: string | null;
   /** What its latest run sent to the chat so far. */
   reply: ReplySoFar;
+  /** The message of the empty reply this turn left in the chat, where it ended before a word of its reply went out and that reply still stands there empty (read from Lumiverse now); null for any other turn. It stays unless the setting lumiverse.reply.removeEmpty takes it away. */
+  emptyReply: string | null;
   /** Why the reply failed, when it did. */
   error: { code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook"; hook?: string; limit?: LimitHit; detail?: string; agent?: string; text?: string } | null;
   /** Its runs' events as far as the read reaches, in order: of the run asked for (the turn's first when none), those numbered `from` on; and every record of each run that began after it. */
@@ -6971,6 +6974,8 @@ export interface LiveKinds {
   folder: { turn: string; path: string };
   /** One of his jobs changed: the job as RPH keeps it now. */
   job: { job: JobView };
+  /** A turn ended before a word of its reply went out, and the empty reply Lumiverse kept for it stays in the chat, by its turn and message; `off` says the setting lumiverse.reply.removeEmpty is off (false: it is on, and taking the reply away failed). The page says what to do with it. */
+  empty_reply: { turn: string; message: string; off: boolean };
   /** A world of his changed: the page reads what it shows of that world again. */
   world: WorldChanged;
   /** A job of his changed: the page shows its progress or its result. */

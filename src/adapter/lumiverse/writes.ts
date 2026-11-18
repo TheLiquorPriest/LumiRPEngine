@@ -1,10 +1,11 @@
 // What RPE writes to Lumiverse, and nothing else (STANDALONE-PLAN §4.2, the write table l.260-273): a lore entry written, made or removed with a
 // revision check (an approved proposal, Build's own actions); the projection book, made for one chat, attached to that chat alone by the one key
 // `chat_world_book_ids` of its metadata with every other key as it was, rewritten, detached and removed; a line of his appended to a chat as his
-// message, text only; a generation started; and the empty reply a turn of RPE's left when it failed or was stopped before a word of its reply
-// went out, taken away as Lumiverse takes its own away (plan §10.10). Each is Lumiverse's own HTTP route asked as the signed-in user, so
-// Lumiverse's own checks and its events (`MESSAGE_SENT`, `MESSAGE_DELETED`, the generation's) go with it. Nothing is written into a message's or
-// a chat's metadata but that one key.
+// message, text only; and a generation started. Beyond the plan's table, and only where he switched `lumiverse.reply.removeEmpty` on (off as
+// shipped, `mount.ts` asks it): the empty reply a turn of RPE's left when it failed or was stopped before a word of its reply went out, taken
+// away as Lumiverse takes its own away (plan §10.10). Each is Lumiverse's own HTTP route asked as the signed-in user, so Lumiverse's own checks
+// and its events (`MESSAGE_SENT`, `MESSAGE_DELETED`, the generation's) go with it. Nothing is written into a message's or a chat's metadata
+// but that one key.
 //
 // The shapes the lore matches (`LoreBookWrites`, `ProjectionBooks`, `src/lore/`) are matched here: the adapter does not import lore.
 
@@ -64,8 +65,8 @@ export interface Writes {
    * The reply a turn's generation staged in the chat, taken away where it still holds no text: the whole message (`swipe` null, a message
    * of one swipe), or that swipe of a message that has others. Lumiverse takes it away itself when a generation fails or is stopped before
    * its first word, but keeps it once thinking went out (`services/generate.service.ts:3608-3615`; a swipe's, `:3590-3606`, and its page's
-   * `ws/useWebSocket.ts:258-266`), and RPE's progress lines are thinking. False where nothing was taken away (it holds text now, it is
-   * his, or it is gone).
+   * `ws/useWebSocket.ts:258-266`), and RPE's progress lines are thinking. Asked only where `lumiverse.reply.removeEmpty` is on
+   * (`Lumiverse.removeEmptyReply`). False where nothing was taken away (it holds text now, it is his, or it is gone).
    */
   dropEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean>;
 }

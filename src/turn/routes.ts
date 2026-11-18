@@ -308,6 +308,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
       chat: r.chat,
       intent: turns.store.user(user).turn(r.turn)?.intent ?? null,
       reply: { text: said.reply, progress: [...said.progress] },
+      emptyReply: await turns.lane.emptyReplyLeft(user, r.turn),
       error: r.error,
       trace: records.filter(within),
       lore: await keptLore(r),

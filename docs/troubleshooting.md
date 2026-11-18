@@ -51,7 +51,14 @@ A turn begins when the run of the turn before it has ended: nothing cuts that wa
 
 ## A turn ends without a reply
 
-RPE played the turn, and it ended with no reply. The chat shows one plain line, from `guidance/.prompts/reply-errors.md` (change the words there if you like). Where the turn had already shown progress lines in the message's thinking block, the same line is written there too: Lumiverse then keeps the message, empty but for its thinking, and the line in it says why. Where nothing was shown yet, Lumiverse keeps no message, and shows the line as the provider's error. The **Turns** page and the turn's own page show what each agent did.
+RPE played the turn, and it ended with no reply. The chat shows one plain line, from `guidance/.prompts/reply-errors.md` (change the words there if you like), in Lumiverse's own notice of a failed generation; a turn you stopped shows none, as any stopped generation. Where nothing was shown yet, Lumiverse keeps no message. Where the turn had already shown progress lines in the message's thinking block (it usually has), Lumiverse keeps the message, empty but for its thinking, and the same line is written there too, so it says why.
+
+What happens to that empty reply depends on the setting `lumiverse.reply.removeEmpty` ("Take away an empty reply a failed or stopped turn left"):
+
+- **Off, as shipped:** the empty reply stays in your chat; RPE writes nothing in your chats to take it away. The line under it in the chat and the turn's page say so, with a press that opens the setting, and so does the HUD's line where the chat plays a world and its page was open when the turn ended. Swipe it or delete it in Lumiverse. It does no harm where it stays: the next turn does not count it as a reply anyone wrote.
+- **On:** once Lumiverse says the generation ended, RPE deletes that empty reply through Lumiverse's own routes, as you: the whole message where the turn made it, or only the swipe the turn added to a message that has others, and only while its text is still empty. This is a write to your chat that RPE makes for nothing else. Where the delete fails, the reply stays, RPE's log says why, and the turn's page says what to do.
+
+The **Turns** page and the turn's own page show what each agent did.
 
 | The line starts | What it means | What to do |
 |---|---|---|

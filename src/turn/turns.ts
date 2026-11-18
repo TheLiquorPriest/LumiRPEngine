@@ -30,7 +30,7 @@ import type { Cut, PromptNotice } from "../adapter/lumiverse/receipt";
 import type { LvMessage } from "../adapter/lumiverse/rows";
 import type { ReplyStream } from "../adapter/lumiverse/stream";
 import { type TagLore, textHash } from "../adapter/lumiverse/wire";
-import type { LiveHub } from "../app";
+import { type LiveHub, liveKind, shape } from "../app";
 import { CAST_VIEWS, castPresentViews, castViews, type CastViewName, type MemorySearch, type SourceReader } from "../cast";
 import { calendarOf, formatClock } from "../engine/calendar";
 import { placeOfEntity } from "../engine/scope";
@@ -64,6 +64,16 @@ import { type FoundItem, foundItems, type GoneTurn, type KeptItem, type SinceKep
 import { stageAt, stageCues } from "./stage";
 import { generationStart, seenOf } from "./start";
 import { guidanceTexts } from "./texts";
+
+/**
+ * A turn ended before a word of its reply went out, and the empty reply Lumiverse kept for it (for the progress lines in its thinking)
+ * stays in the chat: `lumiverse.reply.removeEmpty` is off, as shipped, or the reply could not be taken away. The chat's page says what to
+ * do with it.
+ */
+export const EMPTY_REPLY_KIND = liveKind("empty_reply", {
+  data: shape.object({ turn: shape.text(), message: shape.text(), off: shape.yesNo() }),
+  does: "A turn ended before a word of its reply went out, and the empty reply Lumiverse kept for it stays in the chat, by its turn and message; `off` says the setting lumiverse.reply.removeEmpty is off (false: it is on, and taking the reply away failed). The page says what to do with it.",
+});
 
 /** The prompt parts the turn lane lays its texts out by (each under `.prompts/`). */
 export const PARTS = {
@@ -238,9 +248,10 @@ export interface TurnLaneDeps {
   stopGeneration(generation: string): Promise<boolean>;
   /**
    * Takes away the reply a turn's generation staged in the chat, where it still holds no text (the whole message, `swipe` null, or that
-   * swipe), as the user's own delete does; false where nothing was taken away, or RPE cannot reach Lumiverse.
+   * swipe), as the user's own delete does, and only where `lumiverse.reply.removeEmpty` is on: null where it is off (or RPE cannot reach
+   * Lumiverse) and nothing was asked; else whether it was taken away.
    */
-  dropEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean>;
+  removeEmptyReply(user: string, chat: string, message: string, swipe: number | null): Promise<boolean | null>;
   /** The harness, once built. */
   harness(): Harness;
   /** The Lumiverse user this RPE plays for; null before one is set. */
@@ -1018,6 +1029,20 @@ export class TurnLane implements TurnPlayer, ChatChanges {
     }
     run.stop.abort(new Error(await turnErrorWords(this.#d.files, run, "player_stopped")));
     return true;
+  }
+
+  /**
+   * The empty reply a turn dropped with nothing saved left in the chat, where it still stands there empty, read from Lumiverse now: the
+   * message its generation staged (plan §10.10; it stays unless `lumiverse.reply.removeEmpty` took it away). Null for any other turn, and
+   * where that reply was taken away, written in or swiped off its message, or Lumiverse cannot be read.
+   */
+  async emptyReplyLeft(user: string, turn: string): Promise<string | null> {
+    const row = this.#d.store.user(user).turn(turn);
+    const run = this.#d.runs.reply(user, turn);
+    const reads = this.#d.reads();
+    if (row?.status !== "dropped" || run === null || run.reply !== "" || run.target === null || run.kind === "continue" || run.kind === "impersonate" || reads === null) return null;
+    const saved = (await reads.messagesById(run.chat, [run.target]).catch(() => []))[0];
+    return saved !== undefined && saved.role !== "user" && writtenOf(run, saved)?.text === "" ? saved.id : null;
   }
 
   /**
@@ -2081,8 +2106,9 @@ export class TurnLane implements TurnPlayer, ChatChanges {
    * looks at now, or, saving nothing, left an attempt with no state. A reply not released whole (stopped, failed, or RPE stopped during
    * it) is tied as cut short. Where which swipe it wrote cannot be told, the turn is left open, and the next intake looks again. A
    * continue's run that held its changes on a turn of its own is tied where its end names the message (`#continued`). An attempt
-   * dropped with no text saved leaves the chat as a provider that failed, or a generation stopped, before its first word leaves it: the
-   * reply Lumiverse staged for it, which it kept only for the progress lines in its thinking, is taken away (plan §10.10).
+   * dropped with no text saved leaves an empty reply Lumiverse kept only for the progress lines in its thinking: it stays, as the plan's
+   * table of what RPE writes in Lumiverse has it, and the chat's page is told so; where he switched `lumiverse.reply.removeEmpty` on, it is
+   * taken away, so the chat is left as a provider that failed, or a generation stopped, before its first word leaves it (plan §10.10).
    */
   async #ended(user: string, change: Ended): Promise<void> {
     const run: RunRecord | null = this.#d.runs.byGeneration(user, change.generation);
@@ -2146,19 +2172,21 @@ export class TurnLane implements TurnPlayer, ChatChanges {
   }
 
   /**
-   * The reply a dropped attempt's generation staged and saved nothing in, taken away (plan §10.10 "Stop", "RPE restarted mid-turn"):
-   * Lumiverse takes away its staged message, and its page a staged swipe, when a generation fails or is stopped before its first word,
-   * but keeps either once thinking went out (`services/generate.service.ts:3590-3615`, `ws/useWebSocket.ts:258-266`), and the turn's
-   * progress lines are thinking. A message of one swipe goes whole; a swipe of a message that has others goes alone. One that could not
-   * be taken away is logged and stays, as an empty reply he can delete.
+   * The reply a dropped attempt's generation staged and saved nothing in (plan §10.10 "Stop", "RPE restarted mid-turn"): Lumiverse takes
+   * away its staged message, and its page a staged swipe, when a generation fails or is stopped before its first word, but keeps either
+   * once thinking went out (`services/generate.service.ts:3590-3615`, `ws/useWebSocket.ts:258-266`), and the turn's progress lines are
+   * thinking. Where `lumiverse.reply.removeEmpty` is on, a message of one swipe goes whole and a swipe of a message that has others goes
+   * alone. One that stays (the setting off, as shipped, or a removal that failed, logged) is told on the chat's live socket, so its page
+   * says what to do with it.
    */
   async #dropEmpty(user: string, run: RunRecord, saved: LvMessage, written: LvMessage["saves"][number]): Promise<void> {
     const swipe = saved.saves.length === 1 ? null : saved.saves.indexOf(written);
     if (swipe === -1) return;
-    await this.#d.dropEmptyReply(user, run.chat, saved.id, swipe).catch((error: unknown) => {
+    const removed = await this.#d.removeEmptyReply(user, run.chat, saved.id, swipe).catch((error: unknown) => {
       this.#d.log.warn("The empty reply a turn left in the chat when it ended before a word of it went out could not be taken away; it stays until it is deleted in the chat.", { turn: run.turn, chat: run.chat, message: saved.id, error: words(error) });
       return false;
     });
+    if (removed !== true) EMPTY_REPLY_KIND.publish(this.#d.live, run.chat, { turn: run.turn, message: saved.id, off: removed === null });
   }
 
   /**

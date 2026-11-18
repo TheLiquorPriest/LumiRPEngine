@@ -30,7 +30,7 @@ import { sessionRoutes } from "./session-routes";
 import { globalConfig, passConnection, TURN_SETTINGS, turnSettings } from "./settings";
 import { namedStretches } from "./stage";
 import { HARNESS_MIGRATIONS, PROMPT_MIGRATIONS } from "./tables";
-import { leadConnection, NO_SESSION, type MigratedSource } from "./turns";
+import { EMPTY_REPLY_KIND, leadConnection, NO_SESSION, type MigratedSource } from "./turns";
 import { WEB_SETTING_DEFS, webRoutes } from "./web";
 
 /** What the turn lane takes from the composition. */
@@ -110,7 +110,7 @@ export function turnArea(takes: TurnTakes): TurnArea {
       { area: "harness", migrations: HARNESS_MIGRATIONS },
     ],
     settings: [...harnessSettings(), ...TURN_SETTINGS, ...Object.values(WEB_SETTING_DEFS)],
-    liveKinds: [REQUESTS_KIND, FOLDER_KIND, JOB_KIND],
+    liveKinds: [REQUESTS_KIND, FOLDER_KIND, JOB_KIND, EMPTY_REPLY_KIND],
     fills: {
       // A chat a route names is taken on before the route answers (`chatTaker`): its row and its folders, by what Lumiverse says of it.
       chatNamed: async (user, chat) => {

@@ -2,18 +2,26 @@
 // work, the newest progress line it gave, whether its model call is held by his pause on Live, and how
 // it ended. Folded from the events the page hears as they come, so the HUD and Now show a turn the moment
 // it starts, name the agent at work and the newest progress line, say Paused while the run is held, and
-// say a failed run failed. Nothing is read on a timer.
+// say a failed run failed; and, where a turn ended before a word of its reply went out and the empty reply
+// Lumiverse kept for it stays in the chat, what to do with that reply. Nothing is read on a timer.
 
 import type { Activity } from "../../../shared/turn-activity";
 import type { LiveEvent } from "../../../shared/api";
 
-/** What the page knows of the chat's run: the line shown (null when none runs and none failed), and whether the run's call is held. */
+/**
+ * What the page knows of the chat's run: the line shown (null when none runs and none failed), whether the run's call is held, and the
+ * turn whose empty reply stays in the chat with what to do with it, which the line keeps saying until the next run begins.
+ */
 export interface RunLine {
   activity: Activity | null;
   held: boolean;
+  empty?: { turn: string; words: string };
 }
 
 export const NO_RUN: RunLine = { activity: null, held: false };
+
+/** The line of a turn that ended before a word of its reply went out, where no failure of its run was told yet. */
+const ENDED_EMPTY = "The turn ended before a word of its reply went out.";
 
 /** What a failed run says, in a line: the run's own error code and detail. */
 function failure(outcome: { status: string; error?: { code: string; detail?: string; agent?: string } }): string {
@@ -32,6 +40,15 @@ export function foldRun(chat: string, before: RunLine, events: readonly LiveEven
       if ("progress" in piece && line.activity?.state === "running") line = { ...line, activity: { ...line.activity, label: piece.progress } };
       continue;
     }
+    if (event.kind === "empty_reply") {
+      const { turn, off } = event.data;
+      const words = off
+        ? "Its empty reply stays in your chat: swipe it or delete it in Lumiverse, or switch on “Take away an empty reply a failed or stopped turn left” in Settings."
+        : "Its empty reply stays in your chat, as RPE could not take it away: swipe it or delete it in Lumiverse.";
+      const ended = line.activity?.state === "failed" && line.activity.turn === turn ? line.activity.label : ENDED_EMPTY;
+      line = { held: false, activity: { chatId: chat, turn, state: "failed", label: `${ended} ${words}`, since: event.at }, empty: { turn, words } };
+      continue;
+    }
     if (event.kind !== "trace") continue;
     const { event: said, scope, at } = event.data;
     if (said.kind === "run_started") {
@@ -43,9 +60,12 @@ export function foldRun(chat: string, before: RunLine, events: readonly LiveEven
     } else if (said.kind === "resumed") {
       line = { ...line, held: false };
     } else if (said.kind === "run_ended") {
-      // A run that failed stays as the line until the next run begins; any other end clears it.
+      // A run that failed stays as the line until the next run begins; any other end clears it, but for the empty reply its turn left.
       const status = (said.outcome as { status?: string } | undefined)?.status;
-      line = status === "failed" || status === "limit" ? { held: false, activity: { chatId: chat, turn: scope.turn ?? null, state: "failed", label: failure(said.outcome), since: at } } : NO_RUN;
+      const failed = status === "failed" || status === "limit";
+      const empty = line.empty !== undefined && line.empty.turn === scope.turn ? line.empty : undefined;
+      if (empty !== undefined) line = { held: false, activity: { chatId: chat, turn: empty.turn, state: "failed", label: `${failed ? failure(said.outcome) : ENDED_EMPTY} ${empty.words}`, since: at }, empty };
+      else line = failed ? { held: false, activity: { chatId: chat, turn: scope.turn ?? null, state: "failed", label: failure(said.outcome), since: at } } : NO_RUN;
     }
   }
   return line;

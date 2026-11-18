@@ -43,6 +43,9 @@ export function carriedWords(row: CarriedRow): string {
   return `carried from the previous build, played by ${engine}${row.unplayed === null ? "" : `; no turn was played: ${row.unplayed}`}${row.departures === 0 ? "" : `; ${counted(row.departures, "line")} say something against its turn`}`;
 }
 
+/** The setting that has RPE take away the empty reply a failed or stopped turn left (`lumiverse.reply.removeEmpty`, the door's settings). */
+const REMOVE_EMPTY_SETTING = "lumiverse.reply.removeEmpty";
+
 /** What a turn is, in words: the kind of the run that made it, and "continued" where a continue joined its reply (plan §10.10: the same turn, extended). */
 export function turnKindWords(turn: { kind: TurnRow["kind"]; runs: readonly { kind: TurnRow["kind"] }[] }): string {
   const continued = turn.kind !== "continue" && turn.runs.some((run) => run.kind === "continue");
@@ -436,6 +439,8 @@ export interface TurnViewProps {
   /** The turn's review card and, for a turn carried in, the record an old engine kept; read once the gate is open. */
   review?: ReviewShown;
   onOpenQuest?(id: string): void;
+  /** Opens a setting on the Settings page, by its key. */
+  onOpenSetting?(key: string): void;
   onOpenRequest(name: string, held: string | null): void;
   onCloseFile(): void;
   sections?: readonly TurnSection[];
@@ -495,6 +500,18 @@ export function TurnView(props: TurnViewProps) {
       {failure === null ? null : (
         <Banner tone="neg" icon="alert" title={replied ? "Why its run ended after the reply" : "Why it ended"}>
           <span>{failure}</span>
+        </Banner>
+      )}
+      {turn.emptyReply === null ? null : (
+        <Banner
+          tone="warn"
+          icon="alert"
+          title="Its empty reply is still in your chat"
+          actions={props.onOpenSetting === undefined ? undefined : <Button onClick={() => props.onOpenSetting?.(REMOVE_EMPTY_SETTING)}>Take away an empty reply a failed or stopped turn left</Button>}
+        >
+          <span data-empty-reply={turn.emptyReply}>
+            This turn ended before a word of its reply went out, and Lumiverse kept an empty reply for it, whose thinking holds RPE's progress lines and why it ended. Swipe it or delete it in Lumiverse. If you would rather RPE took such replies away itself, switch that setting on: it is a write to your chat that RPE otherwise never makes.
+          </span>
         </Banner>
       )}
       <SectionsOf parts={parts} sections={sections.filter((s) => !s.spoiler)} />
@@ -603,6 +620,7 @@ export function TurnPage(props: { chat: string; turn: string }) {
       stage={stageRead.value}
       review={review}
       onOpenQuest={(id) => app.go({ page: "quests", chat, at: [id] })}
+      onOpenSetting={(key) => app.go({ page: "settings", chat: null, at: [key] })}
       onOpenGate={() => app.gate.open(chat)}
       onCloseGate={() => app.gate.close(chat)}
       onBack={back}
