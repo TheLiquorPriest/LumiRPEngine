@@ -138,12 +138,20 @@ describe("the Turn page's sections", () => {
 
 describe("who perceived the turn", () => {
   test("a person on stage with no perception shows under none, and how the stage was read is said", () => {
-    const stage = { turn: "t1", message: 3, read: "owner" as const, people: [{ name: "Ash", character: "c1", casting: "principal" as const, perceptions: ["p-1"] }, { name: "Wren", character: "c2", casting: "supporting" as const, perceptions: [] }] };
+    const stage = { turn: "t1", message: 3, carried: false, read: "owner" as const, people: [{ name: "Ash", character: "c1", casting: "principal" as const, perceptions: ["p-1"], files: [] }, { name: "Wren", character: "c2", casting: "supporting" as const, perceptions: [], files: [] }] };
     const text = view(turnAt(), { stage });
     expect(text).toContain("Who perceived the turn");
     expect(text).toContain("No scene was recorded, so the stage was read from where your character stands.");
     expect(text).toContain("Wren");
     expect(text).toContain("1 person on stage with no perception of this turn: Wren.");
     expect(view(turnAt())).not.toContain("Who perceived the turn");
+  });
+
+  test("a turn the migration carried says the previous build played it and gives each one's old mind files, not that perceptions are missing", () => {
+    const stage = { turn: "t1", message: 3, carried: true, read: "owner" as const, people: [{ name: "Wren", character: "c2", casting: "supporting" as const, perceptions: [], files: [{ name: "core.md", filed: true }, { name: "minds", filed: false }] }] };
+    const text = view(turnAt(), { stage });
+    expect(text).toContain("The previous build played this turn, and the migration carried it, so no perception is owed for it.");
+    expect(text).toContain("old mind files carried: core.md (filed), minds (not filed yet)");
+    expect(text).not.toContain("no perception of this turn");
   });
 });

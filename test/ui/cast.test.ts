@@ -236,7 +236,7 @@ describe("the Cast page", () => {
   });
 
   test("setting a casting, redrawing the base, binding a source, naming the person and writing a perception each send their edit with what is typed", () => {
-    const stage: PerceptionRecordReply = { chat: CHAT, turns: [{ turn: "turn-9", message: 12, read: "scene", people: [{ name: "Odile Holt", character: ODILE.id, casting: "principal", perceptions: [] }] }] };
+    const stage: PerceptionRecordReply = { chat: CHAT, turns: [{ turn: "turn-9", message: 12, carried: false, read: "scene", people: [{ name: "Odile Holt", character: ODILE.id, casting: "principal", perceptions: [], files: [] }] }] };
     const drafts = { "casting.as": "extra", "casting.pin": true, "base.part": "soul", "base.text.soul": "Wants the crossing quiet.", "source.kind": "entry", "source.ref": "e-1", "source.defines": "her voice", person: "Tam", "perception.turn-9": "She saw him pay in copper." };
     const { tree, pressed } = view({ list: CAST, open: ODILE.id, character: RICH, stage, drafts }, true);
     for (const words of ["Set casting", "Save as the next version", "Bind it", "Say who", "Write it"]) press(tree, words);

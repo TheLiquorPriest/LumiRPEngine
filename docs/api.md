@@ -898,7 +898,7 @@ Strikes an entry of a character's record, or takes its strike back, as the playe
 
 ### `GET /api/v1/chats/:chat/perceptions`
 
-The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none.
+The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none; a turn a migration carried says so, owes none, and gives each one's old mind files carried with them.
 
 | | |
 |---|---|
@@ -8377,7 +8377,7 @@ export interface StackReply {
 
 ### `StagePerson`
 
-Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; and the perceptions of that turn it has, by id, struck ones left out: none listed is a gap.
+Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; the perceptions of that turn it has, by id, struck ones left out: none listed is a gap on a turn RPE played; and, on a turn a migration carried, the old mind files carried with that character.
 
 ```ts
 export interface StagePerson {
@@ -8387,6 +8387,8 @@ export interface StagePerson {
   /** Its casting in force at the turn; null: none. */
   casting: CastRole | null;
   perceptions: string[];
+  /** On a turn a migration carried: the old mind files carried with the character, by name (`minds` for the older minds pack's notes), each with whether it is marked filed; none on a turn RPE played. */
+  files: { name: string; filed: boolean }[];
 }
 ```
 
@@ -8400,13 +8402,15 @@ export type StageReading = "scene" | "owner" | "none";
 
 ### `StageTurn`
 
-One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none.
+One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none; for a turn a migration carried, that the previous build played it, which owes no perception of RPE's, and the mind files carried with each.
 
 ```ts
 export interface StageTurn {
   turn: TurnId;
   /** That turn's reply on the chat's path, from 0; null where it is on none. */
   message: number | null;
+  /** True for a turn a migration carried, which the previous build played: it owes no perception, and what its characters took from it is in the mind files carried with them. */
+  carried: boolean;
   read: StageReading;
   people: StagePerson[];
 }

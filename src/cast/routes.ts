@@ -36,7 +36,7 @@ import { type Fields, type GuidanceFiles, textOf } from "../iface/texts";
 import type { LedgerEvent } from "../shared/ledger";
 import { JoinedTurnError, type Store, type UserStore } from "../store";
 import { IMPORTED_KIND } from "./carried";
-import { fileName, importedText, isFiled } from "./imported";
+import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import type { OnStage, StageRead } from "./facts";
 import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings } from "./kit";
 import { memoriesNow, type Tier } from "./memory";
@@ -618,7 +618,7 @@ export function castRoutes(deps: CastRoutesDeps) {
       path: PERCEPTIONS_PATH,
       access: "page",
       group: "cast",
-      does: "The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none.",
+      does: "The perception record of a turn, or of the stretch of turns ending at it: who was on stage, how the stage was read (the open scene, where the owner's character stands, or not recorded), and for each the perceptions of that turn they have, or none; a turn a migration carried says so, owes none, and gives each one's old mind files carried with them.",
       query: { turn: turnQuery, count: shape.optional(shape.whole({ least: 1 }), "How many turns of the path, ending at the turn read; left out, that turn alone.") },
       reply: perceptionRecordReply,
       joined: true,
@@ -629,16 +629,26 @@ export function castRoutes(deps: CastRoutesDeps) {
           // The perceptions are read at the chat's head, his own later ones among them: a gap he filled is closed.
           const r = readingAt(deps.store, user, params.chat, null);
           const stretch = castAt(r.s, params.chat, turn).turns.slice(-(query.count ?? 1));
+          // A turn a migration carried (the store's one test, `playedOf`) owes no perception of RPE's: what its characters took from it is
+          // in the old mind files carried with them (plan §15.2), shown with whether each is filed.
+          const played = r.s.playedOf(stretch);
           const stage = stretch.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user, chat: params.chat }, stretch);
           const perceived = new Map<string, string[]>();
           for (const item of r.record.items.values()) if (item.part === "perception" && !item.dropped) perceived.set(`${perceivedTurn(item)}\n${item.character}`, [...(perceived.get(`${perceivedTurn(item)}\n${item.character}`) ?? []), item.id]);
           const turns = stretch.map((t): StageTurnShown => {
             const read = stage.get(t);
+            const carried = !played.has(t);
             const people = (read?.who ?? []).map((name): StagePersonShown => {
               const character = findCharacter(deps.store.db, user, r.chats, name);
-              return { name, character: character?.id ?? null, casting: character === null ? null : (castingInForce(r.record, character)?.as ?? null), perceptions: character === null ? [] : (perceived.get(`${t}\n${character.id}`) ?? []) };
+              return {
+                name,
+                character: character?.id ?? null,
+                casting: character === null ? null : (castingInForce(r.record, character)?.as ?? null),
+                perceptions: character === null ? [] : (perceived.get(`${t}\n${character.id}`) ?? []),
+                files: character === null || !carried ? [] : importedFiles(r.record, character.id).map((f) => ({ name: fileName(f), filed: isFiled(f) })),
+              };
             });
-            return { turn: t, message: r.record.at.replyOf(t), read: read?.how ?? "none", people };
+            return { turn: t, message: r.record.at.replyOf(t), carried, read: read?.how ?? "none", people };
           });
           return { chat: params.chat, turns };
         }),

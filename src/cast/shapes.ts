@@ -254,15 +254,27 @@ const stageReading = shape.named("StageReading", "How a turn's stage was read: f
 
 const stagePerson = shape.named(
   "StagePerson",
-  "Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; and the perceptions of that turn it has, by id, struck ones left out: none listed is a gap.",
-  shape.object({ name: T, character: field(nullable(T), "The cast's character of that name; null where the cast holds none."), casting: field(nullable(castRole), "Its casting in force at the turn; null: none."), perceptions: shape.list(T) }),
+  "Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; the perceptions of that turn it has, by id, struck ones left out: none listed is a gap on a turn RPE played; and, on a turn a migration carried, the old mind files carried with that character.",
+  shape.object({
+    name: T,
+    character: field(nullable(T), "The cast's character of that name; null where the cast holds none."),
+    casting: field(nullable(castRole), "Its casting in force at the turn; null: none."),
+    perceptions: shape.list(T),
+    files: field(shape.list(shape.object({ name: T, filed: shape.yesNo() })), "On a turn a migration carried: the old mind files carried with the character, by name (`minds` for the older minds pack's notes), each with whether it is marked filed; none on a turn RPE played."),
+  }),
 );
 export type StagePersonShown = Infer<typeof stagePerson>;
 
 const stageTurn = shape.named(
   "StageTurn",
-  "One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none.",
-  shape.object({ turn: shape.turnId(), message: field(nullable(N), "That turn's reply on the chat's path, from 0; null where it is on none."), read: stageReading, people: shape.list(stagePerson) }),
+  "One turn of the perception record: who was on stage, how the stage was read, and each one's perceptions of that turn or none; for a turn a migration carried, that the previous build played it, which owes no perception of RPE's, and the mind files carried with each.",
+  shape.object({
+    turn: shape.turnId(),
+    message: field(nullable(N), "That turn's reply on the chat's path, from 0; null where it is on none."),
+    carried: field(shape.yesNo(), "True for a turn a migration carried, which the previous build played: it owes no perception, and what its characters took from it is in the mind files carried with them."),
+    read: stageReading,
+    people: shape.list(stagePerson),
+  }),
 );
 export type StageTurnShown = Infer<typeof stageTurn>;
 
