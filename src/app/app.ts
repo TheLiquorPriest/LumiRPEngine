@@ -279,6 +279,12 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const routes = new RouteTable();
   const live = new LiveHub({ queueEvents: config.live.queueEvents, now, kinds: liveKinds });
   const answers = new Answers(config.server.answerKeepSeconds * 1000);
+  // What the app's own parts keep that can grow with play, for the Runtime page; each area adds its own when it mounts.
+  const kept = new KeptCounts();
+  kept.add("Live follows of a chat by a page", () => ({ count: live.heldNow().follows }));
+  kept.add("Live events held for pages that fell behind", () => ({ count: live.heldNow().held }));
+  kept.add("Long requests' answers kept for their pages", () => ({ count: answers.size }));
+  kept.add("RPE's own log lines kept", () => ({ count: serviceLog.size }));
   const secrets = new SecretsFile(paths.secrets);
   // The model layer's documents written before they were kept by user are the install's user's, moved under him before anything reads them.
   await ownModels(paths, secrets, user, log);
@@ -324,7 +330,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
     now,
     builds,
     workers,
-    kept: new KeptCounts(),
+    kept,
     index,
     migrated,
     async start() {

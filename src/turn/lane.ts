@@ -490,6 +490,9 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
   // The story's counts work out the history window as the prompt's is cut, on the chat's own settings.
   facts.add(storyFacts({ store, window: async (scope) => (await turnSettings(files, scope, app.log)).window, settings: global.numbers(STORY_FACT_SETTING_DEFS) }));
   const trace = turnTrace({ live: app.live, files, runs: new RunTimes(runs), log: app.log });
+  app.kept.add("Turn runs going on", () => ({ count: runs.going }));
+  app.kept.add("Turn folders the trace is writing to", () => ({ count: trace.held().folders }));
+  app.kept.add("Trace records not yet written", () => ({ count: trace.held().writes }));
   // The chat port's reads of Lumiverse; one that cannot be made fails in the words of the turn-errors part in force for the chat.
   const chatNow = async (scope: Scope): Promise<ChatReads> => {
     const parts = options.lumiverse();

@@ -545,6 +545,11 @@ export class Following {
     return this.full && !this.stopped;
   }
 
+  /** How many events are held for the reader now, waiting for it to be ready. */
+  get waiting(): number {
+    return this.held.reduce((n, h) => (h === undefined ? n : n + 1), 0);
+  }
+
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
@@ -629,6 +634,17 @@ export class LiveHub {
     });
     followers.add(following);
     return following;
+  }
+
+  /** What the hub holds now: every reader's follow of a chat, and the events held for readers that fell behind. */
+  heldNow(): { follows: number; held: number } {
+    let follows = 0;
+    let held = 0;
+    for (const set of this.followers.values()) {
+      follows += set.size;
+      for (const following of set) held += following.waiting;
+    }
+    return { follows, held };
   }
 
   /** How many readers follow `chat`. */

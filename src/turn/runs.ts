@@ -315,6 +315,11 @@ export class Runs {
     private readonly writes: Writes,
   ) {}
 
+  /** How many runs are going on now: what is held in memory of runs, the rest being in the database. */
+  get going(): number {
+    return this.#running.size;
+  }
+
   /**
    * Keeps a run's record as it stands, and once it has ended what it spent; inside a queued write. An end once recorded stays recorded,
    * whatever copy is written after it.

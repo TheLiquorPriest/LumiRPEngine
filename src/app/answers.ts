@@ -37,6 +37,11 @@ export class Answers {
     private readonly keepMs: number,
   ) {}
 
+  /** How many answers are kept now for their pages to read. */
+  get size(): number {
+    return this.#ready.size;
+  }
+
   /** Takes `work` in hand and answers at once with its id; its response is kept for reading once it is done. */
   start(work: Promise<Response>): Response {
     const id = randomBytes(16).toString("hex");

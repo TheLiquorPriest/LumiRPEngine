@@ -138,6 +138,8 @@ export interface TraceDeps {
 export interface TurnTrace extends TracePort {
   /** Every record kept for a scope's turn so far (for a scope of no turn, its session's: a job's), in the order RPH gave them. */
   records(scope: RunScope): Promise<TraceRecord[]>;
+  /** What the trace holds now: the turn folders it writes to, the runs it follows, and its writes not yet landed. */
+  held(): { folders: number; runs: number; writes: number };
 }
 
 /** A turn folder that records are being written to: its place on disk, its chain of appends, the runs whose records go there, and the appends not settled. */
@@ -229,6 +231,9 @@ export function turnTrace(deps: TraceDeps): TurnTrace {
     },
     async flush() {
       while (pending.size > 0) await Promise.allSettled([...pending]);
+    },
+    held() {
+      return { folders: open.size, runs: going.size, writes: pending.size };
     },
     async records(scope) {
       while (pending.size > 0) await Promise.allSettled([...pending]);

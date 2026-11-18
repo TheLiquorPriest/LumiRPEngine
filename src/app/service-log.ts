@@ -79,6 +79,11 @@ export class ServiceLog {
     this.log = { debug: say("debug"), info: say("info"), warn: say("warn"), error: say("error") };
   }
 
+  /** How many lines are kept now. */
+  get size(): number {
+    return this.#lines.length;
+  }
+
   /** The kept lines that match, newest first. */
   lines(filter: LogFilter): LogLine[] {
     const worst = filter.level === undefined ? 0 : LEVELS.indexOf(filter.level);
