@@ -2343,6 +2343,8 @@ export class TurnLane implements TurnPlayer, ChatChanges {
       if (intake.waiting) return;
       const steps = await reads.path(chat);
       if (steps === null) return;
+      // A swipe or a regenerate adds its empty swipe, shown, and Lumiverse tells it before the generation that writes it: a generation heard while the path was read is the turn's own to compare, not a swipe the player flipped to.
+      if (this.#generatingIn(user, chat).size > 0 || this.#d.runs.ofChat(user, chat).length > 0) return;
       await this.#compare(user, chat, steps, null, null, store.heardCount(chat));
       await this.#d.notes.follow(user, chat, { turns: store.line(chat).map((l) => l.turn), branchOf: store.chat(chat)?.sourceChat ?? null });
     } finally {
