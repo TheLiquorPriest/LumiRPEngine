@@ -61,12 +61,14 @@ function linesOf(store: UserStore, registry: Registry, turn: string): Lanes {
   const engine = changes.filter((c) => c.lane === "engine");
   const story = changes.filter((c) => c.lane === "story");
   const events = engine.flatMap((c) => eventOf(c.op, c.value) ?? []);
-  const beats = story.flatMap((c) => (c.op === STORY_OPS.write && isRecord(c.value) && c.value.part === "beat" && isRecord(c.value.value) && typeof c.value.value.text === "string" ? [c.value.value.text] : []));
+  // Each beat the turn wrote once, as its latest write words it: a beat written again (its text set twice) is one beat.
+  const beats = new Map<string, string>();
+  for (const c of story) if (c.op === STORY_OPS.write && isRecord(c.value) && c.value.part === "beat" && typeof c.value.item === "string" && isRecord(c.value.value) && typeof c.value.value.text === "string") beats.set(c.value.item, c.value.value.text);
   return {
     time: timeOf(view, place).time,
     place: place === null ? null : (view.nameOf(place) ?? place),
     lanes: [
-      { lane: "story", count: story.length, lines: beats },
+      { lane: "story", count: story.length, lines: [...beats.values()] },
       { lane: "engine", count: engine.length, lines: events.length === 0 ? [] : playerLines(registry, view.world, view.state.world, view.world.pov, events, events.length) },
     ],
   };
