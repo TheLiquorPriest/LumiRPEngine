@@ -6,12 +6,13 @@
 // connections); and the guidance each play's chat stood on, from the files route, with the floor's readers
 // (`scripts/proof/lib/read.ts`). A run whose RPE does not report its commits is refused.
 
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { ConnectionShown } from "../../../src/shared/api";
 import type { AgentFacts, GuidanceFacts, PinHeld } from "../route/host";
-import { heldOf, type PinHow } from "../route/pin";
+import { harnessName, heldOf, type PinHow } from "../route/pin";
+import { installedTag } from "../gate/pin";
 import type { RpeReader } from "../lib/read";
 import { folderTree, gitTree, installedRph } from "../lib/record";
 import type { Lumiverse } from "../../testbed/lib/lumiverse";
@@ -49,15 +50,14 @@ function git(repo: string, args: string[]): string | null {
 
 /** The commit RPE's manifest names for `rp-harness`: the hex after the `#` of its name. */
 export function manifestPin(manifest: unknown): string | null {
-  const name = isRecord(manifest) && isRecord(manifest.dependencies) ? manifest.dependencies["rp-harness"] : undefined;
-  const found = typeof name === "string" ? /#([0-9a-f]+)$/.exec(name) : null;
+  const name = harnessName(manifest);
+  const found = name !== null ? /#([0-9a-f]+)$/.exec(name) : null;
   return found?.[1] ?? null;
 }
 
-/** The commit the installed `rp-harness` is: its own tag, which `bun install` leaves in the package. */
+/** The commit the installed `rp-harness` is: its own tag, which `bun install` leaves in the package (read as the gate's pin reads it). */
 export function installedRphCommit(repo: string): string | null {
-  const tag = join(repo, "node_modules", "rp-harness", ".bun-tag");
-  return existsSync(tag) ? readFileSync(tag, "utf8").trim() : null;
+  return installedTag(repo);
 }
 
 /**

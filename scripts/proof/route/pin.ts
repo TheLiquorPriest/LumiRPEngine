@@ -86,12 +86,20 @@ export function readBundles(file: string): { rpe: string; rph: string } {
   return { rpe, rph };
 }
 
+/** What RPE's manifest names for `rp-harness`: among its dependencies, or its development dependencies, where the application's build carries it from. */
+export function harnessName(manifest: unknown): string | null {
+  for (const section of ["dependencies", "devDependencies"]) {
+    const found = isRecord(manifest) && isRecord(manifest[section]) ? manifest[section]["rp-harness"] : undefined;
+    if (typeof found === "string") return found;
+  }
+  return null;
+}
+
 /**
  * How the pin was held, from RPE's manifest and the settings: the whole name, where the installed copy came from
  * (`from` as the host knows it, else `RPE_PROOF_PIN_FROM`), the stage, and the bundles the mirrors were fed from.
  */
 export function heldOf(manifest: unknown, how: PinHow): PinHeld {
-  const dependencies = isRecord(manifest) ? manifest.dependencies : undefined;
-  const name = isRecord(dependencies) && typeof dependencies["rp-harness"] === "string" ? dependencies["rp-harness"] : null;
+  const name = harnessName(manifest);
   return { name, from: how.from, stage: how.stage, bundles: how.from === "bed-mirror" ? (how.bundlesFile === null ? null : readBundles(how.bundlesFile)) : null };
 }

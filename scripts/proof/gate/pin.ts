@@ -8,7 +8,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../../src/shared/json";
 import type { PinStage } from "../route/host";
-import { pinName, WHOLE_COMMIT } from "../route/pin";
+import { harnessName, pinName, WHOLE_COMMIT } from "../route/pin";
 
 export { WHOLE_COMMIT };
 
@@ -19,16 +19,25 @@ export interface Named {
 }
 
 export function manifestName(manifest: unknown): Named | null {
-  const name = isRecord(manifest) && isRecord(manifest.dependencies) ? manifest.dependencies["rp-harness"] : undefined;
-  if (typeof name !== "string") return null;
+  const name = harnessName(manifest);
+  if (name === null) return null;
   const found = /#([0-9a-f]+)$/.exec(name);
   return { name, commit: found?.[1] ?? null };
 }
 
-/** The installed package folder's own tag, which `bun install` leaves: the commit it was installed at. */
+/**
+ * The installed package folder's own tag, which `bun install` leaves, as the commit it was installed at: the tag is `<owner>-<repo>-<short
+ * commit>` for a package named by its address (the commit alone, as a bed's install may leave it), made whole by the commit the manifest
+ * names where that begins with those digits. A tag that ends in no commit is given as it is, so it differs from the manifest's.
+ */
 export function installedTag(repo: string): string | null {
   const tag = join(repo, "node_modules", "rp-harness", ".bun-tag");
-  return existsSync(tag) ? readFileSync(tag, "utf8").trim() : null;
+  if (!existsSync(tag)) return null;
+  const text = readFileSync(tag, "utf8").trim();
+  const digits = /(?:^|-)([0-9a-f]{7,40})$/.exec(text)?.[1];
+  if (digits === undefined) return text;
+  const named = manifestName(JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as unknown)?.commit;
+  return named !== undefined && named !== null && named.startsWith(digits) ? named : digits;
 }
 
 /** A git command's output in `repo`, or null where git fails. */
