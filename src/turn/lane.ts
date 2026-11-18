@@ -636,6 +636,8 @@ export function buildTurns(app: App, options: TurnsOptions): Turns {
     log: app.log,
   };
   const harness = placingJobs(createHarness(env, { appName: "RPE", ...options.harness }), place);
+  // What the harness keeps that can grow with play, each by its own name, in the Runtime page's list beside RPE's.
+  app.kept.addAll(() => harness.kept());
   const lane = new TurnLane({
     store,
     writes: app.writes,

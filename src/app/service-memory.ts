@@ -34,10 +34,16 @@ export interface KeptCount {
  */
 export class KeptCounts {
   readonly #counts = new Map<string, () => { count: number; chars?: number | null }>();
+  readonly #groups: (() => readonly KeptCount[])[] = [];
 
   /** A part's count under `name`, which says in plain words what is kept ("Session files kept read"). */
   add(name: string, read: () => { count: number; chars?: number | null }): void {
     this.#counts.set(name, read);
+  }
+
+  /** A part that names its own counts, read whole at each read (the harness's `kept()`). */
+  addAll(read: () => readonly KeptCount[]): void {
+    this.#groups.push(read);
   }
 
   read(): KeptCount[] {
@@ -48,6 +54,13 @@ export class KeptCounts {
         out.push({ name, count, chars: chars ?? null });
       } catch {
         // A part that cannot count now is left out of this read; the next read asks it again.
+      }
+    }
+    for (const read of this.#groups) {
+      try {
+        out.push(...read());
+      } catch {
+        // As above.
       }
     }
     return out;
