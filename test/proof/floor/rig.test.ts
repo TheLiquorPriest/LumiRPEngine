@@ -37,7 +37,7 @@ const ROOT = resolve(import.meta.dir, "../../../scripts/proof");
 
 /** What the page's clock cannot tell from the path before a reply's first piece: the two requests Send makes, RPE's turn route, its intake before the first call, a batch of the stream (40 ms), and a loaded machine. */
 const PATH_MS = 300;
-/** The same in the two-step form, where the reply's message comes after the first call's tool, its answer and the second call's start (about 30 ms more). */
+/** The same in the two-step form, where the reply's message comes after the first call's tool, its answer and the second call's start (measured 235 to 290 ms of path on a machine at load 5 to 7). */
 const TWO_STEP_PATH_MS = 350;
 /** What a span between two moments of one stream can be off its gaps by: the stream's batch at each end, and a loaded machine. */
 const SPAN_MS = 100;
@@ -134,8 +134,8 @@ function expectedOf(d: ArmsDelays, played: Played): Figure[] {
   // Plain's time to the figure it is compared at: its first word (tag), its last (two-step).
   const plainAt = d.plain.firstWord + (twoStep ? gaps : 0);
   // RPE's time to the reply, and what the floor takes off it. Tag: the record's pieces are two gaps long, and the reply's first word comes one gap after them.
-  // Two-step: call one thinks for its first thinking and one gap (its second thought) and writes the record, call two's reply comes at its first word, a gap apart, and ends `end` after its last.
-  const unadjusted = twoStep ? d.rpe.firstThinking + d.rpe.between + d.rpe.firstWord + (REPLY_WORDS.length - 1) * d.rpe.between + d.rpe.end : d.rpe.firstWord + 4 * d.rpe.between;
+  // Two-step: call one thinks for its first thinking and one gap (its second thought), writes the record and ends `end` after it (every scripted answer ends so: call one's end is 80 ms of the trace, 254 ms in all), call two's reply comes at its first word, a gap apart, and ends `end` after its last.
+  const unadjusted = twoStep ? d.rpe.firstThinking + d.rpe.between + d.rpe.end + d.rpe.firstWord + (REPLY_WORDS.length - 1) * d.rpe.between + d.rpe.end : d.rpe.firstWord + 4 * d.rpe.between;
   const record = twoStep ? 0 : 2 * d.rpe.between;
   const own = twoStep ? span("RPE: the record's own time (a tool call's write)", first.intent ?? null, 0) : span("RPE: the record's own time", first.intent ?? null, record);
   return [
