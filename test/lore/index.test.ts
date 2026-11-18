@@ -7,7 +7,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type IndexedEntry, Lore, LoreIndex, type LoreIndexInput, loreBatchBlock, loreTools } from "../../src/lore/index";
+import { loreIndexRoutes } from "../../src/lore/index-routes";
 import type { WorldDoc } from "../../src/shared/world";
+import { callRoute } from "../app/call";
 import { CHAT, coastEntries, coastWorld, dbFile, type LoreDb, loreDb, Shelf, startingWorlds, Tags, USER, W } from "./fixtures";
 import { callCtx, type LoreGuidance, shippedGuidance } from "./shipped";
 
@@ -205,5 +207,18 @@ describe("the lore index", () => {
     const kind = ((edited?.parameters.properties as Record<string, { items: { properties: Record<string, { description?: string }> } }>).entries?.items.properties.kind ?? {}).description;
     expect([edited?.description, kind]).toEqual(["Files what each entry is about.", "One word for what it is."]);
     rmSync(join(own, "lore_index_write.md"));
+  });
+
+  test("the owner's edit of an entry's kind is held to the list of kinds, his line may not be empty, and a related entry must be one of the chat's", async () => {
+    await fresh(20);
+    const [first, second] = (await index.entries(AT)).map((e) => e.id);
+    const put = loreIndexRoutes({ index, jobs: { start: async () => ({ refused: "off" }) } as never, definitions: { list: async () => [] }, scope: () => ({}) as never }).find((r) => r.method === "PUT");
+    if (put === undefined || first === undefined || second === undefined) throw new Error("no edit route or no entries");
+    const ask = (body: object) => callRoute(put, { params: { chat: CHAT, entry: first }, user: USER, body });
+    await expect(ask({ kind: "bogus kind" })).rejects.toThrow("character, place, item, faction, rule, event, concept or style");
+    await expect(ask({ line: "   " })).rejects.toThrow("cannot be empty");
+    await expect(ask({ related: ["e-999"] })).rejects.toThrow("e-999 is not an entry of this chat's lore");
+    const done = await ask({ kind: " Faction ", line: " The harbor's wardens. ", related: [second] });
+    expect([done.kind, done.line, done.related, done.edited]).toEqual(["faction", "The harbor's wardens.", [second], ["kind", "line", "related"]]);
   });
 });

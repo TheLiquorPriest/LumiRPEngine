@@ -13,6 +13,7 @@ import type { PageEntry } from "../../page-entry";
 import { usePaged, useRead } from "../../reading";
 import { counted, errorWords } from "../../words";
 import { JobFollow } from "../jobs/follow";
+import { EntryLines } from "./entry-lines";
 import { ProjectionSection } from "./projection";
 import { ProposalsSection, WritesSection } from "./proposals";
 import { readIndex, readIndexStatus, readOverlays, startIndexing } from "./read";
@@ -45,7 +46,7 @@ interface IndexAgain {
   press(): void;
 }
 
-function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) => ComponentChildren) | undefined; again?: IndexAgain | undefined }) {
+function EntryLine(props: { row: LoreIndexRow; edit?: ((row: LoreIndexRow) => ComponentChildren) | undefined; bindings?: ((row: LoreIndexRow) => ComponentChildren) | undefined; again?: IndexAgain | undefined }) {
   const { row } = props;
   const how = row.activation.length === 0 ? "never by itself" : row.activation.map((a) => ACTIVATION_WORDS[a] ?? a).join(", ");
   return (
@@ -83,6 +84,11 @@ function EntryLine(props: { row: LoreIndexRow; bindings?: ((row: LoreIndexRow) =
           Bound to: {row.links.map((l) => `${l.record}${l.linked ? "" : " (not found)"}, ${l.aspect}, by ${BY_WORDS[l.by] ?? l.by}`).join("; ")}
         </p>
       )}
+      {props.edit === undefined ? null : (
+        <Disclosure summary="Change what it is" class="rpe-open">
+          {props.edit(row)}
+        </Disclosure>
+      )}
       {props.bindings === undefined ? null : (
         <Disclosure summary="Change what it is bound to" class="rpe-open">
           {props.bindings(row)}
@@ -118,6 +124,8 @@ export interface LoreViewProps {
   top?: ComponentChildren;
   /** The writes made to his lore and the projection switch, below the overlays. */
   bottom?: ComponentChildren;
+  /** What edits an entry's kind, line and related entries, drawn under the entry's own lines; none where the view is only read. */
+  edit?(row: LoreIndexRow): ComponentChildren;
   /** What edits an entry's bindings, drawn under the entry's own lines; none where the view is only read. */
   bindings?(row: LoreIndexRow): ComponentChildren;
 }
@@ -175,7 +183,7 @@ export function LoreView(props: LoreViewProps) {
         {rows.length === 0 && index.items.length > 0 ? <p class="lre-muted rpe-line">{index.more ? "Nothing among the entries read so far; reading on." : "No entry matches."}</p> : null}
         <ul class="rpe-plain lre-stack" data-entries>
           {rows.map((row) => (
-            <EntryLine key={row.id} row={row} bindings={props.bindings} again={{ busy: props.indexing.busy, disabled: status?.connection === null, press: props.onIndex }} />
+            <EntryLine key={row.id} row={row} edit={props.edit} bindings={props.bindings} again={{ busy: props.indexing.busy, disabled: status?.connection === null, press: props.onIndex }} />
           ))}
         </ul>
         {index.more ? (
@@ -218,7 +226,9 @@ export function LorePage(props: { chat: string }) {
   const [indexing, setIndexing] = useState<IndexingShown>({ busy: false, job: null, problem: null });
   const [written, setWritten] = useState(0);
   const [edited, setEdited] = useState<ReadonlyMap<string, LoreIndexRow>>(new Map());
+  const changed = (next: LoreIndexRow): void => setEdited((held) => new Map(held).set(next.id, next));
   const index = usePaged((cursor) => readIndex(app.client, chat, cursor), [chat]);
+  const titles = new Map(index.items.map((row) => [row.id, row.title]));
   const status = useRead(() => readIndexStatus(app.client, chat), [chat, indexing.job]);
   const overlays = useRead(() => readOverlays(app.client, chat), [chat]);
   // A search looks across every entry, so while one is typed the pages not yet read are read on.
@@ -228,7 +238,8 @@ export function LorePage(props: { chat: string }) {
   return (
     <LoreView
       index={{ ...index, items: index.items.map((row) => edited.get(row.id) ?? row) }}
-      bindings={(row) => <EntryBindings chat={chat} row={row} onChanged={(next) => setEdited((held) => new Map(held).set(next.id, next))} />}
+      edit={(row) => <EntryLines chat={chat} row={row} titles={titles} onChanged={changed} />}
+      bindings={(row) => <EntryBindings chat={chat} row={row} onChanged={changed} />}
       query={query}
       status={status.value}
       statusProblem={status.problem}
@@ -238,6 +249,7 @@ export function LorePage(props: { chat: string }) {
       chat={chat}
       onIndexEnded={() => {
         status.again();
+        setEdited(new Map());
         index.again();
       }}
       onQuery={setQuery}

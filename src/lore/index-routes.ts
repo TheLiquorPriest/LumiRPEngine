@@ -9,6 +9,7 @@
 
 import type { DefinitionsApi, JobRefusal, JobsApi, Scope } from "rp-harness/contract";
 import { RouteError, route, shape } from "../app";
+import { LORE_KINDS, loreKindOf, loreKindsWords } from "../shared/lore-kinds";
 import { BINDING_BYS } from "./bindings";
 import { type IndexedEntry, LORE_INDEX_FIELDS, type LoreIndex, type LoreIndexEdit } from "./indexing";
 import type { LoreAt } from "./lore";
@@ -117,10 +118,10 @@ const booksReply = shape.named(
 );
 
 const editBody = shape.object({
-  kind: shape.optional(shape.nullable(T), "What kind of thing it is; null takes his own off."),
-  line: shape.optional(shape.nullable(T), "One line saying what it is; null takes his own off."),
+  kind: shape.optional(shape.nullable(T), `What kind of thing it is: one of ${LORE_KINDS.join(", ")}; null takes his own off.`),
+  line: shape.optional(shape.nullable(T), "One line saying what it is, not empty; null takes his own off."),
   defines: shape.optional(shape.nullable(shape.list(binding)), "What it defines, each by a record's id, its name or as written; null takes his own off, and the run's show again."),
-  related: shape.optional(shape.nullable(shape.list(T)), "Related entries, by id; null takes his own off."),
+  related: shape.optional(shape.nullable(shape.list(T)), "Related entries, by id, each an entry of the chat's lore; null takes his own off."),
 });
 
 function rowOf(e: IndexedEntry) {
@@ -233,16 +234,33 @@ export function loreIndexRoutes(deps: LoreIndexRoutesDeps) {
       path: LORE_INDEX_ENTRY_PATH,
       access: "page",
       group: "lore",
-      does: "The owner's own lines for one entry of a chat's lore: its kind, its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries. What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.",
+      does: "The owner's own lines for one entry of a chat's lore: its kind (one of the fixed list of kinds: any other is refused, naming the list), its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.",
       body: editBody,
       reply: indexRow,
       handle: async ({ user, params, body }) => {
+        const at: LoreAt = { user, chat: params.chat };
         const edit: LoreIndexEdit = {};
-        if (body.kind !== undefined) edit.kind = body.kind;
-        if (body.line !== undefined) edit.line = body.line;
+        if (body.kind !== undefined) {
+          const kind = body.kind === null ? null : loreKindOf(body.kind);
+          if (body.kind !== null && kind === null) throw new RouteError(400, `"${body.kind}" is not a kind an entry can have: its kind is one of ${loreKindsWords()}.`);
+          edit.kind = kind;
+        }
+        if (body.line !== undefined) {
+          const line = body.line === null ? null : body.line.trim();
+          if (line === "") throw new RouteError(400, "A line says what the entry is, so it cannot be empty; to go back to the indexing run's line, take yours off.");
+          edit.line = line;
+        }
         if (body.defines !== undefined) edit.defines = body.defines;
-        if (body.related !== undefined) edit.related = body.related;
-        const row = await deps.index.edit({ user, chat: params.chat }, params.entry, edit);
+        if (body.related !== undefined) {
+          const related = body.related === null ? null : [...new Set(body.related.map((id) => id.trim()).filter((id) => id !== ""))];
+          if (related !== null && related.length > 0) {
+            const known = new Set((await deps.index.entries(at)).map((e) => e.id));
+            const unknown = related.filter((id) => !known.has(id));
+            if (unknown.length > 0) throw new RouteError(400, `${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not ${unknown.length === 1 ? "an entry" : "entries"} of this chat's lore, so ${unknown.length === 1 ? "it" : "they"} cannot be related to this one.`);
+          }
+          edit.related = related;
+        }
+        const row = await deps.index.edit(at, params.entry, edit);
         if (row === null) throw new RouteError(404, `There is no entry ${params.entry} in this chat's lore.`);
         return rowOf(row);
       },

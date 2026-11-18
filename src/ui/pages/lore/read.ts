@@ -21,3 +21,15 @@ export function readOverlays(client: Pick<RpeClient, "call">, chat: string): Pro
 export function startIndexing(client: Pick<RpeClient, "call">, chat: string): Promise<LoreIndexJob> {
   return client.call("POST /api/v1/chats/:chat/lore/index/jobs", { chat }).then(replyOf);
 }
+
+/** What a person may set of an entry's own lines; null of one takes his own off and the run's shows again. */
+export interface EntryLinesEdit {
+  kind?: string | null;
+  line?: string | null;
+  related?: string[] | null;
+}
+
+/** Sets an entry's own kind, line or related entries; RPE refuses in its words a kind not in the list, an empty line or a related id that is no entry of the chat's lore. */
+export function editEntryLines(client: Pick<RpeClient, "call">, chat: string, entry: string, body: EntryLinesEdit): Promise<LoreIndexRow> {
+  return client.call("PUT /api/v1/chats/:chat/lore/index/:entry", { chat, entry }, { body }).then(replyOf);
+}

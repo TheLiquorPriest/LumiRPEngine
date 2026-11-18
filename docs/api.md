@@ -1341,7 +1341,7 @@ The lore index of a chat, a page at a time in the order of the lore map's catalo
 
 ### `PUT /api/v1/chats/:chat/lore/index/:entry`
 
-The owner's own lines for one entry of a chat's lore: its kind, its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries. What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.
+The owner's own lines for one entry of a chat's lore: its kind (one of the fixed list of kinds: any other is refused, naming the list), its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands.
 
 | | |
 |---|---|
