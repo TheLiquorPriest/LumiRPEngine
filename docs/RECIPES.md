@@ -1,6 +1,6 @@
 # LumiRPEngine recipes
 
-> The world format these recipes use is the engine's, which RPE keeps. Where a recipe names an `lre_*` tool, it is one of the command line and MCP server for outside harnesses, which this build does not serve; in Build, enter each item in its editor ([Worlds in RPE](world.md)).
+> The world format these recipes use is the engine's, which RPE keeps. Where a recipe names an `lre_*` tool, it is one of the command line and MCP server for outside harnesses, which this build does not serve and a later build brings back; in Build, enter each item in its editor ([Worlds in RPE](world.md)).
 
 Small worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `lre_world_create` with no template). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; an agent merges the JSON with `lre_edit`. A new world carries every default data table, pinned as a template's are, so a recipe that needs a table of its own carries the whole table, rows and all, and it replaces the world's copy rather than merging into it; in Build, edit that copy in the **Data tables** editor. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.
 
