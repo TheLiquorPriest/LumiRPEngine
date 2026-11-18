@@ -17,6 +17,13 @@ export type HeldRehearsal =
   | { state: "ready"; report: MigrationReport; text: string; names: ReadonlyMap<string, string> }
   | { state: "failed"; why: string };
 
+/** What Lumiverse holds now that decides where a chat is played: each chat's metadata, each connection's name by id, and the connection active for the user (null: none selected). */
+export interface LumiverseNow {
+  chats: ReadonlyMap<string, JsonObject>;
+  connections: ReadonlyMap<string, string>;
+  active: string | null;
+}
+
 export class RehearsalRunning extends Error {
   override name = "RehearsalRunning";
 }
@@ -78,13 +85,17 @@ export class Rehearsals {
     return read;
   }
 
-  /** Each of the user's chats' metadata as Lumiverse holds it now, read through the migration's door; null where Lumiverse's database can't be read. */
-  chats(user: string, lumiverse: string | null): ReadonlyMap<string, JsonObject> | null {
+  /**
+   * What Lumiverse holds now that decides where a chat is played, read once through the migration's door: each of the user's chats'
+   * metadata, their connections' names by id, and the connection active for them (null: none is selected). Null where Lumiverse's
+   * database can't be read.
+   */
+  lumiverseNow(user: string, lumiverse: string | null): LumiverseNow | null {
     if (lumiverse === null) return null;
     try {
       const db = LumiverseDb.open(lumiverse, user);
       try {
-        return new Map(db.chats().map((c) => [c.id, c.metadata]));
+        return { chats: new Map(db.chats().map((c) => [c.id, c.metadata])), connections: new Map(db.connectionProfiles().map((c) => [c.id, c.name])), active: db.activeConnection() };
       } finally {
         db.close();
       }

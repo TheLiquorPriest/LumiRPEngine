@@ -1916,10 +1916,11 @@ export interface MigrationRowsReply {
   next: string | null;
 }
 
-/** A migration report in brief: a rehearsal or the real run, when it read today's data, why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took. */
+/** A migration report in brief: a rehearsal or the real run, when it read today's data, what you said there is no runtime of the previous build for and this user's found all the same (what was found, and what is therefore not carried), why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took. */
 export interface MigrationSummaryShown {
   mode: "rehearsal" | "real run";
   at: string;
+  disowned: string[];
   refusals: string[];
   counts: { rows: number; chats: number; items: number; notClassified: number; unreadable: number; differences: number; offRpe: number };
   disk: { backup: number; import: number; total: number; free: number | null };
@@ -2056,10 +2057,13 @@ export interface NotesReply {
 /** Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, or parts that are neither text nor a picture, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why. */
 export type NotGiven = { what: "pictures" | "parts"; messages: number[]; count: number } | { what: "world-state" | "on-stage"; error: string };
 
-/** A chat that was on today and is on none of RPE's connections: the connection it is pinned to in Lumiverse now (null: none, so it follows the one active for him), and whether it is on one of RPE's now. His step, in Lumiverse: choose one of RPE's connections for it. */
+/** A chat that was on today and was on none of RPE's connections when the run read it, as it stands now: the connection it is pinned to in Lumiverse (null: none, so it follows the one active for you) and its name; where none, the connection active for you now with its name and whether it is one of RPE's; whether RPE has played it; and whether it is on RPE now (pinned to one of RPE's connections, or pinned to none while the one active for you is one of RPE's). Your step, in Lumiverse: choose one of RPE's connections for it. */
 export interface OffRpeShown {
   chat: string;
   pinned: string | null;
+  pinnedName: string | null;
+  active: { id: string; name: string | null; rpe: boolean } | null;
+  played: boolean;
   /** Whether it is done: its line is struck. */
   done: boolean;
 }
@@ -3936,6 +3940,18 @@ export interface WorldChanged {
   stored?: boolean;
 }
 
+/** What changed from one version of a world to another, part by part. */
+export interface WorldChanges {
+  /** The revision it is compared against. */
+  from: string;
+  /** The revision it is compared to; null for the draft. */
+  to: string | null;
+  /** How many things changed in all. */
+  total: number;
+  /** Each part that changed, in the order of the document. */
+  parts: ({ part: string; added: number; changed: number; removed: number; things: ({ id: string; name: string | null; kind: "added" | "changed" | "removed" })[]; more: number })[];
+}
+
 /** A chat that plays one of his worlds: its name, the world and the revision it plays now (a move that waits for its next turn counted), the world's head, and whether it is behind. */
 export interface WorldChat {
   /** The chat's id. */
@@ -4044,18 +4060,6 @@ export interface WorldRead {
   packRelations: JsonValue;
   /** The formula functions. */
   functions: string[];
-}
-
-/** What changed from one version of a world to another, part by part. */
-export interface WorldChanges {
-  /** The revision it is compared against. */
-  from: string;
-  /** The revision it is compared to; null for the draft. */
-  to: string | null;
-  /** How many things changed in all. */
-  total: number;
-  /** Each part that changed, in the order of the document. */
-  parts: ({ part: string; added: number; changed: number; removed: number; things: ({ id: string; name: string | null; kind: "added" | "changed" | "removed" })[]; more: number })[];
 }
 
 /** The level asked for, then each level below it to the depth asked for, at the chat's head or as it stood at a turn. */

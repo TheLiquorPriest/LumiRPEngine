@@ -84,8 +84,15 @@ const waiting = shape.named(
 
 const offRpe = shape.named(
   "OffRpeShown",
-  "A chat that was on today and is on none of RPE's connections: the connection it is pinned to in Lumiverse now (null: none, so it follows the one active for him), and whether it is on one of RPE's now. His step, in Lumiverse: choose one of RPE's connections for it.",
-  shape.object({ chat: T, pinned: nullable(T), done }),
+  "A chat that was on today and was on none of RPE's connections when the run read it, as it stands now: the connection it is pinned to in Lumiverse (null: none, so it follows the one active for you) and its name; where none, the connection active for you now with its name and whether it is one of RPE's; whether RPE has played it; and whether it is on RPE now (pinned to one of RPE's connections, or pinned to none while the one active for you is one of RPE's). Your step, in Lumiverse: choose one of RPE's connections for it.",
+  shape.object({
+    chat: T,
+    pinned: nullable(T),
+    pinnedName: nullable(T),
+    active: nullable(shape.object({ id: T, name: nullable(T), rpe: shape.yesNo() })),
+    played: shape.yesNo(),
+    done,
+  }),
 );
 
 const folders = shape.object({ configDir: T, dataDir: T });

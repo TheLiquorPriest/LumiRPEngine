@@ -6631,12 +6631,13 @@ export interface MigrationRowsReply {
 
 ### `MigrationSummaryShown`
 
-A migration report in brief: a rehearsal or the real run, when it read today's data, why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took.
+A migration report in brief: a rehearsal or the real run, when it read today's data, what you said there is no runtime of the previous build for and this user's found all the same (what was found, and what is therefore not carried), why the real run would not start on it (after a real run: what of it did not balance), how much of each part there is to page through, the disk it takes and the backup a real run took.
 
 ```ts
 export interface MigrationSummaryShown {
   mode: "rehearsal" | "real run";
   at: string;
+  disowned: string[];
   refusals: string[];
   counts: { rows: number; chats: number; items: number; notClassified: number; unreadable: number; differences: number; offRpe: number };
   disk: { backup: number; import: number; total: number; free: number | null };
@@ -6861,12 +6862,15 @@ export type NotGiven = { what: "pictures" | "parts"; messages: number[]; count: 
 
 ### `OffRpeShown`
 
-A chat that was on today and is on none of RPE's connections: the connection it is pinned to in Lumiverse now (null: none, so it follows the one active for him), and whether it is on one of RPE's now. His step, in Lumiverse: choose one of RPE's connections for it.
+A chat that was on today and was on none of RPE's connections when the run read it, as it stands now: the connection it is pinned to in Lumiverse (null: none, so it follows the one active for you) and its name; where none, the connection active for you now with its name and whether it is one of RPE's; whether RPE has played it; and whether it is on RPE now (pinned to one of RPE's connections, or pinned to none while the one active for you is one of RPE's). Your step, in Lumiverse: choose one of RPE's connections for it.
 
 ```ts
 export interface OffRpeShown {
   chat: string;
   pinned: string | null;
+  pinnedName: string | null;
+  active: { id: string; name: string | null; rpe: boolean } | null;
+  played: boolean;
   /** Whether it is done: its line is struck. */
   done: boolean;
 }

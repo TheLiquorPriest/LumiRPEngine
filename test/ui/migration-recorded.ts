@@ -27,7 +27,7 @@ export const MIGRATED: MigrationReply = {
   rehearsal: { state: "none" },
   sources: SOURCES,
   backup: { path: "/srv/rpe/backups/before-migration.tar", bytes: 48_340_992, sha256: "4f1d2c9a8b7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c4b3a29180f7e6d5c", present: true },
-  offRpe: [{ chat: "chat-calder", pinned: "conn-own", done: false }],
+  offRpe: [{ chat: "chat-calder", pinned: "conn-own", pinnedName: null, active: null, played: false, done: false }],
   waiting: [
     { kind: "guidance", path: "imported/GUIDANCE.md", done: false },
     { kind: "agent", id: "scout", path: "imported/agents/scout.md", done: true, pins: [], deadTools: [] },

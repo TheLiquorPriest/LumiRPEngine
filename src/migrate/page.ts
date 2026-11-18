@@ -10,12 +10,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { JsonObject } from "../shared/json";
+import type { Store } from "../store";
 import type { ChatCarried } from "./briefing";
 import type { ChatEngine, JournalRead } from "./chats";
 import { goingBack, PREVIOUS_PERMISSIONS, swapSteps } from "./going-back";
 import type { LumiverseMarks } from "./lumiverse-db";
 import { IMPORTED, IMPORTED_AGENTS, IMPORTED_SKILLS, SET_APART } from "./own-files";
-import type { Rehearsals } from "./rehearse-job";
+import type { LumiverseNow, Rehearsals } from "./rehearse-job";
 import type { ChatImportReport, ChatReport, Difference, Item, MigrationReport, RowReport } from "./report";
 import { disownedLines } from "./no-runtime";
 import type { RuntimeFolders } from "./runtime-folders";
@@ -41,14 +42,21 @@ export interface ReportSummary {
 export type RehearsalShown = { state: "none" } | { state: "running"; since: number } | { state: "ready"; summary: ReportSummary } | { state: "failed"; why: string };
 
 /**
- * A chat that was on today and is on none of RPE's connections (N-14, R-109): the head of the page, a group of its own. The one
- * step that puts it on RPE is his, in Lumiverse: choose one of RPE's connections for it. RPE changes nothing in his chats. Done
- * once the chat, as Lumiverse holds it now, is pinned to one of RPE's connections.
+ * A chat that was on today's build and was on none of RPE's connections when the run read it (N-14, R-109): the head of the page, a
+ * group of its own, and the chat's own line in the report's chat list: one read of where the chat stands now, for both. RPE changes
+ * nothing in his chats; the one step that puts a chat on RPE is his, in Lumiverse: choose one of RPE's connections for it. `done`
+ * once it is on RPE: pinned to one of RPE's connections, or pinned to none while the connection active for him is one of RPE's.
  */
 export interface OffRpe {
   chat: string;
   /** The connection it is pinned to in Lumiverse now (as the report read it where Lumiverse can't be read now); null: none, so it follows the one active for him. */
   pinned: string | null;
+  /** That connection's name in Lumiverse; null where it is none or Lumiverse can't say. */
+  pinnedName: string | null;
+  /** Where it is pinned to none: the connection active for him in Lumiverse now, its name and whether it is one of RPE's; null where none is selected or Lumiverse can't be read. */
+  active: { id: string; name: string | null; rpe: boolean } | null;
+  /** Whether RPE has played a turn of it. */
+  played: boolean;
   done: boolean;
 }
 
@@ -114,6 +122,8 @@ export interface MigrationPageInput {
   given?: readonly OwnerRow[];
   /** RPE's connections in Lumiverse (`lumiverse.connections`). */
   rpeConnections?: readonly string[];
+  /** RPE's store, where it holds what RPE did with a chat: whether it played a turn there. Absent: no chat counts as played. */
+  store?: Store;
 }
 
 export function summaryOf(report: MigrationReport): ReportSummary {
@@ -155,6 +165,30 @@ export function textFor(input: Pick<MigrationPageInput, "db" | "user" | "rehears
 function pinOf(metadata: JsonObject): string | null {
   const pin = metadata.connection_profile_id;
   return typeof pin === "string" && pin.trim() !== "" ? pin.trim() : null;
+}
+
+/** What decides where a chat is played, as it stands now: Lumiverse (null where it can't be read), the ids of RPE's connections, and whether RPE has played a turn of a chat. */
+interface Placing {
+  now: LumiverseNow | null;
+  rpe: ReadonlySet<string>;
+  played(chat: string): boolean;
+}
+
+/** Where each chat the report found off RPE stands now, read once: the same for the head of the page and for a chat's own line. */
+export function offRpeOf(report: MigrationReport, at: Placing): OffRpe[] {
+  return (report.offRpe ?? []).map((c) => {
+    const pinned = at.now === null ? c.pinned : pinOf(at.now.chats.get(c.chat) ?? {});
+    const follows = pinned === null ? (at.now?.active ?? null) : null;
+    const active = follows === null ? null : { id: follows, name: at.now?.connections.get(follows) ?? null, rpe: at.rpe.has(follows) };
+    return { chat: c.chat, pinned, pinnedName: pinned === null ? null : (at.now?.connections.get(pinned) ?? null), active, played: at.played(c.chat), done: pinned === null ? active?.rpe === true : at.rpe.has(pinned) };
+  });
+}
+
+/** `offRpeOf` as Lumiverse and RPE hold the chats now. */
+export function offRpeNow(input: Pick<MigrationPageInput, "user" | "database" | "rehearsals" | "rpeConnections" | "store">, report: MigrationReport): OffRpe[] {
+  const mine = input.store?.user(input.user);
+  const lumiverse = report.sources?.lumiverse ?? (input.database === null ? null : dirname(input.database));
+  return offRpeOf(report, { now: input.rehearsals.lumiverseNow(input.user, lumiverse), rpe: new Set(input.rpeConnections ?? []), played: (chat) => mine?.playedIn(chat) ?? false });
 }
 
 /** The ids of the folders (`<id>/`) or files (`<id>.md`) of a folder, in name order; none where it is not there. */
@@ -207,13 +241,8 @@ export function migrationPage(input: MigrationPageInput): MigrationPage {
     out.waiting.push(...rows);
     return out;
   }
-  // The chats still off RPE, as Lumiverse holds them now: one pinned to any of RPE's connections is on RPE.
-  const rpe = new Set(input.rpeConnections ?? []);
-  const now = input.rehearsals.chats(input.user, report.sources?.lumiverse ?? out.sources.lumiverse);
-  for (const c of report.offRpe ?? []) {
-    const pinned = now === null ? c.pinned : pinOf(now.get(c.chat) ?? {});
-    out.offRpe.push({ chat: c.chat, pinned, done: pinned !== null && rpe.has(pinned) });
-  }
+  // The chats the run found off RPE, as Lumiverse and RPE hold them now.
+  out.offRpe.push(...offRpeNow(input, report));
   const tree = input.tree;
   const at = (path: string): boolean => tree !== undefined && existsSync(join(tree.files, path));
   const own = report.carried?.ownFiles ?? null;

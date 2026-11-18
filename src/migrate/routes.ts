@@ -114,6 +114,7 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
     runtime: runtimeFoldersOf(deps.env ?? process.env, deps.home ?? (process.env.HOME ?? "")),
     rpeConnections: deps.config.lumiverse.connections,
     ...(presses?.folders === undefined ? {} : { tree: { files: deps.paths.files, ...presses.folders } }),
+    ...(presses?.store === undefined ? {} : { store: presses.store() }),
   });
   /** A press's part the composition gives, or the press refused in words. */
   const needs = <T>(part: T | undefined, what: string): T => {

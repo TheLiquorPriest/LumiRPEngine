@@ -137,6 +137,17 @@ export class LumiverseDb {
     return this.reads.connectionProfiles();
   }
 
+  /** The connection the user has selected as active in Lumiverse (`activeProfileId`), where it names a connection they still have; null where none is selected or it can't be read. A chat pinned to none follows it. */
+  activeConnection(): string | null {
+    try {
+      const setting = this.reads.setting("activeProfileId");
+      const id = setting !== null && typeof setting.value === "string" ? setting.value.trim() : "";
+      return id !== "" && this.reads.connectionProfiles().some((c) => c.id === id) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** How many messages a chat of the user's holds. */
   messageCount(chatId: string): number {
     return this.reads.messageCount(chatId);
