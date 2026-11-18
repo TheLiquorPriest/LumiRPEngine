@@ -26,7 +26,7 @@ import { fieldBounds } from "../../../engine/effects";
 import { lifeOf } from "../../../engine/life";
 import type { EffectContext, EffectDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { labelOf, own } from "../../../engine/pack-kit";
+import { labelOf, optionalQuery, own } from "../../../engine/pack-kit";
 import { evalExpr, fieldDef, placeOfEntity, poolMax, scopeEnv, truthy } from "../../../engine/scope";
 import type { EntityState, WorldState } from "../../../engine/state";
 import { contentsOf } from "../../../engine/things";
@@ -106,6 +106,17 @@ export class Scratch {
 
   name(id: EntityId): string {
     return labelOf(this.ctx, id);
+  }
+
+  /**
+   * Someone's hit points from `from` to `to` in the words of `line`, and as the chat's point of view is shown them: the numbers for
+   * itself and where the fight shows them exactly, else the combat pack's wound band of where they now stand (`combat.hp_line`), and
+   * nothing for someone it cannot see.
+   */
+  hpWords(who: EntityId, line: string, from: number, to: number): { words: string; shown: string } {
+    const words = say(line, { from, to });
+    const banded = optionalQuery(this.ctx, "combat.hp_line")?.(this.ctx, { type: "set", entity: who, field: this.rules.hp.field, value: to });
+    return { words, shown: banded === undefined ? words : (banded ?? "") };
   }
 }
 
@@ -250,6 +261,21 @@ interface Harmed {
   from: number;
   to: number;
   words: string;
+  /** The words as the chat's point of view is shown them: another's hit points as the fight shows them. */
+  shown: string;
+}
+
+/** Words that say the same to everyone, as a part of both the record's words and the player's. */
+const plain = (words: string): { words: string; shown: string } => ({ words, shown: words });
+
+/** Parts joined, the record's words and the player's each. */
+function joined(parts: readonly { words: string; shown: string }[], by: string): { words: string; shown: string } {
+  return { words: parts.map((p) => p.words).filter((x) => x !== "").join(by), shown: parts.map((p) => p.shown).filter((x) => x !== "").join(by) };
+}
+
+/** A record's words: `told` as the GM and the agents read them, and `shown` beside them where the player is shown less (another's hit points). */
+function toldOf(said: { words: string; shown: string }): { told: string; shown?: string } {
+  return { told: said.words, ...(said.shown !== said.words ? { shown: said.shown } : {}) };
 }
 
 /**
@@ -260,37 +286,37 @@ interface Harmed {
 function harmOne(s: Scratch, who: EntityId, amount: number, nonlethal: boolean, rng: Rng): Harmed {
   const rules = s.rules;
   const hp = hpOf(s, who);
-  const parts: string[] = [];
+  const parts: { words: string; shown: string }[] = [];
   if (nonlethal) {
     const before = s.number(who, rules.hp.nonlethal);
     s.set(who, rules.hp.nonlethal, before + amount);
-    parts.push(say("d20_harm_nonlethal", { from: before, to: before + amount }));
+    parts.push(plain(say("d20_harm_nonlethal", { from: before, to: before + amount })));
   } else {
     const temp = s.number(who, rules.hp.temporary);
     const absorbed = Math.min(Math.max(0, temp), amount);
     if (absorbed > 0) {
       s.set(who, rules.hp.temporary, temp - absorbed);
-      parts.push(say("d20_harm_temporary", { absorbed, left: temp - absorbed }));
+      parts.push(plain(say("d20_harm_temporary", { absorbed, left: temp - absorbed })));
     }
     let to = hp.now - (amount - absorbed);
     if (hp.min !== undefined) to = Math.max(hp.min, to);
     s.set(who, rules.hp.field, to);
-    parts.push(say("d20_harm_hp", { from: hp.now, to }));
+    parts.push(s.hpWords(who, "d20_harm_hp", hp.now, to));
     const massive = rules.hp.massive;
     if (massive && s.holds(massive.when, who, { amount })) {
       const dc = typeof massive.dc === "number" ? massive.dc : s.eval(massive.dc, who, { amount });
       const save = rollSave(s, who, massive.save, dc, [], rng.fork("massive"));
-      parts.push(say("d20_harm_massive", { save: save.words }));
+      parts.push(plain(say("d20_harm_massive", { save: save.words })));
       if (save.outcome === "failure") {
         let set = s.eval(massive.hp, who, { amount });
         if (hp.min !== undefined) set = Math.max(hp.min, set);
         s.set(who, rules.hp.field, set);
-        parts.push(say("d20_harm_hp", { from: to, to: set }));
+        parts.push(s.hpWords(who, "d20_harm_hp", to, set));
       }
     }
   }
   settle(s, who);
-  return { from: hp.now, to: s.number(who, rules.hp.field), words: parts.join(", ") };
+  return { from: hp.now, to: s.number(who, rules.hp.field), ...joined(parts, ", ") };
 }
 
 /** The best reduction a creature has against harm of `types` (one that any of them passes does not count), and its best resistance to them. */
@@ -700,12 +726,12 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
   const plan = attackPlan(s, who, p);
   if ("code" in plan) return plan;
   const { target, w, shot, notes, dice, types, nonlethal, strength, damageBonus, touch, concealment } = plan;
-  const told: string[] = [];
+  const told: { words: string; shown: string }[] = [];
   if (w.item && plan.magazine !== null && plan.spend > 0) {
     const loaded = thingNumber(s.ctx, w.item, D20_FIELDS.loaded);
     if (loaded < plan.spend) notes.push(say("d20_magazine_short", { weapon: w.label, loaded, spend: plan.spend }));
     s.set(w.item, D20_FIELDS.loaded, Math.max(0, loaded - plan.spend));
-    told.push(say("d20_rounds_spent", { spent: Math.min(loaded, plan.spend), left: Math.max(0, loaded - plan.spend) }));
+    told.push(plain(say("d20_rounds_spent", { spent: Math.min(loaded, plan.spend), left: Math.max(0, loaded - plan.spend) })));
   }
   const rollDamage = (mult: number, r: Rng): { total: number; words: string } => {
     let rolled = 0;
@@ -732,16 +758,17 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
       if (one === who) continue;
       const sv = rollSave(s, one, shot.save, shot.dc, [], rng.fork(`area:${one}`));
       if (sv.outcome === "success") {
-        told.push(say("d20_area_saved", { who: s.name(one), save: sv.words }));
+        told.push(plain(say("d20_area_saved", { who: s.name(one), save: sv.words })));
         continue;
       }
       const dmg = rollDamage(1, rng.fork(`area-damage:${one}`));
       const stop = stoppedBy(s, one, types, true);
       const amount = Math.max(0, dmg.total - stop.amount);
       const h = harmOne(s, one, amount, nonlethal, rng.fork(`area-harm:${one}`));
-      told.push(say("d20_area_hit", { who: s.name(one), save: sv.words, damage: dmg.words, ...(stop.words !== "" ? { stopped: stop.words } : {}), harm: h.words }));
+      const hit = (harm: string): string => say("d20_area_hit", { who: s.name(one), save: sv.words, damage: dmg.words, ...(stop.words !== "" ? { stopped: stop.words } : {}), harm });
+      told.push({ words: hit(h.words), shown: hit(h.shown) });
     }
-    s.record(D20_EVENTS.attack, { who, target, with: w.label, told: told.join("; "), ...(notes.length > 0 ? { notes: notes.join("; ") } : {}) });
+    s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined(told, "; ")), ...(notes.length > 0 ? { notes: notes.join("; ") } : {}) });
     return null;
   }
   plan.offsets.forEach((offset, n) => {
@@ -779,16 +806,17 @@ const attack: Procedure = (s, who, p, rng, ruled) => {
       }
       words = say("d20_attack_roll", { natural, bonus: signed(bonus), ...(n === 0 && plan.rollParts !== "" ? { parts: plan.rollParts } : {}), ...(offset !== 0 ? { offset: signed(offset) } : {}), total, defence, ...(n === 0 ? { defence_parts: [partsWords(ac), ...plan.toAc.map((g) => modWords({ to: g.to, value: Number(g.value), type: g.type ?? null, source: "given", from: say("d20_given"), ...(g.note !== undefined ? { note: g.note } : {}), counted: true }))].filter((x) => x !== "").join(", ") } : {}), ...(flat ? { flat: true } : {}), ...(touch ? { touch: true } : {}), outcome: say(`d20_outcome_${outcome}`), ...(confirm !== "" ? { confirm } : {}) });
     }
+    let line = plain(words);
     if (outcome !== "miss") {
       const dmg = rollDamage(outcome === "critical" ? plan.multiplier : 1, r.fork("damage"));
       const stop = stoppedBy(s, target, types, true);
       const amount = Math.max(0, dmg.total - stop.amount);
       const h = harmOne(s, target, amount, nonlethal, r.fork("harm"));
-      words = [words, dmg.words, stop.words, h.words].filter((x) => x !== "").join("; ");
+      line = joined([plain(words), plain(dmg.words), plain(stop.words), { words: h.words, shown: h.shown }], "; ");
     }
-    told.push(say("d20_attack_one", { n: n + 1, words }));
+    told.push({ words: say("d20_attack_one", { n: n + 1, words: line.words }), shown: say("d20_attack_one", { n: n + 1, words: line.shown }) });
   });
-  s.record(D20_EVENTS.attack, { who, target, with: w.label, told: told.join(" "), ...(notes.length > 0 ? { notes: notes.join("; ") } : {}) });
+  s.record(D20_EVENTS.attack, { who, target, with: w.label, ...toldOf(joined(told, " ")), ...(notes.length > 0 ? { notes: notes.join("; ") } : {}) });
   return null;
 };
 
@@ -808,18 +836,18 @@ const harm: Procedure = (s, who, p, rng) => {
   const type = text(p.type);
   for (const one of targets) {
     let amount = rolled.total;
-    const parts: string[] = [];
+    const parts: { words: string; shown: string }[] = [];
     if (id !== null && dc !== null) {
       const sv = rollSave(s, one, id, dc, [], rng.fork(`save:${one}`));
-      parts.push(sv.words);
+      parts.push(plain(sv.words));
       if (sv.outcome === "success") amount = yes(p.half) ? Math.floor(amount / 2) : 0;
     }
     const stop = type === "" ? { amount: 0, words: "" } : stoppedBy(s, one, [type], false);
-    if (stop.words !== "") parts.push(stop.words);
+    if (stop.words !== "") parts.push(plain(stop.words));
     amount = Math.max(0, amount - stop.amount);
     const h = harmOne(s, one, amount, yes(p.nonlethal), rng.fork(`harm:${one}`));
-    parts.push(h.words);
-    s.record(D20_EVENTS.harm, { who: one, amount, ...(rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}), ...(type !== "" ? { type } : {}), ...(yes(p.nonlethal) ? { nonlethal: true } : {}), ...(one !== who ? { by: who } : {}), ...(text(p.why) !== "" ? { why: text(p.why) } : {}), told: parts.join(", ") });
+    parts.push({ words: h.words, shown: h.shown });
+    s.record(D20_EVENTS.harm, { who: one, amount, ...(rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}), ...(type !== "" ? { type } : {}), ...(yes(p.nonlethal) ? { nonlethal: true } : {}), ...(one !== who ? { by: who } : {}), ...(text(p.why) !== "" ? { why: text(p.why) } : {}), ...toldOf(joined(parts, ", ")) });
   }
   return null;
 };
@@ -829,33 +857,34 @@ const heal: Procedure = (s, who, p, rng) => {
   const rules = s.rules;
   const rolled = text(p.amount) === "" ? { dice: null, total: 0 } : amountRolled(p.amount, rng.fork("amount"));
   if (rolled === null) return reject("d20_no_amount", say("why_d20_no_amount", { said: text(p.amount) }));
-  const parts: string[] = [];
+  const parts: { words: string; shown: string }[] = [];
   if (yes(p.temporary)) {
     const before = s.number(who, rules.hp.temporary);
     const to = Math.max(before, rolled.total);
     s.set(who, rules.hp.temporary, to);
-    parts.push(say("d20_heal_temporary", { from: before, to }));
+    parts.push(plain(say("d20_heal_temporary", { from: before, to })));
   } else if (yes(p.nonlethal)) {
     const before = s.number(who, rules.hp.nonlethal);
     const to = Math.max(0, before - rolled.total);
     s.set(who, rules.hp.nonlethal, to);
-    parts.push(say("d20_heal_nonlethal", { from: before, to }));
+    parts.push(plain(say("d20_heal_nonlethal", { from: before, to })));
   } else if (rolled.total > 0) {
     const hp = hpOf(s, who);
     const to = Math.min(hp.max ?? Infinity, hp.now + rolled.total);
     s.set(who, rules.hp.field, to);
-    parts.push(say("d20_heal_hp", { from: hp.now, to }));
+    parts.push(s.hpWords(who, "d20_heal_hp", hp.now, to));
   }
   if (yes(p.stabilize) && rules.hp.dying) {
     const list = conditionsHeld(s.ctx, who);
     if (!list.some((c) => c.id === rules.hp.dying?.stable)) {
       const raw = own(s.ctx.state.entities, who)?.fields[D20_FIELDS.conditions];
       s.set(who, D20_FIELDS.conditions, [...(Array.isArray(raw) ? raw : []), { id: rules.hp.dying.stable }] as JsonValue);
-      parts.push(say("d20_stabilized"));
+      parts.push(plain(say("d20_stabilized")));
     }
   }
   settle(s, who);
-  s.record(D20_EVENTS.heal, { who, ...(rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}), told: parts.join(", ") || say("d20_nothing_changed"), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
+  const said = joined(parts, ", ");
+  s.record(D20_EVENTS.heal, { who, ...(rolled.dice !== null ? { dice: rolled.dice, rolled: rolled.total } : {}), ...toldOf(said.words !== "" ? said : plain(say("d20_nothing_changed"))), ...(text(p.why) !== "" ? { why: text(p.why) } : {}) });
   return null;
 };
 
@@ -1188,7 +1217,7 @@ export function upkeep(base: ReadContext, who: EntityId, rng: Rng): LedgerEvent[
   const rules = rulesOf(base.world);
   if (rules === null || !isOn(base) || !own(base.state.entities, who)) return [];
   const s = new Scratch({ ...base, rng, params: {} }, rules);
-  const told: string[] = [];
+  const told: { words: string; shown: string }[] = [];
   const dying = rules.hp.dying;
   const held = conditionsHeld(s.ctx, who);
   if (dying && held.some((c) => c.id === dying.state) && !held.some((c) => c.id === dying.stable)) {
@@ -1198,12 +1227,14 @@ export function upkeep(base: ReadContext, who: EntityId, rng: Rng): LedgerEvent[
       if (passOutcomes(dying.roll, ready.bands).includes(rolled.outcome)) {
         const raw = own(s.ctx.state.entities, who)?.fields[D20_FIELDS.conditions];
         s.set(who, D20_FIELDS.conditions, [...(Array.isArray(raw) ? raw : []), { id: dying.stable }] as JsonValue);
-        told.push(say("d20_upkeep_stable", { total: rolled.total }));
+        told.push(plain(say("d20_upkeep_stable", { total: rolled.total })));
       } else {
         const hp = hpOf(s, who);
         const to = hp.min !== undefined ? Math.max(hp.min, hp.now - dying.lose) : hp.now - dying.lose;
         s.set(who, rules.hp.field, to);
-        told.push(say("d20_upkeep_lost", { total: rolled.total, lost: hp.now - to, from: hp.now, to }));
+        const left = s.hpWords(who, "d20_harm_hp", hp.now, to);
+        const lost = (hpWords: string): string => say("d20_upkeep_lost", { total: rolled.total, lost: hp.now - to, hp: hpWords });
+        told.push({ words: lost(left.words), shown: lost(left.shown) });
       }
     }
   }
@@ -1223,14 +1254,14 @@ export function upkeep(base: ReadContext, who: EntityId, rng: Rng): LedgerEvent[
         const r = rollSave(s, who, save.save, save.dc, [], rng.fork(`ends:${name}`));
         if (r.outcome === "success") {
           changed = true;
-          told.push(say("d20_upkeep_saved", { name, save: r.words }));
+          told.push(plain(say("d20_upkeep_saved", { name, save: r.words })));
           continue;
         }
       }
       if (typeof item.rounds === "number") {
         changed = true;
         if (item.rounds <= 1) {
-          told.push(say("d20_upkeep_ended", { name }));
+          told.push(plain(say("d20_upkeep_ended", { name })));
           continue;
         }
         next.push({ ...item, rounds: item.rounds - 1 });
@@ -1241,6 +1272,6 @@ export function upkeep(base: ReadContext, who: EntityId, rng: Rng): LedgerEvent[
     if (changed) s.set(who, field, next);
   }
   settle(s, who);
-  if (told.length > 0) s.record(D20_EVENTS.upkeep, { who, told: told.join("; ") });
+  if (told.length > 0) s.record(D20_EVENTS.upkeep, { who, ...toldOf(joined(told, "; ")) });
   return s.events;
 }

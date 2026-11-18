@@ -183,4 +183,16 @@ describe("the d20 layer's sums", () => {
     expect(attack.odds?.hit).toBeCloseTo(0.675, 6);
     expect(attack.odds?.miss).toBeCloseTo(0.25, 6);
   });
+
+  test("an attack's record gives the GM the foe's hit points and the player the fight's wound band", () => {
+    const doc = d20World();
+    doc.ruleset = { ...doc.ruleset, combat: { initiative: { id: "initiative", dice: "1d20" }, economy: {}, hp: "hp", showHp: "wounds" } as never };
+    const reg = registry();
+    const state = initialState(doc, "t", reg);
+    const record = run(doc, state, "d20.attack", "wren", { target: "bram" }).find((e) => e.type === "d20.attack");
+    const def = reg.get("d20.attack");
+    if (!record || !def) throw new Error("no attack record");
+    expect(def.describe(record, reg.context(doc, state))).toContain("hit points 10 to -10");
+    expect(def.describe(record, reg.context(doc, state), "wren")).not.toContain("hit points 10 to -10");
+  });
 });

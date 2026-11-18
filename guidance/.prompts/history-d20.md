@@ -94,7 +94,7 @@ d20_trait_off: no longer has {{trait}}
 d20_ranks: has {{to}} rank(s) in {{skill}} (from {{from}}); at most {{most}}{{#over}}, so this is over the most{{/over}}{{#class_skill}}, a class skill{{/class_skill}}; {{left}} skill point(s) left
 d20_stat_as: {{fields}} value(s) of the sheet and {{attacks}} attack(s)
 d20_upkeep_stable: dying, rolled {{total}} and is stable
-d20_upkeep_lost: dying, rolled {{total}} and lost {{lost}} hit point(s), {{from}} to {{to}}
+d20_upkeep_lost: dying, rolled {{total}} and lost {{lost}} hit point(s){{#hp}}: {{hp}}{{/hp}}
 d20_upkeep_saved: {{name}} ended on a save: {{save}}
 d20_upkeep_ended: {{name}} ran out
 d20_mod_to: {{value}}{{#type}} {{type}}{{/type}} to {{to}}

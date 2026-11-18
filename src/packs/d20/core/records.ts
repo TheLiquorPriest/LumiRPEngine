@@ -14,8 +14,12 @@ import { labelOf, own } from "../../../engine/pack-kit";
 /** The fields of a record that name someone or something, said by their names. */
 const NAMED: Readonly<Record<string, true>> = { who: true, target: true, item: true, by: true, aided: true, vs: true };
 
-/** A record's values as its line takes them: a name for an id, an outcome in words, a list's words joined, a number or words as they are. */
-function fieldsOf(e: PackEvent, ctx: ReadContext): Record<string, string | number | boolean> {
+/**
+ * A record's values as its line takes them: a name for an id, an outcome in words, a list's words joined, a number or words as they
+ * are. A player's line (`player`) takes the words the player is shown (`shown`, another's hit points as the fight shows them) in place
+ * of the record's own.
+ */
+function fieldsOf(e: PackEvent, ctx: ReadContext, player: boolean): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
   const word = (key: string, v: JsonValue): string | number | boolean | null => {
     if (key === "outcome" && typeof v === "string") return say(`d20_outcome_${v}`) || v;
@@ -25,7 +29,8 @@ function fieldsOf(e: PackEvent, ctx: ReadContext): Record<string, string | numbe
     return null;
   };
   for (const [key, v] of Object.entries(e.data)) {
-    const w = v === undefined ? null : word(key, v);
+    if (key === "shown") continue;
+    const w = v === undefined ? null : word(key, player && key === "told" && typeof e.data.shown === "string" ? e.data.shown : v);
     if (w !== null && w !== "") out[key] = w;
   }
   return out;
@@ -39,7 +44,7 @@ function record(type: string): EventTypeDef<PackEvent> {
     type: type as PackEvent["type"],
     validate: (e, ctx) => (typeof e.data.who === "string" && own(ctx.state.entities, e.data.who) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: String(e.data.who ?? "") }) }),
     apply: () => undefined,
-    describe: (e, ctx) => say(`ev_${type.replace(".", "_")}`, fieldsOf(e, ctx)),
+    describe: (e, ctx, viewer) => say(`ev_${type.replace(".", "_")}`, fieldsOf(e, ctx, viewer !== undefined)),
     told: true,
     ...(own(ROLLS, type) ? { irreversible: "roll" } : { reverse: () => [] }),
   };
