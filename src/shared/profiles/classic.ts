@@ -14,6 +14,7 @@ import {
   armor,
   armorMods,
   CHALLENGE_ROWS,
+  CLASSIC_MODERN_FEATS,
   condition,
   CORE_WEAPONS,
   creatureType,
@@ -247,21 +248,15 @@ const traitRows: Record<string, TableRow> = {
   ...SHARED_FEATURES,
   ...SHARED_CREATURE_TRAITS,
 
+  ...CLASSIC_MODERN_FEATS,
+
   // Feats of this set's own.
-  acrobatic: trait("Acrobatic", "feat", "+2 Jump and Tumble.", { modifiers: skillsMod(2, ["jump", "tumble"]) }),
   agile: trait("Agile", "feat", "+2 Balance and Slip Free.", { modifiers: skillsMod(2, ["balance", "escape_artist"]) }),
-  alertness: trait("Alert", "feat", "+2 Listen and Spot.", { modifiers: skillsMod(2, ["listen", "spot"]) }),
   animal_affinity: trait("Way with Animals", "feat", "+2 Handle Animals and Ride.", { modifiers: skillsMod(2, ["handle_animal", "ride"]) }),
-  athletic: trait("Athletic", "feat", "+2 Climb and Swim.", { modifiers: skillsMod(2, ["climb", "swim"]) }),
-  cleave: trait("Follow-Through", "feat", "Once a round, dropping a foe in melee gives one more melee attack, at the same bonus, at another foe within reach.", { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
-  combat_expertise: trait("Guarded Fighting", "feat", "Before attacking, it may take up to 5 (no more than its base attack) off its melee attacks and add as much dodge to defence until its next turn: name both as the attack's modifiers.", { requires: "score(self, 'int') >= 13" }),
-  combat_reflexes: trait("Quick Reflexes", "feat", "As many more attacks of opportunity a round as its Dexterity modifier."),
   deceitful: trait("Deceitful", "feat", "+2 Disguise and Forgery.", { modifiers: skillsMod(2, ["disguise", "forgery"]) }),
   deft_hands: trait("Nimble Hands", "feat", "+2 Deft Hands and Rope Work.", { modifiers: skillsMod(2, ["sleight_of_hand", "use_rope"]) }),
   diehard: trait("Hard to Kill", "feat", "Below 0 hit points it is stable at once, and it may act as one disabled instead of falling unconscious.", { requires: "has_trait(self, 'endurance')" }),
   diligent: trait("Diligent", "feat", "+2 Appraise and Decipher Writing.", { modifiers: skillsMod(2, ["appraise", "decipher_script"]) }),
-  dodge: trait("Dodge", "feat", "+1 dodge to defence against the one foe it names each turn.", { modifiers: [mod("ac", 1, { type: "dodge", note: "against the foe it names" })], requires: "score(self, 'dex') >= 13" }),
-  far_shot: trait("Long Shot", "feat", "A projectile weapon's range increment is half again as long, a thrown weapon's twice as long.", { requires: "has_trait(self, 'point_blank_shot')" }),
   improved_critical: improvedCritical(T.weapons),
   improved_grapple: trait("Wrestler", "feat", "+4 to grapple, and taking hold of a foe gives it no attack of opportunity.", { modifiers: [mod("grapple", 4)], requires: "score(self, 'dex') >= 13 and has_trait(self, 'improved_unarmed_strike')" }),
   investigator: trait("Investigator", "feat", "+2 Gather Rumours and Search.", { modifiers: skillsMod(2, ["gather_information", "search"]) }),
@@ -272,9 +267,6 @@ const traitRows: Record<string, TableRow> = {
   power_attack: trait("Heavy Blows", "feat", "Before attacking, it may take up to its base attack off its melee attacks and add as much to damage (twice as much with a weapon in both hands, none with a light one): name both as the attack's modifiers.", { requires: "score(self, 'str') >= 13" }),
   self_sufficient: trait("Self-Reliant", "feat", "+2 First Aid and Survival.", { modifiers: skillsMod(2, ["heal", "survival"]) }),
   skill_focus: trait("Specialist", "feat", "+3 on the skill taken as its choice.", { modifiers: [mod("skill.{choice}", 3)] }),
-  stealthy: trait("Stealthy", "feat", "+2 Hide and Move Quietly.", { modifiers: skillsMod(2, ["hide", "move_silently"]) }),
-  toughness: trait("Tough", "feat", "+3 hit points.", { modifiers: [mod("hp", 3)] }),
-  track: trait("Tracker", "feat", "Follows tracks with Survival."),
 
   // Races.
   human: trait("Human", "race", "Medium, speed 30. One more skill point each level (four more at the first) and one more feat at the first level.", { modifiers: [mod("skill_points", 1, { note: "one more each level" })] }),

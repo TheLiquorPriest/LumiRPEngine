@@ -588,3 +588,18 @@ for (const [id, part] of [["1/10", 0.1], ["1/8", 0.125], ["1/6", 1 / 6], ["1/4",
   CHALLENGE_ROWS[id] = { by_level: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i + 1), Math.round(worth(i + 1, 1) * part)])) };
 }
 for (let cr = 1; cr <= 20; cr++) CHALLENGE_ROWS[String(cr)] = { by_level: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [String(i + 1), worth(i + 1, cr)])) };
+
+/** The feats Classic and Modern hold alike: the same arithmetic on the same skills. */
+export const CLASSIC_MODERN_FEATS: Record<string, TableRow> = {
+  acrobatic: trait("Acrobatic", "feat", "+2 Jump and Tumble.", { modifiers: skillsMod(2, ["jump", "tumble"]) }),
+  alertness: trait("Alert", "feat", "+2 Listen and Spot.", { modifiers: skillsMod(2, ["listen", "spot"]) }),
+  athletic: trait("Athletic", "feat", "+2 Climb and Swim.", { modifiers: skillsMod(2, ["climb", "swim"]) }),
+  cleave: trait("Follow-Through", "feat", "Once a round, dropping a foe in melee gives one more melee attack, at the same bonus, at another foe within reach.", { requires: "score(self, 'str') >= 13 and has_trait(self, 'power_attack')" }),
+  combat_expertise: trait("Guarded Fighting", "feat", "Before attacking, it may take up to 5 (no more than its base attack) off its melee attacks and add as much dodge to defence until its next turn: name both as the attack's modifiers.", { requires: "score(self, 'int') >= 13" }),
+  combat_reflexes: trait("Quick Reflexes", "feat", "As many more attacks of opportunity a round as its Dexterity modifier."),
+  dodge: trait("Dodge", "feat", "+1 dodge to defence against the one foe it names each turn.", { modifiers: [mod("ac", 1, { type: "dodge", note: "against the foe it names" })], requires: "score(self, 'dex') >= 13" }),
+  far_shot: trait("Long Shot", "feat", "A projectile weapon's range increment is half again as long, a thrown weapon's twice as long.", { requires: "has_trait(self, 'point_blank_shot')" }),
+  stealthy: trait("Stealthy", "feat", "+2 Hide and Move Quietly.", { modifiers: skillsMod(2, ["hide", "move_silently"]) }),
+  toughness: trait("Tough", "feat", "+3 hit points.", { modifiers: [mod("hp", 3)] }),
+  track: trait("Tracker", "feat", "Follows tracks with Survival."),
+};
