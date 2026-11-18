@@ -2787,7 +2787,7 @@ Reads; changes nothing.
 | `from` | text, or list of whole number | yes | Where to measure from: someone or something on the map, or a square [column, row]. |
 | `to` | text, or list of whole number |  | Where to measure to, the same way: gives the distance, whether the two see each other, the cover the one has from the other, and the way between with its cost and time. |
 | `within` | whole number |  | A range in squares: who and what stands within it of from. |
-| `area` | one of burst, cone, line, cube |  | An area that starts at from: burst (a radius all round it), cone, line or cube. Where it starts and how much of a square it must cover to count are the world's ruleset's to say, else the settings'; D&D's grid rule starts it at a point where squares meet and counts a square covered by half. |
+| `area` | one of burst, cone, line, cube |  | An area that starts at from: burst (a radius all round it), cone, line or cube. Where it starts and how much of a square it must cover to count are the world's ruleset's to say, else the settings'; as shipped, it starts at a point where squares meet and counts a square covered by half. |
 | `size` | whole number |  | The area's size in squares: a burst's radius, a cone's or a line's length, a cube's side. |
 | `toward` | text, or list of whole number |  | Where a cone, a line or a cube points: someone or something on the map, or a square. |
 | `speed` | number |  | Squares the mover covers in a round, for the way's time; the map's own when left out. |
