@@ -25,14 +25,17 @@ export interface AppTakes {
   accounts?: LumiverseAccounts;
   /** The latest turns' moments of a chat, or of all chats, for the Runtime page's timings. */
   turns?: TurnsTimed;
-  /** What the files name that runs a command or calls out, listed as waiting when RPE starts and after a file that can name one is written. */
-  listing?: Pick<SwitchesListing, "start">;
+  /** What the files name that runs a command or calls out, looked at when RPE starts and before the list of what waits is read. */
+  listing?: Pick<SwitchesListing, "look">;
 }
 
 export function appArea(takes?: AppTakes): Area {
+  const listing = takes?.listing;
   return {
     name: "app",
     settings: [...UPDATE_SETTINGS, ...SERVER_SETTINGS, ...PAGE_SETTINGS],
+    // The app asks every area to look at the files before it reads the list of switches (the command line's, the page's).
+    ...(listing === undefined ? {} : { fills: { listFiles: () => listing.look() } }),
     ...(takes === undefined
       ? {}
       : {
@@ -40,13 +43,13 @@ export function appArea(takes?: AppTakes): Area {
             takes.opened(at);
             at.routes.add("service", serviceRoutes(at, takes.turns));
             at.routes.add("backups", [backupsRoute(at.paths.backups)]);
-            at.routes.add("switches", switchesRoutes(at.db));
+            at.routes.add("switches", switchesRoutes(at.db, () => at.hooks.listFiles()));
             at.routes.add("signin", signinRoutes(signinDeps(at, takes.accounts ?? null)));
           },
           // Once every area is mounted: the levels and connections come from the tree and the turn lane.
           mounted: (at: App) => at.routes.add("settings", settingsRoutes({ settings: at.settings, facts: () => installFacts(at.config, at.paths), ...takes.settings(at) })),
           // The server listens: what the user's files already name that runs a command or calls out is listed as waiting.
-          started: () => takes.listing?.start(),
+          started: () => listing?.look(),
         }),
   };
 }

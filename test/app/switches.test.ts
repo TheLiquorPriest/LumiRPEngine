@@ -47,7 +47,7 @@ describe("the switches", () => {
             });
             a.routes.add("probe", [sql, ...connectionRoutes(testModelLayer(a.models), NO_TAG_CHECKS, () => OWNER, a.log)]);
             // The app area's own route, as it registers it.
-            a.routes.add("switches", switchesRoutes(a.db));
+            a.routes.add("switches", switchesRoutes(a.db, async () => {}));
           },
         },
       ],

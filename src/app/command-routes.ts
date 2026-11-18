@@ -151,8 +151,12 @@ function ownerOf(sink: CommandSink): string {
   return sink.user;
 }
 
-/** The command line's changes, over `sink`; `builds` says the builds in words where the caller knows them. */
-export function commandOps(sink: CommandSink, builds: () => Promise<string | null> = () => Promise.resolve(null)): CommandOps {
+/**
+ * The command line's changes, over `sink`; `builds` says the builds in words where the caller knows them. `look` lists what the user's
+ * files name that runs a command or calls out, as they stand now, before the list is read or a name in it is switched: only a running
+ * RPE can (RPH reads the files for it); a command that writes with RPE stopped looks at nothing, and RPE lists the files when it starts.
+ */
+export function commandOps(sink: CommandSink, builds: () => Promise<string | null> = () => Promise.resolve(null), look: () => Promise<void> = () => Promise.resolve()): CommandOps {
   return {
     async makeKey(ask) {
       const now = sink.now();
@@ -171,6 +175,7 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
       await sink.run((db) => takeKeyHash(db, user, hash, models, sink.now()));
     },
     async setSwitch(name, state, whose) {
+      await look();
       const user = whose ?? ownerOf(sink);
       return await sink.run((db) => {
         const entry = asCommand(db, () => setSwitch(db, user, name, state, sink.now()));
@@ -199,6 +204,7 @@ export function commandOps(sink: CommandSink, builds: () => Promise<string | nul
     async status() {
       // Before the install names a user there is nothing of his to say.
       const user = sink.user;
+      if (user !== null) await look();
       return { keys: user === null ? [] : currentKeys(sink.db, user), switches: user === null ? [] : listAllSwitches(sink.db), builds: await builds() };
     },
   };
@@ -219,8 +225,8 @@ async function asked<T>(done: Promise<T>): Promise<T> {
  * that while RPE runs the command line's process writes neither. Their access is `command`: they are
  * served on the owner's socket and nowhere else.
  */
-export function commandRoutes(sink: CommandSink, builds: () => Promise<string | null>) {
-  const ops = commandOps(sink, builds);
+export function commandRoutes(sink: CommandSink, builds: () => Promise<string | null>, look: () => Promise<void>) {
+  const ops = commandOps(sink, builds, look);
   return [
     route({ method: "POST", path: COMMAND_PATHS.keys, access: "command", group: "service", does: "Makes a new key of a kind, which retires the one before it; shown this once.", body: keyAsk, reply: keyMade, handle: ({ body }) => asked(ops.makeKey(body)) }),
     route({ method: "POST", path: COMMAND_PATHS.takenKeys, access: "command", group: "service", does: "Takes over the provider key today's connections hold, by its hash alone, paired with their model names.", body: takenKeyAsk, reply: shape.nothing(), handle: ({ body }) => asked(ops.takeKey(body.hash, body.models)) }),

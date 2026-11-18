@@ -194,8 +194,14 @@ export function compose(options: ComposeOptions = {}): Composition {
   // The engine's history lines (`.prompts/history-*.md`, one file to a family) as his shared levels hold them, which every chat's history and notices are said in.
   const installLines = (): Promise<void> => installHistoryLines(files(app().config.lumiverse.user ?? "", NO_CHAT));
   const settings = (user: string, chat: string) => turnSettings(made().files, scope(user, chat), made().env.log);
-  // What a file written through the Files routes names that runs a command or calls out is listed as waiting at once.
-  const listing = switchesListing({ external: () => made().harness.external, owner: () => app().config.lumiverse.user, scope: (user, chat) => scope(user, chat ?? NO_CHAT), log: () => app().log });
+  // What the files name that runs a command or calls out is listed as waiting whenever something looks: when RPE starts, before the list is read, and after a file written through the Files routes.
+  const listing = switchesListing({
+    external: () => made().harness.external,
+    owner: () => app().config.lumiverse.user,
+    scope: (user, chat) => scope(user, chat ?? NO_CHAT),
+    chats: (user) => made().chats.placed(user).filter((c) => c.deleted === null).map((c) => c.chat),
+    log: () => app().log,
+  });
   // A chat RPE has not played yet, placed as its first turn places it: under its character, by Lumiverse's own names for both.
   const place = async (owner: string, chat: string) => {
     const known = made().chats.folders(owner, chat);

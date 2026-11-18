@@ -22,12 +22,17 @@ export type JobToolsHook = (scope: UserSessionScope) => Promise<HostTool[]>;
 // biome-ignore lint/suspicious/noEmptyInterface: each lane is added by the door's file, which owns its types
 export interface DoorFills {}
 
+/** Lists what the user's files name that runs a command or calls out, as the files stand now, so that the registry holds each as waiting before anything reads it. */
+export type ListFilesHook = () => Promise<void>;
+
 /** What one area adds to the hooks of the others. */
 export interface Fills {
   /** A view given to an agent by name, which the turn lane's `views` hook asks of every area in turn. */
   readonly views?: ViewHook;
   /** Tools a job of no chat is given, which the turn lane gathers from every area. */
   readonly jobTools?: JobToolsHook;
+  /** Looks at the files for what runs a command or calls out, which the app asks before it reads the list of switches. */
+  readonly listFiles?: ListFilesHook;
   /** The door's lanes this area fills. */
   readonly door?: DoorFills;
 }
@@ -38,6 +43,8 @@ export interface Hooks {
   readonly views: ViewHook;
   /** Every area's tools for a job of no chat, in the order of the areas. */
   readonly jobTools: JobToolsHook;
+  /** Every area's look at the files, once each, as the files stand now. */
+  readonly listFiles: ListFilesHook;
   /** The door's lanes, each as the one area that fills it gave it; a lane no area fills is absent. */
   readonly door: Readonly<DoorFills>;
 }
@@ -53,11 +60,13 @@ interface Giving {
 export function gatherHooks(areas: readonly Giving[]): Hooks {
   const views: ViewHook[] = [];
   const tools: JobToolsHook[] = [];
+  const listers: ListFilesHook[] = [];
   const door: Record<string, unknown> = {};
   const filledBy = new Map<string, string>();
   for (const area of areas) {
     if (area.fills?.views !== undefined) views.push(area.fills.views);
     if (area.fills?.jobTools !== undefined) tools.push(area.fills.jobTools);
+    if (area.fills?.listFiles !== undefined) listers.push(area.fills.listFiles);
     for (const [lane, fill] of Object.entries(area.fills?.door ?? {})) {
       if (fill === undefined) continue;
       const first = filledBy.get(lane);
@@ -75,6 +84,9 @@ export function gatherHooks(areas: readonly Giving[]): Hooks {
       return null;
     },
     jobTools: async (scope) => (await Promise.all(tools.map((t) => t(scope)))).flat(),
+    listFiles: async () => {
+      await Promise.all(listers.map((look) => look()));
+    },
     door: door as DoorFills,
   };
 }

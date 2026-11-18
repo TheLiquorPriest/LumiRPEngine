@@ -269,8 +269,8 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   const builds = new Builds({ version, file: options.appFile ?? null, log, now });
   await builds.start();
   routes.add("app", appRoutes(version, now(), options.ui === undefined ? RPE_UI : options.ui, builds, answers, config.lumiverse.url));
-  // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them.
-  routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words));
+  // The server's own command line's routes, which answer on its socket alone: the app's, so every RPE has them. The files that name what runs a command or calls out are looked at before the list of it is read.
+  routes.add("command", commandRoutes({ paths, secrets, db, user, webKeyMs: config.auth.webKeyDays === null ? null : config.auth.webKeyDays * 86_400_000, run: (write) => writes.run(write, "the command line's change"), now }, async () => (await builds.check()).words, () => hooks.listFiles()));
   let running: RunningServer | null = null;
   let starting: Promise<RunningServer> | null = null;
   let closing: Promise<void> | null = null;

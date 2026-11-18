@@ -11,7 +11,7 @@ import { accountSystemctl, rpeServiceOf } from "../up";
 import { listAllSwitches } from "../switches";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
-import { atWords } from "./words";
+import { atWords, STOPPED_LISTING } from "./words";
 import { runningServer } from "./writer";
 import { runtimeFoldersOf } from "../../migrate/runtime-folders";
 
@@ -79,6 +79,7 @@ export async function statusCommand(paths: DataPaths, config: AppConfig, io: Cli
     io.out(`Switches: ${waiting.length} waiting, ${switches.filter((s) => s.state === "on").length} on, ${switches.filter((s) => s.state === "off").length} off`);
     // Each user's own: a thing of another user than this RPE's is said with whose it is.
     for (const s of waiting) io.out(`  waiting${s.user === user ? "" : ` for user ${s.user}`}: ${s.name} (${s.kind}) runs or calls ${s.what}. Switch it on with: ${runLine(io, paths, "allow", s.name, ...(s.user === user ? [] : ["--user", s.user]))}`);
+    if (said === null) io.out(`  ${STOPPED_LISTING}`);
   } finally {
     db.close();
   }
