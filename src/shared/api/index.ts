@@ -3168,7 +3168,7 @@ export interface StackReply {
   handed: StackHandedRow[];
 }
 
-/** Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; the perceptions of that turn it has, by id, struck ones left out: none listed is a gap on a turn RPE played; and, on a turn a migration carried, the old mind files carried with that character. */
+/** Someone on stage at a turn, by the name the stage gives; the character the cast holds by that name (null: it holds none) with its casting; the perceptions of that turn it has, by id, struck ones left out: none listed is a gap on a turn RPE played; of those, the ones its own agent has not taken in; and, on a turn a migration carried, the old mind files carried with that character. */
 export interface StagePerson {
   name: string;
   /** The cast's character of that name; null where the cast holds none. */
@@ -3176,6 +3176,8 @@ export interface StagePerson {
   /** Its casting in force at the turn; null: none. */
   casting: CastRole | null;
   perceptions: string[];
+  /** Of its perceptions of that turn, those its own agent has not taken in as the chat stands now (no memory, mind entry or relationship of its own names them, and it has not said they leave nothing to remember), by id. */
+  untaken: string[];
   /** On a turn a migration carried: the old mind files carried with the character, by name (`minds` for the older minds pack's notes), each with whether it is marked filed; none on a turn RPE played. */
   files: { name: string; filed: boolean }[];
 }

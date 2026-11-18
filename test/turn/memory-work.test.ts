@@ -254,11 +254,16 @@ test("dream-due: a principal who goes to sleep is reminded of once, as the run e
   expect(fired(b, third)).toEqual([]);
 });
 
-test("the Cast page's press: the cast list says what waits, the press starts the job as his own with her agent playing her, briefed by the shipped part, and the first turn begun after it ended reads it taken in", async () => {
+test("the Cast page's press: the cast list and the Turn page's record say what waits, the press starts the job as his own with her agent playing her, briefed by the shipped part, and once the first turn begun after it ended is played both read it taken in", async () => {
   const author: Answer[] = [...VOICED, { pieces: [{ text: "Nothing more." }] }, { pieces: [{ text: "She was only present; it waits." }] }, replying("The lamp turns.")];
   const b = await openTurnBed({ off: ["rules/unsourced", "rules/perceptions-owed"], answers: routed(author, [TAKING_IN, { pieces: [{ text: "Taken in." }] }]) });
   beds.push(b);
-  await play(b, "I ask whether the boat came.");
+  const first = await play(b, "I ask whether the boat came.");
+  // The Turn page's record of the first turn: her perception, and that her own agent has not taken it in.
+  const record = async () => (await b.page<{ turns: { people: { name: string; perceptions: string[]; untaken: string[] }[] }[] }>("GET", `/api/v1/chats/${CHAT}/perceptions?turn=${first}`)).body.turns[0]?.people.find((p) => p.name === WREN);
+  const before = await record();
+  expect(before?.perceptions).toHaveLength(1);
+  expect(before?.untaken).toEqual(before?.perceptions);
 
   const list = await b.page<{ characters: { name: string; waits: { perceptions: number; dreamt: unknown } }[] }>("GET", `/api/v1/chats/${CHAT}/cast`);
   expect(list.body.characters.find((c) => c.name === WREN)?.waits).toMatchObject({ perceptions: 1, dreamt: null });
@@ -273,4 +278,5 @@ test("the Cast page's press: the cast list says what waits, the press starts the
   expect(fired(b, next)).toEqual([]);
   const after = await b.page<{ characters: { name: string; waits: { perceptions: number } }[] }>("GET", `/api/v1/chats/${CHAT}/cast`);
   expect(after.body.characters.find((c) => c.name === WREN)?.waits.perceptions).toBe(0);
+  expect((await record())?.untaken).toEqual([]);
 });

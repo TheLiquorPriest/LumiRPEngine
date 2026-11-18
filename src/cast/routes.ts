@@ -39,7 +39,7 @@ import { IMPORTED_KIND } from "./carried";
 import { fileName, importedFiles, importedText, isFiled } from "./imported";
 import type { OnStage, StageRead } from "./facts";
 import { CAST_DEFAULTS, type CastCall, type CastClock, castClock, castLines, type CastSettings, datedAt } from "./kit";
-import { memoriesNow, type Tier } from "./memory";
+import { memoriesNow, takenIn, type Tier } from "./memory";
 import { castAt } from "./path";
 import { perceivedTurn, perceiveAsPlayer, struckWith } from "./perceive";
 import {
@@ -649,6 +649,13 @@ export function castRoutes(deps: CastRoutesDeps) {
           const stage = stretch.length === 0 ? new Map<string, StageRead>() : await deps.onStage({ user, chat: params.chat }, stretch);
           const perceived = new Map<string, string[]>();
           for (const item of r.record.items.values()) if (item.part === "perception" && !item.dropped) perceived.set(`${perceivedTurn(item)}\n${item.character}`, [...(perceived.get(`${perceivedTurn(item)}\n${item.character}`) ?? []), item.id]);
+          // What each character's own agent has taken in, as the chat stands now.
+          const taken = new Map<string, Set<string>>();
+          const takenBy = (character: string): Set<string> => {
+            let set = taken.get(character);
+            if (set === undefined) taken.set(character, (set = takenIn(r.record, character)));
+            return set;
+          };
           const turns = stretch.map((t): StageTurnShown => {
             const read = stage.get(t);
             const carried = !played.has(t);
@@ -659,6 +666,7 @@ export function castRoutes(deps: CastRoutesDeps) {
                 character: character?.id ?? null,
                 casting: character === null ? null : (castingInForce(r.record, character)?.as ?? null),
                 perceptions: character === null ? [] : (perceived.get(`${t}\n${character.id}`) ?? []),
+                untaken: character === null ? [] : (perceived.get(`${t}\n${character.id}`) ?? []).filter((id) => !takenBy(character.id).has(id)),
                 files: character === null || !carried ? [] : importedFiles(r.record, character.id).map((f) => ({ name: fileName(f), filed: isFiled(f) })),
               };
             });

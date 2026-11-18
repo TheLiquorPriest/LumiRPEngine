@@ -11,7 +11,8 @@ export const STAGE_WORDS: Readonly<Record<StageReading, string>> = {
 };
 
 /**
- * Who was on stage and who of them has a perception of the turn: plain record, with the ones who have none marked. A turn the migration
+ * Who was on stage and who of them has a perception of the turn: plain record, with the ones who have none marked; and, beside each
+ * one's perceptions, whether its own agent has taken them in as the chat stands now, or how many it has not. A turn the migration
  * carried owes none: the page says the previous build played it, and gives each one's old mind files instead of a gap.
  */
 export function Perceptions(props: { stage: StageTurn }) {
@@ -30,9 +31,17 @@ export function Perceptions(props: { stage: StageTurn }) {
       ) : (
         <ul class="rpe-plain lre-stack">
           {stage.people.map((p) => (
-            <li key={p.name} class="rpe-line" data-person={p.name} data-perceived={p.perceptions.length > 0 ? "yes" : stage.carried ? "carried" : "no"}>
+            <li key={p.name} class="rpe-line" data-person={p.name} data-perceived={p.perceptions.length > 0 ? "yes" : stage.carried ? "carried" : "no"} data-taken={p.perceptions.length === 0 ? undefined : p.untaken.length === 0 ? "yes" : "no"}>
               <span class="rpe-strong">{p.name}</span> {p.casting === null ? null : <Badge>{p.casting}</Badge>}{" "}
               {p.perceptions.length > 0 ? counted(p.perceptions.length, "perception") : stage.carried ? null : <Badge tone="warn">none</Badge>}
+              {p.perceptions.length === 0 ? null : p.untaken.length === 0 ? (
+                <span class="rpe-meta"> · taken in by its own agent</span>
+              ) : (
+                <>
+                  {" "}
+                  <Badge tone="warn">{p.untaken.length === p.perceptions.length ? "not taken in by its own agent" : `${p.untaken.length} not taken in by its own agent`}</Badge>
+                </>
+              )}
               {p.character === null ? (
                 <span class="rpe-meta"> · the cast holds no character by that name</span>
               ) : stage.carried ? (
