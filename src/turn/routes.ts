@@ -104,16 +104,19 @@ function changeOf(c: ChangeRow): ChangeView {
 }
 
 /**
- * Which of a turn's records a read gives, going on from where a page has read to: of the run `run` names (the turn's first when
- * none), those numbered `from` on; and every record of each run that began after it. A run the turn's records do not hold is a 404.
+ * Which of a turn's records a read gives, going on from where a page has read to: of the run `run` names (the turn's first run, `first`,
+ * when none), those numbered `from` on; and every record of each run that began after it. A record of the host's own word outside any
+ * agent's work (a session opened) is a run of its own that RPH numbers from 1: one that came before the named run is given by a read
+ * from the start alone. A run the turn's records do not hold is a 404.
  */
-function readFrom(turn: string, runs: ReadonlyMap<string, readonly TraceRecord[]>, run: string | undefined, from: number): (record: TraceRecord) => boolean {
+function readFrom(turn: string, runs: ReadonlyMap<string, readonly TraceRecord[]>, run: string | undefined, first: string | undefined, from: number): (record: TraceRecord) => boolean {
   const order = [...runs.keys()];
-  const at = run === undefined ? 0 : order.indexOf(run);
+  const at = run !== undefined ? order.indexOf(run) : Math.max(0, first === undefined ? 0 : order.indexOf(first));
   if (at < 0) throw new RouteError(404, `Turn ${turn} has no run ${run}.`);
   const asked = order[at];
+  const before = new Set(run === undefined && from <= 1 ? order.slice(0, at) : []);
   const later = new Set(order.slice(at + 1));
-  return (record) => later.has(record.run) || (record.run === asked && record.seq >= from);
+  return (record) => before.has(record.run) || later.has(record.run) || (record.run === asked && record.seq >= from);
 }
 
 /** The path below a turn's folder a file route names, its segments as the server decoded them: none may be empty, `.` or `..`, or hold a backslash. */
@@ -300,7 +303,7 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     const folders = new Set([r.turn, ...turns.runs.ofTurn(user, r.turn).flatMap((each) => (each.held !== null && each.held !== r.turn ? [each.held] : []))]);
     const records = r.session === CARRIED_SESSION ? [] : (await Promise.all([...folders].map((each) => turns.trace.records({ user, chat: r.chat, session: r.session, turn: each })))).flat().sort((a, b) => a.at - b.at || a.seq - b.seq);
     const runs = byRun(records);
-    const within = readFrom(r.turn, runs, run, from);
+    const within = readFrom(r.turn, runs, run, turns.runs.ofTurn(user, r.turn).find((each) => each.traceRun !== null)?.traceRun ?? undefined, from);
     // What went to the chat is the reply's: a Settle now run writes nothing there.
     const said = turns.runs.reply(user, r.turn) ?? r;
     return {
