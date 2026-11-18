@@ -50,9 +50,10 @@ describe("the turn before, told and kept", () => {
     const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, replying("Wren relights it.")] });
     b.host.send(CHAT, "I climb the stairs.");
     const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    // The words have reached Lumiverse's stream: a stop before they do saves nothing, and the turn is dropped, not cut.
     const turn = await b.until("the reply's first words", () => {
       const run = b.turns.runs.ofChat(USER, CHAT)[0];
-      return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
+      return run !== undefined && [...b.host.streams.values()].some((seen) => seen.content.includes("The lamp turns")) ? run.turn : null;
     });
     expect((await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`)).body).toEqual({ stopped: true });
     const out = await generating;
@@ -70,9 +71,10 @@ describe("the turn before, told and kept", () => {
     const b = await bed({ answers: [{ pieces: [{ text: "<intent>One exchange.</intent>" }, { text: "<reply>The lamp turns, and" }, { hold }, { text: " then dims.</reply>" }] }, { pieces: [{ text: "Nothing to settle." }] }, replying("Wren relights it.")] });
     b.host.send(CHAT, "I climb the stairs.");
     const generating = b.host.generate({ chat: CHAT, connection: CONNECTION, preset: PRESET });
+    // The words have reached Lumiverse's stream: a stop before they do saves nothing, and the turn is dropped, not cut.
     const turn = await b.until("the reply's first words", () => {
       const run = b.turns.runs.ofChat(USER, CHAT)[0];
-      return run !== undefined && run.reply.includes("The lamp turns") ? run.turn : null;
+      return run !== undefined && [...b.host.streams.values()].some((seen) => seen.content.includes("The lamp turns")) ? run.turn : null;
     });
     await b.page<StopReply>("POST", `/api/v1/chats/${CHAT}/turns/${turn}/stop`);
     const cut = await settledTurn(b, (await generating).generationId!);
