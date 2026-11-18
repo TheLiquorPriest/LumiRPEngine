@@ -16,7 +16,8 @@ afterEach(async () => {
 });
 
 async function bed(options: TurnBedOptions): Promise<TurnBed> {
-  const b = await openTurnBed(options);
+  // The reminder of writes that name no source would ask for calls these tests do not script.
+  const b = await openTurnBed({ off: ["rules/unsourced"], ...options });
   beds.push(b);
   return b;
 }

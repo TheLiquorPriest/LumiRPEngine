@@ -23,6 +23,7 @@ async function recordFile(b: TurnBed, turn: string): Promise<string | null> {
 
 test("a turn's record is written to its folder once it is tied, and carried by the next turns in the records mode; a turn with no record has no file", async () => {
   const b = await openTurnBed({
+    off: ["rules/unsourced"],
     global: "sessions:\n  carry: records\n",
     answers: [
       {

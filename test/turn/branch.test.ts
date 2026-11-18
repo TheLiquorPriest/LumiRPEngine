@@ -126,6 +126,7 @@ test("a continue in a branch of the reply it shares with the chat it was made fr
 
 test("after a continue in a branch of the reply it shares, the branch still holds the shared turn's story and cast: its scene stays open, its session is not closed, and the branch's next turn has both; the source is untouched", async () => {
   const b = await openTurnBed({
+    off: ["rules/unsourced"],
     answers: [
       // The source's turn opens the watch scene and casts Wren, then replies.
       {
