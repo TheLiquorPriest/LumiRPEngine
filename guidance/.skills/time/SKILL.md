@@ -21,22 +21,24 @@ The answer to `pass_time` lists what fell due in that span and near the scene: w
 It is a list of things to decide. The tool applied none of it. The GM decides each item when it is asked; on a turn the Author runs alone, the deciding is the Author's. An item nobody decides did not happen: a person listed at school at 8:00 is still at home. This is how it is recorded:
 
 1. For each item, what happened: it happened as scheduled, it happened differently, or it did not happen and why.
-2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`); a need that was met is recorded as the next part says.
+2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`), or with the engine's own action where there is one: a need that was met is recorded as the next part says.
 3. The Author is told what the time brought, unless the Author decided it. An arrival or an ending effect may change the scene.
 
 ## Needs
 
-Hunger, fatigue, social and fun rise with the clock, and they come down only when the engine records that something met them. Passing the minutes of a meal does not: hunger goes on rising through it. What meets a need is an action of the engine's, carried out with the `world_apply` operation `act`; the time it takes is passed with `pass_time`, and the answer to `act` gives the action's own minutes.
+Hunger, fatigue, social and fun rise with the clock, and they come down only when the engine records that something met them. Passing the minutes of a meal does not meet hunger. What meets a need is one of the engine's actions, carried out with the `world_apply` operation `act`:
 
-- **Hunger:** `eat`. **Fatigue:** `sleep`, a night's or a nap. **Social:** `chat_with`, a while with someone. **Fun:** `rest`. `get_up` ends a sleep or a rest; `accept_invitation` says yes to an invitation.
-- `who` is the one who eats, sleeps or rests; left out, the player's character. What the action asks for and did not find is told in the answer, and the action is carried out all the same.
+- **Hunger:** `eat` (`minutes`). **Fatigue:** `sleep` (`minutes` for a nap or a stated length; left out, a night's). **Social:** `chat_with` (`target`, `minutes`), a while with someone. **Fun:** `rest` (`minutes`). `get_up` ends a sleep or a rest, and `accept_invitation` (`host`) says yes to an invitation.
+- `who` is the one who eats, sleeps or rests; left out, the player's character. `world_query` at `ruleset` lists every action the world has; a call that leaves out what its action asks for is answered with what it needs.
+- `act` passes no time. Its answer gives the action's own minutes, and whoever runs the turn passes them with `pass_time` after it, once.
+- A requirement of the action that does not hold is told in the answer, and the action is carried out all the same; `SIMULATION.md` says what to do with that report.
 - A thirty-minute meal, paid for apart with `pay`; hunger is met when the meal ends and rises again from there:
 
 ```
 world_apply {"operations": [{"op": "act", "action": "eat", "who": "Mara", "params": {"minutes": 30}, "source": {"from": "prose", "message": "m-0412"}}, {"op": "pass_time", "minutes": 30, "source": {"from": "prose", "message": "m-0412"}}]}
 ```
 
-- A night's sleep; she goes to her bed if she has one, her activity is sleep until 07:00, and her fatigue is met at 07:00. For a nap or a stated length, give `"params": {"minutes": 480}`:
+- A night's sleep: she goes to her bed if she has one, her activity is sleep until 07:00, and her fatigue is met at 07:00:
 
 ```
 world_apply {"operations": [{"op": "act", "action": "sleep", "who": "Mara", "source": {"from": "prose", "message": "m-0415"}}, {"op": "pass_time", "until": "07:00", "source": {"from": "prose", "message": "m-0415"}}]}
