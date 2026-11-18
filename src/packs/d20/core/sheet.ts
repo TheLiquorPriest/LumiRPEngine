@@ -18,6 +18,7 @@ import { encounterOf, rulesOf as combatRulesOf } from "../../combat/core/model";
 import { isClassSkill, levelsOf, modOf, scoreOf } from "./functions";
 import { classesOf, conditionsHeld, effectsHeld, gearOn, isOn, labelOfRow, naturalAttacks, numberIn, ranksOf, rowIdOf, rowsOf, rulesOf, sizeOf, textIn, thingNumber, traitsHeld, wordsIn } from "./model";
 import { explain, partsWords, signed, totalOf } from "./modifiers";
+import { threatFrom, weaponKey } from "./procedures";
 
 /** A total and where its number comes from, its parts in words. */
 export interface SheetLine {
@@ -93,7 +94,7 @@ function weapons(ctx: ReadContext, who: EntityId, name: (id: EntityId) => string
       with: name(id),
       attack: roll === null ? null : { total: roll.total + enh, parts: [roll.parts, enh !== 0 ? say("d20_part_enhancement", { value: signed(enh), from: name(id) }) : ""].filter((x) => x !== "").join(", ") },
       damage: `${String(dice)}${bonus !== 0 ? signed(bonus) : ""}`,
-      threat: numberIn(row.threat ?? null) ?? a.autoHit,
+      threat: threatFrom(ctx, rules, who, { rowId: rid, row, natural: null }),
       multiplier: numberIn(row.multiplier ?? null) ?? 1,
       ...(range !== null ? { range } : {}),
       ...(wordsIn(row.types).length > 0 ? { types: wordsIn(row.types).join(", ") } : {}),
@@ -102,13 +103,15 @@ function weapons(ctx: ReadContext, who: EntityId, name: (id: EntityId) => string
     });
   }
   for (const nat of naturalAttacks(ctx, who)) {
-    const roll = line(ctx, who, nat.total ?? a.totals.melee, { weapon: "", key: "" });
-    const bonus = strength(nat.held ?? "one") + totalOf(ctx, rules, who, a.totals.damage, { weapon: "", key: "" });
+    // Its own attack is known by its label in lower case, as the attack binds it (`attack.weapon.bite` reaches it).
+    const key = weaponKey(nat);
+    const roll = line(ctx, who, nat.total ?? a.totals.melee, { weapon: key, key });
+    const bonus = strength(nat.held ?? "one") + totalOf(ctx, rules, who, a.totals.damage, { weapon: key, key });
     out.push({
       with: nat.label,
       attack: roll === null ? null : { total: roll.total + (nat.bonus ?? 0) + (nat.secondary === true ? a.secondary : 0), parts: roll.parts },
       damage: `${nat.damage}${bonus !== 0 ? signed(bonus) : ""}`,
-      threat: nat.threat ?? a.autoHit,
+      threat: threatFrom(ctx, rules, who, { rowId: key, row: null, natural: nat }),
       multiplier: nat.multiplier ?? 1,
       ...(nat.types !== undefined ? { types: nat.types.join(", ") } : {}),
     });
