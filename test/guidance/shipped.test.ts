@@ -210,11 +210,11 @@ describe("the shipped set, as RPH's loader reads it, as RPE lays it", () => {
     }
   });
 
-  test.skip("every definition with a tool lists `ALL-AGENTS` and `rules` in `reads`; one with none lists neither", async () => {
+  test.skip("every definition with a tool lists `ALL-AGENTS`, `rules` and `AGENTS` in `reads`; one with none lists none of them", async () => {
     for (const name of AGENTS) {
       const definition = await guidance.definition(name);
       const holds = (definition?.tools.length ?? 0) > 0;
-      expect({ name, holds, all: definition?.reads.includes("ALL-AGENTS"), rules: definition?.reads.includes("rules") }).toEqual({ name, holds, all: holds, rules: holds });
+      expect({ name, holds, all: definition?.reads.includes("ALL-AGENTS"), rules: definition?.reads.includes("rules"), agents: definition?.reads.includes("AGENTS") }).toEqual({ name, holds, all: holds, rules: holds, agents: holds });
     }
     expect((await guidance.definition("narrator"))?.tools).toEqual([]);
   });
@@ -265,7 +265,7 @@ describe("each check fails on a scratch copy of the set that breaks it", () => {
     const author = SHIPPED.get(".agents/author.md") ?? "";
     expect(await one(changed(SHIPPED, { ".agents/author.md": author.replace("effort: off\n", "") }), "effort")).toEqual(["effort: .agents/author.md names no effort"]);
     const indexer = SHIPPED.get(".agents/indexer.md") ?? "";
-    expect(await one(changed(SHIPPED, { ".agents/indexer.md": indexer.replace("reads: [ALL-AGENTS, rules]", "reads: []") }), "reads")).toEqual([
+    expect(await one(changed(SHIPPED, { ".agents/indexer.md": indexer.replace("reads: [ALL-AGENTS, rules, AGENTS]", "reads: []") }), "reads")).toEqual([
       "reads: .agents/indexer.md holds a tool and does not read ALL-AGENTS",
       "reads: .agents/indexer.md holds a tool and does not read rules",
     ]);

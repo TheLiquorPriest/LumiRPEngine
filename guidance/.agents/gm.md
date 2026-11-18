@@ -5,7 +5,7 @@ model: default
 effort: high
 tools: [world_query, world_search, world_apply, roll, map_lay, map_edit, map_place, map_view, map_measure, map_door, cast_query, cast_update, perceive, prompt, lore_read, lore_search, chat_read, chat_search, archive_search, story_query, gap_check, file_read, skill_load, todo, tool_search, tool_use, ask_author]
 out_of_reach: [reply, agents]
-reads: [ALL-AGENTS, rules, WORLD, SIMULATION]
+reads: [ALL-AGENTS, rules, AGENTS, WORLD, SIMULATION]
 given:
   - chat:history[scene]
   - prompt:kind(lore)

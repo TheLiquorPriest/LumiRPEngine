@@ -5,7 +5,7 @@ model: default
 effort: low
 tools: [world_query, world_apply, story_query, story_record, cast_query, chat_read, file_read, tool_search, tool_use, ask_author]
 out_of_reach: [reply, agents]
-reads: [ALL-AGENTS, rules, SIMULATION]
+reads: [ALL-AGENTS, rules, AGENTS, SIMULATION]
 given:
   - turn:reply(saved)
   - turn:result

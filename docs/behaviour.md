@@ -33,7 +33,7 @@ Plain markdown, with no header. Each agent reads the ones its definition names, 
 
 1. `ALL-AGENTS.md`: for every agent. ([shipped](../guidance/ALL-AGENTS.md))
 2. The rules that are always on (see below).
-3. `AGENTS.md`: the character's, then the chat's. None ships; write one to speak to every agent of one character or chat.
+3. `AGENTS.md`: the character's, then the chat's. None ships; write one to speak to the agents of one character or chat. As shipped, every agent reads it but the narrator, which reads `WRITING.md` alone, and Build's five model jobs, which read no file.
 4. `WORLD.md`, `SIMULATION.md` and `WRITING.md`: this story's world, how its game side is run, and how its reply is written.
 5. The agent's own definition.
 6. `TURN.md` and `PRESET.md`: how a turn is run, and how the preset's prompt is used. As shipped, the Author reads both every turn.
