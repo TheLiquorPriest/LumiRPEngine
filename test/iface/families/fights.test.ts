@@ -50,16 +50,15 @@ describe("fights", () => {
     expect(t.s.changes(t.turn.id).length).toBeGreaterThan(changes);
   });
 
-  // hardening: a start naming a fight's place joins it (someone already in it is refused); the case that locked in the old drop is to be rewritten for the join.
-  test.skip("a fight started while one is on is applied as nothing and said, with no report", async () => {
+  // Several fights run at once and a start naming a fight under way joins it, refusing anyone already in it (f130377fe).
+  test("a start naming someone already in the fight is refused in words, and nothing is recorded", async () => {
     const t = await familyRig(fightWorld);
     await t.call("fight_start", { with: ["Wren"], foes: ["wolf"], ...SRC });
     const changes = t.s.changes(t.turn.id).length;
     const again = await t.call("fight_start", { with: ["Wren"], foes: ["wolf"], ...SRC });
-    appliedInFull(again, "engine", false);
-    saidNotReported(again, "was already so");
+    expect(again.error).toBe(true);
+    expect(JSON.stringify(again.content)).toContain("Wren is in that fight already");
     expect(t.s.changes(t.turn.id).length).toBe(changes);
-    expect((opOf(again).fight as JsonObject | null) !== null).toBe(true);
   });
 
   test("a fight takes its fighters in as recorded: no money or things are made up for them", async () => {

@@ -72,15 +72,15 @@ describe("things and gear", () => {
     expect(Object.keys((state().entities.wren?.fields.sets ?? {}) as JsonObject)).toEqual([]);
   });
 
-  // hardening: rewritten once the engine records an end before now and advises it (a grant and a leave keep that end, reported ends_before_now).
-  test.skip("a grant that ends before now is applied with no end, and reported", async () => {
+  // A grant that ends before now is recorded with that end and advised (0ca4fe928).
+  test("a grant that ends before now is applied with that end kept, and reported", async () => {
     const t = await familyRig();
     const r = await t.call("item_grant", { item: "knife", who: "odile", until: "2030-01-01 08:00", ...SRC });
     appliedInFull(r, "engine");
     expect((r.reports ?? []).some((x) => x.includes("is not after now"))).toBe(true);
     const uses = t.s.stateAt(t.turn.id).state.world.entities.odile?.relations.find((x) => x.type === "uses" && x.to === "knife");
     expect(uses).toBeDefined();
-    expect(uses?.until).toBeUndefined();
+    expect(uses?.until).toEqual(expect.any(Number));
   });
 
   test("more used than there is uses it up, and is reported", async () => {
@@ -106,8 +106,7 @@ describe("things and gear", () => {
     expect(world.entities.cloak?.relations.some((x) => x.type === "worn_by" && x.to === "wren")).toBe(true);
   });
 
-  // hardening: the item ops advise now (S13's advice lines), so the old `rule_bent` report this case reads is to be rewritten for the advice.
-  test.skip("a home in something the world's rules say holds nothing is set all the same, and reported", async () => {
+  test("a home in something the world's rules say holds nothing is set all the same, and reported", async () => {
     const t = await familyRig();
     const r = await t.call("item_home", { item: "knife", in: "bell", ...SRC });
     appliedInFull(r, "engine");
