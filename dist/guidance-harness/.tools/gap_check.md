@@ -1,5 +1,6 @@
 ---
 description: gap_check as the model is told it - what the tool does, and what each of its arguments is.
+doing: checking what the story has said about something
 arguments:
   topic: The thing to look for, by its name.
   terms: Its other names, and the words around it.

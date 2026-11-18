@@ -1,6 +1,8 @@
 ---
 # Example. Not in force while it sits in `examples/`. It names every field a rule's header takes, with what each takes, what it is when left out, and which trigger it goes with. A rule fires on one thing, so this one is a pattern, and the fields of the other triggers are written as comments to copy in place of the pattern's.
 description: What the rule is for, in a sentence. The Rules page shows it. A rule with no trigger at all is read in the briefing of the turns `turns` names, and asks for nothing of its own accord.
+# What the rule is called in a person's words: a short phrase with no full stop, as a list of rules shows it. The thinking block's line for a rule that fired shows it; left out, the line names the rule by its file's name.
+title: The word suddenly in a reply or a written file
 # Who the rule is for. It must be there: `all`, or a list of agent definitions by name.
 agents: [author, gm]
 # Files that must be in force for the rule to be: an instruction file by its name (WORLD), or a rule, skill or other file by its folder and name (rules/perceptions). The rule goes out of force with the file. None when left out.

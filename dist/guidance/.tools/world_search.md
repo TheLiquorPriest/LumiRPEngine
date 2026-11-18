@@ -1,5 +1,6 @@
 ---
 description: world_search as the model is told it - what the tool does, and what each of its arguments is.
+doing: searching the world
 arguments:
   words: "The words to find."
   kind: "person, thing, place, group or quest, to find only those. Left out, quests are found beside the rest."

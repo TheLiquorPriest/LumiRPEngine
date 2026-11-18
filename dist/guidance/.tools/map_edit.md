@@ -1,5 +1,6 @@
 ---
 description: map_edit as the model is told it - what the tool does, and what each of its arguments is.
+doing: editing a map
 arguments:
   at: "The place whose map to change."
   strokes: "What to draw, in order: a symbol on squares, in a rectangle or along a line."

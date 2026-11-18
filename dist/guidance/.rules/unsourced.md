@@ -1,9 +1,10 @@
 ---
-description: Points out writes that named no source, when a run is about to end. A reminder of what the file for every agent asks.
+description: Points out an agent's own writes that named no source, when its run is about to end. A reminder of what the file for every agent asks.
+title: Writes that name no source
 agents: all
 needs: ALL-AGENTS
 fact: unsourced.writes > 0
 at: run-end
 repeat: once per turn
 ---
-{{unsourced.writes}} of this turn's writes name no source. The file for every agent says what a source is. If a write has none of those, it is new, and the consent rule applies.
+{{unsourced.writes}} of your writes this turn name no source. The file for every agent says what a source is. If a write has none of those, it is new, and the consent rule applies.

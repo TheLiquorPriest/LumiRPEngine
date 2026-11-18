@@ -1,5 +1,6 @@
 ---
 description: holiday_set as the model is told it - what the tool does, and what each of its arguments is.
+doing: putting a holiday on the calendar
 arguments:
   holiday: "The holiday or named day, by name or id; one that is there is changed, any other is added."
   label: "Its name as the calendar shows it."

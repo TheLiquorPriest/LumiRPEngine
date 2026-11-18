@@ -1,5 +1,6 @@
 ---
 description: set_apply as the model is told it - what the tool does, and what each of its arguments is.
+doing: changing into a saved outfit
 arguments:
   who: "Who changes."
   set: "The saved outfit or loadout, by its name."

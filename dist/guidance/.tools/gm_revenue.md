@@ -1,5 +1,6 @@
 ---
 description: gm_revenue as the model is told it - what the tool does, and what each of its arguments is.
+doing: adjusting what a business takes in
 arguments:
   stream: "The revenue stream to adjust, by name."
   factor: "A multiple of its takings: 1.5 is half as much again, 0.5 half as much."

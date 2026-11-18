@@ -1,5 +1,6 @@
 ---
 description: place_label as the model is told it - what the tool does, and what each of its arguments is.
+doing: naming a place
 arguments:
   place: "The place, by name or id."
   name: "Its new name."

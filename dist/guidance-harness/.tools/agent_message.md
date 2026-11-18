@@ -1,5 +1,6 @@
 ---
 description: agent_message as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing to another agent
 arguments:
   agent: The name the agent goes by this turn, as the answer to delegate gave it, such as gm-1.
   message: What you tell it - the answer to its question, or what you want of it now.

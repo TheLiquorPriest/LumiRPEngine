@@ -29,7 +29,7 @@ on_stage_views:
 {{/cast.base.older.sources}}
 {{/cast.base.older}}
 {{#cast.growth.proposed}}
-- {{cast.growth.proposed}} character(s) have growth a reflection proposed that you have not accepted.
+- Growth that a character's own reflection proposed waits for your decision, for {{cast.growth.proposed.names}}. See `TURN.md`, "A character's reflection proposed growth".
 {{/cast.growth.proposed}}
 {{#cast.playerMind}}
 - The player's character has a mind of its own: the setting cast.playerMind is on.

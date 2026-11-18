@@ -1,5 +1,6 @@
 ---
 description: world_commit as the model is told it - what the tool does, and what each of its arguments is.
+doing: keeping the world's draft as its next revision
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   note: "A note for the world's history, at most 200 characters."

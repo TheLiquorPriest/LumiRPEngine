@@ -1,5 +1,6 @@
 ---
 description: story_query as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading the story record
 arguments:
   part: "Which part: premise, chapter, scene, beat, thread, arc, player, future, canon, retcon or record. Leave it out for every part."
   id: "One item, by its id."

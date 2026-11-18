@@ -1,5 +1,6 @@
 ---
 description: tool_search as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking for a tool
 arguments:
   words: What to look for - what the tool does, its name, or its family.
   limit: The most tools to give.

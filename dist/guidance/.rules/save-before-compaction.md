@@ -1,5 +1,6 @@
 ---
 description: Gives the Author the chance to save what matters before a session's earlier turns are summarized.
+title: Save what matters before the story so far is summarized
 agents: [author]
 at: before-compaction
 repeat: always

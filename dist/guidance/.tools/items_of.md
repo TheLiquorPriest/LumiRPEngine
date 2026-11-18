@@ -1,5 +1,6 @@
 ---
 description: items_of as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking over someone's things
 arguments:
   person: "The person, by name."
 ---

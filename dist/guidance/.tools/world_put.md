@@ -1,5 +1,6 @@
 ---
 description: world_put as the model is told it - what the tool does, and what each of its arguments is.
+doing: putting an item into the world's draft
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   collection: "The collection: entities, places, maps, rules and the others world_shape lists."

@@ -1,5 +1,6 @@
 ---
 description: file_read as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading a file
 arguments:
   path: The file's path as the agents see the files, from the chat's folder; the other levels are under their own names, such as @global/.
   start: The first line to read, counted from 1. Leave it out to read from the start.

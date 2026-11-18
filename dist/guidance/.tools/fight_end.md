@@ -1,5 +1,6 @@
 ---
 description: fight_end as the model is told it - what the tool does, and what each of its arguments is.
+doing: ending a fight
 arguments:
   fight: "The id of the fight to end; left out, the one fight under way."
   winner: "party or foes: the side that won."

@@ -1,5 +1,6 @@
 ---
 description: orgs_list as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking over the groups
 arguments:
   who: "A person, by name; left out, every group."
 ---

@@ -1,5 +1,6 @@
 ---
 description: world_read as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading the world's document
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
   source: "draft (the working copy Build edits; the default), playing (the world as this chat plays it) or revision (a kept revision, named in revision)."

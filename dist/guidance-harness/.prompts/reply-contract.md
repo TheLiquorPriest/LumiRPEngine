@@ -17,4 +17,6 @@ intent_file: scratch/intent.md
 - **The reply:** the plain text of a message that makes no call. One reply per turn. The text of a message that makes a call is never shown.
 {{/form.two_step}}
 
+Whatever language you write in, a name these instructions give you is written exactly as given: a tag, a file's path, the label of a line of the intent record, a field of a record, a tool and its arguments, an id.
+
 A message of yours that makes no call ends your run.

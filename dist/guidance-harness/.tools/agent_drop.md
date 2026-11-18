@@ -1,5 +1,6 @@
 ---
 description: agent_drop as the model is told it - what the tool does, and what each of its arguments is.
+doing: taking back what another agent wrote
 arguments:
   agent: The name the agent goes by this turn, as the answer to delegate gave it, such as gm-1.
 ---

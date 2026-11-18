@@ -1,5 +1,6 @@
 ---
 description: Notices when nothing has been recorded in the engine lane for a while. A reminder of what `TURN.md` asks about both lanes.
+title: Nothing recorded about the game for a while
 agents: [author]
 needs: TURN
 fact: turns.since.engine.change >= 6

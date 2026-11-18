@@ -1,5 +1,6 @@
 ---
 description: suggest as the model is told it - what the tool does, and what each of its arguments is.
+doing: putting a suggestion to you
 arguments:
   file: The file the change is for, as the agents see the files. Name one of file, lore and new_lore.
   lore: The id of the lore entry the change is for.

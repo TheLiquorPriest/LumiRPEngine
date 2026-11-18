@@ -97,7 +97,7 @@ money_accounts_closed: Accounts closed again
 money_accounts_opened: Accounts opened
 money_status: {{account}} is now {{status}}
 money_interest_period: Interest period
-money_declined: {{memo}} was declined
+money_declined: {{#memo}}{{memo}}{{/memo}}{{^memo}}A payment{{/memo}} was declined{{#reason}} ({{reason}}){{/reason}}
 money_year_closed: {{party}} closed {{year}}
 money_foundation_marked: {{org}}'s assets marked for {{month}}
 money_dividend_received: {{party}} received a dividend from {{source}}

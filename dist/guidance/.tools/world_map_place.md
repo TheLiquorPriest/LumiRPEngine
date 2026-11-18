@@ -1,5 +1,6 @@
 ---
 description: world_map_place as the model is told it - what the tool does, and what each of its arguments is.
+doing: putting a place on a map
 arguments:
   map: "The map: its id or its title, as this chat plays it."
   place: "The place on the map to change or take off: its id or its name. Leave it out to put a new place on the map."

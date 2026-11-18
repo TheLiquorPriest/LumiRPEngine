@@ -30,7 +30,7 @@ If the player pinned a casting, it stands.
 
 ## When a part grows
 
-A supporting character starts to matter when they return, when the player seeks them out, or when a thread hangs on them. Recast them as a principal then. What they perceived so far goes to their new agent as perceptions not yet taken in, so their first memories are written by themselves, in their own voice.
+A supporting character starts to matter when they return, when the player seeks them out, or when a thread hangs on them. Recast them as a principal then. What they perceived so far goes to their new agent as perceptions not yet taken in, so their first memories are written by themselves, in their own voice. The perceptions rule says when their agent takes them in.
 
 ## What you end with
 

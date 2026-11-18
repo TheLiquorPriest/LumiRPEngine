@@ -1,5 +1,6 @@
 ---
 description: money_balances as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking at someone's money
 arguments:
   who: "The person or group, by name."
 ---

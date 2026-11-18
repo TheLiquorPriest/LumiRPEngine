@@ -1,5 +1,6 @@
 ---
 description: file_write as the model is told it - what the tool does, and what each of its arguments is.
+doing: writing to a file
 arguments:
   path: The file's path as the agents see the files, from the chat's folder.
   op: What to do - write (make the file, or replace it whole), append (add to its end, making it if needed), edit (replace a piece of its text), or delete.

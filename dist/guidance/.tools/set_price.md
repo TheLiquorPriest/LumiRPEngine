@@ -1,5 +1,6 @@
 ---
 description: set_price as the model is told it - what the tool does, and what each of its arguments is.
+doing: setting a price
 arguments:
   asset: "The asset whose price is set (shares, a holding), by name."
   price: "Its price, in the world's main coin."

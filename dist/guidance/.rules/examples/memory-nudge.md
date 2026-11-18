@@ -1,5 +1,6 @@
 ---
 description: Example. Not in force while it sits in examples/. Copy it into rules/ to switch it on. Every ten turns it asks the Author to consider what the principals should remember. A reminder of what the perceptions rule says about memory work, so it goes when that rule goes.
+title: A reminder of what the characters should remember
 agents: [author]
 needs: perceptions
 every: 10

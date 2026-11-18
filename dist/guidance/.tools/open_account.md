@@ -1,5 +1,6 @@
 ---
 description: open_account as the model is told it - what the tool does, and what each of its arguments is.
+doing: opening an account
 arguments:
   who: "Whose account: a person, a household, a business or another group."
   product: "What kind of account, as the world's banking products name them; left out, the usual one for who holds it."

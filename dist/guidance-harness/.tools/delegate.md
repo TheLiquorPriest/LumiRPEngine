@@ -1,5 +1,6 @@
 ---
 description: delegate as the model is told it - what the tool does, and what each of its arguments is.
+doing: giving another agent a task
 arguments:
   agent: The name of the agent definition to start.
   brief: Its task, in full. It sees nothing of your conversation, only this and what you give it.

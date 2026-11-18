@@ -1,5 +1,6 @@
 ---
 description: world_query as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking up the world's record
 arguments:
   at: "The point of the tree: a place, someone or something (by name or id), world, groups or elsewhere; or ruleset for the world's ruleset and its bestiary; or quests for one line of data on each quest, or a quest by its name, its id or quest:<id> for its record whole."
   depth: "How many levels below the point to show, or full for everything beneath it."

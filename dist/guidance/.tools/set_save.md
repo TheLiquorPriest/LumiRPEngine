@@ -1,5 +1,6 @@
 ---
 description: set_save as the model is told it - what the tool does, and what each of its arguments is.
+doing: saving an outfit
 arguments:
   who: "Whose outfit or loadout."
   name: "Its name; one of the same name is replaced."

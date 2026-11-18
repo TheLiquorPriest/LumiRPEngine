@@ -1,5 +1,6 @@
 ---
 description: gm_set_life as the model is told it - what the tool does, and what each of its arguments is.
+doing: setting someone's life state
 arguments:
   person: "Who."
   state: "Their life state: alive, dying, dead, or one of the world's own."

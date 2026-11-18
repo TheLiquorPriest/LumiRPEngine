@@ -138,9 +138,13 @@ time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{t
 time_left_out: Operation {{n}} ({{op}}): {{field}} cannot be read, you sent {{value}}, so it was left out and {{used}} was applied.{{#wants}} It takes {{wants}}.{{/wants}}
 time_differs: Operation {{n}} ({{op}}): {{field}} reads as {{other}} and {{used}} as {{to}}; the clock was set by {{used}}.
 clock_paused: Operation {{n}} ({{op}}): the clock was paused for this scene, and it was moved as given; the pause still holds.
+standing_cut: Operation {{n}} ({{op}}): the clock stopped at {{reached}}, short of {{asked}}: what the world's own records arrange (pay, bills, standing payments) runs over a year at most, and over so many changes at most, in one go, so it ran as far as that and no further. Pass the rest of the time with another pass_time.
 before_start: Operation {{n}} ({{op}}): the story starts at {{start}}, and the clock was set back to a time before it.
 due_more: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; {{more}} more fall due later in it.
 due_more_uncounted: {{#n}}Operation {{n}} ({{op}}): {{/n}}only the first {{listed}} of what this span brings due are listed; more fall due later in it.
+ran_said: Operation {{n}} ({{op}}): what the world's own records arrange over this span (pay, bills, standing payments, interest and the rest of what an account or a job sets going) happened in its order, and {{total}} {{#one}}change is{{/one}}{{^one}}changes are{{/one}} recorded. ran says what they were, with times where one happened more than once. None of it needs a decision from you.
+ran_more: Operation {{n}} ({{op}}): only the first {{listed}} lines of what happened are in ran; {{more}} more lines are recorded all the same.
+due_open: Operation {{n}} ({{op}}): nothing in due has happened yet; where people went, what they did, a meal or a night's sleep, the weather and a quest stage met are yours to record, as the story says it went.
 no_map: {{at}} has no map to show.
 none_found: Nothing found for {{words}}.
 more_found: Only the first {{shown}} of what {{words}} matches are listed; {{more}} more were found. Narrower words, or a kind, find them.
@@ -233,7 +237,10 @@ acted_twice: Operation {{n}} ({{op}}): {{who}} has acted in round {{round}} alre
 out_of_turn: Operation {{n}} ({{op}}): the order has {{whose}} next, not {{who}}; {{who}}'s act was recorded all the same and the fight went on to the turn after.
 out_of_reach: Operation {{n}} ({{op}}): {{target}} is beyond {{who}}'s reach on the map; the act was recorded all the same.
 rounds_clock: Operation {{n}} ({{op}}): {{rounds}} {{#one}}round{{/one}}{{^one}}rounds{{/one}} on the grid moved the clock {{seconds}} seconds.
-wants_fight_action: an object with who (a fighter) and did (what they did), and optionally to (whom it was aimed at), result (how it came out) and roll (the id of the roll that decided it)
+harm_kept: Operation {{n}} ({{op}}): this world's ruleset names no gauge a fight's harm comes off (its combat hp), so the {{harm}} harm to {{who}} was kept with the act and no value changed.
+harm_no_gauge: Operation {{n}} ({{op}}): {{who}} has no {{gauge}}, the gauge this world's ruleset takes a fight's harm off, so the {{harm}} harm was kept with the act and no value changed.
+wants_harm: a number of 0 or more, what the one it was aimed at lost
+wants_fight_action: an object with who (a fighter) and did (what they did), and optionally to (whom it was aimed at), result (how it came out), harm (what they lost) and roll (the id of the roll that decided it)
 fight_broke_off: Operation {{n}} ({{op}}): the fight under way was ended as the story moved on; no winner was recorded.
 fight_still_on: Operation {{n}} ({{op}}): the fight under way is still on; nothing was recorded.
 joined: Operation {{n}} ({{op}}): {{who}} joined the fight {{fight}}, which was under way; no one else was added.
@@ -261,6 +268,7 @@ quest_opened: Operation {{n}} ({{op}}): opened the {{kind}} {{what}}.
 quest_exists: Operation {{n}} ({{op}}): {{what}} is already a quest, so the call writes to it.
 quest_written: Operation {{n}} ({{op}}): {{what}} was written: {{parts}}.
 quest_world_part: Operation {{n}} ({{op}}): {{what}} is the world's own quest, so {{fields}} was left out; only its stages, what the player is shown and how it closes are written to it.
+quest_way_on: {{#fails}}This makes the quest {{quest}} fail at {{from}} by its own condition, and its failing way leads to {{to}}{{/fails}}{{^fails}}This lets the quest {{quest}} move on from {{from}} to {{to}}{{/fails}}. Nothing moves it but a call: world_apply with {{call}}, and your reason as why.
 unknown_thread: Operation {{n}} ({{op}}): the story record holds no thread {{thread}}.{{#near}} Its threads: {{near}}.{{/near}}
 unknown_beat: Operation {{n}} ({{op}}): the story record holds no beat {{beat}}.{{#near}} Its beats near that: {{near}}.{{/near}}
 fact_part_place: Operation {{n}} ({{op}}): a part names where in a place's record a fact belongs, and {{about}} is not a place. Leave the part out{{#choices}}, or write a fact about a place with one of: {{choices}}{{/choices}}.

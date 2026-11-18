@@ -4,7 +4,8 @@ format: lines
 ---
 answered: {{agent}} answered:
 stopped: {{agent}} was stopped before it answered. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
-limit: {{agent}} reached the player's limit on {{limit}} per {{per}} before it answered: {{value}}, and the player allows {{max}}{{#is.time}} (milliseconds){{/is.time}}{{#is.callTime}} (milliseconds){{/is.callTime}}. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
+limit: {{agent}} reached its limit on {{limit}} per {{per}} before it answered: {{value}}, against {{max}}{{#is.time}} (milliseconds){{/is.time}}{{#is.callTime}} (milliseconds){{/is.callTime}}. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
+limit_floor: {{agent}} stopped before it answered: of its limit of {{max}} on {{limit}} per {{per}}, {{left}} was left{{#is.tokens}} once its next call's prompt was counted{{/is.tokens}}, less than the least room an answer is given ({{floor}} tokens), so that call was not made. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
 failed: {{agent}} could not go on: {{#model}}a call to its model failed{{/model}}{{^model}}the system that runs it failed{{/model}}.
 missing: {{agent}} was not given {{ref}}: it could not be found.
 no_agent: There is no agent definition named {{agent}}.
@@ -13,8 +14,8 @@ no_handle: No agent you started this turn goes by {{agent}}.
 busy: {{agent}} is still at work. What it says comes back to the call that set it going.
 dropped: What {{agent}} wrote this turn was dropped.
 not_dropped: What {{agent}} wrote this turn could not be dropped.
-depth: {{agent}} was not started: it would stand {{value}} deep, and the player allows {{max}}.
-agents: {{agent}} was not started: this turn has started {{value}} agents, and the player allows {{max}}.
+depth: {{agent}} was not started: it would stand {{value}} deep, and {{max}} is the most allowed.
+agents: {{agent}} was not started: this turn has started {{value}} agents, and {{max}} is the most allowed.
 ended: {{agent}} ended when this turn's reply went out, so it cannot be messaged now.
 too_large: {{agent}} was not started: what it is given is {{size}} tokens, and its model has room for {{room}}.{{#attachments}} {{name}} is {{tokens}} tokens.{{/attachments}}
 nobody_to_ask: There is no one above you to ask.

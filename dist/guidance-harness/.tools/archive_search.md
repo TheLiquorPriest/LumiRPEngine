@@ -1,5 +1,6 @@
 ---
 description: archive_search as the model is told it - what the tool does, and what each of its arguments is.
+doing: searching earlier sessions and records
 arguments:
   query: The names and words to look for.
   stores: Only these stores, by name. Leave it out to search them all.

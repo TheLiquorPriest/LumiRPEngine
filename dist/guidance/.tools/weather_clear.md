@@ -1,5 +1,6 @@
 ---
 description: weather_clear as the model is told it - what the tool does, and what each of its arguments is.
+doing: clearing the weather
 arguments:
   region: "A weather region, or a place, for the region it lies in."
   state: "The weather it turns to; left out, the season's likeliest calm weather."

@@ -1,5 +1,6 @@
 ---
 description: item_revoke as the model is told it - what the tool does, and what each of its arguments is.
+doing: taking back someone's leave to use a thing
 arguments:
   item: "The thing."
   who: "Whose use of it ends."

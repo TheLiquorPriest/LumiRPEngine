@@ -1,5 +1,6 @@
 ---
 description: item_own as the model is told it - what the tool does, and what each of its arguments is.
+doing: changing whose a thing is
 arguments:
   item: "The thing."
   owner: "Whose it is now: a person, a household or a group; nobody for no one's."

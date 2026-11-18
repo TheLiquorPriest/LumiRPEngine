@@ -16,9 +16,11 @@ The world has one clock for the chat. The world state shows the date, the hour a
 
 ## What time brings due
 
-The answer to `pass_time` lists what fell due in that span and near the scene: where people's routines now put them, who arrives, a need that crossed a threshold (hunger, sleep), an effect that ended, something the Author scheduled, a payment, a change in the weather or in prices.
+The answer to `pass_time` has two parts.
 
-It is a list of things to decide. The tool applied none of it. The GM decides each item when it is asked; on a turn the Author runs alone, the deciding is the Author's. An item nobody decides did not happen: a person listed at school at 8:00 is still at home. This is how it is recorded:
+What the world's own records arrange over the span happens as the clock passes it, in its order, and the answer's `ran` says what: pay, bills, standing payments, interest and fees, and a schedule that sets an owner's own value (a business's hours), each recorded, with `times` where it happened more than once. Nothing in `ran` needs a decision, and none of it is recorded again with `pay`.
+
+What is left to you is listed in `due`: where people's routines now put them, who arrives, a need that crossed a threshold (hunger, sleep), an effect that ended, something the Author scheduled, a change in the weather or in prices. It is a list of things to decide. The tool applied none of what `due` lists. The GM decides each item when it is asked; on a turn the Author runs alone, the deciding is the Author's. An item nobody decides did not happen: a person listed at school at 8:00 is still at home. This is how it is recorded:
 
 1. For each item, what happened: it happened as scheduled, it happened differently, or it did not happen and why.
 2. Each decision is recorded with the ordinary operations (`move`, `set`, `pay`, `fact`), or with the engine's own action where there is one: a need that was met is recorded as the next part says.
@@ -44,14 +46,17 @@ world_apply {"operations": [{"op": "act", "action": "eat", "who": "Mara", "param
 world_apply {"operations": [{"op": "act", "action": "sleep", "who": "Mara", "source": {"from": "prose", "message": "m-0415"}}, {"op": "pass_time", "until": "07:00", "source": {"from": "prose", "message": "m-0415"}}]}
 ```
 
+A principal who sleeps dreams: the perceptions rule says when its agent is asked to.
+
 ## A long skip
 
 When the story jumps days or weeks:
 
 1. Ask ahead first: what will come due in the span? (`world_query` with the span.)
 2. Split the span where something due would change what comes after it: a deadline, an arrival, a season turning. Pass the time one stretch at a time.
-3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them.
-4. For the routine remainder (meals, wages, rent), record totals for the stretch, not every instance. `time_totals` (found with `tool_search`) gives a person's totals for a span, from the engine run on a copy of the world, and records nothing.
+3. For people off stage, the Author says what they did meanwhile. Record where they ended up and anything that changed for them. A principal for whom days pass dreams: the perceptions rule says when.
+4. Wages, rent and the rest of what accounts and jobs arrange happen as the clock passes them: do not record them. What does not is the routine remainder of a person's days (meals, sleep, rest), which meets their needs only when it is recorded with `act`. A need is kept as the minute it was last met, so for a stretch of days what the needs stand on is the last meal and the last night's sleep: record those with `act` among the `pass_time`s of one `world_apply` call, for each person who matters, and say in the story what the days between held. `time_totals` (found with `tool_search`) gives a person's totals for a span as numbers: the money as `pass_time` will record it, each payday and bill once, and where each need would stand if their days were lived as the world's routines have them. It records nothing.
+5. The engine runs those records over a year at most in one `pass_time`. A longer jump stops where the year ends, the answer says so, and the rest is passed with another `pass_time`.
 
 ## Setting the clock
 

@@ -1,5 +1,6 @@
 ---
 description: chat_read as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading the chat
 arguments:
   from: The position of the first message, counted from 0. Leave it out to start at the first.
   to: The position of the last message, included. Leave it out to read to the end.

@@ -1,5 +1,6 @@
 ---
 description: places_route as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking up the way between places
 arguments:
   to: "The place to reach, by name."
   from: "Where from; left out, where the player's character is."

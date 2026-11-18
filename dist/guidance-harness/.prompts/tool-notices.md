@@ -55,7 +55,8 @@ no_writer: No reply was written: {{^writer}}your definition names no agent to wr
 no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
 released: The reply went out.
-not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached the player's limit on {{hit.limit}} per {{hit.per}}, {{hit.value}} where the player allows {{hit.max}}{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.
+not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached its limit on {{hit.limit}} per {{hit.per}}, {{hit.value}} against {{hit.max}}{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.
+not_written_floor: {{writer}} gave no reply: of its limit of {{hit.max}} on {{hit.limit}} per {{hit.per}}, {{hit.left}} was left{{#hit.is.tokens}} once its next call's prompt was counted{{/hit.is.tokens}}, less than the least room an answer is given ({{hit.floor}} tokens), so its call was not made.
 empty_answer: {{tool}} answered with nothing.
 pictures_answer: {{tool}} answered with these pictures alone.
 timed_out: {{tool}} did not answer within {{seconds}} seconds, so it was stopped. It may have done its work, or not.
@@ -67,4 +68,4 @@ secret_unset: {{tool}} was not run: the secret {{secret}} it sends as {{header}}
 server_failed: {{tool}} was not run: its server {{server}} could not be started or reached.
 server_stopped: {{tool}} did not finish: its server {{server}} stopped during the call. It is started again at the next call.
 no_chat: {{tool}} did nothing: this job belongs to no chat, so there is no chat for it to read or write.
-session_unwritten: The session file {{path}} could not be written ({{reason}}){{#over}}, and the run was stopped when the lines held for it passed the {{most}} MiB the player allows{{/over}}. Its lines are held, and go out with the next write that lands.
+session_unwritten: The session file {{path}} could not be written ({{reason}}){{#over}}, and the run was stopped when the lines held for it passed the {{most}} MiB allowed{{/over}}. Its lines are held, and go out with the next write that lands.

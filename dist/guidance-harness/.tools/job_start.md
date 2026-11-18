@@ -1,5 +1,6 @@
 ---
 description: job_start as the model is told it - what the tool does, and what each of its arguments is.
+doing: starting a job in the background
 arguments:
   agent: The name of the agent definition to start.
   brief: Its task, in full. It sees nothing of your conversation, only this and what you give it.

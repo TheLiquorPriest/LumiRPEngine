@@ -1,5 +1,6 @@
 ---
 description: item_remove as the model is told it - what the tool does, and what each of its arguments is.
+doing: destroying a thing
 arguments:
   item: "The thing."
   why: "What became of it, in a line."

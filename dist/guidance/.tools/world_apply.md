@@ -1,8 +1,9 @@
 ---
 description: world_apply as the model is told it - what the tool does, and what each of its arguments is.
+doing: recording what changed in the world
 arguments:
   operations: The operations, applied in order. A later one may name what an earlier one made.
-  operations.op: "move (go somewhere, others along), place (set a thing down or pick it up; or make a place), give (a thing passes between people), wear (put on, ready, take off), store (put into something, or back where it is kept), pay (money and goods), pass_time (the clock moves on; lists what falls due, applies none), set (a value on someone, something, a place or the time), fact (a statement; about a place, one part of its record), quest (a quest moves), relate (how someone regards another), spawn (someone or something is made), horizon (what the next turn needs), act (one of the world's actions is carried out: eat, sleep, org_admit, or any other that world_query at ruleset lists)."
+  operations.op: "move (go somewhere, others along), place (set a thing down or pick it up; or make a place), give (a thing passes between people), wear (put on, ready, take off), store (put into something, or back where it is kept), pay (money and goods), pass_time (the clock moves on; what accounts and jobs arrange for the span, pay and bills, happens and is recorded, and the rest that falls due is listed for you to decide), set (a value on someone, something, a place or the time), fact (a statement; about a place, one part of its record), quest (a quest moves), relate (how someone regards another), spawn (someone or something is made), horizon (what the next turn needs), act (one of the world's actions is carried out: eat, sleep, org_admit, or any other that world_query at ruleset lists)."
   operations.who: "move: who or what goes. wear: who wears it. pay: who pays. relate: whose regard changes. act: who takes the action; left out, the player's character."
   operations.what: "place, give, wear, store: the thing (for place and store, or the person). place: leave it out, and give a name, to make a place."
   operations.to: "move: the place. give: who receives it. pay: who is paid (none: no one in the world). relate: whom they regard."
@@ -34,8 +35,8 @@ arguments:
   operations.replaces: "fact: the id of a standing fact this one replaces."
   operations.add: "set: a number to add (negative to take away)."
   operations.quest: "quest: the quest, secret, puzzle or agenda."
-  operations.stage: "quest: the stage it moves to."
-  operations.outcome: "quest: met or failed. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules."
+  operations.stage: "quest: the stage a quest the world built moves to (the one it stands on, to call that one); the stage called, for a quest opened in play."
+  operations.outcome: "quest: met or failed: how the stage a move leaves went, with why, or the stage named when the quest stands on it or was opened in play. act: the outcome you ruled, one of the action's own; left out, an action of one outcome takes it and one with a check has its check rolled by the world's rules."
   operations.action: "act: the action, by its id."
   operations.params: "act: the action's own arguments, as name: value: a person, thing or place by name; an amount in the world's main coin; a list of words or ids, read as if joined by commas; a list or object the argument holds (payment tiers), as it is."
   operations.reveal: "quest: true to show the player."

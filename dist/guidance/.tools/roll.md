@@ -1,5 +1,6 @@
 ---
 description: roll as the model is told it - what the tool does, and what each of its arguments is.
+doing: rolling the dice
 arguments:
   who: "Whose roll it is."
   for: "What the roll decides, kept with it."

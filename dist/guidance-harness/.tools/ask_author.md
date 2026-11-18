@@ -1,5 +1,6 @@
 ---
 description: ask_author as the model is told it - what the tool does, and what each of its arguments is.
+doing: asking about its task
 arguments:
   question: What you need to know, in full.
   searched: What you looked for before asking, and where.

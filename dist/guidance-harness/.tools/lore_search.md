@@ -1,5 +1,6 @@
 ---
 description: lore_search as the model is told it - what the tool does, and what each of its arguments is.
+doing: searching the lore
 arguments:
   query: The names and words to look for.
   sources: Only these books or worlds, by name. Leave it out to search them all.

@@ -1,5 +1,6 @@
 ---
 description: prompt as the model is told it - what the tool does, and what its argument is.
+doing: reading the chat application's prompt
 arguments:
   names: The parts to read, each by name. Leave it out for the map of the prompt.
 ---

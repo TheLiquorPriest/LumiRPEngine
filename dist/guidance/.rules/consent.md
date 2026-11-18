@@ -1,5 +1,6 @@
 ---
 description: No agent improvises without the Author's consent, and only when no lore or continuity covers the gap. This file is the one home of that rule.
+title: No filling gaps without the Author's consent
 agents: all
 ---
 # Do not fill gaps on your own

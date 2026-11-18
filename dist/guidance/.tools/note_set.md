@@ -1,5 +1,6 @@
 ---
 description: note_set as the model is told it - what the tool does, and what each of its arguments is.
+doing: leaving a note on the world
 arguments:
   at: "The level the line is on: a person, a thing, a place or the world, by name."
   text: "The line, in words; empty text takes the level's line off."

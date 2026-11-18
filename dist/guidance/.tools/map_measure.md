@@ -1,5 +1,6 @@
 ---
 description: map_measure as the model is told it - what the tool does, and what each of its arguments is.
+doing: measuring on a map
 arguments:
   at: "The place whose map to measure on; leave it out when from names someone or something on a map."
   from: "Where to measure from: someone or something on the map, or a square [column, row]."

@@ -34,7 +34,7 @@ When someone's money matters and nothing recorded or told says what they have, `
 
 ## What comes due
 
-When time passes, the answer lists what the time brought due: wages, rent, a loan's instalment, a tax, a standing payment. It applies none of them. What is decided for each is recorded as what it was: paid is a `pay` (a card's or a loan's instalment, `pay_card`); missed or put off is a `fact` about the one who owes it.
+When time passes, what accounts and jobs arrange for the span happens as the clock passes it, in its order, and the answer's `ran` says what: wages, rent, a loan's instalment, a tax, a standing payment, interest and fees. Do not record those again with `pay`. A payment nobody arranged (a purchase, a gift, a debt paid off early) is a `pay` (a card's or a loan's instalment, `pay_card`); one the story says was missed or put off, where no record did it, is a `fact` about the one who owes it.
 
 ## The rest
 

@@ -1,5 +1,6 @@
 ---
 description: turn_carried as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading what the earlier build recorded of a turn
 arguments:
   turn: "The turn, by its id; left out, the turn this call belongs to."
   part: "One part of the old record to read, by the name the first answer gave it; left out, the answer lists the record's parts."

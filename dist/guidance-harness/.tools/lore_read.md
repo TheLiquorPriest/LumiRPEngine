@@ -1,5 +1,6 @@
 ---
 description: lore_read as the model is told it - what the tool does, and what each of its arguments is.
+doing: reading the lore
 arguments:
   ids: The ids of the entries to read, such as e-112 or w-31.
 ---

@@ -1,5 +1,6 @@
 ---
 description: mind_set as the model is told it - what the tool does, and what each of its arguments is.
+doing: thinking things over
 arguments:
   entries: What is on your mind, written in order, in one write.
   entries.id: "An entry of yours to change, by its id. Leave it out to add one."

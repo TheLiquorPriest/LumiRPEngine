@@ -1,5 +1,6 @@
 ---
 description: apply_credit as the model is told it - what the tool does, and what each of its arguments is.
+doing: opening a loan or a line of credit
 arguments:
   who: "Who borrows: a person, or a group borrowing in its own name."
   product: "credit_card, line_of_credit, loan, or one of the world's own credit products."

@@ -2,9 +2,10 @@
 description: The engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (a field set, a number added, a link made or ended, a quest stage, a clock, a time lapse, a roll, a check, a thing made or removed, a class or a life change, a thing told, a workspace change and the rest), and the lines of what changed in a draft, a regard, a need or a story flag. One line per name, a name, a colon, then its text. A name in double braces puts in what the engine knows of it (an amount in the world's own coin, a name, a number), and a block opened with a hash and closed with a slash shows only when that value is there. Change the words freely. Delete a line and that is not said at all.
 format: lines
 keys:
-  ev_*: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - each is filled with what it names (ev_set - name, field, value, atMost; ev_add - name, field, delta; ev_link and ev_unlink - from, rel, to; ev_roll - actor, action, outcome, rolled, why; ev_check - actor, check, outcome, total, dc)
+  ev_*: the engine's own record lines, one per kind of record, as the GM's and the author's views and the player's journal show them (ev_set, ev_add, ev_link, ev_unlink, ev_stage, ev_clock_*, ev_timelapse, ev_roll, ev_check, ev_entity*, ev_class_*, ev_life*, ev_told, ev_ws_*, and the rest named ev_) - each is filled with what it names (ev_set - name, field, value, atMost; ev_add - name, field, delta; ev_link and ev_unlink - from, rel, to; ev_roll - actor, action, outcome, rolled, why; ev_check - actor, for (what the roll was for), check (the world's check, where it was one), notation, dice (what each die showed), total, dc, outcome (absent where the roll had none))
   need_eased, need_rose: a need eased or rose - you (true where it is the player's), name, need
-  story_flag: the record line of a story flag - name
+  need_standing, needs_none: a person's need as it stands, as the Needs view shows it, and the words where the world has every need off - name, value (of 100), word (its word once it presses, hungry), pressing, since (when it began to press by the story's clock, where its record says), tell (the point it presses from), alert (the point it falls due from), met_by
+  story_flag: the record line of a story flag set, on the GM's and the Author's side (a player's line says nothing of it) - name (in words), set (it is on), cleared (it is off), value (a value other than on or off)
   regard_*: what changed in someone's regard - by, whose, axis, to, moved, parts
   draft_*: what changed in a world draft - how, what, from, to, map, place
 ---
@@ -32,7 +33,7 @@ ev_clock_set_back: clock set back {{minutes}} min
 ev_renamed: {{was}} is now called {{name}}
 ev_meanwhile: what you saw meanwhile
 ev_roll: {{actor}}: {{action}}, {{outcome}}{{^rolled}} (no roll: {{why}}){{/rolled}}
-ev_check: {{actor}}: {{check}}, {{outcome}}{{#total}} (rolled {{total}}{{#dc}} against {{dc}}{{/dc}}){{/total}}
+ev_check: {{actor}} rolled{{#for}} for {{for}}{{/for}}{{^for}}{{#check}} {{check}}{{/check}}{{/for}}{{#notation}} ({{notation}}){{/notation}}{{#dice}}: {{dice}}{{/dice}}{{#total}}, {{total}} in all{{/total}}{{#dc}} against {{dc}}{{/dc}}{{#outcome}}, {{outcome}}{{/outcome}}
 ev_entity_tier: is now in the {{tier}} tier
 ev_entity_agent_on: now lives their own life off-screen
 ev_entity_agent_off: no longer lives their own life off-screen
@@ -58,7 +59,9 @@ ev_output_told: {{kind}} lines told to the narrator
 ev_scene_told: the scene's lore and notes told to the narrator
 need_eased: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} eased
 need_rose: {{#you}}Your{{/you}}{{^you}}{{name}}'s{{/you}} {{need}} rose
-story_flag: flag {{name}}
+need_standing: {{name}} {{value}} of 100{{#pressing}}, so {{word}}{{#if_since}} since {{since}}{{/if_since}}{{/pressing}}{{^pressing}}, {{word}} from {{tell}}{{/pressing}}. Met by {{met_by}}; from {{alert}} it falls due when time passes.
+needs_none: Every need is off in this world.
+story_flag: The story flag “{{name}}”{{#set}} is set{{/set}}{{#cleared}} is cleared{{/cleared}}{{#value}} is now {{value}}{{/value}}
 regard_rose: rose by {{by}}
 regard_fell: fell by {{by}}
 regard_axis: {{whose}} {{axis}} toward {{to}} {{moved}}

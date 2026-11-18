@@ -1,5 +1,6 @@
 ---
 description: file_find as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking for files
 arguments:
   by: How to look - list (what is in a folder), glob (paths that match a pattern such as **/*.md), or grep (lines that match a pattern).
   path: The folder to look in. Leave it out to look from the top.

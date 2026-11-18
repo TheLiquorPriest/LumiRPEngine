@@ -1,5 +1,6 @@
 ---
 description: item_permit as the model is told it - what the tool does, and what each of its arguments is.
+doing: giving someone leave to use another's things
 arguments:
   from: "Whose things: a person, a household or a group."
   to: "Who may use them."

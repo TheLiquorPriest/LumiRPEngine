@@ -1,5 +1,6 @@
 ---
 description: gm_project as the model is told it - what the tool does, and what each of its arguments is.
+doing: working on a group's project
 arguments:
   act: "start, pause, resume, drop or note: what is done to the project."
   org: "The organization the project belongs to; left out when the project is named."

@@ -1,5 +1,6 @@
 ---
 description: map_lay as the model is told it - what the tool does, and what each of its arguments is.
+doing: laying out a map
 arguments:
   place: "The place to lay a map for. With over and square, the name of a new place made on that square when none is drawn there; a place the square does not hold is not laid for, the one it holds is."
   rows: "The map's rows, top first, one symbol to a square: # wall, . floor, + door, a space nothing, and the legend's own symbols; a symbol no legend names reads as floor and is reported. At most 64 rows of 64 squares."

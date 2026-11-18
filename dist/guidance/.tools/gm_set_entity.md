@@ -1,5 +1,6 @@
 ---
 description: gm_set_entity as the model is told it - what the tool does, and what each of its arguments is.
+doing: setting how someone's life is kept
 arguments:
   entity: "The person or thing."
   tier: "Its tier: principal, supporting, background, or one of the world's own."

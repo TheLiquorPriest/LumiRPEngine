@@ -1,5 +1,6 @@
 ---
 description: recall as the model is told it - what the tool does, and what each of its arguments is.
+doing: calling a memory to mind
 arguments:
   cue: "A person, place, thing, topic or feeling, in a few words."
   skip: "Skip this many first, to bring back the rest."

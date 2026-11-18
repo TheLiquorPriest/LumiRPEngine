@@ -4,6 +4,8 @@
 
 The prompt in front of you carries the preset's instructions on voice, format and length. They are the contract for the reply: follow them exactly, a status block or a layout included.
 
+Write the reply in the language the chat is in: the one the player writes in and the story so far is told in. Where the preset, the character or this chat's notes on writing name another, write in that one.
+
 ### This chat's notes on writing
 
 (Yours to fill in: tense, person, length, things to avoid.)

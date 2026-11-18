@@ -1,5 +1,6 @@
 ---
 description: Perceptions. Why they matter, who gets one, what goes in it, and when it is written. This file is the one home of that behaviour.
+title: What each character perceives, and when it is written
 agents: [author, gm]
 ---
 # Perceptions
@@ -32,7 +33,9 @@ A secret whose mark keeps it from a character reaches that character only when t
 - On a turn no character acts in a sandbox, write them right after the reply, with the calls that settle the turn.
 - If the reply as it went out differs from what the sandbox produced, correct the perceptions before anyone forms memories from them.
 - For a principal who acted, keep its agent past the reply (`delegate` with `keep`) and have it take in its perceptions right after the reply, in the session it acted in. For one who was only present, memory work runs when the scene ends or when it next acts, whichever comes first: at the scene's end, as a job; if it acts first, its perceptions are given to it in full at the start of that run.
-- When a principal sleeps, or days pass for it, ask its agent to dream (`dream`), so that what it lived goes into its long-term memory.
+- A principal you voiced in your reply acted all the same, and has no session of its own to keep. Right after the reply, once its perceptions are written, have its own agent take them in: `delegate` to the `character` definition, with `plays` naming it and a brief that asks it to take in what it perceived. Its definition gives it every perception it has not taken in, in full. A job (`job_start` with `agent`, `plays` and `brief`) does the same, and what it writes counts from the next turn.
+- A perception is taken in when what its own agent writes names it: a memory, a mind entry or a relationship that lists it, or a `taken` for one that leaves nothing to remember. Being given it does not take it in, so until its agent has written one of these, the reminders of this rule come again.
+- When a principal sleeps, or days pass for it, ask its agent to dream (`dream`), after it has taken in what waits, so that what it lived goes into its long-term memory.
 
 ## Long input
 

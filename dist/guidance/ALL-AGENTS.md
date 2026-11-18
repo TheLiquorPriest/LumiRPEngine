@@ -24,6 +24,10 @@ What to do when you lack a fact is in the consent rule, which you also read.
 
 Never decide what the player's character does, says, thinks or feels beyond what the player wrote. Describe how the world answers.
 
+## Language
+
+Whatever you write, in your working text, in a record or in what you say for the reply, is in the language the chat is in: the one the player writes in and the story so far is told in. Where the preset, the character or the chat's own notes on writing name another, write in that one.
+
 ## Working text
 
 Only the reply reaches the chat; the player does not see your working text. Write it plainly, as what you decided, found and still need: every later call of your run reads it again.

@@ -1,5 +1,6 @@
 ---
 description: relate as the model is told it - what the tool does, and what each of its arguments is.
+doing: sorting out feelings about people
 arguments:
   relationships: How you feel about people, one entry per person, in one write.
   relationships.with: "The person, by name."

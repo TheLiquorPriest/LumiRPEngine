@@ -1,5 +1,6 @@
 ---
 description: world_status as the model is told it - what the tool does, and what each of its arguments is.
+doing: looking at where the world's draft stands
 arguments:
   world: "A world, by its id; left out, the world this chat plays."
 ---
