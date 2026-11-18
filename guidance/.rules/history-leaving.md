@@ -1,5 +1,6 @@
 ---
 description: Warns the Author when messages are about to leave the prompt and the story record does not cover them. A reminder of what `TURN.md` asks about keeping the record ahead of the window.
+title: Messages leaving the prompt with no record of them
 agents: [author]
 needs: TURN
 fact: history.leaving.uncovered > 0

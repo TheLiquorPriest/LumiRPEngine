@@ -1,5 +1,6 @@
 ---
 description: Points out an agent's own writes that named no source, when its run is about to end. A reminder of what the file for every agent asks.
+title: Writes that name no source
 agents: all
 needs: ALL-AGENTS
 fact: unsourced.writes > 0
