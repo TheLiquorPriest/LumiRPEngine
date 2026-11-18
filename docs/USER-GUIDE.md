@@ -423,7 +423,7 @@ What the records hold can give away what comes next: secrets, the Author's plans
 
 **Cast** lists every character the chat knows, with its casting: **principal**, **supporting** or **extra**. A principal is run as an agent of its own when the turn needs it. Opened, behind the gate, a character's whole record:
 
-- **Base**: who they are, drawn from their sources (the card, lore entries), with **Growth** laid over it as the story changes them; each source marked current, changed, not drawn from yet, or gone.
+- **Base**: who they are, drawn from their sources (the card, lore entries), with **Growth** laid over it as the story changes them; each source marked current, changed, not drawn from yet, or gone. Growth a character's own reflection proposed is laid over the base only once the Author accepts it; until it decides (accepts or strikes it), the entry under **Growth** is marked **proposed: waits for the Author's decision since message …**, and from a turn after, the rule `growth-waiting` reminds the Author at each turn's start.
 - **Mind**: what is on their mind now, by kind.
 - **Memories**, by strength: a memory fades over story days unless it matters or is recalled, and a faint one shows as its gist. As shipped, when a principal sleeps or days pass for it, the Author has its agent dream, which settles what it lived into long-term memory. The settings under **Characters and their memories** set how fast (`cast.fadeDays`, `cast.topOfMind` and the rest).
 - **Relationships** (trust, warmth, respect, fear), **Knowledge**, and **History** with its beats.

@@ -121,6 +121,12 @@ export const CAST_FACT_DEFS: readonly FactDef[] = [
     fields: ["sources"],
   },
   { name: "cast.growth.proposed", counts: "Characters with growth a reflection proposed that the Author has not accepted." },
+  {
+    name: "cast.growth.waiting",
+    counts: "In turns, not characters: the most turns RPE has played since a growth a reflection proposed, and the Author has neither accepted nor struck, was written, the turn read included (one written in the turn just before reads 1); one written in the turn read is not counted. Each group is the most of the characters of that casting; picking several adds them, so pick one. names: the characters whose proposals wait so, those of each casting under namesBy. proposed: each such proposal, with who, its casting, its id, its words (text), what caused it (cause), the reply of the turn it was written in (since) and the turns since (turns).",
+    by: [...UNPERCEIVED_GROUPS],
+    fields: ["proposed"],
+  },
   { name: "cast.playerMind", counts: "1 when the owner has switched on a mind of his own for his character (the setting cast.playerMind), so his persona is cast with an agent and memory work as any principal is; 0 when it has none." },
 ];
 
@@ -148,6 +154,19 @@ async function baseOlder(deps: { store: Store; sources: SourceReader }, scope: S
 function growthProposed(record: CastRecord, characters: readonly Character[]): FactValue {
   const names = characters.filter((c) => record.of(c.id, "growth").some((g) => g.fields.proposed === true)).map((c) => c.name);
   return { count: names.length, names };
+}
+
+/** Growth proposed and not decided, written in an earlier turn of the reading's path: `cast.growth.waiting`. */
+function growthWaiting(record: CastRecord, characters: readonly Character[], at: CastAt, played: ReadonlySet<string>, turn: string | null, groupOf: (c: Character) => Group): FactValue {
+  const rows = characters.flatMap((c) =>
+    record
+      .of(c.id, "growth")
+      .filter((g) => g.fields.proposed === true && g.opened !== turn && at.order.has(g.opened))
+      .map((g) => ({ name: c.name, group: groupOf(c), id: g.id, text: g.fields.text ?? null, cause: g.fields.cause ?? null, since: at.replyOf(g.opened), turns: turnsSince(at, played, at.order.get(g.opened) ?? 0) })),
+  );
+  const counted = valueOf([...new Map(rows.map((r) => [r.name, r])).values()]);
+  for (const group of UNPERCEIVED_GROUPS) (counted.by as Record<string, number>)[group] = Math.max(0, ...rows.filter((r) => r.group === group).map((r) => r.turns));
+  return { ...counted, count: Math.max(0, ...rows.map((r) => r.turns)), fields: { proposed: rows.map((r) => ({ who: r.name, casting: r.group, id: r.id, text: r.text, cause: r.cause, since: r.since, turns: r.turns })) } };
 }
 
 /** The cast's facts, in the shape the turn lane's facts registry takes an area's (`FactSource`). */
@@ -203,7 +222,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
     defs: CAST_FACT_DEFS,
     async read(scope, names) {
       const user = deps.store.user(scope.user);
-      const wanted = { stage: names.includes("stage.unperceived"), path: names.includes("path.unperceived"), older: names.includes("cast.base.older"), proposed: names.includes("cast.growth.proposed"), mind: names.includes("cast.playerMind") };
+      const wanted = { stage: names.includes("stage.unperceived"), path: names.includes("path.unperceived"), older: names.includes("cast.base.older"), proposed: names.includes("cast.growth.proposed"), growthWaits: names.includes("cast.growth.waiting"), mind: names.includes("cast.playerMind") };
       const waits = new Set(WAITING_FACTS.filter((n) => names.includes(n)));
       // His own setting for the chat, whether or not RPE has met it: 1 when his character has a mind.
       const mind: Record<string, FactValue> = wanted.mind ? { "cast.playerMind": await deps.playerMind(scope).then((on): FactValue => ({ count: on ? 1 : 0, names: [on ? "on" : "off"] })) } : {};
@@ -215,6 +234,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
           ...Object.fromEntries([...waits].map((n) => [n, n === "path.untaken.turns" ? valueOf([]) : valueOf([], { [n === "dream.due" ? "due" : "held"]: [] })])),
           ...(wanted.older ? { "cast.base.older": { count: 0, names: [], fields: { sources: [] } } } : {}),
           ...(wanted.proposed ? { "cast.growth.proposed": { count: 0, names: [] } } : {}),
+          ...(wanted.growthWaits ? { "cast.growth.waiting": valueOf([], { proposed: [] }) } : {}),
           ...mind,
         };
       }
@@ -309,6 +329,7 @@ export function castFacts(deps: { store: Store; onStage: OnStage; scenes: Scenes
         }
       }
       if (wanted.proposed) values["cast.growth.proposed"] = growthProposed(record, characters);
+      if (wanted.growthWaits) values["cast.growth.waiting"] = growthWaiting(record, characters, at, played, scope.turn ?? null, groupOf);
       Object.assign(values, mind);
       return values;
     },

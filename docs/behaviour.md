@@ -67,6 +67,7 @@ Shipped rules in force:
 | `guidance/.rules/intent-owed.md` | Reminds the Author, as the calls of a message come back, when it has written no intent record for the turn and its reply has not gone out; it says too how many turns before went without one. |
 | `guidance/.rules/intent-owed-end.md` | The same, as the Author's run is about to end, with the other reminders of that moment, so that the one more call it is given can write the record; where the reply has gone out, it asks for the record alone. Whichever of the two says it first in a run, the other keeps quiet. |
 | `guidance/.rules/press-owed.md` | Reminds the Author, as its run is about to end, of each press of one of the world's actions you made from a panel for this turn that no `act` has carried out or had refused, by what you pressed. |
+| `guidance/.rules/growth-waiting.md` | Tells the Author at a turn's start when growth a character's own reflection proposed has waited for its decision for as many turns as its header says (one, as shipped), naming each proposal: who, its words, what caused it and since when. |
 | `guidance/.rules/unsourced.md` | Points out a write that named no source. |
 | `guidance/.rules/reply-missing.md` | Catches a turn that is about to end without a reply. |
 | `guidance/.rules/save-before-compaction.md` | Gives the Author the chance to save what matters before a session's earlier turns are summarized. |

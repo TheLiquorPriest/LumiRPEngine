@@ -569,7 +569,10 @@ function CharacterView(props: CastViewProps & { character: CharacterReply }) {
       {...extra}
     />
   );
-  const dated = (entry: EntryRow) => card(entry, entry.date === null ? entry.part : `${entry.part}, ${entry.date}`);
+  // A growth a reflection proposed waits for the Author's decision (accept or strike) from the turn it was written in.
+  const waiting = (entry: EntryRow) => entry.part === "growth" && entry.fields.proposed === true && !entry.struck;
+  const dated = (entry: EntryRow) =>
+    card(entry, entry.date === null ? entry.part : `${entry.part}, ${entry.date}`, waiting(entry) ? { marks: <Badge tone="warn">{`proposed: waits for the Author's decision since ${entry.message === null ? "this turn" : `message ${entry.message}`}`}</Badge> } : {});
   const pager = (id: CharacterListName, items: { total: number; before: number; after: number }) => <Pager id={id} items={items} skip={skip(id)} size={c.listed} onMore={props.onMore} />;
   const lists: readonly EntryList[] = [
     { id: "relationships", title: "Relationships", entries: c.relationships },

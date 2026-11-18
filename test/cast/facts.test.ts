@@ -154,7 +154,7 @@ describe("stage.unperceived and path.unperceived", () => {
     b.t.shelf.put("entry", "e-112", "Bram's way of speaking", "r1");
     const facts = castFacts({ ...UNSCENED, store: b.t.store, sources: b.t.shelf.reader, onStage: async () => new Map(), playerMind: async () => false });
     const read = async (turn: string) => {
-      const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["cast.base.older", "cast.growth.proposed"]);
+      const values = await facts.read({ user: USER, chat: CHAT, session: "s-1", turn }, ["cast.base.older", "cast.growth.proposed", "cast.growth.waiting"]);
       expect(factProblems(CAST_FACT_DEFS, values)).toEqual([]);
       return values;
     };
@@ -166,6 +166,15 @@ describe("stage.unperceived and path.unperceived", () => {
     const [bram] = charactersOf(b.t.db, USER, [CHAT]);
     await b.t.write(turn, [{ character: bram?.id ?? "", part: "growth", item: null, value: { text: "Less trusting.", proposed: true } }], "character");
     expect((await read(turn.id))["cast.growth.proposed"]).toMatchObject({ count: 1, names: ["Bram"] });
+    // Written in the turn read, it has waited no turn yet; a turn later it has waited one, named with what it says, until the Author decides it.
+    expect((await read(turn.id))["cast.growth.waiting"]).toMatchObject({ count: 0, names: [] });
+    await b.t.tie(turn);
+    const next = await b.t.begin();
+    const waiting = (await read(next.id))["cast.growth.waiting"];
+    expect(waiting).toMatchObject({ count: 1, names: ["Bram"], by: { principal: 1 }, fields: { proposed: [{ who: "Bram", casting: "principal", text: "Less trusting.", since: castAt(b.t.s, CHAT, null).replyOf(turn.id), turns: 1 }] } });
+    const id = String(((waiting?.fields?.proposed as JsonObject[])[0] as JsonObject).id);
+    expect((await b.call("cast_update", { operations: [{ op: "growth", who: "Bram", id, accept: true }] }, next.id)).error).toBeUndefined();
+    expect((await read(next.id))["cast.growth.waiting"]).toMatchObject({ count: 0, names: [] });
   });
 
   test("a memory entity bound to her is read like any source, its change marks the base older, and cast.playerMind follows his setting", async () => {
