@@ -1875,7 +1875,7 @@ Asks for the open session to be compacted: it runs at the session's next turn, t
 | Params | `chat`, `session` |
 | Query | none |
 | Body | none |
-| Reply | [`SessionOne`](#sessionone) |
+| Reply | [`SessionCompactAnswer`](#sessioncompactanswer) |
 
 ### `POST /api/v1/chats/:chat/sessions/:session/reopen`
 
@@ -8030,6 +8030,20 @@ export interface SessionClosed {
   session: SessionShown;
   scene: string | null;
   change: number | null;
+}
+```
+
+### `SessionCompactAnswer`
+
+What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why.
+
+```ts
+export interface SessionCompactAnswer {
+  session: SessionShown;
+  asked: boolean;
+  turns: number;
+  kept: number;
+  words: string;
 }
 ```
 

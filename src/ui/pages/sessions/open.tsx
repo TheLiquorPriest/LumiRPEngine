@@ -154,6 +154,7 @@ export function SessionOpen(props: SessionOpenProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [closed, setClosed] = useState<{ change: number | null } | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  const [nothing, setNothing] = useState<string | null>(null);
   const [made, setMade] = useState<CarryMode | null>(null);
   const gate = useSelect(app.gate, (open) => open.has(chat));
   const perPage = useUiSetting("rowsAtOnce");
@@ -192,7 +193,8 @@ export function SessionOpen(props: SessionOpenProps) {
   const compact = (): void =>
     press("compact", async () => {
       const answer = await call.call("POST /api/v1/chats/:chat/sessions/:session/compact", { chat, session: session.id });
-      setSaid("Compaction asked for: it runs at the session's next turn, the Author first given its chance to save what it wants kept.");
+      setSaid(answer.asked ? answer.words : null);
+      setNothing(answer.asked ? null : answer.words);
       props.onChanged(answer.session);
     });
   const undo = (id: string): void =>
@@ -214,6 +216,11 @@ export function SessionOpen(props: SessionOpenProps) {
       {problem === null ? null : (
         <Banner tone="neg" icon="alert" title="Not done">
           <span>{problem}</span>
+        </Banner>
+      )}
+      {nothing === null ? null : (
+        <Banner tone="info" icon="info" title="Nothing to compact yet">
+          <span data-nothing-to-compact>{nothing}</span>
         </Banner>
       )}
       {said === null ? null : (

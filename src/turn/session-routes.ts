@@ -11,7 +11,9 @@
 import type { Carry, CompactionView, Log, SessionView } from "rp-harness/contract";
 import { type Exactly, type Holds, type Infer, route, RouteError, shape } from "../app";
 import type { WriteQueue } from "../app/database";
+import { portTexts, readConfig } from "../app/config-read";
 import { harnessSettings } from "../app/setting-list";
+import { SETTINGS as RPH_SETTINGS } from "rp-harness/helpers";
 import { closeOpenScene } from "../story";
 import type { UserStore } from "../store";
 import type { Turns } from "./lane";
@@ -91,6 +93,19 @@ const sessionTurnRow = shape.named(
   "A turn played in a session: its number on the chat's path (none where it left the path), when RPE received it, and the runs of RPE's that ran in this session on it, oldest first.",
   shape.object({ turn: shape.turnId(), n: nullable(shape.whole({ least: 1 })), at: N, runs: shape.list(T) }),
 );
+
+const compactAnswer = shape.named(
+  "SessionCompactAnswer",
+  "What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why.",
+  shape.object({ session: sessionShown, asked: shape.yesNo(), turns: shape.whole({ least: 0 }), kept: shape.whole({ least: 0 }), words: T }),
+);
+
+/** RPH's `compaction.keepTurns`, the newest turns a summary never stands for: what a compaction that found nothing to fold names. */
+const KEEP_TURNS =
+  RPH_SETTINGS.find((s) => s.key === "compaction.keepTurns") ??
+  (() => {
+    throw new Error("rp-harness declares no compaction.keepTurns setting.");
+  })();
 
 const measureFigures = shape.named(
   "MeasureFigures",
@@ -281,11 +296,23 @@ export function sessionRoutes(deps: SessionRoutesDeps) {
       access: "page",
       group: "sessions",
       does: "Asks for the open session to be compacted: it runs at the session's next turn, the Author first given its chance to save what it wants kept.",
-      reply: sessionOne,
+      reply: compactAnswer,
       handle: async ({ user, params }) => {
         const view = await found(user, params.chat, params.session);
         if (view.state !== "open") throw new RouteError(409, `Session ${view.id} is closed: only an open session is compacted.`);
-        return { session: shown(user, await asked(() => sessions.compact({ user, chat: params.chat, session: view.id }))) };
+        const scope = { user, chat: params.chat, session: view.id };
+        // RPH marks the session only when it finds turns to summarize (all but the newest `compaction.keepTurns` it holds without a summary); a session it does not mark is told as it is.
+        const after = await asked(() => sessions.compact(scope));
+        const kept = Number(readConfig(await portTexts(turns.files, scope), deps.log, [KEEP_TURNS]).value(KEEP_TURNS));
+        const name = harnessSettings().find((s) => s.key === KEEP_TURNS.key)?.name ?? KEEP_TURNS.key;
+        if (after.compactAsked === true) {
+          const words = view.compactAsked === true ? "Compaction was asked for already: it runs at the session's next turn." : "Compaction is asked for: it runs at the session's next turn, the Author first given its chance to save what it wants kept.";
+          return { session: shown(user, after), asked: true, turns: after.turns, kept, words };
+        }
+        const summarized = (await sessions.compactions(scope)).reduce((sum, c) => (c.stands && c.of === "turns" ? sum + c.turns.length : sum), 0);
+        const played = `This session has played ${after.turns} ${after.turns === 1 ? "turn" : "turns"}${summarized > 0 ? `, ${summarized} of them under a summary already` : ""}`;
+        const words = `There is nothing to compact yet. ${played}, and the newest ${kept} are always kept as they were, so a compaction waits until more than ${kept} of its turns have no summary. You can change that number on the Settings page, under "${name}".`;
+        return { session: shown(user, after), asked: false, turns: after.turns, kept, words };
       },
     }),
     route({

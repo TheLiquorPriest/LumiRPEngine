@@ -2825,6 +2825,15 @@ export interface SessionClosed {
   change: number | null;
 }
 
+/** What asking for a compaction came to: the session as it now stands, whether a compaction is now waiting for its next turn (no when the session holds too few turns without a summary), the session's turns, how many of its newest turns a summary never stands for, and the answer in words, which says what is so: that it is asked for, was asked for already, or that there is nothing to compact yet and why. */
+export interface SessionCompactAnswer {
+  session: SessionShown;
+  asked: boolean;
+  turns: number;
+  kept: number;
+  words: string;
+}
+
 /** A session's compactions after one was undone, in the order written. */
 export interface SessionCompactions {
   compactions: CompactionShown[];
@@ -4591,7 +4600,7 @@ export interface ApiRoutes {
     long: false;
     joined: false;
   };
-  /** The owner's own lines for one entry of a chat's lore: its kind (one of the fixed list of kinds: any other is refused, naming the list), its line, what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What he sets stands over an indexing run's and outlives a run that redoes the entry; null takes his own off, and the run's shows again. Answers the entry as it now stands. */
+  /** Your own lines for one entry of a chat's lore: its kind (any one line of text, not empty), its line (not empty), what it defines (each to a record by its id, a name given resolving to the one record of that name, else kept as written and shown unlinked) and its related entries (each an entry of the chat's lore, else refused). What you set stands over an indexing run's and outlives a run that redoes the entry; null takes yours off, and the run's shows again. Answers the entry as it now stands. */
   "PUT /api/v1/chats/:chat/lore/index/:entry": {
     params: { chat: string; entry: string };
     query: Record<string, never>;
@@ -4996,7 +5005,7 @@ export interface ApiRoutes {
     params: { chat: string; session: string };
     query: Record<string, never>;
     body: undefined;
-    reply: SessionOne;
+    reply: SessionCompactAnswer;
     paged: false;
     long: false;
     joined: false;
