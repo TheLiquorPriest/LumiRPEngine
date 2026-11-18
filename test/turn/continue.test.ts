@@ -66,8 +66,9 @@ test("a continue as Lumiverse announces and saves it extends the turn its reply 
   expect(b.turns.runs.byGeneration(USER, generation)).toMatchObject({ turn: turn.id, target: turn.message, saved: null });
   expect(store.turn(turn.id)).toMatchObject({ status: "done", message: turn.message, hash: textHash("The lamp turns. And the sea calms.") });
   expect(store.changes(turn.id).slice(before.length).map((c) => [c.lane, c.applied])).toEqual([["engine", true]]);
+  // The same turn, extended (plan §10.10): it stays the kind of the run that made it, its runs a new reply's and the continue's.
   const list = (await b.page<TurnsReply>("GET", `/api/v1/chats/${CHAT}/turns`)).body.turns;
-  expect(list.map((t) => [t.id, t.kind, t.onPath])).toEqual([[turn.id, "continue", true]]);
+  expect(list.map((t) => [t.id, t.kind, t.onPath, t.runs.map((r) => r.kind)])).toEqual([[turn.id, "new", true, ["new", "continue"]]]);
 
   const next = await settledTurn(b, await play(b, "normal", "I wait for the dawn."));
   expect(next.parent).toBe(turn.id);
