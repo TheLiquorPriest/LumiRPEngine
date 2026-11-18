@@ -1,9 +1,9 @@
 // Play → Me → Needs (DESIGN §8): the player character's needs from Cast life 4, each the world has on,
 // as a gauge from met (0) to urgent (100), in words once it is pressing, and under each what its number
 // means (the point it presses from) and what meets it. The panel says what the Author is in fact told of
-// a need: nothing of its number; in the world state each turn, a need of yours that reaches the point it
-// alerts at within the time ahead that state lists, and one that reached it as the last turn moved the
-// clock (`src/store/due.ts`, `src/store/world-state.ts`).
+// a need: the same reading in words (`needsWords`, on your character in the world state each turn, and in
+// what time brings due), with what meets it and from when it is listed as due (`src/store/view.ts`,
+// `src/store/due.ts`, `src/store/world-state.ts`).
 
 import { isRecord } from "../../../shared/json";
 import { Badge, JsonView, Meter, Section } from "../../../frontend/components";
@@ -41,7 +41,7 @@ export function needLine(n: NeedRow): string {
 
 /** What the Author is told of your needs, said once under the gauges. */
 export const NEEDS_TOLD =
-  "The Author is not shown these numbers. The world state it is given each turn says when one of your needs will reach the point it alerts at, if that falls within the time ahead it lists (the setting Time ahead listed as due), and which reached it while the last turn moved the clock.";
+  "The Author is told the same: each turn's world state gives each of your needs by its name and number, the word it is marked with once it presses and since when, and what meets it; and it lists a need that reaches the point it alerts at within the time ahead (the setting Time ahead listed as due), and one that reached it while the last turn moved the clock.";
 
 export function NeedsPanel(props: PanelProps) {
   const needs = decodeNeedsView(props.view);

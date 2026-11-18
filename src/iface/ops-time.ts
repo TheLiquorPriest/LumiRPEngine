@@ -21,7 +21,7 @@ import { clockRecorded, settingClock } from "../store/blank";
 import type { StoreState } from "../store/types";
 import type { DueListing } from "./kit";
 import type { Reading } from "./reading";
-import { findOptional, isUnread, notAs, type OpContext, type OpDef, type Unread } from "./ops";
+import { findOptional, isUnread, named, notAs, type OpContext, type OpDef, type Unread } from "./ops";
 import { roundsClock } from "./map/time";
 import type { Lines } from "./texts";
 
@@ -88,7 +88,8 @@ export function clockText(o: Pick<OpContext, "reading">, clock: number, state: S
 export function listDue(o: Pick<OpContext, "reading" | "reply" | "call">, listing: DueListing, op: { n?: number; op?: string } = {}, state: StoreState = o.reading.state): JsonValue[] {
   if (listing.more === null) o.reply.line("due_more_uncounted", { ...op, listed: listing.items.length });
   else if (listing.more > 0) o.reply.line("due_more", { ...op, listed: listing.items.length, more: listing.more });
-  return listing.items.map((i) => ({ when: clockText(o, i.at, state), kind: i.kind, ...(i.where !== undefined ? { where: i.where } : {}), ...(i.who !== undefined ? { who: i.who } : {}), what: i.what }));
+  // Each by whom it concerns, named with the id a call takes; and what it is in its game system's words where it has them (a need, as the Needs view says it).
+  return listing.items.map((i) => ({ when: clockText(o, i.at, state), kind: i.kind, ...(i.where !== undefined ? { where: i.where } : {}), ...(i.who !== undefined ? { who: i.who.map((id) => named(o.reading, id)) } : {}), what: i.words ?? i.what }));
 }
 
 /**

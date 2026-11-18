@@ -22,7 +22,7 @@
 //      recorded ties), with their own plans at their times
 //   4  needs and drives, invitations, NPC↔NPC encounters (regard through relationship.appraise)
 
-import type { JsonObject, JsonValue } from "../../../shared/json";
+import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
 import { facetsInOrder, facetTree } from "../../../shared/classes";
 import { activityPhrase } from "../../../shared/activity";
@@ -32,7 +32,7 @@ import { activitySpanEnd, type FacetId, type FacetValueId, type FeedScope, type 
 import type { LintIssue } from "../../../shared/lint";
 import { initialState, minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM } from "../../../engine/calendar";
+import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, formatTimeOfDay, MINUTES_PER_DAY, parseHHMM, placeOffset } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
@@ -211,27 +211,92 @@ function companyMet(ctx: ReadContext, pair: readonly EntityId[]): LedgerEvent[] 
 }
 
 /**
+ * One need of a person as it stands (DESIGN §8): its name and the word it is marked with once it presses ("hungry"), its value of
+ * 100 (rounded, as the gauge shows it) and whether it presses, from the point the world tells it at (read from the value itself);
+ * since when by the story's clock where it presses and its record says (a need the planner reads from a day's blocks keeps none);
+ * the point at which it falls due and alerts a timelapse; and what meets it.
+ */
+export interface NeedStanding {
+  need: NeedId;
+  name: string;
+  label: string;
+  value: number;
+  pressing: boolean;
+  tell: number;
+  alert: number;
+  metBy: string;
+  since: number | null;
+}
+
+/** The minute a need first reached the point it presses from, by its recorded anchor and its rate; null where no anchor is kept. */
+function pressingSince(ctx: ReadContext, who: EntityId, need: NeedId, tuned: NeedTuning): number | null {
+  const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
+  if (typeof n.t !== "number" && who !== ctx.world.pov) return null;
+  const v = numOf(n.v, 20);
+  const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
+  const rate = rateOf(ctx, who, need, tuned.rate);
+  if (v >= tuned.tell) return t;
+  return rate > 0 ? t + Math.ceil(((tuned.tell - v) * 60) / rate) : null;
+}
+
+/**
+ * A person's needs as they stand at `at`, each the world has on: the one reading the Needs panel, the narrator's People section and
+ * every agent's read of a person (`needsWords`) give.
+ */
+export function needsOf(ctx: ReadContext, who: EntityId, at = ctx.state.clock): NeedStanding[] {
+  const tuning = tuningOf(ctx);
+  return needsOn(ctx.world).map((need) => {
+    const raw = needValue(ctx, who, need, at);
+    const words = needWords[need];
+    const pressing = raw >= tuning[need].tell;
+    return { need, name: words.name, label: words.word, value: Math.round(raw), pressing, tell: tuning[need].tell, alert: tuning[need].alert, metBy: words.metBy, since: pressing ? pressingSince(ctx, who, need, tuning[need]) : null };
+  });
+}
+
+/** One need in the words an agent is told it (`need_standing`): its name, its value, its word and since when, what meets it, and when it falls due. */
+export function needStandingWords(ctx: ReadContext, who: EntityId, n: NeedStanding): string {
+  const since = n.since === null ? null : formatClock(calendarOf(ctx.world), n.since, placeOffset(ctx.world, n.since, placeOfEntity(ctx.state, who)));
+  return say("need_standing", { name: n.name, value: n.value, word: n.label, pressing: n.pressing, since, if_since: since !== null, tell: n.tell, alert: n.alert, met_by: n.metBy });
+}
+
+/** A need at `value` (a planner's reading of it, at some moment of a day it lays): in the same words (`needStandingWords`), with no since. */
+export function needAtWords(ctx: ReadContext, who: EntityId, need: string, value: number): string {
+  if (!isNeedId(need)) return need;
+  const tuned = tuningOf(ctx)[need];
+  const words = needWords[need];
+  return needStandingWords(ctx, who, { need, name: words.name, label: words.word, value: Math.round(value), pressing: value >= tuned.tell, tell: tuned.tell, alert: tuned.alert, metBy: words.metBy, since: null });
+}
+
+/** A need that falls due when time passes, as it stands at `at`, the moment it reaches the point it alerts at: in the same words (`needStandingWords`). */
+export function needDueWords(ctx: ReadContext, who: EntityId, need: NeedId, at: number): string | undefined {
+  const n = needsOf(ctx, who, at).find((x) => x.need === need);
+  return n === undefined ? undefined : needStandingWords(ctx, who, n);
+}
+
+/**
+ * A person's needs in the words an agent is told them, each as the Needs view gives the player's: the POV's from Cast life 4, and
+ * anyone whose needs are recorded (as the due list lists theirs); never the record they are kept in. Null for anyone else.
+ */
+export function needsWords(ctx: ReadContext, who: EntityId): string | null {
+  const recorded = isRecord(own(ctx.state.entities, who)?.fields.needs);
+  if (!recorded && (who !== ctx.world.pov || ctx.levelOf(who, "castlife") < 4)) return null;
+  const needs = needsOf(ctx, who);
+  return needs.length === 0 ? say("needs_none") : needs.map((n) => needStandingWords(ctx, who, n)).join(" ");
+}
+
+/**
  * The player character's needs as Play's Me shows them (DESIGN §8): each the world has on, from Cast
  * life 4, with the point it's told from and what meets it, so the panel can say what a high one means.
  */
 export interface NeedsView {
-  needs: { need: NeedId; name: string; label: string; value: number; pressing: boolean; tell: number; metBy: string }[];
+  needs: NeedStanding[];
 }
 
 /** The needs view, or none below Cast life 4, with every need off, or for a POV that doesn't act: Play then shows no Needs. */
 export function buildNeedsView(ctx: ReadContext): NeedsView | null {
   const pov = ctx.world.pov;
-  const on = needsOn(ctx.world);
-  if (ctx.levelOf(pov, "castlife") < 4 || on.length === 0 || !acts(ctx, pov)) return null;
-  const tuning = tuningOf(ctx);
-  return {
-    needs: on.map((need) => {
-      // Pressing from the value itself, as the narrator's line reads it: the gauge only shows it rounded.
-      const raw = needValue(ctx, pov, need);
-      const words = needWords[need];
-      return { need, name: words.name, label: words.word, value: Math.round(raw), pressing: raw >= tuning[need].tell, tell: tuning[need].tell, metBy: words.metBy };
-    }),
-  };
+  if (ctx.levelOf(pov, "castlife") < 4 || needsOn(ctx.world).length === 0 || !acts(ctx, pov)) return null;
+  return { needs: needsOf(ctx, pov) };
 }
 
 /** The world's needs settings as Check world reads them: what a write would refuse, and an alert set below the point the need is told at. */
@@ -315,11 +380,12 @@ export function legacyDayOptions(ctx: ReadContext, who: EntityId, dayStart: numb
   const cal = calendarOf(ctx.world);
   const hourOf = (t: number): number => dateAt(cal, t).minuteOfDay / 60;
   const need = (n: string, t: number, laid: readonly PlanBlock[]): number => (level >= 4 ? needIn(ctx, who, n, t, laid, true) : 0);
+  // A need that presses on a block is its reason, in the words an agent is told a need (`needAtWords`).
   const pressed =
-    (n: string, word: string) =>
+    (n: string) =>
     (t: number, laid: readonly PlanBlock[]): string[] => {
       const v = need(n, t, laid);
-      return v >= 50 ? [`${word} (${n} ${Math.round(v)})`] : [];
+      return v >= 50 ? [needAtWords(ctx, who, n, v)] : [];
     };
   const occasion = occasionOf(ctx, who, dateAt(cal, dayStart).dayIndex);
   const off = occasion.dayOff;
@@ -329,15 +395,15 @@ export function legacyDayOptions(ctx: ReadContext, who: EntityId, dayStart: numb
   const unwind = [...(off ? [say("plan_reason_a_day_off")] : []), ...(occasion.season === "summer" || occasion.season === "winter" ? [wordOf("season", occasion.season)] : []), ...(occasion.foul ? [say("plan_reason_bad_weather")] : [])];
   const options: PlanOption[] = [
     { id: "sleep", label: say("plan_label_sleep"), activity: "sleep", place: home, duration: 480, repeat: true, reasons: [say("plan_reason_night")], utility: (t) => (hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0) },
-    { id: "breakfast", label: say("plan_label_breakfast"), activity: "breakfast", place: home, duration: 30, window: off ? within(dayStart, 7, 11) : within(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? [say("plan_reason_morning_meal"), say("plan_reason_a_slow_morning")] : [say("plan_reason_morning_meal")], because: pressed("hunger", "hungry") },
-    { id: "lunch", label: say("plan_label_lunch"), activity: "lunch", place: company, duration: 45, window: within(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_midday_meal")], because: pressed("hunger", "hungry") },
-    { id: "dinner", label: say("plan_label_dinner"), activity: "dinner", place: home, duration: 60, window: within(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_evening_meal")], because: pressed("hunger", "hungry") },
-    { id: "leisure", label: say("plan_label_leisure"), activity: "leisure", place: outdoors, duration: 60, window: within(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: [say("plan_reason_unwind"), ...unwind], because: pressed("fun", "bored") },
+    { id: "breakfast", label: say("plan_label_breakfast"), activity: "breakfast", place: home, duration: 30, window: off ? within(dayStart, 7, 11) : within(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? [say("plan_reason_morning_meal"), say("plan_reason_a_slow_morning")] : [say("plan_reason_morning_meal")], because: pressed("hunger") },
+    { id: "lunch", label: say("plan_label_lunch"), activity: "lunch", place: company, duration: 45, window: within(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_midday_meal")], because: pressed("hunger") },
+    { id: "dinner", label: say("plan_label_dinner"), activity: "dinner", place: home, duration: 60, window: within(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: [say("plan_reason_evening_meal")], because: pressed("hunger") },
+    { id: "leisure", label: say("plan_label_leisure"), activity: "leisure", place: outdoors, duration: 60, window: within(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: [say("plan_reason_unwind"), ...unwind], because: pressed("fun") },
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
   if (social) for (const other of Object.keys(ctx.state.entities)) if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person")) fondness = Math.max(fondness, social(ctx, who, other));
-  options.push({ id: "socialize", label: say("plan_label_socialize"), activity: "socialize", place: company, duration: 90, window: off ? within(dayStart, 12, 23) : within(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: [say("plan_reason_company"), ...(fondness >= FOND ? [say("plan_reason_a_close_friend")] : []), ...(off ? [say("plan_reason_a_day_off")] : [])], because: pressed("social", "lonely") });
+  options.push({ id: "socialize", label: say("plan_label_socialize"), activity: "socialize", place: company, duration: 90, window: off ? within(dayStart, 12, 23) : within(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: [say("plan_reason_company"), ...(fondness >= FOND ? [say("plan_reason_a_close_friend")] : []), ...(off ? [say("plan_reason_a_day_off")] : [])], because: pressed("social") });
   options.push(...groundedOptions(ctx, who, dayStart));
   for (const h of occasion.holidays) {
     options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within(dayStart, 17, 22), utility: 3, reasons: [h.label] });
@@ -405,7 +471,7 @@ export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng, 
   const fixed = commitments(ctx, who, start, end);
   const person = kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person");
   const level = ctx.levelOf(who, "castlife");
-  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0), meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
+  const routine = !legacy && person ? routineDay(ctx, who, day, fixed, { need: (n, t, laid) => (level >= 4 ? needIn(ctx, who, n, t, laid) : 0), words: (n, v) => needAtWords(ctx, who, n, v), meets: (activity) => needsMetBy(ctx, activity) }) : { fixed: [], options: [] };
   const invited = legacy || !person ? [] : invitedBlocks(ctx, who, day, [...fixed, ...routine.fixed]);
   const options = legacy ? legacyDayOptions(ctx, who, start) : [...routine.options, ...groundedOptions(ctx, who, start)];
   const plan = planDay({ agent: who, start, end, fixed: [...fixed, ...routine.fixed, ...invited], options, rng, recorded: decisions(ctx.state) });
@@ -1698,10 +1764,9 @@ export function stanceCues(ctx: ReadContext): string[] {
 export function peopleLines(ctx: ReadContext, scope: FeedScope): FeedLine[] {
   const pov = ctx.world.pov;
   const see = (who: EntityId, id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, who, id);
-  // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it: each the
-  // world has on, from the point the world tells it at.
-  const tuning = tuningOf(ctx);
-  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOn(ctx.world).filter((n) => needValue(ctx, pov, n) >= tuning[n].tell).map((n) => needWords[n].word) : [];
+  // The POV leads, by name, so the narrator knows who "you" is, with the needs pressing on it (`needsOf`, as the Needs view reads them):
+  // each the world has on, from the point the world tells it at.
+  const urgent = ctx.levelOf(pov, "castlife") >= 4 ? needsOf(ctx, pov).flatMap((n) => (n.pressing ? [n.label] : [])) : [];
   const lead = povLead(own(ctx.state.entities, pov)?.name ?? pov);
   const lines: FeedLine[] = [{ text: urgent.length > 0 ? `${lead}: ${urgent.join(", ")}.` : `${lead}.`, known: "pov" }];
   const here = placeOfEntity(ctx.state, pov);

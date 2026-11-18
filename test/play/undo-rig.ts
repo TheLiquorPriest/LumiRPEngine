@@ -15,7 +15,7 @@ import { hashJson } from "../../src/shared/hash";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { MAP_DEFAULTS } from "../../src/shared/map-config";
-import { migrateStore, openStore, type Report, storedWorlds, type UserStore } from "../../src/store";
+import { migrateStore, openStore, type Report, type Store, storedWorlds, type UserStore } from "../../src/store";
 import type { ChangeRow } from "../../src/store/types";
 import { Requests } from "../../src/turn/requests";
 import { HARNESS_MIGRATIONS } from "../../src/turn/tables";
@@ -25,6 +25,8 @@ import { CHAT, GUIDANCE, registry, USER } from "./bed";
 
 /** A chat on a starter world as the Undo tests drive it. */
 export interface Rig {
+  /** The store, whose environment and due list a test reads; `s` is its one user. */
+  store: Store;
   s: UserStore;
   doc: WorldDoc;
   writes: WriteQueue;
@@ -68,6 +70,7 @@ export async function rig(pov?: string, template = "modern_slice_of_life"): Prom
   await writes.run(() => s.tieTurn(begun.id, { message: "msg-1", hash: "hash-1" }), "tying the turn");
   let replies = 1;
   return {
+    store,
     s,
     doc,
     writes,

@@ -118,6 +118,8 @@ export interface DueEntry {
   /** Who or what it concerns, by entity id. */
   who?: string[];
   what: JsonValue;
+  /** What it is in the words an agent is told it, where its kind's game system words it (a need, as the Needs view says it): said in place of `what`. */
+  words?: string;
 }
 
 /** What a span brings due as far as it is listed: the soonest, in time order, and how many more fall in it (the engine tools' `DueListing`). */
@@ -263,7 +265,7 @@ export function worldState(store: UserStore, input: WorldStateInput): WorldState
   const dated = clockRecorded(state);
   const dueLine = (kind: string, d: DueEntry, fields: JsonObject): ViewLine => {
     const where = d.where === undefined ? null : view.resolve(d.where);
-    const out: JsonObject = { ...fields, kind: d.kind, what: said(d.what) };
+    const out: JsonObject = { ...fields, kind: d.kind, what: d.words ?? said(d.what) };
     if (dated) out.when = formatClock(calendarOf(view.world), d.at);
     if (where !== null) out.where = nameOf(where);
     if (d.who !== undefined && d.who.length > 0) out.who = d.who.map((id) => nameOf(`entity:${id}`)).join(", ");

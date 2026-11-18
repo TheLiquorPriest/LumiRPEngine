@@ -332,9 +332,10 @@ function blockReason(block: RoutineBlock, from: Applied): string {
   return block.kind === "optional" ? "a habit" : "routine";
 }
 
-/** What the planner needs from the castlife core to lay a day: how pressing a need is, and the needs an activity meets. */
+/** What the planner needs from the castlife core to lay a day: how pressing a need is, its words at a value (a block's reason), and the needs an activity meets. */
 export interface NeedReader {
   need: (need: string, t: number, laid: readonly PlanBlock[]) => number;
+  words: (need: string, value: number) => string;
   meets: (activity: string) => string[];
 }
 
@@ -365,7 +366,7 @@ export function routineDay(ctx: ReadContext, who: EntityId, day: number, commitm
     const met = block.needs ?? needs.meets(block.activity);
     return met.flatMap((n) => {
       const v = needs.need(n, t, laid);
-      return v >= 50 ? [`${n === "hunger" ? "hungry" : n === "fatigue" ? "tired" : n === "social" ? "lonely" : "bored"} (${n} ${Math.round(v)})`] : [];
+      return v >= 50 ? [needs.words(n, v)] : [];
     });
   };
   const worth = (block: RoutineBlock) => (t: number, laid: readonly PlanBlock[]): number => (block.priority ?? 3) + Math.max(0, ...(block.needs ?? needs.meets(block.activity)).map((n) => needs.need(n, t, laid) / 20));

@@ -86,6 +86,8 @@ export interface DueItem {
   who?: string[];
   /** The record it comes from, as the store names it. */
   what: JsonValue;
+  /** What it is in the words an agent is told it, where its game system words it (a need): said in place of `what`. */
+  words?: string;
 }
 
 /** What a span brings due as far as the store lists it: the soonest, in time order, and how many more fall in the span. */

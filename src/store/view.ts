@@ -37,6 +37,7 @@ import { regionOf } from "../packs/weather/core/index";
 import { madePlacesOf } from "../engine/places-in-play";
 import { chatDraftOf } from "../engine/world-draft";
 import { whereOf } from "../packs/space/core/grid-play";
+import { needsWords } from "../packs/castlife/core";
 import { BLANK_REVISION, clockRecorded } from "./blank";
 import { settled, standing } from "./facts";
 import type { FoldEnv } from "./fold";
@@ -937,7 +938,8 @@ export class TreeView {
 
   /**
    * What the game systems keep their own way, for an entity: where play said it is within its place besides its square, which the
-   * place's map shows (a named zone, words, or both); a person's or a group's coin; and what its own account has posted.
+   * place's map shows (a named zone, words, or both); a person's or a group's coin; a person's needs, in the words the Needs view
+   * gives them (`needsWords`), in place of the record they are kept in; and what its own account has posted.
    */
   private entitySystems(node: Node): ValueLine[] {
     const out: ValueLine[] = [];
@@ -950,6 +952,8 @@ export class TreeView {
       const cash = account === null ? null : (optionalQuery(this.ctx, "economy.carried_cash")?.(this.ctx, node.id) ?? null);
       if (account !== null && cash !== null) out.push({ key: "coin", value: formatMoney(cash, this.doc.currency), from: { system: "economy" }, ...this.coinMark(account) });
     }
+    const needs = node.category === "person" ? needsWords(this.ctx, node.id) : null;
+    if (needs !== null) out.push({ key: "needs", value: needs, from: { system: "castlife" } });
     const posted = this.state.world.accounts[node.id];
     const mark = this.state.marks[node.ref]?.posted;
     if (posted !== undefined) out.push({ key: "posted", value: formatMoney(posted, this.doc.currency), from: { system: "economy" }, ...(mark ? { mark } : {}) });

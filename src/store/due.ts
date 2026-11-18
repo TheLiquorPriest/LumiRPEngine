@@ -18,7 +18,7 @@ import { chatWorld } from "../engine/holidays";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import { chatSchedulesIn, scheduleOwners, slotStarts } from "../engine/schedules";
-import { needValue } from "../packs/castlife/core";
+import { needDueWords, needValue } from "../packs/castlife/core";
 import type { TreeView } from "./view";
 import type { Store } from "./store";
 import type { StoreState } from "./types";
@@ -126,7 +126,9 @@ function otherDue(store: Store, ctx: ReadContext, state: StoreState, view: TreeV
         const tuned = settings[need];
         if (!tuned.on) continue;
         const at = crossing(ctx, id, need, tuned.alert, from, to);
-        if (at !== null) out.push({ entry: { at, kind: "need", who: [id], what: { need, line: tuned.alert } }, refs: [ref] });
+        // Said as the Needs view says a need (`needDueWords`), beside what a page reads it by.
+        const words = at === null ? undefined : needDueWords(ctx, id, need, at);
+        if (at !== null) out.push({ entry: { at, kind: "need", who: [id], what: { need, line: tuned.alert }, ...(words !== undefined ? { words } : {}) }, refs: [ref] });
       }
     }
   }

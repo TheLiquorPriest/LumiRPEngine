@@ -257,7 +257,9 @@ describe("what falls due in the world state", () => {
     // Eight slots start in the two days; the point-of-view character's hunger, fatigue and social needs also cross their lines in them.
     expect(fell.length).toBe(8 + 3);
     const calendar = calendarOf(world);
-    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), typeof d.what === "string" ? d.what : JSON.stringify(d.what)]));
+    // A need is said in its words (as the Needs view says it), never as it is kept.
+    expect(block.sections.passed?.map((l) => [l.kind, l.fields.when, l.fields.what])).toEqual(fell.map((d) => ["fell_due", formatClock(calendar, d.at), d.words ?? (typeof d.what === "string" ? d.what : JSON.stringify(d.what))]));
+    expect(fell.filter((d) => d.kind === "need").map((d) => d.words?.split(",")[0])).toEqual(["Hunger 80 of 100", "Fatigue 80 of 100", "Social 80 of 100"]);
     const lines = block.text.split("\n");
     const heading = lines.indexOf("### Fell due as the clock moved last turn");
     expect(heading).toBeGreaterThanOrEqual(0);
