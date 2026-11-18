@@ -10,7 +10,7 @@
 // narrator shows only what messages and time cover; core members treat orders as binding and may
 // object in words; companions weigh them; the hired take them as their job; allies as favours.
 
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
@@ -18,12 +18,12 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { isPlanStatus, isPlanStatusLive, PLAN_ACTIONS, PLAN_EFFECTS, PLAN_SECTION, PLAN_SOURCES, PLAN_STATUS_WORDS, PLAN_TEXT_MAX, type OrgPlanView, type PlanGoal, type PlanGoalView, type PlanNote, type PlanOrder, type PlanOrderView, type PlanSource, type PlanStatus } from "../../../shared/org-feed";
 import type { OrgRef } from "../../../shared/org-view";
 import { partyTierIn, type PartyTier } from "../../../shared/party";
-import type { ActionDef, ParamDef, WorldDoc } from "../../../shared/world";
+import type { ParamDef, WorldDoc } from "../../../shared/world";
 import { calendarOf, clockOfLocal, dateAt, dayIndexOfText, formatClock, formatStamp } from "../../../engine/calendar";
 import { acts } from "../../../engine/life";
 import { mayAct, orgTypeOf, partyLeader } from "../../../engine/org";
 import { labelOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { CoreRegistry, EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { CoreRegistry, EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
 import { partyIdOf, powersAt, rowsAt } from "./view";
@@ -772,18 +772,16 @@ export function planExtractLines(ctx: ReadContext): string[] {
 // ---------------------------------------------------------------- actions
 
 /** The organization, by id: the party's own before it has an entity is `party_<you>`. */
-const PLAN_ORG: ParamDef = { type: "text", label: "Organization (its id)" };
+const PLAN_ORG: ParamDef = wordedParam({ type: "text" }, "param_plan_org");
 
 /** At once, with Undo (§12 item 5.1). */
 const AT_ONCE = { duration: "2", observable: "makes plans", mechanical: true } as const;
 
-const ACTIONS: readonly ActionDef[] = [
+const ACTIONS: readonly PackAction[] = [
   {
     id: PLAN_ACTIONS.goal,
-    label: "Set a goal",
-    description: "Add a goal to an organization's plan, or change one.",
     pack: "orgs",
-    params: { org: PLAN_ORG, id: { type: "text", optional: true, label: "Goal (its id, to change one)" }, text: { type: "text", optional: true, label: "The goal" }, window: { type: "text", optional: true, label: "By when: today, or a date (YYYY-MM-DD)" }, where: { type: "text", optional: true, label: "Where" } },
+    params: { org: PLAN_ORG, id: { type: "text", optional: true }, text: { type: "text", optional: true }, window: { type: "text", optional: true }, where: { type: "text", optional: true } },
     requires: [],
     outcomes: { default: [{ type: PLAN_EFFECTS.goal, args: { org: "=params.org", id: "=params.id", text: "=params.text", window: "=params.window", where: "=params.where", by: "self" } }] },
     lexicon: ["set a goal", "add to the plan"],
@@ -791,18 +789,16 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: PLAN_ACTIONS.order,
-    label: "Give an order",
-    description: "Give people in an organization a task on its plan, or change one: whom it is for, who leads, where and when.",
     pack: "orgs",
     params: {
       org: PLAN_ORG,
-      id: { type: "text", optional: true, label: "Order (its id, to change one)" },
-      to: { type: "text", optional: true, label: "For (ids, comma separated)" },
-      lead: { type: "text", optional: true, label: "Who leads (an id)" },
-      text: { type: "text", optional: true, label: "The task" },
-      where: { type: "text", optional: true, label: "Where" },
-      when: { type: "text", optional: true, label: "When (YYYY-MM-DD HH:MM; none is a standing order)" },
-      goal: { type: "text", optional: true, label: "The goal it serves (its id)" },
+      id: { type: "text", optional: true },
+      to: { type: "text", optional: true },
+      lead: { type: "text", optional: true },
+      text: { type: "text", optional: true },
+      where: { type: "text", optional: true },
+      when: { type: "text", optional: true },
+      goal: { type: "text", optional: true },
     },
     requires: [],
     outcomes: { default: [{ type: PLAN_EFFECTS.order, args: { org: "=params.org", id: "=params.id", to: "=params.to", lead: "=params.lead", text: "=params.text", where: "=params.where", when: "=params.when", goal: "=params.goal", by: "self" } }] },
@@ -811,10 +807,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: PLAN_ACTIONS.status,
-    label: "Move a plan along",
-    description: "Mark a goal or an order on an organization's plan under way, done, blocked, refused or dropped, or open it again.",
     pack: "orgs",
-    params: { org: PLAN_ORG, id: { type: "text", label: "Goal or order (its id)" }, status: { type: "text", label: "open, under_way, done, dropped, blocked or refused" }, note: { type: "text", optional: true, label: "Note" } },
+    params: { org: PLAN_ORG, id: { type: "text" }, status: { type: "text" }, note: { type: "text", optional: true } },
     requires: [],
     outcomes: { default: [{ type: PLAN_EFFECTS.status, args: { org: "=params.org", id: "=params.id", status: "=params.status", note: "=params.note", by: "self" } }] },
     lexicon: ["mark it done", "drop the plan"],

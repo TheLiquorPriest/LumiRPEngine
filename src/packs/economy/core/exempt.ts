@@ -216,14 +216,12 @@ export function registerExempt(r: FinanceRegistry): void {
   core.effect({ type: "economy.tax_status", args: ["org", "status?", "by?"], gm: true, resolve: (a, ctx) => taxStatusEvents(ctx, a) });
   core.action({
     id: FINANCE_ACTIONS.donate,
-    label: "Donate",
-    description: "Give money to an organization: a charity, a church, a club, a foundation. A person's gift to a charity, a church or a foundation is deductible from their income tax. An exempt organization (a foundation, a charity) may also grant money to a person.",
     pack: "economy",
     params: {
-      to: { type: "ref", of: { kind: [GROUP_KIND, "trust", "person"] }, label: "To" },
+      to: { type: "ref", of: { kind: [GROUP_KIND, "trust", "person"] } },
       amount: { type: "money" },
-      method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings, or the card or account the input names, in its words)" },
-      as: asParam("money.spend", "Giving as: an organization you may spend for, only when the input gives from its money; left out, you give"),
+      method: { type: "text", optional: true },
+      as: asParam("money.spend", "param_giving_as"),
     },
     requires: ["amount > 0", "can_afford(self, amount)", mayAs("money.spend")],
     outcomes: { default: [{ type: "economy.donate", args: { from: "self", to: "to", cents: "=amount", method: "=params.method", by: "actor" } }] },

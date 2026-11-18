@@ -13,18 +13,18 @@
 // settled it; an act that can't be carried out then fails it. Every record is bookkeeping in
 // `packs.orgs.motions`, worded to the player character where they put it or vote.
 
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { DECISION_ACTIONS, DECISION_EFFECTS, DECISION_FIELDS, DECISION_RANGES, decisionRulesIn, isMotionStatus, isVote, isVoteBasis, isVoteHow, pctWords, settled, STANDING_VOTES, tallyOf, VOTE_WORDS, type CarriedAct, type DecisionRules, type Motion, type MotionStatus, type MotionVote, type StandingVote, type Tally, type VoteHow } from "../../../shared/org-motions";
 import { parseOrgOp } from "../../../shared/org-ops";
-import type { ActionDef, ParamDef } from "../../../shared/world";
+import type { ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
 import { mayAct, membersOfOrg, orgTypeOf, trusteesOf } from "../../../engine/org";
 import { labelOf, objOf, optionalQuery, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { Advice, CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { Advice, CoreRegistry, EffectContext, EventTypeDef, ProcessDef, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
@@ -563,19 +563,17 @@ export const MOTION_EVENTS: EventTypeDef<PackEvent>[] = [
 
 // ---------------------------------------------------------------- actions
 
-const ORG_PARAM: ParamDef = { type: "ref", of: { kind: ["business", "household", "group", "trust"] }, label: "Organization" };
+const ORG_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: ["business", "household", "group", "trust"] } }, "param_org");
 
-const ACTIONS: readonly ActionDef[] = [
+const ACTIONS: readonly PackAction[] = [
   {
     id: DECISION_ACTIONS.vote,
-    label: "Vote",
-    description: "Vote on a motion open at an organization: for, against, or abstain; as an organization holder whose shares you manage, with `as`.",
     pack: "orgs",
     params: {
       org: ORG_PARAM,
-      motion: { type: "text", label: "Motion (its id)" },
-      vote: { type: "text", label: "for, against or abstain" },
-      as: { type: "ref", optional: true, of: { kind: ["business", "household", "group", "trust"] }, acting: "shares.manage", label: "Voting as: an organization whose shares you manage that holds a vote; left out, your own vote" },
+      motion: { type: "text" },
+      vote: { type: "text" },
+      as: { type: "ref", optional: true, of: { kind: ["business", "household", "group", "trust"] }, acting: "shares.manage" },
     },
     requires: ["params.as == null or may(actor, params.as, 'shares.manage')"],
     outcomes: { default: [{ type: DECISION_EFFECTS.vote, args: { org: "org", motion: "=params.motion", vote: "=params.vote", who: "self", by: "actor" } }] },
@@ -585,10 +583,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: DECISION_ACTIONS.end,
-    label: "Withdraw a motion",
-    description: "Withdraw a motion you put to a vote, while it is open.",
     pack: "orgs",
-    params: { org: ORG_PARAM, motion: { type: "text", label: "Motion (its id)" } },
+    params: { org: ORG_PARAM, motion: { type: "text" } },
     requires: [],
     outcomes: { default: [{ type: DECISION_EFFECTS.end, args: { org: "org", motion: "=params.motion", how: "withdraw", by: "self" } }] },
     duration: "2",
@@ -598,16 +594,14 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: DECISION_ACTIONS.rules,
-    label: "How decisions are made",
-    description: "Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits.",
     pack: "orgs",
     params: {
       org: ORG_PARAM,
-      vote_by: { type: "text", optional: true, label: "Votes counted by: shares, members, or default" },
-      quorum: { type: "number", optional: true, label: "Quorum (% of the votes that must take part)" },
-      pass: { type: "number", optional: true, label: "Passes with more than (% of the votes cast)" },
-      days: { type: "number", optional: true, label: "A motion stays open (days)" },
-      approval_days: { type: "number", optional: true, label: "A request for approval waits (days)" },
+      vote_by: { type: "text", optional: true },
+      quorum: { type: "number", optional: true },
+      pass: { type: "number", optional: true },
+      days: { type: "number", optional: true },
+      approval_days: { type: "number", optional: true },
     },
     requires: ["may(self, org, 'org.govern')"],
     outcomes: { default: [{ type: DECISION_EFFECTS.rules, args: { org: "org", vote_by: "=params.vote_by", quorum: "=params.quorum", pass: "=params.pass", days: "=params.days", approval_days: "=params.approval_days", by: "self" } }] },
@@ -618,10 +612,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: DECISION_ACTIONS.standing,
-    label: "Standing vote",
-    description: "Set how you vote on an organization's motions when you don't vote yourself: for, against, abstain, with another voter, or none.",
     pack: "orgs",
-    params: { org: ORG_PARAM, vote: { type: "text", label: "for, against, abstain, with, or none" }, with: { type: "ref", optional: true, label: "Whose vote it follows" } },
+    params: { org: ORG_PARAM, vote: { type: "text" }, with: { type: "ref", optional: true } },
     requires: [],
     outcomes: { default: [{ type: DECISION_EFFECTS.standing, args: { org: "org", vote: "=params.vote", with: "=params.with", who: "self", by: "self" } }] },
     duration: "2",

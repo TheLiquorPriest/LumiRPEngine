@@ -380,8 +380,8 @@ export const relationshipsPack: PackDef = {
     // A stated length ("talk for two hours", `minutes`) is the chat's time, a quarter of an hour without
     // one, and the speaker's activity for that span. Relationships needs nothing more: Cast life,
     // when a world has it, meets the speaker's social need from the conversation's regard as the chat ends.
-    r.action({ id: "chat_with", label: "Chat with", description: "Spend a while talking with someone here.", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: CONVERSATION, mutual: true } }] }, duration: CHAT_FOR, activity: { type: "chat", until: `clock + (${CHAT_FOR})` }, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
-    r.action({ id: "give_gift", label: "Give a gift", description: "Give someone here a present.", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
+    r.action({ id: "chat_with", pack: "relationships", params: { target: { type: "ref", ref: "person" }, minutes: STATED_MINUTES }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: CONVERSATION, mutual: true } }] }, duration: CHAT_FOR, activity: { type: "chat", until: `clock + (${CHAT_FOR})` }, lexicon: ["chat with", "talk to", "catch up with"], observable: "chats" });
+    r.action({ id: "give_gift", pack: "relationships", params: { target: { type: "ref", ref: "person" } }, requires: ["at(target, here)"], outcomes: { default: [{ type: "relationships.appraise", args: { from: "target", to: "self", appraisal: "gift" } }] }, duration: "5", lexicon: ["give a gift", "surprise"], observable: "gives a gift" });
 
     r.proposal({
       type: "regard",

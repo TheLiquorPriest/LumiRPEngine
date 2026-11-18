@@ -25,6 +25,7 @@ import type {
   ServiceMap,
   TableDef,
 } from "./registry";
+import { spoken } from "./action-lines";
 import { knowing } from "./life";
 import { observing } from "./seen";
 import { baseWorld, madePlacesOf, playedWorld } from "./places-in-play";
@@ -221,7 +222,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
       query: (name, impl) => once(queries, String(name), impl, "query"),
       formula: (name, fn) => once(formulas, name, fn, "formula"),
       renderer: (d) => renderers.push(d),
-      action: (d) => once(actions, d.id, d, "action"),
+      action: (d) => once(actions, d.id, spoken(d), "action"),
       rule: (d) => rules.push(d),
       schedule: (d) => schedules.push(d),
       table: (d) => once(tables, d.id, d, "table"),

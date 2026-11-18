@@ -277,9 +277,8 @@ export function registerParty(r: CoreRegistry): void {
   const directive = { duration: "1", mechanical: true, observable: "sorts out who travels with them", pack: "orgs" } as const;
   r.action({
     id: "party_tier",
-    label: "Party tier",
-    description: `Add someone you know to your party in a tier (${PARTY_TIERS.join(", ")}), change their tier, or take them out of the party (${PARTY_OUT}).`,
-    params: { who: { type: "ref", ref: "person" }, tier: { type: "text", label: `${PARTY_TIERS.join(", ")} or ${PARTY_OUT}` } },
+    words: { tiers: PARTY_TIERS.join(", "), out: PARTY_OUT },
+    params: { who: { type: "ref", ref: "person" }, tier: { type: "text" } },
     requires: [],
     outcomes: { default: [{ type: "orgs.party_tier", args: { who: "who", tier: "=params.tier", by: "self" } }] },
     lexicon: ["join my party", "travel with me from now on", "leave the party"],
@@ -287,9 +286,7 @@ export function registerParty(r: CoreRegistry): void {
   });
   r.action({
     id: "party_name",
-    label: "Name the party",
-    description: "Give your party a name.",
-    params: { name: { type: "text", label: "Its name" } },
+    params: { name: { type: "text" } },
     requires: [],
     outcomes: { default: [{ type: "orgs.party_name", args: { name: "=params.name", by: "self" } }] },
     lexicon: ["call our party", "name our group"],
@@ -297,9 +294,7 @@ export function registerParty(r: CoreRegistry): void {
   });
   r.action({
     id: "party_purse",
-    label: "Start a purse",
-    description: "Open an account your party owns, with a deposit from an account of your own.",
-    params: { amount: { type: "money", label: "Your deposit" }, from: { type: "ref", ref: "account", optional: true, label: "From" } },
+    params: { amount: { type: "money" }, from: { type: "ref", ref: "account", optional: true } },
     requires: ["amount > 0", `level.money >= ${PURSE_LEVEL}`],
     outcomes: { default: [{ type: "orgs.party_purse", args: { cents: "=amount", from: "=params.from", by: "self" } }] },
     lexicon: ["start a party purse", "pool our money", "a kitty for the party"],
@@ -307,10 +302,8 @@ export function registerParty(r: CoreRegistry): void {
   });
   r.action({
     id: "party_hire",
-    label: "Hire a hand",
-    description: "Hire someone for your party, paid from its purse; they join it as a hired hand.",
     pack: "orgs",
-    params: { worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } },
+    params: { worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true }, rate: { type: "money", optional: true }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true } },
     requires: [`level.money >= ${HIRE_LEVEL}`],
     outcomes: { default: [{ type: "orgs.party_hire", args: { worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] },
     duration: "15",

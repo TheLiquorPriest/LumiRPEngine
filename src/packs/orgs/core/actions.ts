@@ -13,21 +13,21 @@ import type { EntityId } from "../../../shared/ids";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
 import { ACTS_FOR, isOrgPower, ORG_ACTIONS, positionIdOf, positionIn, POWER_WORDS, type OrgLimits, type OrgPower, type Position } from "../../../shared/org";
-import type { ActionDef, ParamDef } from "../../../shared/world";
+import type { ParamDef } from "../../../shared/world";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, dayIndexOfText } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { delegationsOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsBelow, positionsOf, seatFilled } from "../../../engine/org";
 import { labelOf, objOf, own, strOf } from "../../../engine/pack-kit";
-import type { CoreRegistry, EffectContext, ReadContext, Rejection } from "../../../engine/registry";
+import type { CoreRegistry, EffectContext, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import { linkEvents } from "../../../engine/relations";
 import { MEMBER_OF } from "../../../engine/selector";
 import { orgLog } from "./log";
 import { dateWords } from "./view";
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 
 /** Every organization: a group of any kind (a company, a household, the party) or a trust. */
-const ORG_PARAM: ParamDef = { type: "ref", of: { kind: ["business", "household", "group", "trust"] }, label: "Organization" };
+const ORG_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: ["business", "household", "group", "trust"] } }, "param_org");
 
 type Args = Record<string, JsonValue>;
 
@@ -377,13 +377,11 @@ function renameOrg(ctx: EffectContext, a: Args): LedgerEvent[] | Rejection {
 /** At once, as bookkeeping (§4.6): positions and renaming. */
 const AT_ONCE = { duration: "2", observable: "does some paperwork", mechanical: true } as const;
 
-const ACTIONS: readonly ActionDef[] = [
+const ACTIONS: readonly PackAction[] = [
   {
     id: ORG_ACTIONS.admit,
-    label: "Admit a member",
-    description: "Admit someone to an organization, with a title or into a position.",
     pack: "orgs",
-    params: { org: ORG_PARAM, who: { type: "ref", label: "Whom" }, title: { type: "text", optional: true, label: "Title" }, position: { type: "text", optional: true, label: "Position (its id)" } },
+    params: { org: ORG_PARAM, who: { type: "ref" }, title: { type: "text", optional: true }, position: { type: "text", optional: true } },
     requires: ["may(self, org, 'members.admit')"],
     outcomes: { default: [{ type: "orgs.admit", args: { org: "org", who: "who", title: "=params.title", position: "=params.position", by: "self" } }] },
     duration: "10",
@@ -392,10 +390,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.remove,
-    label: "Remove a member",
-    description: "Remove someone from an organization.",
     pack: "orgs",
-    params: { org: ORG_PARAM, who: { type: "ref", label: "Whom" } },
+    params: { org: ORG_PARAM, who: { type: "ref" } },
     requires: ["may(self, org, 'members.remove')"],
     outcomes: { default: [{ type: "orgs.remove", args: { org: "org", who: "who", by: "self" } }] },
     duration: "10",
@@ -404,8 +400,6 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.leave,
-    label: "Leave",
-    description: "Leave an organization you're a member of.",
     pack: "orgs",
     params: { org: ORG_PARAM },
     requires: ["member_of(self, org)"],
@@ -416,10 +410,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.appoint,
-    label: "Appoint",
-    description: "Appoint someone to a position in an organization, or take them out of theirs.",
     pack: "orgs",
-    params: { org: ORG_PARAM, who: { type: "ref", label: "Whom" }, position: { type: "text", optional: true, label: "Position (its id; none takes them out of theirs)" } },
+    params: { org: ORG_PARAM, who: { type: "ref" }, position: { type: "text", optional: true } },
     requires: ["may(self, org, 'members.appoint')"],
     outcomes: { default: [{ type: "orgs.appoint", args: { org: "org", who: "who", position: "=params.position", by: "self" } }] },
     duration: "10",
@@ -428,10 +420,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.title,
-    label: "Change title",
-    description: "Give someone in an organization a title of their own, or take it away.",
     pack: "orgs",
-    params: { org: ORG_PARAM, who: { type: "ref", label: "Whom" }, title: { type: "text", optional: true, label: "Title (none clears it)" } },
+    params: { org: ORG_PARAM, who: { type: "ref" }, title: { type: "text", optional: true } },
     requires: ["who == self or may(self, org, 'members.appoint')"],
     outcomes: { default: [{ type: "orgs.title", args: { org: "org", who: "who", title: "=params.title", by: "self" } }] },
     duration: "5",
@@ -440,23 +430,21 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.position,
-    label: "Set a position",
-    description: "Add, change or remove a position in an organization: its title, powers, seats, whom it reports to, its scope and limits.",
     pack: "orgs",
     params: {
       org: ORG_PARAM,
-      title: { type: "text", label: "Title" },
-      id: { type: "text", optional: true, label: "Id (else from the title)" },
-      powers: { type: "text", optional: true, label: "Powers (ids, comma separated)" },
-      seats: { type: "number", optional: true, label: "Seats (0 is any number)" },
-      reports_to: { type: "text", optional: true, label: "Reports to (a position's id)" },
-      no_report: { type: "bool", optional: true, label: "Reports to no one" },
-      scope: { type: "text", optional: true, label: "Scope: org, or below" },
-      payment: { type: "money", optional: true, label: "Each payment at most" },
-      month: { type: "money", optional: true, label: "Each month at most" },
-      successor: { type: "text", optional: true, label: "Successor: next, vacant, or someone's id" },
-      default: { type: "bool", optional: true, label: "New members join in it" },
-      remove: { type: "bool", optional: true, label: "Remove it" },
+      title: { type: "text" },
+      id: { type: "text", optional: true },
+      powers: { type: "text", optional: true },
+      seats: { type: "number", optional: true },
+      reports_to: { type: "text", optional: true },
+      no_report: { type: "bool", optional: true },
+      scope: { type: "text", optional: true },
+      payment: { type: "money", optional: true },
+      month: { type: "money", optional: true },
+      successor: { type: "text", optional: true },
+      default: { type: "bool", optional: true },
+      remove: { type: "bool", optional: true },
     },
     requires: ["may(self, org, 'org.govern')"],
     outcomes: { default: [{ type: "orgs.position", args: { org: "org", title: "=params.title", id: "=params.id", powers: "=params.powers", seats: "=params.seats", reports_to: "=params.reports_to", no_report: "=params.no_report", scope: "=params.scope", payment: "=params.payment", month: "=params.month", successor: "=params.successor", default: "=params.default", remove: "=params.remove", by: "self" } }] },
@@ -465,10 +453,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.delegate,
-    label: "Delegate",
-    description: "Let someone act for an organization with some of your powers there, within limits, until a date.",
     pack: "orgs",
-    params: { org: ORG_PARAM, to: { type: "ref", label: "To" }, powers: { type: "text", label: "Powers (ids, comma separated)" }, payment: { type: "money", optional: true, label: "Each payment at most" }, month: { type: "money", optional: true, label: "Each month at most" }, until: { type: "date", optional: true, label: "Until (YYYY-MM-DD)" } },
+    params: { org: ORG_PARAM, to: { type: "ref" }, powers: { type: "text" }, payment: { type: "money", optional: true }, month: { type: "money", optional: true }, until: { type: "date", optional: true } },
     requires: ["may(self, org, 'delegate')"],
     outcomes: { default: [{ type: "orgs.delegate", args: { org: "org", to: "to", powers: "=params.powers", payment: "=params.payment", month: "=params.month", until: "=params.until", by: "self" } }] },
     duration: "10",
@@ -477,10 +463,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.revoke,
-    label: "Revoke",
-    description: "End someone's delegation to act for an organization.",
     pack: "orgs",
-    params: { org: ORG_PARAM, to: { type: "ref", label: "Whose" } },
+    params: { org: ORG_PARAM, to: { type: "ref" } },
     requires: ["may(self, org, 'delegate')"],
     outcomes: { default: [{ type: "orgs.revoke", args: { org: "org", to: "to", by: "self" } }] },
     duration: "5",
@@ -489,10 +473,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: ORG_ACTIONS.rename,
-    label: "Rename",
-    description: "Give an organization a new name.",
     pack: "orgs",
-    params: { org: ORG_PARAM, name: { type: "text", label: "New name" } },
+    params: { org: ORG_PARAM, name: { type: "text" } },
     requires: ["may(self, org, 'org.govern')"],
     outcomes: { default: [{ type: "orgs.rename", args: { org: "org", name: "=params.name", by: "self" } }] },
     lexicon: ["rename", "call it"],

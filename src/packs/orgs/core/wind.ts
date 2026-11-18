@@ -213,14 +213,13 @@ export function registerWind(r: CoreRegistry): void {
   r.effect({ type: "orgs.merge", args: ["org", "into", "ratio?", "cash?", "from?", "keep?", "why?", "by?"], gm: true, resolve: (a, ctx) => mergeEvents(ctx, a) });
   r.action({
     id: ORG_ACTIONS.windUp,
-    label: "Wind up a company",
-    description: `Close a company down (from Money 3), all at once or in stages: begin (it stops trading: its staff go, its standing payments end), sell what you choose as the company, then finish (its debts paid, its holdings sold, its real estate and stakes handed to its owners by share or sold, the rest of its cash paid out to them by share, its accounts closed, it dissolved); or resume trading. Stage: ${WIND_STAGES.join(", ")}.`,
+    words: { stages: WIND_STAGES.join(", ") },
     pack: "orgs",
     params: {
-      org: { type: "ref", ref: COMPANY_KIND, label: "Company" },
-      stage: { type: "text", optional: true, label: `Stage (${WIND_STAGES.join(", ")}); left out, all at once` },
-      property: { type: "text", optional: true, label: "Its real estate and stakes: distribute (to its owners by share) or sell" },
-      to: { type: "ref", optional: true, of: { kind: [...PARTY_KINDS] }, label: "Its things and vehicles go to (else its largest owner)" },
+      org: { type: "ref", ref: COMPANY_KIND },
+      stage: { type: "text", optional: true },
+      property: { type: "text", optional: true },
+      to: { type: "ref", optional: true, of: { kind: [...PARTY_KINDS] } },
       vote: VOTE_PARAM,
     },
     requires: ["level.money >= 3"],
@@ -231,16 +230,14 @@ export function registerWind(r: CoreRegistry): void {
   });
   r.action({
     id: ORG_ACTIONS.merge,
-    label: "Merge companies",
-    description: "Fold one company into another (from Money 3): its holders get the other's units at a ratio (by their values unless you say) and any cash it pays, and its accounts, property, staff and positions move over; or, kept, the other takes all of it as its subsidiary. You decide for both, with more than half the votes of each (yours, or an organization's you govern).",
     pack: "orgs",
     params: {
-      org: { type: "ref", ref: COMPANY_KIND, label: "The company merging in (or taken over)" },
-      into: { type: "ref", ref: COMPANY_KIND, label: "The company it merges into (or that takes it over)" },
-      ratio: { type: "number", optional: true, label: "Units of the second for each unit of the first (else by their values)" },
-      cash: { type: "money", optional: true, label: "Cash to the first's holders, in all" },
-      from: { type: "ref", ref: "account", optional: true, label: "Cash from (the second's account)" },
-      keep: { type: "bool", optional: true, label: "Keep it as a subsidiary instead of folding it in" },
+      org: { type: "ref", ref: COMPANY_KIND },
+      into: { type: "ref", ref: COMPANY_KIND },
+      ratio: { type: "number", optional: true },
+      cash: { type: "money", optional: true },
+      from: { type: "ref", ref: "account", optional: true },
+      keep: { type: "bool", optional: true },
       vote: VOTE_PARAM,
     },
     requires: ["level.money >= 3"],

@@ -477,10 +477,8 @@ export const combatPack: PackDef = {
     // A fight's own actions; only worlds with combat rules offer them (`offersAction`).
     r.action({
       id: "fight",
-      label: "Fight",
-      description: "Start a fight with someone.",
       pack: PACK,
-      params: { target: { type: "ref", label: "Opponent" } },
+      params: { target: { type: "ref" } },
       requires: ["can_fight(target)"],
       combat: { cost: {}, start: true },
       outcomes: { default: [{ type: "combat.start", args: { foes: "target" } }] },
@@ -490,8 +488,6 @@ export const combatPack: PackDef = {
     });
     r.action({
       id: "end_turn",
-      label: "End turn",
-      description: "End your turn in a fight.",
       pack: PACK,
       params: {},
       requires: [],

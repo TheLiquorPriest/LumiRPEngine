@@ -7,6 +7,7 @@
 // say nothing in its place.
 
 import type { JsonValue } from "../shared/json";
+import type { ParamDef } from "../shared/world";
 
 /** What a line is filled from: values only, and a field given as undefined is absent. */
 export type LineFields = { readonly [name: string]: JsonValue | undefined };
@@ -53,4 +54,10 @@ export function listOf(words: readonly string[]): string {
 export function orOf(words: readonly string[]): string {
   const last = words[words.length - 1] ?? "";
   return words.length <= 1 ? last : say("list_or", { head: words.slice(0, -1).join(", "), last });
+}
+
+/** A param (of an action) whose label is the line `line`'s, read each time it is asked for; no line, or an empty one, is no label. */
+export function wordedParam<T extends ParamDef>(def: T, line: string): T {
+  Object.defineProperty(def, "label", { enumerable: true, configurable: true, get: () => say(line) || undefined });
+  return def;
 }

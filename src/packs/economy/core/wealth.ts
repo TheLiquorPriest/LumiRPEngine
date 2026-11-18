@@ -158,16 +158,14 @@ export function registerAssets(r: FinanceRegistry): void {
   });
   r.core.action({
     id: "route_distributions",
-    label: "Route dividends, rent or profits",
-    description: "Choose where dividends, rent or profits are paid: reinvested, or into an account.",
     pack: "economy",
     mechanical: true,
     params: {
       holding: { type: "ref", ref: "holding", optional: true },
       property: { type: "ref", ref: "property", optional: true },
       business: { type: "ref", ref: "business", optional: true },
-      to: { type: "text", label: "To (an account, or reinvest)", optional: true },
-      as: asParam("money.manage", "As: an organization whose money or property you manage, only when the input routes what it is paid; left out, it's yours"),
+      to: { type: "text", optional: true },
+      as: asParam("money.manage", "param_routing_as"),
     },
     requires: ["level.money >= 3", "params.as == null or may(actor, params.as, params.property == null ? 'money.manage' : 'property.manage')"],
     outcomes: { default: [{ type: "economy.route", args: { party: "self", holding: "=params.holding", property: "=params.property", business: "=params.business", to: "=params.to", by: "actor" } }] },

@@ -564,11 +564,9 @@ export const storyPack: PackDef = {
 
     r.action({
       id: "answer",
-      label: "Answer",
-      description: "Give your answer to a puzzle: a riddle, a code, a combination.",
       pack: "story",
       // `puzzle` names one in the quest log: the id its row goes by (a secret's stand-in), as interpret's Answer label lists it; words from what the player sees of it (its label, stage or cue: "the safe"), or the id of something they see (`study_safe`), read as its name; or nothing when one puzzle is open.
-      params: { puzzle: { type: "text", optional: true, label: "Puzzle" }, answer: { type: "text" }, decision: { type: "number", optional: true, label: "Judged probability" } },
+      params: { puzzle: { type: "text", optional: true }, answer: { type: "text" }, decision: { type: "number", optional: true } },
       requires: [],
       outcomes: { default: [{ type: "story.answer", args: { puzzle: "=params.puzzle", answer: "=answer", decision: "=params.decision" } }] },
       duration: "1",

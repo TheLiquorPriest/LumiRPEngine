@@ -12,12 +12,13 @@ import { isRecord, type JsonValue } from "./json";
 import type { OrgPower } from "./org";
 import type { OrgRef } from "./org-view";
 import type { ParamDef } from "./world";
+import { wordedParam } from "../engine/lines";
 
 /** An action's choice to put a decision short of the decider's votes to a vote instead: the economy's `decision` reads it from the action's params. */
-export const VOTE_PARAM: ParamDef = { type: "bool", optional: true, label: "Put it to a vote when your votes aren't enough" };
+export const VOTE_PARAM: ParamDef = wordedParam({ type: "bool", optional: true }, "param_vote");
 
 /** An action's choice to ask those above the actor for approval when it's over the actor's limit: the economy's `actAs` reads it from the action's params. */
-export const ASK_PARAM: ParamDef = { type: "bool", optional: true, label: "Ask for approval when it's over your limit" };
+export const ASK_PARAM: ParamDef = wordedParam({ type: "bool", optional: true }, "param_ask");
 
 /** The Decisions section of an organization's page, and its tab (`orgRoute(org, DECISIONS_TAB)`). */
 export const DECISIONS_SECTION = "orgs.decisions";

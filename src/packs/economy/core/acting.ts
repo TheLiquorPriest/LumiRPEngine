@@ -22,7 +22,7 @@ import type { EffectContext, ReadContext, Rejection } from "../../../engine/regi
 import { reject } from "./journal";
 import { holdersOf, traitsOf } from "./model";
 import { namedSource } from "./pay";
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -39,9 +39,9 @@ declare module "../../../engine/registry" {
 /** What an `as` may name: an organization of any type (a company, a household, a group of any kind, the party, a trust). */
 const ORG_KINDS = ["business", "household", "group", "trust"];
 
-/** The `as` param of an action an actor may take for an organization, needing `power` there (§3.6). */
-export function asParam(power: OrgPower, label: string): ParamDef {
-  return { type: "ref", optional: true, of: { kind: ORG_KINDS }, acting: power, label };
+/** The `as` param of an action an actor may take for an organization, needing `power` there (§3.6); its label is the line `line`. */
+export function asParam(power: OrgPower, line: string): ParamDef {
+  return wordedParam({ type: "ref", optional: true, of: { kind: ORG_KINDS }, acting: power }, line);
 }
 
 /** The requirement an `as` adds: acting for nobody, or for an organization where the actor holds `power`. */

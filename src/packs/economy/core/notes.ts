@@ -159,16 +159,14 @@ export function registerNotes(r: FinanceRegistry): void {
   core.effect({ type: "economy.lend", args: ["to", "cents", "from?", "into?", "apr?", "months?", "payment?", "due_day?", "who?", "by?"], resolve: (a, ctx) => lendEvents(api, ctx, a) });
   core.action({
     id: FINANCE_ACTIONS.lend,
-    label: "Lend money",
-    description: "Lend money to someone in the world (a company to its subsidiary, a person to a friend's business): a loan they repay with interest, monthly, by autopay.",
     pack: "economy",
     params: {
-      to: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "Lend to" },
+      to: { type: "ref", of: { kind: [...PARTY_KINDS] } },
       amount: { type: "money" },
-      apr: { type: "number", optional: true, label: "Interest a year, %" },
-      months: { type: "number", optional: true, label: "Over how many months" },
-      from: { type: "ref", ref: "account", optional: true, label: "From account" },
-      as: asParam("money.spend", "Lending as: an organization you may spend for, only when the input lends its money; left out, you lend"),
+      apr: { type: "number", optional: true },
+      months: { type: "number", optional: true },
+      from: { type: "ref", ref: "account", optional: true },
+      as: asParam("money.spend", "param_lending_as"),
     },
     requires: ["amount > 0", "level.money >= 3", mayAs("money.spend")],
     outcomes: { default: [{ type: "economy.lend", args: { to: "to", cents: "=amount", apr: "=params.apr", months: "=params.months", from: "=params.from", who: "self", by: "actor" } }] },

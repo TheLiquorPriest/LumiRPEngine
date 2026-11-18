@@ -11,7 +11,7 @@
 // read when asked. Approving and denying play as turns; the GM answers for anyone, and the reply's
 // `approval` fact records an answer the story tells. Bookkeeping in `packs.orgs.asks`.
 
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 import { ownersIn } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
@@ -19,12 +19,12 @@ import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json"
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { isOrgPower, type OrgPower } from "../../../shared/org";
 import { DECISION_ACTIONS, DECISION_EFFECTS, isRequestStatus, type ApprovalRequest, type RequestState } from "../../../shared/org-motions";
-import type { ActionDef, ParamDef } from "../../../shared/world";
+import type { ParamDef } from "../../../shared/world";
 import { calendarOf, formatStamp } from "../../../engine/calendar";
 import { acts } from "../../../engine/life";
 import { controlPathOf, directMembers, heldPositions, mayAct, orgPower, orgTypeOf, positionsOf } from "../../../engine/org";
 import { labelOf, objOf, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { CoreRegistry, EffectContext, EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
+import type { CoreRegistry, EffectContext, EventTypeDef, ReadContext, Rejection, PackAction } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
 import { actNames, orgLog } from "./log";
@@ -331,15 +331,13 @@ export const APPROVAL_EVENTS: EventTypeDef<PackEvent>[] = [
 
 // ---------------------------------------------------------------- actions
 
-const ORG_PARAM: ParamDef = { type: "ref", of: { kind: ["business", "household", "group", "trust"] }, label: "Organization" };
+const ORG_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: ["business", "household", "group", "trust"] } }, "param_org");
 
-const ACTIONS: readonly ActionDef[] = [
+const ACTIONS: readonly PackAction[] = [
   {
     id: DECISION_ACTIONS.approve,
-    label: "Approve",
-    description: "Approve a request made for an organization over the limit of someone below you there (you granted their delegation, hold a position above theirs, or govern or own it), within your own limits: it is done now, as theirs.",
     pack: "orgs",
-    params: { org: ORG_PARAM, request: { type: "text", label: "Request (its id)" } },
+    params: { org: ORG_PARAM, request: { type: "text" } },
     requires: [],
     outcomes: { default: [{ type: DECISION_EFFECTS.answer, args: { org: "org", request: "=params.request", answer: "approve", by: "self" } }] },
     duration: "5",
@@ -348,10 +346,8 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: DECISION_ACTIONS.deny,
-    label: "Deny",
-    description: "Deny a request for approval made for an organization (your own request: withdraw it).",
     pack: "orgs",
-    params: { org: ORG_PARAM, request: { type: "text", label: "Request (its id)" }, why: { type: "text", optional: true, label: "Why" } },
+    params: { org: ORG_PARAM, request: { type: "text" }, why: { type: "text", optional: true } },
     requires: [],
     outcomes: { default: [{ type: DECISION_EFFECTS.answer, args: { org: "org", request: "=params.request", answer: "deny", why: "=params.why", by: "self" } }] },
     duration: "5",

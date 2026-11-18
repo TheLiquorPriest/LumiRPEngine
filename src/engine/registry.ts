@@ -24,6 +24,15 @@ import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import type { WorldState } from "./state";
 
+/** An action as a pack declares it: the words of it (its label, its description, its params' labels) are the lines' (`engine/action-lines.ts`). */
+export type PackAction = Omit<ActionDef, "label" | "description"> & {
+  /** Only for a pack whose words are not in the lines yet: what the lines do not say. */
+  label?: string;
+  description?: string;
+  /** What its lines are filled with, where they name something the code knows (a level, a list of ids). */
+  words?: { readonly [name: string]: JsonValue | undefined };
+};
+
 /** Cross-pack services, merged by packs. Behavior is defined at every level (DESIGN §9.2). */
 export interface ServiceMap {}
 
@@ -384,7 +393,8 @@ export interface CoreRegistry {
   /** Exposes a query to formulas under `name`. */
   formula(name: string, fn: (ctx: ReadContext, ...args: Value[]) => Value): void;
   renderer(def: SectionRenderer): void;
-  action(def: ActionDef): void;
+  /** A pack's action: its label, its description and its params' labels are said by the lines (`action_<id>_label`, `action_<id>_description`, `action_<id>_param_<name>`), never given here. */
+  action(def: PackAction): void;
   rule(def: RuleDef): void;
   schedule(def: ScheduleDef): void;
   table(def: TableDef): void;

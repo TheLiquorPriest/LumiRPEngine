@@ -461,13 +461,11 @@ export function registerListing(r: FinanceRegistry): void {
   core.service("economy.market_sale", (ctx, sale) => marketSale(api, ctx, sale));
   core.effect({ type: "economy.list", args: ["business", "units", "price?", "symbol?", "class?", "party?", "by?"], gm: true, resolve: (a, ctx) => listShares(api, ctx, a) });
   core.effect({ type: "economy.delist", args: ["business", "price?", "party?", "by?"], gm: true, resolve: (a, ctx) => delist(api, ctx, a) });
-  const as = asParam("shares.manage", "Deciding as: an organization whose shares you manage, only when the input decides for a company it holds shares in; left out, it's your own votes");
+  const as = asParam("shares.manage", "param_deciding_as");
   core.action({
     id: FINANCE_ACTIONS.sharesList,
-    label: "List on the market",
-    description: "List a C corporation you control on the market, selling new units to the public, or offer more units once it is listed; the market pays for them into its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, units: { type: "number", label: "Units to offer" }, price: { type: "money", optional: true, label: "Price a unit (else its books a unit; listed, its market price)" }, symbol: { type: "text", optional: true, label: "Ticker (else its initials)" }, as, vote: VOTE_PARAM },
+    params: { business: { type: "ref", ref: "business" }, units: { type: "number" }, price: { type: "money", optional: true }, symbol: { type: "text", optional: true }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "params.units > 0", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.list", args: { business: "business", units: "=params.units", price: "=params.price", symbol: "=params.symbol", party: "self", by: "actor" } }] },
     duration: "60",
@@ -476,10 +474,8 @@ export function registerListing(r: FinanceRegistry): void {
   });
   core.action({
     id: FINANCE_ACTIONS.sharesDelist,
-    label: "Take it off the market",
-    description: "Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, price: { type: "money", optional: true, label: "Price a unit (else its market price)" }, as, vote: VOTE_PARAM },
+    params: { business: { type: "ref", ref: "business" }, price: { type: "money", optional: true }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.delist", args: { business: "business", price: "=params.price", party: "self", by: "actor" } }] },
     duration: "60",

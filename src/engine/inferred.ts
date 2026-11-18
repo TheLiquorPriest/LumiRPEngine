@@ -268,7 +268,7 @@ function tryRequest(world: WorldDoc, skill: SkillSource, band: DifficultyBand, a
   return {
     action: {
       id: TRY_ACTION,
-      label: `${skill.label} check`,
+      label: say("action_try_label", { skill: skill.label }),
       params: { [skill.param]: skill.action.params[skill.param] ?? { type: "text" }, difficulty: { type: "text", optional: true }, against: { type: "text", optional: true } },
       requires: [],
       ...(check ? { check } : {}),

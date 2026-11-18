@@ -21,7 +21,7 @@
 // sets a step back or adds to its cost (`project_note`, within bounds, with its receipt and Undo).
 // No one marks a step done: only its time does.
 
-import { say } from "../../../engine/lines";
+import { say, wordedParam } from "../../../engine/lines";
 import { hashParts } from "../../../shared/hash";
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, type JsonObject, type JsonValue } from "../../../shared/json";
@@ -29,12 +29,12 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { LintIssue } from "../../../shared/lint";
 import { COST_WHEN_WORDS, costParts, isProjectStatus, lengthWords, PROJECT_ACTIONS, PROJECT_EFFECTS, PROJECT_EVENTS, PROJECT_KIND, PROJECT_LIMITS, PROJECT_NOTE, PROJECT_STATUS_WORDS, PROJECTS_SECTION, PROJECTS_TABLE, stepCost, stepDays, stepOrder, stepsIn, type ProjectDef, type ProjectRun, type ProjectStatus, type ProjectStep, type ProjectTemplateView, type ProjectUnlock, type ProjectView, type ProjectsView, type StepNote, type StepRun, type StepState, type StepView } from "../../../shared/projects";
 import type { DataTable, ShippedRevision } from "../../../shared/tables";
-import type { ActionDef, EntityDef, FieldDef, ParamDef, WorldDoc } from "../../../shared/world";
+import type { EntityDef, FieldDef, ParamDef, WorldDoc } from "../../../shared/world";
 import { clockAt, clockOfLocal, dateAt, formatStamp, MINUTES_PER_DAY, type Calendar } from "../../../engine/calendar";
 import { calendarIn } from "../../../engine/holidays";
 import { mayAct, membersOfOrg, orgTypeOf } from "../../../engine/org";
 import { labelOf, numOf, objOf, optionalService, own, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
-import type { EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { EffectContext, EventTypeDef, ProposalChannelDef, ReadContext, Rejection, SlotInfo, PackAction } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import { monthOf } from "./books";
 import { bookRecovery, depreciates } from "./depreciation";
@@ -1075,16 +1075,14 @@ const BUILT_BY: Record<string, FieldDef> = { built_by: { type: "ref", ref: PROJE
 const TABLE = projectsTable as unknown as DataTable;
 const SHIPPED = shipped as unknown as Readonly<Record<string, readonly ShippedRevision[]>>;
 
-const PROJECT_PARAM: ParamDef = { type: "ref", of: { kind: [PROJECT_KIND] }, label: "Project" };
+const PROJECT_PARAM: ParamDef = wordedParam({ type: "ref", of: { kind: [PROJECT_KIND] } }, "param_project");
 const AT_ONCE = { duration: "2", observable: "does the paperwork", mechanical: true } as const;
 
-const ACTIONS: readonly ActionDef[] = [
+const ACTIONS: readonly PackAction[] = [
   {
     id: PROJECT_ACTIONS.start,
-    label: "Start a project",
-    description: "Start a production project for an organization: from one of the world's templates (a well, a foundry, a building, a farm season), or a planned one. Its steps run day by day and pay from its account; what it builds comes in as each is done.",
     pack: "economy",
-    params: { org: { type: "ref", label: "Organization" }, template: { type: "text", optional: true, label: "Template" }, project: { ...PROJECT_PARAM, optional: true }, name: { type: "text", optional: true, label: "Name" }, account: { type: "ref", ref: "account", optional: true, label: "Pay from" } },
+    params: { org: { type: "ref" }, template: { type: "text", optional: true }, project: { ...PROJECT_PARAM, optional: true }, name: { type: "text", optional: true }, account: { type: "ref", ref: "account", optional: true } },
     requires: ["level.money >= 3"],
     outcomes: { default: [{ type: PROJECT_EFFECTS.start, args: { org: "org", template: "=params.template", project: "=params.project", name: "=params.name", account: "=params.account", by: "self" } }] },
     ...AT_ONCE,
@@ -1092,8 +1090,6 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: PROJECT_ACTIONS.pause,
-    label: "Pause a project",
-    description: "Pause a project under way: its steps stop where they are and keep the work they have left.",
     pack: "economy",
     params: { project: PROJECT_PARAM },
     requires: ["level.money >= 3"],
@@ -1103,8 +1099,6 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: PROJECT_ACTIONS.resume,
-    label: "Resume a project",
-    description: "Set a paused project going again: each step under way finishes the work it had left.",
     pack: "economy",
     params: { project: PROJECT_PARAM },
     requires: ["level.money >= 3"],
@@ -1114,8 +1108,6 @@ const ACTIONS: readonly ActionDef[] = [
   },
   {
     id: PROJECT_ACTIONS.drop,
-    label: "Drop a project",
-    description: "Give up a project: nothing more is paid or done; what it paid stays paid and what it made stays.",
     pack: "economy",
     params: { project: PROJECT_PARAM },
     requires: ["level.money >= 3"],

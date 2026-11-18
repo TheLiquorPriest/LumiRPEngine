@@ -296,17 +296,15 @@ export function registerStakes(r: FinanceRegistry): void {
   });
   r.core.action({
     id: FINANCE_ACTIONS.stakeSell,
-    label: "Sell a share of a business",
-    description: "Sell part of your share of a business, in percent or, where it counts them, in units; to someone in the world, or a whole business to a buyer outside it.",
     pack: "economy",
     params: {
       business: { type: "ref", ref: "business" },
-      share: { type: "number", label: "Share, %", optional: true },
-      units: { type: "number", label: "Units (where it counts them)", optional: true },
-      price: { type: "money", label: "Price" },
-      buyer: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "Buyer", optional: true },
-      to: { type: "ref", ref: "account", label: "Proceeds to", optional: true },
-      as: asParam("shares.manage", "Selling as: an organization whose shares you manage, only when the input sells its stake (\"the trust's share of the shop\"); left out, it's yours"),
+      share: { type: "number", optional: true },
+      units: { type: "number", optional: true },
+      price: { type: "money" },
+      buyer: { type: "ref", of: { kind: [...PARTY_KINDS] }, optional: true },
+      to: { type: "ref", ref: "account", optional: true },
+      as: asParam("shares.manage", "param_selling_as"),
     },
     requires: ["money_feature('investments', self)", "params.share != null or params.units != null", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.stake_sell", args: { party: "self", business: "business", share: "=params.share", units: "=params.units", price: "=params.price", buyer: "=params.buyer", to: "=params.to", by: "actor" } }] },

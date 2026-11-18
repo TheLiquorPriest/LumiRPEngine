@@ -524,10 +524,8 @@ export function registerYearClose(r: FinanceRegistry, deps: YearCloseDeps): void
   core.effect({ type: "economy.consent_dividend", args: ["org", "cents", "year?", "by?"], gm: true, resolve: (a, ctx) => consentEvents(api, deps, ctx, a) });
   core.action({
     id: "consent_dividend",
-    label: "Declare a consent dividend",
-    description: "For a C corporation you govern: its holders agree to count an amount as a dividend paid for the year, with no money moving, so the corporation keeps its cash but owes no tax on keeping its earnings (the accumulated earnings and personal holding company taxes). Each holder takes their part as income for that year and adds it to what their shares cost them.",
     pack: "economy",
-    params: { org: { type: "ref", ref: COMPANY_KIND, label: "The corporation" }, amount: { type: "money" }, year: { type: "number", optional: true, label: "The tax year (this one, or last year's until its return on 15 April)" } },
+    params: { org: { type: "ref", ref: COMPANY_KIND }, amount: { type: "money" }, year: { type: "number", optional: true } },
     requires: ["level.money >= 3", "amount > 0", "may(self, org, 'org.govern')"],
     outcomes: { default: [{ type: "economy.consent_dividend", args: { org: "org", cents: "=amount", year: "=params.year", by: "actor" } }] },
     duration: "15",

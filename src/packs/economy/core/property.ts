@@ -1053,14 +1053,12 @@ export function registerProperty(r: FinanceRegistry): void {
   });
 
   const requires = ["money_feature('property', self)"];
-  const trading = asParam("property.trade", "As: an organization whose property you buy and sell, only when the input does it for it (\"buy the lot for the company\"); left out, it's yours");
-  const managing = asParam("property.manage", "As: an organization whose property you manage, only when the input does it for it (\"let the trust's flat\"); left out, it's yours");
+  const trading = asParam("property.trade", "param_property_trading_as");
+  const managing = asParam("property.manage", "param_property_managing_as");
   r.core.action({
     id: "property_buy",
-    label: "Buy a property",
-    description: "Buy a property, outright or with a mortgage.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months (one a lender offers)", optional: true }, live: { type: "bool", label: "Live there: their home from today, only when the input says they move in", optional: true }, as: trading },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", optional: true }, from: { type: "ref", ref: "account", optional: true }, down: { type: "money", optional: true }, term_months: { type: "number", optional: true }, live: { type: "bool", optional: true }, as: trading },
     requires: [...requires, mayAs("property.trade")],
     outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", live: "=params.live", by: "actor" } }] },
     duration: "60",
@@ -1069,10 +1067,8 @@ export function registerProperty(r: FinanceRegistry): void {
   });
   r.core.action({
     id: "property_sell",
-    label: "Sell a property",
-    description: "Sell a property you own.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true }, as: trading },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money" }, buyer: { type: "ref", ref: "person", optional: true }, to: { type: "ref", ref: "account", optional: true }, as: trading },
     requires: [...requires, mayAs("property.trade")],
     outcomes: { default: [{ type: "economy.property_sell", args: { party: "self", property: "property", price: "=params.price", buyer: "=params.buyer", to: "=params.to", by: "actor" } }] },
     duration: "60",
@@ -1081,11 +1077,9 @@ export function registerProperty(r: FinanceRegistry): void {
   });
   r.core.action({
     id: "property_list",
-    label: "List a property for sale",
-    description: "Put a property you own up for sale at an asking price, or take it off the market.",
     pack: "economy",
     mechanical: true,
-    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Asking price (none takes it off the market)", optional: true }, as: managing },
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", optional: true }, as: managing },
     requires: [...requires, mayAs("property.manage")],
     outcomes: { default: [{ type: "economy.property_list", args: { party: "self", property: "property", price: "=params.price", by: "actor" } }] },
     duration: "5",
@@ -1094,10 +1088,8 @@ export function registerProperty(r: FinanceRegistry): void {
   });
   r.core.action({
     id: "lease_start",
-    label: "Let a unit",
-    description: "Let a unit of a property you own to a tenant, for rent each month.",
     pack: "economy",
-    params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true }, as: managing },
+    params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person" }, rent: { type: "money" }, months: { type: "number", optional: true }, day: { type: "number", optional: true }, unit: { type: "text", optional: true }, as: managing },
     requires: [...requires, mayAs("property.manage")],
     outcomes: { default: [{ type: "economy.lease_start", args: { party: "self", property: "property", tenant: "tenant", rent: "=params.rent", months: "=params.months", day: "=params.day", unit: "=params.unit", by: "actor" } }] },
     duration: "20",
@@ -1106,10 +1098,8 @@ export function registerProperty(r: FinanceRegistry): void {
   });
   r.core.action({
     id: "lease_end",
-    label: "End a lease",
-    description: "End a tenant's lease.",
     pack: "economy",
-    params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true }, as: managing },
+    params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", optional: true }, as: managing },
     requires: [...requires, mayAs("property.manage")],
     outcomes: { default: [{ type: "economy.lease_end", args: { party: "self", lease: "lease", on: "=params.on", by: "actor" } }] },
     duration: "10",

@@ -287,14 +287,12 @@ export function registerAccess(r: CoreRegistry): void {
   // Change entry (§4.4, §4.6): bookkeeping a holder of `property.manage` does at once, with its Undo.
   r.action({
     id: ORG_ENTRY_ACTION,
-    label: "Change entry",
-    description: "Change who may enter one of an organization's places, and its keys.",
     pack: "orgs",
     params: {
-      org: { type: "ref", ref: "thing", of: { kind: ["group", "trust"] }, label: "Organization" },
-      place: { type: "ref", ref: "place", label: "Place" },
-      entry: { type: "text", label: "Who may enter" },
-      keys: { type: "text", optional: true, label: "Keys" },
+      org: { type: "ref", ref: "thing", of: { kind: ["group", "trust"] } },
+      place: { type: "ref", ref: "place" },
+      entry: { type: "text" },
+      keys: { type: "text", optional: true },
     },
     requires: [{ expr: "may(self, org, 'property.manage')", why: "'Needs the power to manage its property'" }],
     outcomes: { default: [{ type: ORGS_ENTRY, args: { place: "=place", entry: "=entry", keys: "=params.keys", org: "org", by: "self" } }] },

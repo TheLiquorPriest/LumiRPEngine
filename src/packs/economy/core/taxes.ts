@@ -1361,10 +1361,8 @@ export function registerTaxes(r: FinanceRegistry): void {
   core.effect({ type: "economy.consolidate", args: ["org", "elect?", "by?"], gm: true, resolve: (a, ctx) => consolidateEvents(api, ctx, a) });
   core.action({
     id: FINANCE_ACTIONS.consolidate,
-    label: "File a consolidated return",
-    description: "Elect, or stop, for a C corporation you govern, to file one federal income tax return with the corporations it holds 80% or more of (by votes and by worth): their profits and losses offset, and it pays the group's tax.",
     pack: "economy",
-    params: { org: { type: "ref", ref: COMPANY_KIND, label: "The parent company" }, elect: { type: "text", optional: true, label: "yes to file one (the default), no to stop" } },
+    params: { org: { type: "ref", ref: COMPANY_KIND }, elect: { type: "text", optional: true } },
     requires: ["level.money >= 3", "may(self, org, 'org.govern')"],
     outcomes: { default: [{ type: "economy.consolidate", args: { org: "org", elect: "=params.elect", by: "actor" } }] },
     duration: "15",

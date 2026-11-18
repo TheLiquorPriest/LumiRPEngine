@@ -537,13 +537,11 @@ export function registerShares(r: FinanceRegistry): void {
   core.effect({ type: "economy.shares_issue", args: ["business", "to", "units", "price?", "class?", "from?", "party?", "by?"], gm: true, resolve: (a, ctx) => issueShares(api, ctx, a) });
   core.effect({ type: "economy.shares_buy_back", args: ["business", "from", "units", "price?", "to?", "party?", "by?"], gm: true, resolve: (a, ctx) => buyBack(api, ctx, a) });
   core.effect({ type: "economy.shares_classes", args: ["business", "class?", "label?", "votes?", "holder?", "remove?", "party?", "by?"], gm: true, resolve: (a, ctx) => setClasses(api, ctx, a) });
-  const as = asParam("shares.manage", "Deciding as: an organization whose shares you manage, only when the input decides for a company it holds shares in; left out, it's your own votes");
+  const as = asParam("shares.manage", "param_deciding_as");
   core.action({
     id: FINANCE_ACTIONS.sharesIssue,
-    label: "Issue shares",
-    description: "Issue new units of a company you control to a buyer, who pays for them into its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, to: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "To" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, class: { type: "text", optional: true, label: "Class (its id)" }, from: { type: "ref", ref: "account", optional: true, label: "Paid from (the buyer's account)" }, as, vote: VOTE_PARAM },
+    params: { business: { type: "ref", ref: "business" }, to: { type: "ref", of: { kind: [...PARTY_KINDS] } }, units: { type: "number" }, price: { type: "money", optional: true }, class: { type: "text", optional: true }, from: { type: "ref", ref: "account", optional: true }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "params.units > 0", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_issue", args: { business: "business", to: "to", units: "=params.units", price: "=params.price", class: "=params.class", from: "=params.from", party: "self", by: "actor" } }] },
     duration: "30",
@@ -552,10 +550,8 @@ export function registerShares(r: FinanceRegistry): void {
   });
   core.action({
     id: FINANCE_ACTIONS.sharesBuyBack,
-    label: "Buy back shares",
-    description: "Have a company you control buy back some of a holder's units, paying them from its account.",
     pack: "economy",
-    params: { business: { type: "ref", ref: "business", label: "Company" }, from: { type: "ref", of: { kind: [...PARTY_KINDS] }, label: "From (the holder)" }, units: { type: "number", label: "Units" }, price: { type: "money", optional: true, label: "Price a unit (else its value a unit)" }, as, vote: VOTE_PARAM },
+    params: { business: { type: "ref", ref: "business" }, from: { type: "ref", of: { kind: [...PARTY_KINDS] } }, units: { type: "number" }, price: { type: "money", optional: true }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "params.units > 0", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_buy_back", args: { business: "business", from: "from", units: "=params.units", price: "=params.price", party: "self", by: "actor" } }] },
     duration: "30",
@@ -564,11 +560,9 @@ export function registerShares(r: FinanceRegistry): void {
   });
   core.action({
     id: FINANCE_ACTIONS.sharesClasses,
-    label: "Change share classes",
-    description: "Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it.",
     pack: "economy",
     mechanical: true,
-    params: { business: { type: "ref", ref: "business", label: "Company" }, label: { type: "text", label: "Class" }, class: { type: "text", optional: true, label: "Its id (else from its name)" }, votes: { type: "number", optional: true, label: "Votes a unit" }, holder: { type: "ref", of: { kind: [...PARTY_KINDS] }, optional: true, label: "Move this holder's units into it" }, remove: { type: "bool", optional: true, label: "Remove it" }, as, vote: VOTE_PARAM },
+    params: { business: { type: "ref", ref: "business" }, label: { type: "text" }, class: { type: "text", optional: true }, votes: { type: "number", optional: true }, holder: { type: "ref", of: { kind: [...PARTY_KINDS] }, optional: true }, remove: { type: "bool", optional: true }, as, vote: VOTE_PARAM },
     requires: ["level.money >= 3", "may(self, business, 'shares.manage')", mayAs("shares.manage")],
     outcomes: { default: [{ type: "economy.shares_classes", args: { business: "business", label: "=params.label", class: "=params.class", votes: "=params.votes", holder: "=params.holder", remove: "=params.remove", party: "self", by: "actor" } }] },
     duration: "2",
