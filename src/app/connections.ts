@@ -189,7 +189,7 @@ const viewFields = {
   effort: opt(effort, "Its own effort, for an agent that names none."),
   serialTools: opt(shape.literal(true), "It takes one tool call per answer."),
   messageThreads: opt(shape.literal(true), "Message threads are on."),
-  retries: opt(N, "How many times a call that failed before any answer arrived is tried again; 2 when absent."),
+  retries: opt(N, "How many times a failed call on it is made again, whenever in the call it failed (a request passed through with no turn: only before any answer came); calls.retries when absent."),
   limits: opt(shape.record(limitsEntry), "What the user entered as each model's limits, by model id."),
   reported: opt(shape.record(limitsEntry), "What the connection's server reported as each model's limits, by model id."),
   headers: opt(shape.list(shape.object({ name: T, set: shape.yesNo() })), "Its headers by name, and whether each has a value; never a value."),

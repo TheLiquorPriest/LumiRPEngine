@@ -208,7 +208,7 @@ function ConnectionForm(props: { was: ConnectionShown | null; fill?: ModelLimits
           <span class="label">Tries again</span>
           <input name="retries" class="lre-input" type="number" inputMode="numeric" min={0} defaultValue={was?.retries === undefined ? "" : String(was.retries)} autoComplete="off" />
           <span class="lre-field-help">
-            How many times a call that failed before any answer arrived is made again. Left empty, the number in <SettingName settingKey="calls.retries" /> holds.
+            How many times a call on this connection that failed is made again, whenever in the call it failed; how long it waits and which failures it tries again after are in Settings, under When a call to the model fails. Left empty, the number in <SettingName settingKey="calls.retries" /> holds.
           </span>
         </label>
         <label class="lre-inline">
