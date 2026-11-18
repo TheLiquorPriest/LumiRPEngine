@@ -47,6 +47,7 @@ import { projectTemplatesOf } from "../../packs/economy/ui/projects";
 import { RevenueEditor, type RevenueStreamDraft } from "../../packs/economy/ui/revenue";
 import { entityPatch } from "./character-model";
 import { deleteItem, go, ItemHeader } from "./chrome";
+import { draftSend } from "./draft";
 import { FormSheet, RefPicker } from "./form-kit";
 import { useHeld } from "./held";
 import { COLLECTION_SPECS, deriveId, newItem } from "./schema";
@@ -209,8 +210,8 @@ function NewOrganization(props: { doc: WorldDoc; onDone(): void }) {
     run(async () => {
       const id = deriveId(name.trim(), new Set(Object.keys(props.doc.entities)));
       const value: JsonObject = { ...newItem("entities", id, props.doc, name.trim()), kind: newOrgKind(type, groupKind) };
-      const sent = await app.request({ type: "lre.editor", worldId: draft.worldId, base: null, op: "put", collection: "entities", id, value });
-      if (!sent) return;
+      const sent = await draftSend(app)({ type: "lre.editor", worldId: draft.worldId, base: null, op: "put", collection: "entities", id, value });
+      if (sent.type !== "lre.result") return;
       props.onDone();
       go(app, { view: "item", worldId: draft.worldId, collection: "entities", id });
     });

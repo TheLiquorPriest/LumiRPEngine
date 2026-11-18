@@ -1,7 +1,9 @@
 // Build's draft over a world others change too (DESIGN §23), through the real protocol client and a
 // fake backend: a newer push reloads once a burst stops, older pushes and Build's own are ignored,
-// a commit reads the world again, a discard and every write name the version Build holds, a save
-// over a change a form keeps its edits over asks first, and a reconnect reads the draft again.
+// the page's own save and commit are never taken for another window's change, even when their push
+// comes before their answer, a commit reads the world again, a discard and every write name the
+// version Build holds, a save over a change a form keeps its edits over asks first, and a
+// reconnect reads the draft again.
 
 import { describe, expect, test } from "bun:test";
 import type { App, Draft } from "../../src/frontend/app";
@@ -153,6 +155,34 @@ describe("Build's reload on a changed draft", () => {
     await h.answer();
     await changed;
     expect([h.gets(), h.app.drafts.get()?.version, h.toasts]).toEqual([3, 4, [RELOADED]]);
+  });
+
+  test("the page's own save and commit are no other window's change: a push that comes before the answer reloads nothing and says nothing, and a later change still does", async () => {
+    const h = harness();
+    await h.loaded("w1");
+    const send = draftSend(h.app);
+    h.backend.version = 2;
+    const saving = send({ type: "lre.editor", worldId: "w1", base: null, op: "put", collection: "places", id: "pier", value: { id: "pier", name: "Pier", fields: {} } });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    h.push("w1", 2);
+    await h.fire();
+    await saving;
+    expect([h.gets(), h.app.drafts.get()?.version, h.toasts]).toEqual([1, 2, []]);
+    // The commit lands and its push reaches the page after QUIET_MS and before the answer.
+    const committing = commitDraft(h.app);
+    h.backend.version = 3;
+    h.backend.stored = false;
+    h.push("w1", 3, "r2");
+    await h.fire();
+    expect(await committing).toBe(true);
+    await h.fire();
+    expect([h.gets(), h.app.drafts.get()?.version, h.app.drafts.get()?.dirty, h.toasts]).toEqual([2, 3, false, ["Committed a new revision."]]);
+    // Another window's change afterwards is still said.
+    h.backend.version = 4;
+    h.backend.stored = true;
+    h.push("w1", 4);
+    await h.fire();
+    expect([h.gets(), h.app.drafts.get()?.version, h.toasts]).toEqual([3, 4, ["Committed a new revision.", RELOADED]]);
   });
 });
 

@@ -3,15 +3,51 @@
 // its version, which replace the held draft; commit turns it into a new revision, `discard` drops
 // it. Build's writes, discards and commits name the version it holds, so one made over a change it
 // hasn't loaded is refused (`conflict`) and reloads. A change made elsewhere (`lre.draft.changed`,
-// DESIGN §23) reloads too, once a burst of them stops; forms keep their edits (`held.tsx`).
+// DESIGN §23) reloads too, once a burst of them stops; forms keep their edits (`held.tsx`). The
+// page's own writes (`ownWrite`: a save, a job's accepted proposals, a commit, a discard) are never
+// that change: a push they bring about is judged only when they have ended and Build holds what
+// they answered and read.
 
 import type { WorldId } from "../../shared/ids";
+import type { ErrorMessage, ResultMessage } from "../../shared/protocol";
 import type { App, Draft } from "../app";
 import type { Send } from "../registry";
 import { confirmOverwrite, NOT_SAVED } from "./held";
 
 /** Draft loads under way, by world. */
 const loading = new Map<WorldId, Promise<Draft | null>>();
+
+/** The page's own writes under way, by world (see `ownWrite`). */
+const writing = new Map<WorldId, Set<Promise<unknown>>>();
+
+/**
+ * Runs one write of this page (its save to the draft, a proposal it accepted, its commit, its
+ * discard) and keeps it on record while it runs. The push such a write brings about may reach the
+ * page before the write's answer does, so a push seen while one runs is not acted on until it has
+ * ended (`settled`): by then the held version is the write's, and only a push newer than that is
+ * another window's or an agent's.
+ */
+function ownWrite<T>(worldId: WorldId, run: () => Promise<T>): Promise<T> {
+  const done = run();
+  const under = writing.get(worldId) ?? new Set<Promise<unknown>>();
+  writing.set(worldId, under);
+  under.add(done);
+  const end = (): void => {
+    under.delete(done);
+    if (under.size === 0 && writing.get(worldId) === under) writing.delete(worldId);
+  };
+  done.then(end, end);
+  return done;
+}
+
+/** Resolves when no load and none of the page's own writes is under way on the world, those started meanwhile too. */
+async function settled(worldId: WorldId): Promise<void> {
+  for (;;) {
+    const pending = [loading.get(worldId), ...(writing.get(worldId) ?? [])].filter((p) => p !== undefined);
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }
+}
 
 const RELOADED = "This world's draft changed in another window, or an outside agent changed it; Build reloaded it.";
 
@@ -67,8 +103,9 @@ function refreshDraft(app: Pick<App, "request" | "drafts">, worldId: WorldId): P
 /**
  * Reloads the held draft when its world's working copy changed elsewhere (`lre.draft.changed`): in
  * another window, or by an outside agent. A push no newer than the version Build holds is ignored
- * (Build's own writes answer with theirs before their push comes), a burst reloads once after
- * QUIET_MS, and a load already under way finishes first, since it may have read the change already.
+ * (Build's own writes answer with theirs), a burst reloads once after QUIET_MS, and a load or one
+ * of the page's own writes already under way finishes first, since it may have read the change
+ * already or be the change itself: a reload that finds Build no longer behind says nothing.
  * Installed once at setup.
  */
 export function trackDraft(app: Pick<App, "client" | "drafts" | "request" | "toast">, timers: Timers = REAL_TIMERS): () => void {
@@ -82,7 +119,7 @@ export function trackDraft(app: Pick<App, "client" | "drafts" | "request" | "toa
   const reload = async (worldId: WorldId): Promise<void> => {
     running.add(worldId);
     try {
-      await loading.get(worldId);
+      await settled(worldId);
       if (behind(worldId) && (await refreshDraft(app, worldId))) app.toast(RELOADED, "info");
     } finally {
       running.delete(worldId);
@@ -117,7 +154,7 @@ export function trackDraft(app: Pick<App, "client" | "drafts" | "request" | "toa
 export async function recheckDraft(app: Pick<App, "drafts" | "request" | "toast">): Promise<void> {
   const held = app.drafts.get();
   if (!held) return;
-  await loading.get(held.worldId);
+  await settled(held.worldId);
   const before = app.drafts.get();
   if (!before || before.worldId !== held.worldId) return;
   const now = await refreshDraft(app, held.worldId);
@@ -136,15 +173,18 @@ export function draftSend(app: App): Send {
     const write = body.type === "lre.editor" && body.op !== "get";
     if (write && !(await confirmOverwrite(app))) return NOT_SAVED;
     const request = body.type === "lre.editor" && draft ? { ...body, worldId: draft.worldId, base: draft.base, version: draft.version } : body;
-    const message = await app.send(request);
-    if (message.type === "lre.error") {
-      app.toast(message.code === "conflict" ? "This world changed elsewhere, so nothing was saved. Build reloaded it; save again to keep your change." : message.message, "error");
-      if (message.code === "conflict" && draft) await refreshDraft(app, draft.worldId);
-    } else if (message.request === "lre.editor") {
-      const current = app.drafts.get();
-      if (current) app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, version: message.body.version, dirty: message.body.stored, reloaded: false });
-    }
-    return message;
+    const sendIt = async (): Promise<ResultMessage | ErrorMessage> => {
+      const message = await app.send(request);
+      if (message.type === "lre.error") {
+        app.toast(message.code === "conflict" ? "This world changed elsewhere, so nothing was saved. Build reloaded it; save again to keep your change." : message.message, "error");
+        if (message.code === "conflict" && draft) await refreshDraft(app, draft.worldId);
+      } else if (message.request === "lre.editor") {
+        const current = app.drafts.get();
+        if (current) app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, version: message.body.version, dirty: message.body.stored, reloaded: false });
+      }
+      return message;
+    };
+    return write && body.type === "lre.editor" ? ownWrite(draft?.worldId ?? body.worldId, sendIt) : sendIt();
   };
 }
 
@@ -152,18 +192,20 @@ export function draftSend(app: App): Send {
 export async function commitDraft(app: App): Promise<boolean> {
   const draft = app.drafts.get();
   if (!draft) return false;
-  const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base, version: draft.version });
-  if (message.type === "lre.error") {
-    app.toast(message.code === "validation" ? `Fix ${message.lint?.length ?? 0} error(s) before committing.` : message.message, "error");
-    if (message.lint) app.drafts.set({ ...draft, lint: message.lint });
-    if (message.code === "conflict") await refreshDraft(app, draft.worldId);
-    return false;
-  }
-  if (message.request !== "lre.world") return false;
-  // Another change may have landed between the commit and its answer, so the draft is read, not assumed.
-  await refreshDraft(app, draft.worldId);
-  app.toast("Committed a new revision.", "info");
-  return true;
+  return ownWrite(draft.worldId, async () => {
+    const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base, version: draft.version });
+    if (message.type === "lre.error") {
+      app.toast(message.code === "validation" ? `Fix ${message.lint?.length ?? 0} error(s) before committing.` : message.message, "error");
+      if (message.lint) app.drafts.set({ ...draft, lint: message.lint });
+      if (message.code === "conflict") await refreshDraft(app, draft.worldId);
+      return false;
+    }
+    if (message.request !== "lre.world") return false;
+    // Another change may have landed between the commit and its answer, so the draft is read, not assumed.
+    await refreshDraft(app, draft.worldId);
+    app.toast("Committed a new revision.", "info");
+    return true;
+  });
 }
 
 /** Drops the stored draft and reloads the head; the draft must still be the one the dialog was shown for. */
@@ -171,11 +213,13 @@ export async function discardDraft(app: App): Promise<void> {
   const draft = app.drafts.get();
   if (!draft) return;
   if (!(await app.host.confirm("Discard draft", "Throw away every uncommitted change to this world?", "danger", "Discard"))) return;
-  const message = await app.send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, version: draft.version, op: "discard" });
-  if (message.type === "lre.error") {
-    app.toast(message.code === "conflict" ? "Nothing was discarded: the draft changed while you were asked. Build reloaded it." : message.message, "error");
-    if (message.code === "conflict") await refreshDraft(app, draft.worldId);
-    return;
-  }
-  if (message.request === "lre.editor") app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
+  await ownWrite(draft.worldId, async () => {
+    const message = await app.send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, version: draft.version, op: "discard" });
+    if (message.type === "lre.error") {
+      app.toast(message.code === "conflict" ? "Nothing was discarded: the draft changed while you were asked. Build reloaded it." : message.message, "error");
+      if (message.code === "conflict") await refreshDraft(app, draft.worldId);
+      return;
+    }
+    if (message.request === "lre.editor") app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
+  });
 }
