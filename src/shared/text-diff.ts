@@ -1,4 +1,4 @@
-// A line diff of two texts (Settings → Agents → Prompts' Compare with shipped, DESIGN §6.12): the
+// A line diff of two texts (the Prompt page's Compare with shipped, DESIGN §6.12): the
 // lines kept, taken out and added, the fewest taken out and added there can be (a longest common
 // subsequence of lines), each change's lines taken out before the lines added in their place. Pure.
 

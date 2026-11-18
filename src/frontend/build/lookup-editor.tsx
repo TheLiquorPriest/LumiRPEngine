@@ -1,4 +1,4 @@
-// Build → Lore lookup table (DESIGN §4.2): terms that lead RPEngine's lore lookups to entries, and
+// Build → Lore lookup table (DESIGN §4.2): terms that lead RPE's lore searches to entries, and
 // topics as a table of contents. Each term and topic is a group with its entries as chips and a
 // picker of the rest; suggestions come from the entries: their titles, aliases and keywords for
 // terms, the topics they name for topics. Edits stay local until Save to draft. Styles: the lore
@@ -295,7 +295,7 @@ export function LookupTableEditor(props: { doc: WorldDoc; lint: readonly LintIss
     <div class="lre-build-page" data-lre-editor="part:loreIndex">
       <PageHeader
         title="Lore lookup table"
-        subtitle="Terms lead the engine's lore lookups to entries; topics are its table of contents. It steers the helpers' searches, including the brief's and the outline's, which draw on public entries for the narrator's Outline."
+        subtitle="Terms lead a lore search to entries; topics are its table of contents. Your agents' lore searches use it."
       />
       <Seg<"terms" | "topics">
         label="Show"

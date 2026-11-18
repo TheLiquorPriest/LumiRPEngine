@@ -110,7 +110,7 @@ export interface AgentClientView {
 /** Reconnect in Lumiverse (DESIGN §23) under way: its processes were asked to exit, and the line waits for them back with this build's tools, or they weren't back within the wait. */
 export interface ReconnectView {
   state: "waiting" | "late";
-  /** The wait it was given (Settings → Timeouts → MCP server reconnect), in ms; null for no limit. */
+  /** The wait it was given (the MCP server reconnect timeout), in ms; null for no limit. */
   waitMs: number | null;
   /** What says it is back: Lumiverse's own tool list, through Spindle (`mcp_servers`), or only the server's new processes. */
   through: "lumiverse" | "server";
@@ -134,7 +134,7 @@ export interface LumiverseProfileView {
   current: boolean;
 }
 
-/** What Settings → MCP server and the update notice show. */
+/** What the MCP server page and the update notice show. */
 export interface AgentsView {
   /** This build. */
   build: string;

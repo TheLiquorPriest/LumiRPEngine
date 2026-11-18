@@ -2,7 +2,7 @@
 // Me's tabs. The view (`FinanceView`) is already at the POV's Money level; the segments lay it out,
 // and each page they open rides the sheet stack. Each control is an in-world action sent like a
 // palette pick: done at once, off screen, with its Undo (DESIGN §11), told to the next reply or not
-// as Settings → Narrator → Out-of-play actions has it; `buy` and typed words still play as a turn.
+// as the Tell the Author settings have it; `buy` and typed words still play as a turn.
 
 import { useId, useState } from "preact/hooks";
 import type { ChatId } from "../../../shared/ids";

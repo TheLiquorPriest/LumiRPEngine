@@ -1,6 +1,6 @@
-// The GM view of a chat, read from RPE's store at its head (plan §14: GM mode's pieces kept on World behind the spoiler gate,
+// The GM view of a chat, read from RPE's store at its head (plan §14: the World page's pieces, behind the spoiler gate,
 // PlanChatUI-P6, -P7, -P4 item 4): one part of today's GM view at a time (`lre.gm.part`'s answer), built by the kept engine's own
-// builders over the played world and the head's state; GM → Things' reads with what the GM's add (where the player character is and
+// builders over the played world and the head's state; the Things reads with what the GM's add (where the player character is and
 // why each thing is had; a thing's rest, history and findings, over the events on the chat's path); Tidy up's run of what does not add
 // up (R-173: listed, never fixed here; a fix is his own edit on the taps route) and Leave it, which writes the chat's leave list;
 // what the chat made in play beside the world's draft, and Keep in the world's draft patch, which the page sends to Build's draft

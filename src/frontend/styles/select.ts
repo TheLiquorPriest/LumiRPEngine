@@ -1,5 +1,5 @@
 // A list's multi-select mode (frontend/multi-select.tsx): the row's box and the bar under the list,
-// in GM mode and Build alike, opaque as the tab bar is so the rows it's pinned over don't show
+// on the World page and in Build alike, opaque as the tab bar is so the rows it's pinned over don't show
 // through; and a bulk change's line on how the picked stand now. Built on the tokens only.
 
 export const SELECT_CSS = `

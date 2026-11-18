@@ -1,7 +1,7 @@
 // Build → a world → its chats → Upgrade (DESIGN §4.3 `migrate`, §12; PlanChatUI-B4): what the Upgrade brings into the chat, entity by
 // entity. Each change shows the chat's value, the revision's, and why it defaults to take (unchanged in play) or keep (changed in
 // play); the owner flips any of them, and the Upgrade goes out with the picks that differ from the defaults. Changes that would give a
-// secret away wait behind their own spoiler gate, as GM mode's truth does: each reads "A hidden change", with its pick still there,
+// secret away wait behind their own spoiler gate, as the World page's truth does: each reads "A hidden change", with its pick still there,
 // until the owner shows the spoilers. A move takes effect from the chat's next turn (a turn that runs now keeps the revision it
 // started with), and Undo takes it back whole. The world home lists each of the world's chats and the Upgrade of the ones behind.
 

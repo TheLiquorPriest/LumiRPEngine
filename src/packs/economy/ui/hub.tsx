@@ -27,8 +27,8 @@ import { BooksSegment } from "./work";
 /**
  * How a party's money pages reach the backend. The player's are in-world actions (`lre.action`): a
  * money or organization action is done at once, off screen, with its Undo (DESIGN §11), told to the
- * next reply or not as its confirm step's Tell switch says (`tell`; absent, as Settings → Narrator →
- * Out-of-play actions has it); the GM's are edits (`lre.edit`, each one correction with its own
+ * next reply or not as its confirm step's Tell switch says (`tell`; absent, as the Tell the Author
+ * settings have it); the GM's are edits (`lre.edit`, each one correction with its own
  * Undo); an organization's own money in Play has none of its own yet (`read`). A page offers only
  * the controls of its mode.
  */

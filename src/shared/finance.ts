@@ -1222,8 +1222,8 @@ export interface LeaseView {
 
 /**
  * The Money section's source for the prices of what is sold where the player character is (DESIGN
- * §9.5): the narrator's alone, sent while Settings → Narrator → Prices is on; the helpers price
- * nothing, so it never takes their room.
+ * §9.5): the prices the world holds, given to RPE's agents; the source
+ * never takes the other helpers' room.
  */
 export const PRICES_SOURCE = "prices";
 

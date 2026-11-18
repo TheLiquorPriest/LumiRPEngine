@@ -1,8 +1,8 @@
 // The agent stores' shared formats (DESIGN §4.4; AGENT-LOOP-PLAN §3.3-3.5, §4): a blob's address, a
 // workspace file's path at either level (the chat's, or the user's global workspace under `~/`), the
 // system files every agent is told, a file kept apart from the story, which the backend's stores,
-// the workspace's events in the engine, the sweep and GM → Workspace all read; and how long the
-// stores keep what nothing needs (Settings → Agents → Retention).
+// the workspace's events in the engine, the sweep and the World page's Workspace all read; and how long the
+// stores keep what nothing needs.
 
 import { hashParts } from "./hash";
 import { isRecord, type JsonObject, safeKey } from "./json";
@@ -139,7 +139,7 @@ export function transcriptPath(turn: number): string {
   return `${TRANSCRIPTS_DIR}reply-${String(turn).padStart(4, "0")}.md`;
 }
 
-/** How long the agent stores keep what nothing needs, and which of the turns' transcripts each chat keeps (Settings → Agents → Retention). */
+/** How long the agent stores keep what nothing needs, and which of the turns' transcripts each chat keeps. */
 export interface RetentionSettings {
   /** Days Diagnostics keeps an agent call's text after the call; "none" keeps it as long as its record. */
   transcriptDays: Limit;

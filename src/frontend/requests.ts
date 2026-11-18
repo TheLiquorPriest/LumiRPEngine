@@ -138,7 +138,7 @@ export function timeFixRequest(time: string, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, time };
 }
 
-/** "Show a hint" on a quest sheet (DESIGN §10): the next hint earned at the row `track` (its id in the quest log) opened, with its Undo; the narrator is told only opened ones. */
+/** "Show a hint" on a quest sheet (DESIGN §10): the next hint earned at the row `track` (its id in the quest log) opened, with its Undo; only opened ones reach the agents. */
 export function hintRequest(track: string, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, hint: track };
 }

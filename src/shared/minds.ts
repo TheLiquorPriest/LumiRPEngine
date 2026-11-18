@@ -353,8 +353,8 @@ export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindP
 export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<MindsMemoryConfig[K]> };
 
 /**
- * The sources a mind's context is read from (DESIGN §24.5, Settings → Minds → What a mind reads), in
- * the order Settings lists them: the story as it stands (the lore pinned to them and to where they
+ * The sources a mind's context is read from (DESIGN §24.5), in
+ * the order they are listed in: the story as it stands (the lore pinned to them and to where they
  * are, the lore the turn activates, the latest reply, the player's message, and their things: what
  * they have on them, what they hold for others, theirs someone else has and theirs that is missing,
  * ITEMS-SPEC §5.5), the recent chat as the player sees it (turns they weren't there for included),
@@ -425,7 +425,7 @@ export type KnowledgeBatch = "scene" | "character";
 export const KNOWLEDGE_BATCHES: readonly KnowledgeBatch[] = ["scene", "character"];
 
 /**
- * `UserSettings.minds.knowledge` (DESIGN §24.11, Settings → Minds → Knowledge): whether knowledge
+ * `UserSettings.minds.knowledge` (DESIGN §24.11): whether knowledge
  * is tracked, the confidence under which a holding is a suspicion, how the knowledge step asks, the
  * longest claim the step writes, the tokens a mind's own holdings, the narrator's Who knows what and
  * the step's own context may take, and the user's own wording of its texts. Each limit applies when
@@ -472,7 +472,7 @@ export const KNOWLEDGE_DEFAULTS: Readonly<KnowledgeSettings> = Object.freeze({ e
 /** The ranges knowledge settings are read within: only what keeps each meaningful (a threshold is a confidence, a claim has a character, no count is negative, at most 8 calls at once). */
 export const KNOWLEDGE_RANGES = { threshold: [0, 1], claimChars: [1, Number.MAX_SAFE_INTEGER], tokens: [0, Number.MAX_SAFE_INTEGER], count: [0, Number.MAX_SAFE_INTEGER], atOnce: [1, 8] } as const;
 
-/** The knowledge settings that are whole numbers within a range, as Settings → Minds → Knowledge lists its limits. */
+/** The knowledge settings that are whole numbers within a range. */
 export const KNOWLEDGE_LIMITS = ["claimChars", "mindTokens", "narratorTokens", "stepTokens", "factsPerChat", "holdersPerFact", "factsPerTurn", "learningsPerTurn", "inPlayTurns", "perPerson"] as const satisfies readonly (keyof KnowledgeSettings)[];
 export type KnowledgeLimit = (typeof KNOWLEDGE_LIMITS)[number];
 
@@ -503,7 +503,7 @@ export function fillText(text: string, values: Readonly<Record<string, string>>)
 
 /**
  * How long each text the minds steps write may be, in characters, and how many items each list of
- * one answer may hold (DESIGN §24.5, Settings → Minds → Lengths): the user's own, so no Model use
+ * one answer may hold (DESIGN §24.5): the user's own, so no Model use
  * preset sets them. A step's model is told those its answer has, after its answer format whoever
  * worded that (`answerLengths`), so it writes to them; a longer text is cut at a word, ending in
  * "…", a longer list loses its last items, and the call's trace and the host log say what was cut
@@ -684,7 +684,7 @@ function readsOf(raw: unknown, base: Readonly<MindsReads>): MindsReads {
 /**
  * A settings file saved before minds had what they read (`minds.reads`), read as before where the
  * user had a say: the reply allowance it replaces (`minds.replyTokens`) is the latest reply's limit,
- * and under Custom, the lore setting the user gave Settings → Steps' Character minds card, which no
+ * and under Custom, the lore setting the user gave an earlier build's Character minds card, which no
  * longer has one, gives each lore source its tokens (or turns both off where that lore was off), so
  * neither reads less than the card allowed. Under a preset the card's lore was the preset's, whose
  * cap is what cut pinned lore, so the sources take their defaults. The switches take the new
@@ -1399,8 +1399,8 @@ export interface KnowledgeOutput {
 }
 
 /**
- * The change types the knowledge step proposes for the player character (C4, Settings → Changes from
- * the reply, with learning as every type has): `learn`, a fact they learned (automatic by default);
+ * The change types the knowledge step proposes for the player character (C4, with learning as every
+ * type has): `learn`, a fact they learned (automatic by default);
  * `reveal`, the story revealing a secret to them (a world lore entry, a track's stage, a World Info
  * mark they didn't hold), which opens it on the player's screens (confirm by default).
  */
@@ -1523,7 +1523,7 @@ export interface MindsGmView {
   /** Every person but the POV, closest on the ladder first. */
   characters: MindsGmCharacter[];
   knowledge: MindsGmKnowledge;
-  /** How long what the GM writes here may be, as the minds steps' own (Settings → Minds → Lengths). */
+  /** How long what the GM writes here may be, as the minds steps' own. */
   lengths: MindLengths;
 }
 

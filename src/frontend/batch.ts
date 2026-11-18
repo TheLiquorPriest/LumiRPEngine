@@ -1,5 +1,5 @@
 // Bulk changes to a list's selection (DESIGN §7, §4.1): what a multi-select's bar applies to everyone
-// picked. In GM mode a change is the existing GM edit ops, one per entity, sent in chunks of the
+// picked. On the World page a change is the existing edit ops, one per entity, sent in chunks of the
 // setting `engine.maxEditOps`: each chunk is one `lre.edit`, all or none, with its own Undo. In Build it is a JSON
 // Patch on the draft, worked out from the draft as it stands, so it writes only what changes, sent in chunks of
 // `engine.maxEditOps` and never more than `worlds.maxPatchOps`. Each op goes through the same checks a single edit or write does.
@@ -76,7 +76,7 @@ export function mixOf(labels: readonly string[], max = 3): string {
   return rest > 0 ? `${text} and ${rest} more` : text;
 }
 
-// ---------------------------------------------------------------- GM mode
+// ---------------------------------------------------------------- The World page
 
 /** A change the GM view applies to everyone selected, as the GM edit op that makes it for one. */
 export type BulkChange =
@@ -98,7 +98,7 @@ export function forCharacters(kind: BulkChange["kind"]): boolean {
   return kind === "role" || kind === "pin" || kind === "intent";
 }
 
-/** An intent's text as it is sent, its spaces tidied; null when it is longer than `max`, the user's length for an intent (Settings → Minds → Lengths). */
+/** An intent's text as it is sent, its spaces tidied; null when it is longer than `max`, the length for an intent. */
 export function intentText(text: string, max: number): string | null {
   const tidy = text.trim().replace(/\s+/g, " ");
   return tidy.length > max ? null : tidy;

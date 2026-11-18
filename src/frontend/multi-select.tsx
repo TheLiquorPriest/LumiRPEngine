@@ -2,7 +2,7 @@
 // row's tap picks it instead of opening it, and a bar under the list says how many are picked, picks
 // every row the list shows (its search and filters as they stand) or exactly one group (by level or
 // tier, a button each, so they never pass for the list's own filters), clears, and holds the list's
-// actions. The selection is the list's own state: in GM mode it lives behind the GM gate and goes
+// actions. The selection is the list's own state: on the World page it lives behind the spoiler gate and goes
 // when the gate closes, and no player surface ever reads it.
 
 import type { ComponentChildren } from "preact";

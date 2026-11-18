@@ -29,13 +29,13 @@ export interface PanelProps {
   send: Send;
 }
 
-/** A panel of Play (DESIGN §12: Scene, You, Money, Garage, Gear, Cast, Calendar, Quests, …) or of GM mode (GM view, Context). */
+/** A panel of Play (DESIGN §12: Scene, You, Money, Garage, Gear, Cast, Calendar, Quests, …) or of the World page (its view, Context). */
 export interface PanelDef {
   id: PanelId;
   label: string;
   /** Order within its home, ties by id. */
   order: number;
-  /** The Play destination it shows in, or GM mode. */
+  /** The Play destination it shows in, or the World page. */
   home: PanelHome;
   component: ComponentType<PanelProps>;
 }

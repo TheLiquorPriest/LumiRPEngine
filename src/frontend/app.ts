@@ -82,7 +82,7 @@ export type Mode = "play" | "gm" | "build" | "settings" | "harness";
 /** Play's bottom-bar destinations. */
 export type Dest = "now" | "me" | "people" | "orgs" | "places" | "story";
 
-/** Where a panel lives: a Play destination, or GM mode. */
+/** Where a panel lives: a Play destination, or the World page. */
 export type PanelHome = Dest | "gm";
 
 /** `org_edit`: an organization's editors in Play (ORG-SPEC §4.4): a member's sheet, Hire someone, Admit a member, a position, a delegation, its dues. */
@@ -102,11 +102,11 @@ export interface PlayState {
   stack: SheetRoute[];
 }
 
-/** GM mode's sections: the engine's own, and each pack's tab by its registered id, which holds a dot (`economy.money`). */
+/** The World page's sections: the engine's own, and each pack's tab by its registered id, which holds a dot (`economy.money`). */
 export type GmSection = "world" | "places" | "things" | "story" | "chat" | `${string}.${string}`;
 
 export interface GmState {
-  /** The truth shows only once the gate is opened; leaving GM mode closes it again. */
+  /** The truth shows only once the gate is opened; leaving the World page closes it again. */
   revealed: boolean;
   section: GmSection;
   /** A character to open in `section` once it shows (a link from another GM page); it is taken when the page opens. */
@@ -180,7 +180,7 @@ export interface UiState {
   harness: HarnessRoute;
   /** The float overlay that is open; one at a time. */
   overlay: "map" | "palette" | "world" | null;
-  /** Ids show beside names everywhere (Settings → Display); kept on this device under SHOW_IDS_KEY. */
+  /** Ids show beside names everywhere (Settings); kept on this device under SHOW_IDS_KEY. */
   showIds: boolean;
 }
 
@@ -197,7 +197,7 @@ export function playAt(ui: UiState, dest: Dest, panel?: PanelId): UiState {
   return { ...ui, mode: "play", play: { dest, tab: panel === undefined ? ui.play.tab : { ...ui.play.tab, [dest]: panel }, stack: [] } };
 }
 
-/** A panel shown where it lives: its Play destination on its tab, or GM mode for a GM panel. */
+/** A panel shown where it lives: its Play destination on its tab, or the World page for a World panel. */
 export function showPanel(ui: UiState, catalog: UiCatalog, panel: PanelId): UiState {
   const home = catalog.panels.find((def) => def.id === panel)?.home;
   if (home === undefined) return ui;
@@ -244,7 +244,7 @@ export function popSheet(ui: UiState): UiState {
 /**
  * Opens the host's active chat. What was open over the last one closes first: the float overlays
  * and every Play sheet, since a sheet asks its chat for its entity's detail (`lre.view.open`) and
- * the new chat's player opened nothing. GM mode closes its own gate on the change.
+ * the new chat's player opened nothing. The World page closes its own spoiler gate on the change.
  */
 export function switchChat(app: Pick<App, "client" | "ui" | "overlays">, chatId: ChatId | null): void {
   const now = app.client.getState();
@@ -400,7 +400,7 @@ export function useView(): StateView | null {
   return useSelect(useApp().sync, (state) => state.view);
 }
 
-/** The chat's world, as its revision has it, with the packs' kinds: what Build's forms read in GM mode (places, owners, fields, a preview's calendar and tables); null until it is read. */
+/** The chat's world, as its revision has it, with the packs' kinds: what Build's forms read on the World page (places, owners, fields, a preview's calendar and tables); null until it is read. */
 export function useChatWorld(send: Send): WorldDoc | null {
   const view = useView();
   const worldId = view?.worldId ?? null;

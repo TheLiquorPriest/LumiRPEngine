@@ -1,8 +1,8 @@
-// The place picker (DESIGN §7, the Character model), for Build, GM mode and any place choice: the
+// The place picker (DESIGN §7, the Character model), for Build, the World page and any place choice: the
 // value as a path, and a sheet to change it. The sheet finds a place by any word of its name or of
 // the places around it, each result with its path; browses from the roots (or the current place's
 // neighbours) down, each row with how many places it holds, › to open it and Choose to pick it; and
-// puts the caller's suggestions on top. Secret places carry a badge: these are author and GM views.
+// puts the caller's suggestions on top. Secret places carry a badge: these are author and World-page views.
 
 import type { ComponentChildren } from "preact";
 import { useId, useMemo, useState } from "preact/hooks";

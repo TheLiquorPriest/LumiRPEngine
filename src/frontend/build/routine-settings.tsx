@@ -4,7 +4,7 @@
 // first, Balanced, Routine first), whom routine blocks may invite, how social people are, and which
 // story plans may move their work or school. RPE has no ladder of how closely a character is
 // followed, so every character counts as Background: only that level's role and skip life are
-// drawn, and the other levels, the plan-a-skip choice and the narrator's routine context of the
+// drawn, and the other levels, the plan-a-skip choice and the routine context given to the narrator of the
 // previous build are kept in the file and named once at the foot (`KeptUnused`). Saved whole as `lre.editor set part
 // routineSettings`; the defaults remove it, so a world left as it was keeps no settings. Whatever is
 // picked, the story leads for anyone on screen: no setting lets a routine move someone out of a
@@ -96,7 +96,7 @@ export function RoutineRoleSettings(props: { value: RoutineSettings; lint: reado
   return (
     <>
       <FormGroup title="What a routine is">
-        <p class="lre-minds-note">Enforced is the default: routines and schedules run people's days. The GM can set it apart for one character in a chat.</p>
+        <p class="lre-minds-note">Enforced is the default: routines and schedules run people's days. A chat can set it apart for one character.</p>
         <Field label="Everyone's routine" help={ROLE_EXPLAINED[role]}>
           <Seg<RoutineRole> label="Everyone's routine" value={role} options={ROUTINE_ROLES.map((r) => ({ value: r, label: ROUTINE_ROLE_LABEL[r] }))} disabled={disabled} onChange={(next) => props.onChange({ ...value, roles: { ...value.roles, background: next } })} />
         </Field>
@@ -104,8 +104,8 @@ export function RoutineRoleSettings(props: { value: RoutineSettings; lint: reado
         <Issues issues={lintAt(lint, "routineSettings.roles")} />
       </FormGroup>
       <FormGroup title="When a stretch of time is run through">
-        <p class="lre-minds-note">How people spend it while their routine is informative. An enforced routine is always lived through it, and an off one never. The GM can set it apart for one character in a chat.</p>
-        <Field label="Everyone" help={role === "informative" ? (skip === "model" ? "The file says a model plans their time. None does now, so they stay where the story has them." : SKIP_NOTE[skip]) : `Their routine is ${ROUTINE_ROLE_LABEL[role].toLowerCase()} here, so this applies only to characters the GM makes informative.`}>
+        <p class="lre-minds-note">How people spend it while their routine is informative. An enforced routine is always lived through it, and an off one never. A chat can set it apart for one character.</p>
+        <Field label="Everyone" help={role === "informative" ? SKIP_NOTE[skip] : `Their routine is ${ROUTINE_ROLE_LABEL[role].toLowerCase()} here, so this applies only to characters a chat makes informative.`}>
           <Seg<SkipLife> label="Everyone, when a stretch of time is run through" value={skip} options={SKIP_LIVES.filter((s) => s !== "model" || skip === "model").map((s) => ({ value: s, label: SKIP_LIFE_LABEL[s] }))} disabled={disabled} onChange={(next) => props.onChange({ ...value, skips: { ...value.skips, background: next } })} />
         </Field>
         <Issues issues={lintAt(lint, "routineSettings.skips")} />
@@ -137,7 +137,7 @@ function keptRoutineSettings(raw: unknown): Record<string, unknown> {
 const KEPT_ROUTINE_SETTINGS = [
   { key: "levels", label: "What a routine is, and how a stretch of time is spent, for the levels of the previous build's closeness ladder above Background (Live, Near and Far)" },
   { key: "skipPlanCalls", label: "How a model plans a time skip: all in one call, or one call per person" },
-  { key: "narrator", label: "Telling the narrator people's usual routines" },
+  { key: "narrator", label: "Whether people's usual routines were put into what the narrator read" },
 ] as const;
 
 /** Build → World → Routines and the story: every setting, saved together from the sticky bar. */

@@ -74,16 +74,16 @@ export const MODE_NOTE: Record<RoutineMode, string> = {
 
 /** What each role means for one character, for choosing one. */
 export const ROLE_NOTE: Record<RoutineRole, string> = {
-  informative: "The story and planning decide what they do; their routine and schedules are only context their mind and the narrator may weigh.",
+  informative: "The story and planning decide what they do; their routine and schedules are only context for your agents.",
   enforced: "The planner lives their routine and their schedules run whenever the story doesn't hold them, never in a scene with you.",
   off: "Their routine isn't used at all, not even as context.",
 };
 
-/** What each way of spending a time skip means, for someone whose routine is informative (Build's levels and the GM's per character). */
+/** What each way of spending a time skip means, for someone whose routine is informative (Build's levels and a chat's per character). */
 export const SKIP_NOTE: Record<SkipLife, string> = {
   stay: "They stay where the story has them while the time passes.",
   routine: "They go about their usual routine through the skip, unless a story plan, a trip or an appointment covers them.",
-  model: "At the skip's start the helper model plans their time from their routine, plans and the story; if it can't, they stay.",
+  model: "An earlier build had a model plan their time through the skip. RPE has none, so they stay where the story has them.",
 };
 
 /** What each awareness does (DESIGN §8), for choosing one: it shapes only an enforced routine. */

@@ -27,11 +27,10 @@ export interface UnfitRef {
 }
 
 /**
- * The first ref param of `interpret`'s params that doesn't name the right real thing, or null when
+ * The first ref param of an action's params that doesn't name the right real thing, or null when
  * every one does: an entity of the param's kind (with inheritance), or a place where the param takes
- * places. Typed text that names nothing that fits ("I take the cash" when cash is an account, not an
- * item) is roleplay for the narrator and `extract`, not an action that would fail; its reply says why
- * on a decline chip (DESIGN §9.4). An entity the POV may not know of (`mayKnow`), or a place it
+ * places. A value that names nothing that fits ("the cash" when cash is an account, not an item) is
+ * turned down with its reason and not played. An entity the POV may not know of (`mayKnow`), or a place it
  * can't see, counts as nothing: a guessed id of a hidden thing must read as one nothing has, or the
  * outcome would tell the player it exists.
  *

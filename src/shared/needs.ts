@@ -1,6 +1,6 @@
 // Needs settings (DESIGN §8, §24.8): per world, each need on or off, how fast it grows, and the two
-// points it is told at: the narrator's line ("you: hungry") with Play's mark, and the alert a
-// timelapse may stop on. Absent, every need is on with the rates and points earlier builds had, so a
+// points it is marked at: Play's Needs panel marks it pressing ("hungry"), and when time passes it
+// is listed as due. Absent, every need is on with the rates and points earlier builds had, so a
 // world without them plays as it did. Needs themselves run from Cast life 4.
 
 import { hasOwn, isRecord } from "./json";
@@ -11,8 +11,8 @@ export type NeedId = "hunger" | "fatigue" | "social" | "fun";
 export const NEED_IDS: readonly NeedId[] = ["hunger", "fatigue", "social", "fun"];
 
 /**
- * Each need in words, the one set every surface uses (Build, Play, Check world, the narrator): its
- * name; the word the narrator is told it in once it's pressing ("you: hungry"); and what meets it,
+ * Each need in words, the one set every surface uses (Build, Play, Check world): its
+ * name; the word Play's Needs panel marks it with once it's pressing ("hungry"); and what meets it,
  * to finish "met by …".
  */
 export const NEED_WORDS: Readonly<Record<NeedId, { name: string; word: string; metBy: string }>> = {
@@ -28,7 +28,7 @@ export interface NeedSetting {
   on?: boolean;
   /** How much it grows per hour, on its scale of 0 (met) to 100 (urgent). */
   rate?: number;
-  /** At or above this the narrator is told of it, and Play's Needs marks it. */
+  /** At or above this Play's Needs panel marks it as pressing. */
   tell?: number;
   /** At or above this it raises the `needs` alert in a timelapse (the interrupt policy says what that does). */
   alert?: number;

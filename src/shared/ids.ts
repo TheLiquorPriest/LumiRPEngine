@@ -58,7 +58,7 @@ export type DomainId = (typeof DOMAINS)[number];
 /** Realism level per domain: 0 off … 4 simulation. */
 export type Level = 0 | 1 | 2 | 3 | 4;
 
-/** Each domain and each level by its name (DESIGN §9.1), as Settings → Realism, the GM view and the engine's lines say them. */
+/** Each domain and each level by its name (DESIGN §9.1), as the World page, the GM view and the engine's lines say them. */
 export const DOMAIN_LABEL: Record<DomainId, string> = {
   money: "Money",
   gear: "Gear",

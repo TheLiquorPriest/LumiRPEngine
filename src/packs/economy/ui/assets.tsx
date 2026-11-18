@@ -378,7 +378,7 @@ function PropertyRow(props: { property: PropertyView; controls: HubControls; nav
 /**
  * Assets: what the party's worth is made of, in the full books, at the top; its investments; the
  * property it owns and what's for sale (the GM adds a property here); its stakes in organizations,
- * each opening its Ownership in Orgs (in GM mode, the stake's own page); and, in Play, its vehicles
+ * each opening its Ownership in Orgs (on the World page, the stake's own page); and, in Play, its vehicles
  * in the Garage, with what they're worth together (the net worth's vehicle lines) where it has any.
  */
 export function AssetsSegment(props: SegmentProps) {

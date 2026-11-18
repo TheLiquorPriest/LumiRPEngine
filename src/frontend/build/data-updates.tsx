@@ -4,7 +4,7 @@
 // is never replaced unasked: it reads "Changed by you · newer shipped version available", and its
 // review shows what the shipped version changes and what the world changed, with Use the shipped
 // version, asked first. Commit makes the draft a revision, and each chat takes it with an Upgrade
-// (GM → This chat → Pins and upgrade).
+// (this world's Chats list).
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { TableId } from "../../shared/ids";
@@ -20,7 +20,7 @@ import { FormGroup, FormSheet } from "./form-kit";
 export const EDITED = "Changed by you · newer shipped version available";
 
 /** What Apply leaves to do, said once it has put the updates in the draft. */
-const APPLIED = "Data updates are in the draft. Commit makes them a revision; then Upgrade each chat in GM → This chat → Pins and upgrade.";
+const APPLIED = "Data updates are in the draft. Commit makes them a revision; then Upgrade each chat from this world's Chats list.";
 
 const rows = (n: number): string => (n === 1 ? "1 row" : `${n} rows`);
 
@@ -131,7 +131,7 @@ export function DataUpdatesSection() {
     <>
       <Section title="Data updates" aside={<Badge tone="accent">{updates.length}</Badge>}>
         <div class="lre-stack" data-lre-data-updates>
-          <p class="lre-build-note">This build of LumiRPEngine ships newer data tables than this world has. Apply puts them in the draft; Commit makes them a revision, and each chat takes them when you Upgrade it (GM → This chat → Pins and upgrade). A table you changed stays as it is: review it to see what's new, and take the shipped version only if you want it.</p>
+          <p class="lre-build-note">This build of LumiRPEngine ships newer data tables than this world has. Apply puts them in the draft; Commit makes them a revision, and each chat takes them when you Upgrade it from this world's Chats list. A table you changed stays as it is: review it to see what's new, and take the shipped version only if you want it.</p>
           <List>
             {updates.map((u) => (
               <ListRow

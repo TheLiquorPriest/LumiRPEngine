@@ -118,7 +118,7 @@ export interface PageRequest extends Request<"lre.page"> {
 export interface RestartRequest extends Request<"lre.restart"> {
   chatId: ChatId;
   turn: string;
-  /** What the player asked of this telling, from the page's ask (Settings → Swipes): for the narrator alone. */
+  /** What the player asked of this telling, from the page's ask: for the narrator alone. */
   direction?: string;
 }
 
@@ -141,7 +141,7 @@ export interface ActionRequest extends Request<"lre.action"> {
   now?: boolean;
   /** Done at once, off screen, for an action of the table that only its surface does so (Gear → Manage's gear actions). */
   offstage?: true;
-  /** Whether the next turn's narrator is told of the action done off screen; absent, Settings → Narrator → Out-of-play actions decides by its group. */
+  /** Whether the Author is told of the action done off screen at the next turn; absent, the Tell the Author settings decide by its group. */
   tell?: boolean;
 }
 
@@ -167,7 +167,7 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
  * the next hint the player has earned at a quest log row opened (`hint`, the row's id: DESIGN §10),
  * or a change to one of the player's own things (`thing`: `fix_item`, under the player's rules), or
  * to several at once (`things`, 1 to `FIX_THINGS_MAX`: all or none, one entry with one Undo named by
- * its `label`, told as Settings → Narrator → Out-of-play actions says for its group unless `tell`
+ * its `label`, told as the Tell the Author settings say for its group unless `tell`
  * says). `undo` is the chip of the entry just written, null while it waits for a reply in flight.
  */
 export type FixRequest = Request<"lre.fix"> & { chatId: ChatId } & ({ entity: EntityId; field: FieldId; value: JsonValue } | { time: string } | { hint: string } | { thing: ItemFix } | { things: ItemFix[]; label: string; tell?: boolean });
@@ -240,8 +240,8 @@ export interface ChatExport {
 }
 
 /**
- * GM → This chat → Sections' preview (DESIGN §6.11): every section as the next turn would give it to
- * the narrator now, built the way a turn builds it. Behind the GM gate: it holds marked facts.
+ * The World page's Sections' preview (DESIGN §6.11): every section as the next turn would give it to
+ * the narrator now, built the way a turn builds it. Behind the spoiler gate: it holds marked facts.
  */
 export interface SectionsRequest extends Request<"lre.sections"> {
   chatId: ChatId;
@@ -335,7 +335,7 @@ export type KeepRequest = Request<"lre.keep"> & { chatId: ChatId } & (
 
 export interface SettingsGetRequest extends Request<"lre.settings.get"> {}
 
-/** The D32 preset caveats (Settings → Caveats), apart from settings: they need a dry run of the chat, which takes long on a long chat. */
+/** The D32 preset caveats, apart from settings: they need a dry run of the chat, which takes long on a long chat. */
 export interface SettingsCaveatsRequest extends Request<"lre.settings.caveats"> {}
 
 /**
@@ -373,9 +373,9 @@ export interface ChatKnowledgeRequest extends Request<"lre.chat.knowledge"> {
   chatId: ChatId;
   knowledge?: boolean | null;
   narrator?: NarratorView | null;
-  /** Which engine plays the chat's turns (GM → This chat, INC2-SPEC C12; HARNESS-SLICE3): its classic steps, the agent loop, or the harness, where the author and the agents it starts play the turn through tools; null returns it to classic. A change drops a turn the engine prepared for it. */
+  /** Retired: which of the previous builds' engines played the chat's turns. RPE plays every chat itself, so nothing offers or sets it. */
   engine?: "classic" | "agents" | "harness" | null;
-  /** Whether this chat's impossible holds are tidied automatically, its one-time Things tidied fix (GM → This chat → Things, ITEMS-SPEC §9, §11); null returns it to the world's (`tidy.auto`). */
+  /** Whether this chat's impossible holds are tidied automatically, its one-time Things tidied fix (the World page's Things, ITEMS-SPEC §9, §11); null returns it to the world's (`tidy.auto`). */
   tidy?: boolean | null;
   /** GM → This chat → Engine's own read: the answer also says why an engine can't be chosen now, where one can't (`harnessBlocked`). */
   engines?: true;
@@ -514,8 +514,8 @@ export interface WorldChangesInfo {
  * the entry at: a write on an entry that has changed since is refused, and the page reads the entry as it now stands.
  * `index`: the lore index of the world's books as Build's index entry would hold it now
  * (`LoreIndexView`), the entry kept brought up to date first. `build`: Build's Build an index entry,
- * on the user's press: that index written as a new entry of `bookId`, which LRE keeps in sync until
- * Settings → Lore stops it; answers the index.
+ * on the user's press: that index written as a new entry of `bookId`, which RPE keeps in sync until
+ * the user stops it; answers the index.
  */
 export type LoreRequest = Request<"lre.lore"> &
   (
@@ -561,7 +561,7 @@ export interface CancelTurnRequest extends Request<"lre.cancel"> {
 }
 
 /**
- * Settings → Preset (DESIGN §6.8): `get` reads the card of the preset Lumiverse generates with; `add`
+ * The preset card (DESIGN §6.8): `get` reads the card of the preset Lumiverse generates with; `add`
  * adds the RPEngine blocks it lacks, then reads it.
  */
 export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
@@ -582,7 +582,7 @@ export interface PresetCard {
 
 /**
  * The outside MCP servers (DESIGN §23). `kit` is a server's own check: this build and where its
- * kit is, and whether this session checked in since the extension started. Settings → MCP server
+ * kit is, and whether this session checked in since the extension started. The MCP server page
  * and the update notice `get` the servers this account has seen; `update` asks the one named to
  * reload now; `reconnect` (Reconnect in Lumiverse) asks the Lumiverse-run one named to leave, so
  * Lumiverse's client connects it again and lists this build's tools; `dismiss` puts the notice away
@@ -640,7 +640,7 @@ export interface AssistantProposalOp {
   changeType: string;
   /** The change in plain words, read with the assistant's knowledge. */
   lines: string[];
-  /** `auto`, or `confirm`: its change type asks first (Settings → Changes from the reply), so it waits for Apply even where changes apply at once. */
+  /** `auto`, or `confirm`: its change type asks first, so it waits for Apply even where changes apply at once. */
   mode: string;
   applied?: true;
   /** Why it didn't land: the writer's code and reason; `WRITE_REFUSED` (its write was refused for when it came), and an applied proposal's Apply may send it again. */
@@ -743,7 +743,7 @@ export interface SessionMessageView {
 }
 
 /**
- * Settings → Agents → Prompts' Test for a role's text (AGENT-LOOP-PLAN §9; DESIGN §6.12): `text`
+ * The Prompt page's Test for a role's text (AGENT-LOOP-PLAN §9; DESIGN §6.12): `text`
  * checked as it would be saved as text `id`'s, then the task whose contract it keeps, built from
  * `chatId`'s latest exchange as a turn builds it, run once by its role with `text` in place, and the
  * answer checked against that contract: one model call, none for a text with problems. It reads the
@@ -782,7 +782,7 @@ export interface WorkspaceFileView {
  * An agent turn's review card (`backend/agents/review.ts`): every change of the turn that asks first,
  * in plain words as the player character may read them. `get` reads the chat's cards, and pushes their
  * changes to this page as `lre.review.update` from then on; `apply` applies a card's open changes, all
- * or the ones `keys` picks; `reject` turns them all down. At a gate (Settings → Agents → Review card)
+ * or the ones `keys` picks; `reject` turns them all down. At a gate
  * either answers the card and the turn resumes: the answer says how to start it (`start`).
  */
 export type ReviewRequest = Request<"lre.review"> & { chatId: ChatId } & ({ op: "get" } | { op: "apply"; turn: string; keys?: string[] } | { op: "reject"; turn: string });
@@ -880,7 +880,7 @@ export interface SettingsResult {
 export interface ResultBodies {
   /**
    * `agentApi`: the outside-client level this build speaks (`AGENT_API`). `requestMs`: how long the
-   * frontend waits for each answer, the user's Engine requests timeout (Settings → Timeouts).
+   * frontend waits for each answer, the user's request timeout.
    * `canStop`: this Lumiverse stops a generation for the engine run (DESIGN §5.1); without it, engine
    * state may be missing from replies. An outside client (DESIGN §23) also learns this `build` and
    * where its agent `kit` is (null when it has none), and an MCP server that checked in, its `client` id.
@@ -924,7 +924,7 @@ export interface ResultBodies {
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean; updates?: TableUpdate[]; undo?: string; undone?: boolean; words?: string; limits?: { editOps: number; patchOps: number; noteChars: number }; revisions?: WorldRevisionInfo[]; next?: string | null; changes?: WorldChangesInfo };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
-  /** The chat's own knowledge choices after the request, null where it follows; `engine` when the chat plays the agent loop or the harness (absent: classic, which a chat with no choice plays); `tidy`, its own Tidy up switch (absent: the world's); `harnessBlocked`, for a request that asked which engines can be chosen (`engines`): why the harness can't play the user's chats now and what to do about it, in words the page shows under the Engine switch (absent: it can). */
+  /** The chat's own knowledge choices after the request, null where it follows; `tidy`, its own Tidy up switch (absent: the world's). `engine` and `harnessBlocked` are retired: nothing sets them, for RPE plays every chat itself. */
   "lre.chat.knowledge": { knowledge: boolean | null; narrator: NarratorView | null; engine?: "agents" | "harness"; tidy?: boolean; harnessBlocked?: string };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
@@ -1025,7 +1025,7 @@ export interface GeneratePush extends Envelope<"lre.generate"> {
   chatId: ChatId;
   as: GenerateAs;
   turn: string;
-  /** A swipe no chip's choice asked anything of, while Settings → Swipes → Ask what should change on each swipe is on: the page asks first (restart.ts), and its claim carries the answer. */
+  /** A swipe no chip's choice asked anything of, while the swipe ask is on: the page asks first (restart.ts), and its claim carries the answer. */
   ask?: true;
 }
 

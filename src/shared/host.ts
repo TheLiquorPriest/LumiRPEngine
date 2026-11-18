@@ -296,7 +296,7 @@ export interface QuietRequest {
   model: string | null;
   /** Tools the model may call instead of answering (lore lookups, DESIGN §5.4); absent: none. */
   tools?: QuietTool[];
-  /** How hard the model reasons (a step's or the helper model's effort); absent or `inherit`: the connection's own reasoning settings. */
+  /** How hard the model reasons (a step's effort); absent or `inherit`: the connection's own reasoning settings. */
   effort?: ReasoningChoice;
   /** How the model's thinking shows, with an effort of the call's own (the host's `thinkingDisplay`): `summarized` sends its text back; absent: the host's default. */
   thinkingDisplay?: "summarized";
@@ -578,7 +578,7 @@ export interface HostPort {
     decide(request: DecideRequest, userId: UserId, signal: AbortSignal): Promise<DecideResult>;
   };
   tokens: {
-    /** The host tokenizer's count for each text (the user's main model, as the prompt breakdown counts), or null when it can't count; rejects with a `TimeoutFired` when counting takes longer than `limit` (Settings → Timeouts → Token counts). */
+    /** The host tokenizer's count for each text (the user's main model, as the prompt breakdown counts), or null when it can't count; rejects with a `TimeoutFired` when counting takes longer than `limit`. */
     count(texts: readonly string[], userId: UserId, limit: Limit): Promise<number[] | null>;
   };
   frontend: {
@@ -647,7 +647,7 @@ export interface HostPort {
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */
     active(userId: UserId): Promise<{ id: string; name: string } | null>;
-    /** The user's connection profiles, by id and name: what a step's own connection must be one of (Settings → Caveats' pre-flight). */
+    /** The user's connection profiles, by id and name: what a step's own connection must be one of. */
     list(userId: UserId): Promise<{ id: string; name: string }[]>;
     /** The models a connection's provider offers, by id; null when the host can't list them or the provider doesn't answer, so nothing is said of a model. */
     models(connectionId: string, userId: UserId): Promise<string[] | null>;

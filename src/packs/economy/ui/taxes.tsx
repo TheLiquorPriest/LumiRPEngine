@@ -128,7 +128,7 @@ function ConsolidationPart(props: { consolidation: ConsolidationView; why: strin
   );
 }
 
-/** Donate: an amount from the reader, as they pay, to an exempt organization; deductible as its status says, with the Tell switch a gift to someone else starts with (Settings → Narrator → Out-of-play actions). Once the gift is taken, the amount clears. */
+/** Donate: an amount from the reader, as they pay, to an exempt organization; deductible as its status says, with the Tell switch a gift to someone else starts with (the Tell the Author settings). Once the gift is taken, the amount clears. */
 export function DonateForm(props: { exempt: ExemptView; currency: WorldCurrency; acts: TaxesActs }) {
   const [amount, setAmount] = useState("");
   const [told, setTold] = useState<boolean | null>(null);

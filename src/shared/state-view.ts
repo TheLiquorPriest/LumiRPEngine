@@ -366,7 +366,7 @@ export interface PaletteView {
   encounter?: PaletteEncounter;
 }
 
-/** The running chat's folded realism, time controls and adjudication policy (Play → Calendar, Settings → This chat). */
+/** The running chat's folded realism, time controls and adjudication policy (Play → Calendar, the World page). */
 export interface ControlsView {
   realism: {
     preset: RealismPresetId;
@@ -400,10 +400,10 @@ export interface ControlsView {
   /** Every renderer source a section can take (`include`), with the section it fills by itself and what it tells in plain words. */
   sources: { id: string; slot: string; label: string }[];
   /**
-   * This chat's knowledge choices (DESIGN §6.11, GM → This chat → Knowledge), each as the chat sets
+   * This chat's knowledge choices (DESIGN §6.11), each as the chat sets
    * it (null where it follows) beside what it follows: knowledge tracking, the user's switch
-   * (Settings → Minds → Knowledge); the narrator's knowledge, the world's default (null when it sets
-   * none), else the user's (Settings → Narrator). The chat's wins, then the world's.
+   * (the Track who knows what setting); the narrator's knowledge, the world's default (null when it sets
+   * none), else the user's (the Narrator's knowledge and Narrator's secrets settings). The chat's wins, then the world's.
    */
   knowledge: {
     tracking: { chat: boolean | null; user: boolean };
@@ -423,7 +423,7 @@ export interface ControlsView {
    * null for its usual Money level), and the player character's Money level; null in a world without money.
    */
   cash?: { chat: boolean | null; world: boolean | null; level: number; usual: number } | null;
-  /** Settings → Narrator → Out-of-play actions, the user's: what each confirm step's Tell switch starts from (DESIGN §11). */
+  /** The Tell the Author settings, the user's: what each confirm step's Tell switch starts from (DESIGN §11). */
   offstage: OffstageSettings;
 }
 
@@ -436,9 +436,8 @@ export interface StateView {
   definitionsFrom?: RevisionId;
   status: ChatStatus;
   /**
-   * Which engine plays this chat's turns (GM → This chat → Engine): its classic steps, agents, or the
-   * harness. The drawer offers the harness's own pages only for a chat on the harness, and Settings
-   * says there which of its pages such a chat doesn't use. Absent on a chat that isn't a world's.
+   * Retired: which of the previous builds' engines played this chat's turns (its classic steps, agents, or
+   * the harness). Nothing sets it now; RPE plays every chat itself. Absent on a chat that isn't a world's.
    */
   engine?: "classic" | "agents" | "harness";
   hud: HudView | null;

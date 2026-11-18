@@ -1,5 +1,5 @@
-// GM mode's curtain as UI state, so the mode shell and the GM view agree on
-// it: Show the truth opens it; Hide, leaving GM mode or another chat closes it again; moving between
+// The World page's curtain as UI state, so the page shell and the GM view agree on
+// it: Show the truth opens it; Hide, leaving the World page or another chat closes it again; moving between
 // GM sections leaves it as it is. World, Places, Things, Story, Money, the Fight and This chat's
 // Edits wait behind it; This chat's rules and the Inspector show player-safe data and don't.
 

@@ -194,7 +194,7 @@ function narratorPart<T extends string>(value: JsonValue | undefined, takes: rea
 
 /**
  * The chat's own knowledge tracking and narrator's view, where its own level sets them, beside his own (the nearest other level's,
- * else the default), as GM → This chat shows them. A chat that sets one part of the narrator's view follows the rest in force.
+ * else the default), as the World page shows them. A chat that sets one part of the narrator's view follows the rest in force.
  */
 function choicesRead(read: ConfigRead): TapSettings["choices"] {
   const chatSet = (def: Setting): JsonValue | undefined => read.setAt(def).find((l) => l.level === "chat")?.value;

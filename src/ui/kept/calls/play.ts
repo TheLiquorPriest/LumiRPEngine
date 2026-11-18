@@ -8,7 +8,7 @@
 // `POST /api/v1/chats/:chat/edits/:edit/undo`, not as today's Undo chip. RPE answers a tap it turns down
 // with `applied: false` and its words, which come back as the refusal they are. His word on a question a
 // lane set to Confirm waits on (the chip under its reply) goes to the question's answer route. The chat's
-// own choices (GM → This chat: knowledge tracking, the narrator's view, the tidy-up switch) are read and
+// own choices (the World page: knowledge tracking, the narrator's view, the tidy-up switch) are read and
 // set as the chat's settings, at its level, through the settings routes (PlanChatUI-P4 item 2); the
 // engine choice goes with the old engines and is not offered.
 

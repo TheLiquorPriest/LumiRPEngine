@@ -56,7 +56,7 @@ import { ActionRow, ActionRows, GmCard, GmPage, usePages } from "./ui";
 
 type ThingsBody = ResultBodies["lre.things"];
 
-/** No lint in GM mode: a chat's things carry no problems of the draft's. */
+/** No lint on the World page: a chat's things carry no problems of the draft's. */
 const NO_PROBLEMS: ReadonlyMap<string, "error" | "warning"> = new Map();
 
 /**

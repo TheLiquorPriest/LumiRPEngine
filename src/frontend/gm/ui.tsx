@@ -1,4 +1,4 @@
-// GM mode's own building blocks on the shared atoms: a page opened over a section's list (as Play
+// The World page's own building blocks on the shared atoms: a page opened over a section's list (as Play
 // opens sheets), rows that carry their own actions (✎, remove, add or take), titled cards for
 // tracks and people's money, the notice an edit leaves with its Undo, and the way to Build for what
 // belongs to the world.
@@ -139,8 +139,8 @@ export function GmCard(props: { name?: string; title: ComponentChildren; subtitl
 }
 
 /**
- * What the latest GM edit did, with its Undo, pinned over GM mode's tab bar until it is dismissed,
- * replaced or no longer undoable. Its height is published on GM mode (`--lre-gm-notice-h`) so a
+ * What the latest GM edit did, with its Undo, pinned over the World page's tab bar until it is dismissed,
+ * replaced or no longer undoable. Its height is published on the World page (`--lre-gm-notice-h`) so a
  * list's selection bar pinned there sits above it.
  */
 export function EditNoticeBar(props: { notice: EditNotice; busy: boolean; onUndo(): void; onDismiss(): void }) {
@@ -172,7 +172,7 @@ export function EditNoticeBar(props: { notice: EditNotice; busy: boolean; onUndo
   );
 }
 
-/** Kinds, places and tracks are the world's definitions; GM mode edits this chat, Build edits the world. */
+/** Kinds, places and tracks are the world's definitions; the World page edits this chat, Build edits the world. */
 export function BuildLink() {
   const app = useApp();
   return (

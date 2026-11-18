@@ -652,7 +652,7 @@ export function SaveBar(props: { children: ComponentChildren }) {
   return <div class="lre-savebar">{props.children}</div>;
 }
 
-/** Whether ids show beside names (Settings → Display → Show ids). */
+/** Whether ids show beside names (Settings). */
 export function useShowIds(): boolean {
   return useUi((ui) => ui.showIds);
 }

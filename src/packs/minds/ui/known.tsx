@@ -56,7 +56,7 @@ export function KnownPanel(props: PanelProps) {
   if (view && !view.tracking) {
     return (
       <Empty icon="eye-off" title="Knowledge tracking is off for this chat">
-        Turn it on in Settings → Minds → Knowledge, or for this chat in GM → This chat.
+        Switch on Track who knows what in Settings, for every chat or for this one.
       </Empty>
     );
   }

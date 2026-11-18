@@ -19,8 +19,8 @@ import { humanize } from "./format";
 import { Icon, type IconName } from "../ui/icons";
 
 /**
- * What each agent is called, by its role id, as Settings → Agents named them: a turn role's label, the GM
- * assistant's and the main agent's. The names of an agent a carried turn's changes were staged by.
+ * What each agent is called, by its role id, as the Agents page names them: a turn role's label, the World
+ * page assistant's and the main agent's. The names of an agent a carried turn's changes were staged by.
  */
 const AGENT_LABEL: Readonly<Record<string, string>> = {
   intent: "Intent",
@@ -119,7 +119,7 @@ export function ReviewCard(props: { card: ReviewCardView; picked: readonly strin
         <Icon name="checklist" class="lre-chat-decision-icon" />
         <div class="lre-chat-decision-text">
           <strong class="lre-chat-decision-label">{open.length > 0 ? `${card.items.length === 1 ? "A change asks" : `${card.items.length} changes ask`} first` : "Changes that asked first"}</strong>
-          <span class="lre-chat-decision-detail">{open.length === 0 ? "Answered." : gate ? "The reply waits until you answer: what you apply lands before it." : "The narrator isn't told of a change until you apply it."}</span>
+          <span class="lre-chat-decision-detail">{open.length === 0 ? "Answered." : gate ? "The reply waits until you answer: what you apply lands before it." : "Nothing is recorded until you apply it."}</span>
         </div>
       </div>
       <div class="lre-gm-assist-ops" role="list">

@@ -44,7 +44,7 @@ export const SHELL_CSS = `
 .lre-drawer .lre-bottomnav>button[aria-current=page]>.lre-icon{background:var(--lre-accent-soft)}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]{background:transparent}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button[aria-current=page]>.lre-icon{background:var(--lre-gm-soft)}
-/* GM mode's bar holds a tab for each of the engine's sections and each pack's, a dozen or more: no label is cut, so where they don't fit in one row they wrap to a second, each button as wide as its label and the rows filled edge to edge */
+/* The World page's bar holds a tab for each of the engine's sections and each pack's, a dozen or more: no label is cut, so where they don't fit in one row they wrap to a second, each button as wide as its label and the rows filled edge to edge */
 .lre-drawer .lre-bottomnav[data-tone=gm]{flex-wrap:wrap;row-gap:2px}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button{flex:1 0 auto;min-width:44px;padding-left:3px;padding-right:3px;letter-spacing:-0.01em}
 .lre-drawer .lre-bottomnav[data-tone=gm]>button>.lre-icon{padding-left:8px;padding-right:8px}

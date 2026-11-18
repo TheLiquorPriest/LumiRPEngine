@@ -13,7 +13,7 @@ export type NarratorSecrets = "marked" | "omit";
 export const NARRATOR_SECRETS: readonly NarratorSecrets[] = ["marked", "omit"];
 
 /**
- * The narrator's knowledge (DESIGN §6.11). The user's default (Settings → Narrator), a world's
+ * The narrator's knowledge (DESIGN §6.11). The user's default (the Narrator's knowledge and Narrator's secrets settings), a world's
  * default (`WorldDoc.narrator`) and a chat's own choice (`backend/chat-knowledge-prefs.ts`) all
  * take this shape; the chat's wins, then the world's.
  */

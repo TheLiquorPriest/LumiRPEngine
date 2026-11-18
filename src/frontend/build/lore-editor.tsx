@@ -1,12 +1,12 @@
 // Build → Lore (DESIGN §4.2): the entries, searchable by title, alias, topic, keyword and text, with
 // the lookup table and Index this text a tap away, and + New, which names a new entry; the lore index
 // of the world's books (each entry by its short id) with Build an index entry, which writes it into a
-// book the user picks, on their press only, for LRE to keep in sync until Settings → Lore stops it;
-// and the entry page: its title and text, how lookups find it (aliases, topics and keywords as chips,
-// then links, group and priority), the source (read-only; a copy an earlier build made of a World Info
-// entry says it is no longer read, its book entry being read live), and secrecy: who may read it, the
-// gate (with examples made of the world's names), whose own secret it is, and the helpers that may
-// read the secret, those whose output reaches the player not offered.
+// book the user picks, on their press only; and the entry page: its title and text, how lookups find it
+// (aliases, topics and keywords as chips, then links, group and priority), the source (read-only; a
+// copy an earlier build made of a World Info entry says it is no longer read, its book entry being
+// read live), and secrecy: who may read it, the gate (with examples made of the world's names), whose
+// own secret it is, and the audience that may read the secret, those whose output reaches the player
+// not offered.
 // Styles: the lore block of styles/forms.ts.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
@@ -71,7 +71,7 @@ export function LoreList(props: { worldId: string }) {
   );
   return (
     <div class="lre-build-page" data-lre-lore-list>
-      <PageHeader title="Lore" subtitle="Kept in the world. The engine's helpers read it, and the narrator gets the entries about where your character is in the Place section; the brief and the prose outline draw on the other public entries for its Outline." actions={add} />
+      <PageHeader title="Lore" subtitle="Kept in the world. Your agents read it when they search lore." actions={add} />
       {adding ? <NewItem worldId={draft.worldId} collection="lore" taken={new Set(Object.keys(doc.lore))} onDone={() => setAdding(false)} /> : null}
       <Section title="Tools" flush>
         <List>
@@ -83,7 +83,7 @@ export function LoreList(props: { worldId: string }) {
             chevron
             onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}
           />
-          <ListRow icon="book" title="World Info is read live" subtitle="The helpers and agents read your World Info books as they are now; nothing to copy or refresh. Settings → Lore picks which books they read." />
+          <ListRow icon="book" title="World Info is read live" subtitle="Your agents read your World Info books as they are now; nothing to copy or refresh." />
           <ListRow icon="scroll" title="Index this text" subtitle="Lore entries made from text you paste, each for you to review" chevron onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })} />
           <ListRow icon="lock" title="Secrecy in your World Info" subtitle="Move your books' secrets from LumiRPEngine's old fields to secret marks in their text, book by book, with a restore" chevron onClick={() => go(app, { view: "secrecy", worldId: draft.worldId })} />
         </List>

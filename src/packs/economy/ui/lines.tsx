@@ -1,6 +1,6 @@
 // Rows the money pages share: journal lines, an account's or a business's owners grouped by role,
 // Money's one filter bar, and the GM's edit of an entity's declared fields (on a page of their own,
-// each field one edit with its own Undo, as GM mode's entity page edits them).
+// each field one edit with its own Undo, as the World page's entity page edits them).
 
 import { useState } from "preact/hooks";
 import { isCorrection, OWNER_ROLE_LABELS, OWNER_ROLES, ROLE_RIGHTS, type JournalLine, type OwnerLine } from "../../../shared/finance";
@@ -98,7 +98,7 @@ export function TxnRows(props: { lines: readonly JournalLine[]; max: number; cur
 }
 
 /**
- * The GM's ✎ on an entity's declared fields, as GM mode's entity page edits them (typed by the
+ * The GM's ✎ on an entity's declared fields, as the World page's entity page edits them (typed by the
  * kind's definitions, each save one edit). `only` keeps the listed fields, in that order.
  */
 export function EntityFields(props: { controls: GmControls; entity: string; only?: readonly string[] }) {

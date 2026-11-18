@@ -1,7 +1,7 @@
 // The gear pack's `notWithYou` setting as Build edits it (ITEMS-SPEC §5.5, §11): how many of the player character's own things
 // that go about with them, and aren't with them now, the Gear section tells. The gear pack keeps it in its config and reads it
-// as RPE runs the pack, so this stays; the editors of the narrator's section guidance, which only the classic pipeline read, are
-// not drawn (R-50).
+// as RPE runs the pack, so this stays; the editors of the narrator's section guidance, which only the previous build's pipeline read,
+// are not drawn (R-50).
 
 import type { LintIssue } from "../../shared/lint";
 import { hasOwn, isRecord } from "../../shared/json";

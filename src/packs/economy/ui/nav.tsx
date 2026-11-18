@@ -1,8 +1,8 @@
 // Money's navigation (ORG-SPEC §5): the pages a party's money opens over its segments, the
 // navigator that opens them, and the pieces every page is built from. One set of pages serves Play
-// → Me → Money, an organization's Money tab in Orgs and GM mode: in Play each page rides the sheet
+// → Me → Money, an organization's Money tab in Orgs and the World page: in Play each page rides the sheet
 // stack as a `money` sheet naming whose money it is (the POV's account page as an `account` one),
-// and in GM mode the pages stack over the segments.
+// and on the World page the pages stack over the segments.
 
 import type { ComponentChildren } from "preact";
 import type { PanelId, EntityId } from "../../../shared/ids";
@@ -51,9 +51,9 @@ export interface HubNav {
   open(page: HubPage): void;
   /** Back one level, from this page to the one it was opened from (the segments under the first); nothing once this page isn't showing. */
   back(): void;
-  /** Leaves money for an organization's page or a panel: Play → Orgs, or in GM mode GM → Orgs. */
+  /** Leaves money for an organization's page or a panel: Play → Orgs, or on the World page its Orgs tab. */
   elsewhere(to: Elsewhere): void;
-  /** Where the pages show: Play's sheet stack, or GM mode's pages. */
+  /** Where the pages show: Play's sheet stack, or the World page's pages. */
   frame: "play" | "gm";
   /** What Back returns to, by name ("Accounts"), for its label; null when there's no name to give. */
   backLabel: string | null;

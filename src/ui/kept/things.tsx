@@ -1,7 +1,7 @@
-// GM mode's things browser, kept on the World page behind its spoiler gate (plan §14 l.1539; PlanChatUI-P6, -P7): today's
-// GM → Things (Here, By place, By owner, Find, a thing's page, a person's things, Select and the bulk bar, + Add, Tidy up and Keep
+// The World page's things browser, kept behind its spoiler gate (plan §14 l.1539; PlanChatUI-P6, -P7): today's
+// Things (Here, By place, By owner, Find, a thing's page, a person's things, Select and the bulk bar, + Add, Tidy up and Keep
 // in the world), over a kept App of its own for the chat (`app.ts`) whose call files read RPE's typed routes. The GM view's parts it
-// reads load as GM mode loaded them (`useGmParts`), again when the chat moves on. Every change is his own edit through the taps
+// reads load as the World page loaded them (`useGmParts`), again when the chat moves on. Every change is his own edit through the taps
 // route, sent in edits of at most `engine.maxEditOps` operations each, with one Undo for all of them; after one applies, a notice says
 // what it did with that Undo. The bounds its controls hold to are RPE's settings, read when it mounts. The World page shows it only
 // with its gate open (`things-page.tsx`), which loads the kept chunk (`chunk.ts`) that mounts it here.

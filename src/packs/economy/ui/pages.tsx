@@ -1,6 +1,6 @@
 // A party's money pages: which module draws a page, by its path's head; whether the POV's own
 // money holds what a page names (so a page opened from an organization's money opens as theirs,
-// with their controls); and what a page is called for Back's label in GM mode. A page its module
+// with their controls); and what a page is called for Back's label on the World page. A page its module
 // draws nothing for (its thing gone from the view, or its control no longer allowed) shows as gone.
 
 import type { FinanceView } from "../../../shared/finance";

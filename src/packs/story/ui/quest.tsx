@@ -2,7 +2,7 @@
 // stage and cue), what the POV has learned, its objectives, n of m done, and the hints earned at
 // its stage behind "Show a hint" (DESIGN §10): a puzzle stage earns one per wrong answer given there,
 // any other stage has its hints as soon as the track reaches it. Opening one is the player's own
-// doing, kept in the chat with its Undo, and only the opened ones reach the narrator. A track isn't
+// doing, kept in the chat with its Undo, and only the opened ones reach the agents. A track isn't
 // an entity, so opening the sheet observes nothing new.
 
 import { useApp } from "../../../frontend/app";

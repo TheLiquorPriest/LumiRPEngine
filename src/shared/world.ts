@@ -1358,7 +1358,7 @@ export interface WorldDoc {
   classifications: Record<FacetId, FacetDef>;
   /** Character minds (DESIGN §24.2): secrecy, the fidelity weights and thresholds, the author's pins and memory defaults; absent, the defaults (`worldMindsOf`). */
   minds?: WorldMindsConfig;
-  /** What the narrator knows in the world's chats (DESIGN §6.11), over the player's Settings → Narrator; a chat's own choice wins over it. Absent, none. */
+  /** What the narrator is given of the secrets in your lore in the world's chats (DESIGN §6.11), over the player's Narrator's knowledge and Narrator's secrets settings; a chat's own choice wins over it. Absent, none. */
   narrator?: NarratorView;
   /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */
   ruleset?: RulesetDef;

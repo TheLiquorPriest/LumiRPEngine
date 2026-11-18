@@ -1,7 +1,7 @@
 // Out of play (DESIGN §11): the money and organization actions a tap does at once, off screen, with
 // no message, no turn and no clock time, recorded on the head as a ✎ fix is, with its Undo. One table
-// marks them, each with its group; the group decides, by Settings → Narrator → Out-of-play actions,
-// whether the next turn's narrator is told of it (`by.told` on its fix, in the Outcome's words,
+// marks them, each with its group; the group decides, by the Tell the Author settings,
+// whether the Author is told of it at the next turn (`by.told` on its fix, in the Outcome's words,
 // recorded when it is done and never worked out again). Typed words or Send now still play the
 // action as a turn, and `buy` stays in the world: it is no entry here. The gear actions Play → Me →
 // Belongings sends (its things, and its hand-overs and changes of outfit) are entries too, applied at
@@ -9,7 +9,7 @@
 
 import type { ItemFix } from "./things";
 
-/** What an out-of-play action is about: which of Settings → Narrator → Out-of-play actions' defaults tells it. */
+/** What an out-of-play action is about: which of the Tell the Author settings' defaults tells it. */
 export type OffstageGroup = "accounts" | "payments" | "credit" | "investing" | "property" | "business" | "staff" | "members" | "structure" | "governance" | "things" | "handovers";
 
 export const OFFSTAGE_GROUPS: readonly OffstageGroup[] = ["payments", "credit", "property", "business", "staff", "members", "structure", "handovers", "accounts", "investing", "governance", "things"];
@@ -183,7 +183,7 @@ export function playsOffstage(action: string, req: { text?: string | undefined; 
   return mechanical || atOnceByDefault(action) || (req.offstage === true && offstageGroupOf(action) !== null);
 }
 
-/** Settings → Narrator → Out-of-play actions: whether each group is told to the next turn's narrator, and the amount from which a payment to someone else is. */
+/** The Tell the Author settings: whether each group is told to the Author at the next turn, and the amount from which a payment to someone else is. */
 export interface OffstageSettings {
   tell: Record<OffstageGroup, boolean>;
   /** A payment to someone else is told from this amount, in whole units of the chat world's money (0: every one); below it, it is bookkeeping. */
@@ -229,7 +229,7 @@ export function fixGroupOf(things: readonly ItemFix[]): OffstageGroup {
   return things.some((t) => t.do === "hand") ? "handovers" : "things";
 }
 
-/** A confirm step's Tell switch for the action it sends (DESIGN §11): null for one done in the story, else on or off as Settings → Narrator → Out-of-play actions presets it. */
+/** A confirm step's Tell switch for the action it sends (DESIGN §11): null for one done in the story, else on or off as the Tell the Author settings preset it. */
 export function tellPreset(action: string, params: Readonly<Record<string, unknown>>, settings: Readonly<OffstageSettings>, decimals: number): boolean | null {
   return atOnceByDefault(action) ? toldByDefault(action, params, settings, decimals) : null;
 }

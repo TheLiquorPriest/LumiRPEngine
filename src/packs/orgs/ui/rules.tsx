@@ -293,8 +293,8 @@ export interface PlayHost {
 /**
  * An editor's page: Back, its fields, why it can't be sent yet, when it plays, its button and, for
  * one that has one, its danger button. Naming the action it sends (`action`), one done at once, off
- * screen (DESIGN §11), it shows the Tell switch above its button, preset from Settings → Narrator →
- * Out-of-play actions until it is pressed; its setting goes to `onGo`.
+ * screen (DESIGN §11), it shows the Tell switch above its button, preset from the Tell the Author
+ * settings until it is pressed; its setting goes to `onGo`.
  */
 export function EditFrame(props: { name: string; title: string; subtitle?: string; onBack(): void; go: string; problem: string | null; busy: boolean; note: string; action?: OrgAction | null; onGo(tell?: boolean): void; danger?: { label: string; onClick(): void }; children: ComponentChildren }) {
   const view = useView();

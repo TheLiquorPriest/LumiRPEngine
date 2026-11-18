@@ -83,8 +83,8 @@ export interface SecretMarkInput {
 
 /**
  * How the narrator is told a mark (`renderMark` "marked"), as a turn resolves it from the prompt
- * registry's Secret marks texts (`narrator.mark.*` and `narrator.secret_marks`, Settings → Agents →
- * Prompts → Final output; `markWording`, `backend/prompts.ts`): `known` for a secret with holders kept
+ * registry's Secret marks texts (`narrator.mark.*` and `narrator.secret_marks`;
+ * `markWording`, `backend/prompts.ts`): `known` for a secret with holders kept
  * from everyone else, `kept` for one kept from some (or, with `everyone` as its names, from everyone
  * but its holders, none named), `both` for holders and some it is kept from. `{{text}}` is the mark's
  * text, `{{known}}` and `{{kept}}` the names, joined by commas.

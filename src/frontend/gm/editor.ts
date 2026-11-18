@@ -1,4 +1,4 @@
-// What GM mode's forms share once the truth is shown: the loaded GM view, the world's currency and
+// What the World page's forms share once the truth is shown: the loaded GM view, the world's currency and
 // one way to send an edit (one `lre.edit`: checked against what it touches, all or none, one fix
 // with its own Undo chip), after which the GM view says what it did, with that Undo: the chips the
 // edits themselves wrote, never whatever else landed meanwhile. The view is the open tab's parts

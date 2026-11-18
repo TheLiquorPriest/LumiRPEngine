@@ -157,7 +157,7 @@ export function ToggleField(props: { label: ComponentChildren; help?: ComponentC
  * names the field, so the reason is in sight though the field is folded away. A one-tap action's
  * page states what it does in its children, which is its confirmation. In Play, a page that names
  * the action it sends (`action`), one done at once, off screen (DESIGN §11), shows the Tell switch
- * above its button, preset from Settings → Narrator → Out-of-play actions until it is pressed; its
+ * above its button, preset from the Tell the Author settings until it is pressed; its
  * setting goes to `submit`, which sends it with the action.
  */
 export function ActionPage(props: { nav: HubNav; controls: HubControls; name: string; title: ComponentChildren; subtitle?: ComponentChildren; go: ComponentChildren; danger?: boolean; problem?: string | null; action?: ActionBody | null; submit(tell?: boolean): Promise<boolean>; children?: ComponentChildren }) {

@@ -410,7 +410,7 @@ export interface RecSession {
   transcript?: string;
   /** The transcript's length in characters, so a listing needs no read of it. */
   transcriptChars?: number;
-  /** When the transcript was last written (epoch ms), which Settings → Agents → Retention's age counts from; none on a record kept before it was noted. */
+  /** When the transcript was last written (epoch ms), which the stores' retention age counts from; none on a record kept before it was noted. */
   transcriptAt?: number;
 }
 
@@ -655,7 +655,7 @@ export interface Rec {
   agents?: RecAgent[];
   /**
    * An agent turn whose minds' memory and consolidation run first in the next turn's pre phase
-   * (Settings → Agents → Pipeline, before the next turn), whose pre events they are: this record
+   * (before the next turn), whose pre events they are: this record
    * holds none of them. Outside every hash but the tombstone's.
    */
   memoryNext?: true;
@@ -667,8 +667,8 @@ export interface Rec {
   finalEdits?: FinalEdit[];
   /**
    * Each part of the narrator's prompt the turn's final review saw, by part id, as the engine made it
-   * (`hashParts` of its text), so the next turn's review, scoped to what changed (Settings → Agents →
-   * Main agent → Final review), makes this one's edits again on a part that reads the same: outside
+   * (`hashParts` of its text), so the next turn's review, scoped to what changed, makes this one's
+   * edits again on a part that reads the same: outside
    * every hash but the tombstone's, read leniently (`finalPartsOf`), a damaged one costing only that.
    */
   finalParts?: Record<string, string>;

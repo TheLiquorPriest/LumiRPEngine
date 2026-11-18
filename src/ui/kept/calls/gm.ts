@@ -1,4 +1,4 @@
-// GM mode's reads kept on World, on RPE's typed routes (plan §14; PlanChatUI-P6, -P4 item 4): one part of the GM view at the chat's
+// The World page's reads, kept on RPE's typed routes (plan §14; PlanChatUI-P6, -P4 item 4): one part of the GM view at the chat's
 // head (`lre.gm.part`), the whole view's world parts where today's page asks for all of it (`lre.gm`), and a person's usual day as the
 // player character may know it or as the GM sees it, with whose routines this chat changed (`lre.routine`).
 

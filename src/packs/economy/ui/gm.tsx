@@ -18,7 +18,7 @@ import { HubPageView, pageLabel } from "./pages";
 const GM_ORGS = "orgs.orgs";
 
 /**
- * The GM pages as a stack (GM mode's `usePages` holds one page; money's go deeper: a thing, an
+ * The GM pages as a stack (the World page's `usePages` holds one page; money's go deeper: a thing, an
  * action), with its focus rules: opening a page focuses its Back, Back returns focus to what
  * opened the page, and Escape goes back one.
  */
@@ -57,7 +57,7 @@ function usePageStack() {
 }
 
 /**
- * One party's money in GM mode: what goes above it (Whose money in GM → Money), its segments, and
+ * One party's money on the World page: what goes above it (Whose money, on the Money tab), its segments, and
  * the pages opened over them, all in the page. An organization is opened in GM → Orgs; nothing
  * here leaves for a panel of Play.
  */

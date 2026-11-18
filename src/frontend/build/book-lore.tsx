@@ -441,7 +441,7 @@ function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions
       ) : null}
       {marks.length > 0 ? (
         <FormGroup title="Secret marks" aside={entry.whole ? <Badge tone="gm">Whole entry</Badge> : undefined}>
-          {entry.whole ? <p class="lre-build-note">Its whole text is one secret, so the whole entry is: the narrator is told it marked as a secret, or not at all, as the chat's narrator view says, and of the characters only those who know it have it in mind.</p> : null}
+          {entry.whole ? <p class="lre-build-note">Its whole text is one secret, so the whole entry is: the narrator is given it marked as a secret, or not at all, as the Narrator's knowledge and Narrator's secrets settings say, and of the characters only those who know it have it in mind.</p> : null}
           <ActionRows label="Secret marks">
             {marks.map((mark, i) => (
               <MarkRow key={`${i}:${mark.text}`} mark={mark} index={i} ctx={ctx} busy={props.busy} onMark={props.onMark} />
@@ -463,7 +463,7 @@ function EntryFields(props: { entry: LoreBookEntryView; doc: WorldDoc; functions
         </div>
       ) : (
         <FormGroup title={adding === "secret" ? "Make this entry secret" : "Add a secret line"}>
-          <p class="lre-build-note">{adding === "secret" ? "Its whole text becomes one secret mark, written into the entry in its book." : "The line goes at the end of the entry's text as a secret mark, written into its book."} The narrator is told a secret marked as one, or not at all, as the chat's narrator view says; of the characters, only those who know it have it in mind.</p>
+          <p class="lre-build-note">{adding === "secret" ? "Its whole text becomes one secret mark, written into the entry in its book." : "The line goes at the end of the entry's text as a secret mark, written into its book."} The narrator is given a secret marked as one, or not at all, as the Narrator's knowledge and Narrator's secrets settings say; of the characters, only those who know it have it in mind.</p>
           {adding === "add" ? <FieldInput spec={SECRET_LINE_SPEC} value={line} ctx={ctx} path={ctx.path} parent={{}} onChange={(next) => setLine(typeof next === "string" ? next : "")} /> : null}
           <MarkNamesFields names={names} ctx={ctx} problem={shown} onChange={setNames} />
           <div class="lre-form-pins-actions">

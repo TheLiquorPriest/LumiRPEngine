@@ -243,7 +243,7 @@ export function isThingFact(v: unknown): v is ThingFact {
 /**
  * What the Curator owns of a reply on an agent chat (ITEMS-SPEC I9, §6.4): the thing facts, a
  * purchase's goods, a walk-on person and a place made in play. While it runs, the reply's read
- * proposes none of them; prompt-only, it is classic's read of these alone.
+ * proposes none of them.
  */
 export const CURATOR_FACTS: readonly string[] = [...THING_FACTS, "purchase", "spawn", "place_make"];
 

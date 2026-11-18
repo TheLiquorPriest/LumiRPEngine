@@ -3,7 +3,7 @@
 // delta whose `base` is not the held `rev` (or whose paths do not resolve) is discarded and the
 // view is resynced; while a resync is outstanding every delta is discarded. Listener
 // notifications are coalesced, so a burst of deltas renders once. A request waits for its answer
-// as long as the user's Engine requests timeout (Settings → Timeouts): the hello's answer carries
+// as long as the user's request timeout allows: the hello's answer carries
 // it, and so does every settings answer, so a change applies to the next request.
 //
 // A hello or resync (a sync) lasts until its view arrives, not just its answer: Lumiverse drops

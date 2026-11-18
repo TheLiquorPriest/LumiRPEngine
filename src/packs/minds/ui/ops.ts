@@ -51,7 +51,7 @@ export function deleteOp(entity: EntityId, part: "note" | "commitment" | "plan",
 /**
  * Sets what they mean to do now and how they go about it, both as the form holds them: blank text
  * and no approach clear the intent. Refused (null) when the text is longer than `max`, the user's
- * length for it (Settings → Minds → Lengths).
+ * length for it.
  */
 export function intentOp(entity: EntityId, draft: MindIntent, max: number = MIND_LENGTH_DEFAULTS.gmIntent): EditOp | null {
   const text = draft.text.trim().replace(/\s+/g, " ");
