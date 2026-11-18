@@ -22,7 +22,7 @@ import type { Lane, StoreState } from "../../store/types";
 import { readOperation, runOperations } from "../apply";
 import { readingOr } from "../fixed";
 import type { Call, Reply, ToolSpec } from "../kit";
-import { find, isUnread, itemOptions, minorUnits, missed, missedData, named, type OpContext, tellUnread, type Unread } from "../ops";
+import { find, isUnread, itemOptions, minorUnits, missed, missedData, named, type OpContext, severalText, tellUnread, type Unread } from "../ops";
 import { openAuthored } from "../ops-values";
 import type { Found, Reading, Want } from "../reading";
 import { PROVENANCE_PROPERTIES } from "../source";
@@ -302,7 +302,7 @@ export function foundIn(r: Reading, field: string, said: JsonValue | undefined, 
   if (typeof said !== "string" || said.trim() === "") return { line: "needs_field", fields: { field } };
   const f = r.find(said, want);
   if ("id" in f) return f;
-  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: textOf(f.several.map((x) => `${x.name} [${x.id}]`)) } };
+  if (f.several.length > 0) return { line: "several", fields: { field, name: f.name, several: severalText(f.several) } };
   return { line: "unknown", fields: missed(r.lines, field, f, want), data: missedData(f) };
 }
 

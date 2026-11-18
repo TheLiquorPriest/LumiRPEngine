@@ -213,11 +213,14 @@ export class Reading {
    * What `said` names, as wanted: an id, a ref (`entity:<id>`, `place:<id>`), a whole name, a name
    * with a note after it ("Bram (the innkeeper)", "Wren: soaked through"), or words that are all
    * words of one name; a thing also as today's things model reads words ("the fridge", "Danny's
-   * keys"). `gone` counts what was taken out of the world.
+   * keys"). `gone` counts what was taken out of the world. `fits`: where the caller knows the kind it
+   * takes (an action's reference to a vehicle, an organization), the name is looked up among that kind
+   * alone, so a place and a company of one name are not both found; what goes by that name otherwise
+   * is said as `other`.
    */
-  find(said: string, want: Want, gone = false): Found | Missed {
+  find(said: string, want: Want, gone = false, fits?: (id: string) => boolean): Found | Missed {
     const trimmed = said.trim();
-    const all = this.candidates(want, gone);
+    const all = this.candidates(want, gone).filter((c) => fits === undefined || fits(c.id));
     const bare = trimmed.replace(/^(?:entity|place|track|quest):/, "");
     const lower = bare.toLowerCase();
     const rules: ((c: Candidate) => boolean)[] = [

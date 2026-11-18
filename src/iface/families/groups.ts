@@ -128,7 +128,8 @@ const whoMay = readTool({
   required: ["org", "power"],
   example: { org: "The Lamplighters", power: "org.govern", who: "bram" },
   read(r, args, reply) {
-    const group = foundIn(r, "org", args.org, "entity");
+    // The field names an organization: it is looked up among them alone, so a place or a thing of the same name is not found with it.
+    const group = foundIn(r, "org", args.org, "organization");
     if (isUnread(group)) return group;
     const power = String(args.power).trim().toLowerCase();
     if (!isOrgPower(power)) return { line: "unreadable", fields: { field: "power", value: JSON.stringify(args.power), choices: textOf(ORG_POWERS) } };

@@ -19,7 +19,7 @@ import { type Call, oneOf, Reply, SEARCH_KINDS, type StateKind, TEXT, type ToolS
 import { baseOf, isPlaceFactPart, PLACE_FACT_PARTS, PLACES_DEFAULTS, placeAtState, placeSliceOf, sourcesNow, sourcesOf, withPlaceLines } from "../places";
 import { queryQuests, searchedQuests } from "../quests/query";
 import { clockText, listDue, timeFrom } from "./ops-time";
-import { missed, missedData, numberArg, unknownFields } from "./ops";
+import { missed, missedData, numberArg, severalText, unknownFields } from "./ops";
 import { type Found, isFound, nearestOf, Reading, saysUnreadable, type Unreadable } from "./reading";
 import { textOf } from "./texts";
 import { commit, Draft } from "./writing";
@@ -45,7 +45,7 @@ export function foundOr(reading: Reading, reply: Reply, field: string, said: Jso
   }
   const r = reading.find(said, want);
   if (isFound(r)) return r;
-  if (r.several.length > 0) reply.line("several", { field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) });
+  if (r.several.length > 0) reply.line("several", { field, name: r.name, several: severalText(r.several) });
   else reply.line("unknown", missed(reading.lines, field, r, want)).refusedWith({ field, ...missedData(r) });
   reply.fail();
   return null;

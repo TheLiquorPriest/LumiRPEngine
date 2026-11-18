@@ -89,12 +89,20 @@ function asText(said: JsonObject | JsonValue[]): string {
 function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue): JsonValue | Unread | undefined {
   const field = `params.${name}`;
   if (said === null || said === "") return undefined;
+  // The kind the argument takes is known from the action: a name is looked up among that kind alone (its `ref`, its selector), so a
+  // company and a place of one name are not both found; a place fits a reference that names no kind.
+  const w = o.draft.w;
+  const fits = (id: string): boolean => {
+    const e = own(w.state.entities, id);
+    if (e === undefined) return def.ref === undefined && def.of === undefined;
+    return (def.ref === undefined || kindIs(o.reading.registry, w.world, e.kind, def.ref)) && (def.of === undefined || selectorMatches(o.reading.registry, w.world, w.state, def.of, id));
+  };
   switch (def.type) {
     case "ref": {
       if (typeof said !== "string") return notAs(o, field, said, "name");
       // A place, someone or something of the kind it takes, or either where it names no kind.
       const want: Want = def.ref === "place" ? "place" : def.ref === undefined ? "point" : "entity";
-      const found = find(o, field, want, false, said);
+      const found = find(o, field, want, false, said, def.ref === "place" ? undefined : fits);
       if (!isUnread(found)) return found.id;
       // As the engine reads a reference that names no one (`prepare`): a place it names, which the action's effects take as such (a place bought becomes a property).
       const place = want === "entity" && found.line === "unknown" ? find(o, field, "place", false, said) : found;
@@ -107,7 +115,7 @@ function paramValue(o: OpContext, name: string, def: ParamDef, said: JsonValue):
       const ids: string[] = [];
       for (const one of names) {
         if (typeof one !== "string" || one.trim() === "") continue;
-        const found = find(o, field, "entity", false, one.trim());
+        const found = find(o, field, "entity", false, one.trim(), fits);
         if (isUnread(found)) return found;
         ids.push(found.id);
       }

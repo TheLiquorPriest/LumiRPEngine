@@ -9,7 +9,7 @@ import type { Lane, StoreState } from "../store/types";
 import type { ItemOpOptions } from "../engine/thing-ops";
 import type { Rejection } from "../engine/registry";
 import type { Call, Reply } from "./kit";
-import { type Found, isFound, type Missed, nearestOf, type Reading, type Want } from "./reading";
+import { type Found, isFound, type Missed, type Near, nearestOf, type Reading, type Want } from "./reading";
 import { type Fields, type Lines, textOf } from "./texts";
 import type { Draft } from "./writing";
 import type { Provenance } from "./source";
@@ -142,12 +142,20 @@ export function missedData(r: Missed): JsonObject {
   return { near: r.near.map((x) => ({ id: x.id, name: x.name, what: x.what })) };
 }
 
-/** The name an argument gives (or `said`, one item of a list argument), found as wanted on the draft; or what says it is not there (with the near matches) or fits several. */
-export function find(o: OpContext, field: string, want: Want, gone = false, said: JsonValue | undefined = o.args[field]): Found | Unread {
+/** The things a name fits, as an answer lists them so the caller can say which: each by its name, its id and what it is (a place, a company). */
+export function severalText(several: readonly Near[]): string {
+  return textOf(several.map((x) => `${x.name} [${x.id}] (${x.what})`));
+}
+
+/**
+ * The name an argument gives (or `said`, one item of a list argument), found as wanted on the draft, among what `fits` where the caller
+ * knows the kind it takes; or what says it is not there (with the near matches) or fits several, each by its kind and name.
+ */
+export function find(o: OpContext, field: string, want: Want, gone = false, said: JsonValue | undefined = o.args[field], fits?: (id: string) => boolean): Found | Unread {
   if (typeof said !== "string" || said.trim() === "") return { line: "needs", fields: { n: o.n, op: o.op, fields: [field] } };
-  const r = o.reading.find(said, want, gone);
+  const r = o.reading.find(said, want, gone, fits);
   if (isFound(r)) return r;
-  if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: textOf(r.several.map((x) => `${x.name} [${x.id}]`)) } };
+  if (r.several.length > 0) return { line: "several", fields: { n: o.n, op: o.op, field, name: r.name, several: severalText(r.several) } };
   const later = typeof said === "string" ? o.later.findIndex((a) => a.op === "spawn" && typeof a.name === "string" && a.name.trim().toLowerCase() === said.trim().toLowerCase()) : -1;
   if (later >= 0) return { line: "not_yet", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want), later: o.n + 1 + later }, want, data: missedData(r) };
   return { line: "unknown", fields: { n: o.n, op: o.op, ...missed(o.call.lines, field, r, want) }, want, data: missedData(r) };
