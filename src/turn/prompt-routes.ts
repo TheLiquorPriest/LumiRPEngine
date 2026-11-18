@@ -1,5 +1,5 @@
 // The Prompt page's routes (plan §4.8, §14): the preset's prompt map as found in a turn's prompt (the
-// chat's newest kept, or one named), with whether its text could be told apart, Lumiverse's own clipping
+// newest kept on the chat's path, or one named, read in the session it played in), with whether its text could be told apart, Lumiverse's own clipping
 // inside the window and the old engines' blocks the preset still holds; each turn's notices and front,
 // newest first, a page as long as the turn list's settings say; and his edits to the map. Showing and
 // editing are RPH's (`promptMap.show`, `promptMap.edit`): nothing here touches the stored map, and each
@@ -39,10 +39,22 @@ function oldBlocks(layout: RawLayout | null): { kind: "block" | "outlet"; name: 
 }
 
 export function promptRoutes(turns: Turns) {
-  /** The scope RPH reads a turn's kept prompt in: the session the turn played in, where one is named. A turn of another chat is not there; a joined one is answered as a fact. */
-  const scopeOf = (user: string, chat: string, turn: string | undefined): Scope => {
-    if (turn === undefined) return { user, chat, session: NO_SESSION };
-    const row = turns.store.user(user).turn(turn);
+  /**
+   * The scope RPH reads a turn's kept prompt in: the turn named, or where none is, the newest turn on the chat's path whose prompt RPH
+   * found its slices in; each with the session it played in. A turn of another chat is not there; a joined one named is answered as a fact.
+   */
+  const scopeOf = (user: string, chat: string, turn: string | undefined): Scope & { turn: string } => {
+    const store = turns.store.user(user);
+    if (turn === undefined) {
+      const path = store.chat(chat) === null ? [] : store.path(chat);
+      for (let at = path.length - 1; at >= 0; at--) {
+        const newest = path[at]?.turn ?? null;
+        const run = newest === null || store.turn(newest)?.joined !== null || turns.prompts.located(user, newest) === null ? null : turns.runs.record(user, newest);
+        if (newest !== null && run !== null) return { user, chat, session: run.session, turn: newest };
+      }
+      throw new RouteError(404, `RPE keeps no turn's prompt for chat ${chat}.`);
+    }
+    const row = store.turn(turn);
     if (row !== null && row.chat === chat && row.joined !== null) throw new JoinedTurnError(turn, row.joined);
     const run = turns.runs.record(user, turn);
     if (row === null || row.chat !== chat || run === null) throw new RouteError(404, `Chat ${chat} has no turn ${turn}.`);
@@ -50,10 +62,10 @@ export function promptRoutes(turns: Turns) {
   };
 
   /** The map as found in the turn's prompt, with what RPE kept of its request beside it. */
-  const shown = async (user: string, chat: string, turn: string | undefined) => {
-    const map = await turns.harness.promptMap.show(scopeOf(user, chat, turn));
-    if (map === undefined) throw new RouteError(404, turn === undefined ? `RPE keeps no turn's prompt for chat ${chat}.` : `RPE no longer keeps the prompt of turn ${turn}.`);
-    const carried = turns.prompts.carried(user, map.turn);
+  const shown = async (scope: Scope & { turn: string }) => {
+    const map = await turns.harness.promptMap.show(scope);
+    if (map === undefined) throw new RouteError(404, `RPE no longer keeps the prompt of turn ${scope.turn}.`);
+    const carried = turns.prompts.carried(scope.user, map.turn);
     return {
       turn: map.turn,
       preset: map.preset,
@@ -85,7 +97,7 @@ export function promptRoutes(turns: Turns) {
       query: turnQuery,
       reply: promptShownReply,
       joined: true,
-      handle: ({ user, params, query }) => shown(user, params.chat, query.turn),
+      handle: ({ user, params, query }) => shown(scopeOf(user, params.chat, query.turn)),
     }),
     route({
       method: "GET",
@@ -117,9 +129,10 @@ export function promptRoutes(turns: Turns) {
       reply: promptShownReply,
       joined: true,
       handle: async ({ user, params, query, body }) => {
-        const edited = await turns.harness.promptMap.edit(scopeOf(user, params.chat, query.turn), body, { id: PLAYER, definition: PLAYER });
+        const scope = scopeOf(user, params.chat, query.turn);
+        const edited = await turns.harness.promptMap.edit(scope, body, { id: PLAYER, definition: PLAYER });
         if (edited.status === "refused") throw new RouteError(400, edited.words);
-        return shown(user, params.chat, query.turn);
+        return shown(scope);
       },
     }),
   ] as const;
