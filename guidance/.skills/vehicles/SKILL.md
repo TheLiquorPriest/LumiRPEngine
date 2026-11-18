@@ -17,8 +17,8 @@ A vehicle that moves takes everyone and everything aboard with it. Move the vehi
 ## A journey
 
 1. Find the way and how long it takes: the world's places are joined by paths, each with its travel mode and time. Search for the route tool with `tool_search` ("route").
-2. Drive it with `vehicles_drive` (found with `tool_search`): the vehicle, where it arrives, who drives and who rides. It burns the fuel, parks the vehicle there and brings its driver and riders with it, so do not also `move` the vehicle or anyone aboard.
-3. Pass the time the journey took (the skill `time` says what to do with what that brings due). The drive does not pass it.
+2. Drive it. The action `drive` (`vehicle`, `to`; `who` is the driver), carried out with the `world_apply` operation `act`, is the journey as the engine plays it: the vehicle arrives with everyone aboard, and the answer gives the minutes the way takes. `vehicles_drive` (found with `tool_search`) records the same journey when you name the driver and the riders yourself or know the fuel left, the miles and the hours. Either way, do not also `move` the vehicle or anyone aboard.
+3. Pass the time the journey took (the skill `time` says what to do with what that brings due). Neither the action nor the tool passes it.
 4. If the journey was the scene (a chase, a breakdown, a talk on the road), the vehicle is the place: put people in their seats and keep the road outside as where it is.
 
 ## Where it is left
@@ -35,7 +35,7 @@ A vehicle is bought like anything costly: one `pay` operation that names it as t
 
 ## Harm
 
-Damage, wear, repair and fuel are the vehicle's condition. Change it with the condition tools (find them with `tool_search`), and say what did it. Refuelling, a repair and a service are also actions of the engine's (`refuel`, `repair_vehicle`, `service_vehicle`), carried out with the `world_apply` operation `act`; each gives its own minutes, which you pass with `pass_time`.
+Damage, wear, repair and fuel are the vehicle's condition. Change it with the condition tools (find them with `tool_search`), and say what did it. Refuelling, a repair and a service are actions of the engine's too (`refuel`, `repair_vehicle`, `service_vehicle`, each with the `vehicle`), carried out with `act`; each answer gives its own minutes, which you pass with `pass_time`. `world_query` at `ruleset` lists every action the world has. A requirement that does not hold (the vehicle is not here) is told in the answer, and the action is carried out all the same (`SIMULATION.md`).
 
 ## What a tool tells you
 
