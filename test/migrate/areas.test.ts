@@ -101,7 +101,7 @@ describe("a turn's area as LumiAH reads it", () => {
           });
           if (fields === null) throw new Error("the branch was migrated");
           expect(shipped.template(MIGRATED_PART).render(fields).text.trimEnd().split("\n")).toEqual([
-            "It was played by the earlier build's harness engine; 1 of its turns were carried, each with what it changed, 1 of them shared with the chat it was branched from.",
+            "It was played by the earlier build's harness engine, and its 1 turn(s) were carried, each with what it changed, 1 of them shared with the chat it was branched from.",
             "Mind files from the earlier build, on each character's record word for word, not yet filed:",
             `- ${PEOPLE.ada.name}: core.md, memory.md`,
             `- ${PEOPLE.bo.name}: profile.md`,

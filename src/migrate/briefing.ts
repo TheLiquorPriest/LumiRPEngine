@@ -67,7 +67,8 @@ export function chatCarried(input: { report: MigrationReport; db: Database; s: U
 
 /** The fields of `.prompts/migrated.md`. A part with nothing in it is left out, so the layout shows nothing of it. (A type, not an interface, so it is a template's fields.) */
 export type MigratedFields = {
-  played?: { engine: string; turns: number; shared?: { turns: number } };
+  /** The engine that played it; and how many turns its path holds, with how many it shares with the chat it was branched from, where it holds any. */
+  played?: { engine: string; carried?: { turns: number; shared?: { turns: number } } };
   marked?: true;
   characters?: { items: { name: string; files: { ".": string[] } }[] };
   story?: { beats: number; struck: number; futures: number; castings: number };
@@ -88,7 +89,7 @@ export function migratedChat(input: { db: Database; store: Store; user: string; 
   const { beats, struck, futures, castings } = c.story;
   const story = beats + struck + futures + castings > 0 ? { beats, struck, futures, castings } : undefined;
   return {
-    ...(c.engine !== null ? { played: { engine: c.engine, turns: c.turns, ...(c.shared ? { shared: { turns: c.shared.turns } } : {}) } } : {}),
+    ...(c.engine !== null ? { played: { engine: c.engine, ...(c.turns > 0 ? { carried: { turns: c.turns, ...(c.shared ? { shared: { turns: c.shared.turns } } : {}) } } : {}) } } : {}),
     ...(c.marked ? { marked: true } : {}),
     ...(c.characters.length > 0 ? { characters: { items: c.characters.map((p) => ({ name: p.name, files: { ".": p.files } })) } } : {}),
     ...(story !== undefined ? { story } : {}),

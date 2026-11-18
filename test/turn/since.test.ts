@@ -348,7 +348,7 @@ describe("what has happened in the chat since the last turn", () => {
     await settledTurn(b, await play(b, "normal", "I climb the stairs."));
     await settledTurn(b, await play(b, "normal", "I wait."));
     expect(sent(b, 0)).toContain(CARRIED);
-    expect(sent(b, 0)).toContain("It was played by the earlier build's agents engine; 3 of its turns were carried, each with what it changed.");
+    expect(sent(b, 0)).toContain("It was played by the earlier build's agents engine, and its 3 turn(s) were carried, each with what it changed.");
     expect(sent(b, 0)).toContain("- Wren Hale: core.md");
     expect(sent(b, 1)).not.toContain(CARRIED);
   });
