@@ -1,29 +1,13 @@
-# LumiRPEngine user guide
+# RPE user guide
 
-> **This is the previous build's guide.** It describes that build's own drawer (its Play, GM, Build and Settings modes), its engine-first way of playing a turn and its Settings pages. RPE is a different application, and where this guide and RPE's pages differ, RPE's pages are right. For RPE, start at the [README](../README.md): its pages are in [Install and run](install.md#the-pages), how a turn runs and how its agents behave is in [How behaviour lives in files](behaviour.md), every setting is in [Settings](settings.md), and a world is in [Worlds in RPE](world.md).
->
-> **What still applies.** The engine's own rules and panels, which RPE keeps: what the play panels show and do (**Play**, **Time controls**), the realism levels, routines and schedules, how checks are decided, and how a world is built (**Authoring**).
->
-> **What does not.** These sections describe the previous build's own engines and steps, which RPE does not have: **Swipes, edits and branches** (RPE's swipes and edits are in the composer's **Swipe** control and on the Turns page), **GM mode**'s Assistant, Live and Workspace, **Model use**, **Character minds**, **Extraction modes**, **The Context inspector**, **Your agent's MCP server** and **Troubleshooting** ([RPE's is here](troubleshooting.md)). Read the rest with these changes:
->
-> | This guide says | In RPE |
-> |---|---|
-> | The drawer's modes Play, GM, Build and Settings | The pages of RPE's tab: **Play**, **Build**, **World**, **Places**, **Quests**, **Cast**, **Story**, **Settings** and the rest |
-> | GM mode's World, Places, Things, Story, Minds, Routines, Orgs and Money | The **World**, **Places**, **Quests**, **Cast** and **Story** pages, and the things browser on **World**, each behind the spoiler gate |
-> | **Settings →** a page, **GM → This chat** | RPE's **Settings** page, a setting at a time, for every chat or for this chat |
-> | The helper model, the steps, the main agent | The **Connections** and **Agents** pages |
-> | **Re-narrate**, **Retry**, **Diagnostics** | Swipe with a line of feedback; send again; **Settle now** on the Turns page; the log on the **Runtime** page |
-> | The Context inspector | **What the Author was given** on a turn's page, and the **Prompt** page |
-> | The status line and the pill | The HUD in the chat (a pill on a desktop, a status line above the composer on a phone) |
-> | The GM assistant, `lumirpengine` and the MCP server | Not in this build; they come with a later one |
-
-This guide is for two kinds of people: players, who want to chat in a world that remembers, and authors, who build those worlds. If you only want to play, read the first part and dip into the rest when you need it. If you are installing for the first time, start with the [README](../README.md).
+This guide is for two kinds of people: players, who want to chat in a world that remembers, and authors, who build those worlds. It follows the order you meet RPE in: a chat first, then its pages, then building worlds and running RPE. If you only want to play, read the first part and dip into the rest when you need it. To install RPE, start with the [README](../README.md) and [Install and run RPE](install.md).
 
 - [How RPE works](#how-rpe-works)
-- **Playing:** [Play](#play) · [GM mode](#gm-mode) · [Swipes, edits and branches](#swipes-edits-and-branches) · [Time controls](#time-controls) · [Realism](#realism)
-- **Tuning:** [Model use](#model-use) · [Character minds](#character-minds) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
+- **Playing:** [Playing in a chat](#playing-in-a-chat) · [The Play page](#the-play-page) · [Time, needs and routines](#time-needs-and-routines) · [Realism](#realism) · [How checks are decided](#how-checks-are-decided) · [Swipes, edits, deletes and branches](#swipes-edits-deletes-and-branches)
+- **The story and what feeds it:** [The world's record, and who may see what](#the-worlds-record-and-who-may-see-what) · [Lore](#lore) · [The prompt and its map](#the-prompt-and-its-map)
+- **The agents:** [Files, agents, rules and skills](#files-agents-rules-and-skills) · [Models and connections](#models-and-connections) · [Jobs and sessions](#jobs-and-sessions)
 - **Building:** [Authoring](#authoring)
-- [Troubleshooting](#troubleshooting)
+- **Running RPE:** [Settings, storage and the runtime](#settings-storage-and-the-runtime) · [What is not in this build](#what-is-not-in-this-build) · [When something is wrong](#when-something-is-wrong)
 
 ## How RPE works
 
