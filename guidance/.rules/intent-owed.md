@@ -1,5 +1,6 @@
 ---
 description: Reminds the Author, as the calls of a message come back, when it has written no intent record for this turn and its reply has not gone out, so that the record still comes before the reply. `TURN.md` is the one home of what the intent record is and when it is written; this only reminds. The header's group `unreleased` keeps it from speaking once the reply is out.
+title: No intent record yet for this turn
 agents: [author]
 needs: TURN
 fact: turn.without.intent(unreleased) > 0

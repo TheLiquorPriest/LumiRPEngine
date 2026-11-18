@@ -1,5 +1,6 @@
 ---
 description: Reminds the Author, as its run is about to end, when it has written no intent record for this turn and nothing has reminded it yet, so that the one more call it is given can write the record. `intent-owed` says the same as the calls of a message come back; whichever says it first in a run, the other keeps quiet (the fact counts 0 once a rule that names it was said). Where the reply has gone out, it asks for the record alone. `TURN.md` is the one home of what the intent record is and when it is written; this only reminds.
+title: The turn is ending with no intent record
 agents: [author]
 needs: TURN
 fact: turn.without.intent > 0
