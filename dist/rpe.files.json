@@ -1,5 +1,5 @@
 {
-  "build": "aa4a6d28",
+  "build": "dcf1d93b",
   "files": {
     "guidance-harness/.hooks/examples/check-source.sh": "01d3b0b7afd186aaa7e50ae8d919df0b934253c7629fb16004de8638aded683f",
     "guidance-harness/.hooks/examples/hooks.yml": "1b1e09469e866c2e93498cb1262b4108bbd845c1a89492611cb66efef5e6791d",
@@ -151,7 +151,7 @@
     "guidance/.rules/engine-silent.md": "200750a1d339f77474dfd2b526e2ee69abaed0d038e577199a2bd26f68666406",
     "guidance/.rules/examples/banned-phrases.md": "8b2c4b63d6de184f3d942891b4bfcd21f57fdbfc3fe6f1256fca6eddf6506292",
     "guidance/.rules/examples/intent-missing.md": "a245c200b895b816d90c02dc3534175e7f7c3da44e95132ccb61176673b9e86a",
-    "guidance/.rules/examples/limits-left.md": "bcfdf231e5c46eeddf73e65f0407ac7e53be3be4bf5357387b01a2dcf1e45177",
+    "guidance/.rules/examples/limits-left.md": "ee8a5e66931959ad1cacabfefb1eec56e0b6980a94ebad244d45a9bd24aa0ee1",
     "guidance/.rules/examples/memory-nudge.md": "19bc99a854ca562f52c51b2e44c808a4520b1f80d924a6597de051858e2a484f",
     "guidance/.rules/examples/no-player-voice.md": "8ec039419cfb6e240886cb1a4d8ed13e3059354e63c911056a8357d8d445b6b2",
     "guidance/.rules/examples/scene-too-long.md": "77d644fdc9abd864137dde7554e94726364ca8a4649f17e50ceb7036e7b721a5",
@@ -313,10 +313,10 @@
     "guidance/chat-defaults/TURN.md": "b3e3f980c39f9663459465506ecd352c80d311e31da182e9f1f1376eeca27d45",
     "guidance/chat-defaults/WORLD.md": "77aff17066410f92bfb51e9cdb35238aa0c06a9ec6a6a05bd730174870fa342a",
     "guidance/chat-defaults/WRITING.md": "c3ac2e9bd291ddd3f4cbdb46a2aa036da01d2f4428354d5d421ef3143ecbb85b",
-    "rpe.js": "faf17dad72f33e57726a0e98251b248fed35d76fd091e31f353bad233a91d1ce",
-    "ui/chunk-mnw3vx1g.js": "d360657c7fe68cc4ee60aa512fd29e122a2d4ff26ecd48bc325712aa37976c86",
-    "ui/chunk-qae2yq16.js": "02f1edbe6dab76a3cc27b4322cfc8dd4c6350d7cd12097cd0496b08ea2e812b1",
+    "rpe.js": "010bea01ab334fe58e01f0e83fe67c31a58f539877ca8b7709e73a6f770f9012",
+    "ui/chunk-9zr48jby.js": "76bb8f19f52beaf865b068fbedcb0f4b168f843ab19376519fb00da9b54e1f99",
+    "ui/chunk-k9xzda17.js": "d3810074c8f7603469ab5246843747882823207fd7465442b016cd1b44ee4528",
     "ui/chunk-wfn4t7fp.js": "e2e54f683cfffd951c17a85b53ec0b217d39266a137711c9f11d68af5380805f",
-    "ui/index.html": "02c1933de7f4e0e9336157840f0c4912b23d009dfc773f5fb5e68cc00c06034a"
+    "ui/index.html": "58e03bca6be16ef5ff1d92ece9386e23181f2937f0c98187a3eed69937315053"
   }
 }

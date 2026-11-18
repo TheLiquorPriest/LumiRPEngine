@@ -252595,7 +252595,15 @@ var chatsReply = shape.named("ChatsReply", "The chats of the user RPE belongs to
     world: field7(shape.yesNo(), "Whether RPE's store has a world for it.")
   })))
 }));
-var turnRow = shape.named("TurnRow", "A turn as a chat's list shows it.", shape.object(rowFields2));
+var turnRunRow = shape.named("TurnRunRow", "One run of a turn as the list gives it: its place among the turn's runs, its kind, where it stands, why its reply failed when it did, when its moments happened (its reply released among them) and what it spent.", shape.object({
+  nth: field7(N9, "Its place among the turn's runs, from 1."),
+  kind: runKind,
+  status: runState,
+  error: field7(nullable7(replyError), "Why the reply failed, when it did."),
+  timings: moments,
+  usage: field7(usage, "What this run alone spent: model calls and tokens.")
+}));
+var turnRow = shape.named("TurnRow", "A turn as a chat's list shows it: its newest run's kind and status, its reply's times, what all its runs spent, and each of its runs in its own words.", shape.object({ ...rowFields2, runs: field7(shape.list(turnRunRow), "Each of its runs, the first first: the run that answered is the latest that is not a Settle now run.") }));
 var turnsReply = shape.named("TurnsReply", "A chat's turns, newest first.", shape.object({ turns: shape.list(turnRow), more: field7(shape.yesNo(), "Older turns remain.") }));
 var notGiven = shape.named("NotGiven", "Something a run's lead was not given, as a fact its briefing told: pictures its model does not take, or parts that are neither text nor a picture, with the messages of the prompt that held them; or a part of the briefing that could not be made, with why.", shape.union(shape.object({ what: shape.oneOf("pictures", "parts"), messages: field7(shape.list(N9), "The messages of the prompt that held them, by place from 0."), count: N9 }), shape.object({ what: shape.oneOf("world-state", "on-stage"), error: field7(T17, "Why it could not be made.") })));
 var runShown = shape.named("RunShown", "One run of a turn: its first, or a continue of it, which runs the turn again under a run id of its own; or a Settle now run on it.", shape.object({
@@ -253675,7 +253683,7 @@ function turnRoutes(deps) {
       path: "/api/v1/chats/:chat/turns",
       access: "page",
       group: "turns",
-      does: "A chat's turns, newest first, each with what its runs spent together; `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.",
+      does: "A chat's turns, newest first, each with what its runs spent together and each of its runs by itself (its kind, where it stands, its error, its moments and its own spend); `before` is a turn's id, and older ones follow it. The settings `turns.page` and `turns.maxPage` give a page's length.",
       query: {
         limit: shape.optional(shape.whole({ least: 1 }), "How many turns to give: the setting `turns.page` when left out, and at most `turns.maxPage`."),
         before: shape.optional(shape.turnId(), "A turn's id: the turns older than it are given.")
@@ -253688,7 +253696,11 @@ function turnRoutes(deps) {
         if (query5.before !== undefined)
           notJoined(user, params.chat, query5.before);
         const kept4 = turns.runs.ofChatKept(user, params.chat, limit5 + 1, query5.before);
-        return { turns: kept4.slice(0, limit5).map((r) => summary(user, params.chat, r)), more: kept4.length > limit5 };
+        const rowOf6 = (r) => ({
+          ...summary(user, params.chat, r),
+          runs: turns.runs.ofTurn(user, r.turn).map((run2, i) => ({ nth: i + 1, kind: run2.kind, status: run2.status, error: run2.error, timings: momentsOf(run2), usage: run2.usage ?? NO_USAGE2 }))
+        });
+        return { turns: kept4.slice(0, limit5).map(rowOf6), more: kept4.length > limit5 };
       }
     }),
     route({
@@ -268631,4 +268643,4 @@ if (Bun.isMainThread)
     stopped,
     fetch: (url2, init) => fetch(url2, init),
     invoked: invokedAs(process.execPath, Bun.main)
-  }, { version: "aa4a6d28", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });
+  }, { version: "dcf1d93b", areas: compose().areas, appFile: Bun.main, host: { platform: process.platform, uid: process.getuid?.() ?? null, bun: process.execPath } });

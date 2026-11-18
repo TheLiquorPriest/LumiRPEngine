@@ -1,5 +1,5 @@
 ---
-description: Example. Not in force while it sits in `examples/`; copy it into `rules/` to switch it on. When the Author has two or fewer calls or tool rounds left, it is told so, the text coming with its next call, as today's build warned an agent of its last rounds. It names the fact `limits.left`, the fewest left of any limit the Author's definition or the turn sets; an agent held to no limit has no such fact, and nothing is said. Change the number to change when it speaks, `agents:` to say whom it is for.
+description: Example. Not in force while it sits in `examples/`; copy it into `rules/` to switch it on. When the Author has two or fewer calls or tool rounds left, it is told so, the text coming with its next call. It names the fact `limits.left`, the fewest left of any limit the Author's definition or the turn sets; an agent held to no limit has no such fact, and nothing is said. Change the number to change when it speaks, `agents:` to say whom it is for.
 agents: [author]
 fact: limits.left <= 2
 at: after-message
