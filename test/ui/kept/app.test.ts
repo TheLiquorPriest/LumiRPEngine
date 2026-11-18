@@ -114,7 +114,7 @@ describe("the App kept for Build and Play", () => {
     const chat = createStore<string | null>("c1");
     const read: string[] = [];
     const call = (async (key: string, params: { chat: string }) => {
-      read.push(params.chat);
+      if (key === "GET /api/v1/chats/:chat/state") read.push(params.chat);
       return { status: "not_world" } as unknown;
     }) as RpeClient["call"];
     const kept = keptApp({ client: { call, ...quiet }, chat, mode: "build", host: host(), timers: handTimers(), settings: () => SETTINGS });

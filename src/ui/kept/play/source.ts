@@ -7,7 +7,10 @@
 // following the chat began (again); and when today's page asks for the chat's view afresh, as it does
 // once it attached a world. Nothing is read on a timer, and at most one read is out at a time: what
 // asks meanwhile is answered by one read after it. A read that fails, or live updates RPE stops, is
-// said in the client's own words until a read succeeds, and the last state read stays shown.
+// said in the client's own words until a read succeeds, and the last state read stays shown. The run
+// line (who is at work, the progress line, a failure, an empty reply left standing) is folded from the
+// live trace as it is heard, and, for what was told before the page followed, from the chat's newest
+// turn as the Live view reads it, once following begins and again when events were lost.
 
 import type { SyncState } from "../../../frontend/protocol-client";
 import type { LiveEvent } from "../../../shared/api";
@@ -15,7 +18,7 @@ import type { StateView } from "../../../shared/state-view";
 import { createStore, type Readable } from "../../store";
 import { replyOf, type RpeClient } from "../../client";
 import { errorWords } from "../../words";
-import { foldRun, NO_RUN, type RunLine } from "./activity";
+import { foldRun, NO_RUN, type RunLine, runOfTurn } from "./activity";
 
 /** The live kind RPE publishes on a chat once its state changed (`src/play/live.ts`), with no data of its own. */
 export const STATE_CHANGED = "state";
@@ -72,23 +75,68 @@ export function chatState(client: Pick<RpeClient, "call" | "follow">, chat: stri
       },
     );
   };
+  /**
+   * The run line as the chat's newest turn tells it (`runOfTurn`), for a page that was not following when it was told: read once following
+   * has begun, and again when events were lost on the way, with what was heard while the read was out folded on after it, since it is newer.
+   */
+  let catching = false;
+  let catchAgain = false;
+  let heardMeanwhile: LiveEvent[] = [];
+  const catchUp = (): void => {
+    if (!alive) return;
+    if (catching) {
+      catchAgain = true;
+      return;
+    }
+    catching = true;
+    heardMeanwhile = [];
+    const done = (): void => {
+      catching = false;
+      heardMeanwhile = [];
+      if (catchAgain) {
+        catchAgain = false;
+        catchUp();
+      }
+    };
+    void (async (): Promise<RunLine | null> => {
+      const newest = replyOf(await client.call("GET /api/v1/chats/:chat/turns", { chat }, { query: { limit: 1 } })).turns[0];
+      return newest === undefined ? null : runOfTurn(chat, replyOf(await client.call("GET /api/v1/chats/:chat/turns/:turn", { chat, turn: newest.id })));
+    })().then(
+      (told) => {
+        const meanwhile = heardMeanwhile;
+        if (alive && told !== null) {
+          run = foldRun(chat, told, meanwhile);
+          state.update((held) => ({ ...held, activity: run.activity, view: shown(base) }));
+        }
+        done();
+      },
+      // A chat RPE holds no turn of, or one it could not read: the line stays as the live events left it.
+      done,
+    );
+  };
 
   const unfollow = client.follow(chat, {
     events(events, missed) {
       heard?.(events);
+      if (catching) heardMeanwhile.push(...events);
       const next = foldRun(chat, run, events);
       if (next !== run) {
         run = next;
         state.update((held) => ({ ...held, activity: run.activity, view: shown(base) }));
       }
       if (missed !== null || events.some((event) => event.kind === STATE_CHANGED || event.kind === REQUESTS_CHANGED)) read();
+      if (missed !== null) catchUp();
     },
-    reset: read,
+    reset() {
+      read();
+      catchUp();
+    },
     refused(words) {
       state.update((held) => ({ ...held, failed: words }));
     },
   });
   read();
+  catchUp();
 
   return {
     get: () => state.get(),

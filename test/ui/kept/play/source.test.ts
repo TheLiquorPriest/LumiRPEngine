@@ -24,7 +24,8 @@ describe("the chat's state from RPE", () => {
     expect(state.get()).toMatchObject({ chatId: CHAT, view: null, status: "syncing", failed: null });
     await settle();
     expect(state.get()).toMatchObject({ chatId: CHAT, view: FIRST, status: "live", failed: null });
-    expect(rpe.asked.every((call) => call.key === "GET /api/v1/chats/:chat/state" && call.chat === CHAT)).toBe(true);
+    // The state is read of this chat; besides it only the chat's newest turn is asked for, for the run line.
+    expect(rpe.asked.every((call) => (call.key === "GET /api/v1/chats/:chat/state" || call.key === "GET /api/v1/chats/:chat/turns") && call.chat === CHAT)).toBe(true);
     state.stop();
   });
 

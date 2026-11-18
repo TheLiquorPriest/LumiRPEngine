@@ -3,10 +3,13 @@
 // it ended. Folded from the events the page hears as they come, so the HUD and Now show a turn the moment
 // it starts, name the agent at work and the newest progress line, say Paused while the run is held, and
 // say a failed run failed; and, where a turn ended before a word of its reply went out and the empty reply
-// Lumiverse kept for it stays in the chat, what to do with that reply. Nothing is read on a timer.
+// Lumiverse kept for it stays in the chat, what to do with that reply. A page that was not following when
+// these were told (opened while a turn runs, or after one ended) folds the same from the chat's newest
+// turn as the Live view reads it (`toldOfTurn`): its trace, its newest progress line, and the empty reply
+// it left standing. Nothing is read on a timer.
 
 import type { Activity } from "../../../shared/turn-activity";
-import type { LiveEvent } from "../../../shared/api";
+import type { LiveEvent, TurnReply } from "../../../shared/api";
 
 /**
  * What the page knows of the chat's run: the line shown (null when none runs and none failed), whether the run's call is held, and the
@@ -19,6 +22,25 @@ export interface RunLine {
 }
 
 export const NO_RUN: RunLine = { activity: null, held: false };
+
+/**
+ * What a turn's read tells, as the events a follower would have heard: each record of its trace, its newest progress line, and the empty
+ * reply it left standing in the chat (where it stands, the setting that takes such replies away is taken to be off, as shipped).
+ */
+export function toldOfTurn(chat: string, turn: TurnReply): LiveEvent[] {
+  const events: LiveEvent[] = turn.trace.map((record) => ({ chat, seq: 0, kind: "trace", at: record.at, data: record }));
+  const last = turn.trace.at(-1);
+  const progress = turn.reply.progress.at(-1);
+  if (last !== undefined && progress !== undefined) events.push({ chat, seq: 0, kind: "reply", at: last.at, data: { run: last.run, line: turn.reply.progress.length - 1, progress } });
+  if (turn.emptyReply !== null) events.push({ chat, seq: 0, kind: "empty_reply", at: last?.at ?? 0, data: { turn: turn.id, message: turn.emptyReply, off: true } });
+  return events;
+}
+
+/** A turn's read folded as if heard: a run its trace leaves going on that the turn no longer runs (its end was never told) shows nothing. */
+export function runOfTurn(chat: string, turn: TurnReply): RunLine {
+  const line = foldRun(chat, NO_RUN, toldOfTurn(chat, turn));
+  return line.activity?.state === "running" && turn.status !== "running" && turn.status !== "released" ? NO_RUN : line;
+}
 
 /** The line of a turn that ended before a word of its reply went out, where no failure of its run was told yet. */
 const ENDED_EMPTY = "The turn ended before a word of its reply went out.";
