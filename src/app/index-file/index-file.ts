@@ -43,9 +43,9 @@ export class IndexFile {
     this.#batch = options.batch;
   }
 
-  /** Opens the file on its own writer thread, making it where it is missing. */
+  /** Opens the file on its own writer thread, making it where it is missing. The writer's thread ends when it has nothing to do as the app pool's do; the next write opens the file again on the next. */
   static async open(options: IndexFileOptions): Promise<IndexFile> {
-    const writer = new Workers({ threads: 1, name: "the index file's writer", log: options.log });
+    const writer = new Workers({ threads: 1, name: "the index file's writer", log: options.log, idleMs: options.workers.idleMs });
     try {
       const { made } = await writer.run("indexOpen", { path: options.path });
       if (made) options.log.info("the index file was made new; each area feeds it again from its own rows", { file: options.path });
@@ -54,6 +54,11 @@ export class IndexFile {
       await writer.close();
       throw error;
     }
+  }
+
+  /** How many threads its writer runs now: one while it writes or waits for the next write, none once it has ended for want of any. */
+  get threads(): number {
+    return this.#writer.running;
   }
 
   /** Indexes `docs` of the user's in `index`: a text of a new revision replaces the one before; one of the same revision is left as it is. */

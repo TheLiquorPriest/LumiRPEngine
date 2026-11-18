@@ -755,6 +755,7 @@ The server, sign-in and tokens, the database, the command line, the service and 
 | Setting | Default | Where | In force | Appendix D.1 | What it does |
 |---|---|---|---|---|---|
 | `workers.threads` | none (the machine's cores less one, at least one) | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Worker threads: The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching. Above 256: Over 256 worker threads at once, more than a machine has cores. |
+| `workers.idleSeconds` | `300` seconds | RPE-global.yml | from RPE's next start | beyond Appendix D.1, for the owner's approval | Idle worker thread ended after: Seconds a worker thread with no task is kept before it ends and lets go of its memory, about 50 MB for each; the next task starts one again, which takes about a fifth of a second. Below 10: A thread may end between two tasks of one turn, and each start takes about a fifth of a second. Above 86400: A thread with nothing to do keeps its memory over a day. |
 
 ### Backups
 

@@ -4,12 +4,14 @@
 // Every thread runs from the app's own file, the file this module was loaded from: in the built app that
 // is the one bundle a server runs (an update or a swap that moves the file moves its threads with it,
 // R-13); run from source, it is this module. Loaded on a thread RPE started, the file serves tasks and
-// nothing else (`serveTasks`, below; the process's entry starts no command line there).
+// nothing else (`serveTasks`, below; the process's entry imports the application on the main thread alone).
 //
 // A task is a function of the one list (`tasks.ts`), named and typed there: it is handed its input, and
 // its answer, or its failure, goes back to its caller. A failure is in the log too, and the pool goes on;
 // a thread that died is let go and its task failed, and the next task starts another. A thread takes one
 // task at a time; threads are started as tasks come, up to the pool's number, and stopped with the app.
+// Each holds a whole runtime of its own (about 50 MB in the built app), so one left with no task for the
+// pool's idle time (`workers.idleSeconds`) ends and lets its memory go; the next task starts another.
 //
 // What a thread must hold to run a task as the main thread would (the engine's lines of words, `SHARED` in `tasks.ts`) is shared with it:
 // `share` tells every thread now running and each one started after, in order before its first task; a thread whose pool shared nothing
@@ -70,6 +72,8 @@ interface Job {
 interface Thread {
   worker: Worker;
   job: Job | null;
+  /** While it has no task: when it ends, if none comes first. */
+  idle?: Timer;
 }
 
 export interface WorkersOptions {
@@ -78,6 +82,8 @@ export interface WorkersOptions {
   /** What these threads are, as the log names them. */
   name: string;
   log: Log;
+  /** Milliseconds a thread with no task is kept before it ends and lets go of its memory (`workers.idleSeconds`); null or absent: kept until the pool closes. */
+  idleMs?: number | null;
 }
 
 /** A pool of worker threads that run the tasks of the one list. */
@@ -85,6 +91,8 @@ export class Workers {
   readonly #threads: number;
   readonly #name: string;
   readonly #log: Log;
+  /** How long a thread with no task is kept; null: until the pool closes. */
+  readonly idleMs: number | null;
   readonly #all = new Set<Thread>();
   readonly #idle: Thread[] = [];
   readonly #queue: Job[] = [];
@@ -96,6 +104,12 @@ export class Workers {
     this.#threads = options.threads;
     this.#name = options.name;
     this.#log = options.log;
+    this.idleMs = options.idleMs ?? null;
+  }
+
+  /** How many of its threads are running now, with a task or waiting for one. */
+  get running(): number {
+    return this.#all.size;
   }
 
   /**
@@ -124,6 +138,7 @@ export class Workers {
     this.#all.clear();
     this.#idle.length = 0;
     for (const thread of threads) {
+      clearTimeout(thread.idle);
       if (thread.job !== null) {
         clearTimeout(thread.job.timer);
         thread.job.reject(new Error(`RPE is stopping, so ${this.#name} did not finish ${thread.job.task}.`));
@@ -143,10 +158,25 @@ export class Workers {
     this.#next();
   }
 
+  /** A thread with no task waits for the next among the idle ones, and ends once it has waited the pool's idle time. */
+  #rest(thread: Thread): void {
+    this.#idle.push(thread);
+    if (this.idleMs !== null) thread.idle = setTimeout(() => this.#end(thread), this.idleMs).unref();
+  }
+
+  /** A thread that waited the pool's idle time with no task ends; the next task starts another. */
+  #end(thread: Thread): void {
+    if (thread.job !== null || !this.#all.delete(thread)) return;
+    const at = this.#idle.indexOf(thread);
+    if (at >= 0) this.#idle.splice(at, 1);
+    void thread.worker.terminate();
+  }
+
   #next(): void {
     while (this.#queue.length > 0) {
       const thread = this.#idle.pop() ?? (this.#all.size < this.#threads ? this.#start() : null);
       if (thread === null) return;
+      clearTimeout(thread.idle);
       const job = this.#queue.shift() as Job;
       thread.job = job;
       thread.worker.ref();
@@ -157,7 +187,7 @@ export class Workers {
         // An input that cannot be sent to a thread fails its task alone.
         thread.job = null;
         thread.worker.unref();
-        this.#idle.push(thread);
+        this.#rest(thread);
         this.#failed(job, error);
       }
     }
@@ -173,7 +203,7 @@ export class Workers {
       const job = thread.job;
       thread.job = null;
       worker.unref();
-      if (this.#all.has(thread)) this.#idle.push(thread);
+      if (this.#all.has(thread)) this.#rest(thread);
       if (job !== null) {
         clearTimeout(job.timer);
         if (answer.ok) job.resolve(answer.output);
@@ -183,6 +213,7 @@ export class Workers {
     });
     const lost = (why: string): void => {
       if (!this.#all.delete(thread)) return;
+      clearTimeout(thread.idle);
       const at = this.#idle.indexOf(thread);
       if (at >= 0) this.#idle.splice(at, 1);
       const job = thread.job;

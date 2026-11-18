@@ -258,7 +258,7 @@ export async function openApp(options: OpenAppOptions): Promise<App> {
   if (migrated.backup !== null) log.info("the database was copied before this version's first migration", { copy: migrated.backup });
   for (const step of migrated.applied) log.info("migrated", { area: step.area, version: step.version });
   const writes = new WriteQueue(db, config.database.sliceMs);
-  const workers = new Workers({ threads: config.workers.threads ?? defaultThreads(), name: "RPE's worker threads", log });
+  const workers = new Workers({ threads: config.workers.threads ?? defaultThreads(), name: "RPE's worker threads", log, idleMs: config.workers.idleSeconds === null ? null : config.workers.idleSeconds * 1000 });
   let index: IndexFile;
   try {
     index = await IndexFile.open({ path: paths.index, workers, batch: config.index.batch, log });

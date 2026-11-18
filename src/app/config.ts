@@ -196,6 +196,8 @@ export interface AppConfig {
   workers: {
     /** The most worker threads RPE runs heavy work on at once; null: the machine's cores less one, at least one. */
     threads: number | null;
+    /** Seconds a worker thread with no task is kept before it ends and lets go of its memory; null: kept until RPE stops. */
+    idleSeconds: number | null;
   };
   index: {
     /** Rows the index file's writer writes in one transaction. */
@@ -223,7 +225,7 @@ export const CONFIG_DEFAULTS: Readonly<AppConfig> = Object.freeze({
   commandLine: { waitMs: 3000, signInMs: 30_000, startMs: 30_000, askEveryMs: 250 },
   service: { portLast: 7899, memory: "1G", restartWait: 2, drainWaitMs: 5 * 60_000, logLines: 2000, timingsTurns: 100 },
   switches: { nameLength: 200 },
-  workers: { threads: null },
+  workers: { threads: null, idleSeconds: 300 },
   index: { batch: 500 },
 });
 
@@ -285,6 +287,7 @@ export const SERVER_SETTING_DEFS = {
   nameLength: { key: "switches.maxNameChars", default: D.switches.nameLength, takes: whole(1), advice: [{ above: 10_000, says: "A name this long is kept for every switch." }], levels: GLOBAL, perConnection: false, name: "The longest name a switch takes", about: "Characters in the longest name of a hook, a command, an MCP server or a connection's place that RPE's registry of what is switched on takes; a longer name is refused.", effect: "start" },
   workerParseBytes: { key: "server.workerParseBytes", default: D.server.workerParseBytes, takes: whole(1), advice: [{ below: 1024, says: "Nearly every request's body is parsed on a worker, which costs more than it saves." }, { above: GIB, says: "No request's body is parsed on a worker: a long prompt's parse holds up the others." }], levels: GLOBAL, perConnection: false, name: "Parsed on a worker from", about: "Bytes from which a request's body is parsed on a worker thread, so that a long prompt's parse never holds up another request.", effect: "start" },
   threads: { key: "workers.threads", default: D.workers.threads, takes: whole(1), advice: [{ above: 256, says: "Over 256 worker threads at once, more than a machine has cores." }], orNone: true, none: "the machine's cores less one, at least one", levels: GLOBAL, perConnection: false, name: "Worker threads", about: "The most worker threads RPE runs its heavy work on at once: parsing very large requests, searching.", effect: "start" },
+  threadIdle: { key: "workers.idleSeconds", default: D.workers.idleSeconds, takes: whole(1), advice: [{ below: 10, says: "A thread may end between two tasks of one turn, and each start takes about a fifth of a second." }, { above: 86_400, says: "A thread with nothing to do keeps its memory over a day." }], orNone: true, none: "a thread is kept until RPE stops", levels: GLOBAL, perConnection: false, name: "Idle worker thread ended after", about: "Seconds a worker thread with no task is kept before it ends and lets go of its memory, about 50 MB for each; the next task starts one again, which takes about a fifth of a second.", effect: "start" },
   batch: { key: "database.indexBatch", default: D.index.batch, takes: whole(1), advice: [{ above: 100_000, says: "Over 100,000 rows are written in one transaction, which holds the index file that long." }], levels: GLOBAL, perConnection: false, name: "Index rows written at once", about: "Rows the index file's writer writes in one transaction.", effect: "start" },
   copiesKept: { key: "database.copiesKept", default: D.database.copiesKept, takes: whole(0), advice: [{ above: 1000, says: "Over 1000 copies of RPE's database are kept on disk." }], levels: GLOBAL, perConnection: false, name: "Copies before migrations kept", about: "Copies of RPE's database taken before a new version's migrations that are kept; the oldest are removed once a new version has started. rpe backup's archives and the migration's backups are never removed.", effect: "start" },
   pieceBytes: { key: "backup.pieceBytes", default: D.database.pieceBytes, takes: whole(1), advice: [{ below: 4096, says: "An archive reads each file a few bytes at a time." }, { above: 64 * 1024 * 1024, says: "An archive holds over 64 MiB of a file in memory at once." }], levels: GLOBAL, perConnection: false, name: "Archive piece", about: "Bytes an archive (rpe backup's, the migration's backup) reads each file in at a time.", effect: "start" },
@@ -426,7 +429,7 @@ export function limitsOf(read: ConfigRead, log: Log | null = null): AppLimits {
     commandLine: { waitMs: n(s.waitMs), signInMs: n(s.signInMs), startMs: n(s.startMs), askEveryMs: n(s.askEveryMs) },
     service: { portLast: n(s.portLast), memory: checkedSetting(read, s.memory, memoryText, D.service.memory, log), restartWait: n(s.restartWait), drainWaitMs: n(s.drainWait) * 1000, logLines: n(s.logLines), timingsTurns: n(s.timingsTurns) },
     switches: { nameLength: n(s.nameLength) },
-    workers: { threads: read.value(s.threads) as number | null },
+    workers: { threads: read.value(s.threads) as number | null, idleSeconds: read.value(s.threadIdle) as number | null },
     index: { batch: n(s.batch) },
   };
 }

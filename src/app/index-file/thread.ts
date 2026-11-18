@@ -55,10 +55,20 @@ const writers = new Map<string, Database>();
 /** Connections that read alone, by file: one for each thread that searched it. */
 const readers = new Map<string, Database>();
 
-function writerOf(path: string): Database {
-  const db = writers.get(path);
-  if (db === undefined) throw new Error(`The index file ${path} is not open for writing on this thread.`);
+/** The writer's connection to the file, made where `create` says it may be, readable by RPE's user alone, set up for one writer and many readers. */
+function openWriter(path: string, create: boolean): Database {
+  const db = new Database(path, { create, readwrite: true, strict: true });
+  // Before the write-ahead log is made, which takes the file's permissions.
+  chmodSync(path, OWNER_ONLY_FILE);
+  db.run("PRAGMA journal_mode = WAL");
+  db.run("PRAGMA synchronous = NORMAL");
+  writers.set(path, db);
   return db;
+}
+
+/** The writer's connection to the file; on a writer's thread started after the one that opened it ended (`workers.idleSeconds`), opened again. The file must be there. */
+function writerOf(path: string): Database {
+  return writers.get(path) ?? openWriter(path, false);
 }
 
 function readerOf(path: string): Database {
@@ -116,12 +126,8 @@ export const INDEX_TASKS = {
   /** On the writer's thread: opens the file, making it and its five indexes where they are missing; `made` when the file was not there. */
   indexOpen(input: { path: string }): { made: boolean } {
     const made = !existsSync(input.path);
-    const db = new Database(input.path, { create: true, strict: true });
-    chmodSync(input.path, OWNER_ONLY_FILE);
-    db.run("PRAGMA journal_mode = WAL");
-    db.run("PRAGMA synchronous = NORMAL");
+    const db = openWriter(input.path, true);
     for (const name of INDEXES) makeIndex(db, name);
-    writers.set(input.path, db);
     return { made };
   },
 
