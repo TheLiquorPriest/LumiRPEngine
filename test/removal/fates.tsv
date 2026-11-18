@@ -1445,3 +1445,32 @@ scripts/testbed/steps/settings.ts	kept	tools	PlanScenarios-4	the bed's scripts
 scripts/testbed/steps/world-parts.ts	kept	tools	PlanScenarios-4	the bed's scripts
 scripts/testbed/steps/world.ts	kept	tools	PlanScenarios-4	the bed's scripts
 scripts/ui/pages.ts	kept	tools	PlanPages-2	writes the list of the new pages' entries the shells offer
+scripts/perf/memory.ts	kept	tools	PlanSwap-14	builds, measures or previews what is kept
+scripts/testbed/road.ts	kept	tools	PlanSwap-14	builds, measures or previews what is kept
+scripts/ui/calls.ts	kept	tools	PlanSwap-14	builds, measures or previews what is kept
+scripts/ui/surfaces.ts	kept	tools	PlanSwap-14	builds, measures or previews what is kept
+src/engine/action-lines.ts	kept	engine
+src/engine/holidays.ts	kept	engine
+src/engine/lines.ts	kept	engine
+src/engine/notices.ts	kept	engine
+src/engine/whereabouts.ts	kept	engine
+src/engine/word-tables.ts	kept	engine
+src/frontend/build/history.tsx	kept	builder
+src/frontend/build/upgrade.tsx	kept	builder
+src/frontend/form-sheet.tsx	kept	hud
+src/frontend/play/activity.tsx	kept	hud
+src/packs/combat/core/bestiary.ts	kept	packs
+src/packs/economy/core/unbook.ts	kept	packs
+src/packs/orgs/ui/config.tsx	kept	packs
+src/packs/space/core/grid-area.ts	kept	packs
+src/packs/space/core/grid-measure.ts	kept	packs
+src/packs/space/core/grid-model.ts	kept	packs
+src/packs/space/core/grid-path.ts	kept	packs
+src/packs/space/core/light.ts	kept	packs
+src/packs/space/ui/map-pieces.ts	kept	packs
+src/packs/space/ui/map-tools.tsx	kept	packs
+src/shared/clock-zones.ts	kept	under
+src/shared/lore-kinds.ts	kept	under
+src/shared/map-config.ts	kept	under
+src/shared/map-settings.ts	kept	under
+src/shared/page-voice.ts	kept	under

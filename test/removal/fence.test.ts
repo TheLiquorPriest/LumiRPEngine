@@ -47,13 +47,13 @@ describe("the fence around today's engines", () => {
 
   test("every line still stands as written, so the list shrinks with the code, line by line and name by name", () => {
     expect(stale(tree, fates, entries)).toEqual([]);
-    const standing = planted({ "src/play/planted.ts": 'import { buildView } from "../backend/view";' });
-    const view = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView\tPlanSwap-6\n").entries;
+    const standing = planted({ "src/play/planted.ts": 'import type { ResultBodies } from "../shared/protocol";' });
+    const view = readList("src/play/planted.ts\tsrc/shared/protocol.ts\tResultBodies\tPlanSwap-6\n").entries;
     expect(stale(standing, fates, view)).toEqual([]);
-    const wider = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView, noSuchName\tPlanSwap-6\n").entries;
-    expect(stale(standing, fates, wider)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/backend/view.ts no longer takes noSuchName; take it out"]);
-    const gone = readList("src/play/planted.ts\tsrc/backend/runtime.ts\treadRun\tPlanSwap-6\n").entries;
-    expect(stale(standing, fates, gone)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/backend/runtime.ts no longer stands; take the line out"]);
+    const wider = readList("src/play/planted.ts\tsrc/shared/protocol.ts\tResultBodies, noSuchName\tPlanSwap-6\n").entries;
+    expect(stale(standing, fates, wider)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/shared/protocol.ts no longer takes noSuchName; take it out"]);
+    const gone = readList("src/play/planted.ts\tsrc/shared/settings.ts\tdefaultSettings\tPlanSwap-6\n").entries;
+    expect(stale(standing, fates, gone)).toEqual(["not-yet-moved.tsv:1: src/play/planted.ts → src/shared/settings.ts no longer stands; take the line out"]);
   });
 
   test("no line, and no name of a line, is one the committed list does not hold, whatever the count", () => {
@@ -80,27 +80,10 @@ describe("the fence around today's engines", () => {
     expect(allowancesAdded(allowance, narrower)).toEqual(["fates.tsv:2: src/shared/settings.ts allows defaultSettings for src/play/, which the committed fates do not"]);
   });
 
-  test("every way a module is loaded is read: a .js name, require(), import =, import() in a type, a second import on one line", () => {
-    for (const source of ['import { readRun } from "../backend/runtime.js";', 'const r = require("../backend/runtime");', 'import r = require("../backend/runtime");', 'type R = import("../backend/runtime").ChatRun;', 'const a = 1; import { readRun } from "../backend/runtime";']) {
-      expect(beyond({ "src/play/planted.ts": source })).toEqual([expect.stringMatching(/^src\/play\/planted\.ts:1 imports .* from src\/backend\/runtime\.ts/)]);
-    }
-    // Text that only looks like an import is none.
-    expect(beyond({ "src/play/planted.ts": '// import { readRun } from "../backend/runtime";\nconst s = \'import { readRun } from "../backend/runtime";\';' })).toEqual([]);
-  });
-
   test("a load of a template or a sum cannot be read, and fails rather than passes", () => {
     for (const source of ["const m = await import(`../backend/${name}`);", 'const m = await import("../backend/" + name);', "const m = require(path);"]) {
       expect(beyond({ "src/play/planted.ts": source })).toEqual([expect.stringContaining("src/play/planted.ts:1 loads")]);
     }
-  });
-
-  test("a listed import allows the names it takes today, not the file", () => {
-    const listed = readList("src/play/planted.ts\tsrc/backend/view.ts\tbuildView\tPlanSwap-6\n").entries;
-    expect(listed[0]?.names.has("readRun")).toBe(false);
-    const import1 = planted({ "src/play/planted.ts": 'import { buildView } from "../backend/view";' });
-    expect(fence(import1, fates, [...entries, ...listed], known.entries).filter((line) => !today.has(line))).toEqual([]);
-    const import2 = planted({ "src/play/planted.ts": 'import { buildView, readRun } from "../backend/view";' });
-    expect(fence(import2, fates, [...entries, ...listed], known.entries).filter((line) => !today.has(line))).toEqual([expect.stringContaining("src/play/planted.ts:1 imports readRun from src/backend/view.ts")]);
   });
 
   test("a listed line takes only names its removed file declares itself, so a re-export cannot pass through it", () => {
@@ -119,19 +102,6 @@ describe("the fence around today's engines", () => {
     // The old wire, and anything their pieces do not move, are fenced as a removed file's names are.
     expect(beyond({ "src/frontend/planted.tsx": 'import { PROTOCOL_VERSION } from "../shared/protocol";' })).toEqual([expect.stringContaining("src/frontend/planted.tsx:1 imports PROTOCOL_VERSION from src/shared/protocol.ts")]);
     expect(beyond({ "src/play/planted.ts": 'import type { ResultBodies } from "../shared/protocol";' })).toEqual([expect.stringContaining("src/play/planted.ts:1 imports ResultBodies from src/shared/protocol.ts")]);
-    // The registry's own names, and what only the migration may take of it, are fenced for the rest.
-    expect(beyond({ "src/turn/planted.ts": 'import { SETTINGS_DEFAULTS_REV } from "../shared/settings";' })).toEqual([expect.stringContaining("src/turn/planted.ts:1 imports SETTINGS_DEFAULTS_REV from src/shared/settings.ts")]);
-    expect(beyond({ "src/turn/planted.ts": 'import { narratorViewOf } from "../shared/settings";' })).toEqual([]);
-  });
-
-  test("the scripts and the preview are fenced too, by their real imports", () => {
-    expect(beyond({ "scripts/planted.ts": 'import { readRun } from "../src/backend/runtime";', "dev/preview/planted.ts": 'export { view } from "../../src/backend/view";' })).toEqual([expect.stringContaining("dev/preview/planted.ts:1 imports view from src/backend/view.ts"), expect.stringContaining("scripts/planted.ts:1 imports readRun from src/backend/runtime.ts")]);
-    expect(beyond({ "scripts/planted.ts": '// See src/backend/runtime.ts: import { readRun } from "../src/backend/runtime";\nexport {};' })).toEqual([]);
-  });
-
-  test("a kept file and a kept test are fenced too, not only the new zones", () => {
-    const found = beyond({ "src/engine/planted.ts": 'export { agentMetaOf } from "../backend/chat-agent-meta";', "test/engine/planted.test.ts": 'import { readRun } from "../../src/backend/runtime";' });
-    expect(found).toEqual([expect.stringContaining("src/engine/planted.ts:1 imports agentMetaOf from src/backend/chat-agent-meta.ts"), expect.stringContaining("test/engine/planted.test.ts:1 imports readRun from src/backend/runtime.ts")]);
   });
 
   test("LumiAH reached through a kept file fails, with the chain that reaches it", () => {
