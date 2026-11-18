@@ -95,8 +95,7 @@ describe("narration proposals", () => {
     expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a cable")?.account).toBe("Visa card");
   });
 
-  // hardening: a stated price past what the player can pay is bought now, advised (`fundsAdvice`), where it declined; the cents below follow from that.
-  test.skip("the Buy action takes an optional stated price: an uncatalogued item at that price, a catalog item without one", () => {
+  test("the Buy action takes an optional stated price: an uncatalogued item at that price, a catalog item without one", () => {
     const w = setup();
     const gum = resolveAction(reg, w, { action: "buy", params: { item: "gum", price: 200 } }, createRng("g"));
     expect(gum.rejected).toEqual([]);
@@ -112,9 +111,9 @@ describe("narration proposals", () => {
     expect(surfboard.rejected).toEqual([]);
     expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used surfboard")?.cents).toBe(-96_300);
     // A kayak is a vehicle class: bought at the stated price, inside its band, as a kayak of the POV's.
-    const kayak = resolveAction(reg, w, { action: "buy", params: { item: "used kayak", price: 90_000 } }, createRng("k"));
+    const kayak = resolveAction(reg, w, { action: "buy", params: { item: "kayak", price: 90_000 } }, createRng("k"));
     expect(kayak.rejected).toEqual([]);
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought Kayak")?.cents).toBe(-96_300);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought Kayak or canoe (paddled, 1-2 seats)")?.cents).toBe(-96_300);
     expect(Object.values(w.state.entities).filter((e) => e.kind === "vehicle" && e.fields.class === "kayak").map((e) => [e.fields.owner, e.fields.value])).toEqual([["you", 90_000]]);
   });
 
