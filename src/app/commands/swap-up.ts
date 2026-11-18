@@ -18,6 +18,7 @@ import { readText, writeWhole } from "../disk";
 import { accountSystemctl, localUrl, type RpeService } from "../up";
 import type { Flags } from "./args";
 import { extensionLeft, sayLeft } from "./left";
+import { readyToMigrate } from "./migrate";
 import { ownConnection } from "./own-connection";
 import { runLine } from "./run-line";
 import { serverAnswer, serverUrl } from "./running";
@@ -169,7 +170,9 @@ export async function swapUp(line: SwapLine, io: CliIO, version: string): Promis
     if (left.length > 0) sayLeft(left, io);
     return 0;
   }
-  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout(), runs: { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob } }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs, reach: (is) => connectionsWhere(call, is) }, swapIo);
+  // The switch runs the migration again, as rpe migrate runs it: with the shipped lines on this thread and every carried setting checked as its reader takes it.
+  const settings = await readyToMigrate();
+  const plan = await swapCheck({ sources, options: { data: paths.root, version, env: io.env, tree: treeLayout(), settings, runs: { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob } }, rpe: { address: current.address, port: current.port }, waitMs: current.commandLine.waitMs, reach: (is) => connectionsWhere(call, is) }, swapIo);
   if (plan === null) return 1;
 
   // Every connection in Lumiverse that reaches today's runtime is kept as it is and becomes RPE's own (R-109); RPE makes its own only where Lumiverse holds none.

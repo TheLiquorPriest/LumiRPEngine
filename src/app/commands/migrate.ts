@@ -8,6 +8,7 @@ import type { CliIO } from "../cli";
 import { compose } from "../compose";
 import { dataPaths, defaultDataFolder, loadConfig } from "../config";
 import { gatherSettings } from "../hooks";
+import type { Setting } from "../setting-list";
 import { rpeServiceOf } from "../up";
 import { type Line, parseArgs, UsageError } from "./args";
 import { runLine } from "./run-line";
@@ -35,16 +36,10 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   const folder = read?.flags.data ?? defaultDataFolder(io.env, io.home);
   const line = read?.flags.data === undefined ? [...rest, "--data", folder] : rest;
   // Its output is whole texts, this one's lines; and it reads the build's id from the environment, where a built `rpe` does not put it.
-  // Each carried setting is checked as the reader of its own key takes it: against the registry of every area's list, which reaches no Lumiverse.
-  const noLumiverse = (): never => {
-    throw new Error("The migration reaches no Lumiverse, and an area asked for it while its settings were listed.");
-  };
-  const registry = () => gatherSettings(compose({ fetch: async () => noLumiverse(), open: noLumiverse, sleep: async () => noLumiverse() }).areas);
-  // The migration runs the engine here, on this process's one thread, with no server to read the user's files through: it says the shipped lines, which the main thread and each worker read by the same loader.
   const migrate = async (): Promise<number> => {
-    await installHistoryLines(shippedTexts());
+    const settings = await readyToMigrate();
     // The turn lane's writer of a carried turn's run record, handed in: the migration may not import the turn lane.
-    return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), registry(), { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
+    return await migrateCli(line, { out: (text) => io.out(text.replace(/\n$/, "")), err: io.err, env: { ...io.env, LRE_BUILD_ID: version }, home: io.home }, treeLayout(), settings, { tables: { area: "harness", migrations: HARNESS_MIGRATIONS }, keep: keepCarriedRun, keepJob: carryJob });
   };
   if (read === null || read.switches.has("rehearse")) return await migrate();
   const paths = dataPaths(folder);
@@ -63,4 +58,19 @@ export async function migrateCommand(rest: readonly string[], io: CliIO, version
   } finally {
     lock.release();
   }
+}
+
+/**
+ * Readies this process for the migration, `rpe migrate`'s and the switch's (`rpe up`) alike, and gives back the registry of every
+ * area's settings. The migration runs the engine here, on this process's one thread, with no server to read the user's files
+ * through: it says the shipped lines, which the main thread and each worker read by the same loader, and with none every chat's
+ * fold fails and no chat is carried. Each carried setting is checked as the reader of its own key takes it, against that
+ * registry, which reaches no Lumiverse.
+ */
+export async function readyToMigrate(): Promise<Setting[]> {
+  await installHistoryLines(shippedTexts());
+  const noLumiverse = (): never => {
+    throw new Error("The migration reaches no Lumiverse, and an area asked for it while its settings were listed.");
+  };
+  return gatherSettings(compose({ fetch: async () => noLumiverse(), open: noLumiverse, sleep: async () => noLumiverse() }).areas);
 }
