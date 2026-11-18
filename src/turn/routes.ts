@@ -248,13 +248,19 @@ export function turnRoutes(deps: TurnRoutesDeps) {
     };
   };
 
-  /** A turn's changes by lane, each lane's in the order recorded, the lanes in the order first written to. */
+  /**
+   * A turn's changes by lane, each lane's in the order recorded, the lanes in the order first written to. A turn dropped with nothing
+   * saved took its staged changes with it (plan §6.3): none of them reads as applied.
+   */
   const changesByLane = (user: string, turn: string): { lane: string; changes: ChangeView[] }[] => {
+    const store = turns.store.user(user);
+    const dropped = store.turn(turn)?.status === "dropped";
     const lanes = new Map<string, ChangeView[]>();
-    for (const c of turns.store.user(user).changes(turn)) {
+    for (const c of store.changes(turn)) {
+      const shown = dropped ? { ...changeOf(c), applied: false } : changeOf(c);
       const of = lanes.get(c.lane);
-      if (of === undefined) lanes.set(c.lane, [changeOf(c)]);
-      else of.push(changeOf(c));
+      if (of === undefined) lanes.set(c.lane, [shown]);
+      else of.push(shown);
     }
     return [...lanes].map(([lane, changes]) => ({ lane, changes }));
   };

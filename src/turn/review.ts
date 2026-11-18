@@ -54,9 +54,10 @@ const question = shape.named(
 
 const cardReply = shape.named(
   "ReviewCardReply",
-  "A turn's one card: its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it.",
+  "A turn's one card: whether the turn was dropped with nothing saved (none of its changes stands then: each reads not applied, with no undo), its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it.",
   shape.object({
     turn: T,
+    dropped: shape.yesNo(),
     lanes: shape.list(shape.object({ lane: shape.oneOf("story", "engine"), changes: shape.list(changeShown) })),
     questions: shape.list(question),
     imported: shape.list(shape.object({ id: T, kind: T, at: N, data: shape.json() })),
@@ -105,28 +106,30 @@ export function reviewRoutes(turns: Turns) {
       path: "/api/v1/chats/:chat/turns/:turn/card",
       access: "page",
       group: "turns",
-      does: "A turn's one review card: its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in.",
+      does: "A turn's one review card: whether the turn was dropped with nothing saved, so that none of its changes stands; its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in.",
       reply: cardReply,
       joined: true,
       handle: async ({ user, params }) => {
         const s = held(user, params.chat, params.turn);
+        // A turn dropped with nothing saved took its staged changes with it (plan §6.3): the card says that none stands, and offers no undo.
+        const dropped = s.turn(params.turn)?.status === "dropped";
         const lanes = s.reviewCard(params.turn).map((l) => ({
           lane: l.lane,
           changes: l.changes.map(({ change, undo, undoneBy }) => ({
             id: String(change.id),
             op: change.op,
-            applied: change.applied,
+            applied: change.applied && !dropped,
             by: change.by,
             source: change.source,
             standing: change.standing,
             value: change.value,
             reports: change.reports,
-            undo,
+            undo: dropped ? { ops: [], left: [] } : undo,
             undoneBy: undoneBy.map(String),
           })),
         }));
         const imported = turns.approvals.chipsOf(user, params.chat, params.turn);
-        return { turn: params.turn, lanes, questions: turns.approvals.ofTurn(user, params.chat, params.turn).map(questionOf), imported };
+        return { turn: params.turn, dropped, lanes, questions: turns.approvals.ofTurn(user, params.chat, params.turn).map(questionOf), imported };
       },
     }),
     route({
@@ -141,6 +144,7 @@ export function reviewRoutes(turns: Turns) {
         const s = held(user, params.chat, params.turn);
         const id = Number(params.change);
         if (!Number.isInteger(id) || !s.reviewCard(params.turn).some((l) => l.changes.some((c) => c.change.id === id))) throw new RouteError(404, `Turn ${params.turn} has no change ${params.change}.`);
+        if (s.turn(params.turn)?.status === "dropped") throw new RouteError(409, "This turn was dropped with nothing saved, so none of its changes stands, and there is nothing of it to undo.");
         const undone = await turns.writes.run(() => s.undo(id), "undoing a change from the turn's card");
         return { recorded: undone.changes.map((c) => String(c.id)), left: undone.left };
       },

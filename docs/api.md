@@ -265,7 +265,7 @@ One turn, read on from where a page has read to: its intent record, what went to
 
 ### `GET /api/v1/chats/:chat/turns/:turn/card`
 
-A turn's one review card: its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in.
+A turn's one review card: whether the turn was dropped with nothing saved, so that none of its changes stands; its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in.
 
 | | |
 |---|---|
@@ -7732,11 +7732,12 @@ export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand"
 
 ### `ReviewCardReply`
 
-A turn's one card: its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it.
+A turn's one card: whether the turn was dropped with nothing saved (none of its changes stands then: each reads not applied, with no undo), its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it.
 
 ```ts
 export interface ReviewCardReply {
   turn: string;
+  dropped: boolean;
   lanes: ({ lane: "story" | "engine"; changes: CardChange[] })[];
   questions: CardQuestion[];
   imported: { id: string; kind: string; at: number; data: JsonValue }[];

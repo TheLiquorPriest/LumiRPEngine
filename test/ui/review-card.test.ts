@@ -10,6 +10,7 @@ import { elements, expand, press, textOf } from "./vnodes";
 const change = (id: string, over: Partial<CardChange> = {}): CardChange => ({ id, op: "set", applied: true, by: "author", source: "stated", standing: "exact", value: { gold: 4 }, reports: [], undo: { ops: ["set"], left: [] }, undoneBy: [], ...over });
 const card: ReviewCardReply = {
   turn: "t5",
+  dropped: false,
   lanes: [
     { lane: "story", changes: [] },
     { lane: "engine", changes: [change("c1"), change("c2", { applied: false })] },

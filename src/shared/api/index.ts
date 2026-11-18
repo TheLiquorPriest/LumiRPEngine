@@ -2622,9 +2622,10 @@ export interface RequestWithdrawnReply {
 /** Where a restart onto RPE's app file on disk stands: nothing to restart onto, waiting for the turns and jobs running, restarting, needed and not made while `update.restart` is off, or needed and not possible, RPE having been started by hand. */
 export type RestartState = "none" | "waiting" | "restarting" | "off" | "by hand";
 
-/** A turn's one card: its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it. */
+/** A turn's one card: whether the turn was dropped with nothing saved (none of its changes stands then: each reads not applied, with no undo), its changes by lane, the questions asked on it (those waiting first), and, for a turn carried in, the cards the earlier engine kept for it. */
 export interface ReviewCardReply {
   turn: string;
+  dropped: boolean;
   lanes: ({ lane: "story" | "engine"; changes: CardChange[] })[];
   questions: CardQuestion[];
   imported: { id: string; kind: string; at: number; data: JsonValue }[];
@@ -5271,7 +5272,7 @@ export interface ApiRoutes {
     long: false;
     joined: true;
   };
-  /** A turn's one review card: its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in. */
+  /** A turn's one review card: whether the turn was dropped with nothing saved, so that none of its changes stands; its changes by lane (the story's and the engine's, every area's), each applied or not with its reports and who decided it, its undo and the changes that undid it; the questions asked on it, those waiting for his word first; and the cards the earlier engine kept for a turn carried in. */
   "GET /api/v1/chats/:chat/turns/:turn/card": {
     params: { chat: string; turn: string };
     query: Record<string, never>;

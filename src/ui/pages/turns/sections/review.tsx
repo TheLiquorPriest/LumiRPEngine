@@ -14,13 +14,13 @@ export function questionWords(q: CardQuestion): string {
   return q.answer === null ? "was answered" : q.answer.go ? "went ahead on your word" : `did not go ahead${q.answer.reason === undefined ? "" : `: ${q.answer.reason}`}`;
 }
 
-function CardChangeLine(props: { change: CardChange; busy: string | null; onUndo(change: string): void }) {
+function CardChangeLine(props: { change: CardChange; dropped: boolean; busy: string | null; onUndo(change: string): void }) {
   const { change } = props;
   const undone = change.undoneBy.length > 0;
   return (
     <li class="rpe-entry lre-stack" data-card-change={change.id} data-applied={change.applied ? "yes" : "no"}>
       <p class="rpe-line">
-        <span class="rpe-strong">{change.op}</span> {valueWords(change.value)} {change.applied ? <Badge tone="pos">applied</Badge> : <Badge tone="warn">held</Badge>}
+        <span class="rpe-strong">{change.op}</span> {valueWords(change.value)} {change.applied ? <Badge tone="pos">applied</Badge> : props.dropped ? <Badge tone="warn">dropped</Badge> : <Badge tone="warn">held</Badge>}
         {undone ? <Badge>undone</Badge> : null}
       </p>
       <p class="rpe-meta">
@@ -76,7 +76,7 @@ function QuestionLine(props: { question: CardQuestion; busy: string | null; onAn
   );
 }
 
-/** A turn's one review card: its changes by lane, each held or applied, with its undo; the questions asked on it, those waiting first, each answered here as in the chat; and the cards an earlier engine kept. */
+/** A turn's one review card: whether the turn was dropped with nothing saved, its changes by lane, each held, applied or dropped, with its undo; the questions asked on it, those waiting first, each answered here as in the chat; and the cards an earlier engine kept. */
 export function ReviewCard(props: { card: ReviewCardReply; review: Pick<ReviewShown, "busy" | "said" | "onUndo" | "onAnswer"> }) {
   const { card, review } = props;
   return (
@@ -86,6 +86,11 @@ export function ReviewCard(props: { card: ReviewCardReply; review: Pick<ReviewSh
           <span data-said>{review.said}</span>
         </Banner>
       )}
+      {card.dropped ? (
+        <Banner tone="warn" icon="alert" title="Nothing of this turn stands">
+          <span data-dropped>It ended with nothing of its reply saved, so the changes it had made were dropped with it.</span>
+        </Banner>
+      ) : null}
       {card.lanes.map(({ lane, changes }) => (
         <div key={lane} class="lre-stack" data-lane={lane}>
           <span class="rpe-caption">{LANE_WORDS[lane] ?? `The ${lane} lane`}</span>
@@ -94,7 +99,7 @@ export function ReviewCard(props: { card: ReviewCardReply; review: Pick<ReviewSh
           ) : (
             <ul class="rpe-plain lre-stack">
               {changes.map((change) => (
-                <CardChangeLine key={change.id} change={change} busy={review.busy} onUndo={review.onUndo} />
+                <CardChangeLine key={change.id} change={change} dropped={card.dropped} busy={review.busy} onUndo={review.onUndo} />
               ))}
             </ul>
           )}
