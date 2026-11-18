@@ -32,7 +32,7 @@ export const BOOTSTRAP_SETTING_DEFS = {
     takes: { type: "whole", least: 1 },
     perConnection: false,
     name: "Bootstrap asks before",
-    about: "Tokens sent and written together by a bootstrap job's agents (a token read again from a cache at the weight jobs.cachedWeight gives), at which the job is held and asks you whether to go on; a go-on gives it as many again unless you say otherwise.",
+    about: "Tokens sent and written together by a bootstrap job's agents (a token read again from a cache at the weight limits.cachedWeight gives), at which the job is held and asks you whether to go on; a go-on gives it as many again unless you say otherwise.",
     effect: "use",
     row: "Bootstrap asks before",
   },
