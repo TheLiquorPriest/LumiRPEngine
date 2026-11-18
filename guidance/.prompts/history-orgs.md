@@ -307,3 +307,11 @@ org_log_name_name2_is_waiting_for_cents_to: {{name}}: {{name2}} is waiting for {
 title_director: Director
 title_leader: Leader
 title_head: Head
+reason_name_you_may_not_powerwords: {{name}}: you may not {{power}}
+reason_account_isn_t_one_of_the: {{account}} isn't one of the accounts you may use for {{name}}
+reason_target_isn_t_below_title_at: {{target}} isn't below {{title}} at {{at}}
+reason_name_s_money_pays_for_name2: {{name}}'s money pays for {{name}}, not for {{target}}
+reason_the_trustees_of_name_decide_together: The trustees of {{name}} decide together: another trustee approves this
+reason_carried_counted: carried: {{counted}}
+reason_voted_down_counted: voted down: {{counted}}
+reason_no_quorum_cast_took_part_quorum: no quorum: {{cast}} took part, {{quorum}} needed

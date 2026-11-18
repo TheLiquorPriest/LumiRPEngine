@@ -213,3 +213,9 @@ eng_nothing_better_to_do: nothing better to do
 eng_close_closing: close {{closing}}
 eng_near_id: near {{id}}
 eng_scope_unreadable_missing_id: scope unreadable: {{missing}} {{id}}
+reason_was_made_in_play_too_keep: was made in play too: keep it as well
+reason_the_world_s_draft_doesn_t: the world's draft doesn't have
+reason_name_is_on_name2_too_big: {{name}} is on {{holder}}: too big to carry ({{size}}; a person carries up to {{ceiling}}).
+reason_name_is_in_name2_too_big: {{name}} is in {{holder}}: too big for it ({{holder}} takes things up to {{ceiling}}).
+reason_name_is_in_around_which: {{name}}: it is in {{around}}, which {{which}}
+reason_vehicle_goes_only_on_another: {{name}} is {{#on}}on{{/on}}{{^on}}in{{/on}} {{holder}}: a vehicle goes only on another vehicle.

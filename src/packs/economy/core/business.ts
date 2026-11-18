@@ -853,7 +853,7 @@ function noAccountIssues(world: WorldDoc, registry: Registry | undefined): LintI
     let account = `${id}_checking`;
     for (let n = 2; own(world.entities, account); n++) account = `${id}_checking_${n}`;
     const def: EntityDef = { id: account, kind: "account", name: say("name_name_checking", { name: e.name }), tier: "background", fields: { owners: [{ party: id, role: "owner" }], product: DEFAULT_ACCOUNT_PRODUCT[company ? "business" : trust ? "trust" : "group"], opening: 0 }, relations: [] };
-    const why = company ? "its takings leave the world and its payroll is paid from nowhere" : trust ? "what it holds and pays out has nowhere to be" : "its payroll is paid from nowhere";
+    const why = company ? say("reason_its_takings_leave_the_world_and") : trust ? say("reason_what_it_holds_and_pays_out") : say("reason_its_payroll_is_paid_from_nowhere");
     out.push({ severity: "warning", code: NO_ACCOUNT_LINT, path: `entities.${id}`, message: say("lint_name_holds_no_bank_account_so_why", { name: e.name, why: why }), fix: { label: `Open ${def.name}`, ops: [{ op: "add", path: pointerOf(["entities", account]), value: def as unknown as JsonValue }] } });
   }
   return out;

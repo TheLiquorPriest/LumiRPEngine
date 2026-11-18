@@ -74,7 +74,7 @@ function check(world: WorldDoc, registry: Registry): LintIssue[] {
         const to = person ? personPlace(ctx, holder) : placeOfEntity(ctx.state, holder);
         const fix: LintFix | undefined = to !== null ? { label: `Put it at ${placeName(to)}`, ops: putAt(world, id, holder, to) } : undefined;
         const big = size === "unknown" || size === "part" || size === "vehicle" ? null : size;
-        const why = big === null ? `${e.name} is ${person ? "on" : "in"} ${h.name}: a vehicle goes only on another vehicle.` : person ? `${e.name} is on ${h.name}: too big to carry (${SIZE_LABELS[big]}; a person carries up to ${SIZE_LABELS[ceiling]}).` : `${e.name} is in ${h.name}: too big for it (${h.name} takes things up to ${SIZE_LABELS[holds]}).`;
+        const why = big === null ? say("reason_vehicle_goes_only_on_another", { name: e.name, holder: h.name, on: person }) : person ? say("reason_name_is_on_name2_too_big", { name: e.name, holder: h.name, size: SIZE_LABELS[big], ceiling: SIZE_LABELS[ceiling] }) : say("reason_name_is_in_name2_too_big", { name: e.name, holder: h.name, ceiling: SIZE_LABELS[holds] });
         issues.push({ severity: "warning", code: THING_LINT.tooBig, path: `entities.${id}`, message: say("lint_why_put_it_at_placename", { why: why, placeName: to !== null ? placeName(to) : undefined, if_to: to !== null }), ...(fix ? { fix } : {}) });
       }
     }

@@ -1170,7 +1170,7 @@ export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents:
   if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", say("why_the_amount_must_be_positive"));
   const diff = total - post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0);
   if (diff === 0) return [];
-  const note = `${post.memo}: price corrected`;
+  const note = say("reason_memo_price_corrected", { memo: post.memo });
   const lines: PostingLine[] = [
     { account: paid.account, amount: -diff },
     { account: got.account, amount: diff },

@@ -88,3 +88,7 @@ fault_block_n_another_block_of_this_routine: block {{n}}: another block of this 
 fault_there_s_no_setting_key_settings: there's no setting {{key}} ({{settings}})
 fault_key_level_is_levels: {{key}}.{{level}} is {{levels}}
 fault_key_is_allowed: {{key}} is {{allowed}}
+reason_an_order: an order
+reason_their_own_plan: their own plan
+reason_routine_only: routine only
+reason_no_time_for_it: no time for it

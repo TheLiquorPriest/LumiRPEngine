@@ -553,7 +553,7 @@ function planOutcomes(ctx: ReadContext, who: EntityId, slot: SlotInfo): LedgerEv
     const blocks = laid.get(p.id) ?? [];
     const last = Math.max(...blocks.map((b) => b.end));
     if (blocks.length > 0 && last <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
-    else if (blocks.length === 0 && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: routineOnly ? "routine only" : "no time for it" } });
+    else if (blocks.length === 0 && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: routineOnly ? say("reason_routine_only") : say("reason_no_time_for_it") } });
   }
   return out;
 }
@@ -1099,7 +1099,7 @@ function dropUnlived(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   for (const who of Object.keys(ctx.state.entities).sort()) {
     if (who === ctx.world.pov || livesPlans(ctx, who)) continue;
-    for (const p of plans(ctx, who)) if (p.status === "open" && isPlayed(p) && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: "routine only" } });
+    for (const p of plans(ctx, who)) if (p.status === "open" && isPlayed(p) && p.when.to <= slot.end) out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: say("reason_routine_only") } });
   }
   return out;
 }

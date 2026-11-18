@@ -547,7 +547,7 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   const ended = endedRefusal(ctx, org, power);
   if (ended !== null) return { ok: false, reason: ended };
   const grant = orgPower(ctx, who, org, power);
-  if (!grant) return { ok: false, reason: `${name}: you may not ${powerWords[power]}` };
+  if (!grant) return { ok: false, reason: say("reason_name_you_may_not_powerwords", { name, power: powerWords[power] }) };
   const checks: LimitCheck[] = [];
   const scopes: { position: Position; at: EntityId }[] = [];
   // The trustee acting for a trust: themselves by their own role, or the organization whose trustee role it flows down through.
@@ -565,7 +565,7 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
   };
   if (grant.basis === "control") {
     const path = controlPathOf(ctx, who, org, power);
-    if (!path) return { ok: false, reason: `${name}: you may not ${powerWords[power]}` };
+    if (!path) return { ok: false, reason: say("reason_name_you_may_not_powerwords", { name, power: powerWords[power] }) };
     const chain = [path.top, ...path.steps.map((s) => s.org)];
     rests(path.root, path.top, chain);
     for (const step of path.steps) {
@@ -582,25 +582,25 @@ export function mayAct(ctx: ReadContext, who: EntityId, org: EntityId, power: Or
       const over = overLimit(limits, amount, spent, name, ctx.world.currency);
       if (over !== null) return { ok: false, reason: over, limit: true };
     }
-    if (limits.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: `${labelOf(ctx, ask.account)} isn't one of the accounts you may use for ${name}`, limit: true };
+    if (limits.accounts && ask.account !== undefined && !limits.accounts.includes(ask.account)) return { ok: false, reason: say("reason_account_isn_t_one_of_the", { account: labelOf(ctx, ask.account), name }), limit: true };
   }
   const target = ask.target;
   if (target !== undefined && SCOPED.includes(power)) {
     for (const { position, at } of scopes) {
       const below = positionsBelow(positionsOf(ctx, at), position.id);
-      if (!heldPositions(ctx, target, at).some((h) => below.includes(h.position.id))) return { ok: false, reason: `${labelOf(ctx, target)} isn't below ${position.title} at ${labelOf(ctx, at)}` };
+      if (!heldPositions(ctx, target, at).some((h) => below.includes(h.position.id))) return { ok: false, reason: say("reason_target_isn_t_below_title_at", { target: labelOf(ctx, target), title: position.title, at: labelOf(ctx, at) }) };
     }
   }
   const rows = grant.basis === "owner" ? ownersIn(own(ctx.state.entities, org)?.fields ?? {}).filter((o) => o.party === who) : [];
   const worth = rows.some((o) => ROLE_RIGHTS[o.role].worth);
   if (target !== undefined && !worth && (power === "money.spend" || power === "money.payout")) {
     const interests = optionalQuery(ctx, "economy.interests")?.(ctx, who) ?? [who];
-    if (interests.includes(target)) return { ok: false, reason: `${name}'s money pays for ${name}, not for ${labelOf(ctx, target)}` };
+    if (interests.includes(target)) return { ok: false, reason: say("reason_name_s_money_pays_for_name2", { name, target: labelOf(ctx, target) }) };
   }
   if (rows.some((o) => o.role === "trustee")) trustee = who;
   // A trustee acting alone where the trustees decide together (§29.1 Trusts): a co-trustee approves it.
   if (ask.approving !== true && trustee !== null && TOGETHER_POWERS.includes(power) && orgTypeOf(ctx, org) === "trust" && trusteesDecideIn(own(ctx.state.entities, org)?.fields ?? {}) === "together" && trusteesOf(ctx, org).some((t) => t !== trustee)) {
-    return { ok: false, reason: `The trustees of ${name} decide together: another trustee approves this`, limit: true };
+    return { ok: false, reason: say("reason_the_trustees_of_name_decide_together", { name }), limit: true };
   }
   return { ok: true, grant };
 }

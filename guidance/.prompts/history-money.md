@@ -242,3 +242,9 @@ flow_label_name_interest: {{name}} interest
 flow_label_name_dividend: {{name}} dividend
 party_suppliers: Suppliers
 party_owners: Owners
+reason_its_takings_leave_the_world_and: its takings leave the world and its payroll is paid from nowhere
+reason_what_it_holds_and_pays_out: what it holds and pays out has nowhere to be
+reason_its_payroll_is_paid_from_nowhere: its payroll is paid from nowhere
+reason_labelof_days_days_late: {{account}}: {{days}} days late
+reason_memo_price_corrected: {{memo}}: price corrected
+reason_its_money_has_nowhere_to_be: its money has nowhere to be

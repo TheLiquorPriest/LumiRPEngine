@@ -356,7 +356,7 @@ export function keepPlaces(ctx: ReadContext, ids: readonly PlaceId[], draft: Pic
   for (const p of [...keeping.values()].sort((a, b) => depth(a) - depth(b) || a.id.localeCompare(b.id))) {
     if (own(draft.places, p.parent) === undefined && !kept.has(p.parent)) {
       const around = nameOf(ctx, p.parent);
-      result.skipped.push({ id: p.id, reason: `${p.name}: it is in ${around}, which ${made.has(p.parent) && !hasOwn(base.places, p.parent) ? "was made in play too: keep it as well" : "the world's draft doesn't have"}` });
+      result.skipped.push({ id: p.id, reason: say("reason_name_is_in_around_which", { name: p.name, around, which: made.has(p.parent) && !hasOwn(base.places, p.parent) ? say("reason_was_made_in_play_too_keep") : say("reason_the_world_s_draft_doesn_t") }) });
       continue;
     }
     ops.push({ op: "add", path: pointerOf(["places", p.id]), value: structuredClone(keptPlace(p)) as unknown as JsonValue });

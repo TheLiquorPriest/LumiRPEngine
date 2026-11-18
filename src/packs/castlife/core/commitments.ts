@@ -17,6 +17,7 @@ import { activeSlot, chatSchedulesIn, ownerRank, scheduleInstants, scheduleOwner
 import { routineSettingsOf } from "../../../shared/routines";
 import { homeOf, workPlace } from "./places";
 import { followOf, scheduleOff } from "./routines";
+import { say } from "../../../engine/lines";
 
 /** What a block of someone's commitments is: routine work or school, an appointment, a trip, one of their own plans, or other routine. */
 export type CommitmentKind = "work" | "school" | "appointment" | "trip" | "plan" | "other";
@@ -78,7 +79,7 @@ const SEARCH_DAYS = 14;
  * player's own words, which are safe to show; a standing order under way holds those hours of each
  * day it runs.
  */
-const ORDER_PLAYED = { minutes: 60, hours: [6, 22] as const, activity: "work", reason: "an order" };
+const ORDER_PLAYED = { minutes: 60, hours: [6, 22] as const, activity: "work", reason: say("reason_an_order") };
 
 /** `blocks` with every span a cutter covers taken out: a block overlapping one keeps only its parts outside it. */
 export function cutAround(blocks: Commitment[], cutters: readonly Commitment[]): Commitment[] {
@@ -268,7 +269,7 @@ function precedence(a: MindPlan, b: MindPlan): number {
 /** What a plan's block is: its kind's activity (company makes a visit social), at its own place, else at home for rest. */
 function planBlock(ctx: ReadContext, who: EntityId, { p, played }: Layable, start: number, end: number): Commitment {
   const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
-  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: played.reason ?? "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: played.reason ?? say("reason_their_own_plan"), kind: "plan", plan: p.id, option: `plan:${p.id}` };
 }
 
 /**

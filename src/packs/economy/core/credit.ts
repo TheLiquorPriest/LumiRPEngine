@@ -229,7 +229,7 @@ export function creditReport(ctx: ReadContext, person: EntityId): CreditReport {
     onTimePct: ontime + late > 0 ? Math.round((ontime * 1000) / (ontime + late)) / 10 : 100,
     accounts: rows,
     inquiries: entries.filter((e) => e.kind === "inquiry").map((e) => ({ at: when(numOf(e.at)), note: strOf(e.note) })),
-    marks: entries.filter((e) => e.kind === "collections" || e.kind === "charged_off" || e.kind === "late").map((e) => ({ at: when(numOf(e.at)), kind: e.kind, note: e.kind === "late" ? `${labelOf(ctx, strOf(e.account))}: ${numOf(e.days)} days late` : `${labelOf(ctx, strOf(e.account))}: ${e.kind.replace(/_/g, " ")}` })),
+    marks: entries.filter((e) => e.kind === "collections" || e.kind === "charged_off" || e.kind === "late").map((e) => ({ at: when(numOf(e.at)), kind: e.kind, note: e.kind === "late" ? say("reason_labelof_days_days_late", { account: labelOf(ctx, strOf(e.account)), days: numOf(e.days) }) : `${labelOf(ctx, strOf(e.account))}: ${e.kind.replace(/_/g, " ")}` })),
     offers,
   };
 }

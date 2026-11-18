@@ -195,7 +195,7 @@ export function orgAlerts(ctx: ReadContext, org: EntityId, viewer: EntityId | nu
   const operating = optionalQuery(ctx, "economy.operating_account");
   const employs = jobsAt(ctx, org).length > 0;
   if (level >= 2 && seesMoney && operating && (type === "company" || type === "trust" || employs) && operating(ctx, org) === null) {
-    const why = type === "company" ? "its takings leave the world and its payroll is paid from nowhere" : employs ? "its payroll is paid from nowhere" : "its money has nowhere to be";
+    const why = type === "company" ? say("reason_its_takings_leave_the_world_and") : employs ? say("reason_its_payroll_is_paid_from_nowhere") : say("reason_its_money_has_nowhere_to_be");
     out.push({ id: "no_account", kind: "no_account", tone: "warn", text: `No bank account: ${why}.`, short: "no bank account", tab: "money", needsYou: viewer !== null && (holds(ctx, org, viewer, "money.manage") || holds(ctx, org, viewer, "org.govern")) });
   }
   // A motion open for the reader's vote, a request waiting on their approval (ORG-SPEC Phase 5).

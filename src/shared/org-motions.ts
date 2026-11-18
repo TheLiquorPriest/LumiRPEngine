@@ -12,7 +12,7 @@ import { isRecord, type JsonValue } from "./json";
 import type { OrgPower } from "./org";
 import type { OrgRef } from "./org-view";
 import type { ParamDef } from "./world";
-import { wordedParam, wordTable } from "../engine/lines";
+import { say, wordedParam, wordTable } from "../engine/lines";
 
 /** An action's choice to put a decision short of the decider's votes to a vote instead: the economy's `decision` reads it from the action's params. */
 export const VOTE_PARAM: ParamDef = wordedParam({ type: "bool", optional: true }, "param_vote");
@@ -241,11 +241,11 @@ export function settled(m: Pick<Motion, "electorate" | "public" | "votes" | "quo
   const t = tallyOf(m);
   const share = m.pass / 100;
   const counted = `${pctWords(t.for)} for, ${pctWords(t.against)} against`;
-  if (t.quorumMet && t.for > share * (t.for + t.against + t.remaining) + EPS) return { outcome: "passed", why: `carried: ${counted}`, tally: t };
-  if (!(t.for + t.remaining > share * (t.for + t.remaining + t.against) + EPS)) return { outcome: "failed", why: `voted down: ${counted}`, tally: t };
+  if (t.quorumMet && t.for > share * (t.for + t.against + t.remaining) + EPS) return { outcome: "passed", why: say("reason_carried_counted", { counted }), tally: t };
+  if (!(t.for + t.remaining > share * (t.for + t.remaining + t.against) + EPS)) return { outcome: "failed", why: say("reason_voted_down_counted", { counted }), tally: t };
   if (!final) return null;
-  if (!t.quorumMet) return { outcome: "failed", why: `no quorum: ${pctWords(t.cast)} took part, ${pctWords(m.quorum)} needed`, tally: t };
-  return t.for > share * (t.for + t.against) + EPS ? { outcome: "passed", why: `carried: ${counted}`, tally: t } : { outcome: "failed", why: `voted down: ${counted}`, tally: t };
+  if (!t.quorumMet) return { outcome: "failed", why: say("reason_no_quorum_cast_took_part_quorum", { cast: pctWords(t.cast), quorum: pctWords(m.quorum) }), tally: t };
+  return t.for > share * (t.for + t.against) + EPS ? { outcome: "passed", why: say("reason_carried_counted", { counted }), tally: t } : { outcome: "failed", why: say("reason_voted_down_counted", { counted }), tally: t };
 }
 
 // ---------------------------------------------------------------- the Decisions section
