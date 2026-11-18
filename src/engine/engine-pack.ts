@@ -463,7 +463,22 @@ const events: EventTypeDef<PackEvent>[] = [
     type: ENGINE_EVENTS.check,
     validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: say("why_no_entity_who", { who: str(e, "actor") }) }),
     apply: noop,
-    describe: (e) => say("ev_check", { actor: str(e, "actor"), check: str(e, "check").replace(/_/g, " "), outcome: str(e, "outcome").replace(/_/g, " "), ...(typeof e.data.total === "number" ? { total: String(e.data.total) } : {}), ...(typeof e.data.dc === "number" ? { dc: String(e.data.dc) } : {}) }),
+    // A roll whole, as every view says it: who rolled, for what (the roll tool's purpose, else the world's check), the dice and the
+    // numbers they showed, the total against the difficulty, and the outcome where it has one besides being rolled.
+    describe: (e) => {
+      const kept = Array.isArray(e.data.dice) ? e.data.dice.filter((d): d is number => typeof d === "number") : typeof e.data.natural === "number" ? [e.data.natural] : [];
+      const outcome = str(e, "outcome");
+      return say("ev_check", {
+        actor: str(e, "actor"),
+        for: str(e, "for"),
+        check: str(e, "check").replace(/_/g, " "),
+        notation: str(e, "notation"),
+        ...(kept.length > 0 ? { dice: kept.join(", ") } : {}),
+        ...(typeof e.data.total === "number" ? { total: String(e.data.total) } : {}),
+        ...(typeof e.data.dc === "number" ? { dc: String(e.data.dc) } : {}),
+        ...(outcome !== "" && outcome !== "rolled" ? { outcome: outcome.replace(/_/g, " ") } : {}),
+      });
+    },
     irreversible: "roll",
   },
   {
