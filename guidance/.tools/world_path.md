@@ -1,5 +1,6 @@
 ---
 description: world_path as the model is told it - what the tool does, and what each of its arguments is.
+doing: laying a way between two places
 arguments:
   from: "One end of the way, by name or id."
   to: "The other end."
