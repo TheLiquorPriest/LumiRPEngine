@@ -293,6 +293,8 @@ describe("a row each of E.6: present, laid out as its row says, asking for nothi
     expect(part.line("still", { elapsed: "1:30" })).toBe("Still working (1:30).");
     expect(part.names).toEqual(expect.arrayContaining(["started", "tool", "delegate", "writing", "still"]));
     expect(written(part)).not.toMatch(ASKS);
+    // A call made again: what broke it, the wait and the try, as RPH fills the row (its turn's `call_failed`).
+    expect(part.line("retrying", { failure: "connection", is: { connection: true }, seconds: 1, next: 2, most: 3 })).toBe("A call to the model failed (the connection broke). Trying again in 1s, try 2 of 3.");
   });
 
   test("notices.md words each notice an agent or the player can be shown, as a fact that fills in and asks for nothing", async () => {
