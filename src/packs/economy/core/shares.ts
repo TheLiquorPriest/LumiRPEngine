@@ -116,7 +116,7 @@ export function decisionRefusal(ctx: ReadContext, business: EntityId, party: Ent
   const need = decidePct(ctx.state, business);
   const have = decisionVotes(ctx, business)[party] ?? 0;
   if (have > need + 1e-9) return null;
-  return `${doing} ${labelOf(ctx, business)} needs ${need === 50 ? "more than half the votes" : `more than ${need}% of the votes`}; ${labelOf(ctx, party)} holds ${Math.round(have * 100) / 100}%`;
+  return say("econ_doing_needs_votes", { doing, business: labelOf(ctx, business), votes: need === 50 ? say("econ_more_than_half_the_votes") : say("econ_more_than_need_of_the_votes", { need }), party: labelOf(ctx, party), pct: Math.round(have * 100) / 100 });
 }
 
 /**
@@ -502,7 +502,7 @@ export function ownershipView(api: FinanceApi, ctx: ReadContext, business: Entit
     const d = deciderFor(ctx, viewer, business, "org.govern", doing);
     return "reason" in d ? { why: d.reason, vote: d.code === "votes" } : { why: null, vote: false };
   };
-  const winding = decides("Winding up");
+  const winding = decides(say("econ_winding_up"));
   const merging = decides("Merging");
   return {
     structure: strOf(fields.structure, "llc"),

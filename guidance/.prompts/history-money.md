@@ -144,7 +144,7 @@ cash_rule_machine: In this chat, cash needs a machine or a branch
 cash_rule_free: In this chat, cash needs no machine
 asset_closed: {{asset}} closed {{on}} at {{price}}
 asset_month_end: {{asset}}'s month-end closes
-memo_cash_deposit_where: Cash deposit{{where}}
+memo_cash_deposit_where: Cash deposit{{#where}} {{where}}{{/where}}
 memo_cash_deposit: Cash deposit
 memo_name_loan_paid_out: {{name}}: loan paid out
 memo_name_replacement: {{name}} replacement
@@ -251,3 +251,44 @@ reason_its_money_has_nowhere_to_be: its money has nowhere to be
 memo_fuel_for: Fuel for {{name}} ({{qty}} {{unit}})
 flow_label_insurance: Insurance: {{name}}
 flow_label_registration: Registration: {{name}}
+econ_cash_machine_fees: Cash machine fees
+econ_cash_advance_fee: Cash advance fee
+econ_payment_to_to: Payment to {{to}}
+econ_an_owner: an owner
+econ_memo_from_viewer_is_late_left: {{memo}} from {{viewer}} is late: {{left}} due.
+econ_by_doesn_t_decide_id: {{by}} doesn't decide {{id}}
+econ_nothing_of_theirs_pays: nothing of theirs pays
+econ_bought_what: Bought {{what}}
+econ_name_isn_t_theirs: {{name}} isn't theirs
+econ_name_is_lost: {{name}} is lost
+econ_sold_name: Sold {{name}}
+econ_more_than_half_the_votes: more than half the votes
+econ_more_than_need_of_the_votes: more than {{need}}% of the votes
+econ_winding_up: Winding up
+econ_estimated_tax: Estimated tax
+econ_corporate_income_tax: Corporate income tax
+econ_shared_out_cents: Shared out {{cents}}
+econ_bought_units_what: Bought {{units}} {{what}}
+econ_sold_units_what: Sold {{units}} {{what}}
+feed_prices_at: Prices at {{place}}{{taxed}}: {{offers}}.
+econ_bought_what_down: Bought {{what}}, {{down}} down
+econ_nothing: nothing
+econ_card_payment: {{card}} payment
+econ_card: Card
+econ_doing_needs_votes: {{doing}} {{business}} needs {{votes}}; {{party}} holds {{pct}}%
+econ_memo_billed_to_is_late: {{memo}}, billed to {{customer}}, is late: {{left}} owed.
+econ_a_customer: a customer
+econ_a_business: a business
+econ_at_place: at {{place}}
+econ_the_branch: the branch
+econ_a_cash_machine: a cash machine
+name_account_cash: Cash
+name_account_checking: Checking
+name_account_savings: Savings
+name_account_credit_card: Credit card
+name_account_debit_card: Debit card
+econ_let_who_go: let {{who}} go
+econ_let_staff_go: let {{count}} staff go
+econ_ended_a_standing_payment: ended a standing payment
+econ_ended_standing_payments: ended {{count}} standing payments
+econ_began_winding_up: Began winding up{{#parts}}: {{parts}}{{/parts}}

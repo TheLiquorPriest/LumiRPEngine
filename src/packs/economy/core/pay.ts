@@ -193,11 +193,11 @@ export function cardProblem(ctx: TableBooks, card: EntityId, holder: EntityId): 
   const e = own(ctx.state.entities, card);
   if (!e || e.kind !== "card") return "isn't a card";
   const name = e.name;
-  if (strOf(e.fields.holder) !== holder) return `${name} isn't theirs`;
+  if (strOf(e.fields.holder) !== holder) return say("econ_name_isn_t_theirs", { name });
   const state = strOf(e.fields.state, "active");
   if (state !== "active") return `${name} is ${state}`;
   const item = strOf(e.fields.item);
-  if (item !== "" && own(ctx.state.entities, item) && isLost(ctx.state, item)) return `${name} is lost`;
+  if (item !== "" && own(ctx.state.entities, item) && isLost(ctx.state, item)) return say("econ_name_is_lost", { name });
   const account = strOf(e.fields.account);
   if (statusOf(ctx.state, account) !== "open") return `${own(ctx.state.entities, account)?.name ?? account} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`;
   return null;

@@ -135,7 +135,7 @@ function shareOut(api: FinanceApi, args: Record<string, JsonValue>, ctx: EffectC
   const by = strOf(args.by);
   // Over its limit, put up for approval when the action asks; under an approval, past it (ORG-SPEC Phase 5).
   if (by !== "" && by !== org) {
-    const held = heldTo(ctx, { by, party: org, power: "money.payout", text: `Shared out ${api.money(ctx, cents)}`, cents, account: from }, mayAct(ctx, by, org, "money.payout", { amount: cents, account: from }), "not_owner");
+    const held = heldTo(ctx, { by, party: org, power: "money.payout", text: say("econ_shared_out_cents", { cents: api.money(ctx, cents) }), cents, account: from }, mayAct(ctx, by, org, "money.payout", { amount: cents, account: from }), "not_owner");
     if (held) return held;
   }
   if (api.available(ctx, from) < cents) return { code: "declined", reason: say("why_from_doesnt_have_cents", { from: labelOf(ctx, from), cents: api.money(ctx, cents) }) };

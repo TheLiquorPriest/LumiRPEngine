@@ -395,7 +395,7 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
       holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
       events.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? say("name_symbol_in_account", { symbol: asset.symbol, account: account ? labelOf(ctx, account) : undefined }) : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...(account ? { account } : { owners: [{ party, role: "owner" }] }) }, relations: [] } });
     }
-    const label = `Bought ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
+    const label = say("econ_bought_units_what", { units: unitsText(qty), what: asset.symbol ?? asset.label });
     const lines: PostingLine[] = [
       { account: source, amount: -cents },
       { account: marketOf(api, assetId), amount: cents },
@@ -418,7 +418,7 @@ export function trade(api: FinanceApi, ctx: EffectContext | ReadContext, t: Trad
   const cents = Math.round(qty * price);
   const dest = proceedsAccount(api, ctx, party, holding, t.to);
   if (typeof dest !== "string") return dest;
-  const label = `Sold ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
+  const label = say("econ_sold_units_what", { units: unitsText(qty), what: asset.symbol ?? asset.label });
   const lines: PostingLine[] = [
     { account: marketOf(api, assetId), amount: -cents },
     { account: dest, amount: cents },

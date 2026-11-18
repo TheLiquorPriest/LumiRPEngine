@@ -402,7 +402,7 @@ function vehicleDetails(v: JsonValue | undefined): VehicleDetails {
 /** What a payer may pay from, for a refusal to list: each account and card of theirs that pays, by name and id. */
 function payChoices(ctx: ReadContext, payer: EntityId): string {
   const ways = accountsOf(ctx, payer, "spend").filter((id) => traitsOf(ctx, id)?.pays === true).flatMap((id) => [id, ...cardsOn(ctx.state, id).filter((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === payer)]);
-  return ways.length > 0 ? ways.map((id) => `${labelOf(ctx, id)} (${id})`).join(", ") : "nothing of theirs pays";
+  return ways.length > 0 ? ways.map((id) => `${labelOf(ctx, id)} (${id})`).join(", ") : say("econ_nothing_of_theirs_pays");
 }
 
 /**
@@ -778,7 +778,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const offers = ctx.levelOf(pov, "money") === 0 || place === null ? [] : offersAtPlace(ctx, place);
       if (place === null || offers.length === 0) return [];
       const taxed = featureFor(ctx, pov, "sales_tax") ? say("feed_before_sales_tax") : "";
-      return [`Prices at ${labelOf(ctx, place)}${taxed}: ${offers.map((o) => `${o.name} ${formatMoney(o.cents, ctx.world.currency)}`).join("; ")}.`];
+      return [say("feed_prices_at", { place: labelOf(ctx, place), taxed, offers: offers.map((o) => `${o.name} ${formatMoney(o.cents, ctx.world.currency)}`).join("; ") })];
     },
   });
   r.renderer({ slot: "property", label: "Property your character holds a part in", render: (ctx) => propertyLines(ctx, "player").map((l) => l.text), feed: propertyLines });
@@ -995,7 +995,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
           const payee = sold ? seller : typeof args.payee === "string" ? args.payee : undefined;
           // A sale between people pays its seller what they agreed: no till, so no business takes it and no sales tax is added. A financed one is taxed on its whole price, paid with the down payment (alone when nothing is put down).
           const till = sold ? {} : { sale: { place: placeOfEntity(ctx.state, buyer), item: row ?? name, ...(financed > 0 ? { price: price.cents } : {}) } };
-          const paid = charge(hooks, ctx, payer, price.cents - financed, financed > 0 ? `Bought ${what}, ${down > 0 ? moneyWords(ctx, down) : "nothing"} down` : `Bought ${what}`, { method: payMethodOf(words), category: price.category, kind: "purchase", ...till, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(payee !== undefined ? { payee } : {}), ...(from !== "" ? { source: from } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}), ...(story ? { story } : {}) });
+          const paid = charge(hooks, ctx, payer, price.cents - financed, financed > 0 ? say("econ_bought_what_down", { what, down: down > 0 ? moneyWords(ctx, down) : say("econ_nothing") }) : say("econ_bought_what", { what }), { method: payMethodOf(words), category: price.category, kind: "purchase", ...till, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(payee !== undefined ? { payee } : {}), ...(from !== "" ? { source: from } : {}), ...(typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {}), ...(story ? { story } : {}) });
           if (isRejection(paid)) return paid;
           out.push(...paid);
         }
@@ -1104,7 +1104,7 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
         if (from === "") return reject("missing_account", say("why_who_has_no_account_to_pay_card", { who: labelOf(ctx, who), card: labelOf(ctx, card) }));
         const unusable = mayUse(ctx, who, from, "from");
         if (unusable) return unusable;
-        return move(ctx, from, card, cents, `${own(ctx.state.entities, card)?.name ?? "Card"} payment`);
+        return move(ctx, from, card, cents, say("econ_card_payment", { card: own(ctx.state.entities, card)?.name ?? say("econ_card") }));
       });
     },
   });

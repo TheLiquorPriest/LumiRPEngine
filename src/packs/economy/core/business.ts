@@ -594,7 +594,7 @@ function shownName(ctx: ReadContext, viewer: EntityId | null, id: string, fallba
 
 function ownerLines(ctx: ReadContext, api: FinanceApi, viewer: EntityId | null, business: EntityId): OwnerLine[] {
   // A company counting units (ORG-SPEC §3.10) gives each row its units, so selling its shares can count them.
-  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? null : o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party), ...(o.units !== undefined ? { units: o.units } : {}) }));
+  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? null : o.party, name: shownName(ctx, viewer, o.party, say("econ_an_owner")), role: o.role, share: api.shareOf(ctx.state, business, o.party), ...(o.units !== undefined ? { units: o.units } : {}) }));
 }
 
 /**
@@ -693,8 +693,8 @@ function invoiceAlerts(ctx: ReadContext, api: FinanceApi, party: EntityId, viewe
   const out: AlertLine[] = [];
   for (const inv of allInvoices(ctx)) {
     if (inv.state !== "late" || inv.left <= 0) continue;
-    if (inv.party === party || (inv.party !== null && mine.includes(inv.party))) out.push({ tone: "neg", text: `${inv.memo} from ${shownName(ctx, viewer, inv.business, "a business")} is late: ${api.money(ctx, inv.left)} due.`, flow: `invoice:${inv.id}` });
-    else if (mine.includes(inv.business)) out.push({ tone: "warn", text: `${inv.memo}, billed to ${inv.party ? shownName(ctx, viewer, inv.party, "a customer") : inv.customer}, is late: ${api.money(ctx, inv.left)} owed.`, flow: `invoice:${inv.id}` });
+    if (inv.party === party || (inv.party !== null && mine.includes(inv.party))) out.push({ tone: "neg", text: say("econ_memo_from_viewer_is_late_left", { memo: inv.memo, viewer: shownName(ctx, viewer, inv.business, say("econ_a_business")), left: api.money(ctx, inv.left) }), flow: `invoice:${inv.id}` });
+    else if (mine.includes(inv.business)) out.push({ tone: "warn", text: say("econ_memo_billed_to_is_late", { memo: inv.memo, customer: inv.party ? shownName(ctx, viewer, inv.party, say("econ_a_customer")) : inv.customer, left: api.money(ctx, inv.left) }), flow: `invoice:${inv.id}` });
   }
   return out;
 }

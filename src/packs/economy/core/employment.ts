@@ -973,7 +973,7 @@ function staffJob(ctx: ReadContext, args: Record<string, JsonValue>, power: OrgP
   if (job.status === "ended") return reject("ended", say("why_that_job_has_already_ended"));
   const by = strOf(args.by);
   if (by === "") return job;
-  const refusal = job.party === null ? `${labelOf(ctx, by)} doesn't decide ${labelOf(ctx, job.id)}` : staffRefusal(ctx, by, job.party, power, position === undefined ? { worker: job.worker } : { worker: job.worker, position });
+  const refusal = job.party === null ? say("econ_by_doesn_t_decide_id", { by: labelOf(ctx, by), id: labelOf(ctx, job.id) }) : staffRefusal(ctx, by, job.party, power, position === undefined ? { worker: job.worker } : { worker: job.worker, position });
   return refusal === null ? job : reject("not_owner", refusal);
 }
 

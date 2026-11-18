@@ -48,6 +48,7 @@ import { kindIs, placeOfEntity } from "../../../engine/scope";
 import { COMPANY_KIND, GROUP_KIND, MEMBER_OF, membersOf, TRUST_KIND } from "../../../engine/selector";
 import { mayAct } from "../../../engine/org";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
+import { wordTable } from "../../../engine/lines";
 
 /** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
 export const CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
@@ -79,26 +80,16 @@ export function outsideAccount(name: string): string {
 }
 
 /** The foundation's and the modules' own outside payees by key, as a person reads them. */
-const OUTSIDE_NAMES: Readonly<Record<string, string>> = {
-  market: "Shops",
-  world: "World",
-  insurer: "Insurer",
-  registrar: "Vehicle registration",
-  "tax:federal": "Federal tax",
-  "tax:state": "State tax",
-  "tax:local": "Local tax",
-  "insurance:property": "Property insurance",
-  "upkeep:property": "Property upkeep",
-};
+const OUTSIDE_NAMES: Readonly<Record<string, string>> = wordTable("outside", ["market", "world", "insurer", "registrar", "tax:federal", "tax:state", "tax:local", "insurance:property", "upkeep:property"]);
 
 /** The taxes a region's authority collects (`tax:<kind>:<region>`), by kind. */
-const REGIONAL_TAXES: Readonly<Record<string, string>> = { sales: "Sales tax", property: "Property tax" };
+const REGIONAL_TAXES: Readonly<Record<string, string>> = wordTable("regional_tax", ["sales", "property"]);
 
 /** Outside keys that name who they are after the kind (`bank:<institution>`), and what each reads as when nothing follows. */
-const NAMED_OUTSIDE: Readonly<Record<string, string>> = { bank: "Bank", atm: "Cash machine", employer: "Employer" };
+const NAMED_OUTSIDE: Readonly<Record<string, string>> = wordTable("outside_named", ["bank", "atm", "employer"]);
 
 /** Outside keys that say what kind of party they are and what they're about (`seller:<property>`), by the kind. A purchase's mortgage pays its money out to the purchase's closing (`closing:<property>`). */
-const OUTSIDE_KINDS: Readonly<Record<string, string>> = { buyer: "Buyer", seller: "Seller", market: "Market", tenant: "Outside tenant", closing: "Closing" };
+const OUTSIDE_KINDS: Readonly<Record<string, string>> = wordTable("outside_kind", ["buyer", "seller", "market", "tenant", "closing"]);
 
 /** What a view reads names with: who may see what, as well as the books. */
 export type ViewBooks = Pick<ReadContext, "world" | "state" | "tables" | "registry">;

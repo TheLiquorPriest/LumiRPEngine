@@ -525,7 +525,7 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
     left -= part;
     const deposit = api.depositAccount(ctx, s.party);
     lines.push({ account: deposit ?? api.outside(s.party), amount: part });
-    disposals.push(disposal(x.property, s.party, 100, Math.round((price * (shares[s.party] ?? 0)) / 100), `Sold ${e.name}`));
+    disposals.push(disposal(x.property, s.party, 100, Math.round((price * (shares[s.party] ?? 0)) / 100), say("econ_sold_name", { name: e.name })));
   });
   if (sellers.length === 0 && net > 0) lines.push({ account: api.outside(`seller:${x.property}`), amount: net });
   const posted = api.post(ctx, lines.filter((l) => l.amount !== 0), { memo: say("memo_bought_name_for_price", { name: e.name, price: money(price) }), kind: "purchase", category: "property" });

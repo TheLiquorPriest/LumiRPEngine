@@ -51,7 +51,7 @@ import { counted, decisionRefusal } from "./shares";
 import { businessIds as companyIds, orgValue, sellStake } from "./stakes";
 import { sCorpRefusal, structureOf, taxStillOwed } from "./taxes";
 import { UNEMPLOYMENT_ACCRUED } from "./unemployment";
-import { say } from "../../../engine/lines";
+import { say, listOf } from "../../../engine/lines";
 import { powerWords } from "../../../engine/word-tables";
 
 /** What a step said, for the History the orgs pack writes: its words, and the people they name. */
@@ -312,8 +312,8 @@ function begin(api: FinanceApi, w: Working, business: EntityId, said: WindSaid[]
   ]);
   if (failed) return failed;
   const workers = [...new Set(jobs.map((j) => j.worker))];
-  const parts = [workers.length > 0 ? `let ${workers.length === 1 ? labelOf(ctx, workers[0] ?? "") : `${workers.length} staff`} go` : null, payments.length > 0 ? `ended ${payments.length === 1 ? "a standing payment" : `${payments.length} standing payments`}` : null].filter((x): x is string => x !== null);
-  said.push({ text: `Began winding up${parts.length > 0 ? `: ${parts.join(" and ")}` : ""}`, names: workers.length === 1 ? workers : [] });
+  const parts = [workers.length > 0 ? (workers.length === 1 ? say("econ_let_who_go", { who: labelOf(ctx, workers[0] ?? "") }) : say("econ_let_staff_go", { count: workers.length })) : null, payments.length > 0 ? (payments.length === 1 ? say("econ_ended_a_standing_payment") : say("econ_ended_standing_payments", { count: payments.length })) : null].filter((x): x is string => x !== null);
+  said.push({ text: say("econ_began_winding_up", { parts: parts.length > 0 ? listOf(parts) : undefined }), names: workers.length === 1 ? workers : [] });
   return null;
 }
 

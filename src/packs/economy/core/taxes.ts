@@ -1307,9 +1307,9 @@ export function registerTaxes(r: FinanceRegistry): void {
         const e = own(ctx.state.entities, id);
         if (!e || isGone(ctx.state, id)) continue;
         // The payee is named as a flow names someone outside (`tax:federal`), not as their outside account.
-        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(api, ctx, id, paths, work)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
+        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(api, ctx, id, paths, work)) out.push(estimateFlow(`esttax:${id}`, say("econ_estimated_tax"), id, "tax:federal", id, false));
         // A corporation, and one that was until its change of structure is taxed (§3.13); never an exempt one, nor one wound up, which pays what it owes as it winds up.
-        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && dissolvedOn(ctx.state, id) === null && !isExempt(ctx, id) && (structureOf(ctx.state, id) === "c_corp" || strOf(e.fields.structure_before) === "c_corp")) out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
+        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && dissolvedOn(ctx.state, id) === null && !isExempt(ctx, id) && (structureOf(ctx.state, id) === "c_corp" || strOf(e.fields.structure_before) === "c_corp")) out.push(estimateFlow(`esttax:${id}`, say("econ_corporate_income_tax"), operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
       }
       return out;
     },

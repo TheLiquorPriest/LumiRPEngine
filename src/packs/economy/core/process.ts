@@ -206,18 +206,18 @@ export function materializeMoney(entity: EntityId, ctx: ReadContext, rng: Rng, v
   const out: LedgerEvent[] = [];
   if (version === 1) {
     const mk = (suffix: string, name: string, fields: JsonObject, inWallet = false): EntityDef => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
-    for (const def of [mk("cash", "Cash", { type: "cash" }, true), mk("checking", "Checking", { type: "checking", institution: "Local bank" }), mk("savings", "Savings", { type: "savings", institution: "Local bank", apy_pct: 0.4 }), mk("card", "Credit card", { type: "card", limit, apr_pct: 22, statement_day: statementDay, due_days: 25, autopay: "minimum" })]) out.push({ type: "spawn", entity: def });
+    for (const def of [mk("cash", say("name_account_cash"), { type: "cash" }, true), mk("checking", say("name_account_checking"), { type: "checking", institution: "Local bank" }), mk("savings", say("name_account_savings"), { type: "savings", institution: "Local bank", apy_pct: 0.4 }), mk("card", say("name_account_credit_card"), { type: "card", limit, apr_pct: 22, statement_day: statementDay, due_days: 25, autopay: "minimum" })]) out.push({ type: "spawn", entity: def });
   } else {
     const owners = [{ party: entity, role: "owner" }];
     const mk = (suffix: string, name: string, fields: JsonObject, inWallet = false): EntityDef => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owners, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
     const card = (suffix: string, name: string, account: string, network: string): EntityDef => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity, network, state: "active" }, relations: [] });
     for (const def of [
-      mk("cash", "Cash", { product: "cash" }, true),
-      mk("checking", "Checking", { product: "checking", institution: "Local bank" }),
-      mk("savings", "Savings", { product: "savings", institution: "Local bank" }),
-      mk("card", "Credit card", { product: "credit_card", institution: "Local bank", limit, statement_day: statementDay, autopay: "minimum", autopay_from: id("checking") }),
-      card("debit_card", "Debit card", id("checking"), "debit"),
-      card("credit_card", "Credit card", id("card"), "credit"),
+      mk("cash", say("name_account_cash"), { product: "cash" }, true),
+      mk("checking", say("name_account_checking"), { product: "checking", institution: "Local bank" }),
+      mk("savings", say("name_account_savings"), { product: "savings", institution: "Local bank" }),
+      mk("card", say("name_account_credit_card"), { product: "credit_card", institution: "Local bank", limit, statement_day: statementDay, autopay: "minimum", autopay_from: id("checking") }),
+      card("debit_card", say("name_account_debit_card"), id("checking"), "debit"),
+      card("credit_card", say("name_account_credit_card"), id("card"), "credit"),
     ])
       out.push({ type: "spawn", entity: def });
   }

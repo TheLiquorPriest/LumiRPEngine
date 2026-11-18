@@ -83,13 +83,13 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   if (atTop) {
     const branch = featureAt<{ bank: string }>(ctx, who, "branch");
     const atm = featureAt<AtmFeature>(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution) where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    if (branch && branch.feature.bank === p.institution) where = say("econ_at_place", { place: own(ctx.world.places, branch.place)?.name ?? say("econ_the_branch") });
     else if (atm) {
       card = debitCard(ctx, who, account);
       if (!card) return reject("no_card", cardsOn(ctx.state, account).length > 0 ? say("why_none_of_who_s_cards_on_account", { who: labelOf(ctx, who), account: labelOf(ctx, account) }) : say("why_account_has_no_card_for_a_cash", { account: labelOf(ctx, account) }));
       if (typeof atm.feature.limit === "number" && cents > atm.feature.limit) return reject("over_limit", say("why_the_machine_gives_at_most_limit_at", { limit: money(ctx, atm.feature.limit) }));
       if (cardRoom(ctx, card, "atm") < cents) return reject("over_limit", say("why_card_has_atm_left_of_its_daily", { card: labelOf(ctx, card), atm: money(ctx, cardRoom(ctx, card, "atm")) }));
-      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      where = say("econ_at_place", { place: own(ctx.world.places, atm.place)?.name ?? say("econ_a_cash_machine") });
       if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
         const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
         if (surcharge > 0) machine.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
@@ -117,7 +117,7 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   const memo = say("memo_cash_withdrawal", { where: where || undefined, fees: fees > 0 ? money(ctx, fees) : undefined });
   // Fees first, so the cash is checked against what they leave: a rebased view that can't cover it drops the unit, fees and all.
   // Cash from a credit account is a cash advance, which runs its own interest from the day it's drawn.
-  return asUnit([...charge(machine, "Cash machine fees", "atm"), ...charge(advanceLines, "Cash advance fee", "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...(card ? { card } : {}) }), ...extra]);
+  return asUnit([...charge(machine, say("econ_cash_machine_fees"), "atm"), ...charge(advanceLines, say("econ_cash_advance_fee"), "cash_advance"), ...posting([{ account, amount: -cents }, { account: wallet, amount: cents }], { memo, kind: "withdrawal", category: t?.revolving ? "cash_advance" : "transfer", ...(card ? { card } : {}) }), ...extra]);
 }
 
 /**
@@ -142,9 +142,9 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
   if (cashNeedsAMachine(ctx, who)) {
     const branch = featureAt<{ bank: string }>(ctx, who, "branch");
     const atm = featureAt<AtmFeature>(ctx, who, "atm");
-    if (branch && branch.feature.bank === p.institution) where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    if (branch && branch.feature.bank === p.institution) where = say("econ_at_place", { place: own(ctx.world.places, branch.place)?.name ?? say("econ_the_branch") });
     else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
-      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      where = say("econ_at_place", { place: own(ctx.world.places, atm.place)?.name ?? say("econ_a_cash_machine") });
       held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
     } else return reject("no_atm", say("why_theres_no_institution_bank_branch_or_deposit", { institution: p.institution }));
   }
@@ -152,7 +152,7 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
     { account: wallet, amount: -cents },
     { account, amount: cents },
   ];
-  const events: LedgerEvent[] = posting(lines, { memo: say("memo_cash_deposit_where", { where }), kind: "deposit", category: "transfer" });
+  const events: LedgerEvent[] = posting(lines, { memo: say("memo_cash_deposit_where", { where: where || undefined }), kind: "deposit", category: "transfer" });
   if (traitsOf(ctx, account)?.liability) events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
   if (held) events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: say("memo_cash_deposit") } });
   return asUnit(events);
@@ -443,7 +443,7 @@ export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string,
   const problem = flowProblem(ctx, who, from, to, strOf(f.fallback));
   if (problem) return problem;
   if (f.once === undefined && f.every === undefined) return reject("bad_flow", say("why_a_flow_needs_a_schedule"));
-  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
+  const label = made.label ?? say("econ_payment_to_to", { to: labelOf(ctx, to) });
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
   const fields: JsonObject = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
   const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;

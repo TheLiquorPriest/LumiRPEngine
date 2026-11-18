@@ -171,3 +171,22 @@ word_season_summer: summer
 word_season_winter: winter
 word_them: them
 word_it: it
+word_outside_market: Shops
+word_outside_world: World
+word_outside_insurer: Insurer
+word_outside_registrar: Vehicle registration
+word_outside_tax_federal: Federal tax
+word_outside_tax_state: State tax
+word_outside_tax_local: Local tax
+word_outside_insurance_property: Property insurance
+word_outside_upkeep_property: Property upkeep
+word_regional_tax_sales: Sales tax
+word_regional_tax_property: Property tax
+word_outside_named_bank: Bank
+word_outside_named_atm: Cash machine
+word_outside_named_employer: Employer
+word_outside_kind_buyer: Buyer
+word_outside_kind_seller: Seller
+word_outside_kind_market: Market
+word_outside_kind_tenant: Outside tenant
+word_outside_kind_closing: Closing
