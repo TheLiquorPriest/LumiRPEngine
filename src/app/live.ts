@@ -122,13 +122,15 @@ const callPermission = shape.named(
   "The permission a write or external tool's call ran under: the lane its tier puts it under (external for a tool of the external tier), the user's setting for that lane, and under Confirm the user's word on the call.",
   shape.object({ lane: T, setting: shape.oneOf("auto", "confirm", "never"), answer: opt(approvalAnswer) }),
 );
+/** A thing that runs a command or calls out, as its file names it: its kind, its name (what `rpe allow` takes) and what it runs or calls. */
+const switchThing = shape.object({ kind: shape.oneOf("hook", "rule-command", "command-tool", "mcp-server", "http-tool", "connection"), name: T, target: T });
 const callRefusal = shape.named(
   "CallRefusal",
   "Why a tool call never ran: a limit spent before it started, past the most tool calls one answer of its agent may make, the thing it calls out to not switched on for the user, its lane set to Never, the user's no with his reason, a rule that held it, a permission or rule that could not be asked, or a hook of his that blocked it with its reason.",
   shape.union(
     shape.object({ by: shape.literal("limit"), hit: limitHit }),
     shape.object({ by: shape.literal("answer"), max: N }),
-    shape.object({ by: shape.literal("switch"), thing: shape.object({ kind: shape.oneOf("hook", "rule-command", "command-tool", "mcp-server", "http-tool", "connection"), name: T, target: T }), state: shape.oneOf("on", "waiting", "off") }),
+    shape.object({ by: shape.literal("switch"), thing: switchThing, state: shape.oneOf("on", "waiting", "off") }),
     shape.object({ by: shape.literal("never"), lane: T }),
     shape.object({ by: shape.literal("declined"), lane: T, reason: opt(T) }),
     shape.object({ by: shape.literal("hold"), rule: T }),
@@ -142,9 +144,18 @@ const jobLimits = shape.named(
   shape.object({ calls: opt(N), tokensIn: opt(N), tokensOut: opt(N), tokens: opt(N), time: opt(N), askAt: opt(N) }),
 );
 const jobState = shape.named("JobState", "Where a job stands.", shape.oneOf("queued", "held", "running", "asking", "done", "failed", "cancelled", "off-path", "interrupted"));
+const jobStopper = shape.named(
+  "JobStopper",
+  "Who ended a job before its agent was done: an agent, by its job_cancel, with the run it worked in; the owner, by his own press; or RPH itself, and why: a limit reached, the turn that started it left the path, RPE stopping, or a restart that found it cut off.",
+  shape.union(
+    shape.object({ by: shape.literal("agent"), agent: agentRef, run: T }),
+    shape.object({ by: shape.literal("user") }),
+    shape.object({ by: shape.literal("engine"), reason: shape.oneOf("limit", "off-path", "stopping", "restart") }),
+  ),
+);
 export const jobView = shape.named(
   "JobView",
-  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
+  "A job: its agent, what it was asked, where it stands, its scope, who started it, when, what it spent, its report, the limit it ended at, who ended it, what its start named and gave, what it was not given, what it wrote, the job it repeats, where it asks, and what the owner gave it beyond its limits.",
   shape.object({
     id: T,
     agent: T,
@@ -157,6 +168,7 @@ export const jobView = shape.named(
     usage,
     report: opt(T),
     limit: opt(limitHit),
+    stoppedBy: opt(jobStopper, "For a job ended before its agent was done (cancelled, at a limit, off the path, interrupted): who ended it."),
     attach: opt(shape.list(T), "The attachments its start named, by name."),
     limits: opt(jobLimits, "The limits of its own its start gave."),
     missing: opt(shape.list(T), "The names in attach nobody could find."),
@@ -203,7 +215,7 @@ const traceEvent = shape.named(
   "What RPH did; each kind's fields are the facts of it.",
   shape.union(
     shape.object({ kind: shape.literal("run_started"), run: shape.oneOf("turn", "job", "talk"), turn: opt(shape.named("TurnKind", "What a generation asks for.", shape.oneOf("new", "swipe", "regenerate", "continue", "impersonate"))), lead: T }),
-    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), session: T, given: shape.list(T), tools: opt(shape.object({ tokens: N, most: N })), judges: opt(shape.object({ rule: T, agent: T })) }),
+    shape.object({ kind: shape.literal("agent_started"), definition: T, connection: T, model: T, effort: opt(effort), set: opt(effort), session: T, given: shape.list(T), tools: opt(shape.object({ tokens: N, most: N })), judges: opt(shape.object({ rule: T, agent: T })) }),
     shape.object({ kind: shape.literal("tool_unheld"), tool: T, definition: T, reason: shape.oneOf("unregistered", "shadowed", "withdrawn") }),
     shape.object({ kind: shape.literal("intent_began") }),
     shape.object({ kind: shape.literal("intent"), text: T }),
@@ -220,6 +232,7 @@ const traceEvent = shape.named(
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("time"), length: N }),
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("command"), detail: T }),
     shape.object({ kind: shape.literal("rule_failed"), rule: T, path: T, why: shape.literal("judge"), detail: T }),
+    shape.object({ kind: shape.literal("rule_waiting"), rule: T, path: T, thing: switchThing, state: shape.oneOf("waiting", "off") }),
     shape.object({
       kind: shape.literal("hook"),
       hook: T,

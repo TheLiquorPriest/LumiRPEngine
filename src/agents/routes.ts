@@ -35,8 +35,8 @@ const definitionLimits = shape.named(
 
 const runsOn = shape.named(
   "DefinitionRun",
-  "What a definition runs on, resolved among the user's connections for the chat it is listed for, with what the settings there set for it standing over its header: the connection its header names (his default where it names none), that connection's model, the effort it thinks at (the settings' for its definition, else the settings' for its connection, else its definition's, else its connection's own), and the limits it is held to (its header's, each one the settings set standing over it; absent where none holds).",
-  shape.object({ connection: nullable(shape.object({ id: T, name: T })), model: nullable(T), effort: nullable(effort), limits: opt(definitionLimits) }),
+  "What a definition runs on, resolved among the user's connections for the chat it is listed for, with what the settings there set for it standing over its header: the connection its header names (his default where it names none), that connection's model, the effort it thinks at (the settings' for its definition, else the settings' for its connection, else its definition's, else its connection's own), the level its model is really sent for that effort (the nearest it has where it has none so high; null where its provider's own default stands or no connection resolves), and the limits it is held to (its header's, each one the settings set standing over it; absent where none holds).",
+  shape.object({ connection: nullable(shape.object({ id: T, name: T })), model: nullable(T), effort: nullable(effort), sent: nullable(effort), limits: opt(definitionLimits) }),
 );
 type RunMirrored = Holds<Exactly<Infer<typeof runsOn>, DefinitionRun>>;
 
