@@ -111,6 +111,13 @@ describe("act", () => {
     expect(regard()).toBeGreaterThan(before);
   });
 
+  test("relationships: a held Chat with, given as the press gave it (an id and minutes), is carried out", async () => {
+    const { t } = await rigOf();
+    const r = await apply(t, { op: "act", action: "chat_with", params: { target: "bram", minutes: 30 } });
+    expect(r.error).toBeUndefined();
+    expect(stateOf(t).entities.wren?.fields.activity).toBe("chat");
+  });
+
   test("sheets: an attempt takes the outcome the GM ruled, and rolls none", async () => {
     const { t } = await rigOf();
     const r = await apply(t, { op: "act", action: "attempt", params: { stat: "strength" }, outcome: "great" });
