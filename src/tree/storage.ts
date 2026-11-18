@@ -183,12 +183,17 @@ export async function treeStorage(deps: StorageDeps & { chats: TreeChats; now():
   return { chats, next, global: (await levelBytes(none, "@global/")) - globalNotes, globalNotes, shipped: await levelBytes(none, "@shipped/"), database, rest: shares.rest };
 }
 
-/** A chat's note files: the largest now, and those agents wrote most often in turns; `limit` of each. */
+/** A chat's note files: the largest now, and those agents wrote most often in turns; `limit` of each. Each note has one key, its path in the chat's view, which the Files page opens. */
 export async function noteFiles(deps: StorageDeps, loc: ChatLocation, user: string, chat: string, limit: number): Promise<NoteFiles> {
   const sizes = new Map<string, number>();
   const notes = await locate(loc, NOTES_FOLDER);
   if (notes.ok) for await (const f of sized(loc, notes.at)) sizes.set(f.rest.join("/"), f.bytes);
-  const counts = new Map(deps.db.query<{ path: string; writes: number }, [string, string]>("SELECT path, count(*) AS writes FROM note_version WHERE user = ? AND chat = ? GROUP BY path").all(user, chat).map((r) => [r.path, r.writes]));
+  // A version names its note below the notes folder or with it, as the agent wrote it: both are the one note's.
+  const counts = new Map<string, number>();
+  for (const r of deps.db.query<{ path: string; writes: number }, [string, string]>("SELECT path, count(*) AS writes FROM note_version WHERE user = ? AND chat = ? GROUP BY path").all(user, chat)) {
+    const path = r.path.startsWith(`${NOTES_FOLDER}/`) ? r.path : `${NOTES_FOLDER}/${r.path}`;
+    counts.set(path, (counts.get(path) ?? 0) + r.writes);
+  }
   const largest = [...sizes]
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
     .slice(0, limit)
