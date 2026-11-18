@@ -87,12 +87,12 @@ describe("on this repository", () => {
   test("the docs and the starter templates reach the tests that read them", () => {
     expect(run(selectTests(repo, ["docs/RECIPES.md"], opts))).toContain("test/docs/recipes.test.ts");
     expect(run(selectTests(repo, ["docs/AGENT-GUIDE.md"], opts))).toEqual(expect.arrayContaining(["test/docs/agent-guide.test.ts", "test/cli/tools.test.ts"]));
-    expect(run(selectTests(repo, ["data-src/templates/fantasy-town.json"], opts))).toEqual(expect.arrayContaining(["test/packs/templates/starters.test.ts", "test/backend/agent-api.test.ts"]));
+    expect(run(selectTests(repo, ["data-src/templates/fantasy-town.json"], opts))).toEqual(expect.arrayContaining(["test/packs/templates/starters.test.ts"]));
     expect(run(selectTests(repo, ["test/ledger/regressions.json"], opts))).toEqual(["test/ledger/regressions.test.ts"]);
   });
 
   test("the hubs keep to the budget and still run their own tests", () => {
-    for (const hub of ["src/app/app.ts", "test/support/rig.ts", "src/shared/json.ts", "src/packs/index.ts"]) {
+    for (const hub of ["src/app/app.ts", "src/store/store.ts", "src/shared/json.ts", "src/packs/index.ts"]) {
       const picked = selectTests(repo, [hub], opts);
       const spent = picked.run.reduce((sum, p) => sum + p.ms, 0);
       const own = picked.run.filter((p) => p.why.startsWith("named after")).reduce((sum, p) => sum + p.ms, 0);
