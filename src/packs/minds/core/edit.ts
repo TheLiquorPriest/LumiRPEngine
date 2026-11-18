@@ -140,7 +140,7 @@ function planFrom(ctx: ReadContext, who: EntityId, id: string | null, v: JsonObj
     made: before?.made ?? ctx.state.clock,
     source: before?.source ?? "gm",
     closed,
-    reason: status === "open" ? null : (before?.reason ?? "GM edit"),
+    reason: status === "open" ? null : (before?.reason ?? say("mind_gm_edit")),
     ...(money && cents ? { cents } : {}),
     ...(shared ? { shared: true as const } : {}),
     // A memory's words stay that memory's until the GM rewrites them; the GM's own are everyone's in it.

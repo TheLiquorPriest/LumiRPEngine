@@ -474,3 +474,6 @@ param_org: Organization
 param_plan_org: Organization (its id)
 param_flow_to: To (an account, someone, or a payee's name)
 param_flow_every: Every (day, week, month, year or once)
+action_how_many: How many
+action_with_names: with {{names}}
+action_from_place: from {{place}}

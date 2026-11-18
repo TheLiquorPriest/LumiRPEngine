@@ -245,3 +245,5 @@ eng2_world_info_entry: World Info: {{entry}}
 eng2_lore_entry: Lore: {{entry}}
 eng2_another_block_of_this_routine_is: another block of this routine is {{blockId}}
 eng2_routine_id_block_id2: Routine {{id}}, block {{block}}
+eng2_money_rounded: {{money}}, rounded
+eng2_the_default_money: the default, {{money}}

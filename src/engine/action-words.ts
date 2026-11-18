@@ -15,23 +15,24 @@ import type { Registry } from "./registry-impl";
 import { findAction, outsideOf, type Resolution } from "./resolve";
 import type { WorldState } from "./state";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "./visibility";
+import { listOf, say } from "./lines";
 
 /** A game-time span in words: "45 min", "2.5 hours", "30 days". */
 export function spanText(minutes: number): string {
-  if (minutes >= 1440) return `${Math.round((minutes / 1440) * 10) / 10} ${minutes === 1440 ? "day" : "days"}`;
-  if (minutes >= 60) return `${Math.round((minutes / 60) * 10) / 10} ${minutes === 60 ? "hour" : "hours"}`;
-  return `${minutes} min`;
+  if (minutes >= 1440) return say(minutes === 1440 ? "span_day" : "span_days", { n: Math.round((minutes / 1440) * 10) / 10 });
+  if (minutes >= 60) return say(minutes === 60 ? "span_hour" : "span_hours", { n: Math.round((minutes / 60) * 10) / 10 });
+  return say("span_minutes", { n: minutes });
 }
 
 /** A game-time span, compact: "45 min", "8 h 55 min", "3 d 4 h" (chip labels). */
 export function compactSpan(minutes: number): string {
   const total = Math.max(0, Math.round(minutes));
-  if (total < 60) return `${total} min`;
+  if (total < 60) return say("span_compact_min", { min: total });
   const days = Math.floor(total / 1440);
   const hours = Math.floor((total % 1440) / 60);
   const rest = total % 60;
-  if (days > 0) return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
-  return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
+  if (days > 0) return hours > 0 ? say("span_compact_d_h", { d: days, h: hours }) : say("span_compact_d", { d: days });
+  return rest > 0 ? say("span_compact_h_min", { h: hours, min: rest }) : say("span_compact_h", { h: hours });
 }
 
 /** The param that counts an action's thing (Buy's, a holding's sale): it reads with that thing. */
@@ -43,7 +44,7 @@ export function paramLabel(action: ActionDef, name: string, world: WorldDoc, reg
   if (def?.label) return def.label;
   const kind = def?.ref ? (world.kinds[def.ref] ?? registry.kinds.get(def.ref)) : undefined;
   if (kind?.label) return kind.label;
-  if (name === COUNT_PARAM) return "How many";
+  if (name === COUNT_PARAM) return say("action_how_many");
   const words = name.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
@@ -144,7 +145,7 @@ export function actionWords(registry: Registry, world: WorldDoc, state: Readonly
     if (def.type === "ref") word = def.outside !== undefined ? read.payee(def, value, said[name]) : (read.nameOf(value) ?? (typeof value === "string" ? read.asTyped(value) : null));
     else if (def.type === "list" && def.ref !== undefined) {
       const names = (Array.isArray(value) ? value : []).map(read.nameOf).filter((n): n is string => n !== null);
-      if (names.length > 0) word = `with ${names.join(" and ")}`;
+      if (names.length > 0) word = say("action_with_names", { names: listOf(names) });
     } else if (def.type === "money" && typeof value === "number") word = formatMoney(value, world.currency);
     else if (def.type === "number" && typeof value === "number") word = `${value} ${paramLabel(action, name, world, registry).toLowerCase()}`;
     else if (def.type === "duration" && typeof value === "number" && value > 0) word = compactSpan(value);
@@ -231,7 +232,7 @@ export function toldAction(registry: Registry, world: WorldDoc, state: Readonly<
   const moved = res.events.findLast((e) => e.type === "set" && e.entity === res.actor && e.field === "place");
   const from = before.from;
   const fromPlace = from ? own(world.places, from) : undefined;
-  if (moved && from && fromPlace && moved.type === "set" && moved.value !== from && canSeePlace(registry, world, state, world.pov, from)) parts.push(`from ${fromPlace.name}`);
+  if (moved && from && fromPlace && moved.type === "set" && moved.value !== from && canSeePlace(registry, world, state, world.pov, from)) parts.push(say("action_from_place", { place: fromPlace.name }));
   const last = new Map<string, JsonValue>();
   for (const e of res.events) if (e.type === "set" && e.entity === res.actor) last.set(e.field, e.value);
   const unchanged = new Set([...last].filter(([field, value]) => JSON.stringify(value) === JSON.stringify(before.fields[field] ?? null)).map(([field]) => field));

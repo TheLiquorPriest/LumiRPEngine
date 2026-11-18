@@ -204,3 +204,13 @@ word_op_run_projects: run production projects
 word_op_lend_money: lend money
 word_unemployment_kind_futa: Federal unemployment tax (FUTA)
 word_unemployment_kind_suta: State unemployment tax (SUTA)
+span_day: {{n}} day
+span_days: {{n}} days
+span_hour: {{n}} hour
+span_hours: {{n}} hours
+span_minutes: {{n}} min
+span_compact_min: {{min}} min
+span_compact_d_h: {{d}} d {{h}} h
+span_compact_d: {{d}} d
+span_compact_h_min: {{h}} h {{min}} min
+span_compact_h: {{h}} h

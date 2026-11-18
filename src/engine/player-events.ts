@@ -603,7 +603,7 @@ function witnessed(e: LedgerEvent): boolean {
  * uncovers, invitations to it) are none of an onlooker's.
  */
 export function witnessLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], max: number): string[] {
-  return wordedLines(reg, world, state, pov, events.filter(witnessed), max, true, "the player character");
+  return wordedLines(reg, world, state, pov, events.filter(witnessed), max, true, say("feed_the_player_character"));
 }
 
 function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, events: readonly LedgerEvent[], max: number, player: boolean, you = "You"): string[] {

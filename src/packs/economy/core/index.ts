@@ -919,7 +919,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const cap = world.packs.economy?.config.unpricedCap;
       if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
       // The engine reads a fraction rounded and anything else not above zero as unset (`unpricedCap`).
-      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
+      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? say("eng2_money_rounded", { money: formatMoney(Math.round(cap), world.currency) }) : say("eng2_the_default_money", { money: formatMoney(derivedUnpricedCap(world), world.currency) });
       return [{ severity: "warning" as const, code: "economy.unpriced_cap", message: say("lint_the_narrated_price_cap_should_be_a", { currency: minorUnitPlural(world.currency), fallback: fallback }), path: "packs.economy.config.unpricedCap" }];
     },
   });
@@ -929,7 +929,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       const cap = world.packs.economy?.config.claimCap;
       if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
       // As with the narrated-price cap, the engine reads a fraction rounded and anything else not above zero as unset (`claimCap`).
-      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedClaimCap(world), world.currency)}`;
+      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? say("eng2_money_rounded", { money: formatMoney(Math.round(cap), world.currency) }) : `the default, ${formatMoney(derivedClaimCap(world), world.currency)}`;
       return [{ severity: "warning" as const, code: "economy.claim_cap", message: say("lint_the_claim_cap_should_be_a_whole", { currency: minorUnitPlural(world.currency), fallback: fallback }), path: "packs.economy.config.claimCap" }];
     },
   });
