@@ -82,9 +82,9 @@ export interface Call {
 
 export function callsOf(trace: readonly TraceRecord[]): Call[] {
   const ends = new Map<string, TraceRecord>();
-  for (const r of trace) if (r.event.kind === "call_ended") ends.set(`${r.run}\u0000${r.agent.id}\u0000${r.event.call}`, r);
+  for (const r of trace) if (r.event.kind === "call_ended") ends.set(`${r.run}\u0000${r.agent?.id}\u0000${r.event.call}`, r);
   return trace.flatMap((r): Call[] => {
-    if (r.event.kind !== "call_started") return [];
+    if (r.event.kind !== "call_started" || r.agent === undefined) return [];
     const end = ends.get(`${r.run}\u0000${r.agent.id}\u0000${r.event.call}`);
     const ended = end?.event.kind === "call_ended" ? end.event : null;
     return [
@@ -111,7 +111,7 @@ export function callsOf(trace: readonly TraceRecord[]): Call[] {
 /** The agent the turn's run started with (the Author, as shipped), by its id and definition. */
 export function leadOf(trace: readonly TraceRecord[]): { id: string; definition: string } | null {
   const started = trace.find((r) => r.event.kind === "run_started");
-  return started ? { id: started.agent.id, definition: started.agent.definition } : null;
+  return started?.agent ? { id: started.agent.id, definition: started.agent.definition } : null;
 }
 
 /** What the lead began at (`agent_started`): its effort (null where the record says none), model and connection. */
@@ -124,7 +124,7 @@ export interface LeadStart {
 /** The effort and model the lead began at (`agent_started`); effort null where the record says none. */
 export function leadStart(trace: readonly TraceRecord[]): LeadStart | null {
   const lead = leadOf(trace);
-  const started = trace.find((r) => r.event.kind === "agent_started" && r.agent.id === lead?.id);
+  const started = trace.find((r) => r.event.kind === "agent_started" && r.agent?.id === lead?.id);
   return started?.event.kind === "agent_started" ? { effort: started.event.effort ?? null, model: started.event.model, connection: started.event.connection } : null;
 }
 

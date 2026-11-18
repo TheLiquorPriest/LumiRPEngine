@@ -80,7 +80,7 @@ export interface FirstMessage {
 export function firstMessage(trace: readonly TraceRecord[]): FirstMessage | null {
   const lead = leadOf(trace);
   if (lead === null) return null;
-  const ended = trace.find((r) => r.event.kind === "call_ended" && r.agent.id === lead.id && r.event.call === 1);
+  const ended = trace.find((r) => r.event.kind === "call_ended" && r.agent?.id === lead.id && r.event.call === 1);
   return ended?.event.kind === "call_ended" ? { run: ended.run, text: ended.event.text, toolCalls: ended.event.toolCalls.length } : null;
 }
 
@@ -147,13 +147,13 @@ export function twoStepTurn(trace: readonly TraceRecord[], tags: ReplyTags): { o
   const calls = callsOf(trace).filter((c) => c.agent === lead.id && c.run === release.run && c.startedAt <= release.at);
   const counted = calls.length;
   // The first tool call the lead began writing, in any call of the run: the intent file's write.
-  const firstTool = trace.find((r) => r.event.kind === "tool_started" && r.agent.id === lead.id && r.run === release.run);
+  const firstTool = trace.find((r) => r.event.kind === "tool_started" && r.agent?.id === lead.id && r.run === release.run);
   const args = firstTool?.event.kind === "tool_started" ? firstTool.event.args : null;
   const path = typeof args === "object" && args !== null && !Array.isArray(args) && typeof args.path === "string" ? args.path : null;
   if (firstTool?.event.kind !== "tool_started" || !writesIntent({ name: firstTool.event.tool, path }) || (path !== null && !path.endsWith(tags.intentFile))) return { outcome: "intent-not-first", calls: counted };
   if (release.form !== "message") return { outcome: "reply-not-a-message", calls: counted };
   const replyCall = calls.at(-1);
-  const texts = trace.flatMap((r) => (r.event.kind === "call_ended" && r.agent.id === lead.id && r.run === release.run ? [{ call: r.event.call, text: r.event.text }] : []));
+  const texts = trace.flatMap((r) => (r.event.kind === "call_ended" && r.agent?.id === lead.id && r.run === release.run ? [{ call: r.event.call, text: r.event.text }] : []));
   const working = texts.filter((t) => t.call !== replyCall?.call && t.text.trim() !== "");
   const reply = texts.find((t) => t.call === replyCall?.call)?.text ?? "";
   const tagged = [tags.intent, tags.reply].some((tag) => reply.includes(`<${tag}>`) || reply.includes(`</${tag}>`));
@@ -216,7 +216,7 @@ export function replyText(trace: readonly TraceRecord[]): string {
   if (lead === null || release === null) return "";
   const calls = callsOf(trace).filter((c) => c.agent === lead.id && c.run === release.run && c.startedAt <= release.at);
   const last = calls.at(-1);
-  const ended = trace.find((r) => r.event.kind === "call_ended" && r.agent.id === lead.id && r.run === release.run && r.event.call === last?.call);
+  const ended = trace.find((r) => r.event.kind === "call_ended" && r.agent?.id === lead.id && r.run === release.run && r.event.call === last?.call);
   return ended?.event.kind === "call_ended" ? ended.event.text : "";
 }
 
@@ -230,7 +230,7 @@ export interface SamplingTurn {
 
 export function samplingTurn(trace: readonly TraceRecord[]): SamplingTurn {
   const lead = leadOf(trace);
-  const started = trace.filter((r) => r.event.kind === "tool_started" && r.agent.id === lead?.id);
+  const started = trace.filter((r) => r.event.kind === "tool_started" && r.agent?.id === lead?.id);
   const failed: string[] = [];
   for (const r of started) {
     if (r.event.kind !== "tool_started") continue;
@@ -316,12 +316,15 @@ export function crossing(run: AtOnce): Crossing {
   const started = new Set<string>();
   const tools = new Map<string, { run: string; agent: string }>();
   for (const r of run.trace) {
+    // A record with no agent is the host's own word (a session opened), no agent's work.
+    if (r.agent === undefined) continue;
     if (r.event.kind === "call_started") started.add(callKey(r.run, r.agent.id, r.event.call));
     if (r.event.kind === "tool_started") tools.set(r.event.callId, { run: r.run, agent: r.agent.id });
   }
   let records = 0;
   for (const r of run.trace) {
     records++;
+    if (r.agent === undefined) continue;
     const where = `${r.agent.id} in ${r.run} (record ${r.seq}, ${r.event.kind})`;
     if (!known.has(r.agent.id)) crossed.push(`${where}: an agent the run did not start`);
     if (r.event.kind === "call_ended" && !started.has(callKey(r.run, r.agent.id, r.event.call))) crossed.push(`${where}: call ${r.event.call} ended in a run and agent that never began it`);
@@ -341,8 +344,8 @@ export function crossing(run: AtOnce): Crossing {
   }
   const unfinished: string[] = [];
   for (const agent of run.agents) {
-    const runs = new Set(run.trace.filter((r) => r.agent.id === agent && r.event.kind === "agent_started").map((r) => r.run));
-    const ended = run.trace.some((r) => r.agent.id === agent && r.event.kind === "agent_ended");
+    const runs = new Set(run.trace.filter((r) => r.agent?.id === agent && r.event.kind === "agent_started").map((r) => r.run));
+    const ended = run.trace.some((r) => r.agent?.id === agent && r.event.kind === "agent_ended");
     if (runs.size === 0) unfinished.push(`${agent}: it never started`);
     else if (!ended) unfinished.push(`${agent}: it never ended`);
     const own = run.transcripts.filter((t) => t.agent === agent);
