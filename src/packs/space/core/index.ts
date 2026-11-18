@@ -375,11 +375,9 @@ export const spacePack: PackDef = {
 
     r.action({
       id: "go",
-      label: "Go to",
-      description: "Go to another place: a room, a building, a street, another part of town.",
       pack: "space",
       // Who comes along: people with the player character it names ("with Danny"), or all of them for "we".
-      params: { to: { type: "ref", ref: "place", label: "Place" }, with: { type: "list", ref: "person", optional: true, label: "Who comes along" } },
+      params: { to: { type: "ref", ref: "place" }, with: { type: "list", ref: "person", optional: true } },
       // Story first: the walk, else any mode's route, else a nominal move. The world's travel
       // simulation brings back the walk it once needed (`can_go`). A place that gives no leave to
       // enter is offered greyed, with why (ORG-SPEC §3.9); typed, it plays as roleplay, and the
@@ -393,8 +391,6 @@ export const spacePack: PackDef = {
     });
     r.action({
       id: "step",
-      label: "Move on the map",
-      description: "Walk to a square of the grid you stand on.",
       pack: "space",
       params: { x: { type: "number" }, y: { type: "number" } },
       requires: ["level.space >= 3", "grid_reachable(here, x, y)"],
