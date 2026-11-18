@@ -12,7 +12,7 @@ import { route, RouteError, shape } from "../app";
 import { type AppConfig, type DataPaths, SHIPPED_FOLDER } from "../app/config";
 import { readText } from "../app/disk";
 import type { Registry } from "../engine/registry-impl";
-import type { Store } from "../store";
+import { JoinedTurnError, type Store } from "../store";
 import { answerPaused, NotPaused } from "./answers";
 import { rowsGiven } from "./migrate";
 import { oldRecord, oldRecords } from "./old-records";
@@ -361,6 +361,9 @@ export function migrateRoutes(deps: MigrateRoutesDeps) {
       reply: carriedTurnReply,
       joined: true,
       handle: ({ user, params }) => {
+        // A turn joined to another (a continue's held turn) is answered as a fact, for the server to answer in its one place.
+        const row = presses?.store?.().user(user).turn(params.turn);
+        if (row !== undefined && row !== null && row.chat === params.chat && row.joined !== null) throw new JoinedTurnError(params.turn, row.joined);
         const found = oldRecord(deps.db, user, params.turn);
         if (found === null || found.chat !== params.chat) throw new RouteError(404, `Turn ${params.turn} of chat ${params.chat} is not one a migration carried.`);
         return found;
