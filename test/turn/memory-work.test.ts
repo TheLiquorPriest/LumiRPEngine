@@ -280,3 +280,13 @@ test("the Cast page's press: the cast list and the Turn page's record say what w
   expect(after.body.characters.find((c) => c.name === WREN)?.waits.perceptions).toBe(0);
   expect((await record())?.untaken).toEqual([]);
 });
+
+test("switch off the perceptions rule and its memory reminders go with it: nothing is said at a run's end or in the next turn's briefing, though her perception still waits", async () => {
+  const b = await openTurnBed({ off: ["rules/unsourced", "rules/perceptions"], answers: [...VOICED, { pieces: [{ text: "Nothing more." }] }, replying("The lamp turns.")] });
+  beds.push(b);
+  const first = await play(b, "I ask whether the boat came.");
+  const second = await play(b, "I wait.");
+  expect([fired(b, first), fired(b, second)]).toEqual([[], []]);
+  expect(told(b, "their own agent has not taken in")).toBe(0);
+  expect(wrenAt(b, second).untaken).toHaveLength(1);
+});
