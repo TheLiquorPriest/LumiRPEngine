@@ -11,6 +11,7 @@ import { markChangeOf } from "./marks";
 import type { BuildLore } from "./service";
 import { LoreError } from "./service";
 import { SecrecyError } from "./secrecy";
+import { WorldError } from "../../worlds/worlds";
 
 const T = shape.text();
 const field = shape.field;
@@ -29,6 +30,8 @@ async function guarded<A>(work: () => Promise<A>): Promise<A> {
     return await work();
   } catch (error) {
     if (error instanceof LoreError || error instanceof SecrecyError) throw new RouteError(STATUS[error.code], error.message);
+    // A world the page names that is not there (the lore index reads its draft) is refused in RPE's words, not failed as the server.
+    if (error instanceof WorldError) throw new RouteError(STATUS[error.code === "not_found" || error.code === "conflict" ? error.code : "bad_request"], error.message);
     throw error;
   }
 }
