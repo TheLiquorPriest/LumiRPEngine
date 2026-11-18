@@ -6,9 +6,12 @@
 // itself once its reply is tied), or along the chat's path for a scope with no turn:
 //   turns.since.engine.change  turns RPE played on that line since the last one that recorded an engine-lane change (a turn a
 //                              migration carried is none since anything, though an engine change it carried ends the count)
-//   turn.recorded              what this turn has recorded so far in any lane, all of it the store's changes (the story's and the
-//                              cast's among them); a continue's, since it began (the marks its run took, as its take-back uses them)
-//   unsourced.writes           this turn's writes with no source, through any tool, counted as `turn.recorded` counts
+//   turn.recorded              what the agents' own calls of this turn have recorded so far in any lane (the story's and the cast's
+//                              records among them); a continue's, since it began (the marks its run took, as its take-back uses
+//                              them). RPE's own records (the knowledge switch at a turn's start) and the rows a write brings with it
+//                              (a holding a perception gives) are no agent's call, and a job's are its own
+//   unsourced.writes           of those, the ones with no source: the agent's own the facts are read for, every agent's where none is
+//                              named, so a reminder counts only what the agent it reminds can put right
 //   turn.owes.reply            1 while the run owes the player a reply it has not released; 0 for a run that owes none (Settle now). A
 //                              release is marked on the run the moment its first text reaches RPE (`turns.ts`), so nothing waits for it
 //   turn.owes.record           1 while the run owes the player a reply and has recorded nothing (`turn.recorded` is 0); 0 for a run
@@ -21,7 +24,7 @@
 //                              which side is closed (PlanStory-12's link, read off the story record's path)
 // A scope naming a past turn reads every one of them as that turn would have (C-10): its line, its changes, its runs.
 
-import type { FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
+import type { AgentRef, FactDef, FactsPort, FactValue, Scope } from "rp-harness/contract";
 import { pairMarks } from "../quests/thread";
 import type { ChangeRow, Store } from "../store";
 import { storyAt } from "../story/path";
@@ -34,8 +37,8 @@ export interface FactSource {
   /** The area, for the error when two areas declare one name. */
   area: string;
   defs: readonly FactDef[];
-  /** The values of these facts (each one of `defs`) for the scope. */
-  read(scope: Scope, names: readonly string[]): Promise<Record<string, FactValue>>;
+  /** The values of these facts (each one of `defs`) for the scope, read for `agent` where the harness names one. */
+  read(scope: Scope, names: readonly string[], agent?: AgentRef): Promise<Record<string, FactValue>>;
 }
 
 export class FactsRegistry implements FactsPort {
@@ -57,14 +60,14 @@ export class FactsRegistry implements FactsPort {
     return this.#sources.flatMap((s) => s.defs.map((d) => ({ ...d, ...(d.by !== undefined ? { by: [...d.by] } : {}), ...(d.fields !== undefined ? { fields: [...d.fields] } : {}) })));
   }
 
-  async read(scope: Scope, names?: string[]): Promise<Record<string, FactValue>> {
+  async read(scope: Scope, names?: string[], agent?: AgentRef): Promise<Record<string, FactValue>> {
     this.#fixed = true;
     const out: Record<string, FactValue> = {};
     await Promise.all(
       this.#sources.map(async (source) => {
         const asked = source.defs.map((d) => d.name).filter((name) => names === undefined || names.includes(name));
         if (asked.length === 0) return;
-        const values = await source.read(scope, asked);
+        const values = await source.read(scope, asked, agent);
         for (const name of asked) {
           const value = values[name];
           if (value !== undefined) out[name] = value;
@@ -98,8 +101,8 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
     area: "turn",
     defs: [
       { name: "turns.since.engine.change", counts: "Turns RPE played on this turn's own line, this one once its reply is saved, since the last one that recorded a change in the engine lane; every turn RPE played on it when none has. A turn a migration carried is not counted: the previous build played it." },
-      { name: "turn.recorded", counts: "Things this turn has recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. A job's are its own." },
-      { name: "unsourced.writes", counts: "This turn's writes with no source, through any tool, counted as turn.recorded counts them." },
+      { name: "turn.recorded", counts: "Things the agents' own calls of this turn have recorded so far in any lane: the engine's changes, and the story's and the cast's records; for a continue, since it began. RPE's own records and the rows a write brings with it are none of them; a job's are its own." },
+      { name: "unsourced.writes", counts: "This turn's writes with no source, counted as turn.recorded counts them: those of the agent the facts are read for (a rule due for it), every agent's where none is named." },
       { name: "turn.owes.reply", counts: "1 while this run owes the player a reply it has not released; 0 once it has, and for a run that owes none (a Settle now run)." },
       { name: "turn.owes.record", counts: "1 while this run owes the player a reply and has recorded nothing in any lane (turn.recorded is 0); 0 once it has, and for a run that owes no reply." },
       { name: "turn.last.without.intent", counts: "1 when the last reply released on the turn before this one on its line (for a continue, on the turn it goes on with) went out with no intent record taken before it; 0 otherwise, and where no reply was released on that turn." },
@@ -108,7 +111,7 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       { name: "story.newest", counts: "With the replies as the story, his newest message: 1 in the group the chat's setting story.newest names.", by: [...STORY_NEWEST] },
       { name: "threads.quests.split", counts: "A story thread and a quest naming it where one is closed and the other open, at this turn, by which side is the closed one; named by the quest.", by: ["thread", "quest"] },
     ],
-    async read(scope, names) {
+    async read(scope, names, agent) {
       const user = store.user(scope.user);
       // A chat RPE has not met yet has no turns on its path: every count is 0. A turn still open is not yet one of the turns counted,
       // so a swipe counts the line it follows, not the attempt it replaces.
@@ -122,8 +125,9 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
       const runNow = turn === null ? null : (ownRuns(turn).at(-1) ?? null);
       // Every run owes the player a reply but one that writes nothing into the chat.
       const owes = runNow !== null && runNow.kind !== "settle";
-      // What a migration wrote on a carried turn (source `import`) is the previous build's, nothing this turn recorded.
-      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && c.source !== "import"));
+      // Only an agent's own call writes a change with its handle: RPE's own records, a migration's, a person's, and the rows a write
+      // brings with it carry none. What a migration wrote on a carried turn is the previous build's, nothing this turn recorded.
+      const mine = (): ChangeRow[] => (turn === null ? [] : user.changes(turn).filter((c) => c.ord > (runNow?.mark ?? -1) && c.job === null && c.handle !== null && c.source !== "import"));
       const recorded = (): number => mine().length;
       const out: Record<string, FactValue> = {};
       if (names.includes("turns.since.engine.change")) {
@@ -132,7 +136,8 @@ export function turnFacts(store: Store, deps: TurnFactsDeps): FactSource {
         out["turns.since.engine.change"] = { count: user.playedOf(newest === null ? turns : turns.slice(turns.lastIndexOf(newest) + 1)).size };
       }
       if (names.includes("turn.recorded")) out["turn.recorded"] = { count: recorded() };
-      if (names.includes("unsourced.writes")) out["unsourced.writes"] = { count: mine().filter((c) => c.source === null).length };
+      // A reminder counts what the agent it reminds can put right: its own writes, by its handle.
+      if (names.includes("unsourced.writes")) out["unsourced.writes"] = { count: mine().filter((c) => c.source === null && (agent === undefined || c.handle === agent.id)).length };
       if (names.includes("previous.run.stopped")) out["previous.run.stopped"] = { count: turn === null ? 0 : deps.stopped(scope.user, turn) };
       if (names.includes("story.from") || names.includes("story.newest")) {
         const story = await deps.story(scope);
