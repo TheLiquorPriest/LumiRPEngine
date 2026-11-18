@@ -5,7 +5,7 @@ import type { ActionId, CheckId, DomainId, FieldId, Level, ProgressionId, TableI
 import type { DataTable } from "../tables";
 import type { ActionDef, AdjudicationDef, CheckDef, CombatDef, FieldDef, ProgressionDef, SheetLayoutDef } from "../world";
 
-export type ProfileId = "modern" | "classic" | "fifth" | "custom";
+export type ProfileId = "modern" | "classic" | "classic_revised" | "fifth" | "custom";
 
 export interface ProfileDef {
   id: ProfileId;

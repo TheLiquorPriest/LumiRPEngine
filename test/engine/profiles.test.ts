@@ -46,6 +46,7 @@ function read(world: WorldDoc, state: WorldState, entity: string, field: string)
 const ATTEMPT: Record<ProfileId, { action: string; params: Record<string, string>; stats: Record<string, number>; mod: number; degrees: boolean }> = {
   modern: { action: "skill_check", params: { skill: "stealth" }, stats: { dex: 12, stealth: 2 }, mod: 3, degrees: true },
   classic: { action: "skill_check", params: { skill: "stealth" }, stats: { dex: 12, stealth: 2 }, mod: 3, degrees: true },
+  classic_revised: { action: "skill_check", params: { skill: "stealth" }, stats: { dex: 12, stealth: 2 }, mod: 3, degrees: true },
   fifth: { action: "skill_check", params: { skill: "stealth" }, stats: { dex: 14, stealth: 1 }, mod: 4, degrees: true },
   custom: { action: "try_something", params: {}, stats: { skill: 3 }, mod: 3, degrees: false },
 };
@@ -62,7 +63,7 @@ function d20Odds(mod: number, degrees: boolean): Record<string, number> {
 }
 
 /** The XP that reaches level 2 on each profile; Custom has none until its author adds a threshold. */
-const LEVEL_TWO: Record<ProfileId, number> = { modern: 1000, classic: 1000, fifth: 300, custom: 100 };
+const LEVEL_TWO: Record<ProfileId, number> = { modern: 1000, classic: 1000, classic_revised: 2000, fifth: 300, custom: 100 };
 
 /** A person to fight where the POV starts: the first one there, else the first one moved there; tough enough to see a round out. */
 function withFoe(world: WorldDoc): string {

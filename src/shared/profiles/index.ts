@@ -19,6 +19,7 @@ import type { EntityId, KindId } from "../ids";
 import { hasOwn, isRecord, safeKey, type JsonValue } from "../json";
 import type { FieldDef, KindDef, RulesetDef, WorldDoc } from "../world";
 import { CLASSIC } from "./classic";
+import { CLASSIC_REVISED } from "./classic-revised";
 import { CUSTOM } from "./custom";
 import { FIFTH } from "./fifth";
 import { MODERN } from "./modern";
@@ -26,10 +27,10 @@ import type { ProfileDef, ProfileId } from "./types";
 
 export type { ProfileDef, ProfileId } from "./types";
 
-export const PROFILES: Readonly<Record<ProfileId, ProfileDef>> = { modern: MODERN, classic: CLASSIC, fifth: FIFTH, custom: CUSTOM };
+export const PROFILES: Readonly<Record<ProfileId, ProfileDef>> = { modern: MODERN, classic: CLASSIC, classic_revised: CLASSIC_REVISED, fifth: FIFTH, custom: CUSTOM };
 
 /** The picker's order: the fullest first, the bare one last. */
-export const PROFILE_IDS: readonly ProfileId[] = ["modern", "classic", "fifth", "custom"];
+export const PROFILE_IDS: readonly ProfileId[] = ["modern", "classic", "classic_revised", "fifth", "custom"];
 
 export function profileOf(id: unknown): ProfileDef | null {
   const found = PROFILE_IDS.find((p) => p === id);
