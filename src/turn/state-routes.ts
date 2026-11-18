@@ -96,6 +96,7 @@ export function stateRoutes(turns: Turns) {
         cursor: opt(T, "Where the page starts: the `next` of the page before."),
       },
       reply: valueHistoryReply,
+      joined: true,
       handle: async ({ user, params, query }) => {
         const s = held(user, params.chat, query.turn);
         const env = turns.store.env;
