@@ -182,6 +182,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.beat", data: { text: "A beat" } },
   { type: "engine.caught", data: { agent: "dev", slot: 3 } },
   { type: "engine.cursor", data: { rr: 1 } },
+  // What an Undo takes back of a pack's slice: an entry taken off a list, a number changed back, a value put back as it was (an entity's field included, with its note in the touched record).
+  { type: "engine.unlist", data: { pack: "engine", path: ["fed"], entry: 1 } },
+  { type: "engine.bump", data: { pack: "engine", path: ["rr"], delta: -1 } },
+  { type: "engine.put", data: { path: ["entities", "you", "fields", "mood"], value: "tense" } },
   { type: "engine.choice", data: { key: "dev:evening", choice: "rest" } },
   { type: "engine.attempt", data: { track: "heist", stage: "on", correct: false } },
   { type: "engine.revealed", data: { track: "heist", stage: "on" } },
@@ -219,6 +223,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "space.where", data: { entity: "you", zone: "by the hearth", words: "behind the bar" } },
   // This chat's own change to the world's places, paths and maps is the engine's world slice (DEPTH2-PLAN §2), never an entity's definition: an Upgrade carries it to the new revision itself (`carryDraft`), as the last test here shows.
   { type: "engine.world", data: { collection: "routes", id: "back_way", value: { id: "back_way", from: "inn", to: "town", modes: { walk: { minutes: 5 } }, bidirectional: true }, over: null } },
+  { type: "engine.world_back", data: { collection: "routes", id: "back_way", entry: null } },
   { type: "economy.anchor", data: { entity: "dev", band: "comfortable", typical: 3000, base: 2000 } },
   { type: "economy.txn", data: { memo: "Rent", lines: [{ account: "acct", amount: -100 }] } },
   { type: "economy.note", data: { entity: "dev", class: "bill", text: "Rent is due" } },
@@ -259,6 +264,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.acquire", data: { entity: "house", party: "you", cents: 25000000 } },
   { type: "economy.dispose", data: { entity: "house", party: "you", pct: 50, proceeds: 15000000, label: "Sold half the house" } },
   { type: "economy.stake_route", data: { business: "shop", owner: "you", to: "acct" } },
+  // What an Undo takes off the books, and what it puts back (a booking, a basis, a distribution clock) is the economy slice's, never an entity's definition.
+  { type: "economy.unbook", data: { at: 0, books: [], basis: [], gains: [], distributed: [] } },
   // The chat's own cash rule is the economy slice's (DESIGN §25.8), never an entity's definition.
   { type: "economy.config", data: { atm: true } },
   // A year's close, a foundation's marks and taxes, a corporation's dividends received and penalty taxes, a trust's distributions and an asset's recovery are the economy slice's records (DESIGN §26.3, §26.4), never an entity's definition.
@@ -280,8 +287,10 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.project_pause", data: { project: "well", at: 10, left: { dig: 4310 } } },
   { type: "economy.project_resume", data: { project: "well", at: 20, ends: { dig: 4330 } } },
   { type: "economy.project_drop", data: { project: "well", at: 30 } },
+  { type: "economy.project_back", data: { project: "well", run: null } },
   // An organization's History and what was spent for it are the orgs slice's (ORG-SPEC §3.17), never an entity's definition.
   { type: "orgs.log", data: { org: "shop", text: "Paid Dev $1.00", by: "you", at: 0 } },
+  { type: "orgs.log_removed", data: { org: "shop", text: "Paid Dev $1.00", by: "you", at: 0 } },
   { type: "orgs.spent", data: { org: "shop", who: "you", month: "2026-01", cents: 100 } },
   { type: "relationships.regard", data: { from: "you", to: "dev", deltas: { warmth: 5 } } },
   { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 10 } },
@@ -303,6 +312,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "orgs.order", data: { org: "shop", order: { id: "o_1", goal: "g_1", to: ["dev"], text: "Fix the sign", status: "open", source: "play", at: 0, by: "you" }, visibility: "secret" } },
   { type: "orgs.status", data: { org: "shop", id: "o_1", status: "under_way", note: "", source: "play", at: 0, visibility: "secret" } },
   { type: "orgs.lived", data: { org: "shop", id: "o_1", at: 60, visibility: "secret" } },
+  // A plan's goal or order put back as it was before an event of it (the Undo of one): the orgs slice's, never an entity's definition.
+  { type: "orgs.plan_back", data: { org: "shop", list: "goals", id: "g_1", item: null, visibility: "secret" } },
   // Motions and requests for approval are the orgs slice's records (ORG-SPEC Phase 5), never an entity's definition: the act one carries out writes its own events.
   { type: "orgs.motion", data: { org: "shop", motion: { id: "m_1", text: "Issue 10 units of the shop to Dev", what: { type: "economy.shares_issue", args: { business: "shop", to: "dev", units: 10, by: "you" } }, by: "you", at: 0, closes: 10080, basis: "shares", quorum: 50, pass: 50, electorate: { you: 60, dev: 40 }, public: 0, votes: { you: { vote: "for", how: "own", at: 0 } }, status: "open" }, visibility: "secret" } },
   { type: "orgs.vote", data: { org: "shop", id: "m_1", who: "dev", vote: "against", how: "own", at: 0, visibility: "secret" } },
@@ -385,6 +396,8 @@ describe("the event types", () => {
       for (const t of written(before, state)) {
         // A materialization's opening postings are the authored balance itself, never play's.
         if (event.type === "materialize" && "aspect" in t && t.aspect === "posted") continue;
+        // An Undo's put-back (`engine.put`) restores what play wrote together with the touched record's note of it, so it is no write of play's.
+        if (event.type === "engine.put") continue;
         const recorded = "field" in t ? touchedField(state, t.entity, t.field) : "rel" in t ? touchedRelation(state, t.entity, t.rel, t.to) : touchedAspect(state, t.entity, t.aspect);
         if (!recorded) problems.push(`${event.type} wrote ${JSON.stringify(t)} without touching it`);
       }
