@@ -469,6 +469,11 @@ export interface ParamDef {
   label?: string;
   ref?: KindId;
   optional?: boolean;
+  /**
+   * A value it takes, as an answer that says what an action takes shows it (`world_apply`'s `act`), for a param whose type does not
+   * tell its form (a list of payment tiers, who may enter); without it the answer draws one from the type and the world.
+   */
+  example?: JsonValue;
   /** A ref param's candidates must also match this selector: the palette offers only those, and the resolver refuses others. */
   of?: Selector;
   /**

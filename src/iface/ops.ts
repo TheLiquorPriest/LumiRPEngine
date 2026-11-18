@@ -62,6 +62,11 @@ export interface OpDef {
   example: JsonObject;
   /** Works the operation out on the draft and records it; what it could not read, when it could not. */
   run(o: OpContext): Unread | undefined;
+  /**
+   * What it says more, after what it takes, when the call could not be read on its account: `n` its place in the call, `args` as sent,
+   * `reading` the state it was worked out on (`act`: what the action it names takes, with a value of each).
+   */
+  explain?(reply: Reply, n: number, args: JsonObject, reading: Reading): void;
 }
 
 /** Whether an operation's work could not read its arguments. */

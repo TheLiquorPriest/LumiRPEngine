@@ -10,16 +10,66 @@
 import type { JsonObject, JsonValue } from "rp-harness/contract";
 import { isRecord } from "../shared/json";
 import { parseMoneyInput } from "../shared/money";
+import type { EntityId } from "../shared/ids";
 import type { ActionDef, ParamDef } from "../shared/world";
+import { calendarOf, dateAt } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
-import { findAction, resolveAction } from "../engine/resolve";
+import { companionCandidates, findAction, paramCandidates, resolveAction } from "../engine/resolve";
 import { createRng } from "../engine/rng";
+import { isGone, kindIs } from "../engine/scope";
+import { selectorMatches } from "../engine/selector";
+import { canSeeEntity } from "../engine/visibility";
 import { isAlready, notApplicable } from "./families/run";
 import { find, isUnread, minorUnits, named, notAs, type OpContext, type OpDef, textArg, type Unread } from "./ops";
 import { clockText } from "./ops-time";
 import { openAuthored } from "./ops-values";
-import { nearestOf, type Want } from "./reading";
+import { nearestOf, type Reading, type Want } from "./reading";
 import { textOf } from "./texts";
+
+/**
+ * A value of one of an action's arguments, as an answer that says what the action takes shows it (`act`'s `explain`): the one the
+ * action declares (`ParamDef.example`); else, for a reference, the first the actor could pick as things stand (as the palette offers
+ * them), else the first of its kind the actor knows of, by name; a count of one, half an hour, ten of the main coin, yes, today's date,
+ * the first row of its table. None for words the action gives no example of: its own words say what they are.
+ */
+function exampleOf(reading: Reading, action: ActionDef, name: string, def: ParamDef, actor: EntityId): JsonValue | undefined {
+  if (def.example !== undefined) return def.example;
+  const reg = reading.registry;
+  const world = reading.world;
+  const state = reading.state.world;
+  switch (def.type) {
+    case "ref": {
+      const known = (id: EntityId): boolean => {
+        const e = own(state.entities, id);
+        return e !== undefined && id !== actor && !isGone(state, id) && (def.ref === undefined || kindIs(reg, world, e.kind, def.ref)) && (def.of === undefined || selectorMatches(reg, world, state, def.of, id)) && canSeeEntity(reg, world, state, actor, id);
+      };
+      // A reference that names no kind takes anyone or anything: someone is the likelier value to show (an admission's who, a fight's target).
+      const picks = paramCandidates(reg, world, state, action, name, actor);
+      const id = (def.ref === undefined ? picks.find((p) => reading.isPerson(p)) : undefined) ?? picks[0] ?? (def.ref === "place" ? undefined : Object.keys(state.entities).sort().find(known));
+      return id === undefined ? undefined : reading.nameOf(id);
+    }
+    case "list": {
+      const id = companionCandidates(reg, world, state, action, name, actor)[0];
+      return id === undefined ? undefined : [reading.nameOf(id)];
+    }
+    case "number":
+      return 1;
+    case "duration":
+      return 30;
+    case "money":
+      return 10;
+    case "bool":
+      return true;
+    case "date": {
+      const d = dateAt(calendarOf(world), state.clock);
+      return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+    }
+    case "text":
+      return def.table === undefined ? undefined : Object.keys(own(world.tables, def.table)?.rows ?? {})[0];
+    default:
+      return undefined;
+  }
+}
 
 /**
  * A list or an object given for an argument that is one value: a list of words or numbers as the words joined by commas (ids, powers,
@@ -172,6 +222,23 @@ const act: OpDef = {
       ...(span !== null ? { activity: span.type, until: clockText(o, span.until, state) } : {}),
     }));
     return undefined;
+  },
+  explain(reply, n, args, reading) {
+    const said = textArg(args, "action");
+    const action = said === undefined ? undefined : findAction(reading.registry, reading.world, said);
+    if (action === undefined) return;
+    const who = typeof args.who === "string" && args.who.trim() !== "" ? reading.find(args.who, "person") : null;
+    const actor = who !== null && "id" in who ? who.id : reading.world.pov;
+    const takes: string[] = [];
+    const example: JsonObject = {};
+    for (const [name, def] of Object.entries(action.params)) {
+      takes.push(reading.lines.line("act_param", { name, optional: def.optional === true, says: def.label ?? "" }) ?? "");
+      const value = exampleOf(reading, action, name, def, actor);
+      if (value !== undefined && (def.optional !== true || def.example !== undefined)) example[name] = value;
+    }
+    const call: JsonObject = { op: "act", action: action.id, ...(Object.keys(example).length > 0 ? { params: example } : {}) };
+    // Each argument's line says commas of its own, so they are set apart by semicolons.
+    reply.line("act_takes", { n, action: `${action.label} [${action.id}]`, takes: takes.filter((t) => t !== "").join("; "), example: JSON.stringify(call) });
   },
 };
 

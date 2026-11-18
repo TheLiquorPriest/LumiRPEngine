@@ -250,7 +250,7 @@ Version 1 · realism domain `castlife` · requires `gear`, `relationships`, `spa
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -324,7 +324,7 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -688,7 +688,7 @@ Extends `group`.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -738,7 +738,7 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 | `property_sell` | Sell a property | Sell a property you own. | `property: ref → property`, `price: money`, `buyer?: ref → person`, `to?: ref → account`, `as?: ref` |  | `default`: `economy.property_sell` | `60` | sell the house, sell the property |
 | `route_distributions` | Route dividends, rent or profits | Choose where dividends, rent or profits are paid: reinvested, or into an account. | `holding?: ref → holding`, `property?: ref → property`, `business?: ref → business`, `to?: text`, `as?: ref` |  | `default`: `economy.route` | `1` | reinvest dividends, send dividends to, send the rent to |
 | `set_autopay` | Set autopay | Set how a card or loan pays itself each month. | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money`, `as?: ref` |  | `default`: `economy.set_autopay` | `2` | set up autopay, turn on autopay, turn off autopay |
-| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text` |  | `default`: `economy.set_pay_prefs` | `2` | i'd rather pay with |
+| `set_pay_prefs` | Set how I pay | Set the order in which you prefer to pay: cash, debit, credit. | `tiers: text, such as [{"use":"debit","max":100},{"use":"cash"}]` |  | `default`: `economy.set_pay_prefs` | `2` | i'd rather pay with |
 | `shares_buy_back` | Buy back shares | Have a company you control buy back some of a holder's units, paying them from its account. | `business: ref → business`, `from: ref`, `units: number`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_buy_back` | `30` | buy back shares, buy them out, buy back their stake |
 | `shares_classes` | Change share classes | Add, change or remove a company's share class (the votes a unit carries), and move a holder's units into it. | `business: ref → business`, `label: text`, `class?: text`, `votes?: number`, `holder?: ref`, `remove?: bool`, `as?: ref`, `vote?: bool` |  | `default`: `economy.shares_classes` | `2` | add a share class, non-voting shares, change the votes |
 | `shares_delist` | Take it off the market | Take a listed company you control off the market, buying back every unit the public holds at its market price or more from its account. | `business: ref → business`, `price?: money`, `as?: ref`, `vote?: bool` |  | `default`: `economy.delist` | `60` | take the company private, delist the company, go private, buy out the public |
@@ -919,7 +919,7 @@ Extends `container`.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1067,7 +1067,7 @@ Version 1 · realism domain none · requires `economy`, `relationships`, `space`
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1077,7 +1077,7 @@ Each is carried out by an agent with `world_apply`'s `act` operation: `action` i
 | `org_decisions` | How decisions are made | Set how an organization's motions count their votes (shares or members), their quorum and pass mark in percent, how many days a motion stays open and a request for approval waits. | `org: ref`, `vote_by?: text`, `quorum?: number`, `pass?: number`, `days?: number`, `approval_days?: number` |  | `default`: `orgs.decisions` | `2` | set the quorum, change the voting rules |
 | `org_delegate` | Delegate | Let someone act for an organization with some of your powers there, within limits, until a date. | `org: ref`, `to: ref`, `powers: text`, `payment?: money`, `month?: money`, `until?: date` |  | `default`: `orgs.delegate` | `10` | let them act for, delegate, give them authority |
 | `org_deny` | Deny | Deny a request for approval made for an organization (your own request: withdraw it). | `org: ref`, `request: text`, `why?: text` |  | `default`: `orgs.answer` | `5` | deny the request, turn it down, withdraw my request |
-| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text`, `keys?: text` |  | `default`: `orgs.entry` | `0` |  |
+| `org_entry` | Change entry | Change who may enter one of an organization's places, and its keys. | `org: ref → thing`, `place: ref → place`, `entry: text, such as "members"`, `keys?: text` |  | `default`: `orgs.entry` | `0` |  |
 | `org_found` | Start an organization | Found a company (from Money 3: you its only owner, with capital from an account of yours, counted in units when you say how many; or, for an organization you govern, its subsidiary from its money), settle a trust (from Money 3: its trustee and beneficiary you unless named, with what you put in), start a nonprofit (from Money 3: no owners, you its Director, with what you give it), or a group of one of the world's kinds, which you lead. An organization you govern may settle a trust or start a nonprofit too. | `type: text`, `name: text`, `kind?: text`, `amount?: money`, `from?: ref → account`, `structure?: text`, `units?: number`, `trustee?: ref`, `beneficiary?: ref`, `revocable?: bool`, `purpose?: text`, `until?: text`, `as?: ref` |  | `default`: `orgs.found` | `30` | start a company, found a business, set up a company, start a group, found a club, form a crew, start a subsidiary, settle a trust, set up a trust, start a charity, start a nonprofit, set up a foundation |
 | `org_goal` | Set a goal | Add a goal to an organization's plan, or change one. | `org: text`, `id?: text`, `text?: text`, `window?: text`, `where?: text` |  | `default`: `orgs.plan_goal` | `2` | set a goal, add to the plan |
 | `org_leave` | Leave | Leave an organization you're a member of. | `org: ref` |  | `default`: `orgs.leave` | `5` | leave the group, quit the club, resign from |
@@ -1187,7 +1187,7 @@ No fields of its own.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1230,7 +1230,7 @@ Version 1 · realism domain `sheets` · requires `space`.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1358,7 +1358,7 @@ Extends `thing`.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1401,7 +1401,7 @@ Version 1 · realism domain none · requires none.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
@@ -1466,7 +1466,7 @@ Extends `container`.
 
 ### Actions
 
-Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.
+Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.
 
 | Action | Label | Description | Parameters | Check | Outcomes and their effects | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|

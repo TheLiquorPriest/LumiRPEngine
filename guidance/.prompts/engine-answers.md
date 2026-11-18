@@ -130,6 +130,8 @@ not_numeric: Operation {{n}} ({{op}}): {{field}} of {{entity}} holds no number, 
 capped: Operation {{n}} ({{op}}): {{field}} of {{entity}} was {{was}} and is held to {{now}}, the cap given; the change is recorded as given.
 advised: Operation {{n}} ({{op}}) was recorded, and the engine advises on it ({{code}}).
 unmet_requirement: Operation {{n}} ({{op}}) was carried out, though one of the action's requirements does not hold: {{requirement}}{{#words}} ({{words}}){{/words}}.
+act_takes: Operation {{n}} (act): {{action}} takes {{#takes}}{{takes}}{{/takes}}{{^takes}}no arguments{{/takes}}. For example: {{example}}
+act_param: {{name}}{{#optional}}, which may be left out{{/optional}}{{#says}} ({{says}}){{/says}}
 on_map: Operation {{n}} ({{op}}): {{said}}
 off_path: Operation {{n}} ({{op}}): {{quest}} went from {{from}} to {{to}}, which is not one of the ways on from {{from}}.
 time_back: Operation {{n}} ({{op}}): the clock was set back from {{from}} to {{to}}.

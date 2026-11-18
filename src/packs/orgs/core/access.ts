@@ -292,7 +292,7 @@ export function registerAccess(r: CoreRegistry): void {
     params: {
       org: { type: "ref", ref: "thing", of: { kind: ["group", "trust"] } },
       place: { type: "ref", ref: "place" },
-      entry: { type: "text" },
+      entry: { type: "text", example: "members" },
       keys: { type: "text", optional: true },
     },
     requires: [{ expr: "may(self, org, 'property.manage')", why: "'Needs the power to manage its property'" }],

@@ -292,13 +292,13 @@ function provenanceLines(reply: Reply, a: Asked): void {
  * given whole beside its words. A handler of the engine's that threw is a fault, said so and kept in the call's details, never the
  * agent's call refused.
  */
-function refusal(call: Call, run: Attempt, explain?: (reply: Reply, unread: Unread) => void): Reply {
+function refusal(call: Call, run: Attempt, explain?: (reply: Reply, unread: Unread, reading: Reading) => void): Reply {
   const unread = run.unread as Unread;
   const refused = tellUnread(call.reply(), unread);
   if (unread.line === "engine_fault" && run.draft.fault !== null) {
     const { error } = run.draft.fault;
     refused.details = { fault: { tool: call.tool, error: error instanceof Error ? error.message : String(error) } };
-  } else explain?.(refused, unread);
+  } else explain?.(refused, unread, run.draft.reading());
   return refused.line("nothing_recorded", {}).fail();
 }
 
@@ -333,7 +333,7 @@ function heldRefusal(call: Call, unread: Unread, asked: readonly Asked[], held: 
  * the write runs, and recorded there; and answered with what changed, how it now stands, and the
  * reports.
  */
-export async function runOperations(call: Call, asked: readonly Asked[], askArgs?: (mine: readonly Asked[]) => JsonObject, explain?: (reply: Reply, unread: Unread) => void): Promise<Reply> {
+export async function runOperations(call: Call, asked: readonly Asked[], askArgs?: (mine: readonly Asked[]) => JsonObject, explain?: (reply: Reply, unread: Unread, reading: Reading) => void): Promise<Reply> {
   const first = call.reply();
   const base = readingOr(call, first);
   if (base === null) return first;
@@ -376,11 +376,14 @@ async function applyOperations(args: JsonObject, call: Call): Promise<Reply> {
   const first = call.reply();
   const asked = readCall(args, call, first);
   if (asked === null) return first;
-  // A name not there may be made by an operation earlier in this same call; and the operation that could not read it takes what it takes.
-  const explain = (reply: Reply, unread: Unread): void => {
+  // A name not there may be made by an operation earlier in this same call; the operation that could not read it takes what it takes,
+  // and says what more its own `explain` gives.
+  const explain = (reply: Reply, unread: Unread, reading: Reading): void => {
     if (unread.want !== undefined) reply.line(`make_${unread.want}`, {});
     const a = asked.find((x) => x.n === unread.fields.n);
-    if (a) takesLine(reply, a.def, a.args);
+    if (a === undefined) return;
+    takesLine(reply, a.def, a.args);
+    a.def.explain?.(reply, a.n, a.args, reading);
   };
   return runOperations(call, asked, (mine) => ({ operations: mine.map((a) => a.args) as JsonValue[] }), explain);
 }

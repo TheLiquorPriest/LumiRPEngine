@@ -12,7 +12,7 @@ import { entryInPlay } from "../../src/engine/org";
 import { requestsOf } from "../../src/packs/orgs/core/approvals";
 import { engine, POV } from "../store/fixtures";
 import { familyRig, SRC } from "./families/kit";
-import { dataOf, type Rig, registry, world as rigWorld, wordsFromFiles } from "./rig";
+import { dataOf, type Rig, registry, world as rigWorld, texts, wordsFromFiles } from "./rig";
 
 /** The rig over its world changed by `edit`, and that world, to read the state with. */
 async function rigOf(edit: (w: WorldDoc) => void = () => undefined): Promise<{ t: Rig; doc: WorldDoc }> {
@@ -227,5 +227,25 @@ describe("act: the actions a play view's press did not reach", () => {
     await apply(other, { op: "act", action: "org_deny", who: "Bram", params: { org: "The Lamplighters", request: "r_name", why: "not this year" } });
     expect(stateOf(other).entities.lamplighters?.name).toBe("The Lamplighters");
     expect(requestsOf(stateOf(other), "lamplighters")[0]?.status).toBe("denied");
+  });
+
+  test("a call that leaves an argument out, or gives one the action cannot take, is told what the action takes, with a value of each", async () => {
+    const { t } = await rigOf(dealings);
+    const changes = t.s.changes(t.turn.id).length;
+    const said = async (operation: JsonObject): Promise<string> => {
+      const r = await t.call("world_apply", { operations: [{ ...operation, ...SRC }] });
+      expect(r.error).toBe(true);
+      wordsFromFiles(r);
+      return texts(r).find((x) => x.includes("For example:")) ?? "";
+    };
+    const prefs = await said({ op: "act", action: "set_pay_prefs" });
+    expect(prefs).toContain("Set how I pay [set_pay_prefs] takes tiers");
+    expect(prefs).toContain(`{"op":"act","action":"set_pay_prefs","params":{"tiers":[{"use":"debit","max":100},{"use":"cash"}]}}`);
+    const lend = await said({ op: "act", action: "lend_money", params: { to: "Bram", amount: "a lot" } });
+    expect(lend).toContain("apr, which may be left out");
+    expect(lend).toMatch(/"params":\{"to":"[^"]+","amount":10\}/);
+    const entry = await said({ op: "act", action: "org_entry", who: "Bram", params: { org: "The Lamplighters", place: "The Cellar", entry: "nobody at all" } });
+    expect(entry).toContain(`"entry":"members"`);
+    expect(t.s.changes(t.turn.id).length).toBe(changes);
   });
 });

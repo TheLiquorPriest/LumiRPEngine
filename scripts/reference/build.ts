@@ -207,8 +207,8 @@ function filled(text: string, words: PackAction["words"]): string {
 
 function actionRows(actions: readonly PackAction[]): string[] {
   const rows = sortedBy(actions, (a) => a.id).map((a) => {
-    // A ref param a player's claim may fill says where the claimed thing appears, and one that pays an outside account for a receiver the story hasn't established names it (DESIGN §9.4).
-    const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}${p.outside ? `, outside: ${p.outside}` : ""}`);
+    // A ref param a player's claim may fill says where the claimed thing appears, and one that pays an outside account for a receiver the story hasn't established names it (DESIGN §9.4); a param that declares a value it takes shows it, as `act` does.
+    const params = Object.entries(a.params).map(([name, p]) => `${name}${p.optional ? "?" : ""}: ${p.type === "ref" && p.ref ? `ref → ${p.ref}` : p.type}${p.claim ? `, claim: ${p.claim}` : ""}${p.outside ? `, outside: ${p.outside}` : ""}${p.example !== undefined ? `, such as ${JSON.stringify(p.example)}` : ""}`);
     const check = a.check === undefined ? "" : typeof a.check === "string" ? code(a.check) : code(a.check.dice);
     // Each outcome with the effects it carries, as the `act` operation applies them.
     const outcomes = Object.keys(a.outcomes).sort(byText).map((o) => {
@@ -233,7 +233,7 @@ function packSection(rec: PackRecord): string[] {
   if (rec.relations.length > 0) out.push("### Relation types", "", ...relationRows(rec.relations), "");
   if (rec.effects.length > 0) out.push("### Effects", "", ...effectRows(rec.effects), "");
   if (rec.formulas.length > 0) out.push("### Formula functions", "", ...formulaRows(rec.formulas), "");
-  if (rec.actions.length > 0) out.push("### Actions", "", "Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters, `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`.", "", ...actionRows(rec.actions), "");
+  if (rec.actions.length > 0) out.push("### Actions", "", "Each is carried out by an agent with `world_apply`'s `act` operation: `action` its id, `params` its parameters by name (a list of names or words for one that takes several, a list or object for one that holds a structure), `outcome` the one ruled. Its requirements are told in the answer, not enforced; its minutes pass by `pass_time`. A call that leaves out or misshapes a parameter is answered with what the action takes and a call with a value of each.", "", ...actionRows(rec.actions), "");
   if (rec.rules.length > 0) out.push("### Rules", "", ...sortedBy(rec.rules, (r) => r.id).map((r) => `- ${code(r.id)}: on ${json(r.on)}`), "");
   if (rec.schedules.length > 0) out.push("### Schedules", "", ...sortedBy(rec.schedules, (s) => s.id).map((s) => `- ${code(s.id)}: sets ${code(s.target)} every ${s.recurrence.every}`), "");
   if (rec.events.length > 0 || rec.guards.length > 0) {
