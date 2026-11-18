@@ -285,7 +285,7 @@ src/engine/events.ts	kept	engine
 src/engine/expr.ts	kept	engine
 src/engine/feed.ts	kept	engine
 src/engine/gm-view.ts	kept	engine
-src/engine/inferred.ts	kept	engine
+src/engine/inferred.ts	removed	PlanSwap-8	classic	the classic interpret step's Try something, a typed attempt read as a check by code; RPE never reads free-form text in code (plan §6.1), so nothing reaches it
 src/engine/ledger/chain.ts	kept	engine
 src/engine/ledger/fold.ts	kept	engine
 src/engine/ledger/journal.ts	kept	engine		the ledger core; today's ledger reader (PlanSwap-5) stands on it
@@ -381,7 +381,7 @@ src/frontend/build/lookup-editor.tsx	kept	builder
 src/frontend/build/lore-editor.tsx	kept	builder
 src/frontend/build/lore-pins.tsx	kept	builder
 src/frontend/build/lore-secrecy.tsx	kept	builder
-src/frontend/build/minds-editor.tsx	kept	builder
+src/frontend/build/minds-editor.tsx	removed	PlanSwap-8	classic	Build's Minds part: its fidelity weights, secrecy and holdings are read by nothing in RPE, which has no minds ladder (plan §7.5); nothing of it moves, so the memory-field piece of minds-patch.ts goes with it
 src/frontend/build/needs-editor.tsx	kept	builder
 src/frontend/build/org-convert.ts	kept	builder
 src/frontend/build/organizations.tsx	kept	builder
@@ -449,7 +449,7 @@ src/frontend/hud-float.ts	removed	PlanSwap-10	ui	only the previous extension's e
 src/frontend/hud.tsx	kept	hud
 src/frontend/hud.tsx	cut	PlanChatUI-P1		its import of ActivityLine from the removed src/frontend/diagnostics.tsx (:13) (PlanChatUI-part-panels.md:23)
 src/frontend/icons.tsx	moved	PlanSwap-6	src/ui/icons.tsx	a shell file the new pages use (its file name there is PlanSwap-6's)
-src/frontend/inferred-form.tsx	kept	under
+src/frontend/inferred-form.tsx	removed	PlanSwap-8	classic	the form of the "inferred checks" policy, drawn by Build's ruleset editor and the drawer; nothing reads the policy any more (plan §6.1)
 src/frontend/json-text.ts	kept	under
 src/frontend/layout.ts	kept	under
 src/frontend/map-math.ts	kept	under
@@ -493,7 +493,6 @@ src/frontend/settings/labels.ts	removed	PlanSwap-9	settings	a settings page the 
 src/frontend/settings/lore.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
 src/frontend/settings/main-agent.tsx	removed	PlanSwap-9	settings	a settings page only the old engines used
 src/frontend/settings/minds-patch.ts	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
-src/frontend/settings/minds-patch.ts	piece	PlanChatUI-B1	src/frontend/build/	MEMORY_FIELDS, memoryValue (build/minds-editor.tsx:19), where a kept reader reads the memory fields (R-50)
 src/frontend/settings/minds.tsx	removed	PlanSwap-9	settings	a settings page the old engines and the harness used
 src/frontend/settings/narrator.tsx	removed	PlanSwap-9	settings	the drawer's Settings, which RPE's Settings, Connections and Runtime pages replace (R-42); settled by R-50
 src/frontend/settings/narrator.tsx	piece	PlanSwap-9	src/frontend/build/	NarratorViewControl (build/schema-form.tsx:29): the narrator's view of secrets is kept (§15.2 l.1620)
@@ -868,7 +867,7 @@ src/shared/harness-texts.ts	removed	PlanSwap-10	texts	today's harness engine's t
 src/shared/hash.ts	kept	under
 src/shared/host.ts	kept	under		the host's shapes, moved whole from src/backend/host.ts by PlanSwap-5
 src/shared/ids.ts	kept	under
-src/shared/inferred.ts	kept	under
+src/shared/inferred.ts	removed	PlanSwap-8	classic	the typed-attempt "inferred checks" policy: nothing in RPE reads it (typed words are not read by code, plan §6.1); the world file keeps `ruleset.inferred` untouched
 src/shared/items-build.ts	kept	under
 src/shared/jobs.ts	kept	under		Build's jobs as data, moved out of protocol.ts by PlanSwap-13 item 2
 src/shared/json-patch.ts	kept	under
@@ -1057,8 +1056,8 @@ test/backend/harness-world-made.test.ts	removed	PlanSwap-8	gate	today's harness 
 test/backend/helper-model.test.ts	removed	PlanSwap-8	halves	Settings → Helper model and the classic helper steps' budgets (§15.4 rows 2, 4); imports src/backend/spindle-host.ts and src/backend/lore-steps.ts
 test/backend/hidden-newcomer.test.ts	removed	PlanSwap-8	halves	the classic reply read's spawn proposal under a hidden person's name (§15.4 row 2); imports test/support/rig.ts (src/backend/runtime.ts)
 test/backend/hold-writes.test.ts	removed	PlanSwap-8	halves	today's runtime holding a ✎ fix in its pre-reply window (§15.4 row 3); RPE places his change after the newest reply itself (R-22, PlanStore-2) and the ledger's rule is test/ledger/prereply.test.ts's; imports test/support/rig.ts
-test/backend/inferred-checks.test.ts	moved	PlanSwap-16	test/engine/	unsure: every check is made by the classic interpret step reading an attempt; the roll rules are the engine's (src/engine/inferred.ts), but this may be only the step's behaviour. rewritten: the pure engine's inferred checks on the world's sheet: opposed, companion and reactive rolls, the skills list, the most rolls a turn holds, an opponent's numbers on no chip or panel; the read and the Outcome go; through test/support/rig.ts (today's runtime)
-test/backend/inferred-controls.test.ts	moved	PlanSwap-17	test/build-mode/	rewritten: Build's ruleset editor committing the world's inferred-checks default, which a new chat plays by (src/frontend/build/ruleset-editor.tsx, src/frontend/inferred-form.tsx); Settings → Checks (src/frontend/settings/inferred.tsx) and GM → This chat's marker go; through test/support/rig.ts (today's runtime)
+test/backend/inferred-checks.test.ts	removed	PlanSwap-8	classic	tests the typed-attempt "inferred checks" (Try something), which nothing in RPE reads: typed words are not read by code, the model judges (plan §6.1); removed with src/engine/inferred.ts
+test/backend/inferred-controls.test.ts	removed	PlanSwap-8	classic	tests Build's inferred-checks default and its form, both removed with the inferred checks (plan §6.1)
 test/backend/inspector-delivery.test.ts	removed	PlanSwap-8	halves	the old engines' context inspector (§15.4 rows 3, 5); imports test/support/rig.ts (src/backend/runtime.ts)
 test/backend/interpret-catalog.test.ts	removed	PlanSwap-8	halves	what the classic interpret step is offered (§15.4 row 2); imports test/support/rig.ts (src/backend/runtime.ts)
 test/backend/interpret-context.test.ts	removed	PlanSwap-8	halves	what the classic interpret step reads besides the message (§15.4 row 2); imports src/backend/interpret-context.ts and src/frontend/settings/steps.tsx
